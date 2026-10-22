@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CancelOrderBatchCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -34,7 +36,9 @@ public final class ClusterCommandWindow {
         ACCOUNT
     }
 
-    /** 最近计算的当前候选阻塞原因。 */
+    /**  最近计算的当前候选阻塞原因。 返回最近一次冲突计算的原因，resetCandidate 和下一次计算会重置。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private Conflict conflict = Conflict.NONE;
     /** 固定环形条目数组，各条目持有可交换复用的解码槽。 */
     private final Entry[] entries;
@@ -42,13 +46,17 @@ public final class ClusterCommandWindow {
     private final int indexMask;
     /** 当前 FIFO 队首物理下标。 */
     private int head;
-    /** 尚未退休的条目数。 */
+    /**  尚未退休的条目数。 返回当前 FIFO 尚未退休的条目数量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int size;
     /** 当前有效队首的绝对位置水位，初始一，小于它的索引记录视为过期。 */
     private long headAbsSeq = 1L;
     /** 每次 add 增加的尾部绝对位置，不是 Core 命令序号。 */
     private long tailAbsSeq;
-    /** 最后一次非零绑定且尚未退休的 Core 序号。 */
+    /**  最后一次非零绑定且尚未退休的 Core 序号。 返回窗口中最后一次绑定非零 Core 序号且尚未退休的记录，不计算数值最大值。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long lastMatchingSequence;
     /** 最后非零绑定条目对应的窗口绝对位置，用于退休后失效。 */
     private long lastMatchingAbsSeq;
@@ -111,10 +119,6 @@ public final class ClusterCommandWindow {
         for (/* 当前预分配、批量订单遍历或退休前缀的下标。 */ int i = 0; i < entries.length; i++) entries[i] = new Entry();
     }
 
-    /**
-     * 返回最近一次冲突计算的原因，resetCandidate 和下一次计算会重置。
-     */
-    public Conflict conflict() { return conflict; }
 
     /**
      * 设置下一入口用户并清掉候选路由及冲突标记；保留已解码请求，便于阻塞队首重试不重复解码。
@@ -273,10 +277,6 @@ public final class ClusterCommandWindow {
         if (pendingHead == null || decodedSource != pendingHead) releaseDecoded();
     }
 
-    /**
-     * 返回窗口中最后一次绑定非零 Core 序号且尚未退休的记录，不计算数值最大值。
-     */
-    public long lastMatchingSequence() { return lastMatchingSequence; }
 
     /**
      * 检查队满和候选路由存在后，填入尾条目、登记用户及当前解码中的订单索引，并把候选解码槽与条目备用槽交换。调用方保证 request 与准备的路由/解码对应；内部后续异常不自动回滚已写字段。
@@ -381,10 +381,6 @@ public final class ClusterCommandWindow {
         lastMatchingAbsSeq = entry.absSeq;
     }
 
-    /**
-     * 返回当前 FIFO 尚未退休的条目数量。
-     */
-    public int size() { return size; }
     /**
      * 返回固定条目数组容量。
      */

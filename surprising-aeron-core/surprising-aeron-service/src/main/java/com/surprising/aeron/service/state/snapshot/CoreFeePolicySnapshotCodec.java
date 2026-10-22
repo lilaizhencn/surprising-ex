@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.model.CoreFeePolicyState;
 
 import com.surprising.aeron.protocol.ProtocolException;
@@ -9,9 +11,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.TreeMap;
 
-/**
- * 手续费策略独立快照的编解码器。新写入使用版本二的字段编号格式，按输入 Map 的策略编号键排序；读取同时支持已发布版本一的固定布局，拒绝重复编号、过量条目和无效业务值，最终返回只读策略表。
- */
+/** 手续费策略独立快照的编解码器。新写入使用版本二的字段编号格式，按输入 Map 的策略编号键排序；读取同时支持已发布版本一的固定布局，拒绝重复编号、过量条目和无效业务值，最终返回只读策略表。 构造约定：工具类不创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CoreFeePolicySnapshotCodec {
 
     /** 仍允许读取的已发布固定布局版本一；当前 encode 实际写版本二。 */
@@ -21,11 +22,6 @@ public final class CoreFeePolicySnapshotCodec {
     /** 版本一币对文本后费率、优先级、启停及有效期需要的字节数。 */
     private static final int TAIL_LENGTH = Long.BYTES * 4 + Integer.BYTES + Byte.BYTES;
 
-    /**
-     * 工具类不创建实例。
-     */
-    private CoreFeePolicySnapshotCodec() {
-    }
 
     /**
      * 按策略 Map 编号键排序后逐项写入策略编号、修订、适用用户和币对、费率、优先级、启停及有效期，再加版本二的小端头。这里只编码，未另执行一百万项的读取上限校验。

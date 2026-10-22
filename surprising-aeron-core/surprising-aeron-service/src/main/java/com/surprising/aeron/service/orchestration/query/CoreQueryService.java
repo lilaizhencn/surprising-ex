@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.query;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -34,18 +36,12 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
-/**
- * 核心内部查询的异步编排入口。Owner 解析条件并登记编号，账户 Lane、Matcher 或系统账本在各自所有权内读取；结果回到这里供 Owner 消费，不能为查询复制一份在线权威账户。
- */
+/** 核心内部查询的异步编排入口。Owner 解析条件并登记编号，账户 Lane、Matcher 或系统账本在各自所有权内读取；结果回到这里供 Owner 消费，不能为查询复制一份在线权威账户。 构造约定：绑定所属交易运行时，查询的投递、身份路由和结果计数均沿用该运行时。 参数 owner：所属交易运行时，提供查询投递、路由、身份和提交水位入口 */
+@RequiredArgsConstructor
 public final class CoreQueryService {
     /** 提供业务路由、线程投递和提交水位的所属运行时，查询仍遵守实际状态所有权。 */
     final TradingCoreRuntime owner;
 
-    /**
-     * 绑定所属交易运行时，查询的投递、身份路由和结果计数均沿用该运行时。
-     * @param owner 所属交易运行时，提供查询投递、路由、身份和提交水位入口
-     */
-    public CoreQueryService(TradingCoreRuntime owner) { this.owner = owner; }
 
     /** 读取线程写入、Owner 消费后移除的并发完成结果表，键为内部查询编号。 */
     final Map<Long, CompletedBookQuery> completedBookQueries
@@ -953,7 +949,14 @@ public final class CoreQueryService {
 
     /**
      * 在系统账本线程读取财库、未平仓量或合约维护用户页的单次任务，直接消费原账本或其索引，编码后通知 Owner。
+     * 构造约定：固定本次账本查询的协议类型，以及可选的合约维护分页条件和维护状态。
+     * 参数 id：本次异步查询的内部编号，完成响应用它写入结果表
+     * 参数 commandCount：查询进入时固定的已应用命令计数，作为响应计数
+     * 参数 type：本次查询的协议消息类型，用来选择账户、账本或编码分支
+     * 参数 page：可选的合约维护用户分页条件，财库或 OI 查询不使用
+     * 参数 maintenance：查询进入时取得的合约维护状态，随用户页一起编码返回
      */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     private final class LedgerQuery implements SystemLedgerLane.Entry {
         /** 本次任务的内部查询编号，用于保存最终响应和完成外部关联消费。 */
         private final long id;
@@ -972,20 +975,6 @@ public final class CoreQueryService {
          */
         private LedgerQuery(long id, long commandCount) {
             this(id, commandCount, CoreMessageType.TREASURY_STATE_QUERY, null, null);
-        }
-        /**
-         * 固定本次账本查询的协议类型，以及可选的合约维护分页条件和维护状态。
-         * @param id 本次异步查询的内部编号，完成响应用它写入结果表
-         * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
-         * @param type 本次查询的协议消息类型，用来选择账户、账本或编码分支
-         * @param page 可选的合约维护用户分页条件，财库或 OI 查询不使用
-         * @param maintenance 查询进入时取得的合约维护状态，随用户页一起编码返回
-         */
-        private LedgerQuery(long id, long commandCount, CoreMessageType type,
-                com.surprising.aeron.protocol.CoreMaintenanceCodec.Query page,
-                com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
-            this.id = id; this.commandCount = commandCount; this.type = type;
-            this.page = page; this.maintenance = maintenance;
         }
         /**
          * 在账本线程读取 OI 索引、按用户游标的合约维护页或财库资产，检查响应规模并编码；参数或规模错误只拒绝本次查询，随后保存响应通知 Owner。

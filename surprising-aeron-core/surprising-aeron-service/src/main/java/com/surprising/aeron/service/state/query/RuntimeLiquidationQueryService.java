@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.query;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreLiquidationActionView;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
@@ -24,16 +26,10 @@ import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 强平可执行性和待办工作查询。按执行、保险补亏、ADL 用途筛选记录，在查询边界用条数和编码字节预算分页，并携带尚未完成风险扫描的继续信息；这里不执行平仓或修改亏空。
- */
+/** 强平可执行性和待办工作查询。按执行、保险补亏、ADL 用途筛选记录，在查询边界用条数和编码字节预算分页，并携带尚未完成风险扫描的继续信息；这里不执行平仓或修改亏空。 构造约定：只组装强平只读查询结果，不持有另一份账户或强平状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeLiquidationQueryService {
 
-    /**
-     * 只组装强平只读查询结果，不持有另一份账户或强平状态。
-     */
-    private RuntimeLiquidationQueryService() {
-    }
 
     /**
      * 核对强平仍在计划或撤单阶段、当前标记价及序号未变，再确认配置、持仓模式与带方向数量仍匹配，风险记录也仍在该序号判为强平；过期价格直接业务拒绝，其他失效返回 false。

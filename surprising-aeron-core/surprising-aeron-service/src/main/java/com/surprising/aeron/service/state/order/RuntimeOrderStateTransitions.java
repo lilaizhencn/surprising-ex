@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.order;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.AccountLaneState;
@@ -11,16 +13,10 @@ import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import java.util.UUID;
 
-/**
- * 已有账户订单状态变更入口：准备身份、写订单与冻结，触发及顺序批次登记待完成预留，取消或拒绝时按剩余冻结释放。调用方仍先满足原准入、Matcher 确认和账户所有权边界，这里不直接操作订单簿。
- */
+/** 已有账户订单状态变更入口：准备身份、写订单与冻结，触发及顺序批次登记待完成预留，取消或拒绝时按剩余冻结释放。调用方仍先满足原准入、Matcher 确认和账户所有权边界，这里不直接操作订单簿。 构造约定：只提供已有订单状态写入的静态入口，不创建额外执行对象。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeOrderStateTransitions {
 
-    /**
-     * 只提供已有订单状态写入的静态入口，不创建额外执行对象。
-     */
-    private RuntimeOrderStateTransitions() {
-    }
 
     /**
      * 校验基本下单输入，在原所有权范围准备客户端、币对及资产身份，再进入已准备身份的账户写入。

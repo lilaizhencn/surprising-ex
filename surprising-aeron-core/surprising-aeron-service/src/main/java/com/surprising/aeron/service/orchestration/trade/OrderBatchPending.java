@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
+import com.surprising.aeron.protocol.CoreOrderStateSource;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
@@ -11,9 +15,11 @@ import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.orchestration.result.ResponseArena;
 import com.surprising.aeron.service.state.admission.PlaceBatchAdmissionEvent;
+import com.surprising.aeron.service.state.admission.PlaceBatchIntentSource;
 import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.ledger.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.state.order.LaneOrderResultTarget;
 import com.surprising.aeron.service.state.order.OrderRuntime;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
@@ -23,7 +29,7 @@ import java.util.List;
 /**
  * 一条批量命令从准入到终态的复用上下文。它把各项输入、准入回执、撮合与账户结果、资金差额和分页游标放在同一生命周期里；Owner 管理顺序，Matcher 和账户按交接约定使用固定槽。结果编码直接读取本批，不另建同内容的订单结果表，整批退休后才清理复用。
  */
-public final class OrderBatchPending implements com.surprising.aeron.service.state.order.LaneOrderResultTarget, com.surprising.aeron.service.state.admission.PlaceBatchIntentSource, TradingOrderBatchCodec.ResultSource, com.surprising.aeron.protocol.CoreOrderStateSource {
+public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatchIntentSource, TradingOrderBatchCodec.ResultSource, CoreOrderStateSource {
     /**
      * 按批内下标读取 PLACE 输入；仅在下单批次和有效下标范围使用。
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
@@ -35,7 +41,7 @@ public final class OrderBatchPending implements com.surprising.aeron.service.sta
      * 借用该项已经准备的产品判断输入，账户准入前由 Owner 填写。
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
-    public com.surprising.aeron.service.state.admission.PlaceBatchIntentSource.Decision decision(int index) { return preparedDecisions[index]; }
+    public PlaceBatchIntentSource.Decision decision(int index) { return preparedDecisions[index]; }
     /** 每项可复用的解析订单槽，借用时才创建，整批退休后清理内容。 */
     private final ResolvedPlaceOrder[] resolvedOrderSlots;
     /**
@@ -118,18 +124,14 @@ public final class OrderBatchPending implements com.surprising.aeron.service.sta
         item.status = accepted ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         item.resultCode = accepted ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
     }
-    /** 完成交接后可读的响应字节缓冲，有效范围由长度限定。 */
+    /**  完成交接后可读的响应字节缓冲，有效范围由长度限定。 借用已编码响应缓冲，完成交接后才可读，实际有效长度见 preparedResponseLength。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(onMethod_ = {@Override})
     byte[] preparedResponse;
-    /** 响应缓冲已编码的有效长度。 */
+    /**  响应缓冲已编码的有效长度。 返回缓冲中已经编码的有效字节长度，不等于缓冲容量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(onMethod_ = {@Override})
     int preparedResponseLength;
-    /**
-     * 借用已编码响应缓冲，完成交接后才可读，实际有效长度见 preparedResponseLength。
-     */
-    @Override public byte[] preparedResponse() { return preparedResponse; }
-    /**
-     * 返回缓冲中已经编码的有效字节长度，不等于缓冲容量。
-     */
-    @Override public int preparedResponseLength() { return preparedResponseLength; }
     /** 创建本批时指定的响应槽分配器。 */
     private final ResponseArena responseArena;
     /** 本批尚未移交或归还的可空响应槽租约。 */
@@ -355,11 +357,15 @@ public final class OrderBatchPending implements com.surprising.aeron.service.sta
         }
     }
 
-    /** 本批下单、撤单或改单类别。 */
+    /**  本批下单、撤单或改单类别。 返回本批下单、撤单或改单类别。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     OrderBatchKind kind;
     /** 已解码的整批输入及稳定路由缓存。 */
     DecodedMatchingCommand decodedCommand;
-    /** 本轮有效项列表，元素来自固定项槽。 */
+    /**  本轮有效项列表，元素来自固定项槽。 借用本批项列表，不复制；各线程只能在约定交接边界访问对应输入或结果。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final ArrayList<OrderBatchItem> items;
     /** 跨批保留的固定项对象数组，所有借用结束后才允许复用。 */
     private final OrderBatchItem[] itemSlots;
@@ -387,7 +393,13 @@ public final class OrderBatchPending implements com.surprising.aeron.service.sta
     int preparedClientKeyCount;
     /** 跨子项累积的财库差额对象，清批时清内容并保留容量。 */
     com.surprising.aeron.service.state.ledger.RuntimeTreasuryDelta treasuryDelta;
-    /** 下一条要准入或处理的批内项下标。 */
+    /**
+     *  下一条要准入或处理的批内项下标。
+     * 保存调用方推进后的批内项游标，不在此验证范围或完成账户工作。
+     * @param nextIndex 调用方推进后的批内下标
+     */
+    @Accessors(fluent = true, chain = false)
+    @Setter
     int nextIndex;
     /** 本批已经统计的成交事件总数。 */
     long tradeCount;
@@ -419,15 +431,23 @@ public final class OrderBatchPending implements com.surprising.aeron.service.sta
     private static final int LANE_CONTEXT_INITIALIZED = 1 << 7;
     /** 已经取得本批执行上下文的标记位。 */
     private static final int ACTIVATED = 1 << 8;
-    /** 本批是否已准备采用流水准入及撮合路径。 */
+    /**  本批是否已准备采用流水准入及撮合路径。 返回本批是否采用整批流水路径，不表示全部工作已完成。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     boolean pipelined;
     /** 本批是否必须按项串行准入，以保留资金及订单依赖。 */
     boolean sequentialAdmission;
-    /** Matcher 执行流水批次时保存的失败，交 Owner 决定恢复处理。 */
+    /**  Matcher 执行流水批次时保存的失败，交 Owner 决定恢复处理。 返回 Matcher 执行流水批次时保存的可空失败原因。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     Throwable pipelinedMatchingFailure;
-    /** 整批流水结算事件，完成并收集后才可回收。 */
+    /**  整批流水结算事件，完成并收集后才可回收。 借用整批流水路径的结算事件。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     com.surprising.aeron.service.state.settlement.MatcherSettlementEvent settlementEvent;
-    /** 整批下单账户准入事件，Owner 收集后回收。 */
+    /**  整批下单账户准入事件，Owner 收集后回收。 借用整批账户准入事件，Owner 收集回收后为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     PlaceBatchAdmissionEvent placeBatchAdmissionEvent;
     /** 本批有效项的解析下单输入列，派发后不能提前清理。 */
     final ResolvedPlaceOrder[] preparedOrders;
@@ -447,19 +467,35 @@ public final class OrderBatchPending implements com.surprising.aeron.service.sta
     /** 最终由本批事实及变化用户汇总的账户位图，需与命令槽核对。 */
     long actualLaneMask;
     // 顺序路径同一时刻只有一个子项等待账户发布，直接持有其事件，不复制执行状态。
-    /** 当前唯一等待账户发布的顺序子项或撤单片段事件，不另复制一份执行状态。 */
+    /**  当前唯一等待账户发布的顺序子项或撤单片段事件，不另复制一份执行状态。 借用当前顺序子项或撤单片段的结算事件。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     com.surprising.aeron.service.state.settlement.MatcherSettlementEvent itemSettlementEvent;
-    /** 当前顺序改单已经收集的解析准入。 */
+    /**  当前顺序改单已经收集的解析准入。 借用当前顺序改单的可空解析准入。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacementAdmission;
     /** 当前顺序改单仍需保留的账户准入事件。 */
     com.surprising.aeron.service.state.admission.ReplacementAdmissionEvent replacementAdmissionEvent;
-    /** 当前顺序下单的账户预留续步。 */
+    /**  当前顺序下单的账户预留续步。 借用当前顺序下单的可空账户预留续步。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     java.util.function.BooleanSupplier itemAdmission;
     /** 开始当前项准入前的修订，跨轮询保留。 */
     long itemAdmissionRevision;
-    /** 整批最后的账户盖戳及响应准备事件。 */
+    /**  整批最后的账户盖戳及响应准备事件。 借用本批最终账户提交事件，未派发或已回收时为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     com.surprising.aeron.service.state.change.LaneCommitEvent laneCommitEvent;
-    /** 当前最近已保存的撮合事实，供账户结算续步使用。 */
+    /**
+     *  当前最近已保存的撮合事实，供账户结算续步使用。
+     * 借用最近已经保存的 Matcher 事实，可用于当前子项结算续步。
+     * 保存或清除当前事实引用，不重复核验证据。
+     * @param lastMatchingResult 要保存或清除的可空 Matcher 事实
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     MatchingResult lastMatchingResult;
     /** 整批无原生撮合动作时复用的成功证据占位，只绑定当前 Core 序号。 */
     final com.surprising.aeron.service.matching.CoreMatchingResult noNativeCommandResult =
@@ -834,60 +870,6 @@ public final class OrderBatchPending implements com.surprising.aeron.service.sta
         }
     }
 
-    /**
-     * 借用当前顺序子项或撤单片段的结算事件。
-     */
-    public com.surprising.aeron.service.state.settlement.MatcherSettlementEvent itemSettlementEvent() { return itemSettlementEvent; }
-    /**
-     * 借用整批流水路径的结算事件。
-     */
-    public com.surprising.aeron.service.state.settlement.MatcherSettlementEvent settlementEvent() { return settlementEvent; }
-    /**
-     * 借用本批最终账户提交事件，未派发或已回收时为空。
-     */
-    public com.surprising.aeron.service.state.change.LaneCommitEvent laneCommitEvent() { return laneCommitEvent; }
-    /**
-     * 返回 Matcher 执行流水批次时保存的可空失败原因。
-     */
-    public Throwable pipelinedMatchingFailure() { return pipelinedMatchingFailure; }
-    /**
-     * 返回本批是否采用整批流水路径，不表示全部工作已完成。
-     */
-    public boolean pipelined() { return pipelined; }
-    /**
-     * 借用整批账户准入事件，Owner 收集回收后为空。
-     */
-    public PlaceBatchAdmissionEvent placeBatchAdmissionEvent() { return placeBatchAdmissionEvent; }
-    /**
-     * 返回本批下单、撤单或改单类别。
-     */
-    public OrderBatchKind kind() { return kind; }
-    /**
-     * 保存调用方推进后的批内项游标，不在此验证范围或完成账户工作。
-     * @param value 调用方推进后的批内下标
-     */
-    public void nextIndex(int value) { this.nextIndex = value; }
-    /**
-     * 借用本批项列表，不复制；各线程只能在约定交接边界访问对应输入或结果。
-     */
-    public ArrayList<OrderBatchItem> items() { return items; }
-    /**
-     * 借用最近已经保存的 Matcher 事实，可用于当前子项结算续步。
-     */
-    public MatchingResult lastMatchingResult() { return lastMatchingResult; }
-    /**
-     * 保存或清除当前事实引用，不重复核验证据。
-     * @param value 要保存或清除的可空 Matcher 事实
-     */
-    public void lastMatchingResult(MatchingResult value) { this.lastMatchingResult = value; }
-    /**
-     * 借用当前顺序改单的可空解析准入。
-     */
-    public com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacementAdmission() { return replacementAdmission; }
-    /**
-     * 借用当前顺序下单的可空账户预留续步。
-     */
-    public java.util.function.BooleanSupplier itemAdmission() { return itemAdmission; }
 
     /**
      * 返回实际批内项数，不是数组容量。

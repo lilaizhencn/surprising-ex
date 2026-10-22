@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.admission;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionMode;
@@ -20,19 +22,13 @@ import com.surprising.aeron.service.state.order.OrderRuntime;
 import com.surprising.aeron.service.state.order.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
-/**
- * 交易步骤 2 的账户准入检查与预留金额计算。核对客户订单身份、持仓模式、只减仓容量、杠杆和风险限额，再按产品规则返回应预留金额；不在这里创建订单、冻结可用余额或应用成交。
- */
+/** 交易步骤 2 的账户准入检查与预留金额计算。核对客户订单身份、持仓模式、只减仓容量、杠杆和风险限额，再按产品规则返回应预留金额；不在这里创建订单、冻结可用余额或应用成交。 构造约定：该类只提供静态准入计算，不创建独立状态实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeOrderAdmission {
 
     /** 百万分比的分母，OI 比例限额和杠杆相关计算共用此比例单位。 */
     private static final long PPM = 1_000_000L;
 
-    /**
-     * 该类只提供静态准入计算，不创建独立状态实例。
-     */
-    private RuntimeOrderAdmission() {
-    }
 
     /**
      * 普通订单准入的便捷入口，不排除已有订单，继续取得身份并计算所需预留。

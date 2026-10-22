@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.matching;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.cmd.CommandResultCode;
 import java.util.AbstractList;
@@ -16,43 +19,75 @@ public final class CoreMatchingResult implements MatchingResult {
     /** 无行情回执共用的空盘口数据，买卖侧列表为空且数量为零。 */
     private static final MatcherResult.MarketData EMPTY_MARKET_DATA =
             new MatcherResult.MarketData(List.of(), List.of(), 0, 0);
-    /** 构造时确定的接受标记，既可来自原生结果，也可由控制调用方提供。 */
+    /**  构造时确定的接受标记，既可来自原生结果，也可由控制调用方提供。 返回引擎是否接受此结果；仍需结合 outcome 判断已知前缀或致命分歧。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final boolean accepted;
-    /** 构造时保存的非空结果码文本。 */
+    /**  构造时保存的非空结果码文本。 返回原撮合结果码文本，不在查询时重新分类。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final String resultCode;
-    /** 本次控制撤单逐项结果，空列表可能按现规则直接借用。 */
+    /**  本次控制撤单逐项结果，空列表可能按现规则直接借用。 返回本次按请求顺序收集的控制撤单结果，调用方遵守当前结果或池化槽位的使用期限。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final List<CoreCancellationResult> cancellations;
-    /** 传入的连续成功撤单数量，构造时只检查不超过列表大小。 */
+    /**  传入的连续成功撤单数量，构造时只检查不超过列表大小。 返回批量控制撤单在首个失败前已经成功的连续前缀数量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final int successfulPrefixCount;
-    /** 适配器显式登记的前缀状态变化标记，不等于所有原生订单簿变化的观测值。 */
+    /**  适配器显式登记的前缀状态变化标记，不等于所有原生订单簿变化的观测值。 返回适配器显式登记的状态变化标记，主要用于已执行撤单前缀；原生成功结果也可能保留 false，不能单靠此标记判断订单簿是否变化。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final boolean matcherStateChanged;
-    /** 构造时按结果码、接受与前缀标记确定的业务分类。 */
+    /**  构造时按结果码、接受与前缀标记确定的业务分类。 返回已分类的接受、拒绝、已执行前缀或致命分歧状态，供后续账户处理选择正确边界。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final Outcome outcome;
     /*
      * Matcher 先创建结果，再绑定命令证据，最后才发布完成回执。
      * 下列原生身份标量在这个构造窗口内保留可写，绑定时复用同一结果对象。
      */
-    /** Matcher 发布前绑定的 Core 命令序号，clearCoreSequence 只清此字段。 */
+    /**  Matcher 发布前绑定的 Core 命令序号，clearCoreSequence 只清此字段。 返回关联的 Core 命令序号，零表示当前尚未绑定或已单独清除。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long nativeCoreSequence;
-    /** 原命令 UUID 高六十四位，发布前绑定。 */
+    /**  原命令 UUID 高六十四位，发布前绑定。 返回保存的命令 UUID 高六十四位。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private long nativeCommandIdMostSignificantBits;
-    /** 原命令 UUID 低六十四位，发布前绑定。 */
+    /**  原命令 UUID 低六十四位，发布前绑定。 返回保存的命令 UUID 低六十四位。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private long nativeCommandIdLeastSignificantBits;
-    /** 本结果关联的普通订单编号。 */
+    /**  本结果关联的普通订单编号。 返回关联的普通订单编号，零可表示未绑定或没有单一订单。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long nativeOrderId;
     /** 显式保存的原生 exchange-core 序号，零时可从原生结果回读。 */
     private long nativeSequenceValue;
-    /** 此回执在证据分片内的业务序号。 */
+    /**  此回执在证据分片内的业务序号。 返回此结果发布到所属证据分片时的业务序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long nativeMatcherSequence;
-    /** 绑定证据时保存的 Cluster 时间戳。 */
+    /**  绑定证据时保存的 Cluster 时间戳。 返回绑定时保存的 Cluster 业务时间戳。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private long nativeAeronTimestamp;
-    /** 本回执所属业务证据分片，控制分片为负一。 */
+    /**  本回执所属业务证据分片，控制分片为负一。 返回证据所属 Matcher 分片，控制分片使用负一。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int nativeMatcherShardId;
-    /** 原生结果引用，没有原生回执的人工结果可为空。 */
+    /**  原生结果引用，没有原生回执的人工结果可为空。 返回底层 exchange-core 原生结果引用，没有原生结果时可为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final MatcherResult nativeMatcherResult;
-    /** 原生事件列表引用或组合片段视图，构造时不统一复制。 */
+    /**  原生事件列表引用或组合片段视图，构造时不统一复制。 返回当前结果关联的原生成交、撤量或拒单事件序列；它是账户结算事实输入，不能据此再次撮合。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final List<MatcherResult.MatcherEvent> matcherEvents;
-    /** 原生行情引用或共用空行情，不在此深拷贝。 */
+    /**  原生行情引用或共用空行情，不在此深拷贝。 返回此结果携带的原生市场数据引用，空行情使用约定的空对象。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final MatcherResult.MarketData marketData;
 
     /**
@@ -294,64 +329,12 @@ public final class CoreMatchingResult implements MatchingResult {
     }
 
     /**
-     * 返回引擎是否接受此结果；仍需结合 outcome 判断已知前缀或致命分歧。
-     */
-    public boolean accepted() { return accepted; }
-    /**
-     * 返回原撮合结果码文本，不在查询时重新分类。
-     */
-    public String resultCode() { return resultCode; }
-    /**
-     * 返回本次按请求顺序收集的控制撤单结果，调用方遵守当前结果或池化槽位的使用期限。
-     */
-    public List<CoreCancellationResult> cancellations() { return cancellations; }
-    /**
-     * 返回批量控制撤单在首个失败前已经成功的连续前缀数量。
-     */
-    public int successfulPrefixCount() { return successfulPrefixCount; }
-    /**
-     * 返回适配器显式登记的状态变化标记，主要用于已执行撤单前缀；原生成功结果也可能保留 false，不能单靠此标记判断订单簿是否变化。
-     */
-    public boolean matcherStateChanged() { return matcherStateChanged; }
-    /**
-     * 返回已分类的接受、拒绝、已执行前缀或致命分歧状态，供后续账户处理选择正确边界。
-     */
-    public Outcome outcome() { return outcome; }
-    /**
      * 优先返回显式证据中的原生序号；其为零且有原生结果时读取原生 sequence，不新建占位身份。
      */
     long nativeSequence() {
         return nativeSequenceValue == 0 && nativeMatcherResult != null
                 ? nativeMatcherResult.sequence() : nativeSequenceValue;
     }
-    /**
-     * 返回关联的 Core 命令序号，零表示当前尚未绑定或已单独清除。
-     */
-    public long nativeCoreSequence() { return nativeCoreSequence; }
-    /**
-     * 返回保存的命令 UUID 高六十四位。
-     */
-    long nativeCommandIdMostSignificantBits() { return nativeCommandIdMostSignificantBits; }
-    /**
-     * 返回保存的命令 UUID 低六十四位。
-     */
-    long nativeCommandIdLeastSignificantBits() { return nativeCommandIdLeastSignificantBits; }
-    /**
-     * 返回关联的普通订单编号，零可表示未绑定或没有单一订单。
-     */
-    public long nativeOrderId() { return nativeOrderId; }
-    /**
-     * 返回此结果发布到所属证据分片时的业务序号。
-     */
-    public long nativeMatcherSequence() { return nativeMatcherSequence; }
-    /**
-     * 返回绑定时保存的 Cluster 业务时间戳。
-     */
-    long nativeAeronTimestamp() { return nativeAeronTimestamp; }
-    /**
-     * 返回证据所属 Matcher 分片，控制分片使用负一。
-     */
-    public int nativeMatcherShardId() { return nativeMatcherShardId; }
     /**
      * 逐半部比较原命令 UUID，不额外检查 Core 序号、订单编号或事件内容。
      * @param most 待比较 UUID 高六十四位
@@ -369,18 +352,6 @@ public final class CoreMatchingResult implements MatchingResult {
         return commandId != null
                 && nativeMatches(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
     }
-    /**
-     * 返回底层 exchange-core 原生结果引用，没有原生结果时可为空。
-     */
-    public MatcherResult nativeMatcherResult() { return nativeMatcherResult; }
-    /**
-     * 返回当前结果关联的原生成交、撤量或拒单事件序列；它是账户结算事实输入，不能据此再次撮合。
-     */
-    public List<MatcherResult.MatcherEvent> matcherEvents() { return matcherEvents; }
-    /**
-     * 返回此结果携带的原生市场数据引用，空行情使用约定的空对象。
-     */
-    public MatcherResult.MarketData marketData() { return marketData; }
 
     /**
      * 先把 EXCHANGE_CORE_FAILURE 与 MATCHING_TIMEOUT 归为致命分歧；其他接受结果为 APPLIED，拒绝结果再根据显式状态变化区分已执行前缀或完全未改。
@@ -417,7 +388,9 @@ public final class CoreMatchingResult implements MatchingResult {
         private final List<List<MatcherResult.MatcherEvent>> segments;
         /** 每个片段的全局排他结束下标，用于二分定位。 */
         private final int[] ends;
-        /** 全部事件片段的固定总长度。 */
+        /**  全部事件片段的固定总长度。 返回构造时固定的所有片段事件总数。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(onMethod_ = {@Override})
         private final int size;
 
         /**
@@ -458,10 +431,5 @@ public final class CoreMatchingResult implements MatchingResult {
             return segments.get(low).get(index - offset);
         }
 
-        /**
-         * 返回构造时固定的所有片段事件总数。
-         */
-        @Override
-        public int size() { return size; }
     }
 }

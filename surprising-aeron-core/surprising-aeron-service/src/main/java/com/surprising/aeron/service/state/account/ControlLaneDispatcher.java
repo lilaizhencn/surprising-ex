@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.command.AccountLaneOperationType;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -9,7 +13,10 @@ import java.util.function.IntFunction;
 
 /**
  * 一个运行时同时推进一项控制派发。复用每 Lane 的任务槽，先保存结果和修订增量再发布完成位，Owner 观察到完成位后才读取结果（release/acquire），收齐后再发布变化。它不自动提供跨 Lane 事务回滚，业务拒绝与工作线程故障沿原边界传播。
+ * 构造约定：保存所属运行时，任务槽和完成数组在首次派发时按拓扑创建。
+ * 参数 owner：拥有派发周期的交易运行时
  */
+@RequiredArgsConstructor
 public final class ControlLaneDispatcher {
     /** 完成标记之间间隔十六个 long，减少不同 Lane 频繁写相邻位置。 */
     private static final int CACHE_LINE_LONGS = 16;
@@ -25,18 +32,13 @@ public final class ControlLaneDispatcher {
     private long requiredLaneMask;
     /** Owner 已 acquire 观察到完成的 Lane 缓存位图。 */
     private long observedCompletedMask;
-    /** 当前是否还需要 Owner 收集控制派发结果。 */
+    /**  当前是否还需要 Owner 收集控制派发结果。 返回 Owner 是否仍在等待当前控制派发收齐回执。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean pending;
     /** 当前账户控制操作分类，用于工作队列统计和诊断。 */
     private AccountLaneOperationType operationType;
 
-    /**
-     * 保存所属运行时，任务槽和完成数组在首次派发时按拓扑创建。
-     * @param owner 拥有派发周期的交易运行时
-     */
-    public ControlLaneDispatcher(TradingRuntimeState owner) {
-        this.owner = owner;
-    }
 
     /**
      * 首次使用时为每个账户 Lane 创建一个可复用任务槽，并为各完成标记留出固定间隔。
@@ -50,10 +52,6 @@ public final class ControlLaneDispatcher {
         for (/* 当前位图最低有效位对应的 Lane 编号。 */ int laneId = 0; laneId < count; laneId++) tasks[laneId] = new LaneControlTask(laneId);
     }
 
-    /**
-     * 返回 Owner 是否仍在等待当前控制派发收齐回执。
-     */
-    public boolean pending() { return pending; }
 
     /**
      * 检查当前 Lane 命令作用域对应的控制任务是否正在执行，供账户变更归集使用。
@@ -195,9 +193,8 @@ public final class ControlLaneDispatcher {
         return observedCompletedMask;
     }
 
-    /**
-     * 一个 Lane 固定复用的控制任务槽，操作、结果与拒绝只在对应完成标记建立的交接边界内使用。
-     */
+    /** 一个 Lane 固定复用的控制任务槽，操作、结果与拒绝只在对应完成标记建立的交接边界内使用。 构造约定：固定任务所属 Lane 编号，后续派发只复用操作及结果字段。 参数 laneId：当前要检查、执行或读取的账户 Lane 编号 */
+    @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
     private final class LaneControlTask implements com.surprising.aeron.service.lane.SettlementLaneWorker.Command {
         /** 复用任务固定所属的 Lane 编号。 */
         private final int laneId;
@@ -212,11 +209,6 @@ public final class ControlLaneDispatcher {
         /** 该任务是否正处于 Lane 执行作用域，仅用于所属执行线程判断。 */
         private boolean executing;
 
-        /**
-         * 固定任务所属 Lane 编号，后续派发只复用操作及结果字段。
-         * @param laneId 当前要检查、执行或读取的账户 Lane 编号
-         */
-        LaneControlTask(int laneId) { this.laneId = laneId; }
 
         /**
          * 清空上次操作、结果、拒绝及修订增量；仅在上一派发已完成时复用，不在此重新建立线程同步。

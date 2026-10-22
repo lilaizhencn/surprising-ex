@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.business.spot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.account.CoreUserState;
@@ -13,11 +15,9 @@ import static com.surprising.aeron.service.state.math.CoreContractMath.feeDeltaU
 import static com.surprising.aeron.service.state.math.CoreContractMath.spotBaseUnits;
 import static com.surprising.aeron.service.state.math.CoreContractMath.spotQuoteUnits;
 
-/** 现货订单准入需要冻结的资产数量计算。 */
+/**  现货订单准入需要冻结的资产数量计算。 构造约定： 这里只计算所需冻结金额，不保存订单或账户，不需要创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SpotOrderAdmission {
-    /** 这里只计算所需冻结金额，不保存订单或账户，不需要创建实例。 */
-    private SpotOrderAdmission() {
-    }
 
     /**
      * 卖单冻结基础资产，买单冻结成交名义金额加逐步成交也足够的手续费额度。

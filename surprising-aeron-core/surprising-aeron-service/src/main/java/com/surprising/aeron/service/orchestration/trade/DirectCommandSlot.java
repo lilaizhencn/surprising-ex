@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandFingerprint;
@@ -17,6 +21,7 @@ import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.service.orchestration.retention.TerminalStateRetention;
 import com.surprising.aeron.service.state.account.AccountControlTask;
+import com.surprising.aeron.service.state.ledger.RuntimeInsuranceFundStateTransitions;
 import com.surprising.aeron.service.state.lifecycle.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.state.order.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.state.order.RuntimeTriggerOrderStateTransitions;
@@ -31,36 +36,62 @@ import java.util.function.IntFunction;
  * 直接控制命令的单个可复用槽。余额、划转、风控、资金费、触发单等命令不走订单簿完成队列，但可能需要等待账户 Lane、账本或回滚。这里保存当前命令和续步，业务状态、发布和回滚仍由运行时负责；当前命令结束后先 clear，再接下一条。
  */
 public final class DirectCommandSlot {
-    /** 本轮原始直接命令，清槽后为空。 */
+    /**  本轮原始直接命令，清槽后为空。 借用当前原始直接命令，未占用或清理后为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private CoreMessage command;
     /** 本轮完整命令指纹，供幂等及终态保留核对。 */
     private CommandFingerprint fingerprint;
     /** 命令来源类型与实例标识。 */
     private TradingCoreRuntime.SourceKey sourceKey;
-    /** 固定使用的 Cluster 业务时间。 */
+    /**  固定使用的 Cluster 业务时间。 返回本命令固定的 Cluster 业务时间。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private long commitFenceTimestamp;
     /** 固定使用的复制日志位置。 */
     private long commitFenceClusterPosition;
 
-    /** 本槽是否被当前命令占用。 */
+    /**  本槽是否被当前命令占用。 返回是否已有直接命令占用本槽，不能据此判断业务是否成功。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean active;
     /** 该工作开始前的运行时修订，用于变化及回滚判断。 */
     private long beforeRevision;
-    /** 命令开始前的账户回滚检查点。 */
+    /**  命令开始前的账户回滚检查点。 返回本命令开始前的账户回滚检查点。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private long checkpoint;
     /** 命令开始前的持仓身份回滚检查点。 */
     private long identityCheckpoint;
-    /** 当前业务或回滚续步，返回假时由 Owner 之后再轮询。 */
+    /**  当前业务或回滚续步，返回假时由 Owner 之后再轮询。 借用当前可空续步，不调用或复制它。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private BooleanSupplier controlWork;
-    /** 业务已决定的响应状态，未决定时为空。 */
+    /**  业务已决定的响应状态，未决定时为空。 返回已决定的响应状态，业务续步尚未结束时可为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private ResponseStatus status;
-    /** 与响应状态配套的业务结果码。 */
+    /**  与响应状态配套的业务结果码。 返回已决定的结果码，不在此推进任务。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private CoreResultCode resultCode;
-    /** 本条直接命令待收集的账户提交事件。 */
+    /**
+     *  本条直接命令待收集的账户提交事件。
+     * 借用当前待收集的账户提交事件。
+     * 保存调用方派发的可空账户提交事件，不等待 Lane。
+     * @param commitEvent 当前账户提交事件引用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     private com.surprising.aeron.service.state.change.LaneCommitEvent commitEvent;
-    /** 本条命令的收尾材料是否已准备。 */
+    /**  本条命令的收尾材料是否已准备。 返回直接命令的收尾材料是否已准备，防止后续轮询重复准备。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean finalizationPrepared;
-    /** 本条命令的发布是否已完成。 */
+    /**  本条命令的发布是否已完成。 返回本条命令的发布工作是否已标记完成。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean publicationComplete;
     /**
      * fundsPreflight：当前占槽是否仅用于资金身份前置查重。
@@ -96,21 +127,21 @@ public final class DirectCommandSlot {
     /** 没有触发续扫时使用的已完成哨兵。 */
     private static final BooleanSupplier COMPLETE_CONTROL = () -> true;
 
-    /** 跨直接命令保留的资金费工作对象。 */
+    /**  跨直接命令保留的资金费工作对象。 返回上次保存的资金费工作对象；初次使用可能为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork;
-    /** 跨命令保留的自动减仓工作对象。 */
+    /**  跨命令保留的自动减仓工作对象。 返回上次保存的自动减仓工作对象。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private RuntimeAdlExecution.AdlWork reusableAdlWork;
     /** 跨命令保留的强平确认工作对象。 */
     private RuntimeLiquidationResolution.ResolutionWork reusableResolutionWork;
     /** 首次绑定当前运行时后只重置预算的风险扫描器。 */
     private RiskScanCoordinator reusableRiskCoordinator;
     /** 跨命令保留的可空保险基金调整工作。 */
-    private com.surprising.aeron.service.state.ledger.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment;
+    private RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment;
 
-    /**
-     * 返回是否已有直接命令占用本槽，不能据此判断业务是否成功。
-     */
-    public boolean active() { return active; }
 
     /**
      * 拒绝覆盖仍占用的槽，保存非空命令、指纹及来源，再记下业务时间、日志位置与回滚检查点；其余旧标记由前一轮 clear 清理。
@@ -144,26 +175,10 @@ public final class DirectCommandSlot {
      */
     public boolean hasControlWork() { return controlWork != null; }
     /**
-     * 借用当前可空续步，不调用或复制它。
-     */
-    public BooleanSupplier controlWork() { return controlWork; }
-    /**
      * 把当前续步换成非空的新续步，供原控制工作转入后续阶段。
      * @param work 当前要保存、替换或轮询的业务续步
      */
     public void replaceControlWork(BooleanSupplier work) { controlWork = Objects.requireNonNull(work); }
-    /**
-     * 借用当前原始直接命令，未占用或清理后为空。
-     */
-    CoreMessage command() { return command; }
-    /**
-     * 返回已决定的响应状态，业务续步尚未结束时可为空。
-     */
-    ResponseStatus status() { return status; }
-    /**
-     * 返回已决定的结果码，不在此推进任务。
-     */
-    CoreResultCode resultCode() { return resultCode; }
     /**
      * 保存调用方已经决定的状态和结果码，不在此检查非空或完成发布。
      * @param status 已决定的响应状态
@@ -173,14 +188,6 @@ public final class DirectCommandSlot {
         this.status = status;
         this.resultCode = resultCode;
     }
-    /**
-     * 返回直接命令的收尾材料是否已准备，防止后续轮询重复准备。
-     */
-    public boolean finalizationPrepared() { return finalizationPrepared; }
-    /**
-     * 返回本条命令的发布工作是否已标记完成。
-     */
-    public boolean publicationComplete() { return publicationComplete; }
     /**
      * 记下发布已经完成，后续轮询继续其他收尾。
      */
@@ -250,26 +257,9 @@ public final class DirectCommandSlot {
                 checkedCommand, timestamp, position, checkedSource, checkedFingerprint);
     }
     /**
-     * 借用当前待收集的账户提交事件。
-     */
-    public com.surprising.aeron.service.state.change.LaneCommitEvent commitEvent() { return commitEvent; }
-    /**
-     * 保存调用方派发的可空账户提交事件，不等待 Lane。
-     * @param event 当前账户提交事件引用
-     */
-    public void commitEvent(com.surprising.aeron.service.state.change.LaneCommitEvent event) { commitEvent = event; }
-    /**
      * 只解除本槽对提交事件的引用，事件回收由原调用方负责。
      */
     public void clearCommitEvent() { commitEvent = null; }
-    /**
-     * 返回本命令固定的 Cluster 业务时间。
-     */
-    long commitFenceTimestamp() { return commitFenceTimestamp; }
-    /**
-     * 返回本命令开始前的账户回滚检查点。
-     */
-    long checkpoint() { return checkpoint; }
 
     /**
      * 要求当前没有续步，再保存非空控制工作，供 Owner 后续轮询。
@@ -293,10 +283,6 @@ public final class DirectCommandSlot {
         controlWork = fundingControl;
     }
 
-    /**
-     * 返回上次保存的资金费工作对象；初次使用可能为空。
-     */
-    public RuntimePerpetualFundingProcessor.FundingWork reusableFundingWork() { return reusableFundingWork; }
 
     /**
      * 绑定风险扫描和后续触发扫描所需信息；同一槽不能并存第二条控制续步。
@@ -330,10 +316,6 @@ public final class DirectCommandSlot {
         controlWork = adlControl;
     }
 
-    /**
-     * 返回上次保存的自动减仓工作对象。
-     */
-    public RuntimeAdlExecution.AdlWork reusableAdlWork() { return reusableAdlWork; }
 
     /**
      * 绑定强平结果确认续步，并保留原工作对象供后续命令复用。

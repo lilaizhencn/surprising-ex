@@ -1,4 +1,7 @@
 package com.surprising.aeron.service.command.support;
+
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import java.util.AbstractCollection;
 import java.util.Arrays;
@@ -19,7 +22,9 @@ public final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
     private int[] indexGenerations;
     /** 当前有效代号，从一开始，零保留给空槽，完整绕回零后统一重置。 */
     private int generation = 1;
-    /** 本代去重后有效值数，同时为下一次追加位置。 */
+    /**  本代去重后有效值数，同时为下一次追加位置。 返回本代已经去重的变更 ID 数量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(onMethod_ = {@Override})
     private int size;
 
     /**
@@ -158,13 +163,6 @@ public final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
         };
     }
 
-    /**
-     * 返回本代已经去重的变更 ID 数量。
-     */
-    @Override
-    public int size() {
-        return size;
-    }
 
     /**
      * 归零有效长度并换代，让原索引槽失效而不逐个清键；代号绕回零时才清所有代号槽并从一重新开始。

@@ -1,21 +1,17 @@
 package com.surprising.aeron.service.state.instrument;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreMaintenanceCodec;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 
-/**
- * 标的配置与维护任务的状态转换入口。在已有运行时所有权内检查产品线、生命周期冲突和任务归属，沿用原标的外壳修改；真正发生变化后才增加业务修订。
- */
+/** 标的配置与维护任务的状态转换入口。在已有运行时所有权内检查产品线、生命周期冲突和任务归属，沿用原标的外壳修改；真正发生变化后才增加业务修订。 构造约定：只提供静态状态转换，不创建独立状态或线程。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeInstrumentStateTransitions {
 
-    /**
-     * 只提供静态状态转换，不创建独立状态或线程。
-     */
-    private RuntimeInstrumentStateTransitions() {
-    }
 
     /**
      * 检查输入和所有权，构造本产品线配置并阻止进行中的资金费或生命周期操作；新标的登记资产身份后注册，旧标的先核对固定合约身份，相同配置直接返回，变化配置保留外壳更新并增加修订。身份表查询发生在部分拒绝检查之前，不保证失败时身份表完全不变。

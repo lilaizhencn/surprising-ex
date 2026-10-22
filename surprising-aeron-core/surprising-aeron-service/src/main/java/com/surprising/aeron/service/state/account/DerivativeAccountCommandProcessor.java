@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
@@ -13,16 +15,10 @@ import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.order.OrderReservation;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
-/**
- * 衍生品账户设置与保证金变更。Owner 侧解析产品及合约规则，账户步骤按用户所属 Lane 检查完整敞口；同步入口还负责产品修订发布，异步入口把结果交回控制续步。
- */
+/** 衍生品账户设置与保证金变更。Owner 侧解析产品及合约规则，账户步骤按用户所属 Lane 检查完整敞口；同步入口还负责产品修订发布，异步入口把结果交回控制续步。 构造约定：只提供账户业务步骤，不保存第二份用户或保证金状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class DerivativeAccountCommandProcessor {
 
-    /**
-     * 只提供账户业务步骤，不保存第二份用户或保证金状态。
-     */
-    private DerivativeAccountCommandProcessor() {
-    }
 
     /**
      * 校验输入与衍生产品线，执行账户模式切换；只有确实切换时才增加产品修订号。

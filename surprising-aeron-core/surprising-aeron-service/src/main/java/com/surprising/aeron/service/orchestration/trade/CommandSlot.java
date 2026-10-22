@@ -1,5 +1,11 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -19,29 +25,48 @@ import com.surprising.aeron.service.state.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.ledger.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.state.ledger.RuntimeFundsDelta;
+import com.surprising.aeron.service.state.lifecycle.RuntimeLifecycleSettlementContinuation;
 import com.surprising.aeron.service.state.order.OrderRuntime;
 import com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.state.settlement.MatcherSettlementEvent;
+import com.surprising.aeron.service.state.settlement.MatcherSettlementPlan;
+
 import java.util.List;
 import java.util.Objects;
 
 /**
  * 一条 Core 命令从准入到响应退休的可复用槽：保存输入、业务阶段、Matcher 发布、Lane 完成、挂起提交与响应租约。Owner 写编排字段，Matcher 通过约定路由和 volatile 完成引用交接；不是任意线程可写的统一状态容器。claimed 控制池复用，clear 只清生命周期，部分旧引用与序号等到 initialize 覆盖。
+ * 构造约定：创建供固定环预分配的空槽，尚未占用或初始化完整命令。
  */
-public final class CommandSlot implements com.surprising.aeron.service.state.settlement.MatcherSettlementEvent.MatcherCompletionRoute {
-    /** 当前命令的可空批次上下文，初始化或 clearReferences 断开，单纯 clear 不清所有业务引用。 */
+@NoArgsConstructor(access = AccessLevel.PACKAGE)
+public final class CommandSlot implements MatcherSettlementEvent.MatcherCompletionRoute {
+    /**  当前命令的可空批次上下文，初始化或 clearReferences 断开，单纯 clear 不清所有业务引用。 返回当前命令关联的可空批次上下文。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     OrderBatchPending orderBatch;
-    /** 当前槽承载的下单、撤单、触发、强平或结算等操作类别。 */
+    /**  当前槽承载的下单、撤单、触发、强平或结算等操作类别。 返回当前保留的业务操作类别。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private Operation operation;
-    /** 本次完整 Core 命令引用，Owner 初始化后供固定任务读取。 */
+    /**  本次完整 Core 命令引用，Owner 初始化后供固定任务读取。 返回当前命令引用，使用方须遵守槽生命周期。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreMessage command;
-    /** 本次命令的确定性指纹。 */
+    /**  本次命令的确定性指纹。 返回当前命令已保存的指纹。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CommandFingerprint fingerprint;
-    /** 准入确定的先撤订单号列表，primitive 不可变列表可借用。 */
+    /**  准入确定的先撤订单号列表，primitive 不可变列表可借用。 返回准入阶段确定的先撤订单号列表，不在此执行撤单。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private List<Long> preMatchingCancellationOrderIds;
-    /** 本命令当前阶段的资金事实累加器，不是可写账户余额。 */
+    /**  本命令当前阶段的资金事实累加器，不是可写账户余额。 返回当前命令拥有的资金累加器，跨阶段交接由调用方控制。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final RuntimeFundsAccumulator fundsAccumulator = new RuntimeFundsAccumulator();
-    /** 本命令已经解码的输入引用。 */
+    /**  本命令已经解码的输入引用。 返回命令的解码槽引用，不能在发布后任意改写。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private DecodedMatchingCommand decodedCommand;
     /** 解析后的可空替换/改单准入信息。 */
     private ResolvedMatchingAdmission admission;
@@ -49,16 +74,22 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
     private long commitFenceTimestamp;
     /** 首次提交边界固定的 Cluster 日志位置。 */
     private long commitFenceClusterPosition;
-    /** 是否已经保存首次提交边界。 */
+    /**  是否已经保存首次提交边界。 返回首次提交边界是否已经保存。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private boolean commitFenceEstablished;
     /** 当前命令持有的结算事件，生命周期与传输槽回收相互独立。 */
-    private com.surprising.aeron.service.state.settlement.MatcherSettlementEvent settlementContinuation;
+    private MatcherSettlementEvent settlementContinuation;
     /** 与结算事件配套的账户应用计划。 */
-    private com.surprising.aeron.service.state.settlement.MatcherSettlementPlan settlementPlan;
-    /** 触发等路径已经形成的独立撮合输入。 */
+    private MatcherSettlementPlan settlementPlan;
+    /**  触发等路径已经形成的独立撮合输入。 返回已经形成的独立撮合输入，普通直达路径也可能不需要它。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private CoreMatchingOrder admittedMatchingOrder;
 
-    /** 普通下单专有事件、准入结果和收据标记。 */
+    /**  普通下单专有事件、准入结果和收据标记。 返回本槽固定的普通下单专有上下文。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final PlaceSlotContext place = new PlaceSlotContext();
     /** 触发子单冻结订单与源收据。 */
     final TriggerSlotContext trigger = new TriggerSlotContext();
@@ -83,24 +114,60 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
     static final byte LANES_DONE = 4;
     /** 阶段值五：外层已标记该命令提交完成。 */
     static final byte COMMITTED = 5;
-    /** 跨分片控制撤单已开始的 Owner 标记，防止重复派发。 */
+    /**
+     *  跨分片控制撤单已开始的 Owner 标记，防止重复派发。
+     * 返回跨分片控制撤单是否已经派发启动。
+     * 设置跨分片撤单启动标记，外层据此避免重复派发。
+     * @param crossShardCancellationStarted 要保存或返回的当前字段值，方法本身不复制引用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     boolean crossShardCancellationStarted;
-    /** 此命令是否走不依赖 Cluster 响应窗口的内部执行路径。 */
+    /**  此命令是否走不依赖 Cluster 响应窗口的内部执行路径。 返回该命令是否按独立于 Cluster 响应窗口的内部路径推进。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     boolean clusterIndependent;
-    /** 本命令不再产生新资金事实的边界标记，响应租约可能仍未退休。 */
+    /**
+     *  本命令不再产生新资金事实的边界标记，响应租约可能仍未退休。
+     * 返回本命令是否已不可能产生新的资金派发事实，响应存储租约此时仍可能存在。
+     * 设置不再产生新资金事实的边界标记。
+     * @param ledgerDispatchClosed 要保存或返回的当前字段值，方法本身不复制引用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     boolean ledgerDispatchClosed;
-    /** 只为实时推送保留的命令独占订单引用或副本，具体租约由发布路径约束。 */
+    /**
+     *  只为实时推送保留的命令独占订单引用或副本，具体租约由发布路径约束。
+     * 返回实时推送所需的命令独占订单副本。
+     * 保存实时推送订单引用，不复制对象。
+     * @param realtimeTakerOrder 要保存或返回的当前字段值，方法本身不复制引用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     com.surprising.aeron.service.state.order.OrderRuntime realtimeTakerOrder;
     /** 外层统计中是否已计入当前流水结算项，take 时读出清零。 */
     private boolean pipelinedSettlementCounted;
-    /** 普通命令缓存的 Matcher 分片，未缓存或初始化后负一。 */
+    /**  普通命令缓存的 Matcher 分片，未缓存或初始化后负一。 返回已缓存的静态分片，尚未缓存时负一。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private int cachedMatcherShard = -1;
 
     // 撮合控制与结算控制共用当前槽的续步入口，不再另建控制状态表。
-    /** Owner 当前待轮询的控制续步，返回真表示该工作完成。 */
+    /**
+     *  Owner 当前待轮询的控制续步，返回真表示该工作完成。
+     * 返回当前待 Owner 轮询的可空控制工作。
+     * 直接替换控制工作引用，与 deferControl 不同，不执行重复绑定检查。
+     * @param controlWork 要保存或返回的当前字段值，方法本身不复制引用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     java.util.function.BooleanSupplier controlWork;
     /** 本槽保留的到期结算工作对象，清其引用而不每次重建。 */
-    private com.surprising.aeron.service.state.lifecycle.RuntimeLifecycleSettlementContinuation.SettlementWork reusableSettlementWork;
+    private RuntimeLifecycleSettlementContinuation.SettlementWork reusableSettlementWork;
     /** 预构造的到期结算 Owner 轮询器。 */
     private final SettlementControlContinuation settlementControl = new SettlementControlContinuation();
     /** 预构造的强平执行 Owner 轮询器。 */
@@ -119,23 +186,51 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
     private final CancelMatchingContinuation cancelMatching = new CancelMatchingContinuation();
     /** 预构造的替换/改单撮合任务。 */
     private final ReplaceMatchingContinuation replaceMatching = new ReplaceMatchingContinuation();
-    /** 本槽持有的可复用准入订单实例，使用前由调用方填充。 */
+    /**  本槽持有的可复用准入订单实例，使用前由调用方填充。 返回本槽预分配的可变准入订单，调用方在新命令使用前覆盖所需字段并遵守租约。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private final ResolvedPlaceOrder reusableResolvedOrder = new ResolvedPlaceOrder();
 
     /**
-     * 返回本槽预分配的可变准入订单，调用方在新命令使用前覆盖所需字段并遵守租约。
+     *  当前等待收集的 Lane 提交事件。
+     * 返回待收集的账户 Lane 提交事件。
+     * 直接保存可空 Lane 提交事件引用。
+     * @param commitEvent 要保存或返回的当前字段值，方法本身不复制引用
      */
-    ResolvedPlaceOrder reusableResolvedOrder() {
-        return reusableResolvedOrder;
-    }
-    /** 当前等待收集的 Lane 提交事件。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     com.surprising.aeron.service.state.change.LaneCommitEvent commitEvent;
 
-    /** 当前命令是否还在等控制续步。 */
+    /**
+     *  当前命令是否还在等控制续步。
+     * 返回当前命令是否还在等控制续步。
+     * 保存控制续步等待标记。
+     * @param controlPending 要保存或返回的当前字段值，方法本身不复制引用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     boolean controlPending;
-    /** 控制账户任务是否已提交，后续财库校验不得再次派发。 */
+    /**
+     *  控制账户任务是否已提交，后续财库校验不得再次派发。
+     * 返回控制账户任务是否已提交，避免后续财库验证重派。
+     * 设置控制账户已提交标记。
+     * @param controlAccountsCommitted 要保存或返回的当前字段值，方法本身不复制引用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     boolean controlAccountsCommitted;
-    /** 暂存终态响应字节引用，消费方遵守响应缓冲租约。 */
+    /**
+     *  暂存终态响应字节引用，消费方遵守响应缓冲租约。
+     * 返回暂存终态响应数据引用。
+     * 保存可空终态响应字节，不复制数组。
+     * @param resultData 要保存或返回的当前字段值，方法本身不复制引用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     byte[] resultData;
 
     /** 本槽固定的最多两笔普通订单结果及响应租约目标。 */
@@ -427,11 +522,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
         controlWork = liquidationExecutionControl;
     }
 
-    /**
-     * 创建供固定环预分配的空槽，尚未占用或初始化完整命令。
-     */
-    CommandSlot() {
-    }
 
     /**
      * 自动计算命令指纹，使用空前置撤单列表并解码后初始化。
@@ -681,30 +771,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
      */
     public long sequence() { return coreSequence; }
     /**
-     * 返回当前保留的业务操作类别。
-     */
-    public Operation operation() { return operation; }
-    /**
-     * 返回当前命令引用，使用方须遵守槽生命周期。
-     */
-    public CoreMessage command() { return command; }
-    /**
-     * 返回当前命令已保存的指纹。
-     */
-    public CommandFingerprint fingerprint() { return fingerprint; }
-    /**
-     * 返回准入阶段确定的先撤订单号列表，不在此执行撤单。
-     */
-    public List<Long> preMatchingCancellationOrderIds() { return preMatchingCancellationOrderIds; }
-    /**
-     * 返回当前命令拥有的资金累加器，跨阶段交接由调用方控制。
-     */
-    public RuntimeFundsAccumulator fundsAccumulator() { return fundsAccumulator; }
-    /**
-     * 返回命令的解码槽引用，不能在发布后任意改写。
-     */
-    public DecodedMatchingCommand decodedCommand() { return decodedCommand; }
-    /**
      * 返回可空的改撤等已解析准入信息。
      */
     public ResolvedMatchingAdmission matchingAdmission() { return admission; }
@@ -817,10 +883,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
      * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
      */
     void realtimeResolvedTakerOrder(ResolvedPlaceOrder order) { place.realtimeResolvedTakerOrder = order; }
-    /**
-     * 返回已经形成的独立撮合输入，普通直达路径也可能不需要它。
-     */
-    CoreMatchingOrder admittedMatchingOrder() { return admittedMatchingOrder; }
     /**
      * 返回触发续步已经冻结的源触发单收据，避免再回读 Lane 客户端索引。
      */
@@ -974,10 +1036,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
         return deferred.sourceKey;
     }
 
-    /**
-     * 返回已缓存的静态分片，尚未缓存时负一。
-     */
-    int cachedMatcherShard() { return cachedMatcherShard; }
 
     /**
      * 要求分片非负后保存，不在此检查拓扑上界。
@@ -1000,12 +1058,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
         boolean value = pipelinedSettlementCounted;
         pipelinedSettlementCounted = false;
         return value;
-    }
-    /**
-     * 返回首次提交边界是否已经保存。
-     */
-    boolean commitFenceEstablished() {
-        return commitFenceEstablished;
     }
     /**
      * 要求边界已建立后返回固定业务时间。
@@ -1064,21 +1116,25 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
     long coreSequence;
     /** 底层环是否仍占用此槽，是允许复用的关键标记。 */
     boolean claimed;
-    /** 当前事实预计参与的账户 Lane 位集合。 */
+    /**  当前事实预计参与的账户 Lane 位集合。 返回此结果预计参与的账户 Lane 位集合。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long expectedLaneMask;
-    /** Owner 已收集的账户 Lane 完成位集合。 */
+    /**  Owner 已收集的账户 Lane 完成位集合。 返回已经由 Owner 收集确认的 Lane 位集合。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long completedLaneMask;
     /** Matcher 用 volatile 发布、Owner 单次收取的普通结果引用。 */
     private volatile CoreMatchingResult completedMatchingResult;
-    /** 已经绑定到 Lane 扇出阶段的事实引用，可为池化结算事件。 */
+    /**  已经绑定到 Lane 扇出阶段的事实引用，可为池化结算事件。 返回已经进入 Lane 扇出的撮合事实引用，可能是池化直达事件。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private MatchingResult matchingResult;
-    /** Owner 绑定而 Matcher 发布前释放的提交分片路由，负一表示无路由。 */
+    /**  Owner 绑定而 Matcher 发布前释放的提交分片路由，负一表示无路由。 返回当前占用的 Matcher 提交路由，负一表示未占用或已释放。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile int submittedMatcherShard = -1;
 
-    /**
-     * 返回当前占用的 Matcher 提交路由，负一表示未占用或已释放。
-     */
-    public int submittedMatcherShard() { return submittedMatcherShard; }
 
     /**
      * 要求槽仍被占用、分片非负、没有现有路由或未收集结果，再由 Owner 绑定提交分片；不检查拓扑上界。
@@ -1122,18 +1178,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
      * 只有 claimed 时返回 Core 序号，否则返回零，避免内部链接把空闲槽当作有效命令。
      */
     long coreSequence() { return claimed ? coreSequence : 0; }
-    /**
-     * 返回此结果预计参与的账户 Lane 位集合。
-     */
-    public long expectedLaneMask() { return expectedLaneMask; }
-    /**
-     * 返回已经由 Owner 收集确认的 Lane 位集合。
-     */
-    public long completedLaneMask() { return completedLaneMask; }
-    /**
-     * 返回已经进入 Lane 扇出的撮合事实引用，可能是池化直达事件。
-     */
-    public MatchingResult matchingResult() { return matchingResult; }
     /**
      * 要求非空结果匹配本槽 Core 序号且没有未收集结果，先释放 Matcher 路由再用 volatile 结果字段发布；后续 Owner 可直接读取，不能当作多写者 CAS 容器。
      * @param shardId 声明占用或释放的 Matcher 分片号
@@ -1744,7 +1788,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
     /**
      * Owner 独占的到期结算完成轮询器，完成后只汇集已有工作结果并请求发布。
      */
-    private final class SettlementControlContinuation implements java.util.function.BooleanSupplier {
+    private static final class SettlementControlContinuation implements java.util.function.BooleanSupplier {
         /** 固定 Owner 控制轮询器借用的有序提交器。 */
         private OrderedCommitCoordinator coordinator;
         /** 固定控制轮询器借用的既有业务工作对象。 */
@@ -1786,7 +1830,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
     /**
      * Owner 独占的强平执行完成轮询器，复用本槽对象而不每次创建捕获函数。
      */
-    private final class LiquidationExecutionContinuation implements java.util.function.BooleanSupplier {
+    private static final class LiquidationExecutionContinuation implements java.util.function.BooleanSupplier {
         /** 固定 Owner 控制轮询器借用的有序提交器。 */
         private OrderedCommitCoordinator coordinator;
         /** 固定控制轮询器借用的既有业务工作对象。 */
@@ -1846,7 +1890,9 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
         private int count;
         /** 哪些绑定项已被 Lane 捕获的位集合。 */
         private int capturedMask;
-        /** 当前响应编码是否完成的标记。 */
+        /**  当前响应编码是否完成的标记。 返回当前是否已准备响应字节。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private boolean prepared;
         /** 目标当前仍持有的响应数组引用。 */
         private byte[] response;
@@ -1879,10 +1925,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
          * 返回是否绑定了至少一个正订单号。
          */
         boolean active() { return count != 0; }
-        /**
-         * 返回当前是否已准备响应字节。
-         */
-        boolean prepared() { return prepared; }
         /**
          * 在最多两个已绑定身份中查结果副本，找不到返回空。
          * @param id 需要在已捕获结果中查找的订单号
@@ -2010,17 +2052,11 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
             }
         }
 
-        /**
-         * 固定结果位置的协议字段读取视图，读取本目标副本而非原 Lane 对象，位置复用后不能保留旧读视图作历史。
-         */
+        /** 固定结果位置的协议字段读取视图，读取本目标副本而非原 Lane 对象，位置复用后不能保留旧读视图作历史。 构造约定：固定绑定一个结果数组位置，字段读取始终取该位置当前副本。 参数 index：当前结果位置或压缩列表下标，范围要求见当前方法 */
+        @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
         private final class OrderSource implements com.surprising.aeron.protocol.CoreOrderStateSource {
             /** 当前字段视图固定读取的结果数组位置。 */
             private final int index;
-            /**
-             * 固定绑定一个结果数组位置，字段读取始终取该位置当前副本。
-             * @param index 当前结果位置或压缩列表下标，范围要求见当前方法
-             */
-            private OrderSource(int index) { this.index = index; }
             /**
              * 返回固定位置当前的订单副本，调用方只在该位置非空时使用。
              */
@@ -2181,41 +2217,45 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
      * 普通下单专有的 Lane 准入事件、已收取标记和准入订单引用，外层命令槽负责阶段约束。
      */
     public static final class PlaceSlotContext {
-        /** 普通下单的 Lane 准入事件。 */
+        /**
+         *  普通下单的 Lane 准入事件。
+         * 返回当前下单准入事件。
+         * 直接保存下单准入事件引用，操作及重复绑定检查由外层入口执行。
+         * @param admission 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
+         */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
+        @Setter(value = AccessLevel.PACKAGE)
         PlaceAdmissionEvent admission;
-        /** Owner 是否已经收取普通下单准入收据。 */
+        /**  Owner 是否已经收取普通下单准入收据。 返回 Owner 已收取准入收据标记。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         boolean ownerCollected;
-        /** Lane 完成准入后保存的下单输入。 */
+        /**
+         *  Lane 完成准入后保存的下单输入。
+         * 返回已准入订单引用。
+         * 直接保存已准入订单引用，不复制对象。
+         * @param admittedOrder 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
+         */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
+        @Setter(value = AccessLevel.PACKAGE)
         ResolvedPlaceOrder admittedOrder;
-        /** 实时推送借用的已准入订单引用。 */
+        /**
+         *  实时推送借用的已准入订单引用。
+         * 返回实时推送借用的准入订单。
+         * 保存可空实时推送准入订单引用。
+         * @param realtimeResolvedTakerOrder 要保存或返回的当前字段值，方法本身不复制引用
+         */
+        @Accessors(fluent = true, chain = false)
+        @Getter
+        @Setter
         ResolvedPlaceOrder realtimeResolvedTakerOrder;
 
-        /**
-         * 返回当前下单准入事件。
-         */
-        PlaceAdmissionEvent admission() { return admission; }
-        /**
-         * 直接保存下单准入事件引用，操作及重复绑定检查由外层入口执行。
-         * @param event 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
-         */
-        void admission(PlaceAdmissionEvent event) { this.admission = event; }
-        /**
-         * 返回 Owner 已收取准入收据标记。
-         */
-        boolean ownerCollected() { return ownerCollected; }
         /**
          * 将已收取标记置真。
          */
         void markOwnerCollected() { this.ownerCollected = true; }
-        /**
-         * 返回已准入订单引用。
-         */
-        ResolvedPlaceOrder admittedOrder() { return admittedOrder; }
-        /**
-         * 直接保存已准入订单引用，不复制对象。
-         * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
-         */
-        void admittedOrder(ResolvedPlaceOrder order) { this.admittedOrder = order; }
 
         /**
          * 清下单事件、收取标记、准入订单及实时推送借用引用。
@@ -2227,39 +2267,27 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
             realtimeResolvedTakerOrder = null;
         }
 
-    /**
-     * 返回实时推送借用的准入订单。
-     */
-    public ResolvedPlaceOrder realtimeResolvedTakerOrder() { return realtimeResolvedTakerOrder; }
-    /**
-     * 保存可空实时推送准入订单引用。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void realtimeResolvedTakerOrder(ResolvedPlaceOrder value) { this.realtimeResolvedTakerOrder = value; }
 }
 
     /**
      * 触发子单的冻结订单与唯一源触发收据，后续无需再回读客户端索引。
      */
     static final class TriggerSlotContext {
-        /** 触发子单已经完成冻结准入的订单引用。 */
+        /**
+         *  触发子单已经完成冻结准入的订单引用。
+         * 返回冻结的触发子单准入订单。
+         * 直接保存触发子单订单引用，外层负责操作和非空检查。
+         * @param admissionOrder 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
+         */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
+        @Setter(value = AccessLevel.PACKAGE)
         OrderRuntime admissionOrder;
-        /** 触发续步已绑定的源触发单收据。 */
+        /**  触发续步已绑定的源触发单收据。 返回源触发单收据。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger;
 
-        /**
-         * 返回冻结的触发子单准入订单。
-         */
-        OrderRuntime admissionOrder() { return admissionOrder; }
-        /**
-         * 直接保存触发子单订单引用，外层负责操作和非空检查。
-         * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
-         */
-        void admissionOrder(OrderRuntime order) { this.admissionOrder = order; }
-        /**
-         * 返回源触发单收据。
-         */
-        com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger() { return sourceTrigger; }
         /**
          * 要求非空且此前未绑定，保存同一源触发单引用。
          * @param trigger 首次绑定的非空源触发单收据
@@ -2282,7 +2310,9 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
      * 强平校验与执行对象的可复用容器，清理只解除工作内部引用。
      */
     static final class LiquidationSlotContext {
-        /** 保留的强平执行工作对象，回收时只清内部引用。 */
+        /**  保留的强平执行工作对象，回收时只清内部引用。 返回已经保存的可空强平执行工作。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork;
         /** 懒创建并保留的强平执行校验对象。 */
         private com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check;
@@ -2296,12 +2326,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
             return check;
         }
 
-        /**
-         * 返回已经保存的可空强平执行工作。
-         */
-        com.surprising.aeron.service.state.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork() {
-            return reusableWork;
-        }
 
         /**
          * 保存非空强平执行工作。
@@ -2357,18 +2381,17 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
      * 替换/改单专用 Lane 准入事件引用，重复及操作检查在外层执行。
      */
     static final class ReplaceSlotContext {
-        /** 替换/改单的 Lane 准入事件，外层负责绑定条件检查。 */
+        /**
+         *  替换/改单的 Lane 准入事件，外层负责绑定条件检查。
+         * 返回替换准入事件。
+         * 直接保存替换事件引用，绑定条件由外层入口检查。
+         * @param admission 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
+         */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
+        @Setter(value = AccessLevel.PACKAGE)
         com.surprising.aeron.service.state.admission.ReplacementAdmissionEvent admission;
 
-        /**
-         * 返回替换准入事件。
-         */
-        com.surprising.aeron.service.state.admission.ReplacementAdmissionEvent admission() { return admission; }
-        /**
-         * 直接保存替换事件引用，绑定条件由外层入口检查。
-         * @param event 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
-         */
-        void admission(com.surprising.aeron.service.state.admission.ReplacementAdmissionEvent event) { this.admission = event; }
 
         /**
          * 断开替换准入事件引用。
@@ -2378,89 +2401,5 @@ public final class CommandSlot implements com.surprising.aeron.service.state.set
         }
     }
 
-    /**
-     * 返回待收集的账户 Lane 提交事件。
-     */
-    public com.surprising.aeron.service.state.change.LaneCommitEvent commitEvent() { return commitEvent; }
-    /**
-     * 返回当前命令关联的可空批次上下文。
-     */
-    public OrderBatchPending orderBatch() { return orderBatch; }
-    /**
-     * 返回实时推送所需的命令独占订单副本。
-     */
-    public com.surprising.aeron.service.state.order.OrderRuntime realtimeTakerOrder() { return realtimeTakerOrder; }
-    /**
-     * 返回本槽固定的普通下单专有上下文。
-     */
-    public PlaceSlotContext place() { return place; }
-    /**
-     * 保存实时推送订单引用，不复制对象。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void realtimeTakerOrder(com.surprising.aeron.service.state.order.OrderRuntime value) { this.realtimeTakerOrder = value; }
-    /**
-     * 返回跨分片控制撤单是否已经派发启动。
-     */
-    public boolean crossShardCancellationStarted() { return crossShardCancellationStarted; }
-    /**
-     * 设置跨分片撤单启动标记，外层据此避免重复派发。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void crossShardCancellationStarted(boolean value) { this.crossShardCancellationStarted = value; }
-    /**
-     * 返回当前命令是否还在等控制续步。
-     */
-    public boolean controlPending() { return controlPending; }
-    /**
-     * 返回当前待 Owner 轮询的可空控制工作。
-     */
-    public java.util.function.BooleanSupplier controlWork() { return controlWork; }
-    /**
-     * 直接替换控制工作引用，与 deferControl 不同，不执行重复绑定检查。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void controlWork(java.util.function.BooleanSupplier value) { this.controlWork = value; }
-    /**
-     * 返回控制账户任务是否已提交，避免后续财库验证重派。
-     */
-    public boolean controlAccountsCommitted() { return controlAccountsCommitted; }
-    /**
-     * 直接保存可空 Lane 提交事件引用。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void commitEvent(com.surprising.aeron.service.state.change.LaneCommitEvent value) { this.commitEvent = value; }
-    /**
-     * 保存控制续步等待标记。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void controlPending(boolean value) { this.controlPending = value; }
-    /**
-     * 返回该命令是否按独立于 Cluster 响应窗口的内部路径推进。
-     */
-    public boolean clusterIndependent() { return clusterIndependent; }
-    /**
-     * 设置控制账户已提交标记。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void controlAccountsCommitted(boolean value) { this.controlAccountsCommitted = value; }
-    /**
-     * 返回本命令是否已不可能产生新的资金派发事实，响应存储租约此时仍可能存在。
-     */
-    public boolean ledgerDispatchClosed() { return ledgerDispatchClosed; }
-    /**
-     * 设置不再产生新资金事实的边界标记。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void ledgerDispatchClosed(boolean value) { this.ledgerDispatchClosed = value; }
 
-    /**
-     * 返回暂存终态响应数据引用。
-     */
-    public byte[] resultData() { return resultData; }
-    /**
-     * 保存可空终态响应字节，不复制数组。
-     * @param value 要保存或返回的当前字段值，方法本身不复制引用
-     */
-    public void resultData(byte[] value) { resultData = value; }
 }

@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.orchestration.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
@@ -10,9 +14,8 @@ import java.util.List;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 
-/**
- * 分段快照 v27 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。提供整体编码、恢复和增量接收；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。
- */
+/** 分段快照 v27 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。提供整体编码、恢复和增量接收；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。 构造约定：禁止实例化纯静态格式入口。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SectionedCoreSnapshotCodec {
 
     /** 外层小端魔数，标识 Surprising 核心分段快照。 */
@@ -60,11 +63,6 @@ public final class SectionedCoreSnapshotCodec {
         return BASE_SECTION_COUNT + accountLaneCount;
     }
 
-    /**
-     * 禁止实例化纯静态格式入口。
-     */
-    private SectionedCoreSnapshotCodec() {
-    }
 
     /**
      * 类初始化时读取最大快照字节系统属性，未配置或空白使用一 GiB；非空值必须可解析且位于允许范围，否则直接使类初始化失败。
@@ -232,9 +230,13 @@ public final class SectionedCoreSnapshotCodec {
      * 编码后的有序字节片段与总长度。外层 List 固定，内层数组共享；可逐片持久化，也可在需要整体数组时合并复制。
      */
     public static final class SectionedSnapshot {
-        /** 固定的外层字节片段列表，内层数组不复制。 */
+        /**  固定的外层字节片段列表，内层数组不复制。 返回不可修改的外层片段列表，其中每个 byte 数组仍是共享引用，调用方不得在消费期间改写。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private final List<byte[]> chunks;
-        /** 构造时传入并保存的总字节长度。 */
+        /**  构造时传入并保存的总字节长度。 返回构造器保存的总字节长度，不重新遍历片段。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private final int length;
 
         /**
@@ -247,19 +249,7 @@ public final class SectionedCoreSnapshotCodec {
             this.length = length;
         }
 
-        /**
-         * 返回不可修改的外层片段列表，其中每个 byte 数组仍是共享引用，调用方不得在消费期间改写。
-         */
-        public List<byte[]> chunks() {
-            return chunks;
-        }
 
-        /**
-         * 返回构造器保存的总字节长度，不重新遍历片段。
-         */
-        public int length() {
-            return length;
-        }
 
         /**
          * 按保存的总长度分配新数组并依次复制所有片段；合法 Writer 输出长度相等，手工构造不一致时可能越界或留下末尾零字节。

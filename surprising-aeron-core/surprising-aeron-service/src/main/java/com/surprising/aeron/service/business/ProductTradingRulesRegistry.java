@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.business;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.business.spot.SpotTradingRules;
 import com.surprising.aeron.service.business.linear.perpetual.LinearPerpetualTradingRules;
@@ -10,10 +12,8 @@ import com.surprising.aeron.service.business.option.OptionTradingRules;
 
 import com.surprising.product.api.ProductLine;
 
-/**
- * 按产品线选取一套确定的交易规则，让现货、四类期货和期权使用各自的资金与结算口径。
- * 共用的是不保存账户状态的规则对象，不是不同产品线的订单、余额或持仓。
- */
+/** 按产品线选取一套确定的交易规则，让现货、四类期货和期权使用各自的资金与结算口径。 共用的是不保存账户状态的规则对象，不是不同产品线的订单、余额或持仓。 构造约定： 只提供固定规则查询，不需要给每个请求创建新的注册表。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class ProductTradingRulesRegistry {
 
     /** 现货规则，买卖分别预留报价资产或基础资产。 */
@@ -29,9 +29,6 @@ public final class ProductTradingRulesRegistry {
     /** 期权规则，区分权利金现金收支、卖方保证金和到期现金结算。 */
     private static final ProductTradingRules OPTION = new OptionTradingRules();
 
-    /** 只提供固定规则查询，不需要给每个请求创建新的注册表。 */
-    private ProductTradingRulesRegistry() {
-    }
 
     /**
      * 根据币对真实合约类型选规则，并再次检查规则与币对匹配，防止跨产品使用。

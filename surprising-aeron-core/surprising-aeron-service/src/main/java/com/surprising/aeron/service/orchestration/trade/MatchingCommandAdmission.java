@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -20,16 +24,14 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 /**
  * 交易步骤二：在 Owner 上解码并检查订单身份、路由和生命周期冲突，派发账户准入后登记待撮合命令。普通下单、撤单、改单与强平共用这道入口，资金准入可异步完成，Matcher 仍受准入门闩约束；登记成功返回待处理响应，终态由后面的有序提交负责。
+ * 构造约定：保存所属运行时；生命周期索引由 initializeLifecycleScopes 另行初始化，不在构造器内建立。
+ * 参数 owner：所属交易 Owner 运行时
  */
+@RequiredArgsConstructor
 public final class MatchingCommandAdmission {
     /** 唯一所属交易 Owner，业务推进及共享编排状态由其串行访问。 */
     final TradingCoreRuntime owner;
 
-    /**
-     * 保存所属运行时；生命周期索引由 initializeLifecycleScopes 另行初始化，不在构造器内建立。
-     * @param owner 所属交易 Owner 运行时
-     */
-    public MatchingCommandAdmission(TradingCoreRuntime owner) { this.owner = owner; }
 
     /** 按在途 Core 序号保留的强平或结算范围；普通订单不在此另存一份范围。 */
     LongObjectHashMap<List<LifecycleScope>> pendingLifecycleScopes;
@@ -48,21 +50,22 @@ public final class MatchingCommandAdmission {
     /** 本轮撤单预算内选择的受影响订单去重缓冲。 */
     private final PrimitiveLongChangeSet batchChangedOrders = new PrimitiveLongChangeSet();
 
-    /**
-     * 触发业务释放账户访问权前保存的冻结子单输入，只存活到正式登记命令槽，不拥有账户或订单事实。
-     */
+    /** 触发业务释放账户访问权前保存的冻结子单输入，只存活到正式登记命令槽，不拥有账户或订单事实。 构造约定：创建待绑定的触发子单暂存对象，初始引用为空。 */
+    @NoArgsConstructor
     static final class QueuedTriggerMatching {
-        /** 等待登记的触发子单原命令引用。 */
+        /**  等待登记的触发子单原命令引用。 借用待正式登记的原命令。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private CoreMessage command;
-        /** 账户已经冻结的子订单引用。 */
+        /**  账户已经冻结的子订单引用。 借用已经冻结的子订单，不重新做资金准入。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private OrderRuntime order;
-        /** 产生该子单的源触发单引用。 */
+        /**  产生该子单的源触发单引用。 借用产生该子订单的源触发单。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger;
 
-        /**
-         * 创建待绑定的触发子单暂存对象，初始引用为空。
-         */
-        public QueuedTriggerMatching() {}
 
         /**
          * 直接保存本条触发子单输入，不校验非空或复制订单。
@@ -97,18 +100,6 @@ public final class MatchingCommandAdmission {
             this.trigger = null;
         }
 
-        /**
-         * 借用待正式登记的原命令。
-         */
-        public CoreMessage command() { return command; }
-        /**
-         * 借用已经冻结的子订单，不重新做资金准入。
-         */
-        public OrderRuntime order() { return order; }
-        /**
-         * 借用产生该子订单的源触发单。
-         */
-        public com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger() { return trigger; }
     }
 
     /** 前六十四条暂存输入可复用的固定对象数组，超出后仍可另行分配。 */

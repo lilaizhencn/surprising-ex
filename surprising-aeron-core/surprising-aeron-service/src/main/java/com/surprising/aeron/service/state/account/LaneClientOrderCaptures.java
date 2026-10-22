@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 /**
  * 一个命令中用户加客户身份键的原订单指向捕获。用连续原语数组保存前值及存在标记，供回滚恢复正反向索引；此缓冲要求客户键为正，与允许零别名的其他索引契约不同。
  */
@@ -12,13 +15,11 @@ public final class LaneClientOrderCaptures {
     long[] beforeOrderIds = new long[4];
     /** 原映射是否存在，不把零数字槽误当成有效关联。 */
     boolean[] presentBefore = new boolean[4];
-    /** 当前命令有效捕获项数量。 */
+    /**  当前命令有效捕获项数量。 返回当前命令捕获的有效客户映射条数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     int size;
 
-    /**
-     * 返回当前命令捕获的有效客户映射条数。
-     */
-    int size() { return size; }
     /**
      * 读取有效捕获项所属用户编号。
      * @param index 当前有效捕获项下标

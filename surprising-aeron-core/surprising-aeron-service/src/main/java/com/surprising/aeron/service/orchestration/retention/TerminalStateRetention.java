@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.orchestration.retention;
 
+import lombok.RequiredArgsConstructor;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.service.orchestration.result.FundsCommandIndex;
@@ -16,7 +20,12 @@ import java.util.UUID;
 
 /**
  * 保存当前产品线的近期终态身份及长期资金命令指纹。终态订单从已提交 Lane 回执直接进入有界墓碑 FIFO，资金索引由 Ledger 执行 I/O；候选表只保留恢复输入中的实体身份，并参与订单编号占用检查，不负责候选发现或批量清理。
+ * 构造约定：接管已恢复的候选、墓碑和资金索引引用，不复制，也不在此启动工作线程。
+ * 参数 candidates：已恢复的有序候选表
+ * 参数 tombstones：已恢复的近期墓碑 FIFO
+ * 参数 fundsCommands：已重建的长期资金身份索引
  */
+@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderSink, AutoCloseable {
 
     // 内存终态身份由当前产品 Owner 管理；资金 I/O 单独交给 Ledger，快照输出为独立字节。
@@ -43,19 +52,6 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
         this(new LinkedHashMap<>(), new TerminalTombstoneStore(), new FundsCommandIndex());
     }
 
-    /**
-     * 接管已恢复的候选、墓碑和资金索引引用，不复制，也不在此启动工作线程。
-     * @param candidates 已恢复的有序候选表
-     * @param tombstones 已恢复的近期墓碑 FIFO
-     * @param fundsCommands 已重建的长期资金身份索引
-     */
-    private TerminalStateRetention(LinkedHashMap<EntityKey, RetainedEntity> candidates,
-                                   TerminalTombstoneStore tombstones,
-                                   FundsCommandIndex fundsCommands) {
-        this.candidates = candidates;
-        this.tombstones = tombstones;
-        this.fundsCommands = fundsCommands;
-    }
 
     /**
      * 将一条已提交终态订单身份写入墓碑，客户号按字节上限规范化；已有同类型同 ID 不重复插入，不在每条写入时裁剪窗口。
@@ -505,9 +501,8 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
         return normalized;
     }
 
-    /**
-     * 终态实体的四种持久化类别，同一个数值 ID 在不同类别中分别索引。
-     */
+    /** 终态实体的四种持久化类别，同一个数值 ID 在不同类别中分别索引。 构造约定：固定快照与墓碑使用的实体类型代码。 参数 code：四种已定义的实体代码 */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     private enum EntityType {
         /**
          * 普通订单终态身份，快照代码零。
@@ -515,11 +510,6 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
         ORDER(0), /** 算法父单终态身份，快照代码一。 */ ALGO(1), /** 触发条件单终态身份，快照代码二。 */ TRIGGER(2), /** 强平记录终态身份，快照代码三。 */ LIQUIDATION(3);
         /** 实体类别的固定持久化代码。 */
         final int code;
-        /**
-         * 固定快照与墓碑使用的实体类型代码。
-         * @param code 四种已定义的实体代码
-         */
-        EntityType(int code) { this.code = code; }
         /**
          * 把四种持久化代码转为实体类型，其他值明确拒绝。
          * @param code 四种已定义的实体代码
@@ -539,9 +529,13 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
      * 类型与正 ID 的组合键。候选 Map 内的键保持稳定，单独的 candidateLookupKey 才允许重复 reset。
      */
     private static final class EntityKey {
-        /** 当前实体键的类型，存入 Map 后不得改写。 */
+        /**  当前实体键的类型，存入 Map 后不得改写。 读取该键的实体类型。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private EntityType type;
-        /** 当前实体键的正 ID。 */
+        /**  当前实体键的正 ID。 读取该键的正实体 ID。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private long id;
         /**
          * 校验并建立类型与正实体 ID 的组合键。
@@ -559,14 +553,6 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
             this.type = type; this.id = id; return this;
         }
         /**
-         * 读取该键的实体类型。
-         */
-        EntityType type() { return type; }
-        /**
-         * 读取该键的正实体 ID。
-         */
-        long id() { return id; }
-        /**
          * 按类型与 ID 计算内存 Map 查询哈希，不作为快照内容。
          */
         @Override public int hashCode() { return 31 * type.hashCode() + Long.hashCode(id); }
@@ -581,13 +567,21 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
      * 已导出、等待确认后清理的候选元数据，不复制订单、资金或持仓；当前候选来自恢复输入。
      */
     private static final class RetainedEntity {
-        /** 候选的稳定实体键，不与可变查询键共用。 */
+        /**  候选的稳定实体键，不与可变查询键共用。 借出该候选稳定存储键。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private final EntityKey key;
-        /** 候选所属正用户 ID。 */
+        /**  候选所属正用户 ID。 读取候选所属用户。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private final long userId;
-        /** 候选原客户号，可为空字符串但不能是 null。 */
+        /**  候选原客户号，可为空字符串但不能是 null。 读取已保存的客户号文本。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private final String clientId;
-        /** 候选已经导出的正序号，确认水位达到它后才可清理。 */
+        /**  候选已经导出的正序号，确认水位达到它后才可清理。 读取导出确认所需的原序号。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private final long exportSequence;
 
         /**
@@ -607,21 +601,5 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
             this.exportSequence = exportSequence;
         }
 
-        /**
-         * 借出该候选稳定存储键。
-         */
-        EntityKey key() { return key; }
-        /**
-         * 读取候选所属用户。
-         */
-        long userId() { return userId; }
-        /**
-         * 读取已保存的客户号文本。
-         */
-        String clientId() { return clientId; }
-        /**
-         * 读取导出确认所需的原序号。
-         */
-        long exportSequence() { return exportSequence; }
     }
 }

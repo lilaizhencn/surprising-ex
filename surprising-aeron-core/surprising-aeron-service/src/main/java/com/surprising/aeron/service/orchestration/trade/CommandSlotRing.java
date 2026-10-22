@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 /**
  * 按 Core 序号低位寻址的固定命令槽池。Owner 占用、初始化并在终态退休后复用对象；claimed 控制槽是否可再分配，原序号和部分业务引用可保留到下次初始化。它不按 FIFO 自动提交，也不复制订单或账户事实。
  */
@@ -8,9 +11,13 @@ public final class CommandSlotRing {
     private final CommandSlot[] contexts;
     /** 容量减一的环形寻址掩码。 */
     private final int mask;
-    /** 当前 claimed 槽位数量。 */
+    /**  当前 claimed 槽位数量。 返回池中已占用槽数，包含尚未链接到待撮合队列的预备槽。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private int inFlight;
-    /** 历史 claimed 数量峰值。 */
+    /**  历史 claimed 数量峰值。 返回该槽池历史占用峰值。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private int highWaterMark;
 
     /**
@@ -105,14 +112,6 @@ public final class CommandSlotRing {
         inFlight--;
     }
 
-    /**
-     * 返回池中已占用槽数，包含尚未链接到待撮合队列的预备槽。
-     */
-    int inFlight() { return inFlight; }
-    /**
-     * 返回该槽池历史占用峰值。
-     */
-    int highWaterMark() { return highWaterMark; }
     /**
      * 返回预分配槽位总数。
      */

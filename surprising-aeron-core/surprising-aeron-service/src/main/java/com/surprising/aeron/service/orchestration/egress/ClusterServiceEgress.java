@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.egress;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreResponse;
@@ -457,7 +459,9 @@ public final class ClusterServiceEgress {
     public final class TransportSession {
         /** 该传输句柄借用的实际 ClientSession。 */
         private final ClientSession actual;
-        /** 构造时固定的实际会话 ID。 */
+        /**  构造时固定的实际会话 ID。 返回固定会话纯 ID，供 Owner 输入与输出关联。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private final long id;
         /** 该句柄是否已请求关闭，角色切换不自动清零。 */
         private boolean closeRequested;
@@ -490,10 +494,6 @@ public final class ClusterServiceEgress {
             }
         }
 
-        /**
-         * 返回固定会话纯 ID，供 Owner 输入与输出关联。
-         */
-        public long id() { return id; }
         /**
          * 传输句柄已请求关闭，或实际会话正在关闭，任一成立就不再发送新响应。
          */

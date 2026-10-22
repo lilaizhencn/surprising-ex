@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.admission;
 
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.AccountLaneState;
 import com.surprising.aeron.service.state.order.OrderRuntime;
@@ -14,18 +17,12 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 import static com.surprising.aeron.service.state.TradingRuntimeState.*;
 
-/**
- * 未完成订单预留的路由和计数。Owner 保留命令序号、用户归属及批次收据，真实冻结仍在账户 Lane；收到完成事实后只移除对应路由和计数，回退及账户状态由原入口处理。
- */
+/** 未完成订单预留的路由和计数。Owner 保留命令序号、用户归属及批次收据，真实冻结仍在账户 Lane；收到完成事实后只移除对应路由和计数，回退及账户状态由原入口处理。 构造约定：绑定所属运行时，路由计数、账户访问和回滚捕获继续沿用原所有权边界。 参数 owner：提供原账户访问、回滚和变更标记入口的所属运行时 */
+@RequiredArgsConstructor
 public final class PendingReservationTracker {
     /** 所属运行时，路由在原所有权范围维护，真实冻结仍由各账户 Lane 持有。 */
     final TradingRuntimeState owner;
 
-    /**
-     * 绑定所属运行时，路由计数、账户访问和回滚捕获继续沿用原所有权边界。
-     * @param owner 提供原账户访问、回滚和变更标记入口的所属运行时
-     */
-    public PendingReservationTracker(TradingRuntimeState owner) { this.owner = owner; }
 
     /** 单项路径的命令序号到待完成订单编号索引，批次路径另存借用收据。 */
     final PendingReservationSequenceIndex pendingReservationsBySequence =
@@ -40,7 +37,9 @@ public final class PendingReservationTracker {
     /** 撤销一个 Matcher 计划时复用的用户删除计数缓冲，不是长期业务状态。 */
     private final LongIntHashMap matcherRemovedByUserScratch = new LongIntHashMap(64);
 
-    /** 单项及批次仍待完成的全局路由计数。 */
+    /**  单项及批次仍待完成的全局路由计数。 供 Core 内部在原所有权或有效读取边界内读取全局路由计数，此方法本身不切换线程。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     int totalPendingReservations;
 
     /** 按 Core 命令序号保留的批次借用收据，不逐订单复制到 Owner 单项路由表。 */
@@ -50,13 +49,19 @@ public final class PendingReservationTracker {
      * 一批已准入订单的借用收据，保存原命令数组及剩余预留数。Owner 按完成项递减，归零后移除，必须先移除收据再让原批次归还订单租约。
      */
     public static final class PendingBatch {
-        /** 该批所有订单共同所属用户编号。 */
+        /**  该批所有订单共同所属用户编号。 返回该批所有订单共同所属的用户编号。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         final long userId;
         /** 借用原命令的获准订单数组，收据必须在原数组租约回收前移除。 */
         final OrderRuntime[] orders;
-        /** 原借用订单数组的有效项数，完成部分项后仍保持原有效前缀范围。 */
+        /**  原借用订单数组的有效项数，完成部分项后仍保持原有效前缀范围。 返回原订单数组中有效前缀的长度。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         final int count;
-        /** 批次仍未完成的项数，只有 Owner 按实际 Lane 回执递减。 */
+        /**  批次仍未完成的项数，只有 Owner 按实际 Lane 回执递减。 返回本批仍未由 Lane 完成的预留数量。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         int remaining;
         /**
          * 借用指定用户的原订单数组并记录有效前缀，剩余数初始等于本批准入项数。
@@ -68,18 +73,6 @@ public final class PendingReservationTracker {
             this.userId = userId; this.orders = orders; this.count = count; this.remaining = count;
         }
 
-    /**
-     * 返回本批仍未由 Lane 完成的预留数量。
-     */
-    public int remaining() { return remaining; }
-    /**
-     * 返回该批所有订单共同所属的用户编号。
-     */
-    public long userId() { return userId; }
-    /**
-     * 返回原订单数组中有效前缀的长度。
-     */
-    public int count() { return count; }
 
     /**
      * 按有效前缀下标借用原批次订单，不复制订单实体。
@@ -705,10 +698,6 @@ public final class PendingReservationTracker {
         }
     }
 
-    /**
-     * 供 Core 内部在原所有权或有效读取边界内读取全局路由计数，此方法本身不切换线程。
-     */
-    public int totalPendingReservations() { return totalPendingReservations; }
 
     /**
      * 按订单编号直接读单项预留归属用户，未登记时返回 primitive 表的 0 标记。

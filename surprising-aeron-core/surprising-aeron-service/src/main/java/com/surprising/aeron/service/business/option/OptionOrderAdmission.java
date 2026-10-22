@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.business.option;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.business.OrderAdmissionMath;
@@ -16,11 +18,9 @@ import com.surprising.aeron.service.state.model.CorePositionState;
 import com.surprising.aeron.service.state.order.OrderReservation;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
-/** 期权订单准入的权利金、卖方保证金和已有持仓风险计算。 */
+/**  期权订单准入的权利金、卖方保证金和已有持仓风险计算。 构造约定： 仅提供期权冻结计算，不创建独立的账户或订单状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class OptionOrderAdmission {
-    /** 仅提供期权冻结计算，不创建独立的账户或订单状态。 */
-    private OptionOrderAdmission() {
-    }
 
     /**
      * 在线计算期权订单需要预留的资金，买方覆盖权利金，卖方覆盖新开空仓的风险保证金。

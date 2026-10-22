@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.ledger;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.change.RuntimeChangeBuffer;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
@@ -30,7 +32,9 @@ public final class TreasuryRuntime {
     private final IntLongHashMap clearingPnlBalances = new IntLongHashMap();
     /** 按稠密币对编号索引的 volatile 发布单元数组，扩容只复制单元引用，旧读者仍见同一单元。 */
     private volatile SettlementStatusCell[] settlementStates = new SettlementStatusCell[8];
-    /** 非空资金费进度条目数的 volatile 索引，由账本所有者随发布维护。 */
+    /**  非空资金费进度条目数的 volatile 索引，由账本所有者随发布维护。 直接读取已发布的非空资金费进度数量索引，用于准入栅栏，不扫描所有币对。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile int incompleteFundingCount;
     /** 当前范围首次写入资产的连续原语键索引，值列不用，槽号对应七列前值。 */
     private final RuntimeChangeBuffer<Void> assetChanges = new RuntimeChangeBuffer<>();
@@ -596,12 +600,6 @@ public final class TreasuryRuntime {
         return result;
     }
 
-    /**
-     * 直接读取已发布的非空资金费进度数量索引，用于准入栅栏，不扫描所有币对。
-     */
-    public int incompleteFundingCount() {
-        return incompleteFundingCount;
-    }
     /**
      * 当前所有者物化非零生命周期完成编号的新 Map。
      */

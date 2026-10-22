@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.trade.commit;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import java.util.Objects;
 
@@ -11,17 +13,27 @@ public final class CommitPublication {
     private final TradingCoreRuntime owner;
     /** 上一次成功应用派生索引时的已提交运行时修订。 */
     private long runtimePatchRevision;
-    /** 是否正在积累本命令的发布请求。 */
+    /**  是否正在积累本命令的发布请求。 返回当前是否正在积累一个命令批次的发布请求。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean deferred;
-    /** 积累期间是否存在需要发布或清理的变化。 */
+    /**  积累期间是否存在需要发布或清理的变化。 返回该批次是否请求过发布，不代表账户和账本已完成。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean dirty;
-    /** 是否只有准入临时变化，正式请求后不再降级。 */
+    /**  是否只有准入临时变化，正式请求后不再降级。 返回本批次是否仅有准入临时投影，不能作为已提交终态发布。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean provisionalOnly;
     /** 当前是否正在 publish 中，防止重入。 */
     private boolean active;
-    /** 独立的已发布序号，正常发布成功后推进。 */
+    /**  独立的已发布序号，正常发布成功后推进。 返回最近一次正常发布的独立序号，不等同于 Core 命令序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long publishedSequence;
-    /** 是否已经进入可发布生命周期。 */
+    /**  是否已经进入可发布生命周期。 返回是否曾成功激活，关闭状态仍须单独由健康检查判定。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean activated;
     /** 是否已经关闭，关闭后健康检查失败。 */
     private boolean closed;
@@ -34,18 +46,6 @@ public final class CommitPublication {
         this.owner = Objects.requireNonNull(owner);
     }
 
-    /**
-     * 返回当前是否正在积累一个命令批次的发布请求。
-     */
-    public boolean deferred() { return deferred; }
-    /**
-     * 返回该批次是否请求过发布，不代表账户和账本已完成。
-     */
-    public boolean dirty() { return dirty; }
-    /**
-     * 返回本批次是否仅有准入临时投影，不能作为已提交终态发布。
-     */
-    public boolean provisionalOnly() { return provisionalOnly; }
 
     /**
      * 要求没有积累或正在执行的发布，且发布序号非负，再恢复索引修订水位及发布序号；不在此验证运行时修订非负或重开已关闭对象。
@@ -69,14 +69,6 @@ public final class CommitPublication {
         activated = true;
     }
 
-    /**
-     * 返回是否曾成功激活，关闭状态仍须单独由健康检查判定。
-     */
-    public boolean activated() { return activated; }
-    /**
-     * 返回最近一次正常发布的独立序号，不等同于 Core 命令序号。
-     */
-    public long publishedSequence() { return publishedSequence; }
 
     /**
      * 未激活或已关闭时抛错，防止在无效生命周期内发布。

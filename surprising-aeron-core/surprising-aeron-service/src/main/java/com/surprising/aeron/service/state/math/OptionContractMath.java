@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.math;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
@@ -9,14 +11,10 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.instrument.api.model.OptionType;
 import java.math.BigInteger;
 
-/** 期权专用的权利金、虚值程度、卖方保证金和到期现金计算。价格以 tick、数量以数量步数传入，返回金额使用结算资产的最小整数单位，不在这里写入账户。 */
+/**  期权专用的权利金、虚值程度、卖方保证金和到期现金计算。价格以 tick、数量以数量步数传入，返回金额使用结算资产的最小整数单位，不在这里写入账户。 构造约定：只提供期权数学计算，不需要创建独立实例或持有账户状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class OptionContractMath {
 
-    /**
-     * 只提供期权数学计算，不需要创建独立实例或持有账户状态。
-     */
-    private OptionContractMath() {
-    }
 
     /**
      * 计算卖出开仓订单的冻结要求：从标记价口径保证金中扣除订单权利金覆盖部分，并保留最低风险保证金。

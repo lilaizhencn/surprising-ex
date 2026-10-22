@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.settlement;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.AccountLaneState;
@@ -16,14 +18,11 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 /**
  * 下单步骤 4.4 的衍生品结算入口。在线 applyLane 只处理所属账户的 taker 和 maker，选择单笔或连续成交计算，更新订单、持仓及剩余预留；金额由 RuntimeDerivativeFillCalculator 和各产品规则决定。通用 applyRuntime 保留原运行时读取边界，不与在线 Lane 的财务交接混用。
+ * 构造约定：只提供静态结算入口，不允许单独创建工具实例。
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeDerivativeMatchProcessor {
 
-    /**
-     * 只提供静态结算入口，不允许单独创建工具实例。
-     */
-    private RuntimeDerivativeMatchProcessor() {
-    }
 
     /**
      * 先核对传入冷状态与运行时的产品线和修订号，再委托通用运行时成交入口；不把冷状态重新投影或作为账户副本更新。

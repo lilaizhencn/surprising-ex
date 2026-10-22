@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.admission;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -15,14 +17,18 @@ import java.util.UUID;
  * 同一用户整批 PLACE 的单向账户准入事件。所属 Lane 按项解析、检查并冻结，保留已成功前缀；可预期失败回退该前缀和客户身份，成功则交出原变更缓冲与获准订单租约，不复制账户镜像。
  */
 public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Command {
-    /** 整批下单沿用的 Core 命令序号。 */
+    /**  整批下单沿用的 Core 命令序号。 返回整批下单沿用的 Core 命令序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long coreSequence;
     /**
      * timestamp：整批订单写入使用的集群业务时间。
      * position：整批命令的集群日志位置。
      */
     private long timestamp, position;
-    /** 本批唯一所属用户编号，所有项由同一账户 Lane 准入。 */
+    /**  本批唯一所属用户编号，所有项由同一账户 Lane 准入。 返回本批唯一所属用户编号，所有项由同一账户 Lane 准入。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long userId;
     /** 本批业务命令 UUID，各项订单和冻结沿用该命令归属。 */
     private UUID commandId;
@@ -32,9 +38,13 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private ResolvedPlaceOrder[] orders;
     /** 与批项对齐的实际客户身份键，失败回退后逐项清零。 */
     private long[] clientKeys;
-    /** 原批次槽保存的逐项获准订单租约数组，后续撮合继续使用。 */
+    /**  原批次槽保存的逐项获准订单租约数组，后续撮合继续使用。 借用本批获准订单租约数组，调用方须遵守原批次生命周期，只使用有效项前缀。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private OrderRuntime[] admittedOrders;
-    /** 本批本次有效项数量，只处理借用数组的这一前缀。 */
+    /**  本批本次有效项数量，只处理借用数组的这一前缀。 返回本批本次有效项数量，只处理借用数组的这一前缀。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int itemCount;
     /** 已经成功写入订单和冻结的前缀项数，失败时只回退此前缀。 */
     private int admittedCount;
@@ -243,22 +253,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         if (!complete()) throw new IllegalStateException("place batch admission is incomplete");
         return userBefore;
     }
-    /**
-     * 返回整批下单沿用的 Core 命令序号。
-     */
-    public long coreSequence() { return coreSequence; }
-    /**
-     * 返回本批唯一所属用户编号，所有项由同一账户 Lane 准入。
-     */
-    public long userId() { return userId; }
-    /**
-     * 借用本批获准订单租约数组，调用方须遵守原批次生命周期，只使用有效项前缀。
-     */
-    public OrderRuntime[] admittedOrders() { return admittedOrders; }
-    /**
-     * 返回本批本次有效项数量，只处理借用数组的这一前缀。
-     */
-    public int itemCount() { return itemCount; }
     /**
      * 按有效项下标读取该项获准订单租约，不新建订单副本。
      * @param index 本批有效前缀内的零起始项下标

@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.index;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.ledger.SystemLedgerLane;
@@ -167,7 +170,9 @@ public final class AdlPositionIndex {
          * asset：最近发布的结算资产代码，用来维护资产成员关系。
          */
         private String instrumentId, asset;
-        /** 该条目的净持仓或双向腿身份，查询路由要完整保留。 */
+        /**  该条目的净持仓或双向腿身份，查询路由要完整保留。 返回净持仓或双向持仓腿，用来区分同用户同合约的持仓身份。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private com.surprising.aeron.protocol.CorePositionSide positionSide;
         /**
          * 返回该索引条目对应的用户编号。
@@ -185,10 +190,6 @@ public final class AdlPositionIndex {
          * 返回当前结算资产代码，候选成员按它分组。
          */
         String asset() { return asset; }
-        /**
-         * 返回净持仓或双向持仓腿，用来区分同用户同合约的持仓身份。
-         */
-        com.surprising.aeron.protocol.CorePositionSide positionSide() { return positionSide; }
     }
 
     /**

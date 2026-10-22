@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.ProtocolException;
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
@@ -9,14 +11,9 @@ import java.nio.charset.CodingErrorAction;
 import java.util.*;
 import java.util.function.Function;
 
-/**
- * 快照持久化边界的字段容器，每个字段写正数编号、四字节长度和内容，数值头按小端编码。同一记录字段不能重复，单记录最多一千零二十四项；字段出现顺序不影响读取，未知合法字段可以保留而由业务读取器不使用。这里不定义具体业务版本或必填字段表，也不进入撮合、结算及账户热路径。
- */
+/** 快照持久化边界的字段容器，每个字段写正数编号、四字节长度和内容，数值头按小端编码。同一记录字段不能重复，单记录最多一千零二十四项；字段出现顺序不影响读取，未知合法字段可以保留而由业务读取器不使用。这里不定义具体业务版本或必填字段表，也不进入撮合、结算及账户热路径。 构造约定：工具容器类不创建实例，使用独立 Writer 或 Reader。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class SnapshotFields {
-    /**
-     * 工具容器类不创建实例，使用独立 Writer 或 Reader。
-     */
-    private SnapshotFields() { }
     /** 每一条字段记录允许的最大字段数，不是整个快照或列表条目总数上限。 */
     private static final int MAX_FIELDS = 1024;
     /**

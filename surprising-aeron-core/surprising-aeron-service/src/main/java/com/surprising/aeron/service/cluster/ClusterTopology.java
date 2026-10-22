@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.cluster;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.product.api.ProductLine;
 import com.surprising.aeron.protocol.ProductLineClusterLayout;
 import io.aeron.ChannelUriStringBuilder;
@@ -18,9 +20,13 @@ public final class ClusterTopology {
     /** 归档控制通道使用的 term buffer 大小，单位是字节。 */
     private static final int TERM_LENGTH = 64 * 1024;
 
-    /** 当前节点所属的产品线，决定集群编号、端口段和目录分组。 */
+    /**  当前节点所属的产品线，决定集群编号、端口段和目录分组。  返回当前节点的产品线，不能用其他产品线的账户或订单状态代替。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final ProductLine productLine;
-    /** 当前成员在 hostnames 中的下标。 */
+    /**  当前成员在 hostnames 中的下标。  返回本节点在成员列表中的编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final int nodeId;
     /** 按成员编号排列的主机地址，构造后不允许外部修改。 */
     private final List<String> hostnames;
@@ -65,15 +71,7 @@ public final class ClusterTopology {
         return new ClusterTopology(productLine, nodeId, hostnames, dataDirectory);
     }
 
-    /** 返回当前节点的产品线，不能用其他产品线的账户或订单状态代替。 */
-    public ProductLine productLine() {
-        return productLine;
-    }
 
-    /** 返回本节点在成员列表中的编号。 */
-    public int nodeId() {
-        return nodeId;
-    }
 
     /** 按产品线生成 Aeron 集群编号，让不同产品线的集群互相隔离。 */
     public int clusterId() {

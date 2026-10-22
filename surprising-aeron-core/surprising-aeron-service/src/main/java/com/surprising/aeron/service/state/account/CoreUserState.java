@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CorePositionState;
@@ -16,19 +18,33 @@ import java.util.Set;
  */
 public final class CoreUserState {
 
-    /** 完整用户业务状态所属的独立产品线。 */
+    /**  完整用户业务状态所属的独立产品线。 返回完整用户业务状态所属的独立产品线。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final ProductLine productLine;
-    /** 该状态对应的正数用户编号。 */
+    /**  该状态对应的正数用户编号。 返回该状态对应的正数用户编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final long userId;
-    /** 用户业务版本，允许初始值为零。 */
+    /**  用户业务版本，允许初始值为零。 返回用户业务版本，允许初始值为零。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final long revision;
-    /** 按资产代码保存的冻结有序余额映射，属于业务快照而非在线 Lane 表。 */
+    /**  按资产代码保存的冻结有序余额映射，属于业务快照而非在线 Lane 表。 返回按资产代码保存的冻结有序余额映射，属于业务快照而非在线 Lane 表。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final Map<String, AssetBalance> balances;
-    /** 按订单编号保存的冻结有序预留记录映射。 */
+    /**  按订单编号保存的冻结有序预留记录映射。 返回按订单编号保存的冻结有序预留记录映射。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final Map<Long, OrderReservation> reservations;
-    /** 按持仓业务键保存的冻结有序持仓映射。 */
+    /**  按持仓业务键保存的冻结有序持仓映射。 返回按持仓业务键保存的冻结有序持仓映射。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final Map<String, CorePositionState> positions;
-    /** 用户的单向或双向持仓模式。 */
+    /**  用户的单向或双向持仓模式。 返回用户的单向或双向持仓模式。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final CorePositionMode positionMode;
     /** 校验用派生金额：各资产订单剩余冻结加持仓保证金，随本快照更新，不是可再次支出的余额。 */
     private final Map<String, Long> explainedLocks;
@@ -173,54 +189,12 @@ public final class CoreUserState {
         requireDescendantLineage("user explained locks", before.explainedLocks, explainedLocks);
     }
 
-    /**
-     * 返回完整用户业务状态所属的独立产品线。
-     */
-    public ProductLine productLine() {
-        return productLine;
-    }
 
-    /**
-     * 返回该状态对应的正数用户编号。
-     */
-    public long userId() {
-        return userId;
-    }
 
-    /**
-     * 返回用户业务版本，允许初始值为零。
-     */
-    public long revision() {
-        return revision;
-    }
 
-    /**
-     * 返回按资产代码保存的冻结有序余额映射，属于业务快照而非在线 Lane 表。
-     */
-    public Map<String, AssetBalance> balances() {
-        return balances;
-    }
 
-    /**
-     * 返回按订单编号保存的冻结有序预留记录映射。
-     */
-    public Map<Long, OrderReservation> reservations() {
-        return reservations;
-    }
 
-    /**
-     * 返回按持仓业务键保存的冻结有序持仓映射。
-     */
-    public Map<String, CorePositionState> positions() {
-        return positions;
-    }
 
-    /**
-     * 返回用户的单向或双向持仓模式。
-     */
-    public CorePositionMode positionMode() {
-        return positionMode;
-    }
 
     /**
      * 查询从给定前状态到当前的余额资产变更键；没有前状态时返回当前全部资产键。

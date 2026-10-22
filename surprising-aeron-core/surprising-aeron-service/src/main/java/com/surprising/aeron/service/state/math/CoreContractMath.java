@@ -1,4 +1,7 @@
 package com.surprising.aeron.service.state.math;
+
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -11,7 +14,8 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.math.BigInteger;
 
-/** 交易 Core 使用的合约金额换算入口，按现货、期货和期权选择各自的数学口径。所有金额都以整数最小单位传递，计算本身不修改余额、订单或持仓。 */
+/**  交易 Core 使用的合约金额换算入口，按现货、期货和期权选择各自的数学口径。所有金额都以整数最小单位传递，计算本身不修改余额、订单或持仓。 构造约定：只提供无状态计算，不需要为订单或账户创建计算器实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CoreContractMath {
 
     /** 任意精度计算使用的百万分之一分母，避免大额中间乘积改变比例口径。 */
@@ -19,11 +23,6 @@ public final class CoreContractMath {
     /** 杠杆和保证金率都按一百万倍缩放，求倒数时分子因此为一万亿。 */
     private static final long LEVERAGE_RATE_NUMERATOR = 1_000_000_000_000L;
 
-    /**
-     * 只提供无状态计算，不需要为订单或账户创建计算器实例。
-     */
-    private CoreContractMath() {
-    }
 
     /**
      * 按订单规模选风险档位，再计算开仓保证金；没有数量或期权买方不收取这项保证金。

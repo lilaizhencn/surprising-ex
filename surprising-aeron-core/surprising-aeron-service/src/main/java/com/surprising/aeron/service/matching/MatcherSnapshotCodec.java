@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.matching;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.lane.LaneTopology;
@@ -23,9 +25,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.zip.CRC32C;
 
-/**
- * 原生 Matcher 快照清单版本八的二进制格式。使用 DataInput/DataOutput 的大端整数顺序，逐模块和整条正文分别校验 CRC32C，保存拓扑、配对水位/哈希、注册表及原生模块；与交易状态快照三十七的小端字段格式不同，不能混用读取器。
- */
+/** 原生 Matcher 快照清单版本八的二进制格式。使用 DataInput/DataOutput 的大端整数顺序，逐模块和整条正文分别校验 CRC32C，保存拓扑、配对水位/哈希、注册表及原生模块；与交易状态快照三十七的小端字段格式不同，不能混用读取器。 构造约定：工具类不创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class MatcherSnapshotCodec {
 
     /** 此原生 Matcher 清单的固定格式识别数。 */
@@ -39,11 +40,6 @@ public final class MatcherSnapshotCodec {
     /** 单个原生模块载荷上限，在总快照限额内预留一百二十八字节空间。 */
     private static final int MAX_MODULE_BYTES = MAX_SNAPSHOT_BYTES - 128;
 
-    /**
-     * 工具类不创建实例。
-     */
-    private MatcherSnapshotCodec() {
-    }
 
     /**
      * 用限长正文缓冲写版本八清单，按清单现有迭代顺序保存注册表、进度及模块，最后追加八字节无符号 CRC32C 值。模块类型沿当前实现写 ordinal，单模块与总字节限长在这里检查；不额外执行 decode 的百万条目数上限。

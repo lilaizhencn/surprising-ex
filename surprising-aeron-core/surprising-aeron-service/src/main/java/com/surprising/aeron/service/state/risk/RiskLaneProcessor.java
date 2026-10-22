@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.risk;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.BalanceRuntime;
@@ -18,14 +20,9 @@ import com.surprising.aeron.service.state.position.PositionRuntime;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
-/**
- * 账户 Lane 内的风险估值主流程：按有界用户页继续持仓和委托扫描，写本 Lane 的风险结果、刷新或取消已有强平计划，并收集待编号的新强平需求；全局编号和总扫描游标由 Owner 负责。
- */
+/** 账户 Lane 内的风险估值主流程：按有界用户页继续持仓和委托扫描，写本 Lane 的风险结果、刷新或取消已有强平计划，并收集待编号的新强平需求；全局编号和总扫描游标由 Owner 负责。 构造约定：只提供 Lane 内的静态估值步骤，不创建额外的状态持有者。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RiskLaneProcessor {
-    /**
-     * 只提供 Lane 内的静态估值步骤，不创建额外的状态持有者。
-     */
-    private RiskLaneProcessor() { }
     /**
      * 在本批预算内逐个处理用户；用户或行情修订变化时重置该用户累计值，用户完成后推进最后完成编号，返回本 Lane 的进度和新增强平需求。
      * @param runtime 本轮操作的交易运行时，账户数据只能在所属 Lane 的权限范围内读取或修改

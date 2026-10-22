@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.query;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
@@ -23,9 +25,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/**
- * 按查询时的持仓和行情即时计算风险及 ADL 候选，不把后台分批强平扫描的旧风险缓存直接当查询结果。生产查询由 Owner 固定市场输入，再由所属账户 Lane 读取账户；这里只构造查询结果，不改资金、风险缓存或扫描进度。
- */
+/** 按查询时的持仓和行情即时计算风险及 ADL 候选，不把后台分批强平扫描的旧风险缓存直接当查询结果。生产查询由 Owner 固定市场输入，再由所属账户 Lane 读取账户；这里只构造查询结果，不改资金、风险缓存或扫描进度。 构造约定：只提供只读查询计算，不创建额外的账户状态持有者。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeRiskQueryService {
 
     /** 候选顺序依次为优先分数从大到小、未实现盈利从大到小、用户编号从小到大、币对编号字符串从小到大。 */
@@ -39,11 +40,6 @@ public final class RuntimeRiskQueryService {
     /** 比例放大一百万倍后的统一分母，避免用浮点数计算查询风险和 ADL 分数。 */
     private static final long PPM = 1_000_000L;
 
-    /**
-     * 只提供只读查询计算，不创建额外的账户状态持有者。
-     */
-    private RuntimeRiskQueryService() {
-    }
 
     /**
      * 不带预捕获市场输入的查询入口，用户 0 表示汇总有持仓用户，否则只查该用户；调用方负责在允许读取这些账户的执行范围内使用。

@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.identity;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.lane.LaneTopology;
@@ -225,17 +229,11 @@ public final class RuntimeIdentityRegistry {
     /** 确定性持仓键到身份及发布保留计数的并发反向表。 */
     private final Map<PositionMapKey, PositionEntry> positions = new ConcurrentHashMap<>();
 
-    /**
-     * 并发反向持仓表中保存的不可变长整数键对象。
-     */
+    /** 并发反向持仓表中保存的不可变长整数键对象。 构造约定：保存确定性持仓长整数键，作为反向表的不可变键对象。 参数 value：要长期保存的确定性持仓长整数键 */
+    @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
     private static final class PositionMapKey {
         /** 保存后不再变化的确定性持仓键。 */
         final long value;
-        /**
-         * 保存确定性持仓长整数键，作为反向表的不可变键对象。
-         * @param value 要长期保存的确定性持仓长整数键
-         */
-        PositionMapKey(long value) { this.value = value; }
         /**
          * 用长整数键计算哈希，与查询探针保持一致。
          */
@@ -377,7 +375,9 @@ public final class RuntimeIdentityRegistry {
     private int nextSymbolId;
     /** 下次 Owner 持仓分配顺序号，从一起，不是哈希业务键。 */
     private long nextPositionKey = 1;
-    /** Owner 已记录的资产、标的及客户端、持仓分配版本，释放不倒退。 */
+    /**  Owner 已记录的资产、标的及客户端、持仓分配版本，释放不倒退。 读取已记录身份分配的版本值；释放不倒退，不能把它当成当前存活身份数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long dictionaryVersion;
     /** 当前身份字典 Owner 线程，冷构建首次使用时绑定。 */
     private Thread owner;
@@ -1194,12 +1194,6 @@ public final class RuntimeIdentityRegistry {
         return identity;
     }
 
-    /**
-     * 读取已记录身份分配的版本值；释放不倒退，不能把它当成当前存活身份数。
-     */
-    public long dictionaryVersion() {
-        return dictionaryVersion;
-    }
 
     /**
      * Owner 汇总当前绑定 Lane 或独立冷表中的存活客户端身份数，统计身份条目而不是保留引用总数。

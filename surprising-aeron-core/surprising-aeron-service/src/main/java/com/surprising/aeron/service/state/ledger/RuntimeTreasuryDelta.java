@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.ledger;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 /**
  * 所属命令或 Lane 的系统资金差额，按资产归集费用、保险、亏空、资金费残差、舍入及清算。单资产先用标量，第二个资产才分配固定容量数组；clear 只重置有效长度。差额不等于权威余额，应用时仍须持有原 Treasury 的单写者所有权。
  */
@@ -39,7 +41,9 @@ public final class RuntimeTreasuryDelta {
     private long[] roundingResidualUnits;
     /** 多资产清算盈亏差额列。 */
     private long[] clearingUnits;
-    /** 本代实际登记的资产项数，金额归零不会自动移除资产项。 */
+    /**  本代实际登记的资产项数，金额归零不会自动移除资产项。 返回本代有效资产项数，不表示金额非零项数或数组容量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int size;
 
     /**
@@ -58,12 +62,6 @@ public final class RuntimeTreasuryDelta {
         this.capacity = capacity;
     }
 
-    /**
-     * 返回本代有效资产项数，不表示金额非零项数或数组容量。
-     */
-    public int size() {
-        return size;
-    }
 
     /**
      * 校验当前有效下标后读取对应资产编号。

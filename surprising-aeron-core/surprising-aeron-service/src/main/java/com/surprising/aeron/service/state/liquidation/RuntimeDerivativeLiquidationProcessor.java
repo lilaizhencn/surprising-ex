@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.liquidation;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.risk.LiquidationRuntime;
 import com.surprising.aeron.service.state.risk.CoreRiskPolicy;
 import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
@@ -29,18 +31,10 @@ import com.surprising.aeron.service.state.position.PositionRuntime;
 import java.util.Collection;
 import java.util.List;
 
-/**
- * 强平步骤 3–6：校验执行条件，等待 Matcher 撤单，再完成账户和账本交接。
- *
- * 衍生品强平的账户执行与账本交接。前置检查由所属 Lane 确认持仓仍需强平，随后在该 Lane 应用已撤订单回执、解冻并平仓；收付、实收强平费及未覆盖亏空形成差额交唯一账本，Owner 等两边完成后提交修订号。
- */
+/** 强平步骤 3–6：校验执行条件，等待 Matcher 撤单，再完成账户和账本交接。 衍生品强平的账户执行与账本交接。前置检查由所属 Lane 确认持仓仍需强平，随后在该 Lane 应用已撤订单回执、解冻并平仓；收付、实收强平费及未覆盖亏空形成差额交唯一账本，Owner 等两边完成后提交修订号。 构造约定：只提供强平执行步骤，不额外保存账户权威状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeDerivativeLiquidationProcessor {
 
-    /**
-     * 只提供强平执行步骤，不额外保存账户权威状态。
-     */
-    private RuntimeDerivativeLiquidationProcessor() {
-    }
 
     /**
      * 核对命令前业务状态与运行时的产品线和修订号，再进入同步强平执行。

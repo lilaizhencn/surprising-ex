@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.settlement;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
 import com.surprising.aeron.service.state.TradingCoreState;
@@ -21,16 +23,10 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
-/**
- * 下单步骤 4.4 的现货结算。买方从计价资产冻结中支付成交额及收费、得到基础资产，卖方交付冻结基础资产、收到计价资产并扣费或返佣。在线 applyLane 只处理所属账户，按单笔或累加路径更新订单和预留，系统费用留在本事件财务差额中交给账本。
- */
+/** 下单步骤 4.4 的现货结算。买方从计价资产冻结中支付成交额及收费、得到基础资产，卖方交付冻结基础资产、收到计价资产并扣费或返佣。在线 applyLane 只处理所属账户，按单笔或累加路径更新订单和预留，系统费用留在本事件财务差额中交给账本。 构造约定：只提供静态现货结算入口，不允许单独创建工具实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeSpotMatchProcessor {
 
-    /**
-     * 只提供静态现货结算入口，不允许单独创建工具实例。
-     */
-    private RuntimeSpotMatchProcessor() {
-    }
 
     /**
      * 检查冷状态参照与运行时的产品线及修订号一致，再委托通用成交入口；传入的资产名称在此实现中不读取，实际资产取规范币对。

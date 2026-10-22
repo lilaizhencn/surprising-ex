@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.NoArgsConstructor;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.CoreUserState;
@@ -25,16 +29,10 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
-/**
- * 在快照、查询和审计边界把运行时实体转回可导出的交易值。先各遍历一次预留和持仓并按用户分组，再构造用户、订单、风险与财库；尚未提交的预约从导出中排除，并还原对应余额和修订号。它不在撮合热路径维护另一份权威账户状态。
- */
+/** 在快照、查询和审计边界把运行时实体转回可导出的交易值。先各遍历一次预留和持仓并按用户分组，再构造用户、订单、风险与财库；尚未提交的预约从导出中排除，并还原对应余额和修订号。它不在撮合热路径维护另一份权威账户状态。 构造约定：工具类不创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeStateMaterializer {
 
-    /**
-     * 工具类不创建实例。
-     */
-    private RuntimeStateMaterializer() {
-    }
 
     /**
      * 在 Owner 上导出当前可见的已提交交易状态，不启用测试用遍历计数器。
@@ -389,13 +387,21 @@ public final class RuntimeStateMaterializer {
      * 导出测试使用的普通累计计数器，观察预留和持仓是否按表遍历；只由本次导出线程使用，没有原子计数或并发测量能力，也没有自动清零接口。
      */
     static final class SnapshotTraversalProbe {
-        /** 本探针累计观察到的预留表遍历启动次数，不自动重置。 */
+        /**  本探针累计观察到的预留表遍历启动次数，不自动重置。 返回该探针自创建以来累计的预留全表遍历次数。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private int reservationTraversals;
-        /** 本探针累计访问的预留条目数，包含待完成预约。 */
+        /**  本探针累计访问的预留条目数，包含待完成预约。 返回累计访问的预留条目数，包含随后被过滤的预约。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private int reservationEntries;
-        /** 本探针累计观察到的持仓表遍历启动次数，不自动重置。 */
+        /**  本探针累计观察到的持仓表遍历启动次数，不自动重置。 返回该探针自创建以来累计的持仓全表遍历次数。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private int positionTraversals;
-        /** 本探针累计访问的持仓条目数。 */
+        /**  本探针累计访问的持仓条目数。 返回累计访问的持仓条目数。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private int positionEntries;
 
         /**
@@ -426,32 +432,8 @@ public final class RuntimeStateMaterializer {
             positionEntries++;
         }
 
-        /**
-         * 返回该探针自创建以来累计的预留全表遍历次数。
-         */
-        int reservationTraversals() {
-            return reservationTraversals;
-        }
 
-        /**
-         * 返回累计访问的预留条目数，包含随后被过滤的预约。
-         */
-        int reservationEntries() {
-            return reservationEntries;
-        }
 
-        /**
-         * 返回该探针自创建以来累计的持仓全表遍历次数。
-         */
-        int positionTraversals() {
-            return positionTraversals;
-        }
 
-        /**
-         * 返回累计访问的持仓条目数。
-         */
-        int positionEntries() {
-            return positionEntries;
-        }
     }
 }

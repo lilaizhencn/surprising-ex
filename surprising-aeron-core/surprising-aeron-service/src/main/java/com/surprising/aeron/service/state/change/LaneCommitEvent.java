@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.change;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.AccountLaneState;
@@ -26,11 +28,17 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     private final long[] completedLanes;
     /** 当前事件关联的运行时，Owner 重置后可清空，所以 Lane 发布前先保存通知目标。 */
     private TradingRuntimeState runtime;
-    /** 本事件唯一 Core 命令序号，零表示可重新准备。 */
+    /**  本事件唯一 Core 命令序号，零表示可重新准备。 返回本事件正在处理的 Core 序号，零表示已重置。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long coreSequence;
-    /** 必须执行并回执的账户 Lane 位图。 */
+    /**  必须执行并回执的账户 Lane 位图。 返回必须完成回执的账户 Lane 位集合。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long requiredLaneMask;
-    /** 需要在用户应用提交水位上推进的参与 Lane 位图。 */
+    /**  需要在用户应用提交水位上推进的参与 Lane 位图。 返回参与分区中需要推进用户应用提交水位的位集合。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long committedLaneMask;
     /** 可选最终订单响应捕获目标，在指定结果 Lane 上填充。 */
     private LaneOrderResultTarget resultTarget;
@@ -287,18 +295,6 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         completionRuntime.signalOwnerCompletion();
     }
 
-    /**
-     * 返回本事件正在处理的 Core 序号，零表示已重置。
-     */
-    public long coreSequence() { return coreSequence; }
-    /**
-     * 返回必须完成回执的账户 Lane 位集合。
-     */
-    public long requiredLaneMask() { return requiredLaneMask; }
-    /**
-     * 返回参与分区中需要推进用户应用提交水位的位集合。
-     */
-    public long committedLaneMask() { return committedLaneMask; }
     /**
      * 以 acquire 读取各参与 Lane 已发布的完成标记，拼出当前观察到的完成位图。
      */

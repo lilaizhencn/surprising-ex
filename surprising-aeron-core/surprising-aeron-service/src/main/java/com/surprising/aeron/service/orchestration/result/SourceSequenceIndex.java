@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.result;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import java.util.LinkedHashMap;
@@ -25,11 +27,15 @@ public final class SourceSequenceIndex {
     private int[] insertionSourceCodes;
     /** 按首次出现顺序保存的来源 ID，与来源代码数组配对。 */
     private long[] insertionSourceIds;
-    /** 不同来源身份的当前数量。 */
+    /**  不同来源身份的当前数量。 返回当前不同来源身份的数量，不是接收命令总数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int size;
     /** 首次出现顺序数组中有效来源条数。 */
     private int insertionCount;
-    /** 最近一次 lookupOrDefault 命中的规范键，未命中时为 null。 */
+    /**  最近一次 lookupOrDefault 命中的规范键，未命中时为 null。 借出最近一次 lookupOrDefault 命中的来源键；put 本身不刷新这份查找结果。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private TradingCoreRuntime.SourceKey lastLookupKey;
 
     /**
@@ -52,10 +58,6 @@ public final class SourceSequenceIndex {
         }
     }
 
-    /**
-     * 返回当前不同来源身份的数量，不是接收命令总数。
-     */
-    public int size() { return size; }
 
     /**
      * 按非空来源和来源 ID 查询序号，未命中返回传入默认值；同时更新最近查找的规范 SourceKey 引用，未命中将它清空。
@@ -70,10 +72,6 @@ public final class SourceSequenceIndex {
         return slot < 0 ? defaultValue : sequences[slot];
     }
 
-    /**
-     * 借出最近一次 lookupOrDefault 命中的来源键；put 本身不刷新这份查找结果。
-     */
-    public TradingCoreRuntime.SourceKey lastLookupKey() { return lastLookupKey; }
 
     /**
      * 校验来源非空和序号非负；已有键直接覆盖值，新键按负载扩表后登记规范键和首次出现顺序，不做递增比较。

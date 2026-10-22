@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -157,10 +159,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    /** 撮合后结算的派发与完成收集入口，沿用各产品现有结算规则。 */
+    /**  撮合后结算的派发与完成收集入口，沿用各产品现有结算规则。 借出唯一撮合结算派发与收集入口。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final MatcherSettlementDispatcher settlements = new MatcherSettlementDispatcher(this);
 
-    /** Owner 维护的在途订单预留序号与用户计数，Lane 完成后再释放。 */
+    /**  Owner 维护的在途订单预留序号与用户计数，Lane 完成后再释放。 借出唯一待完成预留跟踪器，不建立第二套计数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final PendingReservationTracker pendingReservations = new PendingReservationTracker(this);
 
     /** 未完成资金划转的容量上限，沿用财库定义。 */
@@ -176,11 +182,15 @@ public final class TradingRuntimeState implements AutoCloseable {
     static final int LANE_COMPLETION_SPINS = Math.max(0,
             Integer.getInteger("surprising.aeron.lane-completion-spins", 1_024));
 
-    /** 本运行时所属产品线，投影或恢复前默认值为 U 本位永续。 */
+    /**  本运行时所属产品线，投影或恢复前默认值为 U 本位永续。 返回当前运行时元数据中的产品线。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     /** 业务运行时修订，随当前命令及回滚边界维护。 */
     long revision;
-    /** 构造时固定的账户与 Matcher 路由拓扑，恢复时需保持一致。 */
+    /**  构造时固定的账户与 Matcher 路由拓扑，恢复时需保持一致。 返回本运行时固定的 Lane 拓扑。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final LaneTopology topology;
     /** 各账户 Lane 的权威可变状态，活动阶段由所属执行线程拥有。 */
     final AccountLaneState[] accountLanes;
@@ -388,7 +398,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 批量下单准入事件池，专用变化槽由独立入口归还。 */
     final java.util.ArrayDeque<PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
             new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
-    /** 是否已标记账户工作资源启动；关闭时先清此标记再逐个停止工作对象。 */
+    /**  是否已标记账户工作资源启动；关闭时先清此标记再逐个停止工作对象。 返回账户工作资源是否已标记启动。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     boolean accountLanesStarted;
     /** 是否明确启用 FUSED 执行方式，不代表账本也在 Owner 内联执行。 */
     private boolean fusedExecutionActive;
@@ -462,7 +474,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 下一条强平状态身份，需要随快照恢复。 */
     long nextLiquidationId = 1;
-    /** 成功行情输入推进的修订，由 Owner 写入，Lane 在控制任务交接后读取。 */
+    /**  成功行情输入推进的修订，由 Owner 写入，Lane 在控制任务交接后读取。 读取当前行情修订，不在此绑定线程或推进数值。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     long marketRevision;
     /** 本产品线风险扫描的开关和预算配置。 */
     CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
@@ -478,30 +492,42 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 当前命令的持仓变化及索引值，供提交和回滚使用。 */
     final OwnerIndexedChanges<PositionRuntime, RuntimePositionIndexValue> changedPositions =
             new OwnerIndexedChanges<>(new RuntimePositionChangeBuffer());
-    /** 当前命令的强平变化缓冲。 */
+    /**  当前命令的强平变化缓冲。 借出本命令强平变化缓冲，提交清理后不能继续使用旧内容。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeChangeBuffer<LiquidationRuntime> changedLiquidations =
             new RuntimeChangeBuffer<>();
     /** 当前命令变化标记价格的标的内部身份集合。 */
     final IntHashSet changedMarkPrices = new IntHashSet();
-    /** 当前命令的风险快照变化及配套索引信息。 */
+    /**  当前命令的风险快照变化及配套索引信息。 借出风险快照变化及配套索引缓冲。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeIndexedChangeBuffer<RiskSnapshotRuntime, Boolean> changedRiskSnapshots =
             new RuntimeIndexedChangeBuffer<>();
     /** 当前命令变化风险扫描的标的身份集合。 */
     final IntHashSet changedRiskScans = new IntHashSet();
     /** 当前命令变化的杠杆业务键集合。 */
     final HashSet<CoreLeverageKey> changedLeverages = new HashSet<>();
-    /** 当前命令的算法单变化缓冲。 */
+    /**  当前命令的算法单变化缓冲。 借出本命令算法单变化缓冲。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeChangeBuffer<CoreAlgoOrderState> changedAlgoOrders = new RuntimeChangeBuffer<>();
     /** 当前命令变化的定时全撤业务键集合。 */
     final HashSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers = new HashSet<>();
-    /** 当前命令的触发单变化缓冲。 */
+    /**  当前命令的触发单变化缓冲。 借出本命令触发单变化缓冲。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeChangeBuffer<CoreTriggerOrderState> changedTriggerOrders =
             new RuntimeChangeBuffer<>();
     /** 当前命令变化的费用政策身份集合。 */
     final LongHashSet changedFeePolicies = new LongHashSet();
-    /** 各 Lane 的账户修改前值和余额补丁，失败时先恢复账户再恢复 Owner 视图。 */
+    /**  各 Lane 的账户修改前值和余额补丁，失败时先恢复账户再恢复 Owner 视图。 借出各 Lane 账户回滚前后补丁管理对象。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeAccountRollback accountRollback;
-    /** 当前是否处于订单批量修改范围，避免提前交还仍被批次使用的账户访问权。 */
+    /**  当前是否处于订单批量修改范围，避免提前交还仍被批次使用的账户访问权。 返回当前是否处于订单批量修改范围。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     boolean orderBatchMutationScope;
     /** Owner 当前明确进入的账户 Lane 范围，空表示尚未进入。 */
     private AccountLaneState ownerLaneScope;
@@ -592,12 +618,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    /**
-     * 返回本运行时固定的 Lane 拓扑。
-     */
-    public LaneTopology topology() {
-        return topology;
-    }
 
     /**
      * 返回账户 Lane 数量。
@@ -766,18 +786,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         asynchronousCommandScope = false;
     }
 
-    /** Owner 当前是否持有账户访问权；冷阶段初始为真，活动交接按协议变更。 */
+    /**  Owner 当前是否持有账户访问权；冷阶段初始为真，活动交接按协议变更。 返回 Owner 当前是否持有账户访问权。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     public boolean ownerLaneAccess = true;
-    /**
-     * 返回 Owner 当前是否持有账户访问权。
-     */
-    public boolean ownerLaneAccess() { return ownerLaneAccess; }
-    /** 跨线程可见的账户所有权交接轮次，每次新请求递增。 */
+    /**  跨线程可见的账户所有权交接轮次，每次新请求递增。 返回当前账户所有权交接轮次。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     public volatile long laneHandoffEpoch = 0L;
-    /**
-     * 返回当前账户所有权交接轮次。
-     */
-    public long laneHandoffEpoch() { return laneHandoffEpoch; }
     /** Owner 是否已经发起本轮交接请求，防止每次重试都重复请求。 */
     private boolean laneHandoffRequested;
     /** 本轮等待账户交接完成的单调纳秒截止时间。 */
@@ -954,10 +970,6 @@ public final class TradingRuntimeState implements AutoCloseable {
      * 在 Owner 上判断账户已启动、账本已存在或显式异步范围是否任一成立；FUSED 也可能因独立账本而走异步续步。
      */
     public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted || systemLedger != null || asynchronousCommandScope; }
-    /**
-     * 返回账户工作资源是否已标记启动。
-     */
-    public boolean accountLanesStarted() { return accountLanesStarted; }
 
     /** 控制账户任务的唯一有界派发和完成收集入口。 */
     private final ControlLaneDispatcher controlLanes = new ControlLaneDispatcher(this);
@@ -3566,12 +3578,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         owner = null;
     }
 
-    /**
-     * 返回当前运行时元数据中的产品线。
-     */
-    public ProductLine productLine() {
-        return productLine;
-    }
 
     /**
      * 在有效执行范围内读取当前业务修订。
@@ -6369,10 +6375,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedRiskScans.add(scan.symbolId());
     }
 
-    /**
-     * 读取当前行情修订，不在此绑定线程或推进数值。
-     */
-    public long marketRevision() { return marketRevision; }
 
     /**
      * 校验非负后保存调用方提供的行情修订。
@@ -6965,7 +6967,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         return result;
     }
 
-    /** 可空实时变化捕获器，沿用已提交变化或明确快照边界，不替代账户权威状态。 */
+    /**  可空实时变化捕获器，沿用已提交变化或明确快照边界，不替代账户权威状态。 返回当前可空实时捕获器引用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     RealtimeStateCapture realtimeCapture;
 
     /**
@@ -8466,14 +8470,6 @@ appendBalanceFundsDelta(patches, target);
     }
 
     /**
-     * 借出本命令强平变化缓冲，提交清理后不能继续使用旧内容。
-     */
-    public RuntimeChangeBuffer<LiquidationRuntime> changedLiquidations() { return changedLiquidations; }
-    /**
-     * 借出风险快照变化及配套索引缓冲。
-     */
-    public RuntimeIndexedChangeBuffer<RiskSnapshotRuntime, Boolean> changedRiskSnapshots() { return changedRiskSnapshots; }
-    /**
      * 借出包含直接与保留 Lane 输出的订单变化容器。
      */
     public OwnerIndexedChanges<OrderRuntime, Void> orderChanges() { return changedOrders; }
@@ -8481,34 +8477,6 @@ appendBalanceFundsDelta(patches, target);
      * 借出包含持仓值及已准备索引的变化容器。
      */
     public OwnerIndexedChanges<PositionRuntime, RuntimePositionIndexValue> positionChanges() { return changedPositions; }
-    /**
-     * 借出本命令算法单变化缓冲。
-     */
-    public RuntimeChangeBuffer<CoreAlgoOrderState> changedAlgoOrders() { return changedAlgoOrders; }
-    /**
-     * 借出本命令触发单变化缓冲。
-     */
-    public RuntimeChangeBuffer<CoreTriggerOrderState> changedTriggerOrders() { return changedTriggerOrders; }
-    /**
-     * 返回当前可空实时捕获器引用。
-     */
-    public RealtimeStateCapture realtimeCapture() { return realtimeCapture; }
-    /**
-     * 返回当前是否处于订单批量修改范围。
-     */
-    public boolean orderBatchMutationScope() { return orderBatchMutationScope; }
-    /**
-     * 借出各 Lane 账户回滚前后补丁管理对象。
-     */
-    public RuntimeAccountRollback accountRollback() { return accountRollback; }
-    /**
-     * 借出唯一待完成预留跟踪器，不建立第二套计数。
-     */
-    public PendingReservationTracker pendingReservations() { return pendingReservations; }
-    /**
-     * 借出唯一撮合结算派发与收集入口。
-     */
-    public MatcherSettlementDispatcher settlements() { return settlements; }
 
     /**
      * 按数组下标借出原账户 Lane，调用方保证下标及访问边界有效。

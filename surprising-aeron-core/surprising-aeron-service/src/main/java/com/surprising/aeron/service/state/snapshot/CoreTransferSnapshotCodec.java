@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.TransferRuntime;
 
@@ -10,18 +12,12 @@ import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.TreeMap;
 
-/**
- * 尚未完成的跨账户或跨产品线划转快照编解码。版本二按字段保存原命令、所属用户及显式收付款用户；读取也支持已发布版本一的嵌套命令布局，恢复后仍以原 TransferRuntime 交给既有划转生命周期推进。
- */
+/** 尚未完成的跨账户或跨产品线划转快照编解码。版本二按字段保存原命令、所属用户及显式收付款用户；读取也支持已发布版本一的嵌套命令布局，恢复后仍以原 TransferRuntime 交给既有划转生命周期推进。 构造约定：工具类不创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CoreTransferSnapshotCodec {
 
     /** 仍允许读取的已发布嵌套命令布局版本一；新编码使用版本二。 */
     private static final int VERSION = 1;
-    /**
-     * 工具类不创建实例。
-     */
-    private CoreTransferSnapshotCodec() {
-    }
 
     /**
      * 按输入划转 Map 的编号键排序，把用户、划转编号、两端产品线和账户类型、资产金额、引用原因及显式收付款用户写成字段记录，并加版本二头；本入口没有额外检查待划转数量上限。

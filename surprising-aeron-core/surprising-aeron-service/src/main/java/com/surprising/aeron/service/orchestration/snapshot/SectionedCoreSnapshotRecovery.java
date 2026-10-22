@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.snapshot;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.product.api.ProductLine;
@@ -54,7 +56,9 @@ public final class SectionedCoreSnapshotRecovery {
     private int sectionIndex;
     /** 当前段负载已经接收的字节数。 */
     private int payloadPosition;
-    /** 从来源实际拷入内部数组的累计字节数。 */
+    /**  从来源实际拷入内部数组的累计字节数。 返回已经拷入数组的总字节计数，不是声明的最终快照大小。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int totalLength;
     /** 封套格式和段数是否已经校验通过。 */
     private boolean modeKnown;
@@ -144,12 +148,6 @@ public final class SectionedCoreSnapshotRecovery {
         return sectionIndex;
     }
 
-    /**
-     * 返回已经拷入数组的总字节计数，不是声明的最终快照大小。
-     */
-    public int totalLength() {
-        return totalLength;
-    }
 
     /**
      * 累加固定封套、复用段头和各已分配负载数组的字节长度，不统计对象头或解析后的状态对象。

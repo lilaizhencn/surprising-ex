@@ -1,13 +1,13 @@
 package com.surprising.aeron.service.business.option;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 
-/** 行情更新和风险检查共用的期权价格校验；期权必须有指数价及同到期远期价，其他产品不受这条规则限制。 */
+/**  行情更新和风险检查共用的期权价格校验；期权必须有指数价及同到期远期价，其他产品不受这条规则限制。 构造约定： 只提供校验规则，不创建保存状态的实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class OptionRiskRules {
-    /** 只提供校验规则，不创建保存状态的实例。 */
-    private OptionRiskRules() {
-    }
 
     /**
      * 仅对期权检查两个标的风险价格是否为正，缺失时返回业务拒绝，不修改币对配置或行情。

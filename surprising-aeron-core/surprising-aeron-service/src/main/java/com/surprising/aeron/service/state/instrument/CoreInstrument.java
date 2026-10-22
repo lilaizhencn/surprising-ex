@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.instrument;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreInstrumentMaintenance;
 import com.surprising.aeron.protocol.CoreOrderProtection;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
@@ -17,13 +19,21 @@ import java.util.Objects;
  * 单个标的的身份与配置外壳。整数身份固定，配置和维护状态以两个 volatile 引用分别发布；业务转换保留外壳供已有订单引用，更新时换不可变配置。volatile 只保证各引用可见，不把两项变更合成原子事务。
  */
 public final class CoreInstrument {
-    /** 只保留一份的规范协议标的文本，整数身份另用于核心索引。 */
+    /**  只保留一份的规范协议标的文本，整数身份另用于核心索引。 返回保留的规范协议文本，供外部查询和协议输出使用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final String instrumentId;
-    /** 从协议标的文本解析出的固定整数身份。 */
+    /**  从协议标的文本解析出的固定整数身份。 返回解析后的整数标的身份，供核心索引使用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final int instrumentIdValue;
-    /** 当前不可变配置版本，通过替换引用生效；读者需要同版字段时先固定该引用。 */
+    /**  当前不可变配置版本，通过替换引用生效；读者需要同版字段时先固定该引用。 借出当前不可变配置版本；多个独立 getter 不构成跨版本的原子快照。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile Configuration configuration;
-    /** 独立发布的不可变维护状态，配置更新不会替换它。 */
+    /**  独立发布的不可变维护状态，配置更新不会替换它。 返回当前独立维护状态，包含任务归属和清仓价。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile CoreInstrumentMaintenance maintenance;
 
     /**
@@ -253,18 +263,6 @@ public final class CoreInstrument {
                 CoreInstrumentMaintenance.TRADING);
     }
 
-    /**
-     * 返回解析后的整数标的身份，供核心索引使用。
-     */
-    public int instrumentIdValue() { return instrumentIdValue; }
-    /**
-     * 返回保留的规范协议文本，供外部查询和协议输出使用。
-     */
-    public String instrumentId() { return instrumentId; }
-    /**
-     * 借出当前不可变配置版本；多个独立 getter 不构成跨版本的原子快照。
-     */
-    public Configuration configuration() { return configuration; }
 
     /**
      * 创建查询专用外壳并固定当时读到的配置与维护引用，后续原对象替换引用不会改变这个外壳；固定动作仍依赖调用方的查询边界。
@@ -416,10 +414,6 @@ public final class CoreInstrument {
      * 返回允许的有效期位集，位号按 wireCode 减一。
      */
     public int supportedTimeInForceMask() { return configuration.supportedTimeInForceMask(); }
-    /**
-     * 返回当前独立维护状态，包含任务归属和清仓价。
-     */
-    public CoreInstrumentMaintenance maintenance() { return maintenance; }
 
     /**
      * 替换为非空维护状态；任务归属、清仓完成等转换条件由外层检查。

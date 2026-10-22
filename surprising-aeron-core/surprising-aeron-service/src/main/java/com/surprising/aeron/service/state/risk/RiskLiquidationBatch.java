@@ -1,12 +1,18 @@
 package com.surprising.aeron.service.state.risk;
 
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
-/** Lane 产生的新增清算需求；owner 按 Lane 顺序分配连续编号后，交回原 Lane 落地。 */
+/**  Lane 产生的新增清算需求；owner 按 Lane 顺序分配连续编号后，交回原 Lane 落地。 构造约定：为一个 Lane 创建可复用的清算需求批次，实际数组等第一次出现需求时才分配。 参数 capacity：调用方为本次有限工作量片段设置的最大需求数量 */
+@RequiredArgsConstructor
 public final class RiskLiquidationBatch {
-    /** 本片段工作上限；最多一个工作单元生成一条清算。 */
+    /**  本片段工作上限；最多一个工作单元生成一条清算。  返回该批次允许保存的最大需求数量，复用时仍受此容量限制。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final int capacity;
     /** 借用的 Lane 持仓引用，不在这里制作持仓副本；仅有新增清算时才分配有界数组。 */
     private PositionRuntime[] positions;
@@ -17,15 +23,8 @@ public final class RiskLiquidationBatch {
     /** owner 唯一写入的起始编号，派发后由 Lane 读取。 */
     private long firstId;
 
-    /**
-     * 为一个 Lane 创建可复用的清算需求批次，实际数组等第一次出现需求时才分配。
-     * @param capacity 调用方为本次有限工作量片段设置的最大需求数量
-     */
-    public RiskLiquidationBatch(int capacity) { this.capacity = capacity; }
     /** 返回本批新增的清算需求数，Owner 在 Lane 结果发布后据此预留连续编号。 */
     int size() { return count; }
-    /** 返回该批次允许保存的最大需求数量，复用时仍受此容量限制。 */
-    public int capacity() { return capacity; }
 
     /** 开始下一批时清零有效数量和编号起点，复用原数组；旧数组内容不清除，超出新 count 的部分不会被应用。 */
     public void reset() {

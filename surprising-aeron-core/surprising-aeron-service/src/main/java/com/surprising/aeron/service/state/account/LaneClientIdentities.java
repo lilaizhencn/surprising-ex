@@ -1,14 +1,16 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import java.util.Arrays;
 import java.util.Map;
 import org.agrona.collections.Long2LongHashMap;
 
-/**
- * 一个账户 Lane 的客户订单身份行表。正数身份键定位用户与客户号文本，引用计数为零时清除文本并复用空行；跨线程监控只读发布数量，不直接读取行表。
- */
+/** 一个账户 Lane 的客户订单身份行表。正数身份键定位用户与客户号文本，引用计数为零时清除文本并复用空行；跨线程监控只读发布数量，不直接读取行表。 构造约定：绑定所属 Lane，构造时不申请线程所有权；Lane 为 null 的独立使用场景不执行所有者校验。 参数 lane：所属账户 Lane；null 表示不委托 Lane 做线程校验 */
+@RequiredArgsConstructor
 public final class LaneClientIdentities {
     /** 拥有这些客户身份的账户 Lane，独立行表场景允许为 null。 */
     private final AccountLaneState lane;
@@ -28,24 +30,17 @@ public final class LaneClientIdentities {
     private int freeCount;
     /** 尚未使用过的下一行下标，也是清理和冷导出遍历的上界。 */
     private int nextRow;
-    /** 监控可见的存活身份行数，Owner 只观察此计数，不读取原语表和身份行。 */
+    /**  监控可见的存活身份行数，Owner 只观察此计数，不读取原语表和身份行。 返回用于监控的存活身份行数量；单独的 volatile 计数不能用于遍历权威行表。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile int publishedCount;
 
-    /**
-     * 绑定所属 Lane，构造时不申请线程所有权；Lane 为 null 的独立使用场景不执行所有者校验。
-     * @param lane 所属账户 Lane；null 表示不委托 Lane 做线程校验
-     */
-    public LaneClientIdentities(AccountLaneState lane) { this.lane = lane; }
 
     /**
      * 存在所属 Lane 时校验或认领当前线程；没有 Lane 的独立行表沿用调用方串行使用约定。
      */
     private void assertOwner() { if (lane != null) lane.assertOwner(); }
 
-    /**
-     * 返回用于监控的存活身份行数量；单独的 volatile 计数不能用于遍历权威行表。
-     */
-    public int publishedCount() { return publishedCount; }
 
     /**
      * 已有键先核对用户和文本，retain 为 true 才增加已有引用；新键总以一个引用插入。返回正键表示已存在，负键表示本次新建。

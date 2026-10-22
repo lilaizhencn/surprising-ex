@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.command;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import java.util.AbstractList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -8,7 +12,10 @@ import java.util.function.LongConsumer;
 
 /**
  * 用 long 数组保存只读列表，在命令和分页等边界兼容 List<Long>，内部可通过 primitive 视图避免遍历时装箱。只读成立的前提是移交数组后原调用方不再修改；它不会为 takeOwnership 自动复制数组。
+ * 构造约定：直接接管传入数组作为只读列表底层，不复制；外层负责保证后续不再改动它。
+ * 参数 values：要接管的原 long 数组，移交后调用方不得再写
  */
+@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public final class ImmutableLongArrayList extends AbstractList<Long>
         implements RandomAccess, com.surprising.aeron.service.command.support.PrimitiveLongView {
 
@@ -17,13 +24,6 @@ public final class ImmutableLongArrayList extends AbstractList<Long>
     /** 已接管且不得再被外部修改的精确长度数组。 */
     private final long[] values;
 
-    /**
-     * 直接接管传入数组作为只读列表底层，不复制；外层负责保证后续不再改动它。
-     * @param values 要接管的原 long 数组，移交后调用方不得再写
-     */
-    private ImmutableLongArrayList(long[] values) {
-        this.values = values;
-    }
 
     /**
      * 空数组或空引用返回共享空列表，非空则直接接管数组；调用方从此不得再写该数组。
@@ -45,7 +45,9 @@ public final class ImmutableLongArrayList extends AbstractList<Long>
     public static final class Builder {
         /** 构建器当前可追加数组，满时复制扩容。 */
         private long[] values;
-        /** 构建器已追加条数，范围不超过当前数组容量。 */
+        /**  构建器已追加条数，范围不超过当前数组容量。 返回当前已追加条数，不是底层容量。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int size;
 
         /**
@@ -65,10 +67,6 @@ public final class ImmutableLongArrayList extends AbstractList<Long>
             values[size++] = value;
         }
 
-        /**
-         * 返回当前已追加条数，不是底层容量。
-         */
-        public int size() { return size; }
 
         /**
          * 返回最后追加的值，尚无元素时报错。

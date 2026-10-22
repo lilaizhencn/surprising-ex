@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.ledger;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.settlement.FundsPosting;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,7 +15,9 @@ public final class RuntimeFundsDelta {
 
     /** 空资金变化共用实例，不保存资产或分录项。 */
     private static final RuntimeFundsDelta EMPTY = new RuntimeFundsDelta(List.of(), false, true);
-    /** 实际保存的只读分录列表，可信路径包装原列表，其他路径复制归并准备列。 */
+    /**  实际保存的只读分录列表，可信路径包装原列表，其他路径复制归并准备列。 借用实际保存的只读列表；可信路径底层仍是调用方原列表，不能在构造后从外部修改。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final List<Posting> postings;
     /** 按构造时实际选中的源列表计算的逐资产有符号金额合计。 */
     private final IntLongHashMap unitsByAsset;
@@ -189,12 +193,6 @@ public final class RuntimeFundsDelta {
         return delta;
     }
 
-    /**
-     * 借用实际保存的只读列表；可信路径底层仍是调用方原列表，不能在构造后从外部修改。
-     */
-    public List<Posting> postings() {
-        return postings;
-    }
 
     /**
      * 使用运行时资产编号的一条非零资金变化值，只检查基本字段，不承担完整所有者组合或资金守恒校验。

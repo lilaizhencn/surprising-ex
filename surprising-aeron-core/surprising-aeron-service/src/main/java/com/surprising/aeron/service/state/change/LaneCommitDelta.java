@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.change;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.AccountLaneState;
 import com.surprising.aeron.service.state.account.UserRuntime;
@@ -23,11 +26,21 @@ public final class LaneCommitDelta {
     private long[] terminalOrderUsers = new long[4];
     /** 与终态编号同下标的客户号文本列，清理时释放有效引用。 */
     private String[] terminalOrderClients = new String[4];
-    /** 本收据已保存的有效终态身份数量。 */
+    /**  本收据已保存的有效终态身份数量。 返回本收据已收集的终态身份有效数量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int terminalOrderCount;
     /** 本边界 Lane 持仓记录条数，-1 表示未采集或已发布，包含表中保留的零仓位记录。 */
     private int positionCount = -1;
-    /** Lane 独立写入并在完成位之后交给 Owner 的待准入完成数。 */
+    /**
+     *  Lane 独立写入并在完成位之后交给 Owner 的待准入完成数。
+     * 返回该 Lane 本收据记录的已完成待准入数量。
+     * 保存 Lane 已完成的待准入数量回执，不在此修改预留权威表。
+     * @param completedPending 本 Lane 在该边界完成的待准入条数
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     int completedPending;
 
     /** 等待消费者归还 Lane 的已退休订单引用数组。 */
@@ -101,10 +114,6 @@ public final class LaneCommitDelta {
     }
 
     /**
-     * 返回本收据已收集的终态身份有效数量。
-     */
-    public int terminalOrderCount() { return terminalOrderCount; }
-    /**
      * 读取有效终态身份槽的订单编号，调用方应以终态计数限制下标。
      * @param index 终态身份有效列中的下标
      */
@@ -124,15 +133,27 @@ public final class LaneCommitDelta {
     RuntimeChangeBuffer<CoreTriggerOrderState> triggers;
     /** 按需分配的算法单变化列。 */
     RuntimeChangeBuffer<com.surprising.aeron.service.state.model.CoreAlgoOrderState> algos;
-    /** 本边界实际关闭的触发记录条数，Owner 收集后增加产品修订。 */
+    /**
+     *  本边界实际关闭的触发记录条数，Owner 收集后增加产品修订。
+     * 返回收据保存的关闭触发单数量。
+     * 记录此收据实际关闭触发单的条数，后续 Owner 据此增加修订。
+     * @param closedTriggerCount 本收据实际关闭的触发记录条数
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     int closedTriggerCount;
     /** 本收据独立复制的用户命令值缓冲。 */
     final RuntimeUserChangeBuffer users = new RuntimeUserChangeBuffer();
-    /** Lane 活引用在完成位前冻结的订单变化缓冲，可整体交给 Owner。 */
+    /**  Lane 活引用在完成位前冻结的订单变化缓冲，可整体交给 Owner。 返回当前收据订单专用变化缓冲，不能在已交接后继续读写旧租约。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeOrderChangeBuffer orders = new RuntimeOrderChangeBuffer();
     /** Lane 活引用在完成位前冻结的预留后值缓冲。 */
     final RuntimeReservationChangeBuffer reservations = new RuntimeReservationChangeBuffer();
-    /** 持仓发布值与预计算索引的专用变化缓冲。 */
+    /**  持仓发布值与预计算索引的专用变化缓冲。 返回当前收据持仓专用变化缓冲，仍受 Lane 到 Owner 的租约约束。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimePositionChangeBuffer positions = new RuntimePositionChangeBuffer();
     /** 本边界强平值变化，null 代表删除。 */
     final RuntimeChangeBuffer<LiquidationRuntime> liquidations = new RuntimeChangeBuffer<>();
@@ -506,31 +527,5 @@ public final class LaneCommitDelta {
         if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
     }
 
-    /**
-     * 返回该 Lane 本收据记录的已完成待准入数量。
-     */
-    public int completedPending() { return completedPending; }
-    /**
-     * 返回当前收据持仓专用变化缓冲，仍受 Lane 到 Owner 的租约约束。
-     */
-    public RuntimePositionChangeBuffer positions() { return positions; }
-    /**
-     * 返回当前收据订单专用变化缓冲，不能在已交接后继续读写旧租约。
-     */
-    public RuntimeOrderChangeBuffer orders() { return orders; }
-    /**
-     * 记录此收据实际关闭触发单的条数，后续 Owner 据此增加修订。
-     * @param value 本收据实际关闭的触发记录条数
-     */
-    public void closedTriggerCount(int value) { this.closedTriggerCount = value; }
-    /**
-     * 返回收据保存的关闭触发单数量。
-     */
-    public int closedTriggerCount() { return closedTriggerCount; }
 
-    /**
-     * 保存 Lane 已完成的待准入数量回执，不在此修改预留权威表。
-     * @param value 本 Lane 在该边界完成的待准入条数
-     */
-    public void completedPending(int value) { completedPending = value; }
 }

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.query;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreBalanceView;
 import com.surprising.aeron.protocol.CoreLeverageView;
 import com.surprising.aeron.protocol.CoreOrderStateView;
@@ -21,19 +23,13 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
-/**
- * 账户 Lane 内的用户及订单只读查询。先按用户范围检查物化规模，再把整数身份转换成协议视图，并按固定字段顺序计算状态比较哈希；缺失和响应过大使用独立结果标记。
- */
+/** 账户 Lane 内的用户及订单只读查询。先按用户范围检查物化规模，再把整数身份转换成协议视图，并按固定字段顺序计算状态比较哈希；缺失和响应过大使用独立结果标记。 构造约定：只提供账户视图组装和状态比较计算，不另存账户权威数据。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeStateQueryService {
 
     /** 单用户完整查询允许的余额、冻结、持仓及杠杆实体数量合计上限 4096。 */
     public static final int MAX_USER_QUERY_ENTITIES = 4_096;
 
-    /**
-     * 只提供账户视图组装和状态比较计算，不另存账户权威数据。
-     */
-    private RuntimeStateQueryService() {
-    }
 
     /**
      * 在指定 Lane 定位用户，先统计余额、冻结、持仓和杠杆记录总量，超限则不物化；随后组装按资产、订单编号和持仓业务键排序的视图，杠杆沿原键集合顺序读取，并返回用户状态哈希。

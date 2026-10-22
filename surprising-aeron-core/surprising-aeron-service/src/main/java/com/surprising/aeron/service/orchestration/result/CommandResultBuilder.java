@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.result;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
@@ -99,10 +102,26 @@ public final class CommandResultBuilder {
     /** 当前命令公开结果订单列表，物化时绑定当前 primitive 集合。 */
     public List<Long> commandChangedOrderIds;
 
-    /** 当前作用域收集的 primitive 用户 ID 集合，挂起时可随命令槽交接。 */
+    /**
+     *  当前作用域收集的 primitive 用户 ID 集合，挂起时可随命令槽交接。
+     * 借出当前命令的 primitive 用户 ID 集合，所有权仍随 Owner 命令作用域。
+     * 把当前命令 primitive 用户集合引用替换为指定集合，供挂起及恢复作用域交接；不复制内容。
+     * @param changedUserIds 接手续步时要使用的用户 primitive 集合
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     PrimitiveLongChangeSet changedUserIds = new PrimitiveLongChangeSet();
 
-    /** 当前作用域收集的 primitive 订单 ID 集合。 */
+    /**
+     *  当前作用域收集的 primitive 订单 ID 集合。
+     * 借出当前命令的 primitive 订单 ID 集合，不创建副本。
+     * 交接当前命令 primitive 订单集合引用，不复制或清空被交入集合。
+     * @param changedOrderIds 接手续步时要使用的订单 primitive 集合
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     PrimitiveLongChangeSet changedOrderIds = new PrimitiveLongChangeSet();
     /** 当前命令用户键是否已由 Lane 结算准确提供。 */
     private boolean laneCommitIdsSeeded;
@@ -112,7 +131,15 @@ public final class CommandResultBuilder {
     /** 绑定当前订单集合的只读 List 门面，不独立保存订单 ID。 */
     private final MutableLongListView directChangedOrders = new MutableLongListView();
 
-    /** 当前命令已记录的成交数。 */
+    /**
+     *  当前命令已记录的成交数。
+     * 读取当前命令累计成交数。
+     * 写入当前命令累计成交数，本入口直接赋值，不增加校验或交易动作。
+     * @param commandTradeCount 当前命令的成交数，新值直接覆盖
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     long commandTradeCount;
 
     /** 当前资金费命令预设的分页进度响应。 */
@@ -572,7 +599,9 @@ public final class CommandResultBuilder {
     private static final class OrderSourceList extends AbstractList<CoreOrderStateSource> implements RandomAccess {
         /** 按当前有效顺序保存的复用订单源适配器数组。 */
         private OrderRuntimeSource[] values;
-        /** 当前多订单源列表的有效数量。 */
+        /**  当前多订单源列表的有效数量。 返回当前有效源数，不返回预留数组容量。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(onMethod_ = {@Override})
         private int size;
 
         /**
@@ -614,10 +643,6 @@ public final class CommandResultBuilder {
             return values[index];
         }
 
-        /**
-         * 返回当前有效源数，不返回预留数组容量。
-         */
-        @Override public int size() { return size; }
     }
 
     /**
@@ -626,7 +651,9 @@ public final class CommandResultBuilder {
     private static final class OrderRuntimeSource implements CoreOrderStateSource {
         /** 当前适配器借用的实际订单，清适配器时移除引用。 */
         private OrderRuntime order;
-        /** 与当前订单配对的协议币对文本。 */
+        /**  与当前订单配对的协议币对文本。 读取适配时固定的协议币对标识。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private String instrumentId;
 
         /**
@@ -659,10 +686,6 @@ public final class CommandResultBuilder {
          * 读取订单所属用户 ID。
          */
         public long userId() { return order.userId(); }
-        /**
-         * 读取适配时固定的协议币对标识。
-         */
-        public String instrumentId() { return instrumentId; }
         /**
          * 读取订单买卖方向。
          */
@@ -790,31 +813,4 @@ public final class CommandResultBuilder {
         @Override public long primitiveValueAt(int index) { return values.valueAt(index); }
     }
 
-    /**
-     * 借出当前命令的 primitive 用户 ID 集合，所有权仍随 Owner 命令作用域。
-     */
-    public PrimitiveLongChangeSet changedUserIds() { return changedUserIds; }
-    /**
-     * 写入当前命令累计成交数，本入口直接赋值，不增加校验或交易动作。
-     * @param value 当前命令的成交数，新值直接覆盖
-     */
-    public void commandTradeCount(long value) { this.commandTradeCount = value; }
-    /**
-     * 借出当前命令的 primitive 订单 ID 集合，不创建副本。
-     */
-    public PrimitiveLongChangeSet changedOrderIds() { return changedOrderIds; }
-    /**
-     * 读取当前命令累计成交数。
-     */
-    public long commandTradeCount() { return commandTradeCount; }
-    /**
-     * 把当前命令 primitive 用户集合引用替换为指定集合，供挂起及恢复作用域交接；不复制内容。
-     * @param value 接手续步时要使用的用户 primitive 集合
-     */
-    public void changedUserIds(PrimitiveLongChangeSet value) { this.changedUserIds = value; }
-    /**
-     * 交接当前命令 primitive 订单集合引用，不复制或清空被交入集合。
-     * @param value 接手续步时要使用的订单 primitive 集合
-     */
-    public void changedOrderIds(PrimitiveLongChangeSet value) { this.changedOrderIds = value; }
 }

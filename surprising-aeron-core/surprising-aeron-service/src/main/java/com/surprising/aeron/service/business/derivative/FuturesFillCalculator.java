@@ -1,15 +1,15 @@
 package com.surprising.aeron.service.business.derivative;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 
-/** 计算永续和交割成交中新增加仓部分需要的保证金；只返回金额，资金冻结和持仓更新由结算流程负责。 */
+/**  计算永续和交割成交中新增加仓部分需要的保证金；只返回金额，资金冻结和持仓更新由结算流程负责。 构造约定： 无状态计算工具，不需要为每笔成交创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class FuturesFillCalculator {
-    /** 无状态计算工具，不需要为每笔成交创建实例。 */
-    private FuturesFillCalculator() {
-    }
 
     /**
      * 先按成交后总持仓选档，再取币对基础、风险档位、用户杠杆三者中最高的保证金率，计算本次新开仓部分的要求。

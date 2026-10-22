@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.order;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
@@ -13,67 +17,124 @@ import com.surprising.product.api.ProductLine;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * 一个账户 Lane 持有的订单状态。Lane 可原位推进成交和终态，跨线程读取使用固定命令槽或快照；Owner 消费命令回执做有序发布，不能保留活跃权威订单当只读镜像。池化权威对象及其冻结槽要等原退休栅栏后才能复用。
- */
+/** 一个账户 Lane 持有的订单状态。Lane 可原位推进成交和终态，跨线程读取使用固定命令槽或快照；Owner 消费命令回执做有序发布，不能保留活跃权威订单当只读镜像。池化权威对象及其冻结槽要等原退休栅栏后才能复用。 构造约定：只为原对象池和命令槽工厂分配空存储，调用方随后必须完整初始化再作为订单使用。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class OrderRuntime {
-    /** 本订单唯一 Core 编号。 */
+    /**  本订单唯一 Core 编号。 返回本订单唯一 Core 编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long orderId;
-    /** 订单所属独立产品线。 */
+    /**  订单所属独立产品线。 返回订单所属独立产品线。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private ProductLine productLine;
-    /** 订单所属用户编号。 */
+    /**  订单所属用户编号。 返回订单所属用户编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long userId;
-    /** 币对的运行时稠密编号。 */
+    /**  币对的运行时稠密编号。 返回币对的运行时稠密编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int symbolId;
-    /** 订单绑定的规范币对对象，业务值比较也要求同一对象身份。 */
+    /**  订单绑定的规范币对对象，业务值比较也要求同一对象身份。 返回订单绑定的规范币对对象，业务值比较也要求同一对象身份。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreInstrument instrument;
-    /** 买入或卖出方向。 */
+    /**  买入或卖出方向。 返回买入或卖出方向。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreOrderSide side;
-    /** 原请求的限价或现货市价保护边界，衍生品市价请求可为 0。 */
+    /**  原请求的限价或现货市价保护边界，衍生品市价请求可为 0。 返回原请求的限价或现货市价保护边界，衍生品市价请求可为 0。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long priceTicks;
-    /** 实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存。 */
+    /**  实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存。 返回实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long matchingPriceTicks;
-    /** 订单原始总数量步数，等于已成交加剩余数量。 */
+    /**  订单原始总数量步数，等于已成交加剩余数量。 返回订单原始总数量步数，等于已成交加剩余数量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long quantitySteps;
-    /** 已经累计成交的数量步数。 */
+    /**  已经累计成交的数量步数。 返回已经累计成交的数量步数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long executedQuantitySteps;
-    /** 仍未成交的数量步数，撤销后也可保留未成交数量。 */
+    /**  仍未成交的数量步数，撤销后也可保留未成交数量。 返回仍未成交的数量步数，撤销后也可保留未成交数量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long remainingQuantitySteps;
-    /** 是否只允许减少已有持仓。 */
+    /**  是否只允许减少已有持仓。 返回是否只允许减少已有持仓。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean reduceOnly;
-    /** 全仓或逐仓保证金模式。 */
+    /**  全仓或逐仓保证金模式。 返回全仓或逐仓保证金模式。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreMarginMode marginMode;
-    /** 净持仓或双向持仓腿身份。 */
+    /**  净持仓或双向持仓腿身份。 返回净持仓或双向持仓腿身份。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CorePositionSide positionSide;
-    /** 限价或市价等订单类型。 */
+    /**  限价或市价等订单类型。 返回限价或市价等订单类型。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreOrderType orderType;
-    /** GTC、IOC、FOK 或 GTX 等有效期策略。 */
+    /**  GTC、IOC、FOK 或 GTX 等有效期策略。 返回GTC、IOC、FOK 或 GTX 等有效期策略。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreTimeInForce timeInForce;
-    /** 是否要求只成为挂单方，构造校验要求 LIMIT 且 GTX。 */
+    /**  是否要求只成为挂单方，构造校验要求 LIMIT 且 GTX。 返回是否要求只成为挂单方，构造校验要求 LIMIT 且 GTX。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean postOnly;
-    /** 用户客户端订单标识，普通有效值不超过 64 个字符。 */
+    /**  用户客户端订单标识，普通有效值不超过 64 个字符。 返回用户客户端订单标识，普通有效值不超过 64 个字符。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private String clientOrderId;
-    /** 创建该订单的业务命令 UUID。 */
+    /**  创建该订单的业务命令 UUID。 返回创建该订单的业务命令 UUID。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private UUID commandId;
-    /** 下单时固定的 Maker 百万分比费率，可为负返佣。 */
+    /**  下单时固定的 Maker 百万分比费率，可为负返佣。 返回下单时固定的 Maker 百万分比费率，可为负返佣。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long makerFeeRatePpm;
-    /** 下单时固定的 Taker 百万分比费率。 */
+    /**  下单时固定的 Taker 百万分比费率。 返回下单时固定的 Taker 百万分比费率。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long takerFeeRatePpm;
-    /** 该订单累计手续费整数金额，包含实际收费或返佣影响。 */
+    /**  该订单累计手续费整数金额，包含实际收费或返佣影响。 返回该订单累计手续费整数金额，包含实际收费或返佣影响。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long cumulativeFeeUnits;
-    /** 累计成交值的高 64 位，简化构造入口用 -1 表示已有成交但未提供该累计值。 */
+    /**  累计成交值的高 64 位，简化构造入口用 -1 表示已有成交但未提供该累计值。 返回累计成交值的高 64 位，简化构造入口用 -1 表示已有成交但未提供该累计值。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long executedValueHigh;
-    /** 累计成交值的低 64 位，与高位共同保存原始整数位模式。 */
+    /**  累计成交值的低 64 位，与高位共同保存原始整数位模式。 返回累计成交值的低 64 位，与高位共同保存原始整数位模式。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long executedValueLow;
-    /** 订单创建的集群业务时间，初始为 0 时可在首次提交补齐。 */
+    /**  订单创建的集群业务时间，初始为 0 时可在首次提交补齐。 返回订单创建的集群业务时间，初始为 0 时可在首次提交补齐。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long createdAtEpochMillis;
-    /** 最近一次订单提交或状态更新的集群业务时间。 */
+    /**  最近一次订单提交或状态更新的集群业务时间。 返回最近一次订单提交或状态更新的集群业务时间。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long updatedAtEpochMillis;
-    /** 最近一次提交的集群日志位置。 */
+    /**  最近一次提交的集群日志位置。 返回最近一次提交的集群日志位置。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long clusterPosition;
-    /** 订单当前活动或终态状态。 */
+    /**  订单当前活动或终态状态。 返回订单当前活动或终态状态。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreOrderStatus status;
-    /** 订单业务版本，更新时由调用方提供后继版本。 */
+    /**  订单业务版本，更新时由调用方提供后继版本。 返回订单业务版本，更新时由调用方提供后继版本。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long revision;
     /** 值用于可变 Lane 状态还是只读交接的标记，写入仍由调用方遵守原所有权。 */
     private boolean mutable;
@@ -409,122 +470,6 @@ public final class OrderRuntime {
                 canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
     }
 
-    /**
-     * 返回本订单唯一 Core 编号。
-     */
-    public long orderId() { return orderId; }
-    /**
-     * 返回订单所属独立产品线。
-     */
-    public ProductLine productLine() { return productLine; }
-    /**
-     * 返回订单所属用户编号。
-     */
-    public long userId() { return userId; }
-    /**
-     * 返回币对的运行时稠密编号。
-     */
-    public int symbolId() { return symbolId; }
-    /**
-     * 返回订单绑定的规范币对对象，业务值比较也要求同一对象身份。
-     */
-    public CoreInstrument instrument() { return instrument; }
-    /**
-     * 返回买入或卖出方向。
-     */
-    public CoreOrderSide side() { return side; }
-    /**
-     * 返回原请求的限价或现货市价保护边界，衍生品市价请求可为 0。
-     */
-    public long priceTicks() { return priceTicks; }
-    /**
-     * 返回实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存。
-     */
-    public long matchingPriceTicks() { return matchingPriceTicks; }
-    /**
-     * 返回订单原始总数量步数，等于已成交加剩余数量。
-     */
-    public long quantitySteps() { return quantitySteps; }
-    /**
-     * 返回已经累计成交的数量步数。
-     */
-    public long executedQuantitySteps() { return executedQuantitySteps; }
-    /**
-     * 返回仍未成交的数量步数，撤销后也可保留未成交数量。
-     */
-    public long remainingQuantitySteps() { return remainingQuantitySteps; }
-    /**
-     * 返回是否只允许减少已有持仓。
-     */
-    public boolean reduceOnly() { return reduceOnly; }
-    /**
-     * 返回全仓或逐仓保证金模式。
-     */
-    public CoreMarginMode marginMode() { return marginMode; }
-    /**
-     * 返回净持仓或双向持仓腿身份。
-     */
-    public CorePositionSide positionSide() { return positionSide; }
-    /**
-     * 返回限价或市价等订单类型。
-     */
-    public CoreOrderType orderType() { return orderType; }
-    /**
-     * 返回GTC、IOC、FOK 或 GTX 等有效期策略。
-     */
-    public CoreTimeInForce timeInForce() { return timeInForce; }
-    /**
-     * 返回是否要求只成为挂单方，构造校验要求 LIMIT 且 GTX。
-     */
-    public boolean postOnly() { return postOnly; }
-    /**
-     * 返回用户客户端订单标识，普通有效值不超过 64 个字符。
-     */
-    public String clientOrderId() { return clientOrderId; }
-    /**
-     * 返回创建该订单的业务命令 UUID。
-     */
-    public UUID commandId() { return commandId; }
-    /**
-     * 返回下单时固定的 Maker 百万分比费率，可为负返佣。
-     */
-    public long makerFeeRatePpm() { return makerFeeRatePpm; }
-    /**
-     * 返回下单时固定的 Taker 百万分比费率。
-     */
-    public long takerFeeRatePpm() { return takerFeeRatePpm; }
-    /**
-     * 返回该订单累计手续费整数金额，包含实际收费或返佣影响。
-     */
-    public long cumulativeFeeUnits() { return cumulativeFeeUnits; }
-    /**
-     * 返回累计成交值的高 64 位，简化构造入口用 -1 表示已有成交但未提供该累计值。
-     */
-    public long executedValueHigh() { return executedValueHigh; }
-    /**
-     * 返回累计成交值的低 64 位，与高位共同保存原始整数位模式。
-     */
-    public long executedValueLow() { return executedValueLow; }
-    /**
-     * 返回订单创建的集群业务时间，初始为 0 时可在首次提交补齐。
-     */
-    public long createdAtEpochMillis() { return createdAtEpochMillis; }
-    /**
-     * 返回最近一次订单提交或状态更新的集群业务时间。
-     */
-    public long updatedAtEpochMillis() { return updatedAtEpochMillis; }
-    /**
-     * 返回最近一次提交的集群日志位置。
-     */
-    public long clusterPosition() { return clusterPosition; }
-    /**
-     * 返回订单当前活动或终态状态。
-     */
-    public CoreOrderStatus status() { return status; }
-    /**
-     * 返回订单业务版本，更新时由调用方提供后继版本。
-     */
-    public long revision() { return revision; }
 
     /**
      * 名称沿用 canceled，但实际返回 status.terminal：已成交、已拒绝或其他终态也会返回 true。
@@ -626,16 +571,16 @@ public final class OrderRuntime {
         orderId = userId = revision = cachedPositionKey = 0;
     }
 
-    /** 是否为命令固定槽，生命周期跟随原响应及命令退休，不能当 Lane 权威槽清理。 */
+    /**  是否为命令固定槽，生命周期跟随原响应及命令退休，不能当 Lane 权威槽清理。 返回本对象是否属于原命令固定槽，供复制和复用边界核对。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean commandSlotValue;
-    /**
-     * 只为原对象池和命令槽工厂分配空存储，调用方随后必须完整初始化再作为订单使用。
-     */
-    private OrderRuntime() { }
 
     /** 是否为账户 Lane 对象池拥有的权威订单，区别于普通值和命令槽。 */
     private boolean pooledAuthority;
-    /** 权威池订单登记的退休命令序号，0 表示尚未登记退休。 */
+    /**  权威池订单登记的退休命令序号，0 表示尚未登记退休。 返回已登记退休序号，0 表示本单尚未登记退休。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long retiredAfterSequence;
     /** 由用户、永久币对和持仓腿派生的持仓键缓存，新订单复用前清零。 */
     private long cachedPositionKey;
@@ -657,10 +602,6 @@ public final class OrderRuntime {
         return key;
     }
 
-    /**
-     * 返回本对象是否属于原命令固定槽，供复制和复用边界核对。
-     */
-    public boolean commandSlotValue() { return commandSlotValue; }
 
     /**
      * 首次创建或复用原命令槽，写入获准订单的身份、参数和初始状态，再标为只读撮合输入。
@@ -762,10 +703,6 @@ public final class OrderRuntime {
         return true;
     }
 
-    /**
-     * 返回已登记退休序号，0 表示本单尚未登记退休。
-     */
-    public long retiredAfterSequence() { return retiredAfterSequence; }
 
     /**
      * 要求权威池对象已经登记退休，释放客户标识、命令和币对等引用并清派生键；数值存储留给下一次完整初始化。

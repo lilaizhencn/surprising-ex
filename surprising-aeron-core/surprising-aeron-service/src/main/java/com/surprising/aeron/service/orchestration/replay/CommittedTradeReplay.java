@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.replay;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
@@ -19,18 +21,28 @@ public final class CommittedTradeReplay implements AutoCloseable {
     private final com.surprising.aeron.service.state.realtime.RealtimeStateCapture capture;
     /** 资金费观察器为当前命令暂存的计算完成事实，生成分页后清引用。 */
     private com.surprising.aeron.service.state.lifecycle.RuntimePerpetualFundingProcessor.FundingResult fundingResult;
-    /** 最近一次 apply 的可空资金费分页。 */
+    /**  最近一次 apply 的可空资金费分页。 读取最近一次命令生成的可空已提交资金费分页。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CommittedFundingPage fundingPage;
-    /** 最近一次 apply 的可空交割现金分页。 */
+    /**  最近一次 apply 的可空交割现金分页。 读取最近一次命令生成的可空交割现金分页。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CommittedDeliveryPage deliveryPage;
-    /** 最近一次正用户命令尝试的可空最终收据。 */
+    /**  最近一次正用户命令尝试的可空最终收据。 读取最近一次正用户命令尝试的最终收据；冲突重试有自己的拒绝收据，不覆盖原成功事实。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CommittedCommandResult commandResult;
-    /** 最近一次余额或转账命令的可空非零现金差额。 */
+    /**  最近一次余额或转账命令的可空非零现金差额。 读取最近一次命令产生的可空实际现金差额，不把释放冻结当收入。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CommittedBalanceFlow balanceFlow;
     // 这只是本独立回放工作进程的读模型路由；子单成交或撤单未改父修订时，仍可据子 ID 找到父单。
     /** 本导出副本的子订单 ID 到父算法单 ID 路由，不是第二份订单状态。 */
     private final Map<Long, Long> algoByChild = new HashMap<>();
-    /** 当前命令造成进度变化的最终父单视图列表，每次 apply 开头清空。 */
+    /**  当前命令造成进度变化的最终父单视图列表，每次 apply 开头清空。 读取最近一次 apply 收集的算法父单变化列表，下一次 apply 会先清空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private List<CoreAlgoOrderView> algoChanges = List.of();
 
     /**
@@ -228,15 +240,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
         }
     }
 
-    /**
-     * 读取最近一次 apply 收集的算法父单变化列表，下一次 apply 会先清空。
-     */
-    public List<CoreAlgoOrderView> algoChanges() { return algoChanges; }
 
-    /**
-     * 读取最近一次命令产生的可空实际现金差额，不把释放冻结当收入。
-     */
-    public CommittedBalanceFlow balanceFlow() { return balanceFlow; }
 
     /**
      * 读取回放副本当前记录的复制业务时间。
@@ -443,18 +447,6 @@ public final class CommittedTradeReplay implements AutoCloseable {
         algoChanges = List.copyOf(values);
     }
 
-    /**
-     * 读取最近一次命令生成的可空已提交资金费分页。
-     */
-    public CommittedFundingPage fundingPage() { return fundingPage; }
-    /**
-     * 读取最近一次命令生成的可空交割现金分页。
-     */
-    public CommittedDeliveryPage deliveryPage() { return deliveryPage; }
-    /**
-     * 读取最近一次正用户命令尝试的最终收据；冲突重试有自己的拒绝收据，不覆盖原成功事实。
-     */
-    public CommittedCommandResult commandResult() { return commandResult; }
 
     /**
      * 启动重建时分页查询本副本保留的触发记录，校验游标和一至五百一十二的页大小；本次内部查询使用当前系统毫秒时间，不从在线 Core 取数据。

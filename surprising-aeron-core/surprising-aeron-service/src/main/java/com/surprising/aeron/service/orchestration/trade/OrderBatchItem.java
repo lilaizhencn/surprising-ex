@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.state.order.OrderRuntime;
@@ -11,11 +14,17 @@ import java.util.List;
  * 一条批量命令中的一个订单项，保存输入、该项状态、准入订单副本、结算后订单副本及撮合事件。Owner 管理批内顺序；所属账户和 Matcher 只在各自交接边界写约定结果，Owner 等回执后再读。整批终态退出且无人借用后才能清理复用。
  */
 final class OrderBatchItem {
-    /** 本项结果使用的订单编号，改单对应替换后编号。 */
+    /**  本项结果使用的订单编号，改单对应替换后编号。 返回本项对外结果所用的订单编号，改单时是替换后编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     long orderId;
-    /** 改单原订单编号，非改单按输入使用零。 */
+    /**  改单原订单编号，非改单按输入使用零。 返回改单原订单编号，其他批次项通常为零。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     long originalOrderId;
-    /** 改单替换后编号，非改单按输入使用零。 */
+    /**  改单替换后编号，非改单按输入使用零。 返回改单替换后订单编号，其他批次项通常为零。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     long replacementOrderId;
     /** 本项已经解码的输入，随整批生命周期保留。 */
     Object command;
@@ -131,16 +140,4 @@ final class OrderBatchItem {
         cancelSymbol = null;
     }
 
-    /**
-     * 返回本项对外结果所用的订单编号，改单时是替换后编号。
-     */
-    long orderId() { return orderId; }
-    /**
-     * 返回改单原订单编号，其他批次项通常为零。
-     */
-    long originalOrderId() { return originalOrderId; }
-    /**
-     * 返回改单替换后订单编号，其他批次项通常为零。
-     */
-    long replacementOrderId() { return replacementOrderId; }
 }

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.egress;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress.TransportSession;
 import io.aeron.Publication;
 import java.util.ArrayDeque;
@@ -197,9 +199,8 @@ final class DeferredSessionResponses {
 
     /** 解绑临时发送包装器的共享空数组。 */
     private static final byte[] EMPTY = new byte[0];
-    /**
-     * 一个慢会话的传输句柄、响应 FIFO 和轮询链表节点，队列耗尽、关闭或超时后从本地结构移除。
-     */
+    /** 一个慢会话的传输句柄、响应 FIFO 和轮询链表节点，队列耗尽、关闭或超时后从本地结构移除。 构造约定：保存一个具体传输句柄；响应 FIFO 和循环链表随后由原回调线程维护。 参数 session：本条响应目标的实际传输句柄 */
+    @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
     private static final class SessionQueue {
         /** 该队列对应的具体传输会话，只有回调线程操作。 */
         final TransportSession session;
@@ -210,11 +211,6 @@ final class DeferredSessionResponses {
         SessionQueue previous, next;
         /** 该会话尚未成功发送的终态字节 FIFO，先完成队首再试后继。 */
         final ArrayDeque<Response> responses = new ArrayDeque<>();
-        /**
-         * 保存一个具体传输句柄；响应 FIFO 和循环链表随后由原回调线程维护。
-         * @param session 本条响应目标的实际传输句柄
-         */
-        SessionQueue(TransportSession session) { this.session = session; }
     }
     /**
      * 复制后的单条编码响应和固定发送期限；记录引用不变，字节数组仅由本地发送边界持有，不再借用交易对象。

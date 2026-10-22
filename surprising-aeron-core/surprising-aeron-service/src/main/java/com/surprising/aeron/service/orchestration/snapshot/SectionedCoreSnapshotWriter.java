@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
@@ -16,16 +18,10 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.zip.CRC32C;
 
-/**
- * 把同一快照边界的运行时状态编码成有序字节片段。捕获阶段校验 Core/Matcher 配对，编码阶段依次生成元数据、消费水位、命令结果、原生模块、交易状态、费率、划转、终态保留及各 Lane 段，最后写 CRC 页尾。调用方负责冻结和输入生命周期，本类不暂停交易线程。
- */
+/** 把同一快照边界的运行时状态编码成有序字节片段。捕获阶段校验 Core/Matcher 配对，编码阶段依次生成元数据、消费水位、命令结果、原生模块、交易状态、费率、划转、终态保留及各 Lane 段，最后写 CRC 页尾。调用方负责冻结和输入生命周期，本类不暂停交易线程。 构造约定：禁止实例化静态快照写入工具。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SectionedCoreSnapshotWriter {
 
-    /**
-     * 禁止实例化静态快照写入工具。
-     */
-    private SectionedCoreSnapshotWriter() {
-    }
 
     /**
      * 从已建立边界的运行时捕获镜像，再交给分段编码；不是自行建立或等待快照屏障。

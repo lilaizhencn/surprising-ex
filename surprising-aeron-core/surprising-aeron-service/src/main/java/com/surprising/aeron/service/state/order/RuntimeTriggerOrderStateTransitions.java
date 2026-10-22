@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.order;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
@@ -14,16 +16,10 @@ import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 import com.surprising.product.api.ProductLine;
 
-/**
- * 条件单登记和生命周期状态变更。登记时核对用户、币对、持仓腿和可平仓容量，随后分别推进取消、认领、完成、追踪、到期或重试；触发条件判定、子单准入和 Matcher 执行仍在上游原流程。
- */
+/** 条件单登记和生命周期状态变更。登记时核对用户、币对、持仓腿和可平仓容量，随后分别推进取消、认领、完成、追踪、到期或重试；触发条件判定、子单准入和 Matcher 执行仍在上游原流程。 构造约定：只提供已有条件单状态规则的静态入口，不新建调度线程或状态表。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeTriggerOrderStateTransitions {
 
-    /**
-     * 只提供已有条件单状态规则的静态入口，不新建调度线程或状态表。
-     */
-    private RuntimeTriggerOrderStateTransitions() {
-    }
 
     /**
      * 准备币对稠密身份、产品对应持仓键及账本结算标记，再进入登记入口；虽然名为 upsert，重复条件单编号仍拒绝。

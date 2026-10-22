@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.command.trigger;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -49,7 +53,9 @@ public final class TriggerOrderCommands {
     /** 本产品线交易 Owner，串行推进本类命令并管理提交边界。 */
     private final TradingCoreRuntime owner;
 
-    /** Owner 复用的已平仓关联触发 ID 缓冲，后续复制入既有提交事件，下一命令前可重用。 */
+    /**  Owner 复用的已平仓关联触发 ID 缓冲，后续复制入既有提交事件，下一命令前可重用。 借出 Owner 当前复用的清仓触发单 ID 缓冲，调用方在下次清空或重新选择前消费。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final PrimitiveLongChangeSet closingTriggerIds = new PrimitiveLongChangeSet();
     /** 同步 OCO 撤销使用的一页 primitive ID 缓冲，页处理前清空，不把可变缓冲交出命令边界。 */
     private final PrimitiveLongChangeSet ocoSiblingPage = new PrimitiveLongChangeSet(64);
@@ -60,10 +66,6 @@ public final class TriggerOrderCommands {
     /** 触发子单串行执行复用的账户操作与 Owner 续步。 */
     private final TriggerExecutionContinuation reusableTriggerExecution = new TriggerExecutionContinuation();
 
-    /**
-     * 借出 Owner 当前复用的清仓触发单 ID 缓冲，调用方在下次清空或重新选择前消费。
-     */
-    public PrimitiveLongChangeSet closingTriggerIds() { return closingTriggerIds; }
 
     /**
      * 清缓冲后选出本命令已平仓对应的待触发单，核对各单取消修订可增加，再检查全局修订加总不溢出；返回的是待取消 ID，不在这里直接撤销。
@@ -141,9 +143,8 @@ public final class TriggerOrderCommands {
         return receipt == null ? owner.triggerOrderIndex().route(id) : TriggerOrderIndex.TriggerRoute.from(receipt);
     }
 
-    /**
-     * Owner 串行复用的一页触发扫描续步，保留价格与 OCO 游标并等待账户变更或子单准入。
-     */
+    /** Owner 串行复用的一页触发扫描续步，保留价格与 OCO 游标并等待账户变更或子单准入。 构造约定：创建供 Owner 串行复用的页续步，具体输入由 prepare 填入。 */
+    @NoArgsConstructor(access = AccessLevel.PACKAGE)
     private final class PendingTriggerScan implements java.util.function.BooleanSupplier {
         /** 当前扫描标的的规范整数身份。 */
         private int instrumentId;
@@ -167,11 +168,6 @@ public final class TriggerOrderCommands {
         /** 当前页在同一用户账户 Lane 复用的过期、追踪或同组撤销任务。 */
         private final ScanMutation reusableMutation = new ScanMutation();
 
-        /**
-         * 创建供 Owner 串行复用的页续步，具体输入由 prepare 填入。
-         */
-        PendingTriggerScan() {
-        }
 
         /**
          * 固定标的整数身份、扫描值和页预算，用产品线、标的文本及价格序列合成可重建命令 UUID，清上次页和等待状态后返回自身。

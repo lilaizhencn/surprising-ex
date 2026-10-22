@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.order;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
@@ -8,9 +10,8 @@ import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.aeron.service.state.risk.LiquidationRuntime;
 import java.util.List;
 
-/**
- * 订单提交元数据补写及终态记录清理入口。原 Lane 负责业务数据，提交阶段在合法范围补时间与日志位置；只允许原终态保留规则选中的订单、算法单、触发单和已解决强平记录进入清理。
- */
+/** 订单提交元数据补写及终态记录清理入口。原 Lane 负责业务数据，提交阶段在合法范围补时间与日志位置；只允许原终态保留规则选中的订单、算法单、触发单和已解决强平记录进入清理。 构造约定：只提供原提交及清理静态入口，不保存额外发布状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeOrderCommitStateTransitions {
 
     /**
@@ -48,11 +49,6 @@ public final class RuntimeOrderCommitStateTransitions {
         }
     }
 
-    /**
-     * 只提供原提交及清理静态入口，不保存额外发布状态。
-     */
-    private RuntimeOrderCommitStateTransitions() {
-    }
 
     /**
      * 检查非负提交时间、日志位置及非空迭代源，再完整遍历一次，使延迟迭代异常在账户任务开始前暴露；这里不额外校验每个编号。

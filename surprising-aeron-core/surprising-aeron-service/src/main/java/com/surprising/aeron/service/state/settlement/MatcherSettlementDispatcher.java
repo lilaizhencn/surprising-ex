@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.state.settlement;
 
+import lombok.RequiredArgsConstructor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
@@ -15,16 +16,14 @@ import static com.surprising.aeron.service.state.TradingRuntimeState.*;
 
 /**
  * 下单步骤 4.1、4.3 与 4.6 的交接入口：Owner 准备和回收事件，单个 Matcher 发布方直接投递所属账户，顺序批量收集时接续余额边界。产品资金计算仍由结算处理器完成。事件池只有 Owner 访问，不能把 Matcher 投递方法误当成 Owner 方法。
+ * 构造约定：保存所属运行时；事件池随本派发器长期保留，事件完成且交出变化后才能归还。
+ * 参数 owner：本派发器服务的交易运行时
  */
+@RequiredArgsConstructor
 public final class MatcherSettlementDispatcher {
     /** 所属运行时；准备及回收在 Owner，publishMatcherOwned 在单 Matcher 发布方执行。 */
     final TradingRuntimeState owner;
 
-    /**
-     * 保存所属运行时；事件池随本派发器长期保留，事件完成且交出变化后才能归还。
-     * @param owner 本派发器服务的交易运行时
-     */
-    public MatcherSettlementDispatcher(TradingRuntimeState owner) { this.owner = owner; }
 
     /**
      * 为单笔或批量已准入订单准备直达结算事件，委托内部入口处理元数据和复用存储。

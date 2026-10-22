@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.change;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 /**
@@ -19,7 +21,9 @@ public class RuntimeChangeBuffer<V> {
     private int[] indexGenerations = new int[16];
     /** 当前有效查找代次，绕回零才全清代次标记。 */
     private int indexGeneration = 1;
-    /** 本轮连续有效变化数量，不代表底层保留容量。 */
+    /**  本轮连续有效变化数量，不代表底层保留容量。 返回当前有效变化条目数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     int size;
 
     /**
@@ -147,10 +151,6 @@ public class RuntimeChangeBuffer<V> {
         return size == 0;
     }
 
-    /**
-     * 返回当前有效变化条目数。
-     */
-    public int size() { return size; }
 
     /**
      * 校验有效下标后读取该项原语键。

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.order;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.model.AssetBalance;
@@ -8,21 +10,37 @@ import com.surprising.aeron.service.state.model.AssetBalance;
  * 不可变的业务冻结记录，剩余冻结等于总额扣掉累计释放和累计消耗。金额变化返回新记录并复用已校验身份文本；本对象只描述金额，真实账户余额移动由账户入口处理。
  */
 public final class OrderReservation {
-    /** 这份冻结对应的正数订单编号。 */
+    /**  这份冻结对应的正数订单编号。 返回这份冻结对应的正数订单编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final long orderId;
-    /** 已经校验的永久币对编号文本。 */
+    /**  已经校验的永久币对编号文本。 返回已经校验的永久币对编号文本。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final String instrumentId;
-    /** 现货资产或衍生品保证金的冻结类别。 */
+    /**  现货资产或衍生品保证金的冻结类别。 返回现货资产或衍生品保证金的冻结类别。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final ReservationKind kind;
-    /** 已经规范化的冻结资产代码。 */
+    /**  已经规范化的冻结资产代码。 返回已经规范化的冻结资产代码。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final String asset;
-    /** 本记录的冻结总额上限，不是当前剩余额度。 */
+    /**  本记录的冻结总额上限，不是当前剩余额度。 返回本记录的冻结总额上限，不是当前剩余额度。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final long reservedUnits;
-    /** 已经从冻结中释放的累计金额。 */
+    /**  已经从冻结中释放的累计金额。 返回已经从冻结中释放的累计金额。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final long releasedUnits;
-    /** 已经因成交等业务消耗的累计冻结金额。 */
+    /**  已经因成交等业务消耗的累计冻结金额。 返回已经因成交等业务消耗的累计冻结金额。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final long consumedUnits;
-    /** 建立冻结时的订单数量步数基数，不随剩余额度变化。 */
+    /**  建立冻结时的订单数量步数基数，不随剩余额度变化。 返回建立冻结时的订单数量步数基数，不随剩余额度变化。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final long orderQuantitySteps;
 
     /**
@@ -90,38 +108,6 @@ public final class OrderReservation {
         }
     }
 
-    /**
-     * 返回这份冻结对应的正数订单编号。
-     */
-    public long orderId() { return orderId; }
-    /**
-     * 返回已经校验的永久币对编号文本。
-     */
-    public String instrumentId() { return instrumentId; }
-    /**
-     * 返回现货资产或衍生品保证金的冻结类别。
-     */
-    public ReservationKind kind() { return kind; }
-    /**
-     * 返回已经规范化的冻结资产代码。
-     */
-    public String asset() { return asset; }
-    /**
-     * 返回本记录的冻结总额上限，不是当前剩余额度。
-     */
-    public long reservedUnits() { return reservedUnits; }
-    /**
-     * 返回已经从冻结中释放的累计金额。
-     */
-    public long releasedUnits() { return releasedUnits; }
-    /**
-     * 返回已经因成交等业务消耗的累计冻结金额。
-     */
-    public long consumedUnits() { return consumedUnits; }
-    /**
-     * 返回建立冻结时的订单数量步数基数，不随剩余额度变化。
-     */
-    public long orderQuantitySteps() { return orderQuantitySteps; }
 
     /**
      * 按所有身份、类别、资产和金额字段比较业务值，不依赖对象是否为同一实例。

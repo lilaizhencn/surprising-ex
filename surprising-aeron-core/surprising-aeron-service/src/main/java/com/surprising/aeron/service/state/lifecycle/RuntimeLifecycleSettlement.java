@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.lifecycle;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
@@ -23,16 +25,10 @@ import java.util.List;
 import java.util.UUID;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
-/**
- * 按固定结算价结束合约持仓：先撤单，再按页准备余额与持仓后值，确认保险够用后应用账户并更新财库进度。同步主入口仅用于 System Ledger 未激活的回放或离线路径；在线命令由 RuntimeLifecycleSettlementContinuation 分次推进并复用本类的 Lane 操作。
- */
+/** 按固定结算价结束合约持仓：先撤单，再按页准备余额与持仓后值，确认保险够用后应用账户并更新财库进度。同步主入口仅用于 System Ledger 未激活的回放或离线路径；在线命令由 RuntimeLifecycleSettlementContinuation 分次推进并复用本类的 Lane 操作。 构造约定：工具类只提供静态结算步骤，不创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeLifecycleSettlement {
 
-    /**
-     * 工具类只提供静态结算步骤，不创建实例。
-     */
-    private RuntimeLifecycleSettlement() {
-    }
 
     /**
      * 从旧状态补齐缺省的用户集合与活动订单索引后执行同步结算。这里只检查必要对象非空，不另核对 before 与 runtime 的产品线或修订号；用户输入顺序仍由调用方保证。

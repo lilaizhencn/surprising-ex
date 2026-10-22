@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.risk;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -7,16 +9,10 @@ import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 
-/**
- * 更新运行时风险扫描控制和扫描游标。控制配置用版本号防止旧配置覆盖新配置，游标替换保留恢复所需进度，每次成功更新都推进命令修订号。
- */
+/** 更新运行时风险扫描控制和扫描游标。控制配置用版本号防止旧配置覆盖新配置，游标替换保留恢复所需进度，每次成功更新都推进命令修订号。 构造约定：只提供状态更新步骤，不额外持有扫描状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeRiskStateTransitions {
 
-    /**
-     * 只提供状态更新步骤，不额外持有扫描状态。
-     */
-    private RuntimeRiskStateTransitions() {
-    }
 
     /**
      * Owner 校验期望控制版本，生成下一版本的启用、间隔和工作量配置；更新时间最低取 0，写入后增加命令修订号。

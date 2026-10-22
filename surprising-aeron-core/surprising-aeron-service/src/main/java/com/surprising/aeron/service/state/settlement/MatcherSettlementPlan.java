@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.settlement;
 
+import lombok.RequiredArgsConstructor;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.service.matching.CoreCancellationResult;
 import com.surprising.aeron.service.matching.MatchingResult;
@@ -22,7 +26,9 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
  * 下单步骤 4.2：把一项撮合结果整理成成交事件、受影响订单和账户 Lane 路由。直达入口由 Matcher 根据输入事实构建，通用入口沿既有 Owner 读取边界校验账户；发布后由所属 Lane 消费。数组、只读视图和准入引用都受事件或在途槽租约约束，不能当成永久快照。
  */
 public final class MatcherSettlementPlan {
-    /** 本代 taker 或撤单请求是否被拒绝，不能与已计入成交并存。 */
+    /**  本代 taker 或撤单请求是否被拒绝，不能与已计入成交并存。 返回本计划是否要求按拒单或撤单拒绝处理 taker。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private boolean rejectedTaker;
     /**
      * 保存撮合拒单标记并返回本计划；已有成交时禁止标记拒绝，防止用拒单覆盖已发生的成交事实。
@@ -33,26 +39,34 @@ public final class MatcherSettlementPlan {
         rejectedTaker = rejected;
         return this;
     }
-    /**
-     * 返回本计划是否要求按拒单或撤单拒绝处理 taker。
-     */
-    boolean rejectedTaker() { return rejectedTaker; }
 
-    /** 本计划对应的 Core 复制命令序号。 */
+    /**  本计划对应的 Core 复制命令序号。 返回本计划所属 Core 序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long coreSequence;
-    /** 主动订单或撤单目标的编号。 */
+    /**  主动订单或撤单目标的编号。 返回当前 taker 或撤单目标编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long takerOrderId;
-    /** 当前复制命令的发起用户。 */
+    /**  当前复制命令的发起用户。 返回发起当前命令的账户用户编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long activeUserId;
-    /** 由 taker、maker 及相关变化归集的账户 Lane 位图。 */
+    /**  由 taker、maker 及相关变化归集的账户 Lane 位图。 返回本计划实际涉及的账户 Lane 位图。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long requiredLaneMask;
     /** 本计划自有或内部构造接管的原语订单编号数组，只使用 orderCount 个有效槽。 */
     private long[] orderIds;
-    /** 订单身份数组当前代的有效项数。 */
+    /**  订单身份数组当前代的有效项数。 返回本代受影响订单编号的有效数量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int orderCount;
     /** 本代原始 Matcher 事件列表引用，包含成交与其他事件。 */
     private List<MatcherEvent> matcherEvents;
-    /** 已校验并计入计划的 TRADE 事件数量。 */
+    /**  已校验并计入计划的 TRADE 事件数量。 返回本代已经统计的 TRADE 成交事件数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int tradeCount;
     /** 本代前置撤单有效数据指向，可能为空哨兵或自有复用数组。 */
     private long[] preCancellationOrderIds;
@@ -74,9 +88,13 @@ public final class MatcherSettlementPlan {
     private static final long[] NO_ORDERS = new long[0];
     /** 直达构建入口保存的 taker 引用，按本计划租约保留并在 clearReferences 释放。 */
     private OrderRuntime directTaker;
-    /** 构建时保留的准入订单值或命令槽引用，消费者遵守该代租约。 */
+    /**  构建时保留的准入订单值或命令槽引用，消费者遵守该代租约。 返回构建时保留的准入订单引用，借用期受计划租约限制，可能为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private OrderRuntime admittedTaker;
-    /** 尚无 Owner 订单后值时使用的不可变已解析准入输入。 */
+    /**  尚无 Owner 订单后值时使用的不可变已解析准入输入。 返回普通下单等入口保存的不可变准入输入，可能为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private ResolvedPlaceOrder resolvedTaker;
     /** 直达事实校验所需的主动订单方向，空表示不走直达订单校验。 */
     private com.surprising.aeron.protocol.CoreOrderSide directTakerSide;
@@ -521,7 +539,9 @@ public final class MatcherSettlementPlan {
                 || order.instrument() != directTakerInstrument)
             throw new IllegalStateException("matcher fact does not match Lane-owned order");
     }
-    /** 本代要由 taker Lane 写入的触发单终态，普通命令为空。 */
+    /**  本代要由 taker Lane 写入的触发单终态，普通命令为空。 返回本代要由 taker Lane 写入的触发单终态，普通订单返回空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private com.surprising.aeron.service.state.model.CoreTriggerOrderState completedTrigger;
 
     /**
@@ -537,10 +557,6 @@ public final class MatcherSettlementPlan {
         completedTrigger = value;
         return this;
     }
-    /**
-     * 返回本代要由 taker Lane 写入的触发单终态，普通订单返回空。
-     */
-    public com.surprising.aeron.service.state.model.CoreTriggerOrderState completedTrigger() { return completedTrigger; }
 
     /**
      * 从已有原语事实列创建计划，默认没有前置撤单；内部入口接管传入数组与事件引用。
@@ -970,19 +986,13 @@ public final class MatcherSettlementPlan {
         return size + 1;
     }
 
-    /**
-     * 绑定所属计划的只读订单编号视图，同时提供原语读取接口；有效范围随当前计划代次变化，不持有独立快照。
-     */
+    /** 绑定所属计划的只读订单编号视图，同时提供原语读取接口；有效范围随当前计划代次变化，不持有独立快照。 构造约定：只保存所属计划引用，读取时跟随该计划当前代的有效编号前缀。 参数 plan：此只读视图借用的所属计划 */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     private static final class OrderIdView extends AbstractList<Long>
             implements RandomAccess, com.surprising.aeron.service.command.support.PrimitiveLongView {
         /** 只读视图借用的所属计划，不复制其订单数组。 */
         private final MatcherSettlementPlan plan;
 
-        /**
-         * 只保存所属计划引用，读取时跟随该计划当前代的有效编号前缀。
-         * @param plan 此只读视图借用的所属计划
-         */
-        private OrderIdView(MatcherSettlementPlan plan) { this.plan = plan; }
 
         /**
          * 校验当前有效范围后返回装箱订单编号；本视图不复制编号，计划复用后旧代内容失效。
@@ -1062,34 +1072,6 @@ public final class MatcherSettlementPlan {
         return order;
     }
 
-    /**
-     * 返回本计划所属 Core 序号。
-     */
-    public long coreSequence() { return coreSequence; }
-    /**
-     * 返回当前 taker 或撤单目标编号。
-     */
-    public long takerOrderId() { return takerOrderId; }
-    /**
-     * 返回发起当前命令的账户用户编号。
-     */
-    public long activeUserId() { return activeUserId; }
-    /**
-     * 返回构建时保留的准入订单引用，借用期受计划租约限制，可能为空。
-     */
-    OrderRuntime admittedTaker() { return admittedTaker; }
-    /**
-     * 返回普通下单等入口保存的不可变准入输入，可能为空。
-     */
-    ResolvedPlaceOrder resolvedTaker() { return resolvedTaker; }
-    /**
-     * 返回本计划实际涉及的账户 Lane 位图。
-     */
-    public long requiredLaneMask() { return requiredLaneMask; }
-    /**
-     * 返回本代受影响订单编号的有效数量。
-     */
-    public int orderCount() { return orderCount; }
 
     /**
      * 借用计划自带的只读订单编号视图，不复制数组；视图随当前计划代次变化，不能跨租约保留。
@@ -1109,10 +1091,6 @@ public final class MatcherSettlementPlan {
      * @param index 当前代有效订单、事件或前置撤单下标
      */
     public MatcherEvent matcherEvent(int index) { return matcherEvents.get(index); }
-    /**
-     * 返回本代已经统计的 TRADE 成交事件数。
-     */
-    public int tradeCount() { return tradeCount; }
     /**
      * 把调用方整个原语撤单数组复制到计划自有缓冲，空数组清除本代撤单前缀；这里不重新验证撤单是否成功。
      * @param orderIds 受影响订单编号数组，复制或接管方式以具体入口为准

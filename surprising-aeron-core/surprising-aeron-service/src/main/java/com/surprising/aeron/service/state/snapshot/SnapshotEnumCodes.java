@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.state.*;
 import com.surprising.aeron.service.state.model.*;
@@ -10,14 +12,9 @@ import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 
-/**
- * 快照和确定性业务表示使用的固定枚举编号表。每种业务枚举单独双向映射，已有数字保持不变，新增 Java 枚举不能靠改变 ordinal 混入历史快照；未知持久化编号一律拒绝。
- */
+/** 快照和确定性业务表示使用的固定枚举编号表。每种业务枚举单独双向映射，已有数字保持不变，新增 Java 枚举不能靠改变 ordinal 混入历史快照；未知持久化编号一律拒绝。 构造约定：工具类不创建实例，编码由固定映射确定。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SnapshotEnumCodes {
-    /**
-     * 工具类不创建实例，编码由固定映射确定。
-     */
-    private SnapshotEnumCodes() { }
     /**
      * 把预留用途写成固定持久化编号：SPOT_ASSET=0、DERIVATIVE_MARGIN=1。不使用 Java 枚举声明顺序。
      * @param value 本次要持久化的预留用途枚举值

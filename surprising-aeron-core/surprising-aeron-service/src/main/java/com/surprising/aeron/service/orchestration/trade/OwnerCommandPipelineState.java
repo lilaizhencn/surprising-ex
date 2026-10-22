@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
@@ -14,7 +17,9 @@ public final class OwnerCommandPipelineState {
     /** 异步命令截止点使用的三十秒纳秒间隔，本类只保存截止点。 */
     static final long COMMAND_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
 
-    /** 当前 Owner 的响应 FIFO，非窗口模式为空。 */
+    /**  当前 Owner 的响应 FIFO，非窗口模式为空。 返回当前响应 FIFO，未启用窗口模式时为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final ClusterCommandWindow commandWindow;
 
     /**
@@ -29,18 +34,34 @@ public final class OwnerCommandPipelineState {
     public OwnerCommandPipelineState(boolean pipelined) {
         commandWindow = pipelined ? new ClusterCommandWindow() : null;
     }
-    /** 正在等待直接业务或查询完成的入口条目。 */
+    /**  正在等待直接业务或查询完成的入口条目。 返回当前控制命令的入口条目引用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private OwnerIngressRing.Entry activeControl;
-    /** 当前控制命令暂存的可空响应候选。 */
+    /**
+     *  当前控制命令暂存的可空响应候选。
+     * 返回当前控制命令暂存的响应候选。
+     * 保存可空响应候选，实际发送时机由 Owner 主流程决定。
+     * @param controlResponse 需要暂存或匹配保存的可空/非空响应，具体要求见方法
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     private CoreResponse controlResponse;
     /** 控制命令等待的 Matcher 序号，零表示无等待。 */
     private long matchingResponseSequence;
-    /** 已经匹配等待序号的控制撮合终态响应。 */
+    /**  已经匹配等待序号的控制撮合终态响应。 返回已经匹配保存的控制撮合终态响应。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreResponse matchingResponse;
 
-    /** 当前正在提交的窗口队首引用，退休前固定。 */
+    /**  当前正在提交的窗口队首引用，退休前固定。 返回已绑定队首引用，其日志位置与时间保留在条目中。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private ClusterCommandWindow.Entry committingHead;
-    /** 当前异步命令保存的 nanoTime 截止点。 */
+    /**  当前异步命令保存的 nanoTime 截止点。 返回上次保存的单调时钟截止点，未设置时为零。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long progressDeadline;
 
     /** 被现有依赖挡住的入口请求对象。 */
@@ -55,10 +76,14 @@ public final class OwnerCommandPipelineState {
     /** 上次无进展且无本地工作的等待通知标记。 */
     private boolean waitingMatchingNotification;
 
-    /** Owner 已记录的命令阶段推进次数。 */
+    /**  Owner 已记录的命令阶段推进次数。 返回 Owner 已记录的推进次数，不是已应用 Core 序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long commandProgress;
 
-    /** 准入记录时观测到的窗口最大占用。 */
+    /**  准入记录时观测到的窗口最大占用。 返回记录准入时观测到的窗口峰值。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int commandWindowHighWaterMark;
     /** 已建立队首提交边界的次数，在 beginHeadCommit 增加。 */
     private long drainedCommands;
@@ -116,12 +141,6 @@ public final class OwnerCommandPipelineState {
         return activeControl != null;
     }
 
-    /**
-     * 返回当前控制命令的入口条目引用。
-     */
-    public OwnerIngressRing.Entry activeControl() {
-        return activeControl;
-    }
 
     /**
      * 保存控制入口并清上一控制响应及等待 Matcher 水位，不校验 entry 非空。
@@ -134,20 +153,7 @@ public final class OwnerCommandPipelineState {
         matchingResponse = null;
     }
 
-    /**
-     * 返回当前控制命令暂存的响应候选。
-     */
-    public CoreResponse controlResponse() {
-        return controlResponse;
-    }
 
-    /**
-     * 保存可空响应候选，实际发送时机由 Owner 主流程决定。
-     * @param response 需要暂存或匹配保存的可空/非空响应，具体要求见方法
-     */
-    public void controlResponse(CoreResponse response) {
-        controlResponse = response;
-    }
 
     /**
      * 记录当前控制命令等待的序号并清旧响应；本方法不检查序号正数。
@@ -165,12 +171,6 @@ public final class OwnerCommandPipelineState {
         return matchingResponseSequence != 0;
     }
 
-    /**
-     * 返回已经匹配保存的控制撮合终态响应。
-     */
-    public CoreResponse matchingResponse() {
-        return matchingResponse;
-    }
 
     /**
      * 清当前控制入口、响应候选和等待序号，不移动普通命令窗口。
@@ -182,12 +182,6 @@ public final class OwnerCommandPipelineState {
         matchingResponse = null;
     }
 
-    /**
-     * 返回当前响应 FIFO，未启用窗口模式时为空。
-     */
-    public ClusterCommandWindow commandWindow() {
-        return commandWindow;
-    }
 
     /**
      * 要求依赖前缀在当前窗口内，记录请求对象和该前缀最后一个现有条目；不复制一份依赖集合。
@@ -244,12 +238,6 @@ public final class OwnerCommandPipelineState {
         return committingHead != null;
     }
 
-    /**
-     * 返回已绑定队首引用，其日志位置与时间保留在条目中。
-     */
-    public ClusterCommandWindow.Entry committingHead() {
-        return committingHead;
-    }
 
     /**
      * 保存当前 nanoTime 加三十秒的截止点，超时判断由调用方后续执行，不在这里启动计时任务。
@@ -258,12 +246,6 @@ public final class OwnerCommandPipelineState {
         progressDeadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
     }
 
-    /**
-     * 返回上次保存的单调时钟截止点，未设置时为零。
-     */
-    public long progressDeadline() {
-        return progressDeadline;
-    }
 
     /**
      * 保存本次派发上限和完成进度，只有进度未变且没有本地可推进工作时才标记等待通知。
@@ -332,12 +314,6 @@ public final class OwnerCommandPipelineState {
         matchingResponse = response;
     }
 
-    /**
-     * 返回 Owner 已记录的推进次数，不是已应用 Core 序号。
-     */
-    public long commandProgress() {
-        return commandProgress;
-    }
 
     /**
      * 记录一次入口准入进展，并按当前窗口大小更新观测峰值。
@@ -371,12 +347,6 @@ public final class OwnerCommandPipelineState {
         if (retry) retryFences++;
     }
 
-    /**
-     * 返回记录准入时观测到的窗口峰值。
-     */
-    public int commandWindowHighWaterMark() {
-        return commandWindowHighWaterMark;
-    }
 
     /**
      * 组装终止日志摘要：窗口峰值、剩余项、建立提交边界次数及各类等待计数；commands 不是成功完成命令数。

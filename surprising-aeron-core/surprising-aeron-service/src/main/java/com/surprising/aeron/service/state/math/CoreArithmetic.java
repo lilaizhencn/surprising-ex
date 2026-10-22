@@ -1,17 +1,15 @@
 package com.surprising.aeron.service.state.math;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import java.math.BigInteger;
 
-/** 金额和比例计算共用的整数工具。向上取整和四舍五入函数按非负被除数、正除数的业务场景使用；long 中间值溢出时尝试大整数，但最终返回 long 时仍会检查范围。 */
+/**  金额和比例计算共用的整数工具。向上取整和四舍五入函数按非负被除数、正除数的业务场景使用；long 中间值溢出时尝试大整数，但最终返回 long 时仍会检查范围。 构造约定：只提供整数计算，不能创建实例来保存任何业务资金状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CoreArithmetic {
     /** 比例按百万分之一保存时使用的大整数分母。 */
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
 
-    /**
-     * 只提供整数计算，不能创建实例来保存任何业务资金状态。
-     */
-    private CoreArithmetic() {
-    }
 
     /**
      * 先按给定分子分母缩放并截断，再先应用下限、后应用上限；这里的 floor 是保底金额，不是另一个舍入函数。

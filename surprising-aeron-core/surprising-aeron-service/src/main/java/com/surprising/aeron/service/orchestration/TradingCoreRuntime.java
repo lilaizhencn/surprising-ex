@@ -1,5 +1,11 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.protocol.CommandFingerprint;
@@ -98,19 +104,25 @@ import java.util.concurrent.CompletableFuture;
  * 结果完成交给 OrderedCommitCoordinator；其他命令交给对应业务 Commands。
  * <p>账户 Lane、Matcher 和账本各自拥有权威状态。本类保存当前命令的变化范围、路由索引、收据及恢复水位，
  * 借出引用不会自动授予跨线程账户读写权限。构造保持被动，activate 才建立活动执行边界。</p>
+ * 日志： 运行时生命周期及故障诊断日志，不参与业务计算。
  */
+@Slf4j
 public final class TradingCoreRuntime implements AutoCloseable {
 
-    /** 运行时生命周期及故障诊断日志，不参与业务计算。 */
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TradingCoreRuntime.class);
 
-    /** 本 Owner 复用的命令指纹计算器，用于同一命令身份的内容一致性检查。 */
+    /**  本 Owner 复用的命令指纹计算器，用于同一命令身份的内容一致性检查。 借出请求指纹计算器，供同一 Owner 的幂等准备使用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
 
-    /** 标的生命周期结算入口，处理交割等结算编排。 */
+    /**  标的生命周期结算入口，处理交割等结算编排。 借出标的交割及结算处理对象。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final InstrumentSettlementCommands instrumentSettlement = new InstrumentSettlementCommands(this);
 
-    /** 撮合命令准入入口，承担解码后的订单与账户准备。 */
+    /**  撮合命令准入入口，承担解码后的订单与账户准备。 借出撮合准入入口，使用当前 Owner 与命令上下文。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final MatchingCommandAdmission admissions = new MatchingCommandAdmission(this);
 
     /** 撮合结果的有序提交入口，等待账户和账本完成后交出终态。 */
@@ -123,7 +135,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final InstrumentConfigurationCommands instruments =
             new InstrumentConfigurationCommands(this);
 
-    /** 永续资金费命令与进度入口，U 本位和币本位沿用各自结算规则。 */
+    /**  永续资金费命令与进度入口，U 本位和币本位沿用各自结算规则。 借出资金费命令入口，沿用产品线、事实和结算边界。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final PerpetualFundingCommands funding = new PerpetualFundingCommands(this);
 
     /** 衍生品标记价、风险扫描及风控命令入口。 */
@@ -135,7 +149,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 杠杆调整命令入口。 */
     final LeverageCommands leverage = new LeverageCommands(this);
 
-    /** 强平命令及后续工作入口。 */
+    /**  强平命令及后续工作入口。 借出强平命令处理对象，沿用当前事实和提交作用域。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final LiquidationCommands liquidations = new LiquidationCommands(this);
 
     /** 自动减仓命令入口，沿用对应产品线风险边界。 */
@@ -152,7 +168,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
             balances, instruments, funding, risk, liquidations, adl, insurance,
             positions, leverage, new FeePolicyCommands(this),
             triggers);
-    /** 本次调用是否采用独立窗口准入，执行结束恢复外层值。 */
+    /**  本次调用是否采用独立窗口准入，执行结束恢复外层值。 返回本次调用是否允许按独立撮合窗口接纳。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean clusterPipelineAdmission;
     /** 本次借用的原输入对象，用对象身份约束解码与指纹缓存。 */
     private CoreMessage decodedIngressMessage;
@@ -160,9 +178,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private DecodedMatchingCommand decodedIngressCommand;
     /** 当前输入已准备的可空指纹，只能与同一原输入配套复用。 */
     private CommandFingerprint preparedIngressFingerprint;
-    /** 最近一次窗口预检查留下的用户 Lane 位，未适用时为零。 */
+    /**  最近一次窗口预检查留下的用户 Lane 位，未适用时为零。 返回预检查记下的用户 Lane 位；它只用于窗口路由，不代表业务已经受理。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long preparedRouteUserLaneBit;
-    /** 最近一次窗口预检查留下的 Matcher 分片，未适用时为负一。 */
+    /**  最近一次窗口预检查留下的 Matcher 分片，未适用时为负一。 返回预检查记下的 Matcher 分片；没有可用路由时为负一。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int preparedRouteMatcherShard = -1;
     /** 普通撮合派发与完成推进的业务协作入口。 */
     public final CoreMatchingFlow matchingFlow = new CoreMatchingFlow(this);
@@ -175,15 +197,21 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 缓存视图对应的已发布投影序号。 */
     private long cachedSequence = Long.MIN_VALUE;
 
-    /** 有界响应缓冲池，同时由近期收据和传输出口持有租约；收据退窗不一定立即可复用。 */
+    /**  有界响应缓冲池，同时由近期收据和传输出口持有租约；收据退窗不一定立即可复用。 借出响应缓冲池，调用方仍须遵守收据与传输租约。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final ResponseArena responseArena = new ResponseArena();
 
     /** 当前命令复用的结果构建器，响应最终交接前持有其缓冲租约。 */
     public final CommandResultBuilder resultBuilder = new CommandResultBuilder(this);
 
-    /** 批量下单、撤单和改单业务处理对象。 */
+    /**  批量下单、撤单和改单业务处理对象。 借出批量订单业务入口，沿用当前命令与有序提交边界。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final OrderBatchExecutor batches = new OrderBatchExecutor(this);
-    /** Owner 串行推进的跨分片撤单队列。 */
+    /**  Owner 串行推进的跨分片撤单队列。 借出跨分片撤单推进对象，由 Owner 串行调用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final CrossShardCancellationCoordinator crossShardCancellations = new CrossShardCancellationCoordinator(this);
 
     /** 快照栅栏、捕获、编码和恢复所需的生命周期对象。 */
@@ -194,7 +222,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 撮合完成与提交进度的观测和通知入口。 */
     public final MatchingPipelineProgress matchingProgress = new MatchingPipelineProgress(this);
 
-    /** 可选实时变化捕获器，未接入实时输出时为空。 */
+    /**  可选实时变化捕获器，未接入实时输出时为空。 取得可空的实时变更捕获器。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
     /**
      * 接入实时输出队列，创建本产品线的变更捕获器并交给运行时；这里只连接既有业务状态，不启动输出线程。
@@ -583,13 +613,19 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 类加载时读取的在途撮合配置，默认 4096；实际队列容量还受 Matcher 窗口限制。 */
     public static final int MAX_PENDING_MATCHING = Integer.getInteger(
             "surprising.aeron.max-pending-matching", 4_096);
-    /** 本运行时唯一产品线，隔离协议、标的、账户和恢复状态。 */
+    /**  本运行时唯一产品线，隔离协议、标的、账户和恢复状态。 返回该运行时唯一所属的产品线。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final ProductLine productLine;
     /** 当前绑定的 Owner 线程，被动构造后可交接，活动业务要求线程一致。 */
     Thread owner;
-    /** 基于运行时事实建立的索引集合，恢复时重新绑定并重建。 */
+    /**  基于运行时事实建立的索引集合，恢复时重新绑定并重建。 借出运行时事实索引集合，沿用各索引已有所有权。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final com.surprising.aeron.service.state.index.RuntimeFactIndexes factIndexes;
-    /** 近期完整命令收据及响应租约的有界保存表。 */
+    /**  近期完整命令收据及响应租约的有界保存表。 借出近期命令收据表，不延长其中响应缓冲的持有期限。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final CommandResultLedger resultLedger;
 
     /** Owner 按来源类型和来源身份记录的最新已登记序号。 */
@@ -598,71 +634,123 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public final PendingMatchingRing pendingMatching;
     /** Matcher 分片的执行、控制任务、完成通知及路由边界。 */
     public final MatcherPipelineGroup matcherPipeline;
-    /** 本产品线的确定性撮合适配器，构造时先保持被动状态。 */
+    /**  本产品线的确定性撮合适配器，构造时先保持被动状态。 借出 Matcher 适配器，仍遵守其分片线程和控制协议。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final DeterministicExchangeCoreAdapter matchingAdapter;
 
-    /** 持仓用户索引；活动阶段由账本维护，Owner 使用路由及查询描述。 */
+    /**  持仓用户索引；活动阶段由账本维护，Owner 使用路由及查询描述。 借出持仓用户索引引用；活动阶段的可变内容仍由账本拥有。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final PositionUserIndex positionUserIndex;
-    /** 持仓量索引；活动阶段的可变权威状态归账本。 */
+    /**  持仓量索引；活动阶段的可变权威状态归账本。 借出持仓量索引引用，活动阶段由账本维护其权威变化。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final OpenInterestIndex openInterestIndex;
-    /** Owner 维护的活动触发单及扫描索引。 */
+    /**  Owner 维护的活动触发单及扫描索引。 借出 Owner 维护的触发单索引，供触发扫描及命令编排使用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final TriggerOrderIndex triggerOrderIndex;
-    /** Owner 维护的算法单索引。 */
+    /**  Owner 维护的算法单索引。 借出 Owner 算法单索引。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final AlgoOrderIndex algoOrderIndex;
-    /** Owner 维护的强平身份及工作索引。 */
+    /**  Owner 维护的强平身份及工作索引。 借出 Owner 强平索引，供既有业务编排使用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final LiquidationIndex liquidationIndex;
     /** Owner 维护的定时全撤状态索引。 */
     final CancelAllAfterIndex cancelAllAfterIndex;
-    /** Owner 维护的活动订单路由索引，避免路由判断扫描账户。 */
+    /**  Owner 维护的活动订单路由索引，避免路由判断扫描账户。 借出 Owner 的活动订单路由索引，查询路由不等于读取账户权威状态。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final ActiveOrderIndex activeOrderIndex;
-    /** ADL 持仓索引；活动阶段按账本所有权读写。 */
+    /**  ADL 持仓索引；活动阶段按账本所有权读写。 借出 ADL 持仓索引引用，遵守账本的状态所有权。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final AdlPositionIndex adlPositionIndex;
 
-    /** 已经累计到终态统计中的 TRADE 事件条数。 */
+    /**
+     *  已经累计到终态统计中的 TRADE 事件条数。
+     * 保存调用方给出的终态成交事件计数，不在这里增加或重新统计。
+     * @param terminalTradeCount 需要保存的终态 TRADE 事件总数
+     */
+    @Accessors(fluent = true, chain = false)
+    @Setter
     long terminalTradeCount;
-    /** 近期终态候选和墓碑，以及长期资金身份的保留入口。 */
+    /**  近期终态候选和墓碑，以及长期资金身份的保留入口。 借出终态保留对象，沿用 Owner、恢复和账本边界。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final TerminalStateRetention terminalRetention;
 
-    /** 当前是否有一条命令占用事实变化作用域。 */
+    /**  当前是否有一条命令占用事实变化作用域。 返回当前是否处于已激活的命令事实作用域。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     boolean factContextActive;
-    /** 已登记受理的 Core 序号上界，可能包含尚未完成的撮合命令。 */
+    /**  已登记受理的 Core 序号上界，可能包含尚未完成的撮合命令。 返回已经登记受理的 Core 命令计数；在途撮合可能尚未推进到已提交水位。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     long appliedCommandCount;
-    /** 已经完成的有序 Core 前缀，不能跨越在途撮合队首。 */
+    /**  已经完成的有序 Core 前缀，不能跨越在途撮合队首。 返回已经完成有序前缀的 Core 序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     long committedCoreSequence;
-    /** 已经登记的提交发布故障，后续健康检查立即传播。 */
+    /**
+     *  已经登记的提交发布故障，后续健康检查立即传播。
+     * 登记调用方给出的提交发布故障，后续健康检查传播该值。
+     * @param commitPublicationFailure 需要登记的可空提交发布异常
+     */
+    @Accessors(fluent = true, chain = false)
+    @Setter
     RuntimeException commitPublicationFailure;
-    /** 标的、资产和持仓等内部身份注册表，沿用 Owner 与恢复边界。 */
+    /**  标的、资产和持仓等内部身份注册表，沿用 Owner 与恢复边界。 借出本产品线的身份注册表，沿用其线程与恢复边界。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeIdentityRegistry identities;
-    /** 账户、持仓、账本及直接命令的实际运行时；Owner 不取得各 Lane 的任意写权限。 */
+    /**  账户、持仓、账本及直接命令的实际运行时；Owner 不取得各 Lane 的任意写权限。 借出实际运行时引用，供既有编排访问；引用本身不授予跨线程账户读写权限。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final TradingRuntimeState runtimeState;
 
-    /** 已经登记的致命撮合分歧，非空时阻止后续健康检查通过。 */
+    /**  已经登记的致命撮合分歧，非空时阻止后续健康检查通过。 取得已经登记的撮合致命分歧，未登记时返回空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     FatalMatchingDivergenceException fatalFailure;
 
     /** 跨 Lane 财库变化合并时复用的资金累加器。 */
     final RuntimeTreasuryDelta mergedLaneTreasuryDelta =
             new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
-    /** 当前命令保存的原复制日志位置。 */
+    /**
+     *  当前命令保存的原复制日志位置。
+     * 返回当前保存的复制日志位置。
+     * 保存调用方提供的当前复制日志位置；本方法只赋值，不自行推进业务或检查线程。
+     * @param currentClusterPosition 需要保存的当前复制日志位置
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     long currentClusterPosition;
-    /** 当前命令保存的原复制日志业务时间。 */
+    /**
+     *  当前命令保存的原复制日志业务时间。
+     * 返回当前命令保存的复制日志业务时间。
+     * 保存调用方提供的复制日志业务时间，不读取系统时间或自行执行业务。
+     * @param currentClusterTimestamp 需要保存的当前复制日志业务时间
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     long currentClusterTimestamp;
     /** 准入前的日志位置，准入拒绝时恢复。 */
     long admissionPreviousClusterPosition;
     /** 准入前的业务时间，准入拒绝时恢复。 */
     long admissionPreviousClusterTimestamp;
-    /** 是否已经完整执行过激活流程，关闭时不会自动改回假。 */
+    /**  是否已经完整执行过激活流程，关闭时不会自动改回假。 返回是否已经完成激活；不把该值当作资源仍未关闭的独立证明。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     boolean activated;
     /** 是否已经进入关闭流程，重复关闭直接返回。 */
     boolean closed;
 
-    /**
-     * 借出实际运行时引用，供既有编排访问；引用本身不授予跨线程账户读写权限。
-     */
-    public TradingRuntimeState runtimeState() { return runtimeState; }
-    /**
-     * 借出本产品线的身份注册表，沿用其线程与恢复边界。
-     */
-    public RuntimeIdentityRegistry identities() { return identities; }
     /**
      * 要求当前提交发布器记录变化；实际何时发布仍由命令完成边界决定。
      */
@@ -671,22 +759,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * 返回当前运行时是否正在异步命令作用域内。
      */
     public boolean asynchronousCommands() { return runtimeState.asynchronousCommands(); }
-    /**
-     * 借出持仓用户索引引用；活动阶段的可变内容仍由账本拥有。
-     */
-    public PositionUserIndex positionUserIndex() { return positionUserIndex; }
-    /**
-     * 借出 Owner 维护的触发单索引，供触发扫描及命令编排使用。
-     */
-    public TriggerOrderIndex triggerOrderIndex() { return triggerOrderIndex; }
-    /**
-     * 借出 Owner 的活动订单路由索引，查询路由不等于读取账户权威状态。
-     */
-    public ActiveOrderIndex activeOrderIndex() { return activeOrderIndex; }
-    /**
-     * 借出 ADL 持仓索引引用，遵守账本的状态所有权。
-     */
-    public AdlPositionIndex adlPositionIndex() { return adlPositionIndex; }
     /**
      * 取得强平索引中的活动强平身份集合，供既有强平编排使用。
      */
@@ -722,10 +794,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * 返回触发扫描每轮的默认工作预算。
      */
     public int defaultTriggerScanBatchSize() { return DEFAULT_TRIGGER_SCAN_BATCH_SIZE; }
-    /**
-     * 返回当前命令保存的复制日志业务时间。
-     */
-    public long currentClusterTimestamp() { return currentClusterTimestamp; }
     /**
      * 判断算法单实体 ID 或该用户的客户算法单号是否仍在终态保留范围内。
      * @param algoOrderId 要检查终态保留的算法单实体 ID
@@ -971,26 +1039,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return apply(message, message.header().submittedAtEpochMillis(), Math.addExact(appliedCommandCount, 1));
     }
 
-    /**
-     * 返回本次调用是否允许按独立撮合窗口接纳。
-     */
-    public boolean clusterPipelineAdmission() {
-        return clusterPipelineAdmission;
-    }
 
-    /**
-     * 返回预检查记下的用户 Lane 位；它只用于窗口路由，不代表业务已经受理。
-     */
-    public long preparedRouteUserLaneBit() {
-        return preparedRouteUserLaneBit;
-    }
 
-    /**
-     * 返回预检查记下的 Matcher 分片；没有可用路由时为负一。
-     */
-    public int preparedRouteMatcherShard() {
-        return preparedRouteMatcherShard;
-    }
 
     /**
      * 交易入口：激活并绑定 Owner，检查健康、控制命令和快照边界，登记原日志元数据，按查询需要取得读栅栏；先尝试查询，再把合法命令交给幂等和业务准入入口。
@@ -1935,10 +1985,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
     }
 
-    /**
-     * 返回是否已经完成激活；不把该值当作资源仍未关闭的独立证明。
-     */
-    public boolean activated() { return activated; }
 
     /**
      * 返回终态候选索引当前条数。
@@ -1961,12 +2007,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return identities.clientIdentityCount();
     }
 
-    /**
-     * 借出终态保留对象，沿用 Owner、恢复和账本边界。
-     */
-    public TerminalStateRetention terminalRetention() {
-        return terminalRetention;
-    }
 
     /**
      * 取得当前业务状态哈希，使用完整业务读取及快照栅栏边界。
@@ -2117,26 +2157,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return SectionedCoreSnapshotCodec.manifest(snapshot, productLine);
     }
 
-    /**
-     * 返回该运行时唯一所属的产品线。
-     */
-    public ProductLine productLine() {
-        return productLine;
-    }
 
-    /**
-     * 返回已经登记受理的 Core 命令计数；在途撮合可能尚未推进到已提交水位。
-     */
-    public long appliedCommandCount() {
-        return appliedCommandCount;
-    }
 
-    /**
-     * 返回已经完成有序前缀的 Core 序号。
-     */
-    public long committedCoreSequence() {
-        return committedCoreSequence;
-    }
 
     /**
      * 在 Owner 上计算下一个 Core 序号，溢出直接报错；此方法只计算，不预留或写回计数。
@@ -3125,20 +3147,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
                                   com.surprising.aeron.service.matching.MatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) { return commits.completeMatching(sequence, matchingResult, clusterTimestamp, clusterPosition); }
 
-    /**
-     * Owner 上的跨 Matcher 分片撤单推进器：逐项派发、等待证据并保留原顺序，完整结果再交给已有结算路径。
-     */
+    /** Owner 上的跨 Matcher 分片撤单推进器：逐项派发、等待证据并保留原顺序，完整结果再交给已有结算路径。 构造约定：固定所属运行时；后续队列仅由其 Owner 推进。 参数 owner：拥有本跨分片撤单推进器的运行时 */
+    @RequiredArgsConstructor(access = AccessLevel.PACKAGE)
     public static final class CrossShardCancellationCoordinator {
         /** 拥有此撤单推进器的运行时，所有队列推进遵守其 Owner 约束。 */
         private final TradingCoreRuntime owner;
         /** 按登记顺序等待派发与回执的跨分片撤单工作。 */
         private final java.util.ArrayDeque<Progress> pending = new java.util.ArrayDeque<>();
 
-        /**
-         * 固定所属运行时；后续队列仅由其 Owner 推进。
-         * @param owner 拥有本跨分片撤单推进器的运行时
-         */
-        CrossShardCancellationCoordinator(TradingCoreRuntime owner) { this.owner = owner; }
 
         /**
          * 同一命令只登记一次跨分片撤单，保存其稳定撤单描述并立即尝试推进。
@@ -3347,98 +3363,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return runtimeState.topology().accountLaneMask(userId);
     }
 
-    /**
-     * 借出请求指纹计算器，供同一 Owner 的幂等准备使用。
-     */
-    public CommandFingerprint.Calculator fingerprints() { return fingerprints; }
-    /**
-     * 借出批量订单业务入口，沿用当前命令与有序提交边界。
-     */
-    public OrderBatchExecutor batches() { return batches; }
-    /**
-     * 借出近期命令收据表，不延长其中响应缓冲的持有期限。
-     */
-    public CommandResultLedger resultLedger() { return resultLedger; }
-    /**
-     * 借出 Matcher 适配器，仍遵守其分片线程和控制协议。
-     */
-    public DeterministicExchangeCoreAdapter matchingAdapter() { return matchingAdapter; }
-    /**
-     * 借出 Owner 强平索引，供既有业务编排使用。
-     */
-    public LiquidationIndex liquidationIndex() { return liquidationIndex; }
-    /**
-     * 保存调用方提供的当前复制日志位置；本方法只赋值，不自行推进业务或检查线程。
-     * @param value 需要保存的当前复制日志位置
-     */
-    public void currentClusterPosition(long value) { this.currentClusterPosition = value; }
-    /**
-     * 借出强平命令处理对象，沿用当前事实和提交作用域。
-     */
-    public LiquidationCommands liquidations() { return liquidations; }
-    /**
-     * 借出标的交割及结算处理对象。
-     */
-    public InstrumentSettlementCommands instrumentSettlement() { return instrumentSettlement; }
-    /**
-     * 保存调用方给出的终态成交事件计数，不在这里增加或重新统计。
-     * @param value 需要保存的终态 TRADE 事件总数
-     */
-    public void terminalTradeCount(long value) { this.terminalTradeCount = value; }
-    /**
-     * 借出撮合准入入口，使用当前 Owner 与命令上下文。
-     */
-    public MatchingCommandAdmission admissions() { return admissions; }
-    /**
-     * 借出响应缓冲池，调用方仍须遵守收据与传输租约。
-     */
-    public ResponseArena responseArena() { return responseArena; }
-    /**
-     * 借出跨分片撤单推进对象，由 Owner 串行调用。
-     */
-    public CrossShardCancellationCoordinator crossShardCancellations() { return crossShardCancellations; }
-    /**
-     * 取得已经登记的撮合致命分歧，未登记时返回空。
-     */
-    public FatalMatchingDivergenceException fatalFailure() { return fatalFailure; }
-    /**
-     * 取得可空的实时变更捕获器。
-     */
-    public com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture() { return realtimeCapture; }
-    /**
-     * 返回当前保存的复制日志位置。
-     */
-    public long currentClusterPosition() { return currentClusterPosition; }
-    /**
-     * 保存调用方提供的复制日志业务时间，不读取系统时间或自行执行业务。
-     * @param value 需要保存的当前复制日志业务时间
-     */
-    public void currentClusterTimestamp(long value) { this.currentClusterTimestamp = value; }
-    /**
-     * 借出 Owner 算法单索引。
-     */
-    public AlgoOrderIndex algoOrderIndex() { return algoOrderIndex; }
-    /**
-     * 借出持仓量索引引用，活动阶段由账本维护其权威变化。
-     */
-    public OpenInterestIndex openInterestIndex() { return openInterestIndex; }
-    /**
-     * 借出资金费命令入口，沿用产品线、事实和结算边界。
-     */
-    public PerpetualFundingCommands funding() { return funding; }
-    /**
-     * 返回当前是否处于已激活的命令事实作用域。
-     */
-    public boolean factContextActive() { return factContextActive; }
-    /**
-     * 借出运行时事实索引集合，沿用各索引已有所有权。
-     */
-    public com.surprising.aeron.service.state.index.RuntimeFactIndexes factIndexes() { return factIndexes; }
-    /**
-     * 登记调用方给出的提交发布故障，后续健康检查传播该值。
-     * @param value 需要登记的可空提交发布异常
-     */
-    public void commitPublicationFailure(RuntimeException value) { this.commitPublicationFailure = value; }
     /**
      * 借出来源序号索引，写入仍由 Owner 的有序命令完成路径负责。
      */

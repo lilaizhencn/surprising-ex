@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.adl;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.risk.LiquidationRuntime;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -18,18 +20,10 @@ import com.surprising.aeron.service.state.math.OptionContractMath;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
-/**
- * ADL 步骤 1–4：源强平校验、目标账户减仓、源强平补亏、账本记账。
- *
- * 自动减仓执行：先读取并校验亏空来源的强平记录，再由盈利目标账户的 Lane 减仓和结算，由源账户 Lane 扣减亏空，最后把资金差额交唯一账本。Owner 只安排顺序并收集完成结果。
- */
+/** ADL 步骤 1–4：源强平校验、目标账户减仓、源强平补亏、账本记账。 自动减仓执行：先读取并校验亏空来源的强平记录，再由盈利目标账户的 Lane 减仓和结算，由源账户 Lane 扣减亏空，最后把资金差额交唯一账本。Owner 只安排顺序并收集完成结果。 构造约定：只提供 ADL 执行入口，运行状态由命令槽内的续步保存。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeAdlExecution {
 
-    /**
-     * 只提供 ADL 执行入口，运行状态由命令槽内的续步保存。
-     */
-    private RuntimeAdlExecution() {
-    }
 
     /**
      * 核对业务状态与运行时的产品线及修订号后，进入同步 ADL 执行入口。

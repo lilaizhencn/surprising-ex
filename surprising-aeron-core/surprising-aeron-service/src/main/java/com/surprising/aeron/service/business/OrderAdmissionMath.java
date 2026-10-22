@@ -1,14 +1,14 @@
 package com.surprising.aeron.service.business;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 
-/** 各产品线订单准入共用的费用冻结计算，不拥有任何运行时状态。 */
+/**  各产品线订单准入共用的费用冻结计算，不拥有任何运行时状态。 构造约定： 只提供无状态计算，不需要创建工具对象或为每笔订单保存一份副本。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class OrderAdmissionMath {
-    /** 只提供无状态计算，不需要创建工具对象或为每笔订单保存一份副本。 */
-    private OrderAdmissionMath() {
-    }
 
     /**
      * 按单步费用计算冻结额度，避免先计算整笔费用时的分片舍入造成少冻结。

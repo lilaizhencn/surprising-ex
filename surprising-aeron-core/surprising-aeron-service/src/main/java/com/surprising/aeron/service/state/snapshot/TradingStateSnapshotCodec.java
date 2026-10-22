@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.state.*;
 import com.surprising.aeron.service.state.TradingCoreState;
@@ -33,16 +35,14 @@ import java.util.function.Function;
 
 /**
  * 交易状态的独立持久化格式。新快照外层版本三十七，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。三十五、三十六版由冻结读取器恢复，三十七版另以根字段十二声明最低业务读取修订，未知合法字段可按长度保留而不参与当前恢复。
+ * 构造约定：工具类不创建实例；当前写版本三十七，历史固定布局只经独立读取器恢复。
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本三十七。 */
     private static final int VERSION = 37;
     /** 当前支持的最高业务读取修订四，与外层布局版本分开管理。 */
     private static final int READER_REVISION = 4;
-    /**
-     * 工具类不创建实例；当前写版本三十七，历史固定布局只经独立读取器恢复。
-     */
-    private TradingStateSnapshotCodec() { }
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本三十七头。根字段十二是最低业务读取修订：数量步长需二、非默认订单保护需三，算法退休量或待关联子单需四；不把 Java 类名或当前接口 DTO 当作磁盘结构。

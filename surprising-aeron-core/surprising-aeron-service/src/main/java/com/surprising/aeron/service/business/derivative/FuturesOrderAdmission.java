@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.business.derivative;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.business.OrderAdmissionMath;
@@ -15,14 +17,9 @@ import com.surprising.aeron.service.state.model.CorePositionState;
 import com.surprising.aeron.service.state.order.OrderReservation;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
-/**
- * 四条期货产品线的下单预留计算：先按本合约风险档位计算开仓保证金，再加上足够覆盖成交分片的费用。
- * 这里只读入持仓和配置并返回金额，不负责真正冻结资产，也不把线性与反向合约的数学公式混用。
- */
+/** 四条期货产品线的下单预留计算：先按本合约风险档位计算开仓保证金，再加上足够覆盖成交分片的费用。 这里只读入持仓和配置并返回金额，不负责真正冻结资产，也不把线性与反向合约的数学公式混用。 构造约定： 仅提供无状态的金额计算，不需要构造计算器实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class FuturesOrderAdmission {
-    /** 仅提供无状态的金额计算，不需要构造计算器实例。 */
-    private FuturesOrderAdmission() {
-    }
 
     /**
      * 计算在线下单要预留的保证金与费用；只减仓单不开新仓，因此保证金部分为 0。

@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.order;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.AccountLaneState;
@@ -15,25 +19,41 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     private TradingRuntimeState runtime;
     /** 本命令原有结算变化缓冲，Lane 写完后由 Owner 接管一次。 */
     private MatcherSettlementChanges changes;
-    /** 最终结果及变更捕获采用的当前产品身份表。 */
+    /**  最终结果及变更捕获采用的当前产品身份表。 返回本次借用的产品身份表，仅在原事件生命周期内使用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private RuntimeIdentityRegistry identities;
-    /** 本次撤单事件的正数 Core 序号，清理后归零防止重复准备。 */
+    /**  本次撤单事件的正数 Core 序号，清理后归零防止重复准备。 返回本次撤单事件的正数 Core 序号，清理后归零防止重复准备。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long coreSequence;
-    /** 待撤订单共同所属用户编号。 */
+    /**  待撤订单共同所属用户编号。 返回待撤订单共同所属用户编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long userId;
     /** 事件自己保存的编号数组，准备时复制输入，有效前缀由 orderCount 决定。 */
     private long[] orderIds;
-    /** 本次有效撤单编号数量。 */
+    /**  本次有效撤单编号数量。 返回本次有效撤单编号数量。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int orderCount;
     /** 本次撤单终态采用的集群业务时间。 */
     private long commitTimestamp;
     /** 本次撤单终态采用的集群日志位置。 */
     private long commitClusterPosition;
-    /** 唯一目标账户 Lane 编号。 */
+    /**  唯一目标账户 Lane 编号。 返回唯一目标账户 Lane 编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int laneId;
     /** 是否由此事件自行推进 Lane 应用和提交水位，false 时由原批次边界负责。 */
     private boolean commitLane;
-    /** 原命令拥有的结果接收槽，Lane 在发布完成前捕获并准备响应。 */
+    /**
+     *  原命令拥有的结果接收槽，Lane 在发布完成前捕获并准备响应。
+     * 绑定原命令的结果接收槽，必须在 Lane 使用前由原派发流程准备好。
+     * @param resultTarget 本命令预先准备的结果槽，接收最终订单和已编码响应
+     */
+    @Accessors(fluent = true, chain = false)
+    @Setter
     LaneOrderResultTarget resultTarget;
     /** Lane 完成所有变化和结果捕获后的可见性标记，回收前必须等到它。 */
     @SuppressWarnings("unused")
@@ -167,25 +187,9 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
      */
     public boolean commitsLane() { return commitLane; }
     /**
-     * 返回本次撤单事件的正数 Core 序号，清理后归零防止重复准备。
-     */
-    public long coreSequence() { return coreSequence; }
-    /**
-     * 返回待撤订单共同所属用户编号。
-     */
-    public long userId() { return userId; }
-    /**
-     * 返回本次有效撤单编号数量。
-     */
-    public int orderCount() { return orderCount; }
-    /**
      * 返回当前编号数组的第一笔订单，调用方先确保事件已准备且有效项数非零。
      */
     public long orderId() { return orderIds[0]; }
-    /**
-     * 返回唯一目标账户 Lane 编号。
-     */
-    public int laneId() { return laneId; }
     /**
      * 返回唯一目标账户 Lane 的位标记，供原完成条件核对。
      */
@@ -194,10 +198,6 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
      * 返回 Lane 是否已经发布撤单事件完成，不把准备或投递成功当完成。
      */
     public boolean complete() { return completed; }
-    /**
-     * 返回本次借用的产品身份表，仅在原事件生命周期内使用。
-     */
-    RuntimeIdentityRegistry identities() { return identities; }
 
     /**
      * 完成后一次性交出原变化缓冲并清空事件引用，未完成或重复领取都报错。
@@ -247,9 +247,4 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         commitLane = false;
     }
 
-    /**
-     * 绑定原命令的结果接收槽，必须在 Lane 使用前由原派发流程准备好。
-     * @param value 本命令预先准备的结果槽，接收最终订单和已编码响应
-     */
-    public void resultTarget(LaneOrderResultTarget value) { this.resultTarget = value; }
 }

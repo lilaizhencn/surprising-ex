@@ -1,12 +1,16 @@
 package com.surprising.aeron.service.exception;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 /**
  * 表示当前账户、订单或产品状态不允许执行这条命令。
  * 调用方用稳定的错误码生成业务拒绝结果；它与撮合状态损坏等需要恢复的致命故障不同。
  */
 public final class CoreStateRejectedException extends RuntimeException {
 
-    /** 供协议结果识别的业务错误码，不能只依赖可变化的错误文字。 */
+    /**  供协议结果识别的业务错误码，不能只依赖可变化的错误文字。  返回用于转换 CoreResultCode 或记录拒绝原因的稳定业务错误码。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final String code;
 
     /**
@@ -22,8 +26,4 @@ public final class CoreStateRejectedException extends RuntimeException {
         this.code = code;
     }
 
-    /** 返回用于转换 CoreResultCode 或记录拒绝原因的稳定业务错误码。 */
-    public String code() {
-        return code;
-    }
 }

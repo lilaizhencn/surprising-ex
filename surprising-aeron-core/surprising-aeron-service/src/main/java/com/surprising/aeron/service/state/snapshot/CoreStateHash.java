@@ -1,8 +1,9 @@
 package com.surprising.aeron.service.state.snapshot;
 
-/**
- * 确定性业务哈希的基础混入函数。按固定字节顺序把数值、布尔或字符串加入六十四位 FNV 风格哈希，长整型乘法允许自然溢出；这里不校验资金守恒，也不提供加密签名。
- */
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+/** 确定性业务哈希的基础混入函数。按固定字节顺序把数值、布尔或字符串加入六十四位 FNV 风格哈希，长整型乘法允许自然溢出；这里不校验资金守恒，也不提供加密签名。 构造约定：工具类不创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CoreStateHash {
 
     /** 每轮哈希固定的六十四位起始值。 */
@@ -10,11 +11,6 @@ public final class CoreStateHash {
     /** 每混入一个字节所乘的固定 FNV 质数。 */
     private static final long PRIME = 0x100000001b3L;
 
-    /**
-     * 工具类不创建实例。
-     */
-    private CoreStateHash() {
-    }
 
     /**
      * 返回固定哈希初值，供每个独立状态或条目开始计算。

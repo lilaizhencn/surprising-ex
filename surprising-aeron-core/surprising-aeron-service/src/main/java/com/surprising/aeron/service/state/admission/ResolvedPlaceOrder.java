@@ -1,46 +1,67 @@
 package com.surprising.aeron.service.state.admission;
 
+import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.state.model.AssetBalance;
 
-/**
- * 一笔订单确定后的准入输入，分开保存原始意图、币对路由、撮合价格、预留价格和费率。普通下单可直接由池化准入事件继承这些字段，复用前必须清理，不能把同一实例并发用于多个命令。
- */
+/** 一笔订单确定后的准入输入，分开保存原始意图、币对路由、撮合价格、预留价格和费率。普通下单可直接由池化准入事件继承这些字段，复用前必须清理，不能把同一实例并发用于多个命令。 构造约定：创建尚未绑定意图和价格决策的空对象，供命令槽或对象池后续初始化。 */
+@NoArgsConstructor
 public class ResolvedPlaceOrder {
-    /** 原始下单意图，包含订单编号、方向、数量、模式和客户端标识。 */
+    /**  原始下单意图，包含订单编号、方向、数量、模式和客户端标识。 返回原始下单意图，包含订单编号、方向、数量、模式和客户端标识。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private PlaceOrderCommand intent;
-    /** 本次决策绑定的币对配置，后续准入须与同一业务身份一致。 */
+    /**  本次决策绑定的币对配置，后续准入须与同一业务身份一致。 返回本次决策绑定的币对配置，后续准入须与同一业务身份一致。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreInstrument instrument;
-    /** 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配。 */
+    /**  币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配。 返回币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int symbolId;
     /** 是否已经完成价格、预留资产和费率决策；仅绑定意图时仍为 false。 */
     private boolean resolved;
-    /** 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界。 */
+    /**  实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界。 返回实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long matchingPriceTicks;
-    /** 计算预留金额采用的价格刻度，可能比撮合边界更保守。 */
+    /**  计算预留金额采用的价格刻度，可能比撮合边界更保守。 返回计算预留金额采用的价格刻度，可能比撮合边界更保守。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long reservationPriceTicks;
-    /** 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界。 */
+    /**  本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界。 返回本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long markPriceTicks;
-    /** 本次决策使用的指数价格刻度，不需要该价格的入口可为 0。 */
+    /**  本次决策使用的指数价格刻度，不需要该价格的入口可为 0。 返回本次决策使用的指数价格刻度，不需要该价格的入口可为 0。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long indexPriceTicks;
-    /** 本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格。 */
+    /**  本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格。 返回本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long forwardPriceTicks;
-    /** 应冻结现货资产还是衍生品保证金的类别。 */
+    /**  应冻结现货资产还是衍生品保证金的类别。 返回应冻结现货资产还是衍生品保证金的类别。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private ReservationKind reservationKind;
-    /** 已经规范化的冻结资产代码，衍生品为结算资产，现货按买卖方向选择。 */
+    /**  已经规范化的冻结资产代码，衍生品为结算资产，现货按买卖方向选择。 返回已经规范化的冻结资产代码，衍生品为结算资产，现货按买卖方向选择。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private String reservationAsset;
-    /** Maker 费率，单位为百万分比，负数表示返佣。 */
+    /**  Maker 费率，单位为百万分比，负数表示返佣。 返回Maker 费率，单位为百万分比，负数表示返佣。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long makerFeeRatePpm;
-    /** Taker 费率，单位为百万分比，且不能小于 Maker 费率。 */
+    /**  Taker 费率，单位为百万分比，且不能小于 Maker 费率。 返回Taker 费率，单位为百万分比，且不能小于 Maker 费率。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long takerFeeRatePpm;
 
-    /**
-     * 创建尚未绑定意图和价格决策的空对象，供命令槽或对象池后续初始化。
-     */
-    public ResolvedPlaceOrder() {
-    }
 
     /**
      * 校验并保存完整订单决策输入，包括指数、远期价格及冻结资产与费率。
@@ -199,54 +220,6 @@ public class ResolvedPlaceOrder {
      * 返回完整价格和预留决策是否已初始化，仅绑定路由不能算完成。
      */
     public final boolean resolvedOrderInitialized() { return resolved; }
-    /**
-     * 返回原始下单意图，包含订单编号、方向、数量、模式和客户端标识。
-     */
-    public PlaceOrderCommand intent() { return intent; }
-    /**
-     * 返回本次决策绑定的币对配置，后续准入须与同一业务身份一致。
-     */
-    public CoreInstrument instrument() { return instrument; }
-    /**
-     * 返回币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配。
-     */
-    public int symbolId() { return symbolId; }
-    /**
-     * 返回实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界。
-     */
-    public long matchingPriceTicks() { return matchingPriceTicks; }
-    /**
-     * 返回计算预留金额采用的价格刻度，可能比撮合边界更保守。
-     */
-    public long reservationPriceTicks() { return reservationPriceTicks; }
-    /**
-     * 返回本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界。
-     */
-    public long markPriceTicks() { return markPriceTicks; }
-    /**
-     * 返回本次决策使用的指数价格刻度，不需要该价格的入口可为 0。
-     */
-    public long indexPriceTicks() { return indexPriceTicks; }
-    /**
-     * 返回本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格。
-     */
-    public long forwardPriceTicks() { return forwardPriceTicks; }
-    /**
-     * 返回应冻结现货资产还是衍生品保证金的类别。
-     */
-    public ReservationKind reservationKind() { return reservationKind; }
-    /**
-     * 返回已经规范化的冻结资产代码，衍生品为结算资产，现货按买卖方向选择。
-     */
-    public String reservationAsset() { return reservationAsset; }
-    /**
-     * 返回Maker 费率，单位为百万分比，负数表示返佣。
-     */
-    public long makerFeeRatePpm() { return makerFeeRatePpm; }
-    /**
-     * 返回Taker 费率，单位为百万分比，且不能小于 Maker 费率。
-     */
-    public long takerFeeRatePpm() { return takerFeeRatePpm; }
     /**
      * 返回原下单意图中的唯一订单编号。
      */

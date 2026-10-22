@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.lifecycle;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.CoreFundingPaymentView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
@@ -25,16 +27,10 @@ import java.util.NavigableSet;
 import java.util.UUID;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
-/**
- * 永续合约资金费的账户与财库处理。固定本轮标记价和价格序号后，按全局用户页分给账户 Lane；用户应付金额只扣可用余额，扣不到的部分从持仓收付明细中依次减免。账本记录实际收付的反向差额与分页进度，Owner 最后推进修订号。
- */
+/** 永续合约资金费的账户与财库处理。固定本轮标记价和价格序号后，按全局用户页分给账户 Lane；用户应付金额只扣可用余额，扣不到的部分从持仓收付明细中依次减免。账本记录实际收付的反向差额与分页进度，Owner 最后推进修订号。 构造约定：静态业务入口不创建实例；每页状态保存在 FundingWork。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimePerpetualFundingProcessor {
 
-    /**
-     * 静态业务入口不创建实例；每页状态保存在 FundingWork。
-     */
-    private RuntimePerpetualFundingProcessor() {
-    }
 
     /**
      * 核对旧状态与运行时的产品线、修订号一致；未给用户索引时使用旧状态用户集合，再执行账本未激活的同步路径。

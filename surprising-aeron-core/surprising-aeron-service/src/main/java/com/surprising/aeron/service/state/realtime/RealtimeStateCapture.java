@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.realtime;
 
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.state.account.UserRuntime;
@@ -15,7 +19,12 @@ import java.util.List;
 
 /**
  * Owner 把已交接的业务发布值编码成实时帧的边界。每轮 outbox 捕获内使用原日志位置、业务时间和递增帧序号，普通提交带开始/结束标记，用户快照带快照标记。只编码，不把可变账户对象交给发送线程；部分入口捕获编码异常并撤销，其余异常沿原调用边界传播。
+ * 构造约定：保存原 outbox、产品线及身份表引用；本构造器不额外做空值校验或启动资源。
+ * 参数 outbox：本轮复用的有界实时输出缓存
+ * 参数 product：所有输出帧所属产品线
+ * 参数 identities：资产和标的内部编号的原身份表
  */
+@RequiredArgsConstructor
 public final class RealtimeStateCapture {
     /** 本 Owner 使用的实时暂存与提交缓存，发送线程只消费已编码字节。 */
     private final RealtimeOutbox outbox;
@@ -23,16 +32,15 @@ public final class RealtimeStateCapture {
     private final ProductLine product;
     /** 已准备内部编号到永久标的、资产文本的身份表。 */
     private final RuntimeIdentityRegistry identities;
-    /** 是否跳过指定账户增量类别，不影响所有帧类型。 */
+    /**
+     *  是否跳过指定账户增量类别，不影响所有帧类型。
+     * 设置是否跳过余额、元数据、预留、持仓、杠杆和风险增量；订单、触发单、成交及执行回报仍按原入口处理，不是统一屏蔽全部私有数据。
+     * @param orderProjectionOnly 是否跳过指定账户增量类别
+     */
+    @Accessors(fluent = true, chain = false)
+    @Setter
     private boolean orderProjectionOnly;
 
-    /**
-     * 设置是否跳过余额、元数据、预留、持仓、杠杆和风险增量；订单、触发单、成交及执行回报仍按原入口处理，不是统一屏蔽全部私有数据。
-     * @param value 是否跳过指定账户增量类别
-     */
-    public void orderProjectionOnly(boolean value) {
-        orderProjectionOnly = value;
-    }
 
     /**
      * 返回 outbox 当前是否处于捕获中，与 active 相同；不单独根据 orderProjectionOnly 判断。
@@ -49,25 +57,15 @@ public final class RealtimeStateCapture {
     private long sequence, timestamp, snapshotId;
     /** 本捕获内下一帧从零开始的顺序号。 */
     private int ordinal;
-    /** 明确调用 failed 所记录的捕获失败次数。 */
+    /**  明确调用 failed 所记录的捕获失败次数。 读取已记录的捕获失败次数，不是 outbox 丢批次数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long failures;
     /** 本次收尾要输出的业务导出序号。 */
     private long exportSequence;
     /** 捕获开始前导出序号，供消费者衔接及判断空批次。 */
     private long previousExportSequence;
 
-    /**
-     * 保存原 outbox、产品线及身份表引用；本构造器不额外做空值校验或启动资源。
-     * @param outbox 本轮复用的有界实时输出缓存
-     * @param product 所有输出帧所属产品线
-     * @param identities 资产和标的内部编号的原身份表
-     */
-    public RealtimeStateCapture(
-            RealtimeOutbox outbox, ProductLine product, RuntimeIdentityRegistry identities) {
-        this.outbox = outbox;
-        this.product = product;
-        this.identities = identities;
-    }
 
     /**
      * 以上次导出序号零开始本轮捕获，供没有显式序号的既有调用使用。
@@ -138,12 +136,6 @@ public final class RealtimeStateCapture {
         outbox.abort();
     }
 
-    /**
-     * 读取已记录的捕获失败次数，不是 outbox 丢批次数。
-     */
-    public long failures() {
-        return failures;
-    }
 
     /**
      * 增加失败次数并撤销本次捕获，计数沿用普通 long 自增。

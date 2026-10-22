@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -7,16 +9,10 @@ import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.model.AssetBalance;
 
-/**
- * 账户余额变更与待完成跨产品划转的业务步骤。同步入口组织身份校验和产品修订，账户内部步骤只改变所属用户；目标产品的入账与源产品完成确认分别由自己的命令执行。
- */
+/** 账户余额变更与待完成跨产品划转的业务步骤。同步入口组织身份校验和产品修订，账户内部步骤只改变所属用户；目标产品的入账与源产品完成确认分别由自己的命令执行。 构造约定：只提供余额和划转步骤，权威余额及待完成记录仍由运行时所属 Lane 保存。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeAccountStateTransitions {
 
-    /**
-     * 只提供余额和划转步骤，权威余额及待完成记录仍由运行时所属 Lane 保存。
-     */
-    private RuntimeAccountStateTransitions() {
-    }
 
     /**
      * 校验输入及调用线程，规范化资产并预计算产品修订，再调整所属账户可用余额，最后发布元数据。

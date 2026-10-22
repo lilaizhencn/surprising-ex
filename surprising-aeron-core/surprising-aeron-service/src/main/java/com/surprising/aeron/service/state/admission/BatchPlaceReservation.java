@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.admission;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -36,7 +38,9 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     private UUID commandId;
     /** 按产品和买卖方向选定的冻结资产运行时编号。 */
     private int assetId;
-    /** prepareClientKeyInLane 的原始准备结果，实际客户键通过 clientKeyValue 取得。 */
+    /**  prepareClientKeyInLane 的原始准备结果，实际客户键通过 clientKeyValue 取得。 返回本项客户身份准备的原始结果值，供原流程回退或取实际身份键，调用方先等控制任务完成。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long preparedClientKey;
     /** 原批次命令槽保存的获准订单租约，寿命长于本项可复用任务。 */
     private OrderRuntime admittedOrder;
@@ -44,7 +48,9 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     private PlaceBatchIntentSource source;
     /** 本项在原批次中的下标，用来保存到对应项槽。 */
     private int sourceIndex;
-    /** 逆向非只减仓订单所需的平仓冲突撤单编号，供顺序批次后续撮合使用。 */
+    /**  逆向非只减仓订单所需的平仓冲突撤单编号，供顺序批次后续撮合使用。 在控制回执完成后读取本项平仓容量冲突的前置撤单编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private List<Long> closeCapacityCancellations = List.of();
     /** Lane 的任务体已停止访问字段的可见性标记，Owner 仍须等控制调度器发布结果。 */
     private volatile boolean completed = true;
@@ -183,14 +189,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         if (admittedOrder == null) throw new IllegalStateException("batch reservation has not completed");
         return admittedOrder;
     }
-    /**
-     * 返回本项客户身份准备的原始结果值，供原流程回退或取实际身份键，调用方先等控制任务完成。
-     */
-    public long preparedClientKey() { return preparedClientKey; }
-    /**
-     * 在控制回执完成后读取本项平仓容量冲突的前置撤单编号。
-     */
-    public List<Long> closeCapacityCancellations() { return closeCapacityCancellations; }
 
     /**
      * Lane 仍持有任务时保留其输入；已释放时清空本项引用和标记。prepare 会拒绝未释放任务，避免故障收尾时复用仍排队的对象。

@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.matcher;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.config.TradingCpuAffinity;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.orchestration.trade.CommandSlot;
@@ -72,9 +75,13 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private final Wakeup wakeup = new Wakeup();
     /** 是否仍接收新命令，关闭或故障时清为 false，worker 仍按分支处理已提交任务。 */
     private volatile boolean accepting;
-    /** 发布侧观测到的提交减回收窗口占用峰值。 */
+    /**  发布侧观测到的提交减回收窗口占用峰值。 返回发布侧观测到的窗口占用峰值，包含尚未由 Owner 回收的完成槽，不等同于 submissionDepth 峰值。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile int submissionHighWaterMark;
-    /** 工作线程观测到的完成减回收槽位峰值。 */
+    /**  工作线程观测到的完成减回收槽位峰值。 返回工作线程观测到的未回收完成槽峰值，融合模式成功保留普通完成时记为一。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile int completionHighWaterMark;
     /** 启动动作已结束的可见标记，成功与失败均会置位。 */
     private volatile boolean started;
@@ -92,13 +99,14 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private final int workerId;
     /** Owner 单生产者、Matcher 单消费者的有界查询信箱，请求记录提交栅栏而不复制状态。 */
     private OneToOneConcurrentArrayQueue<BackgroundRead<?>> backgroundReads;
-    /** Matcher 发布完成或可见故障后的可空唤醒回调。 */
-    private volatile Runnable completionSignal;
     /**
+     *  Matcher 发布完成或可见故障后的可空唤醒回调。
      * 安装可空的完成唤醒回调；Matcher 发布完成或发现发布故障时调用，回调不在此方法执行。
-     * @param signal 完成或发布故障后执行的可空唤醒动作
+     * @param completionSignal 完成或发布故障后执行的可空唤醒动作
      */
-    public void completionSignal(Runnable signal) { completionSignal = signal; }
+    @Accessors(fluent = true, chain = false)
+    @Setter
+    private volatile Runnable completionSignal;
     /**
      * 队列模式把查询和当前已提交位置放入有界单生产者读信箱，Matcher 执行到该位置后再读；融合模式要求当前线程就是拥有者并立即执行。关闭或信箱满返回失败 Future，运行异常转为失败结果，查询不会复制交易状态。
      * @param <T> 读取或控制调用返回值的类型
@@ -610,19 +618,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         return inlineOwner != null ? 1 : requestedCapacity;
     }
 
-    /**
-     * 返回发布侧观测到的窗口占用峰值，包含尚未由 Owner 回收的完成槽，不等同于 submissionDepth 峰值。
-     */
-    public int submissionHighWaterMark() {
-        return submissionHighWaterMark;
-    }
 
-    /**
-     * 返回工作线程观测到的未回收完成槽峰值，融合模式成功保留普通完成时记为一。
-     */
-    public int completionHighWaterMark() {
-        return completionHighWaterMark;
-    }
 
     /**
      * 按配置申请当前 Matcher 的 CPU 绑定并执行主循环，退出自动释放绑定；启动前异常转为 startupFailure，启动后异常转为 publicationFailure 并通知 Owner，停止接收新任务。

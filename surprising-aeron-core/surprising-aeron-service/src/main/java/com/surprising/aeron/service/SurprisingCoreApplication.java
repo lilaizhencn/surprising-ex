@@ -1,5 +1,7 @@
 package com.surprising.aeron.service;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.bootstrap.AeronCoreLifecycle;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.SpringBootConfiguration;
@@ -7,17 +9,12 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.ComponentScan;
 
-/**
- * 一个交易 Core 节点的启动入口，负责把 Spring 配置和 Aeron 资源装配起来。
- * 这个进程只运行交易集群，不启动 HTTP 服务；启动完成后会一直等到收到关闭信号。
- */
+/** 一个交易 Core 节点的启动入口，负责把 Spring 配置和 Aeron 资源装配起来。 这个进程只运行交易集群，不启动 HTTP 服务；启动完成后会一直等到收到关闭信号。 构造约定： 入口配置交给 Spring 创建，业务代码不需要手动创建这个类。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 @SpringBootConfiguration
 @ComponentScan
 public class SurprisingCoreApplication {
 
-    /** 入口配置交给 Spring 创建，业务代码不需要手动创建这个类。 */
-    private SurprisingCoreApplication() {
-    }
 
     /**
      * 先加载配置和组件，再启动集群；节点退出时一并关闭 Spring 上下文。

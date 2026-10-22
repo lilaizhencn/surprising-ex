@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.business.option;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -7,11 +9,9 @@ import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.math.CoreContractMath;
 import com.surprising.aeron.service.state.math.OptionContractMath;
 
-/** 期权成交的卖方保证金计算及风险价格检查，并计算卖出权利金可用于覆盖新增保证金的部分；这里只算金额，不直接写账户。 */
+/**  期权成交的卖方保证金计算及风险价格检查，并计算卖出权利金可用于覆盖新增保证金的部分；这里只算金额，不直接写账户。 构造约定： 无状态的期权成交计算工具，不需要创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class OptionFillCalculator {
-    /** 无状态的期权成交计算工具，不需要创建实例。 */
-    private OptionFillCalculator() {
-    }
 
     /**
      * 平仓或买入不增加这项卖方保证金；卖出新开仓按成交后总持仓选档，再以标记权利金和档位参数计算保证金。

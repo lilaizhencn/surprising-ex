@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.ingress;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 
@@ -197,9 +200,13 @@ public final class OwnerIngressRing {
      * 可复用输入条目。生产者填好后交给 Owner，Owner 移除时清空；后续窗口若仍需请求，须自行保留请求租约，不能保留这份可立即复用的条目。
      */
     public static final class Entry {
-        /** 当前借给 Owner 的请求，动作条目通常为空。 */
+        /**  当前借给 Owner 的请求，动作条目通常为空。 借看当前请求，框架动作条目通常为 null；条目移除后不得再从这里取请求。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         CoreMessage command;
-        /** 原会话 ID，空槽默认 NO_SESSION_ID。 */
+        /**  原会话 ID，空槽默认 NO_SESSION_ID。 读取原会话纯 ID，不把 Cluster 会话对象传入 Owner。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         long sessionId = NO_SESSION_ID;
         /**
          * timestamp：原复制日志业务时间。
@@ -207,11 +214,23 @@ public final class OwnerIngressRing {
          * enqueuedNanos：可选入队纳秒观测时间，零表示未记录，不参与交易裁决。
          */
         long timestamp, position, enqueuedNanos;
-        /** 要在 Owner 执行的框架动作，普通命令通常为空。 */
+        /**  要在 Owner 执行的框架动作，普通命令通常为空。 借看当前条目的框架动作，业务命令通常为 null。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         Runnable action;
-        /** Owner 对当前代条目的观察标记，清槽时复位。 */
+        /**
+         *  Owner 对当前代条目的观察标记，清槽时复位。
+         * 读取 Owner 是否已经观察过当前代条目。
+         * 记录 Owner 已观察当前代条目，供原命令推进边界使用；槽复用前会清零。
+         * @param ownerObserved 当前代条目是否已被 Owner 观察
+         */
+        @Accessors(fluent = true, chain = false)
+        @Getter
+        @Setter
         boolean ownerObserved;
-        /** 请求内容指纹，随请求交接并在清槽时移除引用。 */
+        /**  请求内容指纹，随请求交接并在清槽时移除引用。 借看原请求指纹，移除条目前须交给后续实际持有者。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         CommandFingerprint fingerprint;
 
         /**
@@ -224,14 +243,6 @@ public final class OwnerIngressRing {
         }
 
     /**
-     * 借看当前条目的框架动作，业务命令通常为 null。
-     */
-    public Runnable action() { return action; }
-    /**
-     * 借看当前请求，框架动作条目通常为 null；条目移除后不得再从这里取请求。
-     */
-    public CoreMessage command() { return command; }
-    /**
      * 读取原复制日志的业务时间，不用系统时间重新生成。
      */
     public long timestamp() { return timestamp; }
@@ -239,22 +250,5 @@ public final class OwnerIngressRing {
      * 读取原复制日志位置，保持业务推进与恢复顺序一致。
      */
     public long position() { return position; }
-    /**
-     * 借看原请求指纹，移除条目前须交给后续实际持有者。
-     */
-    public CommandFingerprint fingerprint() { return fingerprint; }
-    /**
-     * 读取 Owner 是否已经观察过当前代条目。
-     */
-    public boolean ownerObserved() { return ownerObserved; }
-    /**
-     * 记录 Owner 已观察当前代条目，供原命令推进边界使用；槽复用前会清零。
-     * @param value 当前代条目是否已被 Owner 观察
-     */
-    public void ownerObserved(boolean value) { this.ownerObserved = value; }
-    /**
-     * 读取原会话纯 ID，不把 Cluster 会话对象传入 Owner。
-     */
-    public long sessionId() { return sessionId; }
 }
 }

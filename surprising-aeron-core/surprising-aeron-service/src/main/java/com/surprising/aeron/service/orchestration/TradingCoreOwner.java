@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration;
 
+import lombok.extern.slf4j.Slf4j;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.client.RealtimeOutbox;
@@ -25,13 +28,10 @@ import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 
 import static com.surprising.aeron.service.orchestration.egress.ClusterServiceEgress.NO_SESSION_ID;
 
-/**
- * 启动步骤 8、交易步骤 1 和 5：在 Owner 线程推进复制命令，并把完成结果交给响应出口。它持有当前产品线运行时和命令生命周期；FUSED 沿输入环队首执行，PIPELINED 使用有界命令窗口。Cluster 会话、网络发送和真正的线程启动由外层承担。
- */
+/** 启动步骤 8、交易步骤 1 和 5：在 Owner 线程推进复制命令，并把完成结果交给响应出口。它持有当前产品线运行时和命令生命周期；FUSED 沿输入环队首执行，PIPELINED 使用有界命令窗口。Cluster 会话、网络发送和真正的线程启动由外层承担。 日志： Owner 生命周期与故障诊断日志，不参与业务状态计算。 */
+@Slf4j
 public final class TradingCoreOwner {
 
-    /** Owner 生命周期与故障诊断日志，不参与业务状态计算。 */
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(TradingCoreOwner.class);
 
     /** 快照和显式完成前缀使用的秒数预算，JVM 配置默认 300 秒。 */
     private static final long SNAPSHOT_TIMEOUT_SECONDS = Long.getLong(
@@ -41,7 +41,9 @@ public final class TradingCoreOwner {
     private final OwnerCommandPipelineState commandPipeline;
     /** 仅 FUSED 使用的复用解码槽，终态交接前保留；PIPELINED 为 null。 */
     private final com.surprising.aeron.service.command.order.DecodedMatchingCommand fusedDecoder;
-    /** Cluster 到 Owner 的唯一单生产者、单消费者输入环。 */
+    /**  Cluster 到 Owner 的唯一单生产者、单消费者输入环。 返回 Cluster 与 Owner 共用的原输入环；调用方遵守单生产者、单消费者约定。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final OwnerIngressRing ingress = new OwnerIngressRing();
     /** 每轮输入推进预算，类加载时读取并校验，默认 64 条。 */
     private static final int INPUT_BATCH_SIZE = configuredInputBatchSize();
@@ -139,10 +141,6 @@ public final class TradingCoreOwner {
         realtimeBoundary.start(logContext.role, logContext.position, state);
     }
 
-    /**
-     * 返回 Cluster 与 Owner 共用的原输入环；调用方遵守单生产者、单消费者约定。
-     */
-    public OwnerIngressRing ingress() { return ingress; }
 
     /**
      * 读取 JVM 的每轮输入预算，默认 64，允许 1 至 256；空白、非数字或越界配置包装成带属性名的配置异常。

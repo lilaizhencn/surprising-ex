@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -64,11 +68,23 @@ public final class AccountLaneState {
     /** 本 Lane 实体表初始容量，读取 lane-initial-entities JVM 参数，默认 1024，最低 16。 */
     private static final int INITIAL_ENTITY_CAPACITY = Math.max(16,
             Integer.getInteger("surprising.aeron.lane-initial-entities", 1_024));
-    /** 创建时固定的账户分片编号，用于路由与监控。 */
+    /**  创建时固定的账户分片编号，用于路由与监控。 返回创建时固定的 Lane 编号，不申请线程所有权。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final int laneId;
-    /** 创建时记录的 Lane 工作队列容量。 */
+    /**  创建时记录的 Lane 工作队列容量。 返回配置的队列容量，供调度和监控使用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final int queueCapacity;
-    /** 当前准入作用域首次创建用户成员集合时使用的容量提示，默认 2，批量结束后由外层恢复。 */
+    /**
+     *  当前准入作用域首次创建用户成员集合时使用的容量提示，默认 2，批量结束后由外层恢复。
+     * 返回当前准入用于首次分配用户成员集合的容量提示。
+     * 直接设置准入容量提示；批量作用域负责在结束时恢复原值。
+     * @param admissionIndexCapacity 当前批量准入希望预先容纳的成员数量
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     int admissionIndexCapacity = 2;
     /** 登记属于本 Lane 的用户编号集合，和 users 值表分别维护。 */
     private final LongHashSet userIds = new LongHashSet(INITIAL_ENTITY_CAPACITY);
@@ -96,7 +112,15 @@ public final class AccountLaneState {
     /** 用户到持仓键的成员索引，便于只遍历该用户持仓。 */
     final LongObjectHashMap<LongHashSet> positionKeysByUser =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
-    /** 本逻辑 Lane 复用的风险候选输出，包含同步跨多个 Lane 的调用，不能依赖线程本地共享一个批次。 */
+    /**
+     *  本逻辑 Lane 复用的风险候选输出，包含同步跨多个 Lane 的调用，不能依赖线程本地共享一个批次。
+     * 返回本逻辑 Lane 复用的风险候选输出缓冲。
+     * 安装本 Lane 的风险候选输出缓冲，后续扫描可原位复用。
+     * @param riskLiquidationBatch 本 Lane 要保留并复用的风险候选批次缓冲
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     RiskLiquidationBatch riskLiquidationBatch;
     /** 按稠密合约和用户分组的开仓持仓键有序原语数组，供分页风险扫描使用。 */
     final IntObjectHashMap<LongObjectHashMap<LongArrayList>> positionKeysBySymbolAndUser
@@ -104,15 +128,23 @@ public final class AccountLaneState {
     /** 每个用户的客户身份键到订单编号映射，不直接以客户号文本作为热路径键。 */
     final LongObjectHashMap<Long2LongHashMap> clientOrderIndex =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
-    /** 本 Lane 拥有的客户号身份行、引用计数及可复用空行。 */
+    /**  本 Lane 拥有的客户号身份行、引用计数及可复用空行。 返回本 Lane 拥有的客户订单身份字典，不创建跨线程身份副本。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final LaneClientIdentities clientIdentities = new LaneClientIdentities(this);
-    /** 订单编号到所有客户身份别名的反向索引，便于终态逐项清理。 */
+    /**  订单编号到所有客户身份别名的反向索引，便于终态逐项清理。 返回订单编号到客户别名的 Lane 内反向索引，终态清理据此逐项解除关联。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final OrderClientKeyIndex clientKeysByOrderId = new OrderClientKeyIndex();
     /** 同一 Lane 持有的风险、强平、杠杆、条件单和划转等冷业务状态。 */
     final LaneColdState cold = new LaneColdState();
-    /** 本 Lane 复用的杠杆读取结果槽。 */
+    /**  本 Lane 复用的杠杆读取结果槽。 返回可复用的杠杆查找槽，后续查找可能覆盖其中结果。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final TradingRuntimeState.LeverageLookup leverageLookup = new TradingRuntimeState.LeverageLookup();
-    /** 本 Lane 复用的运行时身份查找工作槽。 */
+    /**  本 Lane 复用的运行时身份查找工作槽。 返回本 Lane 复用的身份查找结果槽；调用方遵守所属线程或有效读取边界，不能长期保留可变结果。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeIdentityRegistry.LookupScratch identityLookupScratch = new RuntimeIdentityRegistry.LookupScratch();
     /** 仅遍历用户修订时借用的命令收据，结束后清空，禁止嵌套借用。 */
     private LaneCommitDelta userRevisionChanges;
@@ -133,18 +165,28 @@ public final class AccountLaneState {
     /** 常驻的映射解绑回调，删除前核对映射仍指向目标订单。 */
     private final org.eclipse.collections.api.block.procedure.primitive.LongProcedure unlinkClientOrder =
             this::unlinkClientOrder;
-    /** 本 Lane 复用的衍生品成交结算工作对象。 */
+    /**  本 Lane 复用的衍生品成交结算工作对象。 返回本 Lane 复用的衍生品结算累加器，避免每次填充重新创建工作对象。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator derivativeSettlementAccumulator =
             new RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator();
-    /** 本 Lane 复用的现货成交结算工作对象。 */
+    /**  本 Lane 复用的现货成交结算工作对象。 返回本 Lane 复用的现货结算累加器。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeSpotMatchProcessor.SpotSettlementAccumulator spotSettlementAccumulator =
             new RuntimeSpotMatchProcessor.SpotSettlementAccumulator();
-    /** 本 Lane 复用的单持仓风险计算工作缓冲。 */
+    /**  本 Lane 复用的单持仓风险计算工作缓冲。 返回本 Lane 风险估值使用的持仓工作缓冲，不是可供外部保存的风险快照。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RiskLaneProcessor.PositionRiskScratch positionRiskScratch = new RiskLaneProcessor.PositionRiskScratch();
-    /** 本 Lane 复用的单笔成交计算游标。 */
+    /**  本 Lane 复用的单笔成交计算游标。 返回单笔成交计算复用的游标，结果在后续使用时可被覆盖。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final RuntimeDerivativeFillCalculator.FillCursor singleFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
 
-    /** 对外可见的队列历史深度峰值，写入按现有串行调用约定执行。 */
+    /**  对外可见的队列历史深度峰值，写入按现有串行调用约定执行。 返回最近发布的队列深度峰值，监控读取不会申请账户所有权。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile int queueHighWaterMark;
 
     /**
@@ -161,12 +203,6 @@ public final class AccountLaneState {
         return current;
     }
 
-    /**
-     * 返回最近发布的队列深度峰值，监控读取不会申请账户所有权。
-     */
-    public int queueHighWaterMark() {
-        return queueHighWaterMark;
-    }
 
     /**
      * 按触发编号写入条件记录并维护用户成员索引；替换为另一用户时先移除旧用户关联，返回旧记录。
@@ -212,7 +248,15 @@ public final class AccountLaneState {
     private final IntObjectHashMap<LongLongHashMap> pendingReservedUnitsByAsset = new IntObjectHashMap<>();
     /** 整个 Lane 仍待完成的预留条数。 */
     private int totalPendingReservations;
-    /** 本 Lane 新建客户身份的累计次数，完成收据由 Owner 汇入字典版本。 */
+    /**
+     *  本 Lane 新建客户身份的累计次数，完成收据由 Owner 汇入字典版本。
+     * 返回 Lane 已记录的客户身份新建累计数。
+     * 直接设置客户身份新建累计数，供恢复及受控更新使用；不自动汇入 Owner 字典版本。
+     * @param clientIdentityAllocations 恢复或更新后的客户身份累计分配次数
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     long clientIdentityAllocations;
     /** 该 Lane 已应用的修订计数，和单个用户或订单修订号不同。 */
     private long revision;
@@ -234,11 +278,35 @@ public final class AccountLaneState {
     private int[] hashIntScratch = new int[16];
     /** 本 Lane 唯一复用的准入汇总视图，每次查询前选择目标稠密合约编号。 */
     private final LaneAdmissionOrderIndex admissionOrderIndex = new LaneAdmissionOrderIndex();
-    /** 是否处于命令访问作用域的标记，本身不提供锁或跨线程发布。 */
+    /**
+     *  是否处于命令访问作用域的标记，本身不提供锁或跨线程发布。
+     * 返回当前是否处于 Lane 命令作用域，不在此建立线程可见性或自动取得所有权。
+     * 直接记录 Lane 命令作用域开关，真实进入和离开顺序由调用方维护。
+     * @param commandScopeActive 是否标记为处于命令作用域
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     boolean commandScopeActive;
-    /** 是否处于查询访问作用域的标记，不能代替实际读取屏障。 */
+    /**
+     *  是否处于查询访问作用域的标记，不能代替实际读取屏障。
+     * 返回已记录的查询作用域开关，不代替实际读取屏障检查。
+     * 直接记录查询作用域开关，本身不暂停工作线程或建立读取屏障。
+     * @param queryScopeActive 是否标记为处于查询作用域
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     boolean queryScopeActive;
-    /** 当前命令借用的 Matcher 结算变化收集器。 */
+    /**
+     *  当前命令借用的 Matcher 结算变化收集器。
+     * 返回当前借用的 Matcher 结算变化收集器。
+     * 绑定或解除当前结算变化收集器，不在此发布命令完成。
+     * @param matcherSettlementChanges 当前结算变化收集器，null 表示解除借用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     MatcherSettlementChanges matcherSettlementChanges;
 
     /**
@@ -295,12 +363,10 @@ public final class AccountLaneState {
         return OrderRuntime.preparePooled(reusableOrders.pollLast(), product, userId, intent, commandId, symbolId, timestamp, position);
     }
 
-    /** 当前实际拥有 Lane 状态的线程，受控交接期间允许为空。 */
+    /**  当前实际拥有 Lane 状态的线程，受控交接期间允许为空。 返回当前绑定线程，供模块内交接所有权时核对；不在此自动绑定调用方。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private volatile Thread owner;
-    /**
-     * 返回当前绑定线程，供模块内交接所有权时核对；不在此自动绑定调用方。
-     */
-    Thread owner() { return owner; }
     /** 用于从未绑定状态原子认领线程的 VarHandle，普通业务读写不通过它加锁。 */
     private static final VarHandle OWNER;
     /** 初始化线程认领句柄；反射失败直接阻止本类启动。 */
@@ -473,14 +539,6 @@ public final class AccountLaneState {
         }
     }
 
-    /**
-     * 返回创建时固定的 Lane 编号，不申请线程所有权。
-     */
-    public int laneId() { return laneId; }
-    /**
-     * 返回配置的队列容量，供调度和监控使用。
-     */
-    public int queueCapacity() { return queueCapacity; }
     /**
      * 核对所属线程后返回 Lane 应用修订次数。
      */
@@ -1615,55 +1673,6 @@ public final class AccountLaneState {
     }
 
     /**
-     * 返回本 Lane 复用的身份查找结果槽；调用方遵守所属线程或有效读取边界，不能长期保留可变结果。
-     */
-    public RuntimeIdentityRegistry.LookupScratch identityLookupScratch() { return identityLookupScratch; }
-    /**
-     * 返回本 Lane 拥有的客户订单身份字典，不创建跨线程身份副本。
-     */
-    public LaneClientIdentities clientIdentities() { return clientIdentities; }
-    /**
-     * 直接设置客户身份新建累计数，供恢复及受控更新使用；不自动汇入 Owner 字典版本。
-     * @param value 恢复或更新后的客户身份累计分配次数
-     */
-    public void clientIdentityAllocations(long value) { this.clientIdentityAllocations = value; }
-    /**
-     * 返回 Lane 已记录的客户身份新建累计数。
-     */
-    public long clientIdentityAllocations() { return clientIdentityAllocations; }
-    /**
-     * 返回本逻辑 Lane 复用的风险候选输出缓冲。
-     */
-    public RiskLiquidationBatch riskLiquidationBatch() { return riskLiquidationBatch; }
-    /**
-     * 安装本 Lane 的风险候选输出缓冲，后续扫描可原位复用。
-     * @param value 本 Lane 要保留并复用的风险候选批次缓冲
-     */
-    public void riskLiquidationBatch(RiskLiquidationBatch value) { this.riskLiquidationBatch = value; }
-    /**
-     * 返回当前是否处于 Lane 命令作用域，不在此建立线程可见性或自动取得所有权。
-     */
-    public boolean commandScopeActive() { return commandScopeActive; }
-    /**
-     * 直接记录查询作用域开关，本身不暂停工作线程或建立读取屏障。
-     * @param value 是否标记为处于查询作用域
-     */
-    public void queryScopeActive(boolean value) { this.queryScopeActive = value; }
-    /**
-     * 返回当前借用的 Matcher 结算变化收集器。
-     */
-    public MatcherSettlementChanges matcherSettlementChanges() { return matcherSettlementChanges; }
-    /**
-     * 直接记录 Lane 命令作用域开关，真实进入和离开顺序由调用方维护。
-     * @param value 是否标记为处于命令作用域
-     */
-    public void commandScopeActive(boolean value) { this.commandScopeActive = value; }
-    /**
-     * 绑定或解除当前结算变化收集器，不在此发布命令完成。
-     * @param value 当前结算变化收集器，null 表示解除借用
-     */
-    public void matcherSettlementChanges(MatcherSettlementChanges value) { this.matcherSettlementChanges = value; }
-    /**
      * 按订单编号读取预留权威值，缺失返回 null。
      * @param key 预留对应的订单编号
      */
@@ -1685,10 +1694,6 @@ public final class AccountLaneState {
      */
     public UserRuntime storeUser(long key, UserRuntime value) { return users.put(key, value); }
     /**
-     * 返回订单编号到客户别名的 Lane 内反向索引，终态清理据此逐项解除关联。
-     */
-    public OrderClientKeyIndex clientKeysByOrderId() { return clientKeysByOrderId; }
-    /**
      * 按订单编号读取权威记录，可能返回仍保留的终态订单。
      * @param key 订单编号
      */
@@ -1708,10 +1713,6 @@ public final class AccountLaneState {
      * @param key 通常为 CoreLeverageKey 的查找键
      */
     public Long leverage(Object key) { return cold.leverages.get(key); }
-    /**
-     * 返回已记录的查询作用域开关，不代替实际读取屏障检查。
-     */
-    public boolean queryScopeActive() { return queryScopeActive; }
     /**
      * 按强平编号读取当前 Lane 的强平记录。
      * @param key 强平编号
@@ -1739,10 +1740,6 @@ public final class AccountLaneState {
      * 返回直接关联持仓表的值视图，调用方在读取保护范围内消费。
      */
     public Iterable<com.surprising.aeron.service.state.position.PositionRuntime> positionValuesForRead() { return positions.values(); }
-    /**
-     * 返回可复用的杠杆查找槽，后续查找可能覆盖其中结果。
-     */
-    public TradingRuntimeState.LeverageLookup leverageLookup() { return leverageLookup; }
     /**
      * 直接写入并返回旧杠杆设置，用户键索引由调用方同步维护。
      * @param key 用户、合约和保证金模式组成的杠杆键
@@ -1887,31 +1884,6 @@ public final class AccountLaneState {
      * @param key 要检查是否仍在权威表中的订单编号
      */
     public boolean hasOrder(long key) { return orders.containsKey(key); }
-    /**
-     * 返回当前准入用于首次分配用户成员集合的容量提示。
-     */
-    public int admissionIndexCapacity() { return admissionIndexCapacity; }
-    /**
-     * 返回本 Lane 复用的衍生品结算累加器，避免每次填充重新创建工作对象。
-     */
-    public RuntimeDerivativeMatchProcessor.DerivativeSettlementAccumulator derivativeSettlementAccumulator() { return derivativeSettlementAccumulator; }
-    /**
-     * 返回本 Lane 复用的现货结算累加器。
-     */
-    public RuntimeSpotMatchProcessor.SpotSettlementAccumulator spotSettlementAccumulator() { return spotSettlementAccumulator; }
-    /**
-     * 返回本 Lane 风险估值使用的持仓工作缓冲，不是可供外部保存的风险快照。
-     */
-    public RiskLaneProcessor.PositionRiskScratch positionRiskScratch() { return positionRiskScratch; }
-    /**
-     * 返回单笔成交计算复用的游标，结果在后续使用时可被覆盖。
-     */
-    public RuntimeDerivativeFillCalculator.FillCursor singleFillCursor() { return singleFillCursor; }
-    /**
-     * 直接设置准入容量提示；批量作用域负责在结束时恢复原值。
-     * @param value 当前批量准入希望预先容纳的成员数量
-     */
-    public void admissionIndexCapacity(int value) { this.admissionIndexCapacity = value; }
     /**
      * 用接收 Long 键的 Java 回调遍历订单项，适用于现有冷边界调用；需要原语键时使用 forEachOrder。
      * @param consumer 在当前 Lane 访问边界内消费遍历项的回调，不应修改正在遍历的容器

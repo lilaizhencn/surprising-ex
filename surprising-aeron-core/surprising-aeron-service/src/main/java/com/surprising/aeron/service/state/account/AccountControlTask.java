@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
@@ -14,9 +17,8 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntFunction;
 
-/**
- * 命令槽复用的账户控制续步，处理余额、转出与完成划转、杠杆、持仓模式和逐仓保证金。准备阶段派发所属 Lane，apply 在 Lane 内改账户，poll 在 Owner 收齐结果后发布元数据；同一对象在完成与释放前不能再次 prepare 或 clear。
- */
+/** 命令槽复用的账户控制续步，处理余额、转出与完成划转、杠杆、持仓模式和逐仓保证金。准备阶段派发所属 Lane，apply 在 Lane 内改账户，poll 在 Owner 收齐结果后发布元数据；同一对象在完成与释放前不能再次 prepare 或 clear。 构造约定：创建空控制续步，不派发业务；使用前需调用与本命令匹配的准备入口。 */
+@NoArgsConstructor
 public final class AccountControlTask implements IntFunction<Object>, BooleanSupplier {
     /** 余额增减任务标记，对应可用余额调整。 */
     public static final byte KIND_BALANCE = 1;
@@ -45,7 +47,9 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     private long nextRevision;
     /** 本续步是否已由 Owner 收集并完成，或划转完成路径无需派发。 */
     private boolean completed;
-    /** 本续步是否已记录需要发布的变化，沿用各分支规则，不表示所有情况都有新扣款。 */
+    /**  本续步是否已记录需要发布的变化，沿用各分支规则，不表示所有情况都有新扣款。 返回本续步记录的发布变化标记；转出路径即使幂等未新建也会置 true，不把它等同于必然发生资金变化。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean stateChanged;
 
     // 余额任务输入。
@@ -84,11 +88,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     /** 当前逐仓保证金增减命令。 */
     private AdjustPositionMarginCommand positionMarginCommand;
 
-    /**
-     * 创建空控制续步，不派发业务；使用前需调用与本命令匹配的准备入口。
-     */
-    public AccountControlTask() {
-    }
 
     /**
      * 检查输入，重置续步并解析资产，预计算下一产品修订号，再把余额调整交给所属账户 Lane。
@@ -378,12 +377,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         return true;
     }
 
-    /**
-     * 返回本续步记录的发布变化标记；转出路径即使幂等未新建也会置 true，不把它等同于必然发生资金变化。
-     */
-    public boolean stateChanged() {
-        return stateChanged;
-    }
 
     /**
      * 把 BooleanSupplier 轮询接口接到 poll，供命令槽继续推进。

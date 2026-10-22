@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.ingress;
 
+import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
@@ -227,56 +230,91 @@ public final class CoreMessageFlyweightDecoder {
         return slot;
     }
 
-    /**
-     * 同一个解码器反复使用的头部读取视图；字段随 wrap 更新，不能当作跨帧不可变值。wrap 失败不保证此前或部分字段保持原样。
-     */
+    /** 同一个解码器反复使用的头部读取视图；字段随 wrap 更新，不能当作跨帧不可变值。wrap 失败不保证此前或部分字段保持原样。 构造约定：建立尚未绑定帧的读取器，必须成功 wrap 后再读取其字段。 */
+    @NoArgsConstructor
     public static final class DirectMessageReader {
-        /** 最近一次成功 wrap 的原始帧缓冲，读取器只借用它。 */
+        /**  最近一次成功 wrap 的原始帧缓冲，读取器只借用它。 借出最近一次成功绑定的原缓冲，不复制帧字节。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private DirectBuffer buffer;
-        /** 当前帧在原缓冲中的起始字节偏移。 */
+        /**  当前帧在原缓冲中的起始字节偏移。 读取当前帧的缓冲起始偏移。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int offset;
-        /** 当前完整帧的字节长度。 */
+        /**  当前完整帧的字节长度。 读取当前完整帧长度。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int length;
-        /** 已校验的固定头长度。 */
+        /**  已校验的固定头长度。 读取已校验的固定头长度。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int headerLength;
-        /** 已校验的有效载荷长度。 */
+        /**  已校验的有效载荷长度。 读取有效载荷字节数。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int payloadLength;
-        /** 载荷在原缓冲中的绝对起始偏移。 */
+        /**  载荷在原缓冲中的绝对起始偏移。 读取有效载荷的绝对字节偏移。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int payloadOffset;
 
-        /** 帧头协议版本，必须等于当前支持版本。 */
+        /**  帧头协议版本，必须等于当前支持版本。 读取当前协议版本。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int schemaVersion;
-        /** 帧头消息种类，例如命令或查询。 */
+        /**  帧头消息种类，例如命令或查询。 读取当前消息种类。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private WireMessageKind kind;
-        /** 帧头产品线，经 wire code 解码。 */
+        /**  帧头产品线，经 wire code 解码。 读取已解码产品线。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private com.surprising.product.api.ProductLine productLine;
-        /** 帧头具体业务消息类型。 */
+        /**  帧头具体业务消息类型。 读取具体业务消息类型。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private CoreMessageType messageType;
-        /** 帧头命令来源种类。 */
+        /**  帧头命令来源种类。 读取命令来源种类。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private CommandSource source;
-        /** 帧头路由分片代码，路由合法性由后续 CoreRoute 构造继续检查。 */
+        /**  帧头路由分片代码，路由合法性由后续 CoreRoute 构造继续检查。 读取路由分片代码。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int shardCode;
-        /** 帧头路由版本，后续构造 CoreRoute 使用。 */
+        /**  帧头路由版本，后续构造 CoreRoute 使用。 读取路由版本。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private int routeVersion;
-        /** 命令 UUID 的高六十四位。 */
+        /**  命令 UUID 的高六十四位。 读取命令 UUID 高位。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long commandIdMsb;
-        /** 命令 UUID 的低六十四位。 */
+        /**  命令 UUID 的低六十四位。 读取命令 UUID 低位。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long commandIdLsb;
-        /** 命令来源实例 ID。 */
+        /**  命令来源实例 ID。 读取命令来源实例 ID。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long sourceId;
-        /** 来源内部递增序号，供原幂等和顺序检查使用。 */
+        /**  来源内部递增序号，供原幂等和顺序检查使用。 读取来源内部序号。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long sourceSequence;
-        /** 命令目标用户 ID。 */
+        /**  命令目标用户 ID。 读取目标用户 ID。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long userId;
-        /** 请求头中的提交毫秒时间，不等于复制日志业务时间。 */
+        /**  请求头中的提交毫秒时间，不等于复制日志业务时间。 读取原请求提交毫秒时间。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long submittedAtEpochMillis;
-        /** 请求与响应关联用的原关联号。 */
+        /**  请求与响应关联用的原关联号。 读取请求响应关联号。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long correlationId;
 
-        /**
-         * 建立尚未绑定帧的读取器，必须成功 wrap 后再读取其字段。
-         */
-        public DirectMessageReader() {}
 
         /**
          * 先检查缓冲范围、魔数、版本和头长度，再按小端读取头字段及载荷长度；要求整帧长度精确匹配，成功后保存原缓冲视图。不在此校验业务载荷或执行交易。
@@ -348,85 +386,5 @@ public final class CoreMessageFlyweightDecoder {
             return this;
         }
 
-        /**
-         * 借出最近一次成功绑定的原缓冲，不复制帧字节。
-         */
-        public DirectBuffer buffer() { return buffer; }
-        /**
-         * 读取当前帧的缓冲起始偏移。
-         */
-        public int offset() { return offset; }
-        /**
-         * 读取当前完整帧长度。
-         */
-        public int length() { return length; }
-        /**
-         * 读取已校验的固定头长度。
-         */
-        public int headerLength() { return headerLength; }
-        /**
-         * 读取有效载荷的绝对字节偏移。
-         */
-        public int payloadOffset() { return payloadOffset; }
-        /**
-         * 读取有效载荷字节数。
-         */
-        public int payloadLength() { return payloadLength; }
-        /**
-         * 读取当前协议版本。
-         */
-        public int schemaVersion() { return schemaVersion; }
-        /**
-         * 读取当前消息种类。
-         */
-        public WireMessageKind kind() { return kind; }
-        /**
-         * 读取已解码产品线。
-         */
-        public com.surprising.product.api.ProductLine productLine() { return productLine; }
-        /**
-         * 读取具体业务消息类型。
-         */
-        public CoreMessageType messageType() { return messageType; }
-        /**
-         * 读取命令来源种类。
-         */
-        public CommandSource source() { return source; }
-        /**
-         * 读取路由分片代码。
-         */
-        public int shardCode() { return shardCode; }
-        /**
-         * 读取路由版本。
-         */
-        public int routeVersion() { return routeVersion; }
-        /**
-         * 读取命令 UUID 高位。
-         */
-        public long commandIdMsb() { return commandIdMsb; }
-        /**
-         * 读取命令 UUID 低位。
-         */
-        public long commandIdLsb() { return commandIdLsb; }
-        /**
-         * 读取命令来源实例 ID。
-         */
-        public long sourceId() { return sourceId; }
-        /**
-         * 读取来源内部序号。
-         */
-        public long sourceSequence() { return sourceSequence; }
-        /**
-         * 读取目标用户 ID。
-         */
-        public long userId() { return userId; }
-        /**
-         * 读取原请求提交毫秒时间。
-         */
-        public long submittedAtEpochMillis() { return submittedAtEpochMillis; }
-        /**
-         * 读取请求响应关联号。
-         */
-        public long correlationId() { return correlationId; }
     }
 }

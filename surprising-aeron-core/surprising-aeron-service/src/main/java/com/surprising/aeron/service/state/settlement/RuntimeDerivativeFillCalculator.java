@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.settlement;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.business.ProductTradingRules;
 import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
@@ -20,16 +22,10 @@ import com.surprising.aeron.service.state.order.OrderRuntime;
 import com.surprising.aeron.service.state.order.ReservationRuntime;
 import com.surprising.aeron.service.state.position.PositionRuntime;
 
-/**
- * 下单步骤 4.4 的衍生品成交计算。读取所属账户的订单、预留、余额、持仓及产品规则，在 Lane 独占游标中计算开平仓、保证金、盈亏、权利金和手续费，再写回同一账户；系统资金差额交给原账本边界，不跨 Lane 读写权威状态。
- */
+/** 下单步骤 4.4 的衍生品成交计算。读取所属账户的订单、预留、余额、持仓及产品规则，在 Lane 独占游标中计算开平仓、保证金、盈亏、权利金和手续费，再写回同一账户；系统资金差额交给原账本边界，不跨 Lane 读写权威状态。 构造约定：只提供成交计算静态入口，不允许单独创建工具实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeDerivativeFillCalculator {
 
-    /**
-     * 只提供成交计算静态入口，不允许单独创建工具实例。
-     */
-    private RuntimeDerivativeFillCalculator() {
-    }
 
     /**
      * 校验单笔成交、账户预留及余额归属，借用所属 Lane 的单笔游标计算并发布结果；期权额外要求风险标记价，finally 释放游标引用供下次复用。

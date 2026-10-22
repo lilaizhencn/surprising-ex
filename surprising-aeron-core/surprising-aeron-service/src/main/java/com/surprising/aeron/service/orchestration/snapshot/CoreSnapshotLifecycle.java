@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.orchestration.snapshot;
 
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatchingResult;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
@@ -13,34 +17,56 @@ import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
 /**
  * Owner 上的一致性快照流程：先建立屏障并收齐待撮合/待结算命令，再物化状态和哈希，捕获各 Matcher 原生模块，审计配对后提交编码 Future。轮询完成才交出字节；释放屏障请求取消编码 Future，不自动取消正在运行的 Matcher 捕获。线程与跨 Lane 读取权限沿用现有 Owner 边界。
+ * 构造约定：保存所属交易运行时引用，不复制交易状态，也不在构造器里激活 Matcher。
+ * 参数 owner：所属交易 Owner 运行时
  */
+@RequiredArgsConstructor
 public final class CoreSnapshotLifecycle {
     /** 所属交易 Owner 运行时，保存协作入口而不复制账户或订单状态。 */
     final TradingCoreRuntime owner;
 
-    /**
-     * 保存所属交易运行时引用，不复制交易状态，也不在构造器里激活 Matcher。
-     * @param owner 所属交易 Owner 运行时
-     */
-    public CoreSnapshotLifecycle(TradingCoreRuntime owner) { this.owner = owner; }
 
-    /** 已建立屏障后调用的原生撮合快照捕获函数，默认实现通过 Matcher 控制队列执行。 */
+    /**
+     *  已建立屏障后调用的原生撮合快照捕获函数，默认实现通过 Matcher 控制队列执行。
+     * 替换原生撮合快照捕获入口，不在此检查非空，调用方负责初始化和线程使用边界。
+     * @param matcherSnapshotCapture 后续屏障使用的 Matcher 捕获实现
+     */
+    @Accessors(fluent = true, chain = false)
+    @Setter
     TradingCoreRuntime.MatcherSnapshotCapture matcherSnapshotCapture;
 
-    /** 通过审计后接收快照镜像并返回分段结果 Future 的编码入口。 */
+    /**
+     *  通过审计后接收快照镜像并返回分段结果 Future 的编码入口。
+     * 替换快照编码入口，不在此检查非空或启动编码；实际轮询要求返回非空 Future。
+     * @param snapshotEncoder 后续屏障使用的快照编码实现
+     */
+    @Accessors(fluent = true, chain = false)
+    @Setter
     TradingCoreRuntime.SnapshotEncoder snapshotEncoder;
 
-    /** 编码回调记录的首个运行异常，Owner 健康检查据此拒绝继续。 */
+    /**  编码回调记录的首个运行异常，Owner 健康检查据此拒绝继续。 返回共享审计失败引用，编码回调只登记首个失败，运行时健康检查读取。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final AtomicReference<RuntimeException> snapshotAuditFailure = new AtomicReference<>();
 
-    /** 当前仍在执行的 Matcher 捕获 Future，屏障释放不直接取消它。 */
+    /**  当前仍在执行的 Matcher 捕获 Future，屏障释放不直接取消它。 返回正在捕获 Matcher 快照的原子引用，捕获完成后按同一 Future 身份比较清除。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final AtomicReference<CompletableFuture<MatcherSnapshot>> inFlightMatcherSnapshot =
             new AtomicReference<>();
 
-    /** 当前 Owner 正在推进的快照屏障，返回结果或释放后清空。 */
+    /**  当前 Owner 正在推进的快照屏障，返回结果或释放后清空。 返回当前屏障引用，未开始或已释放时为空，供 Owner 内部协作。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     SnapshotFence snapshotFence;
 
-    /** 最近完成或恢复时登记的快照编号，用于选择后续编号。 */
+    /**
+     *  最近完成或恢复时登记的快照编号，用于选择后续编号。
+     * 直接设置最近快照编号，不在此校验正数或单调递增；正常完成快照时另用 max 推进。
+     * @param lastSnapshotId 恢复或内部协作直接写入的最近快照编号
+     */
+    @Accessors(fluent = true, chain = false)
+    @Setter
     long lastSnapshotId;
 
     /**
@@ -292,13 +318,17 @@ public final class CoreSnapshotLifecycle {
         long coreSequence = -1;
         /** 首次物化状态时保存的投影发布水位，负一表示尚未捕获。 */
         long projectionSequence = -1;
-        /** 首次在快照读取边界物化的交易状态，只在该屏障生命周期持有。 */
+        /**  首次在快照读取边界物化的交易状态，只在该屏障生命周期持有。 返回首次物化后供 Matcher 配对使用的状态引用，尚未捕获时为空。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         TradingCoreState snapshotState;
         /** 首次物化状态连同费率及待划转的业务哈希，用于 Matcher 配对。 */
         long businessStateHash;
         /** 本屏障的 Matcher 捕获 Future，可能在屏障释放后仍继续执行。 */
         CompletableFuture<MatcherSnapshot> matcherSnapshot;
-        /** 通过审计后启动的编码 Future，成功后交给持久化边界。 */
+        /**  通过审计后启动的编码 Future，成功后交给持久化边界。 返回当前编码 Future 引用，尚未进入编码阶段时为空，不复制或阻止调用方操作该 Future。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         CompletableFuture<SectionedCoreSnapshotCodec.SectionedSnapshot> encodedSnapshot;
 
         /**
@@ -311,41 +341,6 @@ public final class CoreSnapshotLifecycle {
             this.deadlineNanos = deadlineNanos;
         }
 
-    /**
-     * 返回当前编码 Future 引用，尚未进入编码阶段时为空，不复制或阻止调用方操作该 Future。
-     */
-    public CompletableFuture<SectionedCoreSnapshotCodec.SectionedSnapshot> encodedSnapshot() { return encodedSnapshot; }
-    /**
-     * 返回首次物化后供 Matcher 配对使用的状态引用，尚未捕获时为空。
-     */
-    public TradingCoreState snapshotState() { return snapshotState; }
 }
 
-    /**
-     * 直接设置最近快照编号，不在此校验正数或单调递增；正常完成快照时另用 max 推进。
-     * @param value 恢复或内部协作直接写入的最近快照编号
-     */
-    public void lastSnapshotId(long value) { this.lastSnapshotId = value; }
-    /**
-     * 替换原生撮合快照捕获入口，不在此检查非空，调用方负责初始化和线程使用边界。
-     * @param value 后续屏障使用的 Matcher 捕获实现
-     */
-    public void matcherSnapshotCapture(TradingCoreRuntime.MatcherSnapshotCapture value) { this.matcherSnapshotCapture = value; }
-    /**
-     * 替换快照编码入口，不在此检查非空或启动编码；实际轮询要求返回非空 Future。
-     * @param value 后续屏障使用的快照编码实现
-     */
-    public void snapshotEncoder(TradingCoreRuntime.SnapshotEncoder value) { this.snapshotEncoder = value; }
-    /**
-     * 返回当前屏障引用，未开始或已释放时为空，供 Owner 内部协作。
-     */
-    public SnapshotFence snapshotFence() { return snapshotFence; }
-    /**
-     * 返回共享审计失败引用，编码回调只登记首个失败，运行时健康检查读取。
-     */
-    public AtomicReference<RuntimeException> snapshotAuditFailure() { return snapshotAuditFailure; }
-    /**
-     * 返回正在捕获 Matcher 快照的原子引用，捕获完成后按同一 Future 身份比较清除。
-     */
-    public AtomicReference<CompletableFuture<MatcherSnapshot>> inFlightMatcherSnapshot() { return inFlightMatcherSnapshot; }
 }

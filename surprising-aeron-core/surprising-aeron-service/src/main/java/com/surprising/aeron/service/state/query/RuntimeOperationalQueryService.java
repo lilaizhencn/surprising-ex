@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.query;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.protocol.CoreCancelAllAfterView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
@@ -21,20 +23,14 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
-/**
- * 账本资产、资金费及到期结算进度、条件单、算法母单和定时撤单的查询视图组装。各入口按自己的扫描、条数或分页规则限制规模，读取时仍须遵守账户 Lane 与账本的所有权。
- */
+/** 账本资产、资金费及到期结算进度、条件单、算法母单和定时撤单的查询视图组装。各入口按自己的扫描、条数或分页规则限制规模，读取时仍须遵守账户 Lane 与账本的所有权。 构造约定：只提供查询视图转换，不额外持有资金或订单权威状态。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeOperationalQueryService {
 
     /** 普通查询物化实体的统一条数上限一万，具体入口还可能接受更小的分页限制。 */
     public static final int MAX_QUERY_ENTITIES = 10_000;
     /** 单次查询允许扫描的索引规模上限 16384，避免结果少但遍历范围无限大。 */
     public static final int MAX_INDEX_SCAN = 16_384;
-    /**
-     * 只提供查询视图转换，不额外持有资金或订单权威状态。
-     */
-    private RuntimeOperationalQueryService() {
-    }
 
     /**
      * 通过运行时的账本静止读取入口获取资产视图，再调用账本数据版本的组装方法。

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.index;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
@@ -72,7 +74,9 @@ public final class ActiveOrderIndex {
          * userId：路由当前用户，回收后为零。
          */
         private long orderId, userId;
-        /** 路由当前永久数字标的文本，回收后为空。 */
+        /**  路由当前永久数字标的文本，回收后为空。 读取该路由当前永久数字标的文本。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private String instrumentId;
         /**
          * 建立只含订单、用户、标的的路由持有者，不保存余额、预留或 OrderRuntime。
@@ -102,10 +106,6 @@ public final class ActiveOrderIndex {
          * 读取该路由当前用户。
          */
         public long userId() { return userId; }
-        /**
-         * 读取该路由当前永久数字标的文本。
-         */
-        public String instrumentId() { return instrumentId; }
     }
     // Owner 独占的有界页筛选暂存，不按全订单深度分配。
     /** Owner 独占、延迟创建的一千零二十五槽页筛选堆，不按全订单深度扩容。 */

@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.settlement;
 
+import lombok.NoArgsConstructor;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -21,7 +25,9 @@ import java.lang.invoke.VarHandle;
 
 /**
  * 下单步骤 4.2–4.6 的可复用结算事件。Owner 准备命令输入，Matcher 整理并发布事实，各账户 Lane 写自己的变化和完成位，系统账本交回财务完成位，Owner 收集后有序提交。readyForLane 只要求结果已发布，ready 还等待发布方交出租约，complete 再核对全部路由账户及已登记财务工作；事件不是永久不可变快照，清理前还须交出 changes。
+ * 构造约定：创建空事件壳，命令输入、批量槽和完成标记由后续准备入口填写。
  */
+@NoArgsConstructor
 public final class MatcherSettlementEvent implements
         SettlementLaneWorker.Command,
         com.surprising.aeron.service.matching.MatchingResult {
@@ -43,17 +49,25 @@ public final class MatcherSettlementEvent implements
     /** 完成数组的 VarHandle，Lane release 发布、Owner 及账本 acquire 读取。 */
     private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
 
-    /** 本段账户最终提交序号，顺序批次中间项可为零。 */
+    /**  本段账户最终提交序号，顺序批次中间项可为零。 返回本段账户处理完成后需要推进的 Lane 提交序号，零表示本段不推进最终水位。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long commitSequence;
-    /** 当前事实真正需要应用账户业务变化的 Lane 位图。 */
+    /**  当前事实真正需要应用账户业务变化的 Lane 位图。 返回本代事实实际需要应用业务变化的账户 Lane 位图。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long requiredLaneMask;
     /** 复制日志中的业务时间，用于订单及触发终态元数据。 */
     private long commitTimestamp;
     /** 本次复制命令的日志位置，随账户结果发布。 */
     private long commitClusterPosition;
-    /** 当前代所属运行时，事件归还前解除引用。 */
+    /**  当前代所属运行时，事件归还前解除引用。 借用事件关联的所属交易运行时，回收后引用为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private TradingRuntimeState runtime;
-    /** 当前代解析资产、币对及持仓身份的运行时字典。 */
+    /**  当前代解析资产、币对及持仓身份的运行时字典。 借用当前代运行时身份字典，事件回收后引用为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private RuntimeIdentityRegistry identities;
     /** 按实际参与业务 Lane 紧凑排列的财务差额槽，各 Lane 只写自己的槽。 */
     private RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
@@ -83,7 +97,9 @@ public final class MatcherSettlementEvent implements
     private com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacement;
     /** 改单新预留使用的资产编号。 */
     private int replacementAssetId;
-    /** 改单 Lane 新分配的客户身份次数，交给 Owner 归集。 */
+    /**  改单 Lane 新分配的客户身份次数，交给 Owner 归集。 返回本代改单在所属 Lane 新分配的客户身份数量，供 Owner 收集时归集。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long replacementIdentityAllocations;
     /** 触发子订单对应的源触发状态，Matcher 结果据此准备终态。 */
     private com.surprising.aeron.service.state.model.CoreTriggerOrderState sourceTrigger;
@@ -91,9 +107,13 @@ public final class MatcherSettlementEvent implements
     private long triggeredAt;
     /** 直达事实的 Core 证据序号，可不同于最终 Lane 提交序号。 */
     private long directCoreSequence;
-    /** Owner 已预约逻辑发布标记，不代表各 Lane 已入队。 */
+    /**  Owner 已预约逻辑发布标记，不代表各 Lane 已入队。 返回是否已预约逻辑发布状态，不表示 Lane 队列已经收到事件。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private boolean dispatched;
-    /** 单 Matcher 发布方已登记投递的路由 Lane 位图，不是完成位图。 */
+    /**  单 Matcher 发布方已登记投递的路由 Lane 位图，不是完成位图。 返回发布方已登记投递的 Lane 位图，不能代替账户完成位。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private long queuedLaneMask;
     /** 初始只含一个 Lane 时允许随 maker 成交扩展路由的标记。 */
     private boolean expandLaneRoute;
@@ -103,7 +123,9 @@ public final class MatcherSettlementEvent implements
     private volatile boolean matcherPublicationDeferred;
     /** Matcher 构建或发布前捕获的执行故障，不能作为普通拒单继续提交。 */
     private Throwable directFailure;
-    /** 必须消费本事件票据的 Lane 位图，固定多 Lane 预约可含本代无业务变化的 Lane。 */
+    /**  必须消费本事件票据的 Lane 位图，固定多 Lane 预约可含本代无业务变化的 Lane。 返回必须消费本事件票据的路由 Lane 位图，可能包含本代已无业务变化的预约 Lane。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private long routedLaneMask;
     /** 本代命令 UUID，供结果证据校验。 */
     private java.util.UUID directCommandId;
@@ -111,15 +133,21 @@ public final class MatcherSettlementEvent implements
     private long directCommandIdMsb;
     /** 命令 UUID 的低六十四位，供原语证据比较。 */
     private long directCommandIdLsb;
-    /** 本代命令固定的 Matcher 分片。 */
+    /**  本代命令固定的 Matcher 分片。 返回本代命令固定的 Matcher 分片编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private int directShard;
     /** Owner 与已接受准入回执合并后的授权撤单列表，不等于成功列表。 */
     private java.util.List<Long> authorizedCancellations = java.util.List.of();
     /** 本代原生结果引用，可能借用事件命令槽，只在事件租约内有效。 */
     private exchange.core2.core.common.MatcherResult directNativeResult;
-    /** 本代首项原生或合成结果的 Matcher 证据序号。 */
+    /**  本代首项原生或合成结果的 Matcher 证据序号。 返回本代首项 Matcher 证据序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long directMatcherSequence;
-    /** 本代最后保存项的 Matcher 序号，批次输入必须递增。 */
+    /**  本代最后保存项的 Matcher 序号，批次输入必须递增。 返回本代最后已保存项的 Matcher 序号，批量构建据此要求递增。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long directLastMatcherSequence;
     /** 本代结果视图对应的首项订单编号。 */
     private long directOrderId;
@@ -143,7 +171,9 @@ public final class MatcherSettlementEvent implements
     private MatcherCompletionRoute matcherCompletionRoute;
     /** 交给传输释放回调的 Matcher 分片编号。 */
     private int matcherCompletionShard;
-    /** 本代是否要求复制普通下单的账户准入回执。 */
+    /**  本代是否要求复制普通下单的账户准入回执。 返回本代是否登记了普通下单准入回执边界。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private boolean admissionRequired;
     /** 事件租约内保存的普通下单不可变准入输入。 */
     private ResolvedPlaceOrder admissionOrder;
@@ -151,7 +181,9 @@ public final class MatcherSettlementEvent implements
     private long admissionUserId;
     /** 普通下单准入的订单及预留编号。 */
     private long admissionOrderId;
-    /** 准入所属 Lane，未登记时为负一。 */
+    /**  准入所属 Lane，未登记时为负一。 返回普通下单准入所属 Lane，未登记时为负一。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private int admissionLaneId = -1;
     /** 准入回执字段已复制完成的 volatile 发布标记。 */
     private volatile boolean admissionResolved;
@@ -271,11 +303,6 @@ public final class MatcherSettlementEvent implements
         return batchStorage;
     }
 
-    /**
-     * 创建空事件壳，命令输入、批量槽和完成标记由后续准备入口填写。
-     */
-    public MatcherSettlementEvent() {
-    }
 
     /**
      * 准备一代直达事件，默认以同一 Core 序号作为最终 Lane 提交序号，委托完整入口登记租约输入。
@@ -388,10 +415,6 @@ public final class MatcherSettlementEvent implements
         replacementAssetId = assetId;
     }
 
-    /**
-     * 返回本代改单在所属 Lane 新分配的客户身份数量，供 Owner 收集时归集。
-     */
-    public long replacementIdentityAllocations() { return replacementIdentityAllocations; }
 
     /**
      * 仅允许单项事件借用首项准入订单引用，普通不可变准入输入路径可能没有此运行时值。
@@ -410,18 +433,6 @@ public final class MatcherSettlementEvent implements
      */
     public long coreSequence() { return directCoreSequence; }
     /**
-     * 返回本代命令固定的 Matcher 分片编号。
-     */
-    int directShard() { return directShard; }
-    /**
-     * 借用事件关联的所属交易运行时，回收后引用为空。
-     */
-    TradingRuntimeState runtime() { return runtime; }
-    /**
-     * 返回是否已预约逻辑发布状态，不表示 Lane 队列已经收到事件。
-     */
-    public boolean dispatched() { return dispatched; }
-    /**
      * 单 Matcher 发布方为实际路由中的 Lane 登记一次投递，拒绝越界、未预约、非路由和重复投递。
      * @param laneId 当前操作的账户 Lane 编号
      */
@@ -435,14 +446,6 @@ public final class MatcherSettlementEvent implements
         }
         queuedLaneMask |= bit;
     }
-    /**
-     * 返回发布方已登记投递的 Lane 位图，不能代替账户完成位。
-     */
-    long queuedLaneMask() { return queuedLaneMask; }
-    /**
-     * 返回必须消费本事件票据的路由 Lane 位图，可能包含本代已无业务变化的预约 Lane。
-     */
-    long routedLaneMask() { return routedLaneMask; }
     /**
      * 供 Owner 检查结果已发布且 Matcher 已结束发布过程；尚不表示账户或财务工作完成。
      */
@@ -464,17 +467,9 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * 返回本代是否登记了普通下单准入回执边界。
-     */
-    boolean admissionRequired() { return admissionRequired; }
-    /**
      * 未要求普通下单准入时视为接受，否则返回已复制的准入接受标记；调用方仍须遵守回执发布顺序。
      */
     public boolean admissionAccepted() { return !admissionRequired || admissionAccepted; }
-    /**
-     * 返回普通下单准入所属 Lane，未登记时为负一。
-     */
-    int admissionLaneId() { return admissionLaneId; }
 
     /**
      * 在已登记普通下单准入路由的事件中保存不可变订单输入与用户，预留回执须匹配该订单编号。
@@ -833,14 +828,6 @@ public final class MatcherSettlementEvent implements
      * 要求结果已发布且无故障后返回接受标记；批量事件该标记代表首项。
      */
     public boolean directNativeAccepted() { requireDirectResult(); return directNativeAccepted; }
-    /**
-     * 返回本代首项 Matcher 证据序号。
-     */
-    public long directMatcherSequence() { return directMatcherSequence; }
-    /**
-     * 返回本代最后已保存项的 Matcher 序号，批量构建据此要求递增。
-     */
-    public long directLastMatcherSequence() { return directLastMatcherSequence; }
     /**
      * 返回本代结果证据所属 Matcher 分片。
      */
@@ -1376,14 +1363,6 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * 返回本段账户处理完成后需要推进的 Lane 提交序号，零表示本段不推进最终水位。
-     */
-    public long commitSequence() { return commitSequence; }
-    /**
-     * 返回本代事实实际需要应用业务变化的账户 Lane 位图。
-     */
-    public long requiredLaneMask() { return requiredLaneMask; }
-    /**
      * Owner 仅在发布结束后以 acquire 读取尚未观察完成的路由 Lane 标记，并缓存已完成位，不回退本代观察结果。
      */
     public long completedLaneMask() {
@@ -1476,10 +1455,6 @@ public final class MatcherSettlementEvent implements
         if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
         return batchStorage.plans[index];
     }
-    /**
-     * 借用当前代运行时身份字典，事件回收后引用为空。
-     */
-    public RuntimeIdentityRegistry identities() { return identities; }
     /**
      * 借用首项规范币对，只有已经准备该元数据的有效事件入口才能使用。
      */

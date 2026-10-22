@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.order;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -9,16 +11,10 @@ import com.surprising.aeron.service.state.change.LaneCommitDelta;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 
-/**
- * 算法父单和普通子单之间的账户状态约束。子单在同一 Lane 受父单身份、顺序和数量限制，退休时把成交进度归入父单；父单更新必须保留原意图并单调推进版本和子单列表。
- */
+/** 算法父单和普通子单之间的账户状态约束。子单在同一 Lane 受父单身份、顺序和数量限制，退休时把成交进度归入父单；父单更新必须保留原意图并单调推进版本和子单列表。 构造约定：只提供算法订单已有状态规则的静态入口，不建立另一套调度器。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeAlgoOrderStateTransitions {
 
-    /**
-     * 只提供算法订单已有状态规则的静态入口，不建立另一套调度器。
-     */
-    private RuntimeAlgoOrderStateTransitions() {
-    }
 
     /**
      * 非 algo- 前缀订单不参与此检查；算法子单解析父单和片序号，核对同用户、币对、方向、可执行状态、下一子单位置和数量，上一子单仍活动时拒绝。

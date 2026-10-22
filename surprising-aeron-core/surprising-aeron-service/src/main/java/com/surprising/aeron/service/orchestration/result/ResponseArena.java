@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.result;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.service.orchestration.trade.ClusterCommandWindow;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -53,13 +56,21 @@ public final class ResponseArena {
      * 一次响应编码可使用的数组描述符，保存池归属、槽号和有效长度。池内描述符与数组一起复用，独立响应有自己的描述符；编码 writer 只由当前持有者使用。
      */
     public static final class Slot {
-        /** 当前描述符借用的底层数组，池内数组可能大于有效长度。 */
+        /**  当前描述符借用的底层数组，池内数组可能大于有效长度。 借出底层数组，必须遵守描述符借用期并另带有效长度。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         byte[] storage;
         /** 底层数组是否属于本池固定槽，决定是否参与引用归还。 */
         final boolean arenaBacked;
         /** 池内固定槽号，独立数组和空描述符为负一。 */
         final int slotIndex;
-        /** 当前编码完成后的有效字节数，由编码持有者赋值。 */
+        /**
+         *  当前编码完成后的有效字节数，由编码持有者赋值。
+         * 记录当前有效响应长度，本方法直接赋值，不校验是否超出容量。
+         * @param length 当前编码的有效长度，本方法不额外验证
+         */
+        @Accessors(fluent = true, chain = false)
+        @Setter
         int length;
         /** 与当前数组配对的复用 ByteBuffer，仅当前编码持有者修改其位置。 */
         private java.nio.ByteBuffer writer;
@@ -84,16 +95,7 @@ public final class ResponseArena {
             return writer.clear();
         }
 
-    /**
-     * 记录当前有效响应长度，本方法直接赋值，不校验是否超出容量。
-     * @param value 当前编码的有效长度，本方法不额外验证
-     */
-    public void length(int value) { this.length = value; }
 
-    /**
-     * 借出底层数组，必须遵守描述符借用期并另带有效长度。
-     */
-    public byte[] storage() { return storage; }
 }
 
     /**

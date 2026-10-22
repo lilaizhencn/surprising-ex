@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.ledger;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -107,7 +110,9 @@ public final class SystemLedgerLane implements AutoCloseable {
     private long cachedConsumerSequence = -1L;
     /** 构造时的唯一 Owner 生产线程，也是允许内联应用的线程。 */
     private final Thread producer;
-    /** 消费财务任务的守护账本线程。 */
+    /**  消费财务任务的守护账本线程。 返回本执行器创建的账本工作线程，用于所有权和生命周期检查。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final Thread thread;
     /** 账本线程故障交给所属运行时的通知入口。 */
     private final Consumer<Throwable> failurePublisher;
@@ -121,7 +126,9 @@ public final class SystemLedgerLane implements AutoCloseable {
     private volatile boolean running = true;
     /** 构造线程可结束启动等待的 volatile 标记，故障退出也置 true，成功与否仍须 assertHealthy。 */
     private volatile boolean started;
-    /** 账本线程发布的停车状态，生产者据此决定是否 unpark。 */
+    /**  账本线程发布的停车状态，生产者据此决定是否 unpark。 返回账本线程当前是否已发布停车等待标记，不表示业务队列一定为空。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private volatile boolean parked;
     /** 账本线程首轮退出时保留的故障，调用者通过健康检查观察。 */
     private volatile Throwable failure;
@@ -222,10 +229,6 @@ public final class SystemLedgerLane implements AutoCloseable {
     }
 
     /**
-     * 返回本执行器创建的账本工作线程，用于所有权和生命周期检查。
-     */
-    public Thread thread() { return thread; }
-    /**
      * 返回按生产与消费序号计算并截为非负的排队深度；任务开始 apply 前已释放消费容量，因此此数不包含全部在执行资金工作。
      */
     int depth() { return (int) Math.max(0L, producerSequence.value - consumerSequence.value); }
@@ -240,10 +243,6 @@ public final class SystemLedgerLane implements AutoCloseable {
         cachedConsumerSequence = consumerSequence.value;
         return nextSeq - cachedConsumerSequence <= capacity;
     }
-    /**
-     * 返回账本线程当前是否已发布停车等待标记，不表示业务队列一定为空。
-     */
-    boolean parked() { return parked; }
 
     /**
      * 把账本线程保留的运行时异常或 Error 原样交给调用方，其他故障包装后抛出。

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.admission;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -14,19 +16,13 @@ import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.model.CoreMarkPriceState;
 import com.surprising.aeron.service.state.order.OrderReservation;
 
-/**
- * 交易步骤 2 的订单规则决策：把原始下单意图和币对、市场价格、费率及结算状态变成确定的准入输入。先决定撮合边界和预留价格，账户再检查容量并执行冻结；这里不创建真实订单或执行撮合。
- */
+/** 交易步骤 2 的订单规则决策：把原始下单意图和币对、市场价格、费率及结算状态变成确定的准入输入。先决定撮合边界和预留价格，账户再检查容量并执行冻结；这里不创建真实订单或执行撮合。 构造约定：只提供静态订单决策入口，不允许创建无业务状态的工具实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CoreOrderDecisionResolver {
 
     /** 百万分比的分母，价格保护、滑点和费率参数均采用这一比例单位。 */
     private static final long PPM = 1_000_000L;
 
-    /**
-     * 只提供静态订单决策入口，不允许创建无业务状态的工具实例。
-     */
-    private CoreOrderDecisionResolver() {
-    }
 
     /**
      * 在 Owner 读取规范币对、身份、市场和账本状态，结合用户费率及集群时间生成新决策对象，缺失币对或身份立即失败。

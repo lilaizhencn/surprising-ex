@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.matching;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -83,7 +87,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
     /** 快照号到正在进行操作的并发表，同号请求共享底层 Future，完成后移除。 */
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
-    /** 启动配置或恢复快照确定的账户与 Matcher 分片拓扑。 */
+    /**  启动配置或恢复快照确定的账户与 Matcher 分片拓扑。 返回本适配器启动或恢复时确定的线程分片拓扑。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final LaneTopology topology;
     /** 只保存首个故障的跨线程标记，后续命令和完成结果据此停止。 */
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
@@ -1977,10 +1983,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 返回本适配器启动或恢复时确定的线程分片拓扑。
-     */
-    public LaneTopology topology() { return topology; }
-    /**
      * 校验品种字符串并预留稳定路由编号，返回目标 Matcher 分片；预留路由不等于该分片原生品种已注册。
      * @param instrumentId 外部永久数字品种字符串
      */
@@ -2162,9 +2164,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
-    /**
-     * 按快照号共享的在途操作，保存重试校验身份和唯一底层完成对象；结束后从并发表移除。
-     */
+    /** 按快照号共享的在途操作，保存重试校验身份和唯一底层完成对象；结束后从并发表移除。 构造约定：登记同一在途快照号对应的 Core 序号和业务哈希，共享底层完成 Future。 参数 coreSequence：当前逻辑命令或冻结点的 Core 序号 参数 businessStateHash：冻结点的 Core 业务哈希 */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     private static final class SnapshotOperation {
         /** 该在途快照开始时的 Core 序号，用来核对重试身份。 */
         private final long coreSequence;
@@ -2173,15 +2174,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         /** 所有同号请求共用的快照底层 Future，外层视图不传播 cancel。 */
         private final CompletableFuture<MatcherSnapshot> result = new CompletableFuture<>();
 
-        /**
-         * 登记同一在途快照号对应的 Core 序号和业务哈希，共享底层完成 Future。
-         * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-         * @param businessStateHash 冻结点的 Core 业务哈希
-         */
-        private SnapshotOperation(long coreSequence, long businessStateHash) {
-            this.coreSequence = coreSequence;
-            this.businessStateHash = businessStateHash;
-        }
 
         /**
          * 创建独立的不可取消 Future，将共享底层成功值或异常转发给该视图；调用方在视图上自行完成也不会改变底层结果。

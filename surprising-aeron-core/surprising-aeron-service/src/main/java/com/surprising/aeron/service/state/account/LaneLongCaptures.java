@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 /**
  * 一个 Lane、一个命令的 long 键前值捕获缓冲。按首次捕获顺序保存键和值引用，另用带代次的索引定位；null 是合法捕获值，是否已捕获需通过 containsKey 判断。调用方在原位变更前自行冻结需要保留的值。
  * @param <V> 调用方约定的捕获业务值类型，可以用 null 表示原值不存在
@@ -17,13 +20,11 @@ final class LaneLongCaptures<V> {
     private int[] indexGenerations = new int[16];
     /** 当前查找代次，绕回零时清空代次标记并重新从一开始。 */
     private int indexGeneration = 1;
-    /** 当前命令有效捕获项数量。 */
+    /**  当前命令有效捕获项数量。 返回当前命令已捕获的有效条目数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     int size;
 
-    /**
-     * 返回当前命令已捕获的有效条目数。
-     */
-    int size() { return size; }
     /**
      * 判断当前命令是否尚无捕获条目。
      */

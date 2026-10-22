@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.lane.LaneTopology;
@@ -13,16 +15,10 @@ import java.nio.ByteOrder;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 解析元数据并核对各快照组件是否来自同一冻结点。比较产品线、拓扑、快照号、Core 水位、业务/资金哈希、来源摘要及账户 Lane 摘要；不读取正在运行的订单簿，也不在这里替代恢复后的原生逐单核对。
- */
+/** 解析元数据并核对各快照组件是否来自同一冻结点。比较产品线、拓扑、快照号、Core 水位、业务/资金哈希、来源摘要及账户 Lane 摘要；不读取正在运行的订单簿，也不在这里替代恢复后的原生逐单核对。 构造约定：禁止实例化静态快照配对检查工具。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class SectionedCoreSnapshotValidation {
 
-    /**
-     * 禁止实例化静态快照配对检查工具。
-     */
-    private SectionedCoreSnapshotValidation() {
-    }
 
     /**
      * 按固定小端字段读取元数据，使用快照保存的路由参数构造并校验拓扑，检查预期产品线、正快照号、非负水位/时间及投影水位反码；必须读尽该段。Core 数量与 Matcher 的配对另由 validatePairing 核对。

@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.ledger;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
@@ -12,9 +15,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * 按结算资产共享保险预算的确定性比例分配。先按触发价格序号、用户、合约、持仓方向及强平编号排序，以大整数计算各缺口比例，整除后的余数按该固定顺序逐项补一。只计算补偿计划，不在本类扣保险或更新强平记录；候选唯一性及跨线程引用生命周期由调用方保证。
- */
+/** 按结算资产共享保险预算的确定性比例分配。先按触发价格序号、用户、合约、持仓方向及强平编号排序，以大整数计算各缺口比例，整除后的余数按该固定顺序逐项补一。只计算补偿计划，不在本类扣保险或更新强平记录；候选唯一性及跨线程引用生命周期由调用方保证。 构造约定：只提供保险索赔分组和分配静态入口，不允许单独实例化。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class InsuranceAllocationPolicy {
 
     /** 运行时索赔固定顺序：触发价格序号、用户、业务合约名、持仓方向 ordinal、强平编号。 */
@@ -32,11 +34,6 @@ public final class InsuranceAllocationPolicy {
             .thenComparingInt(/* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim -> claim.positionSide().ordinal())
             .thenComparingLong(CoreLiquidationState::liquidationId);
 
-    /**
-     * 只提供保险索赔分组和分配静态入口，不允许单独实例化。
-     */
-    private InsuranceAllocationPolicy() {
-    }
 
     /**
      * 在原运行时可读边界准备候选索赔，再通过静默账本查询读取各资产保险预算并计算全部分配，不直接从 Owner 读取可变财库。
@@ -55,17 +52,11 @@ public final class InsuranceAllocationPolicy {
         return runtime.queryLedgerAtRest(/* 账本静默查询回调持有的原财库，预算由该执行边界读取。 */ ledger -> allocations(ledger, inputs));
     }
 
-    /**
-     * 当前命令或查询持有的按资产索赔引用分组，预算由账本读取；列表不是永久不可变副本，后续分配会原地排序，生命周期由调用方交接。
-     */
+    /** 当前命令或查询持有的按资产索赔引用分组，预算由账本读取；列表不是永久不可变副本，后续分配会原地排序，生命周期由调用方交接。 构造约定：接管当前命令或查询已准备的按资产索赔列表，不复制列表或权威账户状态。 参数 byAsset：当前调用独占的按资产索赔列表 Map，构造时接管引用 */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class AllocationInputs {
         /** 当前命令或查询按结算资产保存的索赔列表，后续分配会原地排序，消费期间独占。 */
         private final Map<Integer, ArrayList<Claim>> byAsset;
-        /**
-         * 接管当前命令或查询已准备的按资产索赔列表，不复制列表或权威账户状态。
-         * @param byAsset 当前调用独占的按资产索赔列表 Map，构造时接管引用
-         */
-        private AllocationInputs(Map<Integer, ArrayList<Claim>> byAsset) { this.byAsset = byAsset; }
     }
 
     /**

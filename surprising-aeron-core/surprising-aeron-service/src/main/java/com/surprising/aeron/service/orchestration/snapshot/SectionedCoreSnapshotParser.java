@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -27,16 +29,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/**
- * 把已经按段接收且通过外层 CRC 的负载解成 Core、Matcher 和运行时辅助组件，并核对同一冻结点的哈希、路由与水位。恢复入口随后创建候选运行时、装回各 Lane 状态并激活原生订单簿；解析清单时只使用组件，不启动运行线程。
- */
+/** 把已经按段接收且通过外层 CRC 的负载解成 Core、Matcher 和运行时辅助组件，并核对同一冻结点的哈希、路由与水位。恢复入口随后创建候选运行时、装回各 Lane 状态并激活原生订单簿；解析清单时只使用组件，不启动运行线程。 构造约定：禁止实例化静态组件解析工具。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SectionedCoreSnapshotParser {
 
-    /**
-     * 禁止实例化静态组件解析工具。
-     */
-    private SectionedCoreSnapshotParser() {
-    }
 
     /**
      * 按固定段位置依次解码元数据、来源、幂等结果、Matcher、交易状态、费率、划转和 Lane 清单，检查 Lane 数量、摘要及整体配对，再解码终态保留索引并返回组件。假定外层 Recovery 已确认段结构及 CRC，不在这里重新校验 CRC。

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.config.CoreConfiguration;
 import com.surprising.aeron.service.lane.LaneTopology;
 import com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey;
@@ -32,16 +34,10 @@ import com.surprising.aeron.service.state.risk.RiskScanRuntime;
 import com.surprising.aeron.service.state.risk.RiskSnapshotRuntime;
 import java.util.Map;
 
-/**
- * 把已解码的交易状态装回可变运行时的恢复入口。按原身份表还原用户、余额、预留、持仓、财库、风险及订单，再绑定并重建业务索引和账户哈希；完成后清除本次装载变化并释放线程归属，交给后续运行线程接管。这里只恢复内存，不负责读取快照字节或启动 Cluster。
- */
+/** 把已解码的交易状态装回可变运行时的恢复入口。按原身份表还原用户、余额、预留、持仓、财库、风险及订单，再绑定并重建业务索引和账户哈希；完成后清除本次装载变化并释放线程归属，交给后续运行线程接管。这里只恢复内存，不负责读取快照字节或启动 Cluster。 构造约定：工具类仅提供恢复转换，不创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeStateProjector {
 
-    /**
-     * 工具类仅提供恢复转换，不创建实例。
-     */
-    private RuntimeStateProjector() {
-    }
 
     /**
      * 通过统一配置入口绑定独立运行的拓扑，随后按指定身份表恢复运行时。

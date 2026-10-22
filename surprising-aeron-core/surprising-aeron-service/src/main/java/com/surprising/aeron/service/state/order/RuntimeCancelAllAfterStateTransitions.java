@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.order;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
 import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -7,16 +9,10 @@ import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 
-/**
- * 撤单倒计时的账户状态机。SET 设置或禁用，CLAIM 到期后认领，COMPLETE 记录撤单数量，RETRY 重新开放；这里只写计时状态和版本，不代替后续真实撤单。
- */
+/** 撤单倒计时的账户状态机。SET 设置或禁用，CLAIM 到期后认领，COMPLETE 记录撤单数量，RETRY 重新开放；这里只写计时状态和版本，不代替后续真实撤单。 构造约定：只保留原计时状态更新的静态入口，不创建系统时间驱动线程。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeCancelAllAfterStateTransitions {
 
-    /**
-     * 只保留原计时状态更新的静态入口，不创建系统时间驱动线程。
-     */
-    private RuntimeCancelAllAfterStateTransitions() {
-    }
 
     /**
      * 核对用户后按用户及币对范围读旧计时器；SET 新建或重置并清统计，其他动作须匹配原版本及到期或认领状态，成功写入下一状态并推进命令版本。

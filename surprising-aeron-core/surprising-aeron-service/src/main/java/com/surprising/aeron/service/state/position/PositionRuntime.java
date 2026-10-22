@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.position;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.state.instrument.CoreInstrument;
@@ -8,27 +10,49 @@ import com.surprising.aeron.service.state.instrument.CoreInstrument;
  * 账户 Lane 持有的运行时持仓，平时原位更新整数业务字段；发布时复制字段或借用变更缓冲区槽位。配置引用不会深复制，mutable 用于选择复制与复用方式，线程所有权仍由调用方遵守。
  */
 public final class PositionRuntime {
-    /** 这份持仓所属的用户编号，持仓身份固定后不应改到其他用户。 */
+    /**  这份持仓所属的用户编号，持仓身份固定后不应改到其他用户。 返回这份持仓所属的用户编号，持仓身份固定后不应改到其他用户。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long userId;
-    /** 这份持仓对应的非负币对整数编号，通过身份表映射到对外合约编号。 */
+    /**  这份持仓对应的非负币对整数编号，通过身份表映射到对外合约编号。 返回这份持仓对应的非负币对整数编号，通过身份表映射到对外合约编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int symbolId;
-    /** 保证金或结算资产的非负整数编号，金额字段都要按这项资产的单位理解。 */
+    /**  保证金或结算资产的非负整数编号，金额字段都要按这项资产的单位理解。 返回保证金或结算资产的非负整数编号，金额字段都要按这项资产的单位理解。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int assetId;
-    /** 全仓或逐仓模式，决定持仓权益是否与同资产的其他全仓持仓共享。 */
+    /**  全仓或逐仓模式，决定持仓权益是否与同资产的其他全仓持仓共享。 返回全仓或逐仓模式，决定持仓权益是否与同资产的其他全仓持仓共享。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreMarginMode marginMode;
-    /** 净持仓、多头腿或空头腿，用于区分双向持仓身份。 */
+    /**  净持仓、多头腿或空头腿，用于区分双向持仓身份。 返回净持仓、多头腿或空头腿，用于区分双向持仓身份。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CorePositionSide positionSide;
-    /** 所属合约的配置引用；发布持仓副本时沿用此引用，不深复制配置。 */
+    /**  所属合约的配置引用；发布持仓副本时沿用此引用，不深复制配置。 返回所属合约的配置引用；发布持仓副本时沿用此引用，不深复制配置。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CoreInstrument instrument;
-    /** 带方向的持仓数量步数，正数为多头、负数为空头、0 为空仓。 */
+    /**  带方向的持仓数量步数，正数为多头、负数为空头、0 为空仓。 返回带方向的持仓数量步数，正数为多头、负数为空头、0 为空仓。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long signedQuantitySteps;
-    /** 当前持仓的入场价格 tick，空仓时归零。 */
+    /**  当前持仓的入场价格 tick，空仓时归零。 返回当前持仓的入场价格 tick，空仓时归零。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long entryPriceTicks;
-    /** 入场价格与持仓绝对数量对应的累计价格量，空仓时归零。 */
+    /**  入场价格与持仓绝对数量对应的累计价格量，空仓时归零。 返回入场价格与持仓绝对数量对应的累计价格量，空仓时归零。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long entryValueTicks;
-    /** 已经实现的累计盈亏，正数盈利、负数亏损，单位为结算资产最小单位。 */
+    /**  已经实现的累计盈亏，正数盈利、负数亏损，单位为结算资产最小单位。 返回已经实现的累计盈亏，正数盈利、负数亏损，单位为结算资产最小单位。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long realizedPnlUnits;
-    /** 分配给持仓的非负保证金金额，单位为保证金资产最小单位，空仓时为 0。 */
+    /**  分配给持仓的非负保证金金额，单位为保证金资产最小单位，空仓时为 0。 返回分配给持仓的非负保证金金额，单位为保证金资产最小单位，空仓时为 0。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long positionMarginUnits;
     /** 转换为 Lane 值或发布值时使用的复用标记：Lane 值为 true，发布副本为 false；它不是写方法的权限校验开关。 */
     private boolean mutable;
@@ -96,50 +120,6 @@ public final class PositionRuntime {
         }
     }
 
-    /**
-     * 返回这份持仓所属的用户编号，持仓身份固定后不应改到其他用户。
-     */
-    public long userId() { return userId; }
-    /**
-     * 返回这份持仓对应的非负币对整数编号，通过身份表映射到对外合约编号。
-     */
-    public int symbolId() { return symbolId; }
-    /**
-     * 返回保证金或结算资产的非负整数编号，金额字段都要按这项资产的单位理解。
-     */
-    public int assetId() { return assetId; }
-    /**
-     * 返回全仓或逐仓模式，决定持仓权益是否与同资产的其他全仓持仓共享。
-     */
-    public CoreMarginMode marginMode() { return marginMode; }
-    /**
-     * 返回净持仓、多头腿或空头腿，用于区分双向持仓身份。
-     */
-    public CorePositionSide positionSide() { return positionSide; }
-    /**
-     * 返回所属合约的配置引用；发布持仓副本时沿用此引用，不深复制配置。
-     */
-    public CoreInstrument instrument() { return instrument; }
-    /**
-     * 返回带方向的持仓数量步数，正数为多头、负数为空头、0 为空仓。
-     */
-    public long signedQuantitySteps() { return signedQuantitySteps; }
-    /**
-     * 返回当前持仓的入场价格 tick，空仓时归零。
-     */
-    public long entryPriceTicks() { return entryPriceTicks; }
-    /**
-     * 返回入场价格与持仓绝对数量对应的累计价格量，空仓时归零。
-     */
-    public long entryValueTicks() { return entryValueTicks; }
-    /**
-     * 返回已经实现的累计盈亏，正数盈利、负数亏损，单位为结算资产最小单位。
-     */
-    public long realizedPnlUnits() { return realizedPnlUnits; }
-    /**
-     * 返回分配给持仓的非负保证金金额，单位为保证金资产最小单位，空仓时为 0。
-     */
-    public long positionMarginUnits() { return positionMarginUnits; }
 
     /**
      * 复制当前持仓的身份和金额字段，并把副本标记为发布值；配置仍引用同一对象，调用方应按发布后只读的约定使用。

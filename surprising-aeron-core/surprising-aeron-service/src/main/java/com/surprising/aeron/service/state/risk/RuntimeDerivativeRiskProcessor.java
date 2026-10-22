@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.risk;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.service.business.option.OptionRiskRules;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
@@ -12,16 +14,10 @@ import com.surprising.aeron.service.state.market.MarkPriceRuntime;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.RiskLaneProgress;
 
-/**
- * 衍生品标记价和风险续扫的命令入口。先校验行情序号及期权风险价格，写行情并安排扫描；后续由 RiskScanCoordinator 准备用户页并交所属账户 Lane 估值。
- */
+/** 衍生品标记价和风险续扫的命令入口。先校验行情序号及期权风险价格，写行情并安排扫描；后续由 RiskScanCoordinator 准备用户页并交所属账户 Lane 估值。 构造约定：只提供风险命令入口，不创建额外的账户或风险状态容器。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeDerivativeRiskProcessor {
 
-    /**
-     * 只提供风险命令入口，不创建额外的账户或风险状态容器。
-     */
-    private RuntimeDerivativeRiskProcessor() {
-    }
 
     /**
      * 先核对业务状态与运行时版本，登记新标记价；风险扫描启用时再按配置预算推进一批，保持调用方需要的状态转换顺序。

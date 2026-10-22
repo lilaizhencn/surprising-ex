@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 
 /**
@@ -86,13 +88,11 @@ public final class LaneBalancePatches {
     int[] indexGenerations = new int[16];
     /** 当前有效代次，int 加一绕回零时清空代次标记并重设为一。 */
     int indexGeneration = 1;
-    /** 本轮有效连续条目数，数组容量在跨命令复用时保留。 */
+    /**  本轮有效连续条目数，数组容量在跨命令复用时保留。 返回本轮有效捕获条目数，超过此前缀的数组容量不参与发布。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     int size;
 
-    /**
-     * 返回本轮有效捕获条目数，超过此前缀的数组容量不参与发布。
-     */
-    public int size() { return size; }
     /**
      * 直接读取有效下标的用户编号，调用方负责下标范围。
      * @param index 本轮连续存储前缀中的下标

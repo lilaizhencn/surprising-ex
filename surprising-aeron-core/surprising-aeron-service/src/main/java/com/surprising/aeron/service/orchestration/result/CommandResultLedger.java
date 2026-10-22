@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.result;
 
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -47,7 +50,9 @@ public final class CommandResultLedger {
     private int retentionHead;
     /** 保留循环队列的下一追加绝对位置。 */
     private int retentionTail;
-    /** 当前哈希表内保留结果数。 */
+    /**  当前哈希表内保留结果数。 返回当前保留结果数，不是系统累计执行命令数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter(value = AccessLevel.PACKAGE)
     private int size;
     /** 当前保留结果的协议总字节，不按池数组容量累计。 */
     private long commandResultBytes;
@@ -87,10 +92,6 @@ public final class CommandResultLedger {
      * 判断当前是否没有保留任何命令结果。
      */
     public boolean isEmpty() { return size == 0; }
-    /**
-     * 返回当前保留结果数，不是系统累计执行命令数。
-     */
-    int size() { return size; }
 
     /**
      * 按 UUID 两段数值查找当前记录，空账本或未命中返回 null；返回记录仍归账本复用，不是长期独立快照。
@@ -501,11 +502,17 @@ public final class CommandResultLedger {
         private CommandFingerprint fingerprint;
         /** 本记录自有的可复用指纹字节槽，用于接收借用指纹的复制。 */
         private CommandFingerprint fingerprintSlot;
-        /** 原命令保存的执行状态。 */
+        /**  原命令保存的执行状态。 读取原命令的执行终态。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private ResponseStatus status;
-        /** 原命令保存的确定性结果码。 */
+        /**  原命令保存的确定性结果码。 读取原命令的确定性业务结果码。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private CoreResultCode resultCode;
-        /** 原结果保存时的应用命令计数，可能高于结算完成水位。 */
+        /**  原结果保存时的应用命令计数，可能高于结算完成水位。 读取记录保存时的原应用命令计数，不以当前运行时计数替换。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long appliedCommandCount;
         /** 保留的响应底层数组，使用有效偏移和长度解释。 */
         private byte[] responseData;
@@ -513,7 +520,9 @@ public final class CommandResultLedger {
         private int responseOffset;
         /** 有效响应字节数，池数组可比它更大。 */
         private int responseLength;
-        /** 本记录的保留顺序号，替换内容时继续沿用。 */
+        /**  本记录的保留顺序号，替换内容时继续沿用。 读取本结果的保留顺序，内容替换不将它挪到队尾。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter
         private long retentionSequence;
         /**
          * 为记录池预建一个尚未写入业务内容的槽，固定其池下标；以后由 set 写入实际结果。
@@ -675,22 +684,6 @@ public final class CommandResultLedger {
          * 返回指纹的不可变值，避免对外暴露会随记录复用改写的指纹槽。
          */
         public CommandFingerprint fingerprint() { return fingerprint.immutableValue(); }
-        /**
-         * 读取原命令的执行终态。
-         */
-        public ResponseStatus status() { return status; }
-        /**
-         * 读取原命令的确定性业务结果码。
-         */
-        public CoreResultCode resultCode() { return resultCode; }
-        /**
-         * 读取记录保存时的原应用命令计数，不以当前运行时计数替换。
-         */
-        public long appliedCommandCount() { return appliedCommandCount; }
-        /**
-         * 读取本结果的保留顺序，内容替换不将它挪到队尾。
-         */
-        public long retentionSequence() { return retentionSequence; }
 
         /**
          * 借出原响应底层数组，必须连同偏移和有效长度使用，不能读写容量尾部或越过借用期。

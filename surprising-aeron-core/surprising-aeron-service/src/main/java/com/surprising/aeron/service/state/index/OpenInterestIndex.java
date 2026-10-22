@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.index;
 
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.ledger.SystemLedgerLane;
@@ -278,23 +280,13 @@ public final class OpenInterestIndex {
     public record Totals(long longQuantity, long shortQuantity) {
     }
 
-    /**
-     * 索引写线程持有的可变单合约累计值，更新时原位调整，查询时另复制成只读 Totals。
-     */
+    /** 索引写线程持有的可变单合约累计值，更新时原位调整，查询时另复制成只读 Totals。 构造约定：保存调用方已检查的多空初始绝对总量，作为索引线程可复用的累计桶。 参数 longQuantity：该合约多头的非负绝对数量步数总和 参数 shortQuantity：该合约空头的非负绝对数量步数总和 */
+    @AllArgsConstructor(access = AccessLevel.PRIVATE)
     private static final class MutableTotals {
         /** 当前合约多头非负绝对步数合计。 */
         private long longQuantity;
         /** 当前合约空头非负绝对步数合计。 */
         private long shortQuantity;
 
-        /**
-         * 保存调用方已检查的多空初始绝对总量，作为索引线程可复用的累计桶。
-         * @param longQuantity 该合约多头的非负绝对数量步数总和
-         * @param shortQuantity 该合约空头的非负绝对数量步数总和
-         */
-        private MutableTotals(long longQuantity, long shortQuantity) {
-            this.longQuantity = longQuantity;
-            this.shortQuantity = shortQuantity;
-        }
     }
 }

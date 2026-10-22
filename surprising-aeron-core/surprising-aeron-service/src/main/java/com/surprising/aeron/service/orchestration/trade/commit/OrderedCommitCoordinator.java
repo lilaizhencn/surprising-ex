@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.orchestration.trade.commit;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultView;
 import com.surprising.aeron.protocol.CoreLiquidationProgressView;
 import com.surprising.aeron.protocol.CoreResponse;
@@ -33,7 +36,9 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public final class OrderedCommitCoordinator {
-    /** 唯一所属交易 Owner，串行访问命令槽和发布边界。 */
+    /**  唯一所属交易 Owner，串行访问命令槽和发布边界。 借用本提交边界所属的 Owner 运行时。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final TradingCoreRuntime owner;
 
     /**
@@ -48,18 +53,28 @@ public final class OrderedCommitCoordinator {
     /** 各逻辑分片已核验并应用的序号，控制分片负一映射零下标；后续证据要求严格递增。 */
     long[] appliedMatcherSequences;
 
-    /** 已经计入预派发且尚未终态退休的结算命令数量。 */
+    /**
+     *  已经计入预派发且尚未终态退休的结算命令数量。
+     * 返回当前预派发且尚未退休的结算计数。
+     * 直接保存调用方更新的在途计数，不在此做增减或范围检查。
+     * @param dispatchedSettlementInFlight 调用方已计算的计数或观测值，此处直接保存
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     int dispatchedSettlementInFlight;
 
-    /** 在途结算数量的观测峰值。 */
+    /**
+     *  在途结算数量的观测峰值。
+     * 返回已记录的结算在途数量峰值，仅供观测。
+     * 直接保存调用方计算的观测峰值，不在此检查单调性或范围。
+     * @param dispatchedSettlementHighWaterMark 调用方已计算的计数或观测值，此处直接保存
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     int dispatchedSettlementHighWaterMark;
 
-    /**
-     * 返回已记录的结算在途数量峰值，仅供观测。
-     */
-    public int dispatchedSettlementHighWaterMark() {
-        return dispatchedSettlementHighWaterMark;
-    }
 
     /** 同一 Owner 使用的索引及变化发布边界，不另存账户事实。 */
     public final CommitPublication publication;
@@ -1415,25 +1430,7 @@ public final class OrderedCommitCoordinator {
                 : tryMatchingCommit(pending, matching, clusterTimestamp, clusterPosition);
     }
 
-    /**
-     * 直接保存调用方计算的观测峰值，不在此检查单调性或范围。
-     * @param value 调用方已计算的计数或观测值，此处直接保存
-     */
-    public void dispatchedSettlementHighWaterMark(int value) { this.dispatchedSettlementHighWaterMark = value; }
-    /**
-     * 返回当前预派发且尚未退休的结算计数。
-     */
-    public int dispatchedSettlementInFlight() { return dispatchedSettlementInFlight; }
-    /**
-     * 借用本提交边界所属的 Owner 运行时。
-     */
-    public TradingCoreRuntime owner() { return owner; }
 
-    /**
-     * 直接保存调用方更新的在途计数，不在此做增减或范围检查。
-     * @param value 调用方已计算的计数或观测值，此处直接保存
-     */
-    public void dispatchedSettlementInFlight(int value) { dispatchedSettlementInFlight = value; }
     /**
      * 按调用方给定长度新建零进度数组，调用方须包含控制分片位置；此入口不自行推导拓扑。
      * @param count 进度数组总长度，调用方须计入控制分片

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.product.api.ProductLine;
 
@@ -7,13 +9,21 @@ import com.surprising.product.api.ProductLine;
  * 用户身份、版本和持仓模式的运行态值。普通值保持值语义，Lane 权威值可在原所有权内原位更新，命令槽只在消费者释放后复用；完整余额、冻结和持仓仍在账户表或业务快照中。
  */
 public final class UserRuntime {
-    /** 用户元数据所属的独立产品线。 */
+    /**  用户元数据所属的独立产品线。 返回用户元数据所属的独立产品线。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private ProductLine productLine;
-    /** 正数用户编号。 */
+    /**  正数用户编号。 返回正数用户编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long userId;
-    /** 当前用户业务版本，允许初始版本为零。 */
+    /**  当前用户业务版本，允许初始版本为零。 返回当前用户业务版本，允许初始版本为零。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long revision;
-    /** 单向或双向持仓模式。 */
+    /**  单向或双向持仓模式。 返回单向或双向持仓模式。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private CorePositionMode positionMode;
     /** 本对象是否由账户 Lane 作为可原位更新的权威元数据持有。 */
     private final boolean laneOwned;
@@ -71,22 +81,6 @@ public final class UserRuntime {
             throw new IllegalArgumentException("invalid runtime user");
     }
 
-    /**
-     * 返回用户元数据所属的独立产品线。
-     */
-    public ProductLine productLine() { return productLine; }
-    /**
-     * 返回正数用户编号。
-     */
-    public long userId() { return userId; }
-    /**
-     * 返回当前用户业务版本，允许初始版本为零。
-     */
-    public long revision() { return revision; }
-    /**
-     * 返回单向或双向持仓模式。
-     */
-    public CorePositionMode positionMode() { return positionMode; }
 
     /**
      * 已是 Lane 权威值就返回自身，其他值复制为新的 Lane 权威对象；调用方仍负责在所属 Lane 接管它。

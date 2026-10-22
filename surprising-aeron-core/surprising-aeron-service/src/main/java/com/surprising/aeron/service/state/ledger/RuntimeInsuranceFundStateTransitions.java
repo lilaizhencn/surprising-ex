@@ -1,20 +1,16 @@
 package com.surprising.aeron.service.state.ledger;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.identity.RuntimeIdentityRegistry;
 
-/**
- * 保险基金直接增减的业务入口。账本激活前可由原所有者同步处理，激活后准备可复用控制续步，扣款余额检查与保险修改在账本执行，Owner 收到阶段完成后发布产品修订。
- */
+/** 保险基金直接增减的业务入口。账本激活前可由原所有者同步处理，激活后准备可复用控制续步，扣款余额检查与保险修改在账本执行，Owner 收到阶段完成后发布产品修订。 构造约定：只提供静态保险调整入口，不允许单独实例化工具类。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeInsuranceFundStateTransitions {
 
-    /**
-     * 只提供静态保险调整入口，不允许单独实例化工具类。
-     */
-    private RuntimeInsuranceFundStateTransitions() {
-    }
 
     /**
      * 仅允许系统账本未激活的原 Owner 同步调整，先检查输入并准备任务，直接应用到原 Treasury 后推进命令修订；账本已激活时要求沿异步续步执行。

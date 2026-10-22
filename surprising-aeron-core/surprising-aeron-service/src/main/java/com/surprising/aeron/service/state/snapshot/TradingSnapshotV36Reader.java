@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderType;
@@ -42,9 +44,8 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
 
-/**
- * 已发布交易快照三十五/三十六版的固定布局读取器。字段按原顺序读取，不能随当前接口 Codec 或 Java 声明变化；嵌入算法和触发单也使用本类冻结的磁盘读取逻辑。只恢复内存业务状态，不启动运行时线程，也不写新历史格式。
- */
+/** 已发布交易快照三十五/三十六版的固定布局读取器。字段按原顺序读取，不能随当前接口 Codec 或 Java 声明变化；嵌入算法和触发单也使用本类冻结的磁盘读取逻辑。只恢复内存业务状态，不启动运行时线程，也不写新历史格式。 构造约定：工具类不创建实例，读游标由每次调用独立 Reader 持有。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class TradingSnapshotV36Reader {
 
     /** 本历史读取器支持的最高布局版本三十六，入口同时接受三十五。 */
@@ -54,11 +55,6 @@ final class TradingSnapshotV36Reader {
     /** 旧格式审计文本的最大字节数两千零四十八。 */
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
-    /**
-     * 工具类不创建实例，读游标由每次调用独立 Reader 持有。
-     */
-    private TradingSnapshotV36Reader() {
-    }
 
     /**
      * 按历史固定顺序恢复用户、余额、预留、持仓、订单、币对、风险、财库和条件业务，检查产品线、数量、重复键及最终字节耗尽。三十五版缺少最近成交价时取零，三十六版读取该值；业务值构造器继续校验自身不变量，未统一包装所有构造异常。

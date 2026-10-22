@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.lifecycle;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.business.ProductTradingRules;
@@ -21,16 +23,10 @@ import java.util.List;
 import java.util.UUID;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
-/**
- * 在线到期或固定价格结算的续步入口。Owner 校验命令后保存本页工作对象，按原控制派发器依次让账户 Lane 撤单、准备后值、应用账户，让 System Ledger 核对保险并记录财库及进度；Owner 通过 poll 收集完成状态。
- */
+/** 在线到期或固定价格结算的续步入口。Owner 校验命令后保存本页工作对象，按原控制派发器依次让账户 Lane 撤单、准备后值、应用账户，让 System Ledger 核对保险并记录财库及进度；Owner 通过 poll 收集完成状态。 构造约定：工具类不创建实例，工作状态保存在命令槽持有的 SettlementWork 中。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeLifecycleSettlementContinuation {
 
-    /**
-     * 工具类不创建实例，工作状态保存在命令槽持有的 SettlementWork 中。
-     */
-    private RuntimeLifecycleSettlementContinuation() {
-    }
 
     /**
      * 校验并新建当前结算页的续步对象，不在此等待账户结算完成。

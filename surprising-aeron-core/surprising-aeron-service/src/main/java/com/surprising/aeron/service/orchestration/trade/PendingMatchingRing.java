@@ -1,4 +1,7 @@
 package com.surprising.aeron.service.orchestration.trade;
+
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
@@ -31,7 +34,9 @@ public final class PendingMatchingRing {
     private final PendingCommandIdIndex entriesByCommandId;
     /** 当前已链接命令按正用户号计数的派生索引。 */
     private final LongIntHashMap pendingByUser;
-    /** 真正拥有可复用命令槽的固定池。 */
+    /**  真正拥有可复用命令槽的固定池。 返回同一个底层命令槽池，供受约束的 Owner/Matcher 协作。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final CommandSlotRing contexts;
     /** 槽池容量减一的物理寻址掩码。 */
     private final int mask;
@@ -41,14 +46,14 @@ public final class PendingMatchingRing {
     private int tail = -1;
     /** 尚需按顺序派发资金事实的物理游标，独立于响应退休队首。 */
     private int ledgerDispatchHead = -1;
-    /** 已经链接进入全局队列的项数。 */
+    /**  已经链接进入全局队列的项数。 返回已经 put 链接的命令数。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int size;
-    /** Owner 调度状态变化时递增的本地修订号，不是通知对象或业务序号。 */
+    /**  Owner 调度状态变化时递增的本地修订号，不是通知对象或业务序号。 返回调度进度标记，供调用方判断是否值得重新派发，不是 Core 序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long dispatchRevision;
-    /**
-     * 返回调度进度标记，供调用方判断是否值得重新派发，不是 Core 序号。
-     */
-    public long dispatchRevision() { return dispatchRevision; }
 
     /**
      * 只递增 Owner 本地调度修订号，本方法本身不发送通知或唤醒线程。
@@ -554,10 +559,6 @@ public final class PendingMatchingRing {
     }
 
     /**
-     * 返回已经 put 链接的命令数。
-     */
-    public int size() { return size; }
-    /**
      * 返回已链接队列是否为空，不等于槽池没有预备占用。
      */
     public boolean isEmpty() { return size == 0; }
@@ -565,10 +566,6 @@ public final class PendingMatchingRing {
      * 返回槽池向上取整后的容量。
      */
     public int capacity() { return contexts.capacity(); }
-    /**
-     * 返回同一个底层命令槽池，供受约束的 Owner/Matcher 协作。
-     */
-    public CommandSlotRing contexts() { return contexts; }
 
     /**
      * 按完整序号从槽池严格取占用槽，不要求它已经 put 链接。

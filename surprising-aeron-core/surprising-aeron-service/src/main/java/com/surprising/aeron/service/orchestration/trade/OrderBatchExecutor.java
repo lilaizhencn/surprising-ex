@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.orchestration.trade;
 
+import lombok.RequiredArgsConstructor;
 import com.surprising.aeron.protocol.AmendOrderBatchCommand;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.CancelOrderBatchCommand;
@@ -32,18 +33,12 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * 批量订单从准入、撮合到整批终态的推进入口。Owner 用一条 Core 序号管理全部项：满足条件的同分片下单可流水推进，其余按项等待账户准入和结算，撤单还可合并连续同分片片段。每项保留自己的成功或拒绝结果；所有账户与财务条件收齐后才保存整批终态。
- */
+/** 批量订单从准入、撮合到整批终态的推进入口。Owner 用一条 Core 序号管理全部项：满足条件的同分片下单可流水推进，其余按项等待账户准入和结算，撤单还可合并连续同分片片段。每项保留自己的成功或拒绝结果；所有账户与财务条件收齐后才保存整批终态。 构造约定：保存所属运行时，共用原有命令槽、账户和发布边界。 参数 owner：所属交易 Owner 运行时 */
+@RequiredArgsConstructor
 public final class OrderBatchExecutor {
     /** 唯一所属交易 Owner，共用原有账户及提交状态。 */
     final TradingCoreRuntime owner;
 
-    /**
-     * 保存所属运行时，共用原有命令槽、账户和发布边界。
-     * @param owner 所属交易 Owner 运行时
-     */
-    public OrderBatchExecutor(TradingCoreRuntime owner) { this.owner = owner; }
 
     /**
      * firstBatch：按 Core 序号递增排列的最早未退休批次。

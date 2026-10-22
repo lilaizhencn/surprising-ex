@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.state.settlement;
 
+import lombok.RequiredArgsConstructor;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.state.model.AssetBalance;
 
 /**
@@ -29,9 +33,8 @@ public record FundsPosting(String asset, OwnerKind ownerKind, long ownerId, Subl
         }
     }
 
-    /**
-     * 本条资金变化归谁：普通用户、做市账户、系统财库或系统外部。
-     */
+    /** 本条资金变化归谁：普通用户、做市账户、系统财库或系统外部。 构造约定：保存所有者类别对应的固定编码。 参数 wireCode：给该枚举项指定的固定编码 */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     public enum OwnerKind {
         /**
          * 普通用户账户的资金归属。
@@ -50,28 +53,16 @@ public record FundsPosting(String asset, OwnerKind ownerKind, long ownerId, Subl
          */
         EXTERNAL(4);
 
-        /** 此枚举项的固定编码，独立于声明顺序。 */
+        /**  此枚举项的固定编码，独立于声明顺序。 返回该所有者类别的固定编码，不使用会受枚举排列影响的 ordinal。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private final int wireCode;
 
-        /**
-         * 保存所有者类别对应的固定编码。
-         * @param wireCode 给该枚举项指定的固定编码
-         */
-        OwnerKind(int wireCode) {
-            this.wireCode = wireCode;
-        }
 
-        /**
-         * 返回该所有者类别的固定编码，不使用会受枚举排列影响的 ordinal。
-         */
-        int wireCode() {
-            return wireCode;
-        }
     }
 
-    /**
-     * 按用途区分资金变化的子账类别；枚举本身不执行余额更新，也不校验一组分录是否平衡。
-     */
+    /** 按用途区分资金变化的子账类别；枚举本身不执行余额更新，也不校验一组分录是否平衡。 构造约定：保存子账类别对应的固定编码。 参数 wireCode：给该枚举项指定的固定编码 */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     public enum Subledger {
         /**
          * 可用余额的变动。
@@ -122,22 +113,11 @@ public record FundsPosting(String asset, OwnerKind ownerKind, long ownerId, Subl
          */
         EXTERNAL_ADJUSTMENT(12);
 
-        /** 此枚举项的固定编码，独立于声明顺序。 */
+        /**  此枚举项的固定编码，独立于声明顺序。 返回该子账的固定编码。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PACKAGE)
         private final int wireCode;
 
-        /**
-         * 保存子账类别对应的固定编码。
-         * @param wireCode 给该枚举项指定的固定编码
-         */
-        Subledger(int wireCode) {
-            this.wireCode = wireCode;
-        }
 
-        /**
-         * 返回该子账的固定编码。
-         */
-        int wireCode() {
-            return wireCode;
-        }
     }
 }

@@ -1,5 +1,10 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import java.lang.ref.WeakReference;
 import java.util.AbstractMap;
 import java.util.AbstractSet;
@@ -20,7 +25,9 @@ import java.util.function.Function;
 
 /**
  * 状态快照值使用的有序 Map、路径复制增量和延迟取值工具。普通增量共享不可变树节点并记录本代变化，延迟增量按键缓存加载结果，FrozenMap 只封闭本入口写操作。原有序 Map、借入集合和业务键值没有统一深拷贝保证，发布后必须遵守输入稳定与所有权约定；这些状态表示不替代 Account Lane 的权威账户。
+ * 构造约定：工具类不创建实例；各 Map 保存的是状态表示，不新增业务权威数据。
  */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 @SuppressWarnings("unchecked")
 public final class StateMapSupport {
 
@@ -28,11 +35,6 @@ public final class StateMapSupport {
     private static final NavigableMap<?, ?> EMPTY_SORTED =
             new FrozenMap<>(new TreeMap<>());
 
-    /**
-     * 工具类不创建实例；各 Map 保存的是状态表示，不新增业务权威数据。
-     */
-    private StateMapSupport() {
-    }
 
     /**
      * 已有 FrozenMap 直接复用，空表共用只读空表；普通无序 Map 复制为 TreeMap，已有 NavigableMap 则直接借用。非空增量表先冻结血缘再套只读入口，未深拷贝键和值；调用方必须停止通过原 Map 引用修改数据。
@@ -265,7 +267,9 @@ public final class StateMapSupport {
      * @param <V> 状态表存放的业务值类型，本工具不深拷贝该值
      */
     private static final class FrozenMap<K, V> extends AbstractMap<K, V> implements NavigableMap<K, V> {
-        /** 借入的原有序表，用来保留内部身份与增量血缘，不是深拷贝。 */
+        /**  借入的原有序表，用来保留内部身份与增量血缘，不是深拷贝。 仅供本工具内部取得原 Map 身份和血缘，不复制底层数据。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PRIVATE)
         private final NavigableMap<K, V> raw;
         /** 禁止从此包装入口修改的有序委托，底层数据仍来自 raw。 */
         private final NavigableMap<K, V> delegate;
@@ -279,12 +283,6 @@ public final class StateMapSupport {
             this.delegate = Collections.unmodifiableNavigableMap(raw);
         }
 
-        /**
-         * 仅供本工具内部取得原 Map 身份和血缘，不复制底层数据。
-         */
-        private NavigableMap<K, V> raw() {
-            return raw;
-        }
 
         /**
          * 通过只读委托返回当前条目数。
@@ -505,17 +503,25 @@ public final class StateMapSupport {
      */
     private static final class LazyDeltaMap<K extends Comparable<? super K>, V>
             extends AbstractMap<K, V> implements NavigableMap<K, V> {
-        /** 本延迟代强引用的稳定基表。 */
+        /**  本延迟代强引用的稳定基表。 返回此代直接借用的基表，不展开整张延迟表。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PRIVATE)
         private final NavigableMap<K, V> base;
-        /** 创建时借入的变化键集合，数组另存其当时顺序。 */
+        /**  创建时借入的变化键集合，数组另存其当时顺序。 返回创建时保存的变化键集合引用，不额外做只读复制。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PRIVATE)
         private final Set<K> changedKeys;
         /** 变化键中本代仍存在的键集合，构造时据此记录存在位。 */
         private final Set<K> presentKeys;
         /** 为本代仍存在的变化键加载非空业务值的函数，成功结果按键缓存。 */
         private final Function<K, V> loader;
-        /** 创建方式标记，不随解析或物化完成自动变化。 */
+        /**  创建方式标记，不随解析或物化完成自动变化。 返回此实例创建时的延迟标记，不统计还有多少键未加载。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(value = AccessLevel.PRIVATE)
         private final boolean deferred;
-        /** 由基表大小及变化键存在性预先计算的结果条目数。 */
+        /**  由基表大小及变化键存在性预先计算的结果条目数。 直接返回构造时按存在位算出的条目数，不展开业务值。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(onMethod_ = {@Override})
         private final int size;
         /** 构造时复制的变化键顺序数组，二分查找要求与基表比较器一致。 */
         private final Object[] changedKeysByIndex;
@@ -560,26 +566,8 @@ public final class StateMapSupport {
             size = nextSize;
         }
 
-        /**
-         * 返回此代直接借用的基表，不展开整张延迟表。
-         */
-        private NavigableMap<K, V> base() {
-            return base;
-        }
 
-        /**
-         * 返回创建时保存的变化键集合引用，不额外做只读复制。
-         */
-        private Set<K> changedKeys() {
-            return changedKeys;
-        }
 
-        /**
-         * 返回此实例创建时的延迟标记，不统计还有多少键未加载。
-         */
-        private boolean deferred() {
-            return deferred;
-        }
 
         /**
          * 有缓存则复用；否则复制基表并依次应用变化键，对存在项按需解析，对删除项移除，最后发布只读完整表。并发读者可能各建一份等价 Map，单键值仍由 CAS 协调加载。
@@ -688,13 +676,6 @@ public final class StateMapSupport {
             return -1;
         }
 
-        /**
-         * 直接返回构造时按存在位算出的条目数，不展开业务值。
-         */
-        @Override
-        public int size() {
-            return size;
-        }
 
         /**
          * 先物化完整只读表，再取得只读条目集合；与单键 get 的按需加载范围不同。
@@ -1173,29 +1154,27 @@ public final class StateMapSupport {
 
     /**
      * 按路径复制的不可变平衡搜索树。新版本共享未变节点，直接查询和中序遍历不物化；范围与反序接口按当前实现返回独立临时 TreeMap 的可变视图。
+     * 构造约定：固定保存一个不可变根节点、排序规则和大小，后续变化产生新树版本。
+     * 参数 root：此树版本固定根节点，空表可为空
+     * 参数 comparator：键排序规则，为空时使用自然顺序
+     * 参数 size：本次构造的树或子树所含条目数
      * @param <K> 有序状态表的键类型，使用自然顺序或所给比较器
      * @param <V> 状态表存放的业务值类型，本工具不深拷贝该值
      */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     private static final class PersistentTreeMap<K, V> extends AbstractMap<K, V>
             implements NavigableMap<K, V> {
         /** 此树版本固定的不可变根节点，可与其他版本共享未变子树。 */
         private final Node<K, V> root;
-        /** 此版本固定的键比较器，null 使用自然顺序。 */
+        /**  此版本固定的键比较器，null 使用自然顺序。 返回本树固定比较器，null 表示自然顺序。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(onMethod_ = {@Override})
         private final Comparator<? super K> comparator;
-        /** 此树版本固定的条目数。 */
+        /**  此树版本固定的条目数。 返回本树版本创建时固定的条目数。 */
+        @Accessors(fluent = true, chain = false)
+        @Getter(onMethod_ = {@Override})
         private final int size;
 
-        /**
-         * 固定保存一个不可变根节点、排序规则和大小，后续变化产生新树版本。
-         * @param root 此树版本固定根节点，空表可为空
-         * @param comparator 键排序规则，为空时使用自然顺序
-         * @param size 本次构造的树或子树所含条目数
-         */
-        private PersistentTreeMap(Node<K, V> root, Comparator<? super K> comparator, int size) {
-            this.root = root;
-            this.comparator = comparator;
-            this.size = size;
-        }
 
         /**
          * 按已排序且调用期间稳定的来源迭代器构造平衡树，继承 SortedMap 比较器；本方法本身不重排普通 Map。条目过多或过少时报大小变化，不提供并发快照锁。
@@ -1458,11 +1437,6 @@ public final class StateMapSupport {
             return candidate;
         }
 
-        /**
-         * 返回本树版本创建时固定的条目数。
-         */
-        @Override
-        public int size() { return size; }
 
         /**
          * 检查根节点是否为空。
@@ -1583,11 +1557,6 @@ public final class StateMapSupport {
             };
         }
 
-        /**
-         * 返回本树固定比较器，null 表示自然顺序。
-         */
-        @Override
-        public Comparator<? super K> comparator() { return comparator; }
 
         /**
          * 沿当前不可变树搜索取得严格小于给定键的最大条目，缺失返回 null。
@@ -1781,9 +1750,11 @@ public final class StateMapSupport {
          * @param <V> 状态表存放的业务值类型，本工具不深拷贝该值
          */
         private static final class Node<K, V> implements Entry<K, V> {
-            /** 此条目的键引用，调用方须保持影响排序的内容稳定。 */
+            /**  此条目的键引用，调用方须保持影响排序的内容稳定。 返回节点持有的键引用。 */
+            @Getter(onMethod_ = {@Override})
             private final K key;
-            /** 此条目的业务值引用，不在节点内深拷贝。 */
+            /**  此条目的业务值引用，不在节点内深拷贝。 返回节点持有的业务值引用。 */
+            @Getter(onMethod_ = {@Override})
             private final V value;
             /** 此版本左子树的不可变节点引用。 */
             private final Node<K, V> left;
@@ -1807,17 +1778,7 @@ public final class StateMapSupport {
                 this.height = 1 + Math.max(height(left), height(right));
             }
 
-            /**
-             * 返回节点持有的键引用。
-             */
-            @Override
-            public K getKey() { return key; }
 
-            /**
-             * 返回节点持有的业务值引用。
-             */
-            @Override
-            public V getValue() { return value; }
 
             /**
              * 始终拒绝通过 Map.Entry 原位改值，写入必须创建新的树路径。

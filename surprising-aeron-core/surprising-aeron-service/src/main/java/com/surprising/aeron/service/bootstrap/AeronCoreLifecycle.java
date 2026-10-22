@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.bootstrap;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.aeron.service.cluster.ClusterTopology;
@@ -28,12 +29,18 @@ import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.DisposableBean;
 
-/** 启动步骤 3–5：拥有单节点 Aeron 资源的创建、启动、等待与逆序关闭。配置绑定见 CoreConfiguration。 */
+/**
+ *  启动步骤 3–5：拥有单节点 Aeron 资源的创建、启动、等待与逆序关闭。配置绑定见 CoreConfiguration。
+ * 日志： 记录节点启动、警告和致命错误，便于把故障定位到具体 Aeron 组件。
+ * 构造约定：接收 Spring 已装配好的拓扑与业务服务，此时还没有启动网络和集群资源。
+ * 参数 topology：本节点固定的地址与目录配置
+ * 参数 clusteredService：负责把 Cluster 回调交给交易 Owner 的服务
+ */
+@Slf4j
+@RequiredArgsConstructor
 @Component
 public final class AeronCoreLifecycle implements ApplicationListener<ContextClosedEvent>, DisposableBean {
 
-    /** 记录节点启动、警告和致命错误，便于把故障定位到具体 Aeron 组件。 */
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AeronCoreLifecycle.class);
 
 
     /** 当前节点的产品线、成员地址、端口和持久化目录。 */
@@ -43,15 +50,6 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
     /** 主线程等待的关闭信号；Spring 关闭和 Aeron 终止都唤醒同一个等待点。 */
     private final ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
 
-    /**
-     * 接收 Spring 已装配好的拓扑与业务服务，此时还没有启动网络和集群资源。
-     * @param topology 本节点固定的地址与目录配置
-     * @param clusteredService 负责把 Cluster 回调交给交易 Owner 的服务
-     */
-    public AeronCoreLifecycle(ClusterTopology topology, AeronTradingClusterService clusteredService) {
-        this.topology = topology;
-        this.clusteredService = clusteredService;
-    }
 
     /**
      * 依次启动网络驱动、归档、共识模块和交易容器，然后等待关闭信号。

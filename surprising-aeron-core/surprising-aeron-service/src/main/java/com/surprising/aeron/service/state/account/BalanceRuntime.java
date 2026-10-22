@@ -1,17 +1,27 @@
 package com.surprising.aeron.service.state.account;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 /**
  * 账户 Lane 持有的某用户某资产余额，可原位冻结、释放、消耗或入账。调用方遵守原 Lane 或读取屏障边界；本对象只更新两项金额，不自行组织线程或核对整笔交易的资金守恒。
  */
 public final class BalanceRuntime {
 
-    /** 本份余额所属的正数用户编号。 */
+    /**  本份余额所属的正数用户编号。 返回本份余额所属的正数用户编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final long userId;
-    /** 资产的运行时整数编号。 */
+    /**  资产的运行时整数编号。 返回资产的运行时整数编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final int assetId;
-    /** 当前可以使用的整数余额。 */
+    /**  当前可以使用的整数余额。 返回当前可以使用的整数余额。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long availableUnits;
-    /** 当前已经冻结或占用的整数余额。 */
+    /**  当前已经冻结或占用的整数余额。 返回当前已经冻结或占用的整数余额。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long lockedUnits;
 
     /**
@@ -31,22 +41,6 @@ public final class BalanceRuntime {
         this.lockedUnits = lockedUnits;
     }
 
-    /**
-     * 返回本份余额所属的正数用户编号。
-     */
-    public long userId() { return userId; }
-    /**
-     * 返回资产的运行时整数编号。
-     */
-    public int assetId() { return assetId; }
-    /**
-     * 返回当前可以使用的整数余额。
-     */
-    public long availableUnits() { return availableUnits; }
-    /**
-     * 返回当前已经冻结或占用的整数余额。
-     */
-    public long lockedUnits() { return lockedUnits; }
 
     /**
      * 先核对两项后金额都非负，再原位替换可用和锁定值，业务来源及守恒由调用方原流程负责。

@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.admission;
 
+import lombok.NoArgsConstructor;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
@@ -16,18 +19,21 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-/**
- * 一笔普通下单的单向准入交接事件，同时复用 ResolvedPlaceOrder 存决策字段。Owner 先绑定路由，账本按需提供 OI，所属 Lane 决策、检查及冻结，Matcher 等回执后才能使用；对象池回收还要满足消费条件。
- */
+/** 一笔普通下单的单向准入交接事件，同时复用 ResolvedPlaceOrder 存决策字段。Owner 先绑定路由，账本按需提供 OI，所属 Lane 决策、检查及冻结，Matcher 等回执后才能使用；对象池回收还要满足消费条件。 构造约定：创建可由对象池保存的空准入事件，后续先绑定决策输入，再准备命令归属。 */
+@NoArgsConstructor
 public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
-    /** 本次下单的 Core 命令序号，准入回执和冻结状态都归属此序号。 */
+    /**  本次下单的 Core 命令序号，准入回执和冻结状态都归属此序号。 返回本次下单的 Core 命令序号，准入回执和冻结状态都归属此序号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long coreSequence;
     /**
      * timestamp：命令复制后的集群业务时间，写订单及冻结时保持该时间。
      * position：命令的集群日志位置，用于订单状态和后续确定性提交。
      */
     private long timestamp, position;
-    /** 下单用户编号，只能由其所属账户 Lane 处理。 */
+    /**  下单用户编号，只能由其所属账户 Lane 处理。 返回下单用户编号，只能由其所属账户 Lane 处理。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private long userId;
     /** 原命令 UUID，订单及预留写入沿用它标识业务操作。 */
     private UUID commandId;
@@ -43,9 +49,13 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private long preparedClientKey;
     /** Matcher 是否会借用此事件等待准入回执，要求消费后才能归还对象池。 */
     private boolean matcherWaitRequired;
-    /** 本订单实际冻结资产的运行时编号。 */
+    /**  本订单实际冻结资产的运行时编号。 返回本订单实际冻结资产的运行时编号。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int assetId;
-    /** 本次下单目标账户 Lane 编号，用于准入就绪通知。 */
+    /**  本次下单目标账户 Lane 编号，用于准入就绪通知。 返回本次下单目标账户 Lane 编号，用于准入就绪通知。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private int laneId;
     /** 提供账户写入、账本输入和完成通知的所属运行时。 */
     private TradingRuntimeState runtime;
@@ -72,11 +82,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     /** Matcher 已读取或明确取消等待的发布位，可见后 Matcher 不得继续访问事件字段。 */
     private volatile boolean matcherConsumed;
 
-    /**
-     * 创建可由对象池保存的空准入事件，后续先绑定决策输入，再准备命令归属。
-     */
-    public PlaceAdmissionEvent() {
-    }
 
     /**
      * Owner 先绑定意图和币对路由，再保存价格、费率表及决策时间引用；完整价格与费率计算由所属 Lane 进行。
@@ -405,22 +410,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
      * 取走本次客户身份分配计数差并清零，避免 Owner 重复统计。
      */
     public long takeIdentityAllocations() { /* 本次取走的客户身份分配计数差，返回后原字段已经清零。 */ long result = identityAllocations; identityAllocations = 0; return result; }
-    /**
-     * 返回本次下单的 Core 命令序号，准入回执和冻结状态都归属此序号。
-     */
-    public long coreSequence() { return coreSequence; }
-    /**
-     * 返回下单用户编号，只能由其所属账户 Lane 处理。
-     */
-    public long userId() { return userId; }
-    /**
-     * 返回本次下单目标账户 Lane 编号，用于准入就绪通知。
-     */
-    public int laneId() { return laneId; }
-    /**
-     * 返回本订单实际冻结资产的运行时编号。
-     */
-    public int assetId() { return assetId; }
     /**
      * 返回本次准入准备的实际客户端订单身份键，读取前由调用方遵守完成边界。
      */

@@ -1,21 +1,18 @@
 package com.surprising.aeron.service.state.snapshot;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.account.CoreUserState;
 import com.surprising.aeron.service.state.ledger.CoreTreasuryState;
 import java.util.Map;
 
-/**
- * 只在快照、恢复和明确审计边界计算的全量资金哈希。覆盖产品线、每个用户的资产可用/冻结额及七类财库金额，按计数、加和与异或聚合使 Map 遍历顺序不影响结果；不包含持仓、预留明细或结算进度，也不等于资金守恒证明。
- */
+/** 只在快照、恢复和明确审计边界计算的全量资金哈希。覆盖产品线、每个用户的资产可用/冻结额及七类财库金额，按计数、加和与异或聚合使 Map 遍历顺序不影响结果；不包含持仓、预留明细或结算进度，也不等于资金守恒证明。 构造约定：工具类不创建实例。 */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class FundsStateHash {
     /** 条目哈希的固定区分标记，避免把原键值直接当作最终分组哈希。 */
     private static final long HASH_TAG = 0xd6e8feb86659fd93L;
 
-    /**
-     * 工具类不创建实例。
-     */
-    private FundsStateHash() { }
 
     /**
      * 逐用户汇总资产余额哈希，再加入手续费、保险、亏空、强平费、资金费剩余、舍入剩余和清算盈亏各表；每次复用临时聚合器，最后返回当前产品的完整资金表示哈希。

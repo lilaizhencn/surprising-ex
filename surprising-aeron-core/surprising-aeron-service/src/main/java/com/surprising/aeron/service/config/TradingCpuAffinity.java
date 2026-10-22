@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.config;
 
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import com.surprising.aeron.service.lane.LaneTopology;
 import java.util.BitSet;
 import java.util.Locale;
@@ -142,18 +144,11 @@ public final class TradingCpuAffinity {
             throw new IllegalStateException("Trading CPU affinity requires Linux; macOS explicitly skips binding");
     }
 
-    /**
-     * 一次 CPU 绑定的恢复凭据，必须由申请它的同一个工作线程关闭。
-     * 它只记住绑定前的范围，不负责启动或停止线程。
-     */
+    /** 一次 CPU 绑定的恢复凭据，必须由申请它的同一个工作线程关闭。 它只记住绑定前的范围，不负责启动或停止线程。 构造约定：保存当前线程结束绑定时需要恢复的范围。 参数 previous：原 CPU 范围；空操作凭据传 null */
+    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class Binding implements AutoCloseable {
         /** 绑定前的 CPU 范围；null 表示没有执行绑定，关闭时无需操作系统调用。 */
         private final BitSet previous;
-        /**
-         * 保存当前线程结束绑定时需要恢复的范围。
-         * @param previous 原 CPU 范围；空操作凭据传 null
-         */
-        private Binding(BitSet previous) { this.previous = previous; }
         /** 在当前工作线程中恢复申请绑定之前的 CPU 范围。 */
         @Override
         public void close() {

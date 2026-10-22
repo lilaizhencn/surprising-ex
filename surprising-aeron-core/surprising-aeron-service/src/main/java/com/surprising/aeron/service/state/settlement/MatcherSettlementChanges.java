@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state.settlement;
 
+import lombok.Getter;
+import lombok.Setter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.account.AccountLaneState;
@@ -29,13 +32,33 @@ public final class MatcherSettlementChanges {
     private static final RuntimeFundsAccumulator EMPTY_FUNDS_DELTA = new RuntimeFundsAccumulator();
     /** 未激活 Lane 共用的空用户修订哨兵，不可写入用户增量。 */
     private static final LongLongHashMap EMPTY_USER_REVISIONS = new LongLongHashMap();
-    /** 本代是否直接使用持仓身份交接；Owner 收集时据此释放已发布身份。 */
+    /**  本代是否直接使用持仓身份交接；Owner 收集时据此释放已发布身份。 返回本代是否采用直达持仓身份交接，供 Owner 选择身份释放方式。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     boolean directPositionIdentities;
-    /** 由外部环槽或对象池管理的占用标记，clear 不自行重置。 */
+    /**
+     *  由外部环槽或对象池管理的占用标记，clear 不自行重置。
+     * 返回外部池或环槽管理的占用标记。
+     * 由池或环槽管理方更新占用标记，不在此等待消费者。
+     * @param inUse 本槽是否正在被当前事件占用
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     boolean inUse;
-    /** 创建时确定的固定环槽编号，负一表示普通独立缓冲。 */
+    /**  创建时确定的固定环槽编号，负一表示普通独立缓冲。 返回固定环槽编号，负一表示未关联固定环槽。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     final int ringIndex;
-    /** 本代已登记参与的 Lane 位图，路由扩展时补充，清理时只处理这些 Lane。 */
+    /**
+     *  本代已登记参与的 Lane 位图，路由扩展时补充，清理时只处理这些 Lane。
+     * 返回本代登记过的参与 Lane 位图。
+     * 由持有租约的调用方直接设置参与位图；这里只保存位图，不分配各 Lane 缓冲。
+     * @param activeLaneMask 本代参与账户 Lane 的完整位图
+     */
+    @Accessors(fluent = true, chain = false)
+    @Getter
+    @Setter
     long activeLaneMask;
     /** 按 Lane 保存的实体与终态变化列，完成交接前由所属 Lane 独占写入。 */
     final LaneCommitDelta[] laneDeltas;
@@ -287,32 +310,6 @@ public final class MatcherSettlementChanges {
         activeLaneMask = 0;
     }
 
-    /**
-     * 返回本代登记过的参与 Lane 位图。
-     */
-    public long activeLaneMask() { return activeLaneMask; }
-    /**
-     * 返回外部池或环槽管理的占用标记。
-     */
-    public boolean inUse() { return inUse; }
-    /**
-     * 由池或环槽管理方更新占用标记，不在此等待消费者。
-     * @param value 本槽是否正在被当前事件占用
-     */
-    public void inUse(boolean value) { this.inUse = value; }
-    /**
-     * 由持有租约的调用方直接设置参与位图；这里只保存位图，不分配各 Lane 缓冲。
-     * @param value 本代参与账户 Lane 的完整位图
-     */
-    public void activeLaneMask(long value) { this.activeLaneMask = value; }
-    /**
-     * 返回固定环槽编号，负一表示未关联固定环槽。
-     */
-    public int ringIndex() { return ringIndex; }
-    /**
-     * 返回本代是否采用直达持仓身份交接，供 Owner 选择身份释放方式。
-     */
-    public boolean directPositionIdentities() { return directPositionIdentities; }
 
     /**
      * 借用指定 Lane 的实体与终态变化缓冲，不复制内容。

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.lane;
 
+import lombok.Getter;
+import lombok.experimental.Accessors;
 import com.surprising.aeron.service.config.TradingCpuAffinity;
 import com.surprising.aeron.service.state.account.AccountLaneState;
 import com.surprising.aeron.service.state.settlement.MatcherSettlementEvent;
@@ -176,7 +178,9 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
     private final int spinLimit;
     /** 本工作线程唯一拥有的账户 Lane。 */
     private final AccountLaneState lane;
-    /** 构造时启动的实际 LaneThread，始终带有所属账户引用。 */
+    /**  构造时启动的实际 LaneThread，始终带有所属账户引用。 借出实际账户工作线程引用，供生命周期及诊断使用。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private final Thread thread;
     /** Owner 已发布普通任务的上界，以 volatile 游标交接可见性。 */
     private final PaddedSequence producerSequence = new PaddedSequence();
@@ -194,7 +198,9 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
     private volatile boolean started;
     /** 是否继续接纳和正常推进任务，关闭或故障时清为假。 */
     private volatile boolean running = true;
-    /** 账户线程已保存的原 Throwable，健康检查及关闭按原类型传播。 */
+    /**  账户线程已保存的原 Throwable，健康检查及关闭按原类型传播。 读取已经发布的可空账户线程故障。 */
+    @Accessors(fluent = true, chain = false)
+    @Getter
     private volatile Throwable failure;
     /**
      * 创建一个账户工作线程，默认一个 Matcher 结算环，故障回调为空操作，CPU 亲和使用禁用配置。
@@ -300,10 +306,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         unparkIfParked();
     }
 
-    /**
-     * 借出实际账户工作线程引用，供生命周期及诊断使用。
-     */
-    public Thread thread() { return thread; }
     /**
      * 读取工作线程是否已声明准备休眠；这个标记本身不证明线程此刻仍停在 park。
      */
@@ -435,12 +437,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         return currentDepth < admissionCommands.length ? currentDepth : -1;
     }
 
-    /**
-     * 读取已经发布的可空账户线程故障。
-     */
-    public Throwable failure() {
-        return failure;
-    }
 
     /**
      * 有故障时按原类型继续抛出，不消费任务或完成结果。
