@@ -31,8 +31,8 @@ class AccountServiceLocalSnapshotTest {
         var service = new AccountService(properties, commands, queries);
         when(queries.balance(line, 1001, "USDT", null))
                 .thenReturn(java.util.Optional.of(new CoreBalanceView("USDT", 800, 200)));
-        assertThat(service.balance(1001, "usdt").availableUnits()).isEqualTo(800);
-        assertThat(service.productBalance(1001, AccountType.valueOf(line.accountTypeCode()), "usdt").lockedUnits())
+        assertThat(service.balance(1001, "USDT").availableUnits()).isEqualTo(800);
+        assertThat(service.productBalance(1001, AccountType.valueOf(line.accountTypeCode()), "USDT").lockedUnits())
                 .isEqualTo(200);
         verifyNoInteractions(commands);
     }
@@ -62,8 +62,8 @@ class AccountServiceLocalSnapshotTest {
         when(queries.balance(ProductLine.LINEAR_PERPETUAL, 1001, "USDT", null))
                 .thenReturn(java.util.Optional.of(snapshot().balances().getFirst()));
         assertThat(service.position(1001, "1").signedQuantitySteps()).isEqualTo(10);
-        assertThat(service.positionMargin(1001, "1", "CROSS").marginUnits()).isEqualTo(200);
-        assertThat(service.productBalance(1001, AccountType.USDT_PERPETUAL, "usdt").availableUnits()).isEqualTo(800);
+        assertThat(service.positionMargin(1001, "1", com.surprising.trading.api.model.MarginMode.CROSS).marginUnits()).isEqualTo(200);
+        assertThat(service.productBalance(1001, AccountType.USDT_PERPETUAL, "USDT").availableUnits()).isEqualTo(800);
         when(queries.position(ProductLine.LINEAR_PERPETUAL, 1001, "1", CoreMarginMode.CROSS, CorePositionSide.NET, null))
                 .thenReturn(java.util.Optional.empty());
         assertThat(service.position(1001, "1").signedQuantitySteps()).isZero();
@@ -82,7 +82,7 @@ class AccountServiceLocalSnapshotTest {
                 .thenReturn(java.util.Optional.of(snapshot().positions().getFirst()));
         AccountService service = service(queries);
 
-        assertThat(service.balance(1001L, "usdt").availableUnits()).isEqualTo(800L);
+        assertThat(service.balance(1001L, "USDT").availableUnits()).isEqualTo(800L);
         assertThat(service.position(1001L, "1").signedQuantitySteps()).isEqualTo(10L);
         assertThat(service.positions(1001L).count()).isEqualTo(1);
         assertThat(service.positionMode(1001L).positionMode()).isEqualTo(PositionMode.ONE_WAY);

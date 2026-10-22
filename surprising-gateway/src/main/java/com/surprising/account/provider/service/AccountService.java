@@ -74,7 +74,7 @@ public class AccountService {
 
     public BalanceResponse balance(long userId, String asset) {
         requireUserId(userId);
-        String normalizedAsset = normalizeAsset(asset);
+        String normalizedAsset = asset;
         var balance = realtimeQueries.balance(currentProductLine(), userId, normalizedAsset, null);
         return balance
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
@@ -110,7 +110,7 @@ public class AccountService {
         requireUserId(userId);
         ProductLine product = accountType.productLine().orElseThrow();
         requireCurrentProduct(product);
-        String normalizedAsset = normalizeAsset(asset);
+        String normalizedAsset = asset;
         var selected = realtimeQueries.balance(product, userId, normalizedAsset, null);
         BalanceResponse balance = selected
                 .map(value -> new BalanceResponse(userId, value.asset(), value.availableUnits(), value.lockedUnits(),
@@ -158,19 +158,19 @@ public class AccountService {
     }
 
     public PositionResponse position(long userId, String instrumentId) {
-        return position(userId, instrumentId, null, null);
+        return position(userId, instrumentId, MarginMode.CROSS, com.surprising.trading.api.model.PositionSide.NET);
     }
 
-    public PositionResponse position(long userId, String instrumentId, String marginMode) {
-        return position(userId, instrumentId, marginMode, null);
+    public PositionResponse position(long userId, String instrumentId, MarginMode marginMode) {
+        return position(userId, instrumentId, marginMode, com.surprising.trading.api.model.PositionSide.NET);
     }
 
-    public PositionResponse position(long userId, String instrumentId, String marginMode, String positionSide) {
+    public PositionResponse position(long userId, String instrumentId, MarginMode marginMode, com.surprising.trading.api.model.PositionSide positionSide) {
         requireUserId(userId);
         requireDerivativeProduct(currentProductLine());
-        String normalizedSymbol = normalizeSymbol(instrumentId);
-        MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
-        com.surprising.trading.api.model.PositionSide normalizedPositionSide = normalizePositionSide(positionSide);
+        String normalizedSymbol = instrumentId;
+        MarginMode normalizedMarginMode = marginMode;
+        com.surprising.trading.api.model.PositionSide normalizedPositionSide = positionSide;
         var position = realtimeQueries.position(currentProductLine(), userId, normalizedSymbol,
                     com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalizedMarginMode.name()),
                     com.surprising.aeron.protocol.CorePositionSide.valueOf(normalizedPositionSide.name()), null)
@@ -179,11 +179,11 @@ public class AccountService {
                         normalizedMarginMode, normalizedPositionSide, 0L, 0L, 0L, Instant.EPOCH));
     }
 
-    public PositionMarginResponse positionMargin(long userId, String instrumentId, String marginMode) {
+    public PositionMarginResponse positionMargin(long userId, String instrumentId, MarginMode marginMode) {
         requireUserId(userId);
         requireDerivativeProduct(currentProductLine());
-        String normalizedSymbol = normalizeSymbol(instrumentId);
-        MarginMode normalizedMarginMode = normalizeMarginMode(marginMode);
+        String normalizedSymbol = instrumentId;
+        MarginMode normalizedMarginMode = marginMode;
         var position = realtimeQueries.position(currentProductLine(), userId, normalizedSymbol,
                     com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalizedMarginMode.name()),
                     com.surprising.aeron.protocol.CorePositionSide.NET, null)
@@ -199,11 +199,10 @@ public class AccountService {
         return positions(userId, null);
     }
 
-    public PositionQueryResponse positions(long userId, String positionSide) {
+    public PositionQueryResponse positions(long userId, com.surprising.trading.api.model.PositionSide positionSide) {
         requireUserId(userId);
         requireDerivativeProduct(currentProductLine());
-        com.surprising.trading.api.model.PositionSide normalized = positionSide == null || positionSide.isBlank()
-                ? null : normalizePositionSide(positionSide);
+        com.surprising.trading.api.model.PositionSide normalized = positionSide;
         CoreUserStateView snapshot = accountSnapshot(currentProductLine(), userId);
         List<PositionResponse> rows = snapshot.positions().stream()
                 .filter(value -> normalized == null || value.positionSide().name().equals(normalized.name()))
@@ -212,11 +211,11 @@ public class AccountService {
         return new PositionQueryResponse(rows.size(), rows);
     }
 
-    public PositionResponse adminPosition(long userId, String instrumentId, String marginMode, String positionSide) {
+    public PositionResponse adminPosition(long userId, String instrumentId, MarginMode marginMode, com.surprising.trading.api.model.PositionSide positionSide) {
         return position(userId, instrumentId, marginMode, positionSide);
     }
 
-    public PositionQueryResponse adminPositions(long userId, String positionSide) {
+    public PositionQueryResponse adminPositions(long userId, com.surprising.trading.api.model.PositionSide positionSide) {
         return positions(userId, positionSide);
     }
 
@@ -287,36 +286,12 @@ public class AccountService {
         }
     }
 
-    private static String normalizeAsset(String asset) {
-        if (asset == null || asset.isBlank()) {
-            throw new IllegalArgumentException("asset is required");
-        }
-        String value = asset.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!value.matches("[A-Z0-9]{2,20}")) {
-            throw new IllegalArgumentException("invalid asset: " + asset);
-        }
-        return value;
-    }
 
-    private static String normalizeSymbol(String instrumentId) {
-        if (instrumentId == null || instrumentId.isBlank()) {
-            throw new IllegalArgumentException("instrumentId is required");
-        }
-        String normalized = instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
-        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
-            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
-        }
-        return normalized;
-    }
 
-    private static MarginMode normalizeMarginMode(String value) {
-        return value == null || value.isBlank() ? MarginMode.CROSS : MarginMode.valueOf(value.trim().toUpperCase());
-    }
 
-    private static com.surprising.trading.api.model.PositionSide normalizePositionSide(String value) {
-        return value == null || value.isBlank()
-                ? com.surprising.trading.api.model.PositionSide.NET
-                : com.surprising.trading.api.model.PositionSide.valueOf(value.trim().toUpperCase());
-    }
+
+
+
+
 
 }

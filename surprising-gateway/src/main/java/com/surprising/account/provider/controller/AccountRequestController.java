@@ -52,7 +52,7 @@ public class AccountRequestController {
 
     public BalanceResponse adjustBalance(BalanceAdjustmentRequest request) {
         try {
-            return commandGateway.adjustBalance(request, null, null);
+            return commandGateway.adjustBalance(AccountInputBinding.adjustment(request), null, null);
         } catch (AccountCommandTimeoutException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
@@ -63,7 +63,7 @@ public class AccountRequestController {
     public BalanceResponse adminAdjustBalance(String adminUserId, String adminUsername, BalanceAdjustmentRequest request) {
         requireAdmin(adminUserId);
         try {
-            return commandGateway.adjustBalance(request, adminUserId, adminUsername);
+            return commandGateway.adjustBalance(AccountInputBinding.adjustment(request), adminUserId, adminUsername);
         } catch (AccountCommandTimeoutException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
@@ -75,7 +75,7 @@ public class AccountRequestController {
 
     public ProductBalanceResponse adjustProductBalance(ProductBalanceAdjustmentRequest request) {
         try {
-            return commandGateway.adjustProductBalance(request, null, null);
+            return commandGateway.adjustProductBalance(AccountInputBinding.productAdjustment(request), null, null);
         } catch (AccountCommandTimeoutException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
@@ -88,7 +88,7 @@ public class AccountRequestController {
     public ProductBalanceResponse adminAdjustProductBalance(String adminUserId, String adminUsername, ProductBalanceAdjustmentRequest request) {
         requireAdmin(adminUserId);
         try {
-            return commandGateway.adjustProductBalance(request, adminUserId, adminUsername);
+            return commandGateway.adjustProductBalance(AccountInputBinding.productAdjustment(request), adminUserId, adminUsername);
         } catch (AccountCommandTimeoutException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
@@ -100,7 +100,7 @@ public class AccountRequestController {
 
     public BalanceResponse balance(long userId, String asset) {
         try {
-            return accountService.balance(userId, asset);
+            return accountService.balance(userId, AccountInputBinding.asset(asset));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -117,7 +117,7 @@ public class AccountRequestController {
 
     public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
         try {
-            return accountService.productBalance(userId, accountType, asset);
+            return accountService.productBalance(userId, accountType, AccountInputBinding.asset(asset));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -158,7 +158,7 @@ public class AccountRequestController {
 
     public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request, String productLineHeader, String productLineValue) {
         try {
-            return commandGateway.updatePositionMode(withProductLine(request, productLine(productLineValue, productLineHeader)));
+            return commandGateway.updatePositionMode(AccountInputBinding.positionMode(withProductLine(request, productLine(productLineValue, productLineHeader))));
         } catch (AccountCommandTimeoutException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
@@ -185,7 +185,7 @@ public class AccountRequestController {
 
     public PositionResponse position(long userId, String instrumentId, String marginMode, String positionSide) {
         try {
-            return accountService.position(userId, instrumentId, marginMode, positionSide);
+            return accountService.position(userId, AccountInputBinding.instrument(instrumentId), AccountInputBinding.marginMode(marginMode), AccountInputBinding.positionSide(positionSide));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -193,12 +193,12 @@ public class AccountRequestController {
 
     public PositionResponse adminPosition(String adminUserId, long userId, String instrumentId, String marginMode, String positionSide) {
         requireAdmin(adminUserId);
-        return accountService.adminPosition(userId, instrumentId, marginMode, positionSide);
+        return position(userId, instrumentId, marginMode, positionSide);
     }
 
     public PositionMarginResponse positionMargin(long userId, String instrumentId, String marginMode) {
         try {
-            return accountService.positionMargin(userId, instrumentId, marginMode);
+            return accountService.positionMargin(userId, AccountInputBinding.instrument(instrumentId), AccountInputBinding.marginMode(marginMode));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -206,7 +206,7 @@ public class AccountRequestController {
 
     public PositionMarginAdjustmentResponse adjustPositionMargin(PositionMarginAdjustmentRequest request) {
         try {
-            return commandGateway.adjustPositionMargin(request);
+            return commandGateway.adjustPositionMargin(AccountInputBinding.positionMargin(request));
         } catch (AccountCommandTimeoutException ex) {
             throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
@@ -218,7 +218,7 @@ public class AccountRequestController {
 
     public PositionQueryResponse positions(long userId, String positionSide) {
         try {
-            return accountService.positions(userId, positionSide);
+            return accountService.positions(userId, AccountInputBinding.optionalPositionSide(positionSide));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -226,7 +226,7 @@ public class AccountRequestController {
 
     public PositionQueryResponse adminPositions(String adminUserId, long userId, String positionSide) {
         requireAdmin(adminUserId);
-        return accountService.adminPositions(userId, positionSide);
+        return positions(userId, positionSide);
     }
 
     public AccountLedgerQueryResponse accountLedger(String adminUserId, Long userId, String asset, String referenceType, int limit, String cursor, String sort) {

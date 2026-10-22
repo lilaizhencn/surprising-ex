@@ -568,3 +568,5 @@ C2C后台审核的版本文本和原因由 `c2c.controller.C2cAdminController` �
 资产配置由 `asset.controller.AssetConfigurationController` 在原鉴权/审批后校验代码、文本及静态字段；`AssetConfigurationService` 锁定资产后检查版本、单位不可变、网络启停与金额精确性，配置和审计同事务提交。审批继续使用原始正文。
 
 活动订单由 `OrderRequestController` 绑定 `ActiveOrderPageQuery`；活动条件单由 `TriggerOrderRequestController` 绑定 `OpenTriggerPageQuery`。游标协议归各自 `utils`，Service仅按原生ID排序和seek，读取既有产品/用户视图并传递最小导出序号。首屏用beforeId=0表示不限制ID上界，避免漏掉Long.MAX_VALUE；历史游标协议保持独立。
+
+实时账户格式由 `account.provider.controller.AccountInputBinding` 绑定；`AccountRequestController` 接收HTTP/本地文本后交给Service规范资产、合约和原生仓位枚举，并绑定写请求的referenceId。`MakerQuoteInputsController` 也直接使用原生MarginMode/PositionSide。`AccountService` 保留产品账户归属、衍生品边界、实时状态身份和金额业务；`AccountCommandGateway` 的确定性命令标识、资金指令与响应映射保持原文件不变。

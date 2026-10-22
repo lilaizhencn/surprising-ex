@@ -42,10 +42,10 @@ public class MakerQuoteInputsController {
             for (long user : request.accountIds()) {
                 long inventory;
                 if (product == ProductLine.SPOT) {
-                    var balance = accounts.balance(user, instrument.baseAsset());
+                    var balance = accounts.balance(user, com.surprising.account.provider.controller.AccountInputBinding.asset(instrument.baseAsset()));
                     inventory = Math.max(0L, balance.equityUnits()) / instrument.quantityStepUnits();
                 } else {
-                    inventory = accounts.position(user, request.instrumentId(), request.marginMode().name(), "NET")
+                    inventory = accounts.position(user, com.surprising.account.provider.controller.AccountInputBinding.instrument(request.instrumentId()), request.marginMode(), com.surprising.trading.api.model.PositionSide.NET)
                             .signedQuantitySteps();
                 }
                 var fee = fees.effectiveFee(user, request.instrumentId(), request.instrumentChangeId(), product);
