@@ -38,9 +38,10 @@ import com.surprising.trading.order.model.ValidationResult;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
 import java.nio.charset.StandardCharsets;
+import com.surprising.trading.order.model.ActiveOrderPageQuery;
+import com.surprising.trading.order.utils.ActiveOrderCursors;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -80,7 +81,6 @@ public class OrderService {
     private final com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     private static final int MAX_CANCEL_BATCH_SIZE = 50;
-    private static final String ACTIVE_ORDER_CURSOR_PREFIX = "core-open:v1:";
 
     private final TradingOrderProperties properties;
     private final OrderValidator orderValidator;
@@ -416,24 +416,11 @@ public class OrderService {
         return current;
     }
 
-    public OrderQueryResponse openOrders(long userId, String instrumentId, int limit) {
-        return openOrders(userId, instrumentId, limit, null);
-    }
-
-    public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
-        return openOrders(userId, instrumentId, limit, cursor, null);
-    }
-
-    public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor,
+    public OrderQueryResponse openOrders(long userId, String instrumentId, ActiveOrderPageQuery query,
                                          Long minExportSequence) {
-        if (userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
-        }
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
-        long beforeOrderId = decodeActiveOrderCursor(cursor);
+        int limit = query.limit();
+        String normalizedSymbol = instrumentId;
+        long beforeOrderId = query.beforeId();
         List<OrderResponse> orders = requireRealtimeQueries().require(currentProductLine(),userId,minExportSequence).openOrders().stream()
                 .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.instrumentId()))
                 .filter(v->beforeOrderId==0 || v.orderId()<beforeOrderId)
@@ -442,7 +429,7 @@ public class OrderService {
         boolean hasMore = orders.size() > limit;
         if (hasMore) orders = new ArrayList<>(orders.subList(0, limit));
         String nextCursor = hasMore && !orders.isEmpty()
-                ? encodeActiveOrderCursor(orders.getLast().orderId()) : null;
+                ? ActiveOrderCursors.encode(orders.getLast().orderId()) : null;
         return new OrderQueryResponse(orders.size(), orders, nextCursor, hasMore, "createdAt.desc", limit);
     }
 
@@ -451,7 +438,7 @@ public class OrderService {
         if (productLine != currentProductLine()) {
             throw new IllegalArgumentException("product line does not match this order core");
         }
-        if (userId != null) return openOrders(userId, instrumentId, limit).orders();
+        if (userId != null) return openOrders(userId, instrumentId, new ActiveOrderPageQuery(limit, 0L), null).orders();
         return readyProjection(requireProjection().openOrders(productLine, null, instrumentId, null, limit, null));
     }
 
@@ -921,27 +908,9 @@ public class OrderService {
         }
     }
 
-    private static String encodeActiveOrderCursor(long orderId) {
-        if (orderId <= 0) throw new IllegalArgumentException("invalid active order cursor");
-        String value = ACTIVE_ORDER_CURSOR_PREFIX + orderId;
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(value.getBytes(StandardCharsets.UTF_8));
-    }
 
-    private static long decodeActiveOrderCursor(String cursor) {
-        if (cursor == null || cursor.isBlank()) return 0;
-        try {
-            String value = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
-            if (!value.startsWith(ACTIVE_ORDER_CURSOR_PREFIX)) {
-                throw new IllegalArgumentException("invalid active order cursor");
-            }
-            long orderId = Long.parseLong(value.substring(ACTIVE_ORDER_CURSOR_PREFIX.length()));
-            if (orderId <= 0) throw new IllegalArgumentException("invalid active order cursor");
-            return orderId;
-        } catch (RuntimeException exception) {
-            throw new IllegalArgumentException("invalid active order cursor", exception);
-        }
-    }
+
+
 
     private String emptyToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();

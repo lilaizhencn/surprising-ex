@@ -1,5 +1,8 @@
 package com.surprising.trading.order.controller;
 
+import com.surprising.trading.order.model.ActiveOrderPageQuery;
+import com.surprising.trading.order.utils.ActiveOrderCursors;
+
 import com.surprising.trading.api.model.AmendOrderRequest;
 import com.surprising.trading.api.model.CancellationPlanResponse;
 import com.surprising.trading.api.model.AlgoOrderBatchResponse;
@@ -346,7 +349,8 @@ public class OrderRequestController {
 
     public OrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor, Long minExportSequence) {
         try {
-            return orderService.openOrders(userId, instrumentId, limit, cursor, minExportSequence);
+            if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+            return orderService.openOrders(userId, activeInstrument(instrumentId), activePage(limit, cursor), minExportSequence);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (ProjectionReadResult.ProjectionLagException ex) {
@@ -384,5 +388,18 @@ public class OrderRequestController {
                 HttpStatus.OK;
         };
         return ResponseEntity.status(status).cacheControl(org.springframework.http.CacheControl.noStore()).body(receipt);
+    }
+
+    public static ActiveOrderPageQuery activePage(int limit, String cursor) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
+        return new ActiveOrderPageQuery(limit, ActiveOrderCursors.decode(cursor));
+    }
+
+    private static String activeInstrument(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) return null;
+        String value = instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(value))
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
+        return value;
     }
 }

@@ -1,5 +1,8 @@
 package com.surprising.trading.trigger.controller;
 
+import com.surprising.trading.trigger.model.OpenTriggerPageQuery;
+import com.surprising.trading.trigger.utils.OpenTriggerCursors;
+
 import com.surprising.trading.trigger.service.TriggerOrderAeronGateway;
 
 import com.surprising.trading.api.model.BatchCancelTriggerOrdersRequest;
@@ -139,9 +142,23 @@ public class TriggerOrderRequestController {
 
     public TriggerOrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
         try {
-            return triggerOrderService.openOrders(userId, instrumentId, limit, cursor);
+            if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+            return triggerOrderService.openOrders(userId, activeInstrument(instrumentId), activePage(limit, cursor));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
+    }
+
+    public static OpenTriggerPageQuery activePage(int limit, String cursor) {
+        if (limit < 1 || limit > 1000) throw new IllegalArgumentException("limit must be in [1, 1000]");
+        return new OpenTriggerPageQuery(limit, OpenTriggerCursors.decode(cursor));
+    }
+
+    private static String activeInstrument(String instrumentId) {
+        if (instrumentId == null || instrumentId.isBlank()) return null;
+        String value = instrumentId.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!com.surprising.product.api.utils.InstrumentIds.valid(value))
+            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
+        return value;
     }
 }

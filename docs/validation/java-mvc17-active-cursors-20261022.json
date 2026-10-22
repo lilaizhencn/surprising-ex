@@ -1,0 +1,370 @@
+{
+  "verified_at_utc": "2026-10-22T02:36:08.091915+00:00",
+  "ids": [
+    "ADD-090",
+    "ADD-091"
+  ],
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=OrderServiceTest,OrderControllerTest,TriggerOrderRequestControllerTest,LocalBusinessApiTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.order.service.OrderServiceTest",
+          "tests": 124,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderControllerTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.controller.TriggerOrderRequestControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "b047556d0dbd45913c606066e75e991dc2134a30e5f09916c6e05429eda98c91",
+      "tests": 183,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ActiveOrderQueryBoundaryTest,OrderServiceTest,OrderControllerTest,TriggerOrderRequestControllerTest,LocalBusinessApiTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "801266464221b52d00865d18c6a88de0c08e348fa42b84724ae4dcf0f95d08fd",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary-fixed": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ActiveOrderQueryBoundaryTest,OrderServiceTest,OrderControllerTest,TriggerOrderRequestControllerTest,LocalBusinessApiTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.order.service.OrderServiceTest",
+          "tests": 124,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderControllerTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.controller.TriggerOrderRequestControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.ActiveOrderQueryBoundaryTest",
+          "tests": 29,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "8088cbee777df1f8deaa89ffdf3f49bfa127a00433d32570c5def2b392f2aee1",
+      "tests": 212,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative-max-id": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=ActiveOrderQueryBoundaryTest#nativePagesPreserveMaxInt64AndOwnerProductInstrumentScope",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.gateway.provider.local.ActiveOrderQueryBoundaryTest",
+          "tests": 11,
+          "failures": 5,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "724b0dc1196c60e7b05181f53060193da2ff4908df9e2ce7cc2740774aef12c7",
+      "tests": 11,
+      "failures": 5,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded-clean": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Order*Test,Trigger*Test,LocalBusinessApiTest,ActiveOrderQueryBoundaryTest,MultiProductMoneyIntegrationTest,LocalMoneyCommandsTest,GatewayProxyControllerTest,BboOrderServiceTest,AlgoOrder*Test",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerOrderProjectionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderServiceTest",
+          "tests": 124,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderControllerTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.OrderFeeRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderValidatorTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderExecutionJsonTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.config.TriggerPropertiesTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderMarginMathTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderBatchServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderBusinessSettingsControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.BboOrderServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.AlgoOrderProjectionPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.AlgoOrderCancellationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderAeronGatewayTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalMoneyCommandsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.controller.TriggerOrderRequestControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.AlgoOrderServiceTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.task.TriggerOrderMaintenanceTaskTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerLifecycleDrainTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.MultiProductMoneyIntegrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.ActiveOrderQueryBoundaryTest",
+          "tests": 29,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.OrderMarkPriceRepositoryTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderPlacementStateServiceTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.OrderHistoryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.GatewayProxyControllerTest",
+          "tests": 39,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "b1ad481a5ea3de16ffd01808e995098d2f0530636f402b83d44e40773fb29e7a",
+      "tests": 363,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "proof": {
+    "entire_services": "两个Service按精确限定的输入职责搬移后整个类体相同，其他命令、生命周期及维护业务不变",
+    "wire_protocol": "保留core-open:v1:与trigger:原有前缀和Base64/long行为；纯工具编码输出、Controller解码输入，Service无原始游标参数",
+    "native_boundary": "两个model只承接原生limit/beforeId，无运行状态；实际公共本地路由->Controller->Service->ValkeyUserQueries调用受测",
+    "negative_control": "旧Long.MAX_VALUE首屏界恢复后5类衍生条件单漏最大ID，11分页场景中5失败6通过，finally恢复后扩大clean构建绿色",
+    "isolation": "新测试验证用户伪造403不访问视图、产品范围与instrument过滤、原生最小导出序号；不调用Core或历史仓储"
+  },
+  "scope": "实际本地路由及相关Gateway回归/六Core资金测试；未启动外部钱包或六产品真实部署，无性能结论。",
+  "new_types": "2个原生查询model及2个无状态协议utils，承接真实协议边界，无新状态/缓存/接口。",
+  "resources": "本批无新增服务进程，ValidatorFactory测试后关闭，目标PG最终统一清理。"
+}

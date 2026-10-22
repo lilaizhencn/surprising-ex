@@ -35,6 +35,8 @@ import com.surprising.trading.api.model.TriggerOrderType;
 import com.surprising.trading.order.service.StableOrderIdentity;
 import com.surprising.trading.trigger.config.TriggerProperties;
 import java.nio.charset.StandardCharsets;
+import com.surprising.trading.trigger.model.OpenTriggerPageQuery;
+import com.surprising.trading.trigger.utils.OpenTriggerCursors;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -314,19 +316,10 @@ public class TriggerOrderService {
         return triggerBatchResponse(results);
     }
 
-    public TriggerOrderQueryResponse openOrders(long userId, String instrumentId, int limit) {
-        return openOrders(userId, instrumentId, limit, null);
-    }
-
-    public TriggerOrderQueryResponse openOrders(long userId, String instrumentId, int limit, String cursor) {
-        if (userId <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        if (limit < 1 || limit > 1000) {
-            throw new IllegalArgumentException("limit must be in [1, 1000]");
-        }
-        String normalizedSymbol = instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId);
-        long before = decodeOpenTriggerCursor(cursor);
+    public TriggerOrderQueryResponse openOrders(long userId, String instrumentId, OpenTriggerPageQuery query) {
+        int limit = query.limit();
+        String normalizedSymbol = instrumentId;
+        long before = query.beforeId();
         List<CoreTriggerOrderStateView> states = requireRealtimeQueries().require(currentProductLine(),userId,null).triggerOrders().stream()
                 .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.instrumentId()))
                 .filter(v->before==0 || v.triggerOrderId()<before)
@@ -335,7 +328,7 @@ public class TriggerOrderService {
         boolean hasMore = values.size() > limit;
         List<TriggerOrderResponse> orders = hasMore ? values.subList(0, limit) : values;
         String next = hasMore && !orders.isEmpty()
-                ? encodeOpenTriggerCursor(orders.getLast().triggerOrderId()) : null;
+                ? OpenTriggerCursors.encode(orders.getLast().triggerOrderId()) : null;
         return new TriggerOrderQueryResponse(orders.size(), List.copyOf(orders), next, hasMore,
                 "createdAt.desc", limit);
     }
@@ -414,24 +407,9 @@ public class TriggerOrderService {
                 operation, userId, instrumentId, pageSize, maxPages);
     }
 
-    static String encodeOpenTriggerCursor(long triggerOrderId) {
-        if (triggerOrderId <= 0) throw new IllegalArgumentException("open-trigger cursor id must be positive");
-        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(
-                ("trigger:" + triggerOrderId).getBytes(StandardCharsets.UTF_8));
-    }
 
-    static long decodeOpenTriggerCursor(String cursor) {
-        if (cursor == null || cursor.isBlank()) return Long.MAX_VALUE;
-        try {
-            String decoded = new String(java.util.Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
-            if (!decoded.startsWith("trigger:")) throw new IllegalArgumentException("invalid open-trigger cursor");
-            long id = Long.parseLong(decoded.substring("trigger:".length()));
-            if (id <= 0) throw new IllegalArgumentException("invalid open-trigger cursor");
-            return id;
-        } catch (IllegalArgumentException exception) {
-            throw new IllegalArgumentException("invalid open-trigger cursor", exception);
-        }
-    }
+
+
 
     private PlaceTriggerOrderRequest normalize(PlaceTriggerOrderRequest request) {
         if (request == null) throw new IllegalArgumentException("trigger order request is required");

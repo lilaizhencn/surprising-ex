@@ -566,3 +566,5 @@ C2C后台审核的版本文本和原因由 `c2c.controller.C2cAdminController` �
 认证身份与权限格式由 `auth.controller.AuthRequestBinding` 在实际HTTP入口绑定；角色和权限纯工具归 `auth.utils.AuthCodeFormats`，两个Repository各自只操作角色表或权限表。`AuthService` 保留邮箱/手机号注册策略、密码核验、MFA、冻结/封禁、会话和权限保护；规范化后的角色先参与自身管理员保护。审批仍使用原始正文，格式错误在消费审批之前返回。
 
 资产配置由 `asset.controller.AssetConfigurationController` 在原鉴权/审批后校验代码、文本及静态字段；`AssetConfigurationService` 锁定资产后检查版本、单位不可变、网络启停与金额精确性，配置和审计同事务提交。审批继续使用原始正文。
+
+活动订单由 `OrderRequestController` 绑定 `ActiveOrderPageQuery`；活动条件单由 `TriggerOrderRequestController` 绑定 `OpenTriggerPageQuery`。游标协议归各自 `utils`，Service仅按原生ID排序和seek，读取既有产品/用户视图并传递最小导出序号。首屏用beforeId=0表示不限制ID上界，避免漏掉Long.MAX_VALUE；历史游标协议保持独立。
