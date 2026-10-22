@@ -6,13 +6,18 @@ import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyQueryResponse;
 import com.surprising.marketmaker.api.model.MarketMakerStrategyResponse;
 import com.surprising.marketmaker.provider.service.MarketMakerService;
-import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerAdminMetricsResponse;
-import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerRunLogQueryResponse;
-import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerStrategyConfigResponse;
-import com.surprising.marketmaker.provider.service.MarketMakerService.MarketMakerStrategyConfigUpdateRequest;
+import com.surprising.marketmaker.provider.model.MarketMakerAdminModels.MarketMakerAdminMetricsResponse;
+import com.surprising.marketmaker.provider.model.MarketMakerAdminModels.MarketMakerRunLogQueryResponse;
+import com.surprising.marketmaker.provider.model.MarketMakerAdminModels.MarketMakerStrategyConfigResponse;
+import com.surprising.marketmaker.provider.model.MarketMakerAdminModels.MarketMakerStrategyConfigUpdateRequest;
 import com.surprising.product.api.ProductLine;
 import java.util.Locale;
+import com.surprising.marketmaker.provider.model.MarketMakerRunEventPageQuery;
+import com.surprising.marketmaker.provider.utils.AdminCursorPage;
+import java.time.DateTimeException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -81,7 +86,7 @@ public class AdminMarketMakerController {
             @RequestParam(value = "sort", required = false) String sort) {
         requireAdmin(adminUserId);
         return marketMakerService.runLogs(productLine(productLineValue, productLineHeader),
-                strategyId, instrumentId, accountId, eventType, limit, cursor, sort);
+                optional(strategyId), optionalInstrument(instrumentId), accountId, optional(eventType), eventPage(limit, cursor, sort));
     }
 
     @GetMapping("/strategy-definitions")
@@ -193,8 +198,8 @@ public class AdminMarketMakerController {
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public void handleBadRequest(IllegalArgumentException ex) {
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+    public ResponseEntity<ProblemDetail> handleBadRequest(IllegalArgumentException ex) {
+        return ResponseEntity.badRequest().body(ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage()));
     }
 
     private ProductLine productLine(String queryValue, String headerValue) {
@@ -219,4 +224,22 @@ public class AdminMarketMakerController {
         }
         throw new IllegalArgumentException("unsupported productLine: " + value);
     }
+    public static MarketMakerRunEventPageQuery eventPage(int limit, String cursor, String sort) {
+        String order=sort==null || sort.isBlank()?"createdAt.desc":sort.trim();
+        if(!order.equals("createdAt.desc") && !order.equals("createdAt.asc"))throw new IllegalArgumentException("unsupported sort: "+sort);
+        try {
+            var after=AdminCursorPage.decodeCursor(cursor);
+            return new MarketMakerRunEventPageQuery(AdminCursorPage.limit(limit,1000),after==null?null:after.timestamp(),after==null?0L:after.id(),order.equals("createdAt.desc"));
+        } catch(DateTimeException invalid) {throw new IllegalArgumentException("invalid cursor",invalid);}
+    }
+
+    private static String optional(String value) {return value==null || value.isBlank()?null:value.trim().toUpperCase(Locale.ROOT);}
+    private static String optionalInstrument(String value) {
+        String normalized=optional(value);
+        if(normalized==null)return null;
+        normalized=normalized.toUpperCase();
+        if(!com.surprising.product.api.utils.InstrumentIds.valid(normalized))throw new IllegalArgumentException("invalid instrumentId: "+value);
+        return normalized;
+    }
+
 }

@@ -2,6 +2,7 @@ package com.surprising.marketmaker.provider.repository;
 
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
+import com.surprising.marketmaker.provider.model.MarketMakerRunEventPageQuery;
 import java.util.List;
 
 /**
@@ -11,21 +12,12 @@ public interface MarketMakerRunEventRepository {
 
     void record(MarketMakerRunEventWrite event);
 
-    List<MarketMakerRunEventRecord> find(ProductLine productLine,
-                                         String strategyId,
-                                         String instrumentId,
-                                         Long accountId,
-                                         String eventType,
-                                         int limit);
-
     CursorPage<MarketMakerRunEventRecord> findPage(ProductLine productLine,
                                                    String strategyId,
                                                    String instrumentId,
                                                    Long accountId,
                                                    String eventType,
-                                                   int limit,
-                                                   String cursor,
-                                                   String sort);
+                                                   MarketMakerRunEventPageQuery query);
 
     record MarketMakerRunEventWrite(
             String strategyId,

@@ -3,6 +3,7 @@ package com.surprising.marketmaker.provider.repository;
 import com.surprising.marketmaker.provider.utils.AdminCursorPage;
 
 import com.surprising.product.api.ProductLine;
+import com.surprising.marketmaker.provider.model.MarketMakerRunEventPageQuery;
 import java.time.Instant;
 import java.util.*;
 import org.springframework.stereotype.Repository;
@@ -11,9 +12,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class InMemoryMarketMakerRunEventRepository implements MarketMakerRunEventRepository {
     private static final int CAPACITY = 2048;
-    private static final AdminCursorPage.SortSpec DESC = new AdminCursorPage.SortSpec("createdAt", true);
-    private static final List<AdminCursorPage.SortSpec> SORTS = List.of(DESC,
-            new AdminCursorPage.SortSpec("createdAt", false));
     private final Deque<MarketMakerRunEventRecord> events = new ArrayDeque<>(CAPACITY);
     private long sequence;
 
@@ -23,15 +21,11 @@ public class InMemoryMarketMakerRunEventRepository implements MarketMakerRunEven
                 v.accountId(), v.nodeId(), v.cycleSequence(), v.eventType(), v.submittedOrders(), v.canceledOrders(),
                 v.rejectedOrders(), v.skippedReason(), truncate(v.errorMessage(), 1000), v.createdAt() == null ? Instant.now() : v.createdAt()));
     }
-    @Override public List<MarketMakerRunEventRecord> find(ProductLine line, String strategy, String instrument,
-                                                         Long account, String type, int limit) {
-        return findPage(line, strategy, instrument, account, type, limit, null, null).items();
-    }
     @Override public synchronized CursorPage<MarketMakerRunEventRecord> findPage(ProductLine line, String strategy,
-            String instrument, Long account, String type, int limit, String cursor, String sort) {
-        var order = AdminCursorPage.parseSort(sort, DESC, SORTS);
-        var after = AdminCursorPage.decodeCursor(cursor);
-        int count = AdminCursorPage.limit(limit, 1000);
+            String instrument, Long account, String type, MarketMakerRunEventPageQuery query) {
+        var order = new AdminCursorPage.SortSpec("createdAt", query.descending());
+        var after = query.afterTime() == null ? null : new AdminCursorPage.Cursor(query.afterTime(), query.afterId());
+        int count = query.limit();
         Comparator<MarketMakerRunEventRecord> comparator = Comparator.comparing(MarketMakerRunEventRecord::createdAt)
                 .thenComparingLong(MarketMakerRunEventRecord::eventId);
         if (order.descending()) comparator = comparator.reversed();

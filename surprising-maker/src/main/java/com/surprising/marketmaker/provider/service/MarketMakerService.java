@@ -1,5 +1,8 @@
 package com.surprising.marketmaker.provider.service;
 
+import com.surprising.marketmaker.provider.model.MarketMakerAdminModels.*;
+import com.surprising.marketmaker.provider.model.MarketMakerRunEventPageQuery;
+
 import lombok.extern.slf4j.Slf4j;
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.api.model.PositionResponse;
@@ -322,58 +325,10 @@ public class MarketMakerService {
         return new MarketMakerAdminMetricsResponse(now, nodeId, totals(productLine, rows, anomalies), rows, anomalies, warnings);
     }
 
-    public MarketMakerRunLogQueryResponse runLogs(String strategyId,
-                                                  String instrumentId,
-                                                  Long accountId,
-                                                  String eventType,
-                                                  int limit) {
-        return runLogs(null, strategyId, instrumentId, accountId, eventType, limit);
-    }
-
-    public MarketMakerRunLogQueryResponse runLogs(ProductLine productLine,
-                                                  String strategyId,
-                                                  String instrumentId,
-                                                  Long accountId,
-                                                  String eventType,
-                                                  int limit) {
-        return new MarketMakerRunLogQueryResponse(
-                Instant.now(),
-                runEventRepository.find(
-                        productLine,
-                        normalizeOptional(strategyId),
-                        instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId),
-                        accountId,
-                        normalizeOptional(eventType),
-                        limit));
-    }
-
-    public MarketMakerRunLogQueryResponse runLogs(String strategyId,
-                                                  String instrumentId,
-                                                  Long accountId,
-                                                  String eventType,
-                                                  int limit,
-                                                  String cursor,
-                                                  String sort) {
-        return runLogs(null, strategyId, instrumentId, accountId, eventType, limit, cursor, sort);
-    }
-
-    public MarketMakerRunLogQueryResponse runLogs(ProductLine productLine,
-                                                  String strategyId,
-                                                  String instrumentId,
-                                                  Long accountId,
-                                                  String eventType,
-                                                  int limit,
-                                                  String cursor,
-                                                  String sort) {
+    public MarketMakerRunLogQueryResponse runLogs(ProductLine productLine, String strategyId, String instrumentId,
+                                                  Long accountId, String eventType, MarketMakerRunEventPageQuery query) {
         CursorPage<MarketMakerRunEventRecord> page = runEventRepository.findPage(
-                productLine,
-                normalizeOptional(strategyId),
-                instrumentId == null || instrumentId.isBlank() ? null : normalizeSymbol(instrumentId),
-                accountId,
-                normalizeOptional(eventType),
-                limit,
-                cursor,
-                sort);
+                productLine, strategyId, instrumentId, accountId, eventType, query);
         return new MarketMakerRunLogQueryResponse(Instant.now(), page.items(), page.nextCursor(),
                 page.hasMore(), page.sort(), page.limit());
     }
@@ -568,10 +523,6 @@ public class MarketMakerService {
         }
         return notional.longValueExact();
     }
-
-    public record MarketMakerLiquidityMetric(long slippagePpm, long targetNotionalUnits,
-            long bidNotionalWithinBandUnits, long askNotionalWithinBandUnits,
-            long bookSequence, Instant bookEventTime, boolean fresh) { }
 
     private MarketMakerMetricsTotals totals(ProductLine productLine,
                                             List<MarketMakerStrategyMetric> rows,
@@ -1824,135 +1775,6 @@ public class MarketMakerService {
             return configuredNodeId.trim();
         }
         return "market-maker-" + UUID.randomUUID();
-    }
-
-    public record MarketMakerAdminMetricsResponse(Instant generatedAt,
-                                                  String nodeId,
-                                                  MarketMakerMetricsTotals totals,
-                                                  List<MarketMakerStrategyMetric> rows,
-                                                  List<MarketMakerAnomaly> anomalies,
-                                                  List<MarketMakerMetricWarning> warnings) {
-    }
-
-    public record MarketMakerRunLogQueryResponse(Instant generatedAt,
-                                                 List<MarketMakerRunEventRecord> events,
-                                                 String nextCursor,
-                                                 boolean hasMore,
-                                                 String sort,
-                                                 int limit) {
-
-        public MarketMakerRunLogQueryResponse(Instant generatedAt, List<MarketMakerRunEventRecord> events) {
-            this(generatedAt, events, null, false, null, events == null ? 0 : events.size());
-        }
-
-        public int count() {
-            return events == null ? 0 : events.size();
-        }
-    }
-
-    public record MarketMakerStrategyConfigResponse(MarketMakerStrategyConfig configured,
-                                                    MarketMakerStrategyConfig effective,
-                                                    StrategyConfigOverride override) {
-    }
-
-    public record MarketMakerStrategyConfig(String strategyId,
-                                            ProductLine productLine,
-                                            boolean enabled,
-                                            List<Long> accountIds,
-                                            List<String> instrumentIds,
-                                            long baseQuantitySteps,
-                                            MarginMode marginMode,
-                                            long spreadTicks,
-                                            long levelSpacingTicks,
-                                            Long maxInventorySteps,
-                                            Long maxInventorySkewPpm,
-                                            Integer orderLevels) {
-    }
-
-    public record MarketMakerStrategyConfigUpdateRequest(Boolean enabled,
-                                                         Long baseQuantitySteps,
-                                                         String marginMode,
-                                                         Long spreadTicks,
-                                                         Long levelSpacingTicks,
-                                                         Long maxInventorySteps,
-                                                         Long maxInventorySkewPpm,
-                                                         Integer orderLevels,
-                                                         String reason) {
-    }
-
-    public record MarketMakerMetricsTotals(long strategyCount,
-                                           long enabledStrategies,
-                                           long runningStrategies,
-                                           long degradedStrategies,
-                                           long pausedStrategies,
-                                           long disabledStrategies,
-                                           long metricRows,
-                                           long submittedOrders,
-                                           long canceledOrders,
-                                           long rejectedOrders,
-                                           long skippedCycles,
-                                           long anomalyCount,
-                                           long criticalAnomalies,
-                                           long warnAnomalies) {
-    }
-
-    public record MarketMakerStrategyMetric(String strategyId,
-                                            ProductLine productLine,
-                                            String instrumentId,
-                                            long accountId,
-                                            MarketMakerStrategyStatus strategyStatus,
-                                            String qualityStatus,
-                                            boolean configuredEnabled,
-                                            boolean runtimePaused,
-                                            long cycleSequence,
-                                            long submittedOrders,
-                                            long canceledOrders,
-                                            long rejectedOrders,
-                                            long skippedCycles,
-                                            long signedInventorySteps,
-                                            long absInventorySteps,
-                                            long maxInventorySteps,
-                                            long inventoryUsagePpm,
-                                            long realizedPnlUnits,
-                                            Instant positionUpdatedAt,
-                                            long ownedOpenOrders,
-                                            long ownedBidOrders,
-                                            long ownedAskOrders,
-                                            long desiredQuoteCount,
-                                            long desiredBidQuotes,
-                                            long desiredAskQuotes,
-                                            long matchedDesiredQuotes,
-                                            long missingDesiredQuotes,
-                                            long staleOwnedOrders,
-                                            long offTargetOwnedOrders,
-                                            long bestBidTicks,
-                                            long bestAskTicks,
-                                            long spreadTicks,
-                                            long spreadPpm,
-                                            long markPriceTicks,
-                                            long quoteCoveragePpm,
-                                            String lastError,
-                                            Instant lastCycleTime,
-                                            String error,
-                                            MarketMakerLiquidityMetric liquidity) {
-    }
-
-    public record MarketMakerAnomaly(String severity,
-                                     String type,
-                                     String strategyId,
-                                     ProductLine productLine,
-                                     String instrumentId,
-                                     long accountId,
-                                     long metricValue,
-                                     long threshold,
-                                     String summary) {
-    }
-
-    public record MarketMakerMetricWarning(String strategyId,
-                                           ProductLine productLine,
-                                           String instrumentId,
-                                           long accountId,
-                                           String message) {
     }
 
     private record ReconcileResult(long submitted, long canceled, long rejected, String rejectionReason) {

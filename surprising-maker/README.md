@@ -549,3 +549,5 @@ JFR profile 上限 16 MiB。实际内存配置的 definitions＋单策略覆盖�
 Kafka职责归包：独立快照、审计、结算/排空及推送消费入口统一放在各自provider.consumer（价格为index.consumer/mark.consumer），业务和缓存继续由原Service/状态所有者负责。监听topic、group、启动条件与处理顺序保持；做市事件唤醒组件为consumer.MakerQuoteWakeups，原唯一信号状态不变。详见 docs/validation/java-mvc-consumer-packages-20261022.json。
 
 外部参考行情适配位于 `provider.client.RestReferenceMarketProvider`；做市报价业务仍由原Service/Task拥有。
+
+管理运行日志由 `AdminMarketMakerController.eventPage` 绑定 `MarketMakerRunEventPageQuery`，包含原生时间、序号、方向和限制；Repository只负责2048条有界诊断事件、产品过滤及seek。指标、日志、策略配置的10个共享契约归 `model.MarketMakerAdminModels`，Service保留做市运行和指标业务；非法HTTP分页直接返回400。

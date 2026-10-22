@@ -1,5 +1,8 @@
 package com.surprising.marketmaker.provider.service;
 
+import com.surprising.marketmaker.provider.model.MarketMakerRunEventPageQuery;
+
+import com.surprising.marketmaker.provider.model.MarketMakerAdminModels;
 import static org.assertj.core.api.Assertions.assertThat;
 import com.surprising.account.api.client.AccountRpcApi;
 import com.surprising.account.api.model.AccountType;
@@ -739,7 +742,7 @@ class MarketMakerServiceTest {
             assertThat(row.desiredBidQuotes()).isEqualTo(1L);
             assertThat(row.desiredAskQuotes()).isEqualTo(1L);
         });
-        assertThat(metrics.anomalies()).extracting(MarketMakerService.MarketMakerAnomaly::type)
+        assertThat(metrics.anomalies()).extracting(MarketMakerAdminModels.MarketMakerAnomaly::type)
                 .contains("REDUCED_DISTINCT_DEPTH");
     }
 
@@ -847,7 +850,7 @@ class MarketMakerServiceTest {
                     assertThat(row.markPriceTicks()).isEqualTo(50_000L);
                 });
         assertThat(metrics.anomalies())
-                .extracting(MarketMakerService.MarketMakerAnomaly::type)
+                .extracting(MarketMakerAdminModels.MarketMakerAnomaly::type)
                 .containsExactlyInAnyOrder("MISSING_DESIRED_QUOTES", "NO_LIVE_QUOTES");
     }
 
@@ -857,7 +860,7 @@ class MarketMakerServiceTest {
         MarketMakerService service = fixtures.service();
 
         var config = service.updateStrategyConfig("47",
-                new MarketMakerService.MarketMakerStrategyConfigUpdateRequest(
+                new MarketMakerAdminModels.MarketMakerStrategyConfigUpdateRequest(
                         true, 25L, "CROSS", 40L, 12L, 500L, 500_000L, 2, "quote tuning"),
                 "1001");
         service.runOnce(new MarketMakerRunRequest("47", "1"));
@@ -894,7 +897,7 @@ class MarketMakerServiceTest {
     }
 
     @Test
-    void runLogsWithCursorDelegatesNormalizedFiltersToRepository() {
+    void runLogsDelegatesNativeQueryAndBoundFiltersToRepository() {
         Fixtures fixtures = new Fixtures(List.of());
         FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
         MarketMakerService service = fixtures.service(runEventRepository);
@@ -905,7 +908,7 @@ class MarketMakerServiceTest {
                 "next", true, "createdAt.desc", 25);
 
         var response = service.runLogs(ProductLine.LINEAR_PERPETUAL, "47", "1", 900001L,
-                "QUOTE_RECONCILED", 25, "cursor", "createdAt.desc");
+                "QUOTE_RECONCILED", new MarketMakerRunEventPageQuery(25, Instant.EPOCH, 9L, true));
 
         assertThat(response.events()).singleElement()
                 .satisfies(event -> assertThat(event.eventId()).isEqualTo(77L));
@@ -916,8 +919,7 @@ class MarketMakerServiceTest {
         assertThat(runEventRepository.lastRunEventsPageProductLine).isEqualTo(ProductLine.LINEAR_PERPETUAL);
         assertThat(runEventRepository.lastRunEventsPageStrategyId).isEqualTo("47");
         assertThat(runEventRepository.lastRunEventsPageSymbol).isEqualTo("1");
-        assertThat(runEventRepository.lastRunEventsPageCursor).isEqualTo("cursor");
-        assertThat(runEventRepository.lastRunEventsPageSort).isEqualTo("createdAt.desc");
+        assertThat(runEventRepository.lastRunEventsPageQuery).isEqualTo(new MarketMakerRunEventPageQuery(25, Instant.EPOCH, 9L, true));
     }
 
     private static String accountPrefix(ProductLine productLine, String strategyId, String instrumentId, long accountId) {
@@ -1135,22 +1137,11 @@ class MarketMakerServiceTest {
         private Long lastRunEventsPageAccountId;
         private String lastRunEventsPageEventType;
         private int lastRunEventsPageLimit;
-        private String lastRunEventsPageCursor;
-        private String lastRunEventsPageSort;
+        private MarketMakerRunEventPageQuery lastRunEventsPageQuery;
 
         @Override
         public void record(MarketMakerRunEventWrite event) {
             events.add(event);
-        }
-
-        @Override
-        public List<MarketMakerRunEventRecord> find(ProductLine productLine,
-                                                    String strategyId,
-                                                    String instrumentId,
-                                                    Long accountId,
-                                                    String eventType,
-                                                    int limit) {
-            return List.of();
         }
 
         @Override
@@ -1159,17 +1150,14 @@ class MarketMakerServiceTest {
                                                               String instrumentId,
                                                               Long accountId,
                                                               String eventType,
-                                                              int limit,
-                                                              String cursor,
-                                                              String sort) {
+                                                              MarketMakerRunEventPageQuery query) {
             lastRunEventsPageProductLine = productLine;
             lastRunEventsPageStrategyId = strategyId;
             lastRunEventsPageSymbol = instrumentId;
             lastRunEventsPageAccountId = accountId;
             lastRunEventsPageEventType = eventType;
-            lastRunEventsPageLimit = limit;
-            lastRunEventsPageCursor = cursor;
-            lastRunEventsPageSort = sort;
+            lastRunEventsPageLimit = query.limit();
+            lastRunEventsPageQuery = query;
             return runEventPage;
         }
     }
