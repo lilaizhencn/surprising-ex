@@ -1,0 +1,446 @@
+{
+  "verified_at_utc": "2026-10-22T01:18:35.715428+00:00",
+  "toolchain": "Corretto HotSpot JDK27; Maven3.9.16",
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=FeeScheduleBoundaryPostgresTest,TradingFeeServiceTest,OrderFeeRepositoryTest,TradingFeeInternalControllerTest,FeePolicyCoreImporterTest,FeeScheduleSnapshotCacheTest,FeeScheduleSnapshotInitializerTest,MakerQuoteInputsControllerTest,LocalBusinessApiTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.trading.order.controller.MakerQuoteInputsControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.TradingFeeServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.api.cache.FeeScheduleSnapshotCacheTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.OrderFeeRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.FeePolicyCoreImporterTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.TradingFeeInternalControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.FeeScheduleSnapshotInitializerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.FeeScheduleBoundaryPostgresTest",
+          "tests": 63,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "b55485bf6011979b562c34a4985153a04f4dc8f8d471a2edecea6b26d0475c5c",
+      "tests": 122,
+      "failures": 2,
+      "errors": 0,
+      "skipped": 0
+    },
+    "boundary": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=FeeScheduleBoundaryPostgresTest,TradingFeeServiceTest,OrderFeeRepositoryTest,TradingFeeInternalControllerTest,FeePolicyCoreImporterTest,FeeScheduleSnapshotCacheTest,FeeScheduleSnapshotInitializerTest,MakerQuoteInputsControllerTest,LocalBusinessApiTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.order.controller.MakerQuoteInputsControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.TradingFeeServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.api.cache.FeeScheduleSnapshotCacheTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.OrderFeeRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.FeePolicyCoreImporterTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.TradingFeeInternalControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.FeeScheduleSnapshotInitializerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.FeeScheduleBoundaryPostgresTest",
+          "tests": 63,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "a4741512759789c62b9d3eaff260597f71868b46c25830f63c33374af5827b9b",
+      "tests": 122,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative-product": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=FeeScheduleBoundaryPostgresTest#rejectsOtherProductsBeforeReadingOrPublishing",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.trading.order.controller.FeeScheduleBoundaryPostgresTest",
+          "tests": 6,
+          "failures": 6,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "feb386218ad510e39e46bad511c491817d828e544f4bd2302863188fa235c10d",
+      "tests": 6,
+      "failures": 6,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded-clean": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=*Fee*Test,Order*Test,Trigger*Test,MakerQuoteInputsControllerTest,LocalBusinessApiTest,MultiProductMoneyIntegrationTest,LocalMoneyCommandsTest,GatewayProxyControllerTest",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.order.controller.MakerQuoteInputsControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerOrderProjectionPostgresTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerOrderIdentityTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.TradingFeeServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderServiceTest",
+          "tests": 124,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderControllerTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.api.cache.FeeScheduleSnapshotCacheTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.OrderFeeRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderValidatorTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.FeePolicyCoreImporterTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.account.provider.service.TradeFeeMathTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.TradingFeeInternalControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderExecutionJsonTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.config.TriggerPropertiesTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderMarginMathTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderBatchServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.OrderBusinessSettingsControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.FeeScheduleSnapshotInitializerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderAeronGatewayTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalMoneyCommandsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.controller.TriggerOrderRequestControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.task.TriggerOrderMaintenanceTaskTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.trigger.service.TriggerLifecycleDrainTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.config.OrderBusinessSettingsIntegrationTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.controller.FeeScheduleBoundaryPostgresTest",
+          "tests": 63,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.product.MultiProductMoneyIntegrationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.OrderMarkPriceRepositoryTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.service.OrderPlacementStateServiceTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.local.LocalBusinessApiTest",
+          "tests": 36,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.trading.order.repository.OrderHistoryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.gateway.provider.controller.GatewayProxyControllerTest",
+          "tests": 39,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "d0c802558cd9cac78d708e5e9f90af119b6e792a1b68103012c2203379a0e2d6",
+      "tests": 395,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "proof": {
+    "repository_retained_sql_blocks": 4,
+    "removed_sql": "无生产调用的非分页查询；实际HTTP一直调用分页路径",
+    "repository_project_body_identical": true,
+    "retained_service_complete_bodies": [
+      "disableSchedule",
+      "snapshot",
+      "currentVersion",
+      "requireCurrentProductLine",
+      "currentProductLine"
+    ],
+    "complete_input_normalization_bodies_moved": true,
+    "event_order": "publish -> importPolicy原文保持",
+    "maker_other_caller": "共享MakerQuoteInputs.Request构造器原来就执行InstrumentIds.parse及账户ID验证，费率Service接收其原生值"
+  },
+  "negative_control": "撤去Service产品归属检查，6项跨产品实际PG查询预期失败；finally恢复精确字节后扩大绿色。",
+  "scope": "费率请求/查询、Core导入协议和本地实际调用；两种执行模式六真实Core状态机资金守恒与重试恢复。未启动wallet或真实网关/集群/做市部署。",
+  "graph_limitations": "CLI CodeGraph部分边仍指向历史Service，已使用实际文件、调用文本和全模块编译补足；没有宣称完整语义门禁通过。",
+  "new_type": "FeeSchedulePageQuery是Controller/Service/Repository实际共享的原生分页；无SQL列、HTTP文本、状态或缓存。",
+  "remaining": "追加113项中93关闭20待修复；最终六产品实栈未完成。",
+  "cleanup": "所属PG停止删除，所属日志及已汇总Gateway报告清理；保留构建产物。"
+}

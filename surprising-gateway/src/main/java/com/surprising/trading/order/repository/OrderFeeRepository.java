@@ -5,7 +5,7 @@ import com.surprising.trading.api.model.FeeScheduleQueryResponse;
 import com.surprising.trading.api.model.FeeScheduleResponse;
 import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
-import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
+import com.surprising.trading.order.model.FeeSchedulePageQuery;
 import com.surprising.product.api.ProductLine;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -25,18 +25,6 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class OrderFeeRepository {
-
-    private static final long MAX_ABS_FEE_RATE_PPM = 1_000_000L;
-    private static final int MAX_QUERY_LIMIT = 500;
-    private static final AdminCursorPage.SortSpec SCHEDULE_UPDATED_DESC =
-            new AdminCursorPage.SortSpec("updatedAt", "updated_at", "fee_schedule_id", true);
-    private static final List<AdminCursorPage.SortSpec> SCHEDULE_SORTS = List.of(
-            SCHEDULE_UPDATED_DESC,
-            new AdminCursorPage.SortSpec("updatedAt", "updated_at", "fee_schedule_id", false),
-            new AdminCursorPage.SortSpec("createdAt", "created_at", "fee_schedule_id", true),
-            new AdminCursorPage.SortSpec("createdAt", "created_at", "fee_schedule_id", false),
-            new AdminCursorPage.SortSpec("effectiveTime", "effective_time", "fee_schedule_id", true),
-            new AdminCursorPage.SortSpec("effectiveTime", "effective_time", "fee_schedule_id", false));
 
     private final JdbcTemplate jdbcTemplate;
     public OrderFeeRepository(JdbcTemplate jdbcTemplate) {
@@ -91,44 +79,17 @@ public class OrderFeeRepository {
                 Timestamp.from(now));
     }
 
-    public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
-                                                   long userId,
-                                                   String instrumentId,
-                                                       FeeScheduleStatus status,
-                                                       int limit) {
-        requireProductLine(productLine);
-        int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
-        String normalizedSymbol = emptyToNull(instrumentId);
-        String statusName = status == null ? null : status.name();
-        List<FeeScheduleResponse> schedules = jdbcTemplate.query("""
-                SELECT *
-                  FROM trading_fee_schedules
-                 WHERE (CAST(? AS text) IS NULL OR product_line = ?)
-                   AND (? <= 0 OR user_id = ?)
-                   AND (CAST(? AS text) IS NULL OR instrument_id = ?)
-                   AND (CAST(? AS text) IS NULL OR status = ?)
-                 ORDER BY product_line ASC, user_id ASC, instrument_id ASC NULLS FIRST, effective_time DESC, fee_schedule_id DESC
-                 LIMIT ?
-                """, (rs, rowNum) -> toResponse(rs),
-                productLine.name(), productLine.name(),
-                userId, userId, normalizedSymbol, normalizedSymbol,
-                statusName, statusName, normalizedLimit);
-        return new FeeScheduleQueryResponse(schedules.size(), schedules);
-    }
-
     public FeeScheduleQueryResponse querySchedulesPage(ProductLine productLine,
                                                        long userId,
                                                        String instrumentId,
                                                        FeeScheduleStatus status,
-                                                       int limit,
-                                                       String cursor,
-                                                       String sort) {
+                                                       FeeSchedulePageQuery query) {
         requireProductLine(productLine);
-        int normalizedLimit = AdminCursorPage.limit(limit, MAX_QUERY_LIMIT);
-        String normalizedSymbol = emptyToNull(instrumentId);
+        int normalizedLimit = query.limit();
+        String normalizedSymbol = instrumentId;
         String statusName = status == null ? null : status.name();
-        AdminCursorPage.SortSpec sortSpec = AdminCursorPage.parseSort(sort, SCHEDULE_UPDATED_DESC, SCHEDULE_SORTS);
-        AdminCursorPage.Cursor decodedCursor = AdminCursorPage.decodeCursor(cursor);
+        AdminCursorPage.SortSpec sortSpec = scheduleSort(query.order());
+        AdminCursorPage.Cursor decodedCursor = query.after();
         List<Object> args = new ArrayList<>();
         args.add(productLine.name());
         args.add(productLine.name());
@@ -163,37 +124,6 @@ public class OrderFeeRepository {
                 page.sort(), page.limit());
     }
 
-    public static void validateSchedule(FeeScheduleUpsertRequest request) {
-        if (request == null) {
-            throw new IllegalArgumentException("fee schedule request is required");
-        }
-        if (request.feeScheduleId() == null || request.feeScheduleId() <= 0) {
-            throw new IllegalArgumentException("feeScheduleId must be positive");
-        }
-        if (request.userId() <= 0) {
-            throw new IllegalArgumentException("userId must be positive");
-        }
-        productLine(request.productLine());
-        validateSymbol(request.instrumentId());
-        validateFeeRate(request.makerFeeRatePpm(), "makerFeeRatePpm");
-        validateFeeRate(request.takerFeeRatePpm(), "takerFeeRatePpm");
-        if (request.makerFeeRatePpm() > request.takerFeeRatePpm()) {
-            throw new IllegalArgumentException("makerFeeRatePpm cannot exceed takerFeeRatePpm");
-        }
-        if (request.reason() == null || request.reason().isBlank()) {
-            throw new IllegalArgumentException("reason is required");
-        }
-        if (request.tierCode() != null && !request.tierCode().isBlank()
-                && !request.tierCode().trim().toUpperCase().matches("[A-Z0-9][A-Z0-9_-]{0,31}")) {
-            throw new IllegalArgumentException("invalid tierCode: " + request.tierCode());
-        }
-        Instant effectiveTime = request.effectiveTime();
-        Instant expireTime = request.expireTime();
-        if (effectiveTime != null && expireTime != null && !expireTime.isAfter(effectiveTime)) {
-            throw new IllegalArgumentException("expireTime must be after effectiveTime");
-        }
-    }
-
     private FeeScheduleResponse toResponse(ResultSet rs) throws SQLException {
         return new FeeScheduleResponse(
                 rs.getLong("fee_schedule_id"),
@@ -220,30 +150,11 @@ public class OrderFeeRepository {
         return status == null ? FeeScheduleStatus.ACTIVE : status;
     }
 
-    private static ProductLine productLine(ProductLine productLine) {
-        return requireProductLine(productLine);
-    }
-
     private static ProductLine requireProductLine(ProductLine productLine) {
         if (productLine == null) {
             throw new IllegalArgumentException("productLine is required");
         }
         return productLine;
-    }
-
-    private static void validateFeeRate(long feeRatePpm, String field) {
-        if (feeRatePpm < -MAX_ABS_FEE_RATE_PPM || feeRatePpm > MAX_ABS_FEE_RATE_PPM) {
-            throw new IllegalArgumentException(field + " must be within +/- 100%");
-        }
-    }
-
-    private static void validateSymbol(String instrumentId) {
-        if (instrumentId == null || instrumentId.isBlank()) {
-            return;
-        }
-        if (!com.surprising.product.api.utils.InstrumentIds.valid(instrumentId.trim().toUpperCase())) {
-            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
-        }
     }
 
     private static Timestamp timestampOrNull(Instant instant) {
@@ -260,6 +171,15 @@ public class OrderFeeRepository {
             return null;
         }
         return value.trim().toUpperCase();
+    }
+
+    private static AdminCursorPage.SortSpec scheduleSort(FeeSchedulePageQuery.Order order) {
+        String column = switch (order) {
+            case UPDATED_DESC, UPDATED_ASC -> "updated_at";
+            case CREATED_DESC, CREATED_ASC -> "created_at";
+            case EFFECTIVE_DESC, EFFECTIVE_ASC -> "effective_time";
+        };
+        return new AdminCursorPage.SortSpec(order.field(), column, "fee_schedule_id", order.descending());
     }
 
     private static Function<FeeScheduleResponse, Instant> scheduleTimestampExtractor(

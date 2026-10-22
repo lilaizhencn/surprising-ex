@@ -19,6 +19,8 @@ import com.surprising.trading.api.cache.FeeScheduleSnapshotCache;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
+import com.surprising.trading.order.model.FeeSchedulePageQuery;
+import com.surprising.trading.api.utils.AdminCursorPage.Cursor;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import java.time.Instant;
@@ -94,7 +96,7 @@ class TradingFeeServiceTest {
     }
 
     @Test
-    void querySchedulesWithCursorNormalizesSymbolAndDelegatesProductLineToRepositoryPage() {
+    void querySchedulesUsesBoundPageAndChecksProductLine() {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
         TradingFeeService service = service(feeRepository, instrumentRuleLookup, null,
@@ -102,15 +104,16 @@ class TradingFeeServiceTest {
         FeeScheduleQueryResponse expected = new FeeScheduleQueryResponse(0, List.of(), "next", true,
                 "updatedAt.asc", 50);
 
+        var query = new FeeSchedulePageQuery(50, new Cursor(Instant.EPOCH, 9L), FeeSchedulePageQuery.Order.UPDATED_ASC);
         when(feeRepository.querySchedulesPage(ProductLine.LINEAR_DELIVERY, 1001L, "1",
-                FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc")).thenReturn(expected);
+                FeeScheduleStatus.ACTIVE, query)).thenReturn(expected);
 
         FeeScheduleQueryResponse response = service.querySchedules(ProductLine.LINEAR_DELIVERY, 1001L, "1",
-                FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc");
+                FeeScheduleStatus.ACTIVE, query);
 
         assertThat(response).isEqualTo(expected);
         verify(feeRepository).querySchedulesPage(ProductLine.LINEAR_DELIVERY, 1001L, "1",
-                FeeScheduleStatus.ACTIVE, 50, "cursor", "updatedAt.asc");
+                FeeScheduleStatus.ACTIVE, query);
     }
 
     private InstrumentRule rule(long version) {

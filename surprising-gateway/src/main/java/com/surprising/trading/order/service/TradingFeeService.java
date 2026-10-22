@@ -13,6 +13,7 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.InstrumentRule;
 import com.surprising.trading.order.model.InstrumentRuleLookup;
 import com.surprising.trading.order.model.OrderFeeSnapshot;
+import com.surprising.trading.order.model.FeeSchedulePageQuery;
 import com.surprising.trading.order.repository.OrderFeeRepository;
 import java.time.Instant;
 import java.util.List;
@@ -20,8 +21,6 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class TradingFeeService {
-
-    private static final int DEFAULT_LIMIT = 100;
 
     private final OrderFeeRepository orderFeeRepository;
     private final InstrumentRuleLookup instrumentRuleLookup;
@@ -59,7 +58,7 @@ public class TradingFeeService {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
-        String normalizedSymbol = normalizeSymbol(instrumentId);
+        String normalizedSymbol = instrumentId;
         long resolvedVersion = instrumentChangeId > 0 ? instrumentChangeId : currentVersion(normalizedSymbol);
         Instant now = Instant.now();
         OrderFeeSnapshot snapshot = (feeSnapshotLookup == null
@@ -74,7 +73,7 @@ public class TradingFeeService {
     }
 
     public FeeScheduleResponse upsertSchedule(FeeScheduleUpsertRequest request) {
-        OrderFeeRepository.validateSchedule(request);
+        validateSchedulePolicy(request);
         requireCurrentProductLine(request.productLine());
         long feeScheduleId = request.feeScheduleId();
         if (feeScheduleId <= 0) {
@@ -84,10 +83,10 @@ public class TradingFeeService {
         FeeScheduleResponse previous = feeScheduleSnapshotCache == null ? null
                 : feeScheduleSnapshotCache.find(request.productLine(), feeScheduleId).orElse(null);
         FeeScheduleResponse response = new FeeScheduleResponse(feeScheduleId, request.productLine(), request.userId(),
-                normalizeOptionalSymbol(request.instrumentId()), request.makerFeeRatePpm(), request.takerFeeRatePpm(),
+                request.instrumentId(), request.makerFeeRatePpm(), request.takerFeeRatePpm(),
                 request.sourceType() == null ? com.surprising.trading.api.model.FeeScheduleSourceType.USER_OVERRIDE
                         : request.sourceType(),
-                emptyToNull(request.tierCode()), request.reason().trim(),
+                request.tierCode(), request.reason(),
                 request.status() == null ? FeeScheduleStatus.ACTIVE : request.status(),
                 request.effectiveTime() == null ? now : request.effectiveTime(), request.expireTime(),
                 previous == null || previous.createdAt() == null ? now : previous.createdAt(), now);
@@ -143,40 +142,21 @@ public class TradingFeeService {
                 Integer.toHexString(schedules.hashCode()), schedules);
     }
 
-    public FeeScheduleQueryResponse querySchedules(long userId, String instrumentId, FeeScheduleStatus status, int limit) {
-        return querySchedules(currentProductLine(), userId, instrumentId, status, limit);
-    }
-
-    public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
-                                                   long userId,
-                                                   String instrumentId,
-                                                   FeeScheduleStatus status,
-                                                   int limit) {
+    public FeeScheduleQueryResponse querySchedules(ProductLine productLine, long userId, String instrumentId,
+                                                   FeeScheduleStatus status, FeeSchedulePageQuery query) {
         requireCurrentProductLine(productLine);
-        return orderFeeRepository.querySchedules(productLine, userId, normalizeOptionalSymbol(instrumentId), status,
-                limit <= 0 ? DEFAULT_LIMIT : limit);
+        return orderFeeRepository.querySchedulesPage(productLine, userId, instrumentId, status, query);
     }
 
-    public FeeScheduleQueryResponse querySchedules(long userId,
-                                                   String instrumentId,
-                                                   FeeScheduleStatus status,
-                                                   int limit,
-                                                   String cursor,
-                                                   String sort) {
-        return orderFeeRepository.querySchedulesPage(currentProductLine(), userId, normalizeOptionalSymbol(instrumentId),
-                status, limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
-    }
-
-    public FeeScheduleQueryResponse querySchedules(ProductLine productLine,
-                                                   long userId,
-                                                   String instrumentId,
-                                                   FeeScheduleStatus status,
-                                                   int limit,
-                                                   String cursor,
-                                                   String sort) {
-        requireCurrentProductLine(productLine);
-        return orderFeeRepository.querySchedulesPage(productLine, userId, normalizeOptionalSymbol(instrumentId), status,
-                limit <= 0 ? DEFAULT_LIMIT : limit, cursor, sort);
+    private void validateSchedulePolicy(FeeScheduleUpsertRequest request) {
+        if (request.makerFeeRatePpm() > request.takerFeeRatePpm()) {
+            throw new IllegalArgumentException("makerFeeRatePpm cannot exceed takerFeeRatePpm");
+        }
+        Instant effectiveTime = request.effectiveTime();
+        Instant expireTime = request.expireTime();
+        if (effectiveTime != null && expireTime != null && !expireTime.isAfter(effectiveTime)) {
+            throw new IllegalArgumentException("expireTime must be after effectiveTime");
+        }
     }
 
     private long currentVersion(String instrumentId) {
@@ -198,29 +178,6 @@ public class TradingFeeService {
             throw new IllegalStateException("交易费率服务未配置产品线");
         }
         return properties.getKafka().getProductLine();
-    }
-
-    private String normalizeSymbol(String instrumentId) {
-        String normalized = normalizeOptionalSymbol(instrumentId);
-        if (normalized == null) {
-            throw new IllegalArgumentException("instrumentId is required");
-        }
-        return normalized;
-    }
-
-    private String normalizeOptionalSymbol(String instrumentId) {
-        if (instrumentId == null || instrumentId.isBlank()) {
-            return null;
-        }
-        String normalized = instrumentId.trim().toUpperCase();
-        if (!com.surprising.product.api.utils.InstrumentIds.valid(normalized)) {
-            throw new IllegalArgumentException("invalid instrumentId: " + instrumentId);
-        }
-        return normalized;
-    }
-
-    private String emptyToNull(String value) {
-        return value == null || value.isBlank() ? null : value.trim();
     }
 
 }

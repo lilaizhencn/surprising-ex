@@ -8,9 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.FeeScheduleSourceType;
 import com.surprising.trading.api.model.FeeScheduleStatus;
-import com.surprising.trading.api.model.FeeScheduleUpsertRequest;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -34,26 +32,6 @@ class OrderFeeRepositoryTest {
                 });
 
         assertThat(repository.loadSnapshotSchedules(ProductLine.LINEAR_PERPETUAL)).hasSize(1);
-    }
-
-    @Test
-    void validatesVipScheduleWithMakerRebate() {
-        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(71L, ProductLine.LINEAR_PERPETUAL,
-                1001L, "1", -50L, 350L, FeeScheduleSourceType.VIP, "VIP3", "vip fee tier",
-                FeeScheduleStatus.ACTIVE, Instant.parse("2026-07-01T00:00:00Z"), null);
-
-        OrderFeeRepository.validateSchedule(request);
-    }
-
-    @Test
-    void rejectsScheduleWhenMakerRateIsWorseThanTakerRate() {
-        FeeScheduleUpsertRequest request = new FeeScheduleUpsertRequest(72L, ProductLine.LINEAR_PERPETUAL,
-                1001L, "1", 600L, 500L, FeeScheduleSourceType.USER_OVERRIDE, null, "bad fee",
-                FeeScheduleStatus.ACTIVE, Instant.parse("2026-07-01T00:00:00Z"), null);
-
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> OrderFeeRepository.validateSchedule(request))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("makerFeeRatePpm cannot exceed takerFeeRatePpm");
     }
 
     private ResultSet row(long id,
