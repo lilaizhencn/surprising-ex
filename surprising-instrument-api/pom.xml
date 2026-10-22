@@ -13,37 +13,34 @@
 
     <artifactId>surprising-instrument-api</artifactId>
     <name>surprising-instrument-api</name>
-    <description>Instrument RPC contracts and shared models</description>
+    <description>Shared product lines, instrument contracts and integer formulas</description>
 
+    <!-- Framework adapters are opt-in; protocol/model consumers only need the shared definitions. -->
     <dependencies>
-        <dependency>
-            <groupId>com.surprising</groupId>
-            <artifactId>surprising-product-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-openfeign-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>jakarta.validation</groupId>
-            <artifactId>jakarta.validation-api</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-web</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>jakarta.annotation</groupId>
             <artifactId>jakarta.annotation-api</artifactId>
+            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

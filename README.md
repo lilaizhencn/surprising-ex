@@ -17,7 +17,12 @@ Product line identity controls routing and keeps instruments, accounts, trading 
 
 ## Architecture
 
-Backend snapshot field evolution and historical command recovery: [恢复兼容设计](docs/core-snapshot-evolution.md).
+产品线定义、topic 命名、币对契约和共享合约公式统一由
+[`surprising-instrument-api`](surprising-instrument-api/README.md) 提供。
+开发分层与约束见 [AGENTS.md](AGENTS.md)；性能优化和压测前必须读取
+[性能子规范](AGENTS-performance.md)。
+
+Core startup, snapshots and command recovery: [Aeron architecture](surprising-aeron-core/README.md).
 
 The single-node stack has six Java processes:
 

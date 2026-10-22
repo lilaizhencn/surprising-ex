@@ -4,6 +4,12 @@
 HTTP 接入、价格生产、生命周期调度和外部查询投影由其他服务承担。
 六条产品线的账户、订单簿和风险模型各自隔离，公共执行骨架通过产品规则选择资金计算。
 
+产品线、永久币对 ID、topic 命名和共享合约公式统一来自
+[`surprising-instrument-api`](../../surprising-instrument-api/README.md)。
+币对纯计算能否共享以及 `CoreContractMath`、`OptionContractMath`、`CoreArithmetic`
+的具体评估见该模块的“[Aeron 币对计算的共享边界评估](../../surprising-instrument-api/README.md#aeron-币对计算的共享边界评估)”。
+订单准入、成交应用、币对配置转换和账户/持仓状态继续留在本模块。
+
 样板代码使用 Lombok：直接字段访问器用 `@Getter` / `@Setter`，原有 `field()` 风格通过
 `@Accessors(fluent = true, chain = false)` 保持；纯字段赋值构造器使用相应构造注解，日志使用 `@Slf4j`。
 包含校验、复制、所有权检查或状态转换的方法仍显式实现。可变交易对象不使用 `@Data`，

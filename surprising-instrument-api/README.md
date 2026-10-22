@@ -1,9 +1,49 @@
 # surprising-instrument-api
 
+## 产品与币对共享契约
+
+原 `surprising-product-api` 已合并到本模块，根 POM 和所有调用方统一依赖
+`surprising-instrument-api`。本次只调整 Maven 归属，原 Java 包名、产品线枚举、
+永久币对 ID 格式和 Kafka topic 名称保持原契约；不保留旧 Maven 模块或兼容转发层。
+
+| 源码包 | 共享内容 |
+| --- | --- |
+| `com.surprising.product.api` | `ProductLine` 六产品线身份、`ProductLineConfiguration` 产品线配置校验 |
+| `com.surprising.product.api.utils` | `InstrumentIds` 永久 ID 编解码校验、`ProductTopicNames` topic 与消费组命名 |
+| `com.surprising.instrument.api.model` | 合约类型、当前币对配置、风险档位、指数源、配置变更和生命周期事件 |
+| `com.surprising.instrument.api.math` | `PerpetualContractMath` 线性/反向合约的名义金额、盈亏和保证金公式 |
+| `com.surprising.instrument.api.cache` | 每个使用方进程持有的合约配置快照，以及共享启动加载模板 |
+| `com.surprising.instrument.api.client` / `kafka` / `utils` | Feign 查询契约、消费者参数和快照加载/事件校验适配；不启动独立服务 |
+
+核心依赖方向为 `Aeron protocol / client / service、业务 API、应用 → instrument-api`，
+本模块不依赖 Aeron 协议、Aeron Service 或 Gateway。产品线身份仍是所有缓存、路由和事件校验的边界。
+
+Feign、Spring Web、Kafka、Jackson、Jakarta Annotation 依赖均为 Maven `optional`：
+只使用产品线、模型或公式的调用方不传递引入这些框架。使用 RPC 或快照消息适配的应用
+需显式引入对应依赖；共享适配保留单份，进程内的缓存实例、监听器、消费组和启停仍由使用方管理。
+
+### Aeron 币对计算的共享边界评估
+
+“不写账户”不足以证明一个类可以直接放入共享 API，还要检查其参数、异常和调用依赖。
+共享公式应只依赖整数参数或共享不可变模型，不得引入 Aeron 运行时、协议和线程所有权。
+
+| 当前代码 | 结论及原因 |
+| --- | --- |
+| [`PerpetualContractMath`](src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java) | 已在共享模块，Aeron 的 `CoreContractMath` 已复用名义金额、盈亏、初始/维持保证金公式。 |
+| [`CoreArithmetic`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreArithmetic.java) | 只依赖整数和 `BigInteger`，可以迁为共享整数工具；本轮只做评估，不扩大到金融计算调用点改造。迁移时保留舍入、符号、溢出和异常契约。 |
+| [`CoreContractMath`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java) | 部分金额、费用、资金费公式适合提取；整类依赖 `CoreInstrument`、`CoreOrderSide`、`CoreRiskLimitBracket` 和 `CoreStateRejectedException`，直接迁入会形成反向依赖。Aeron 保留参数适配与拒绝语义。 |
+| [`OptionContractMath`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/OptionContractMath.java) | 权利金、虚值和到期现金等公式可按共享参数提取；当前方法签名和风险价格异常仍依赖 Core，不整类搬迁。 |
+| [`OrderAdmissionMath`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/OrderAdmissionMath.java)、`FuturesFillCalculator` | 依赖已解析订单、行情、用户杠杆和成交后持仓口径，属于订单准入/结算业务，留在 Aeron service。 |
+| [`CoreInstrument`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/CoreInstrument.java)、注册/状态转换和产品交易规则 | 持有或管理 Core 配置、维护状态及执行约束，继续由 Aeron 运行时拥有，不成为共享 API 状态。 |
+
+后续若提取公式，应按具体业务需求迁移实际复用部分，保持 ticks、steps、ppm、资产单位、
+风险选档和舍入规则，验证六产品线的资金与恢复边界；不为共用公式创建逐订单参数副本或反向依赖。
+本次合并不调整任何交易公式、状态、协议字节、topic 或执行阶段，不宣称性能变化。
+
 本模块直接位于仓库根目录，由根 POM 聚合并继承 `surprising-parent`。
 原 `surprising-instrument/surprising-instrument-api` 的外层目录已移除，artifactId、Java 包名和 API 契约不变。
 
-本目录现在只构建共享 API。业务实现和测试已迁到 `../surprising-gateway/src/`，不再启动独立 provider。部署入口、内部调用和首期 U 本位永续范围见 [合并说明](../docs/business-application-merge.md)。
+本目录只构建共享 API。币对业务实现和测试位于 `../surprising-gateway/src/`，不再启动独立 provider；应用入口见 [Gateway README](../surprising-gateway/README.md)。
 
 
 Surprising Exchange 产品基础配置模块。它是现货、永续、交割和期权交易系统的产品规则中心，后续撮合、风控、账户、K 线、指数价格、标记价格、资金费率、交割和行权都应该从这里获取 symbol 和交易规则。
@@ -180,7 +220,10 @@ java -jar surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar
 ## 验证
 
 ```bash
-mvn -pl surprising-gateway -am test
+# 产品线、topic、永久 ID、币对模型和共享公式
+mvn -pl surprising-instrument-api -am clean test
+# 修改共享契约或模块依赖时覆盖全部调用方
+mvn -B -ntp clean test
 ```
 
 ## Core 同步与审计引用

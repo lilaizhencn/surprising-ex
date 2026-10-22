@@ -18,7 +18,7 @@
     <dependencies>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-product-api</artifactId>
+            <artifactId>surprising-instrument-api</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

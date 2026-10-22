@@ -14,9 +14,8 @@
 
     <modules>
         <module>surprising-parent</module>
-        <module>surprising-product-api</module>
-        <module>surprising-aeron-core</module>
         <module>surprising-instrument-api</module>
+        <module>surprising-aeron-core</module>
         <module>surprising-price</module>
         <module>surprising-trading-api</module>
         <module>surprising-account-api</module>

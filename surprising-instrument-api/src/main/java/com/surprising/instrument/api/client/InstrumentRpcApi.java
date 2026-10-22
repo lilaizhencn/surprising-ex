@@ -7,7 +7,6 @@ import com.surprising.instrument.api.model.InstrumentSnapshotResponse;
 import com.surprising.instrument.api.model.InstrumentStatus;
 import com.surprising.instrument.api.model.InstrumentType;
 import com.surprising.product.api.ProductLine;
-import jakarta.validation.constraints.NotBlank;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;

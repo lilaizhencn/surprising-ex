@@ -23,11 +23,6 @@
         <dependency><groupId>com.surprising</groupId><artifactId>surprising-realtime-api</artifactId><version>${project.version}</version></dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-product-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-protocol</artifactId>
             <version>${project.version}</version>
         </dependency>

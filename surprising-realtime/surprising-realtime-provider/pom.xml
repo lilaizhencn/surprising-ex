@@ -59,11 +59,6 @@
         </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
-            <artifactId>surprising-product-api</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.surprising</groupId>
             <artifactId>surprising-trading-api</artifactId>
             <version>${project.version}</version>
         </dependency>
