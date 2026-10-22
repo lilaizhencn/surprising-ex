@@ -76,7 +76,7 @@ class RuntimeChangedIndexCommitTest {
         // 原始身份表，供内部编号转换和最终身份回收断言
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本用例由冷状态投影的交易运行时，真实 Lane 用例会显式启动账户资源
-        TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(initial, identities);
         // 永久标的一对应内部稠密标的编号
         int symbolId = identities.symbolId("1");
         // USDT 内部资产编号
@@ -90,7 +90,7 @@ class RuntimeChangedIndexCommitTest {
 
         // 四项可断言索引及共同事实应用入口组成的测试记录
         IndexSet indexes = indexes(initial, identities);
-        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).containsExactly(11L);
@@ -102,7 +102,7 @@ class RuntimeChangedIndexCommitTest {
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(),
                 3, 100, 300, 0, 60));
         runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 5));
-        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(runtime.admissionOrders(7, symbolId).inspect(7, "1", CorePositionSide.NET,
@@ -112,7 +112,7 @@ class RuntimeChangedIndexCommitTest {
         runtime.clearChangedKeys();
         runtime.removeOrder(11);
         runtime.removePosition(positionKey, 7);
-        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).isEmpty();
@@ -131,7 +131,7 @@ class RuntimeChangedIndexCommitTest {
         // 原始身份表，供内部编号转换和最终身份回收断言
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本用例由冷状态投影的交易运行时，真实 Lane 用例会显式启动账户资源
-        TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(initial, identities);
         // 永久标的一对应内部稠密标的编号
         int symbolId = identities.symbolId("1");
         // USDT 内部资产编号
@@ -155,7 +155,7 @@ class RuntimeChangedIndexCommitTest {
             runtime.putRiskSnapshot(positionKey, risk);
             return null;
         });
-        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isEqualTo(risk);
@@ -166,7 +166,7 @@ class RuntimeChangedIndexCommitTest {
             runtime.removePosition(positionKey, userId);
             return null;
         });
-        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
         runtime.clearCommittedChanges(identities);
 
@@ -186,7 +186,7 @@ class RuntimeChangedIndexCommitTest {
         // 原始身份表，供内部编号转换和最终身份回收断言
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本用例由冷状态投影的交易运行时，真实 Lane 用例会显式启动账户资源
-        TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(initial, identities);
         // 永久标的一对应内部稠密标的编号
         int symbolId = identities.symbolId("1");
         // 本用例账户用户七
@@ -203,7 +203,7 @@ class RuntimeChangedIndexCommitTest {
             runtime.putLiquidation(planned);
             return null;
         });
-        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1))).isEqualTo(planned);
@@ -214,7 +214,7 @@ class RuntimeChangedIndexCommitTest {
             runtime.removeLiquidation(1);
             return null;
         });
-        if (runtime.accountLanesStarted) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+        if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1))).isNull();

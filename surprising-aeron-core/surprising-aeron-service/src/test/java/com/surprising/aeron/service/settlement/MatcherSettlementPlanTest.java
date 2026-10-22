@@ -8,7 +8,7 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
@@ -34,7 +34,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void directFactsCannotStartOrPublishWithoutAReservedMatcherSlot() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 固定测试币对一对应的稠密编号。
@@ -75,7 +75,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void matcherPublicationWaitsForReadinessBeforeApplyingAccounts() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 固定测试币对一对应的稠密编号。
@@ -107,7 +107,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void matcherPublishedFactsRetireInAccountOrder() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 固定测试币对一对应的稠密编号。
@@ -155,7 +155,7 @@ class MatcherSettlementPlanTest {
         var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         // 执行事件发布和完成通知的实际测试线程，退出时有界等待结束。
         Thread matcher = null;
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 固定测试币对一对应的稠密编号。
@@ -221,7 +221,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void settlementPublicationFailureReachesOwnerInsteadOfLeavingDeadMatcher() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState();
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime();
              /* 用例实际启动并自动关闭的 Matcher 管线，用于检查故障传播。 */ var pipeline = new com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline(256)) {
             // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = new MatcherSettlementEvent();
@@ -269,7 +269,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void rejectedDirectCancelLeavesOrderUnchangedWithoutInstrumentMetadata() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 当前用例固定测试币对的稠密编号。
@@ -303,7 +303,7 @@ class MatcherSettlementPlanTest {
         // 用例显式使用的四账户 Lane 路由拓扑。
         var topology = new LaneTopology(1, 0, 0, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState(topology)) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime(topology)) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 当前用例固定测试币对的稠密编号。
@@ -328,7 +328,7 @@ class MatcherSettlementPlanTest {
             runtime.releaseOwnerLaneAccess();
             try {
                 for (/* 当前需阻塞的账户 Lane 下标，实际参与 Lane 被排除。 */ int lane = 0; lane < 4; lane++) if (lane != actual)
-                    runtime.laneWorkers[lane].submit(/* 阻塞回调收到的账户 Lane，本回调只等待门闩，不读写账户。 */ ignored -> {
+                    runtime.submitAccountCommand(lane, /* 阻塞回调收到的账户 Lane，本回调只等待门闩，不读写账户。 */ ignored -> {
                         waiting.countDown();
                         awaitPublicationLatch(release);
                     });
@@ -378,7 +378,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void sharedMakerQuantityIsValidatedAcrossItemsBeforeAnyLaneApplies() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 当前用例固定测试币对的稠密编号。
@@ -412,7 +412,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void reusedPlanAndScratchDoNotRetainPriorMakerOrTriggerState() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry(); /* 当前用例固定测试币对的稠密编号。 */ int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0); runtime.registerInstrument(instrument());
@@ -436,7 +436,7 @@ class MatcherSettlementPlanTest {
         // 用例显式使用的四账户 Lane 路由拓扑。
         var topology = new LaneTopology(1,0,0,4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,16,16,16);
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState(topology)) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime(topology)) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry(); /* 当前用例固定测试币对的稠密编号。 */ int instrumentId = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL,0); runtime.registerInstrument(instrument());
@@ -473,7 +473,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void smallerBatchReusesCapacityAndIgnoresStaleTailPlans() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 当前用例固定测试币对的稠密编号。
@@ -513,7 +513,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void singleCommandSlotReusesPlanWithoutLeakingPriorOrdersOrCancellations() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 当前用例固定测试币对的稠密编号。
@@ -554,7 +554,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void singleItemBatchBuilderUsesThePooledTargetForInitialIdentity() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 当前用例固定测试币对的稠密编号。
@@ -581,7 +581,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void orderIdViewFollowsPlanLifetimeWithoutCopyingStorage() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 需要在各代间复用的结算计划对象。
             var slot = MatcherSettlementPlan.emptyInto(new MatcherSettlementPlan(), 1, 21, 11, 10, runtime);
             // 绑定计划生命周期的只读订单编号视图。
@@ -599,7 +599,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 当前用例固定测试币对的稠密编号。
@@ -629,7 +629,7 @@ class MatcherSettlementPlanTest {
      */
     @Test
     void singleEventAndRepeatedMakerBothRejectExcessBeforeStateMutation() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
             var identities = new RuntimeIdentityRegistry();
             // 当前用例固定测试币对的稠密编号。

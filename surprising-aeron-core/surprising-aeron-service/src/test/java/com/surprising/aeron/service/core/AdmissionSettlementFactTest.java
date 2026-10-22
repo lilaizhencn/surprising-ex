@@ -84,7 +84,7 @@ class AdmissionSettlementFactTest {
                 int laneId = runtime.accountLaneId(7);
                 // 通知测试线程阻塞工作已经进入账户 Lane 的门闩
                 var entered = new CountDownLatch(1);
-                runtime.laneWorkers[laneId].submit(/* 实际执行阻塞工作的用户所属账户 Lane */ lane -> { entered.countDown(); await(release); });
+                runtime.submitAccountCommand(laneId, /* 实际执行阻塞工作的用户所属账户 Lane */ lane -> { entered.countDown(); await(release); });
                 assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
                 try {
                     runtime.dispatchPlaceAdmission(2, 7, event, new UUID(1, 2), captured, asset, ids, 1_001, 2);

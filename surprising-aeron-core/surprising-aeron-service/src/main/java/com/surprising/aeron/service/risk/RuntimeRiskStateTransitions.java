@@ -4,7 +4,7 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -19,7 +19,7 @@ public final class RuntimeRiskStateTransitions {
      * @param command 带期望版本、扫描开关、间隔、工作量和操作原因的控制更新命令
      * @param updatedAtEpochMillis 本次控制更新的 Unix 毫秒时间戳，负值会归为 0
      */
-    public static void updateScanControl(TradingRuntimeState runtime, UpdateRiskScanControlCommand command,
+    public static void updateScanControl(TradingAccountRuntime runtime, UpdateRiskScanControlCommand command,
                                   long updatedAtEpochMillis) {
         if (runtime == null || command == null) {
             throw new IllegalArgumentException("invalid runtime risk scan control update");
@@ -45,7 +45,7 @@ public final class RuntimeRiskStateTransitions {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      * @param scan 包含账户风险及条件单游标的原扫描记录
      */
-    public static void replaceScan(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void replaceScan(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                             CoreRiskState.RiskScan scan) {
         if (runtime == null || identities == null || scan == null) {
             throw new IllegalArgumentException("invalid runtime risk scan");
@@ -66,7 +66,7 @@ public final class RuntimeRiskStateTransitions {
      * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
      * @param scan 包含账户风险及条件单游标的原扫描记录
      */
-    public static void replaceScan(TradingRuntimeState runtime, RiskScanRuntime scan) {
+    public static void replaceScan(TradingAccountRuntime runtime, RiskScanRuntime scan) {
         if (runtime == null || scan == null) {
             throw new IllegalArgumentException("invalid runtime risk scan");
         }

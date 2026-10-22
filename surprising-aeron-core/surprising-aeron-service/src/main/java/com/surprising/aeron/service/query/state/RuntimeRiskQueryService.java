@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.core.*;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -47,7 +47,7 @@ public final class RuntimeRiskQueryService {
      * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
      */
     public static List<CoreRiskSnapshotView> snapshots(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId) {
         return snapshots(runtime, identities, userId, null);
     }
 
@@ -58,7 +58,7 @@ public final class RuntimeRiskQueryService {
      * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
      * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
      */
-    public static List<CoreRiskSnapshotView> userSnapshots(TradingRuntimeState runtime,
+    public static List<CoreRiskSnapshotView> userSnapshots(TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities, long userId, MarketInputs markets) {
         if (userId <= 0 || markets == null) throw new IllegalArgumentException("risk query Lane inputs are required");
         return snapshots(runtime, identities, userId, markets);
@@ -71,7 +71,7 @@ public final class RuntimeRiskQueryService {
      * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
      * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
      */
-    private static List<CoreRiskSnapshotView> snapshots(TradingRuntimeState runtime,
+    private static List<CoreRiskSnapshotView> snapshots(TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities, long userId, MarketInputs markets) {
         // 即时查询把当前持仓与当前查询行情一起估值。后台风险缓存属于分批强平扫描，
         // 可能仍对应旧价格，因此不能直接作为本次查询结果。
@@ -176,7 +176,7 @@ public final class RuntimeRiskQueryService {
      * @param limit 最多返回或保留的候选条数，调用方应提供非负上限
      */
     public static List<CoreAdlCandidateView> adlCandidates(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, String asset,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String asset,
             Iterable<AdlPositionIndex.PositionKey> keys, int limit) {
         // 规范化后的目标结算资产代码，所有候选都必须与它匹配。
         String normalizedAsset = AssetBalance.normalizeAsset(asset);
@@ -217,7 +217,7 @@ public final class RuntimeRiskQueryService {
      * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
      * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
      */
-    public static CoreAdlCandidateView adlCandidate(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static CoreAdlCandidateView adlCandidate(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             long userId, long positionKey, String asset, MarketInputs markets) {
         if (userId <= 0 || markets == null) throw new IllegalArgumentException("ADL query Lane inputs are required");
         // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
@@ -236,7 +236,7 @@ public final class RuntimeRiskQueryService {
      * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
      * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
      */
-    private static CoreAdlCandidateView adlCandidate(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    private static CoreAdlCandidateView adlCandidate(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             long userId, PositionRuntime position, String asset, MarketInputs markets) {
         // 本仓的行情，生产查询用固定引用，通用路径直接读运行时当前行情。
         MarkPriceRuntime mark = markets == null ? runtime.markPrice(position.symbolId()) : markets.mark(position.symbolId());
@@ -347,7 +347,7 @@ public final class RuntimeRiskQueryService {
          * @param identities 币对、资产和持仓业务编号与整数键的映射
          * @param instrumentIds 本次查询需要固定市场输入的外部币对编号集合
          */
-        public static MarketInputs capture(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+        public static MarketInputs capture(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                 Iterable<String> instrumentIds) {
             // 本次新建的整数币对配置映射，逐个保存配置查询副本。
             var instruments = new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<CoreInstrument>();
@@ -391,7 +391,7 @@ public final class RuntimeRiskQueryService {
      * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
      */
     private static long crossWalletBalance(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId, String asset, MarketInputs markets) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId, String asset, MarketInputs markets) {
         // 当前结算资产扣掉逐仓持仓与委托占用后的全仓共享钱包。
         long wallet = totalBalance(runtime, identities, userId, asset, markets);
         if (runtime.positionCountForUser(userId) > RuntimeOperationalQueryService.MAX_INDEX_SCAN
@@ -429,7 +429,7 @@ public final class RuntimeRiskQueryService {
      * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
      */
     private static long totalBalance(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId, String asset, MarketInputs markets) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId, String asset, MarketInputs markets) {
         // 固定查询使用捕获的资产编号，否则查当前身份表；缺少编号就不读取余额。
         Integer assetId = markets == null ? identities.findAssetId(asset) : markets.assetIds.get(asset);
         // 用户在目标结算资产的余额，缺失时查询按零余额处理。

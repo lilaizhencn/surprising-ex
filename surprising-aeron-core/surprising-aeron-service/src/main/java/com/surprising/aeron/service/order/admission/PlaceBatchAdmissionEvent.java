@@ -5,7 +5,7 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.LaneBalancePatches;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
@@ -53,7 +53,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     /** 本批固定的 Matcher 分片，账户准入完成后通知该分片的续步。 */
     private int matcherShard;
     /** 提供原账户写入、批次回退和通知入口的所属运行时。 */
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /** 本批原有结算变更缓冲，结果消费时转交一次，不复制第二份账户变化。 */
     private MatcherSettlementChanges changes;
     /** 当前产品身份表，客户键在所属 Lane 准备并在失败时回退。 */
@@ -92,7 +92,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             long[] clientKeys,
             OrderRuntime[] admittedOrders,
             int itemCount, int laneId, int matcherShard,
-            TradingRuntimeState runtime, MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
+            TradingAccountRuntime runtime, MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || source == null || identities == null || clientKeys == null || admittedOrders == null || itemCount <= 0
                 || itemCount > orders.length || itemCount > clientKeys.length
@@ -204,7 +204,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         }
         identityAllocations = lane.clientIdentityAllocations() - allocationsBefore;
         // 完成发布前取得的通知目标，用于唤醒原 Matcher 分片续步。
-        TradingRuntimeState completionRuntime = runtime;
+        TradingAccountRuntime completionRuntime = runtime;
         lane.recordCommandOperation();
         completed = true;
         completionRuntime.publishAccountAdmissionReadyShard(matcherShard);

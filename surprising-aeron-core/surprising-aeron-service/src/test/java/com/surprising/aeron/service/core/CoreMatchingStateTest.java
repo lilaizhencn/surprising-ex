@@ -139,17 +139,7 @@ class CoreMatchingStateTest {
     void emptyNotificationProbeStillDetectsAFailedLaneWithoutACompletion() throws Exception {
         try (/* 本用例独立创建并在结束时关闭的产品线交易运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
-            // 反射取得 TradingCoreRuntime.runtimeState 的字段句柄。
-            var runtimeField = TradingCoreRuntime.class.getDeclaredField("runtimeState");
-            runtimeField.setAccessible(true);
-            // 反射读到的原账户运行时对象。
-            Object runtime = runtimeField.get(state);
-            // 账户 Lane 故障槽的反射字段句柄。
-            var failureField = runtime.getClass().getDeclaredField("accountLaneFailure");
-            failureField.setAccessible(true);
-            // 反射取得的账户 Lane 异常原子引用，测试注入后最终清空。
-            @SuppressWarnings("unchecked")
-            var signal = (java.util.concurrent.atomic.AtomicReference<Throwable>) failureField.get(runtime);
+            var signal = AccountLaneTestAccess.failure(state.runtimeState());
             // 本用例注入且希望下一次通知探测原样抛出的异常。
             var failure = new IllegalStateException("injected lane failure before completion publication");
             // 比当前纳秒时间晚一秒的测试探测时刻，随后再人为推进探测时间。
@@ -201,7 +191,7 @@ class CoreMatchingStateTest {
             assertThat(completed).isOne();
             assertThat(rejected[0]).isNotNull();
             assertThat(rejected[0].resultCode()).isEqualTo(CoreResultCode.STALE_MARK_PRICE);
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
         }
     }
 

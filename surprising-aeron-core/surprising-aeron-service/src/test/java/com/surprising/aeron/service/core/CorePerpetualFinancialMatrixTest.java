@@ -205,7 +205,7 @@ class CorePerpetualFinancialMatrixTest {
         RuntimeTestStateTransitions.FundingApplication expected = reducer.applyFundingWithFacts(marked, command);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ TradingRuntimeState runtime = RuntimeStateProjector.project(marked, identities)) {
+        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(marked, identities)) {
             assertThat(runtime.topology().accountLaneId(USER_ID))
                     .isNotEqualTo(runtime.topology().accountLaneId(SECOND_MAKER_ID));
             // 直接资金费处理返回的支付事实和进度，不是另一个运行时快照
@@ -256,7 +256,7 @@ class CorePerpetualFinancialMatrixTest {
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本次验证直接转换或异步控制使用的投影运行时
-        TradingRuntimeState runtime = RuntimeStateProjector.project(beforeAdl, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(beforeAdl, identities);
         runtime.startAccountLanes();
         try {
             // 已派到账户 Lane 的 ADL 可轮询工作
@@ -447,7 +447,7 @@ class CorePerpetualFinancialMatrixTest {
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本次验证直接转换或异步控制使用的投影运行时
-        TradingRuntimeState runtime = RuntimeStateProjector.project(ordered, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(ordered, identities);
 
         assertThat(RuntimeDerivativeLiquidationProcessor.applyCancellationAdvance(
                 ordered, command, RuntimeTestStateTransitions.cancellationRoutes(canceled), 702, runtime, identities)).isSameAs(runtime);
@@ -460,7 +460,7 @@ class CorePerpetualFinancialMatrixTest {
         // 撤单后执行分支单独投影使用的身份表
         RuntimeIdentityRegistry executionIdentities = new RuntimeIdentityRegistry();
         // 从同一 ordered 起点投影、供撤单加执行一步对照的运行时
-        TradingRuntimeState executionRuntime = RuntimeStateProjector.project(ordered, executionIdentities);
+        TradingAccountRuntime executionRuntime = RuntimeStateProjector.project(ordered, executionIdentities);
         assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
                 ordered, command, RuntimeTestStateTransitions.cancellationRoutes(canceled), executionRuntime, executionIdentities)).isSameAs(executionRuntime);
         RuntimeStateParityChecker.assertMatches(executionExpected, executionIdentities, executionRuntime);
@@ -732,7 +732,7 @@ class CorePerpetualFinancialMatrixTest {
         // 直接强平运行时投影和物化对比用的整数身份表
         RuntimeIdentityRegistry liquidationIdentities = new RuntimeIdentityRegistry();
         // 执行同一强平命令的直接投影运行时，与冷状态结果逐项比较
-        TradingRuntimeState runtimeLiquidated = RuntimeStateProjector.project(marked, liquidationIdentities);
+        TradingAccountRuntime runtimeLiquidated = RuntimeStateProjector.project(marked, liquidationIdentities);
         assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
                 marked, liquidationCommand, List.of(), runtimeLiquidated, liquidationIdentities))
                 .isSameAs(runtimeLiquidated);
@@ -972,7 +972,7 @@ class CorePerpetualFinancialMatrixTest {
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
-        TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(marked, identities);
+        TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(marked, identities);
         assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
                 marked, command, List.of(), runtimeEnding, identities)).isSameAs(runtimeEnding);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用
@@ -1031,7 +1031,7 @@ class CorePerpetualFinancialMatrixTest {
                 TradingStateSnapshotCodec.encode(funded), variant.productLine());
         assertThat(restoredFunded).isEqualTo(funded);
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
-        TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(restoredFunded, identities);
+        TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(restoredFunded, identities);
         assertThat(RuntimeLiquidationResolution.apply(
                 restoredFunded, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用
@@ -1127,7 +1127,7 @@ class CorePerpetualFinancialMatrixTest {
                 TradingStateSnapshotCodec.encode(beforeAdl), variant.productLine());
         assertThat(restoredBeforeAdl).isEqualTo(beforeAdl);
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
-        TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(restoredBeforeAdl, identities);
+        TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(restoredBeforeAdl, identities);
         assertThat(RuntimeAdlExecution.apply(
                 restoredBeforeAdl, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用

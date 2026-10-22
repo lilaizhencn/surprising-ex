@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.risk;
 
 import com.surprising.aeron.model.RiskLaneProgress;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -17,7 +17,7 @@ import java.util.List;
  */
 public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
     /** 本命令固定的交易运行时，任务完成前按既有控制命令边界稳定风险输入。 */
-    private final TradingRuntimeState runtime;
+    private final TradingAccountRuntime runtime;
     /** 本命令共用的业务编号映射，Owner 准备路由和 Lane 估值时使用。 */
     private final RuntimeIdentityRegistry identities;
     /** 按币对及 Lane 查询候选持仓用户的索引，可为空以使用另一有序用户来源。 */
@@ -66,7 +66,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
      * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
-    public RiskScanCoordinator(int maxWork, PositionUserIndex positionUsers, TradingRuntimeState runtime,
+    public RiskScanCoordinator(int maxWork, PositionUserIndex positionUsers, TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities) {
         this(maxWork, positionUsers, null, runtime, identities);
     }
@@ -80,7 +80,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
     private RiskScanCoordinator(int maxWork, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (maxWork <= 0 || maxWork > 4096 || (positionUsers == null && indexedUserIds == null)
                 || runtime == null || identities == null) throw new IllegalArgumentException("invalid risk scan budget");
         runtime.assertOwner();
@@ -190,7 +190,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
     static int runSlice(int maxWork, int symbolId, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         // 同步路径本次使用的续扫对象，内部仍按相同 Lane 规则完成一片。
         RiskScanCoordinator c = new RiskScanCoordinator(maxWork, positionUsers, indexedUserIds, runtime, identities);
         c.prepare(runtime.riskScan(symbolId), c.budget);
@@ -302,7 +302,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
     private void publishRoutes() {
         ledgerScope = null;
         // 发布就绪前暂存的运行时引用，完成信号通过它通知 Owner。
-        TradingRuntimeState completion = runtime;
+        TradingAccountRuntime completion = runtime;
         routesReady = true;
         completion.signalOwnerCompletion();
     }

@@ -48,7 +48,7 @@ public final class CoreMatchingFlow {
      */
     CoreResponse recordRejectedMatching(CoreMessage message, TradingCoreRuntime.SourceKey sourceKey,
                                         CommandFingerprint fingerprint, CoreResultCode resultCode) {
-        if (!owner.pendingMatching.isEmpty()) {
+        if (!owner.pendingMatching().isEmpty()) {
             // 本次准备或记录拒绝所占的 Core 应用序号。
             long sequence = owner.nextAppliedSequence();
             // 当前新建、查询或收据收集中的命令槽。
@@ -57,10 +57,10 @@ public final class CoreMatchingFlow {
                     message, fingerprint);
             putPendingMatching(pending);
             pending.rejectMatching(resultCode);
-            owner.pendingMatching.completeSubmission(sequence);
+            owner.pendingMatching().completeSubmission(sequence);
             owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
             return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK,
-                    TradingCoreRuntime.matchingPendingCode(), sequence,
+                    CoreResultCode.MATCHING_PENDING, sequence,
                     TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         }
         // 本次准备或记录拒绝所占的 Core 应用序号。
@@ -80,12 +80,12 @@ public final class CoreMatchingFlow {
     public CommandSlot removePendingMatching(long sequence) {
         owner.admissions().pendingLifecycleScopes.remove(sequence);
         // 当前静态 Matcher 分片号。
-        int shard = owner.pendingMatching.submissionShard(sequence);
+        int shard = owner.pendingMatching().submissionShard(sequence);
         // 退休项是否恰好占着该分片提交头，决定是否唤起后继。
         boolean releasesSubmissionHead = shard >= 0
-                && owner.pendingMatching.isSubmissionHead(sequence, shard);
+                && owner.pendingMatching().isSubmissionHead(sequence, shard);
         // 退休前仍在队列中的原槽，用于解除收据租约。
-        CommandSlot current = owner.pendingMatching.get(sequence);
+        CommandSlot current = owner.pendingMatching().get(sequence);
         if (current != null) {
             if (current.replacementAdmission() != null) {
                 if (!current.replacementAdmission().complete())
@@ -107,25 +107,20 @@ public final class CoreMatchingFlow {
             }
         }
         // 已经从队列移除并清生命周期的同一槽对象。
-        CommandSlot removed = owner.pendingMatching.remove(sequence);
+        CommandSlot removed = owner.pendingMatching().remove(sequence);
         if (releasesSubmissionHead) owner.matchingProgress.submissionHeadReleased(shard);
-        refreshCommittedCoreSequence();
+        owner.refreshCommittedCoreSequence();
         return removed;
     }
 
-    /**
-     * 让运行时按现有待命令低水位重新计算已提交 Core 水位。
-     */
-    void refreshCommittedCoreSequence() {
-        owner.refreshCommittedCoreSequence();
-    }
+
 
     /**
      * 只检查序号仍在待队列且高于已提交水位，不在此递增或写入已提交水位。
      * @param sequence 当前命令的完整 Core 序号
      */
     public void commitMatchingSequence(long sequence) {
-        if (!owner.pendingMatching.contains(sequence) || sequence <= owner.committedCoreSequence()) {
+        if (!owner.pendingMatching().contains(sequence) || sequence <= owner.committedCoreSequence()) {
             throw new IllegalStateException("matching sequence is not pending above the committed watermark");
         }
     }
@@ -136,7 +131,7 @@ public final class CoreMatchingFlow {
      */
     void putPendingMatching(CommandSlot pending) {
         pending.clusterIndependent = owner.clusterPipelineAdmission();
-        if (owner.pendingMatching.size() >= owner.pendingMatching.capacity()) {
+        if (owner.pendingMatching().size() >= owner.pendingMatching().capacity()) {
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
         try {
@@ -145,15 +140,15 @@ public final class CoreMatchingFlow {
                     && owner.preparedRouteMatcherShard() >= 0) {
                 pending.cachedMatcherShard(owner.preparedRouteMatcherShard());
             }
-            owner.pendingMatching.put(pending);
+            owner.pendingMatching().put(pending);
             // 当前完整消息类型，决定是否另登记分片提交链接。
             CoreMessageType type = pending.command().header().messageType();
             if (!TradingCoreRuntime.isOrderBatchCommand(type)) {
-                owner.pendingMatching.registerSubmission(pending.sequence(), matcherShard(pending));
+                owner.pendingMatching().registerSubmission(pending.sequence(), matcherShard(pending));
             }
         } catch (/* 当前登记、准入或哈希读取的运行异常，按所在方法清理或转为失败结果。 */ RuntimeException failure) {
-            if (owner.pendingMatching.remove(pending.sequence()) == null) {
-                owner.pendingMatching.discardPrepared(pending.sequence());
+            if (owner.pendingMatching().remove(pending.sequence()) == null) {
+                owner.pendingMatching().discardPrepared(pending.sequence());
             }
             throw failure;
         }
@@ -273,7 +268,7 @@ public final class CoreMatchingFlow {
             owner.batches().submitOrderBatchMatching(pending);
             // 批次仍可能派发后续 Matcher 片段时，保留当前分片提交边界。
             if (pending.isMatchingSubmitted()
-                    && owner.pendingMatching.submissionShard(pending.sequence()) >= 0
+                    && owner.pendingMatching().submissionShard(pending.sequence()) >= 0
                     && owner.batches().remainingMatcherShardMask(pending.orderBatch) == 0)
                 owner.matchingProgress.submissionCompleted(pending);
             return;
@@ -288,7 +283,7 @@ public final class CoreMatchingFlow {
                 owner.crossShardCancellations().start(pending, orders);
                 return;
             }
-            owner.matcherPipeline.submit(shardId < 0 ? matcherShard(pending) : shardId,
+            owner.matcherPipeline().submit(shardId < 0 ? matcherShard(pending) : shardId,
                     pending.sequence(), prepareMatchingCommand(pending, null));
             pending.matchingSubmitted();
             owner.matchingProgress.submissionCompleted(pending);
@@ -304,7 +299,7 @@ public final class CoreMatchingFlow {
             matcherSubmission = pending.gateAdmission(owner, pending.placeAdmission(), matcherShard(pending),
                     direct, matcherSubmission);
         }
-        owner.matcherPipeline.submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
+        owner.matcherPipeline().submit(matcherShard(pending), pending.sequence(), matcherSubmission, direct);
         pending.matchingSubmitted();
         if (pending.placeAdmission() == null) owner.matchingProgress.submissionCompleted(pending);
     }
@@ -344,8 +339,8 @@ public final class CoreMatchingFlow {
         if (result == null || result.nativeCoreSequence() != sequence) {
             throw new IllegalStateException("synchronous matcher returned an invalid result");
         }
-        owner.pendingMatching.required(sequence).publishMatchingCompletion(result);
-        owner.pendingMatching.progressChanged();
+        owner.pendingMatching().required(sequence).publishMatchingCompletion(result);
+        owner.pendingMatching().progressChanged();
     }
 
     /**
@@ -429,29 +424,13 @@ public final class CoreMatchingFlow {
     }
 
     /**
-     * 有当前注册品种标记价就用它，否则使用传入参考价，最终要求正数；这里不检查价格新鲜度或生成时间。
-     * @param instrumentId 永久品种字符串
-     * @param referencePriceTicks 没有注册标记价时使用的原参考 tick 价格
-     */
-    long currentMarkPriceTicks(String instrumentId, long referencePriceTicks) {
-        // 注册表查到的可空永久品种编号。
-        Integer symbolId = owner.identities().findSymbolId(instrumentId);
-        // 品种当前保存的可空标记价对象。
-        var markPrice = symbolId == null ? null : owner.runtimeState().markPrice(symbolId);
-        // 现有标记价或原参考价，最终须为正。
-        long value = markPrice == null ? referencePriceTicks : markPrice.markPriceTicks();
-        if (value <= 0) throw new CoreStateRejectedException("MARK_PRICE_MISSING", "mark price is required");
-        return value;
-    }
-
-    /**
      * 故障或命令已不在队列时返回空；优先取已绑定事实，再取就绪直达事件，否则消费普通完成引用。直达 ready 仅表示可取撮合事实，不表示所有账户已结算完。
      * @param sequence 当前命令的完整 Core 序号
      */
     public MatchingResult takeMatchingResult(long sequence) {
-        if (owner.fatalFailure() != null || !owner.pendingMatching.contains(sequence)) return null;
+        if (owner.fatalFailure() != null || !owner.pendingMatching().contains(sequence)) return null;
         // 当前新建、查询或收据收集中的命令槽。
-        CommandSlot pending = owner.pendingMatching.get(sequence);
+        CommandSlot pending = owner.pendingMatching().get(sequence);
         if (pending == null) return null;
         if (pending.matchingResult() != null) return pending.matchingResult();
         // 当前命令或批次保留的直达结算事件。
@@ -462,20 +441,6 @@ public final class CoreMatchingFlow {
         }
         if (direct != null && direct.direct()) return direct.ready() ? direct.directResult() : null;
         return pending.takeMatchingCompletion();
-    }
-
-    /**
-     * 待项存在才保存首次 Cluster 提交边界并返回真，不存在返回假。
-     * @param sequence 当前命令的完整 Core 序号
-     * @param clusterTimestamp 本命令固定的 Cluster 业务时间
-     * @param clusterPosition 本命令固定的日志位置
-     */
-    boolean establishMatchingCommitFence(long sequence, long clusterTimestamp, long clusterPosition) {
-        // 当前新建、查询或收据收集中的命令槽。
-        CommandSlot pending = owner.pendingMatching.get(sequence);
-        if (pending == null) return false;
-        pending.establishCommitFence(clusterTimestamp, clusterPosition);
-        return true;
     }
 
     /**
@@ -600,7 +565,7 @@ public final class CoreMatchingFlow {
      */
     private void completePlaceAdmissionSubmission(CommandSlot pending) {
         if (pending != null && pending.isMatchingSubmitted()
-                && owner.pendingMatching.submissionShard(pending.sequence()) >= 0) {
+                && owner.pendingMatching().submissionShard(pending.sequence()) >= 0) {
             owner.matchingProgress.submissionCompleted(pending);
         }
     }
@@ -610,8 +575,8 @@ public final class CoreMatchingFlow {
      * @param sequence 当前命令的完整 Core 序号
      */
     public boolean hasPendingMatchingRejection(long sequence) {
-        return owner.pendingMatching.claimed(sequence)
-                && owner.pendingMatching.required(sequence).hasMatchingRejection();
+        return owner.pendingMatching().claimed(sequence)
+                && owner.pendingMatching().required(sequence).hasMatchingRejection();
     }
 
     /**
@@ -621,9 +586,9 @@ public final class CoreMatchingFlow {
         owner.assertOwner();
         try {
             return owner.matchingAdapter().topology().matchingEngineCount() == 1
-                    ? owner.matcherPipeline.readAtSubmissionFence(0,
+                    ? owner.matcherPipeline().readAtSubmissionFence(0,
                     () -> owner.matchingAdapter().orderBooksStateHashAsync().join())
-                    : owner.matcherPipeline.readEachAsync(owner.matchingAdapter()::stateHashShard)
+                    : owner.matcherPipeline().readEachAsync(owner.matchingAdapter()::stateHashShard)
                     .thenApply(owner.matchingAdapter()::aggregateBookHash);
         } catch (/* 当前登记、准入或哈希读取的运行异常，按所在方法清理或转为失败结果。 */ RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);

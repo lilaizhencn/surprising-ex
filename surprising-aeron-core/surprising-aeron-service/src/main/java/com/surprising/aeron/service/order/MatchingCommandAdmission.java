@@ -193,7 +193,7 @@ public final class MatchingCommandAdmission {
      */
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint) {
-        return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
+        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
                 com.surprising.aeron.service.treasury.RuntimeFundsDelta.empty(),
                 owner.decodeMatchingCommand(command), null);
     }
@@ -209,7 +209,7 @@ public final class MatchingCommandAdmission {
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint,
                                    DecodedMatchingCommand decodedCommand) {
-        return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
+        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
                 com.surprising.aeron.service.treasury.RuntimeFundsDelta.empty(), decodedCommand, null);
     }
 
@@ -228,7 +228,7 @@ public final class MatchingCommandAdmission {
                                    List<Long> preMatchingCancellations,
                                    DecodedMatchingCommand decodedCommand,
                                    ResolvedMatchingAdmission admission) {
-        return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, preMatchingCancellations,
+        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, preMatchingCancellations,
                 owner.runtimeState().coldCommandFunds(),
                 decodedCommand, admission);
     }
@@ -351,7 +351,7 @@ public final class MatchingCommandAdmission {
                         operation, message, decodedCommand, placeAdmission);
         } catch (/* 当前准入或盖戳过程中抛出的错误，按所在边界拒绝、回滚或继续传播 */ CoreStateRejectedException exception) {
             if (owner.commits.publication.dirty()) {
-                if (!owner.pendingMatching.isEmpty()) {
+                if (!owner.pendingMatching().isEmpty()) {
                     throw new IllegalStateException("cannot roll back across an in-flight lane command", exception);
                 }
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
@@ -363,7 +363,7 @@ public final class MatchingCommandAdmission {
             return owner.finishFactContext(response);
         } catch (/* 当前准入或盖戳过程中抛出的错误，按所在边界拒绝、回滚或继续传播 */ ArithmeticException | IllegalArgumentException exception) {
             if (owner.commits.publication.dirty()) {
-                if (!owner.pendingMatching.isEmpty()) {
+                if (!owner.pendingMatching().isEmpty()) {
                     throw new IllegalStateException("cannot roll back across an in-flight lane command", exception);
                 }
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
@@ -397,7 +397,7 @@ public final class MatchingCommandAdmission {
         if (deferredPending == null) {
             owner.matchingFlow.putPendingMatching(pending);
         } else {
-            owner.pendingMatching.put(pending);
+            owner.pendingMatching().put(pending);
             pending.activateDeferredMatching();
         }
         if (placeAdmission != null) pending.placeAdmission(placeAdmission);
@@ -412,7 +412,7 @@ public final class MatchingCommandAdmission {
         // 撮合输入已经固定，可立即交接；账户 Lane 同时完成资金预留。
         // Matcher 仍须等准入门闩通过，有序提交再收齐准入及结算事实。
         owner.matchingFlow.submitMatching(pending);
-        return message.matchingPendingResponse(TradingCoreRuntime.matchingPendingCode(), sequence);
+        return message.matchingPendingResponse(com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, sequence);
     }
 
     /**
@@ -444,7 +444,7 @@ public final class MatchingCommandAdmission {
         owner.matchingFlow.putPendingMatching(pending);
         pending.deferMatching(clusterTimestamp, clusterPosition, sourceKey);
         owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
-        return message.matchingPendingResponse(TradingCoreRuntime.matchingPendingCode(), sequence);
+        return message.matchingPendingResponse(com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, sequence);
     }
 
     /**
@@ -712,7 +712,7 @@ public final class MatchingCommandAdmission {
         // 当前候选是否会改变普通订单
         boolean orderChanging = candidate == null || candidate.orderChanging();
         if (lifecycle) {
-            owner.pendingMatching.forEach(/* 当前新借、恢复或参与范围比较的命令槽 */ pending -> {
+            owner.pendingMatching().forEach(/* 当前新借、恢复或参与范围比较的命令槽 */ pending -> {
                 if (pendingLifecycleConflicts(candidate, pending)) {
                     throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                             "matching lifecycle scope is in progress");

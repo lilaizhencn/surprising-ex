@@ -280,7 +280,7 @@ class CoreMaintenanceTest {
             throw new AssertionError("Direct command timed out: " + message.header().messageType());
         }
         if (response.resultCode()==CoreResultCode.MATCHING_PENDING) response = CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
-        while(state.pendingMatching.firstSequence()!=0) CoreTestCompletion.completeMatchingSynchronously(state, state.pendingMatching.firstSequence(),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
+        while(state.pendingMatching().firstSequence()!=0) CoreTestCompletion.completeMatchingSynchronously(state, state.pendingMatching().firstSequence(),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
         return response;
     }
 }

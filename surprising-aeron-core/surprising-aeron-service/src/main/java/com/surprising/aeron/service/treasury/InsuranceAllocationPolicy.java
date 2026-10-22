@@ -2,7 +2,7 @@ package com.surprising.aeron.service.treasury;
 
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
@@ -40,7 +40,7 @@ public final class InsuranceAllocationPolicy {
      * @param identities 把运行时币对及结算资产转换为业务名称或稠密编号的字典
      * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
      */
-    public static Map<Long, Long> allocations(TradingRuntimeState runtime,
+    public static Map<Long, Long> allocations(TradingAccountRuntime runtime,
                                                RuntimeIdentityRegistry identities,
                                                Iterable<Long> candidateIds) {
         if (runtime == null || identities == null || candidateIds == null) {
@@ -64,7 +64,7 @@ public final class InsuranceAllocationPolicy {
      * @param identities 把运行时币对及结算资产转换为业务名称或稠密编号的字典
      * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
      */
-    public static AllocationInputs prepareAllocations(TradingRuntimeState runtime,
+    public static AllocationInputs prepareAllocations(TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
         if (runtime == null || identities == null || candidateIds == null)
             throw new IllegalArgumentException("insurance allocation inputs are required");
@@ -96,7 +96,7 @@ public final class InsuranceAllocationPolicy {
      * @param assetIds 与强平编号同下标且由上游配好的结算资产编号数组
      * @param instruments 与强平编号同下标的规范合约输入数组
      */
-    public static AllocationInputs prepareLaneAllocations(TradingRuntimeState runtime, long[] ids,
+    public static AllocationInputs prepareLaneAllocations(TradingAccountRuntime runtime, long[] ids,
             int[] assetIds, CoreInstrument[] instruments) {
         if (runtime.currentLaneCommandScope() == null) throw new IllegalStateException("insurance claim read requires Lane ownership");
         // 本次新建的结算资产到索赔列表分组。
@@ -144,7 +144,7 @@ public final class InsuranceAllocationPolicy {
      * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
      * @param liquidationId 本次要查询保险份额及优先级的目标强平编号
      */
-    public static long expectedCoverage(TradingRuntimeState runtime,
+    public static long expectedCoverage(TradingAccountRuntime runtime,
                                         RuntimeIdentityRegistry identities,
                                         Iterable<Long> candidateIds,
                                         long liquidationId) {
@@ -158,7 +158,7 @@ public final class InsuranceAllocationPolicy {
      * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
      * @param liquidationId 本次要查询保险份额及优先级的目标强平编号
      */
-    public static boolean isNext(TradingRuntimeState runtime,
+    public static boolean isNext(TradingAccountRuntime runtime,
                                  RuntimeIdentityRegistry identities,
                                  Iterable<Long> candidateIds,
                                  long liquidationId) {
@@ -172,7 +172,7 @@ public final class InsuranceAllocationPolicy {
      * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
      * @param liquidationId 本次要查询保险份额及优先级的目标强平编号
      */
-    public static Resolution resolve(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static Resolution resolve(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                       Iterable<Long> candidateIds, long liquidationId) {
         if (runtime == null || identities == null || candidateIds == null) {
             throw new IllegalArgumentException("insurance allocation inputs are required");
@@ -216,7 +216,7 @@ public final class InsuranceAllocationPolicy {
      * @param target 本次目标强平事实，缺口及身份由既有输入边界固定
      * @param assetId 目标共享保险预算的结算资产编号
      */
-    public static ResolutionInputs prepareResolution(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static ResolutionInputs prepareResolution(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                Iterable<Long> candidateIds, LiquidationRuntime target, int assetId) {
         // 当前资产需要分配的独占索赔列表，排序会改变列表顺序。
         ArrayList<Claim> claims = new ArrayList<>();

@@ -5,7 +5,7 @@ import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.AccountLaneTestAccess;
 import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.change.LaneCommitTestAccess;
 import com.surprising.aeron.service.core.change.RuntimeUserChangeBuffer;
@@ -190,7 +190,7 @@ class UserRevisionReuseTest {
      * 记录修订三的用户元数据后继续修改权威值并复用收据，最终从实时 outbox 解码到的帧仍必须保存修订三及原模式。
      */
     @Test void delayedMetadataOutputKeepsItsCommandRevisionAfterAuthorityAndCellReuse() {
-        try (/* 本场景独立交易运行时，作用域结束关闭工作资源。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本场景独立交易运行时，作用域结束关闭工作资源。 */ var runtime = new TradingAccountRuntime()) {
             // 接收实时编码结果的有界帧输出缓冲。
             var outbox = new com.surprising.aeron.client.RealtimeOutbox(32, 65_536);
             // 负责捕获并编码当前命令实时变化的输出边界。
@@ -235,7 +235,7 @@ class UserRevisionReuseTest {
      * 实际启动账户 Lane，连续更新并回滚已有用户，检查原权威身份及最早修订模式恢复；再核对模式重试不重复变更、命令中新建用户回滚后消失。
      */
     @Test void actualLaneRollbackRestoresRevisionModeAndAuthorityIdentity() {
-        try (/* 本场景独立交易运行时，作用域结束关闭工作资源。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本场景独立交易运行时，作用域结束关闭工作资源。 */ var runtime = new TradingAccountRuntime()) {
             runtime.putUser(new UserRuntime(7));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();

@@ -17,7 +17,7 @@ import org.openjdk.jmh.annotations.*;
 @Warmup(iterations = 3, time = 1) @Measurement(iterations = 3, time = 1)
 @Fork(value = 1, jvmArgsAppend = {"-Xms512m", "-Xmx512m", "-XX:+UseG1GC"})
 public class TransferLaneAllocationBenchmark {
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
     private final AccountControlTask task = new AccountControlTask();
     private final TransferFundsCommand command = new TransferFundsCommand(91, ProductLine.SPOT,

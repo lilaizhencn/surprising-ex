@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core.change;
 
 import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.LaneOrderResultTarget;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -27,7 +27,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     /** 各 Lane 间隔保存的完成标记，零未发布、非零已经发布本事件结果。 */
     private final long[] completedLanes;
     /** 当前事件关联的运行时，Owner 重置后可清空，所以 Lane 发布前先保存通知目标。 */
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /**  本事件唯一 Core 命令序号，零表示可重新准备。 返回本事件正在处理的 Core 序号，零表示已重置。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -223,7 +223,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
      * @param owner 拥有事件准备、完成观察及回收的运行时
      */
     public LaneCommitEvent prepare(long sequence, long laneMask, LongArrayList[] routedUsers,
-                            TradingRuntimeState owner) {
+                            TradingAccountRuntime owner) {
         if (sequence <= 0 || laneMask == 0 || routedUsers == null || owner == null
                 || coreSequence != 0 || completedLaneMask() != 0) {
             throw new IllegalStateException("invalid Account Lane commit event");
@@ -289,7 +289,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         }
         // 先保存通知目标再发布完成位，Owner 可能立即收齐并重置事件，使 runtime 字段先于本 Lane 唤醒动作被清空。
         // 发布完成位之前保存的运行时通知目标，避免 Owner 立即回收事件后读到空 runtime。
-        TradingRuntimeState completionRuntime = runtime;
+        TradingAccountRuntime completionRuntime = runtime;
         LONGS.setRelease(completedLanes, completionOffset, 1L);
         // 完成位才是交接依据，先发布可见完成位再唤醒 Owner；Owner 重新核对所有参与位后才继续。
         completionRuntime.signalOwnerCompletion();

@@ -10,7 +10,7 @@ import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.UserRuntime;
 import com.surprising.aeron.service.core.*;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
@@ -38,7 +38,7 @@ public final class RuntimeStateQueryService {
      * @param userId 本次用户或客户端订单查询所属的用户编号
      */
     public static UserQueryResult userState(
-            TradingRuntimeState runtime,
+            TradingAccountRuntime runtime,
             AccountLaneState lane,
             RuntimeIdentityRegistry identities,
             long userId) {
@@ -127,7 +127,7 @@ public final class RuntimeStateQueryService {
      * @param orderId 需要读取的 Core 订单编号
      */
     public static OrderQueryResult orderState(
-            TradingRuntimeState runtime,
+            TradingAccountRuntime runtime,
             AccountLaneState lane,
             RuntimeIdentityRegistry identities,
             long orderId) {
@@ -154,7 +154,7 @@ public final class RuntimeStateQueryService {
      * @param clientOrderId 该用户在客户端使用的订单标识，与普通 Core 订单编号分开定位
      */
     public static OrderQueryResult clientOrderState(
-            TradingRuntimeState runtime,
+            TradingAccountRuntime runtime,
             AccountLaneState lane,
             RuntimeIdentityRegistry identities,
             long userId,

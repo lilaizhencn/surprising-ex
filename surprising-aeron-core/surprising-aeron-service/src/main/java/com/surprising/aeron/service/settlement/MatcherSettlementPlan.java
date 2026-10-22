@@ -2,7 +2,7 @@ package com.surprising.aeron.service.settlement;
 
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.CoreCancellationResult;
@@ -133,7 +133,7 @@ public final class MatcherSettlementPlan {
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     void buildDirect(long sequence, OrderRuntime taker, CoreInstrument instrument,
-                     MatchingResult result, TradingRuntimeState runtime) {
+                     MatchingResult result, TradingAccountRuntime runtime) {
         if (taker == null || instrument == null || result == null
                 || result.nativeCoreSequence() != sequence
                 || result.nativeOrderId() != taker.orderId()
@@ -153,7 +153,7 @@ public final class MatcherSettlementPlan {
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     void buildDirect(long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrument instrument,
-                     MatchingResult result, TradingRuntimeState runtime) {
+                     MatchingResult result, TradingAccountRuntime runtime) {
         if (userId <= 0 || taker == null || instrument == null || result == null
                 || result.nativeCoreSequence() != sequence
                 || result.nativeOrderId() != taker.orderId()
@@ -181,7 +181,7 @@ public final class MatcherSettlementPlan {
                              com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
                              CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker,
                              CoreInstrument instrument, MatchingResult result,
-                             TradingRuntimeState runtime) {
+                             TradingAccountRuntime runtime) {
         clearReferences();
         coreSequence = sequence; directTaker = taker; admittedTaker = taker;
         directTakerSide = side;
@@ -229,42 +229,6 @@ public final class MatcherSettlementPlan {
     }
 
     /**
-     * 校验单笔撤单的序号与订单证据，拒绝夹带成交或其他撤单；撤单被接受时再检查用户归属并登记订单身份，只需用户所属 Lane。
-     * @param sequence 当前事实的 Core 序号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param order 当前需校验或准备持仓身份的订单引用
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     */
-    void buildDirectCancellation(long sequence, long userId, OrderRuntime order, MatchingResult result,
-                                 TradingRuntimeState runtime) {
-        if (order == null || result == null || result.nativeCoreSequence() != sequence
-                || result.nativeOrderId() != order.orderId())
-            throw new IllegalArgumentException("invalid direct cancellation fact");
-        // 当前构建或校验入口借用的原始撮合事件列表。
-        var matcherEvents = result.matcherEvents();
-        for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < matcherEvents.size(); index++) {
-            // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
-            MatcherEvent event = matcherEvents.get(index);
-            if (event == null || event.eventType() == MatcherEventType.TRADE)
-                throw new IllegalStateException("cancel result contains a trade");
-        }
-        if (!result.cancellations().isEmpty())
-            throw new IllegalStateException("single cancel contains unrelated cancellations");
-        clearReferences();
-        if (result.accepted() && order.userId() != userId)
-            throw new IllegalStateException("matcher canceled another account order");
-        coreSequence = sequence;
-        takerOrderId = order.orderId();
-        activeUserId = userId;
-        takerLaneId = runtime.topology().accountLaneId(activeUserId);
-        rejectedTaker = !result.accepted();
-        requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
-        orderCount = result.accepted() ? 1 : 0;
-        if (orderCount != 0) orderIds[0] = order.orderId();
-    }
-
-    /**
      * 由已准入运行时订单及原生 MatcherResult 构建直达计划，按订单剩余量校验成交；命令序号等外层证据由事件边界核对。
      * @param sequence 当前事实的 Core 序号
      * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
@@ -273,7 +237,7 @@ public final class MatcherSettlementPlan {
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     void buildDirectNative(long sequence, OrderRuntime taker, CoreInstrument instrument,
-                           exchange.core2.core.common.MatcherResult result, TradingRuntimeState runtime) {
+                           exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
         if (taker == null || instrument == null || result == null || instrument != taker.instrument())
             throw new IllegalArgumentException("invalid direct native matcher fact");
         buildDirectNative(sequence, taker.orderId(), taker.userId(), taker.side(), taker.symbolId(),
@@ -290,7 +254,7 @@ public final class MatcherSettlementPlan {
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     void buildDirectNative(long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrument instrument,
-                           exchange.core2.core.common.MatcherResult result, TradingRuntimeState runtime) {
+                           exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
         if (userId <= 0 || taker == null || instrument == null || result == null
                 || instrument != taker.instrument())
             throw new IllegalArgumentException("invalid direct native matcher fact");
@@ -314,7 +278,7 @@ public final class MatcherSettlementPlan {
     private void buildDirectNative(long sequence, long orderId, long userId,
                                    com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
                                    CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker,
-                                   exchange.core2.core.common.MatcherResult result, TradingRuntimeState runtime) {
+                                   exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
         clearReferences();
         coreSequence = sequence; directTaker = taker; admittedTaker = taker;
         directTakerSide = side; directTakerSymbolId = symbolId; directTakerInstrument = takerInstrument;
@@ -406,7 +370,7 @@ public final class MatcherSettlementPlan {
      */
     void buildDirectNativeCancellation(long sequence, long userId, long orderId,
                                        exchange.core2.core.common.MatcherResult result,
-                                       TradingRuntimeState runtime) {
+                                       TradingAccountRuntime runtime) {
         if (orderId <= 0 || result == null) throw new IllegalArgumentException("invalid direct cancellation fact");
         for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < result.events().size(); index++) {
             // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
@@ -495,7 +459,7 @@ public final class MatcherSettlementPlan {
      * @param identities 合约名称与运行时持仓身份字典
      * @param instrument 当前事实的规范币对对象，必须与订单输入一致
      */
-    void validateDirectLane(AccountLaneState lane, TradingRuntimeState runtime,
+    void validateDirectLane(AccountLaneState lane, TradingAccountRuntime runtime,
                             RuntimeIdentityRegistry identities, CoreInstrument instrument) {
         if (directTakerSide == null) return;
         if (runtime.topology().accountLaneId(activeUserId) == lane.laneId()) {
@@ -619,7 +583,7 @@ public final class MatcherSettlementPlan {
          * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
          * @param id 当前要读取或复用最近引用的 maker 订单编号
          */
-        OrderRuntime maker(TradingRuntimeState runtime, long id) {
+        OrderRuntime maker(TradingAccountRuntime runtime, long id) {
             if (lastMaker == null || lastMaker.orderId() != id) lastMaker = requireOpen(runtime, id);
             return lastMaker;
         }
@@ -646,7 +610,7 @@ public final class MatcherSettlementPlan {
      */
     public static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
                                                long[] initialOrderIds, MatchingResult result,
-                                               TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+                                               TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (initialOrderIds == null) throw new IllegalArgumentException("initial orders are required");
         return build(coreSequence, takerOrderId, activeUserId, initialOrderIds, result, runtime, identities,
                 null, null, null, null, null);
@@ -666,60 +630,13 @@ public final class MatcherSettlementPlan {
      */
     public static MatcherSettlementPlan buildInto(MatcherSettlementPlan target,
             long sequence, long takerOrderId, long userId, long firstOrderId, long secondOrderId,
-            MatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            MatchingResult result, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (target == null) throw new IllegalArgumentException("settlement target is required");
         if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
         target.initialOrderScratch[0] = firstOrderId;
         target.initialOrderScratch[1] = secondOrderId;
         return build(sequence, takerOrderId, userId, target.initialOrderScratch, result, runtime, identities,
                 null, null, null, null, target);
-    }
-
-    /**
-     * 使用准入回执中的订单引用构建目标计划，避免尚未发布的账户后值必须先进入 Owner 查询视图。
-     * @param target 可独占重建的计划槽，上一代消费者必须已经结束
-     * @param sequence 当前事实的 Core 序号
-     * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
-     * @param firstOrderId 首个已知关联订单编号
-     * @param secondOrderId 第二个已知关联订单编号
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     */
-    public static MatcherSettlementPlan buildAdmittedInto(MatcherSettlementPlan target,
-            long sequence, OrderRuntime taker, long firstOrderId, long secondOrderId,
-            MatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        if (target == null || taker == null) throw new IllegalArgumentException("admitted taker is required");
-        if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
-        target.initialOrderScratch[0] = firstOrderId;
-        target.initialOrderScratch[1] = secondOrderId;
-        return build(sequence, taker.orderId(), taker.userId(), target.initialOrderScratch, result,
-                runtime, identities, taker, null, null, null, target);
-    }
-
-    /**
-     * 使用不可变已解析准入输入和规范币对构建目标计划，不复制 Lane 权威运行时订单。
-     * @param target 可独占重建的计划槽，上一代消费者必须已经结束
-     * @param sequence 当前事实的 Core 序号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
-     * @param firstOrderId 首个已知关联订单编号
-     * @param secondOrderId 第二个已知关联订单编号
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     */
-    public static MatcherSettlementPlan buildResolvedInto(MatcherSettlementPlan target,
-            long sequence, long userId, ResolvedPlaceOrder taker,
-            long firstOrderId, long secondOrderId, MatchingResult result,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        if (target == null || userId <= 0 || taker == null)
-            throw new IllegalArgumentException("resolved admitted taker is required");
-        if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
-        target.initialOrderScratch[0] = firstOrderId;
-        target.initialOrderScratch[1] = secondOrderId;
-        return build(sequence, taker.orderId(), userId, target.initialOrderScratch, result,
-                runtime, identities, null, taker, taker.instrument(), null, target);
     }
 
     /**
@@ -734,7 +651,7 @@ public final class MatcherSettlementPlan {
      */
     public static MatcherSettlementPlan buildSingleInto(MatcherSettlementPlan target,
             long sequence, long takerOrderId, long userId,
-            MatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            MatchingResult result, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (target == null) throw new IllegalArgumentException("settlement target is required");
         if (target.initialOrderScratch == null || target.initialOrderScratch.length < 1)
             target.initialOrderScratch = new long[1];
@@ -753,7 +670,7 @@ public final class MatcherSettlementPlan {
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     public static MatcherSettlementPlan emptyInto(MatcherSettlementPlan target, long sequence,
-            long userId, long firstOrderId, long secondOrderId, TradingRuntimeState runtime) {
+            long userId, long firstOrderId, long secondOrderId, TradingAccountRuntime runtime) {
         if (target == null || sequence <= 0 || userId <= 0 || firstOrderId <= 0 || secondOrderId <= 0
                 || runtime == null) throw new IllegalArgumentException("invalid empty settlement target");
         target.clearReferences();
@@ -779,7 +696,7 @@ public final class MatcherSettlementPlan {
      * @param target 可独占重建的计划槽，上一代消费者必须已经结束
      */
     static MatcherSettlementPlan buildBatchItem(long sequence, OrderRuntime taker, CoreInstrument instrument,
-                                                MatchingResult result, TradingRuntimeState runtime,
+                                                MatchingResult result, TradingAccountRuntime runtime,
                                                 RuntimeIdentityRegistry identities, BatchValidationScratch scratch, MatcherSettlementPlan target) {
         return build(sequence, taker.orderId(), taker.userId(), null, result, runtime, identities,
                 taker, null, instrument, scratch, target);
@@ -802,7 +719,7 @@ public final class MatcherSettlementPlan {
      */
     private static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
                                                long[] initialOrderIds, MatchingResult result,
-                                               TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                               TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                OrderRuntime preparedTaker, ResolvedPlaceOrder resolvedTaker,
                                                CoreInstrument preparedInstrument,
                                                BatchValidationScratch batch, MatcherSettlementPlan target) {
@@ -962,7 +879,7 @@ public final class MatcherSettlementPlan {
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     public static MatcherSettlementPlan empty(long coreSequence, long activeUserId, long[] orderIds,
-                                               TradingRuntimeState runtime) {
+                                               TradingAccountRuntime runtime) {
         if (coreSequence <= 0 || activeUserId <= 0 || orderIds == null || runtime == null) {
             throw new IllegalArgumentException("invalid empty matcher settlement plan input");
         }
@@ -1032,7 +949,7 @@ public final class MatcherSettlementPlan {
      * @param instrument 当前事实的规范币对对象，必须与订单输入一致
      * @param order 当前需校验或准备持仓身份的订单引用
      */
-    private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    private static void preparePositionIdentity(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                 CoreInstrument instrument, OrderRuntime order) {
         preparePositionIdentity(runtime, identities, instrument, order.userId(), order.positionSide());
     }
@@ -1045,7 +962,7 @@ public final class MatcherSettlementPlan {
      * @param userId 当前主动、撤单或持仓身份所属用户
      * @param positionSide 用户在该合约上的持仓方向
      */
-    private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    private static void preparePositionIdentity(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                 CoreInstrument instrument, long userId,
                                                 com.surprising.aeron.protocol.CorePositionSide positionSide) {
         if (!runtime.productLine().isDerivative()) return;
@@ -1057,7 +974,7 @@ public final class MatcherSettlementPlan {
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
      */
-    private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {
+    private static OrderRuntime requireOpen(TradingAccountRuntime runtime, long orderId) {
         // 当前撤单结果在运行时可读取的订单，或 requireOpen 取得的待校验值。
         OrderRuntime order = runtime.order(orderId);
         if (order == null || order.status() != CoreOrderStatus.OPEN) {
@@ -1258,7 +1175,7 @@ public final class MatcherSettlementPlan {
      * 事件至少八个且涉及多个 Lane 时，逆序串出各 maker Lane 的事件链，保持原成交顺序；taker Lane 继续顺序读取全部原事件。
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
-    private MatcherSettlementPlan indexLaneEvents(TradingRuntimeState runtime) {
+    private MatcherSettlementPlan indexLaneEvents(TradingAccountRuntime runtime) {
         // 少量事件不建索引；深度成交时各 maker Lane 只沿自己的事件链读取，
         // taker Lane 仍保留原事件顺序，不复制成交事件。
         if (matcherEvents.size() < 8 || Long.bitCount(requiredLaneMask) < 2) return this;
@@ -1306,7 +1223,7 @@ public final class MatcherSettlementPlan {
      * @param laneId 当前要遍历或判断的账户 Lane 编号
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
-    public boolean matcherEventTouchesLane(int index, int laneId, TradingRuntimeState runtime) {
+    public boolean matcherEventTouchesLane(int index, int laneId, TradingAccountRuntime runtime) {
         // 启用深度索引时，非 taker 调用方已经沿当前 maker Lane 的事件链传入下标，
         // 因此可直接判定相关；其他遍历方式仍按账户拓扑判断。
         if (laneEventsIndexed && laneId != takerLaneId) return true;

@@ -110,7 +110,7 @@ public final class CoreQueryService {
             throw failure;
         }
         owner.runtimeState().completePendingTransferPage(page);
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount());
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
@@ -148,7 +148,7 @@ public final class CoreQueryService {
             queryIds.remove(message.header().commandId());
             throw failure;
         }
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount());
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
@@ -264,7 +264,7 @@ public final class CoreQueryService {
             throw failure;
         }
         pendingRiskQueries.put(id, query);
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount());
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
@@ -440,7 +440,7 @@ public final class CoreQueryService {
             queryIds.remove(message.header().commandId());
             throw failure;
         }
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount());
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
@@ -732,7 +732,7 @@ public final class CoreQueryService {
             return owner.rejected(CoreResultCode.MATCHING_REJECTED);
         }
         if (!owner.runtimeState().dispatchLedgerQuery(query)) deferredLiquidationWorkQuery = query;
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount());
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
@@ -920,7 +920,7 @@ public final class CoreQueryService {
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
         } catch (/* 投递任务时发生的原始异常，先移除外部命令与查询编号的关联，再继续上抛。 */ RuntimeException failure) { queryIds.remove(message.header().commandId()); throw failure; }
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount());
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
@@ -942,7 +942,7 @@ public final class CoreQueryService {
             queryIds.remove(message.header().commandId());
             throw failure;
         }
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount());
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
@@ -1036,7 +1036,7 @@ public final class CoreQueryService {
         // 本次查询的内部编号，用于登记异步完成、失败或后续消费。
         long queryId = nextAsyncQueryId++;
         try {
-            owner.matcherPipeline.readAtSubmissionFence(owner.matchingAdapter().matcherShardId(query.instrumentId()),
+            owner.matcherPipeline().readAtSubmissionFence(owner.matchingAdapter().matcherShardId(query.instrumentId()),
                     () -> owner.matchingAdapter().orderBookLevelsAsync(query.instrumentId(), query.depth()).join())
                     .whenComplete((/* Matcher 在对应提交栅栏后读取出的盘口层级，包装后交给 Owner 编码。 */ levels, /* Matcher 盘口读取或投递失败，登记内部失败标记，随后由 Owner 消费为拒绝响应。 */ failure) -> {
                         if (failure != null) failedQueries.put(queryId, true);
@@ -1046,7 +1046,7 @@ public final class CoreQueryService {
             failedQueries.put(queryId, true);
         }
         queryIds.put(message.header().commandId(), queryId);
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING,
                 owner.appliedCommandCount());
     }
 
@@ -1070,9 +1070,9 @@ public final class CoreQueryService {
         try {
             // 异步取得的初始化快照凭据；单 Matcher 读栅栏，多 Matcher 分别读取后合并。
             var snapshot = owner.matchingAdapter().topology().matchingEngineCount() == 1
-                    ? owner.matcherPipeline.readAtSubmissionFence(0,
+                    ? owner.matcherPipeline().readAtSubmissionFence(0,
                     () -> owner.matchingAdapter().orderBookBootstrapAsync(query.depth()).join())
-                    : owner.matcherPipeline.readEachAsync(
+                    : owner.matcherPipeline().readEachAsync(
                     /* 当前要读取初始化盘口的 Matcher 分片编号。 */ shardId -> owner.matchingAdapter().orderBookBootstrapShard(shardId, query.depth()))
                     .thenApply(owner.matchingAdapter()::mergeBookBootstrapShards);
             snapshot.whenComplete((/* 所有 Matcher 初始化读取及合并完成的快照内容，先包装完成结果，Owner 稍后创建会话。 */ value, /* 初始化读取、分片合并或任务投递失败，登记标记供 Owner 消费时返回拒绝。 */ failure) -> {
@@ -1084,7 +1084,7 @@ public final class CoreQueryService {
             failedQueries.put(queryId, true);
         }
         queryIds.put(message.header().commandId(), queryId);
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
+        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING,
                 owner.appliedCommandCount());
     }
 

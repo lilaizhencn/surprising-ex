@@ -4,7 +4,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -137,7 +137,7 @@ class PublishedPositionCountTest {
      * 轮询 Owner 的控制收集直到完成或三秒超时，不通过直接读取 Lane 表推断完成。
      * @param runtime 要等待控制收据完成的交易运行时
      */
-    private static void awaitControl(TradingRuntimeState runtime) {
+    private static void awaitControl(TradingAccountRuntime runtime) {
         // 控制任务收齐完成回执的三秒单调时钟截止时间。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!runtime.pollControlLanes()) {

@@ -5,24 +5,20 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 冷账本状态的增量共享和七子账独立性测试，直接构造内存值并核对资产变化键，不启动在线账本。
+ * 冷账本快照的规范化和七子账独立性测试，不启动在线账本。
  */
 class CoreTreasuryStateTest {
 
-    /**
-     * 只调整 USDT 费用，核对变化键以及保险、亏空 Map 复用原引用。
-     */
+    /** 规范化完整快照的资产名称并移除零额，不混入其他子账。 */
     @Test
-    void feeAdjustmentKeepsUnchangedTreasuryMapsAndReportsOnlyChangedAsset() {
-        // 费用调整前全部为空的冷账本。
-        CoreTreasuryState before = CoreTreasuryState.empty();
+    void normalizesAssetsAndDropsZeroBalances() {
+        CoreTreasuryState treasury = CoreTreasuryState.ofSubledgers(
+                Map.of(" usdt ", 5L, "BTC", 0L), Map.of(), Map.of(),
+                Map.of(), Map.of(), Map.of(), Map.of());
 
-        // 仅新增 USDT 费用五单位的新冷账本。
-        CoreTreasuryState after = before.adjustFee("USDT", 5);
-
-        assertThat(after.changedAssets()).containsExactly("USDT");
-        assertThat(after.insuranceBalances()).isSameAs(before.insuranceBalances());
-        assertThat(after.insuranceDeficits()).isSameAs(before.insuranceDeficits());
+        assertThat(treasury.feeBalances()).containsExactlyEntriesOf(Map.of("USDT", 5L));
+        assertThat(treasury.insuranceBalances()).isEmpty();
+        assertThat(treasury.insuranceDeficits()).isEmpty();
     }
 
     /**

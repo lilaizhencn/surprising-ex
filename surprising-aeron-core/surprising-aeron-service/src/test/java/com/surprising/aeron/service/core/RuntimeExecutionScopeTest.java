@@ -17,7 +17,7 @@ class RuntimeExecutionScopeTest {
      */
     @Test
     void ownerCompatibilityScopeCannotClearTheWorkersActiveScope() throws Exception {
-        try (/* 当前生产拓扑的测试运行时，用例退出时自动关闭 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 当前生产拓扑的测试运行时，用例退出时自动关闭 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             runtime.startAccountLanes();
             // 工作 Lane 进入自身命令作用域后通知 Owner 的门闩
             var entered = new java.util.concurrent.CountDownLatch(1);
@@ -36,11 +36,11 @@ class RuntimeExecutionScopeTest {
                 });
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 // 这里只验证线程执行作用域，不在临时 Owner 范围内读取账户业务状态。
-                runtime.ownerLaneAccess = true;
+                AccountLaneTestAccess.ownerAccess(runtime, true);
                 try {
                     runtime.inLaneCommandScope(runtime.accountLanes[0], /* Owner 当前临时作用域所属 Lane，用于核对退出前没有被其他线程覆盖 */ lane -> null);
                 } finally {
-                    runtime.ownerLaneAccess = false;
+                    AccountLaneTestAccess.ownerAccess(runtime, false);
                 }
             } finally { ownerFinished.countDown(); }
             // 轮询工作 Lane 完成的单调时钟截止值，最多五秒
@@ -59,7 +59,7 @@ class RuntimeExecutionScopeTest {
      */
     @Test
     void unrelatedReaderCannotInheritAnActiveOwnerLaneScope() throws Exception {
-        try (/* 当前生产拓扑的测试运行时，用例退出时自动关闭 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 当前生产拓扑的测试运行时，用例退出时自动关闭 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             // 把普通读取线程的断言异常带回 Owner 测试线程的原子槽
             var failure = new AtomicReference<Throwable>();
             runtime.inLaneCommandScope(runtime.accountLanes[0], /* Owner 当前临时作用域所属 Lane，用于核对退出前没有被其他线程覆盖 */ lane -> {

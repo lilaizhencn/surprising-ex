@@ -101,16 +101,17 @@ public final class ResponseArena {
      * 按 Owner 命令窗口配置计算固定槽数，使用默认每槽六十四 KiB 容量建池。
      */
     public ResponseArena() {
-        this(defaultSlotCount(), DEFAULT_SLOT_BYTES);
+        this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone());
     }
 
     /**
      * 读取 JVM 命令窗口配置，按至少六十四的窗口预算另留二百五十六槽，再取至少五百一十二的二次幂容量；本入口不替命令窗口执行完整配置范围验证。
      */
-    private static int defaultSlotCount() {
-        // JVM 属性读出的 Owner 命令窗口配置值
-        int configuredWindow = Integer.getInteger(
-                "surprising.aeron.owner-command-window", ClusterCommandWindow.DEFAULT_CAPACITY);
+    public ResponseArena(com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+        this(defaultSlotCount(configuration.ownerCommandWindow()), DEFAULT_SLOT_BYTES);
+    }
+
+    private static int defaultSlotCount(int configuredWindow) {
         // 在窗口及额外余量要求下计算的最少槽数
         int required = Math.max(DEFAULT_SLOT_COUNT, Math.max(64, configuredWindow) + 256);
         // 逐步翻倍至满足要求的候选槽数

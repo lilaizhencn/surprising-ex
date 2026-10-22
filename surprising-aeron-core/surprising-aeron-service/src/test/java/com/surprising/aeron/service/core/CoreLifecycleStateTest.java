@@ -219,7 +219,7 @@ class CoreLifecycleStateTest {
         // 等额收付运行时投影及状态对照共用的身份表。
         RuntimeIdentityRegistry netZeroIdentities = new RuntimeIdentityRegistry();
         // 从等额收付前置状态投影出的独立运行时。
-        TradingRuntimeState netZeroRuntime = RuntimeStateProjector.project(netZero, netZeroIdentities);
+        TradingAccountRuntime netZeroRuntime = RuntimeStateProjector.project(netZero, netZeroIdentities);
         // 实际运行时资金费入口返回的等额收付结果。
         var netZeroActual = RuntimePerpetualFundingProcessor.apply(netZero, netZeroCommand,
                 null, null, netZeroRuntime, netZeroIdentities);
@@ -256,7 +256,7 @@ class CoreLifecycleStateTest {
         // 两页实际运行时共用的身份表。
         RuntimeIdentityRegistry chunkedIdentities = new RuntimeIdentityRegistry();
         // 第一页建立并继续用于第二页的可变权威运行时。
-        TradingRuntimeState chunkedRuntime = RuntimeStateProjector.project(chunked, chunkedIdentities);
+        TradingAccountRuntime chunkedRuntime = RuntimeStateProjector.project(chunked, chunkedIdentities);
         // 实际运行时第一页结果，后续继续使用其中原运行时引用。
         var firstActual = RuntimePerpetualFundingProcessor.apply(chunked, firstCommand,
                 List.of(1L, 2L), firstCommandId, chunkedRuntime, chunkedIdentities);
@@ -679,7 +679,7 @@ class CoreLifecycleStateTest {
         // 独立运行时投影或业务状态对照使用的身份表。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 用于核对反向编号列表分配结果的独立运行时。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
         // 故意反转的候选强平编号列表，用来检查输入次序不改变分配。
         var reverseIds = new java.util.ArrayList<>(state.riskState().liquidations().keySet());
         java.util.Collections.reverse(reverseIds);
@@ -753,7 +753,7 @@ class CoreLifecycleStateTest {
         // 独立运行时投影或业务状态对照使用的身份表。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 独立运行时 ADL 模拟得到的实际状态。
-        TradingRuntimeState runtimeResolved = RuntimeDerivativeLiquidationFixture.simulateAdl(
+        TradingAccountRuntime runtimeResolved = RuntimeDerivativeLiquidationFixture.simulateAdl(
                 state, command, identities);
         // 保险回执或 ADL 处理完成后的业务状态。
         TradingCoreState resolved = reducer.executeAdl(state, command);

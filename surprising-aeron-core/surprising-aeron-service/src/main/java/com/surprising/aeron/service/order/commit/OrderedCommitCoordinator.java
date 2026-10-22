@@ -84,7 +84,7 @@ public final class OrderedCommitCoordinator {
     public CoreResponse completeRejectedMatching(long sequence) {
         owner.assertOwner();
         // 当前按完整序号或有序游标取得的命令槽
-        CommandSlot pending = owner.pendingMatching.get(sequence);
+        CommandSlot pending = owner.pendingMatching().get(sequence);
         if (pending == null || !owner.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         // 当前直达事件或匹配到的直达事实，类型见声明
         var direct = pending.settlementEvent();
@@ -148,7 +148,7 @@ public final class OrderedCommitCoordinator {
                                   MatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) {
         owner.assertOwner();
-        return completeMatching(owner.pendingMatching.get(sequence), matchingResult, clusterTimestamp, clusterPosition);
+        return completeMatching(owner.pendingMatching().get(sequence), matchingResult, clusterTimestamp, clusterPosition);
     }
 
     /**
@@ -526,7 +526,7 @@ public final class OrderedCommitCoordinator {
         owner.matchingFlow.removePendingMatching(pending.sequence());
         // 先结束当前命令事实作用域，再恢复后继批次的挂起上下文。
         owner.finishFactContext(response);
-        if (owner.pendingMatching.hasDeferred() || owner.batches().hasPendingBatches()) {
+        if (owner.pendingMatching().hasDeferred() || owner.batches().hasPendingBatches()) {
             owner.matchingProgress.submitDeferredMatchingAfterBatch();
         }
         return response;
@@ -759,9 +759,9 @@ public final class OrderedCommitCoordinator {
      * @param sequence 仍在槽池中的完整 Core 序号
      */
     public boolean controlPending(long sequence) {
-        if (!owner.pendingMatching.claimed(sequence)) return false;
+        if (!owner.pendingMatching().claimed(sequence)) return false;
         // 仍由指定完整序号占用的命令槽
-        CommandSlot slot = owner.pendingMatching.required(sequence);
+        CommandSlot slot = owner.pendingMatching().required(sequence);
         return slot.controlPending();
     }
 
@@ -1078,10 +1078,10 @@ public final class OrderedCommitCoordinator {
      */
     public void advanceMatchingProgress(long clusterTimestamp, long clusterPosition, long throughSequence) {
         // 当前待命令全局最小序号
-        long first = owner.pendingMatching.firstSequence();
+        long first = owner.pendingMatching().firstSequence();
         if (first > throughSequence) return;
         // 当前按完整序号或有序游标取得的命令槽
-        CommandSlot pending = owner.pendingMatching.get(first);
+        CommandSlot pending = owner.pendingMatching().get(first);
         // 连续轮询复用命令已有的Map键，不为同一在途序号反复分配Long。
         OrderBatchPending head = pending == null ? null : pending.orderBatch();
         if (head != null && !head.activated()) {
@@ -1099,10 +1099,10 @@ public final class OrderedCommitCoordinator {
         if (!owner.runtimeState().systemLedgerStarted()) return;
         // 当前按完整序号或有序游标取得的命令槽
         CommandSlot pending;
-        while ((pending = owner.pendingMatching.ledgerDispatchHead()) != null
+        while ((pending = owner.pendingMatching().ledgerDispatchHead()) != null
                 && pending.sequence() <= throughSequence) {
             if (pending.ledgerDispatchClosed()) {
-                owner.pendingMatching.completeLedgerDispatch(pending.sequence());
+                owner.pendingMatching().completeLedgerDispatch(pending.sequence());
                 continue;
             }
             // 当前结算事件或遍历的 Matcher 事件，类型见声明
@@ -1114,7 +1114,7 @@ public final class OrderedCommitCoordinator {
             // 顺序批次还会产生后续子项。
             // 在最后子项或显式业务关闭前保留资金游标，响应槽租约也继续保留。
             if (sequential && !pending.orderBatch().matchingApplied()) return;
-            owner.pendingMatching.completeLedgerDispatch(pending.sequence());
+            owner.pendingMatching().completeLedgerDispatch(pending.sequence());
         }
     }
 
@@ -1124,7 +1124,7 @@ public final class OrderedCommitCoordinator {
     public boolean hasFinancialDispatchWork() {
         if (!owner.runtimeState().systemLedgerStarted()) return false;
         // 当前按完整序号或有序游标取得的命令槽
-        CommandSlot pending = owner.pendingMatching.ledgerDispatchHead();
+        CommandSlot pending = owner.pendingMatching().ledgerDispatchHead();
         if (pending == null) return false;
         if (pending.ledgerDispatchClosed()) return true;
         // 当前结算事件或遍历的 Matcher 事件，类型见声明
@@ -1165,7 +1165,7 @@ public final class OrderedCommitCoordinator {
      */
     private boolean financialHeadReady(CommandSlot pending) {
         if (!owner.runtimeState().systemLedgerStarted()) return true;
-        if (pending.sequence() != owner.pendingMatching.firstSequence()) return false;
+        if (pending.sequence() != owner.pendingMatching().firstSequence()) return false;
         if (pending.hasMatchingRejection() || owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) return true;
         // 当前命令关联的可空批次
         OrderBatchPending batch = pending.orderBatch();
@@ -1230,7 +1230,7 @@ public final class OrderedCommitCoordinator {
         }
         // 直达事件没有完成队列游标。
         // 增加一次调度修订即可提示队首重试，不必按 Lane 重复通知。
-        if (changed) owner.pendingMatching.progressChanged();
+        if (changed) owner.pendingMatching().progressChanged();
     }
 
     /**
@@ -1238,7 +1238,7 @@ public final class OrderedCommitCoordinator {
      */
     CommandSlot pollReadyPending() {
         // 当前按完整序号或有序游标取得的命令槽
-        CommandSlot pending = owner.pendingMatching.head();
+        CommandSlot pending = owner.pendingMatching().head();
         return matchingCommitReady(pending) ? pending : null;
     }
 
@@ -1250,7 +1250,7 @@ public final class OrderedCommitCoordinator {
      */
     CommandSlot pollReadyHead(
             long clusterTimestamp, long clusterPosition, long throughSequence) {
-        if (owner.pendingMatching.isEmpty() || owner.pendingMatching.firstSequence() > throughSequence) {
+        if (owner.pendingMatching().isEmpty() || owner.pendingMatching().firstSequence() > throughSequence) {
             return null;
         }
         advanceMatchingProgress(clusterTimestamp, clusterPosition, throughSequence);
@@ -1352,7 +1352,7 @@ public final class OrderedCommitCoordinator {
         // 本轮已尝试推进的队首次数，未完成的一次也计入预算
         int attempts = 0;
         while (attempts < maxCompletions) {
-            if (owner.pendingMatching.firstSequence() > throughSequence) break;
+            if (owner.pendingMatching().firstSequence() > throughSequence) break;
             // 当前按完整序号或有序游标取得的命令槽
             CommandSlot pending = pollReadyPending();
             if (pending == null && attempts == 0 && awaitFirst) {
@@ -1364,7 +1364,7 @@ public final class OrderedCommitCoordinator {
             // 本轮完成时交给窗口的终态响应，未完成可为空
             CoreResponse response = commitReadyPending(pending, clusterTimestamp, clusterPosition);
             attempts++;
-            owner.pendingMatching.progressChanged();
+            owner.pendingMatching().progressChanged();
             // 撮合或账户通知可能稍后才到。
             // 保留未完成队首，让下一轮 Owner 调度重试，不在这里阻塞。
             if (response == null) {
@@ -1393,13 +1393,13 @@ public final class OrderedCommitCoordinator {
         if (advanceProgress) {
             advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
         }
-        if (owner.pendingMatching.firstSequence() > throughSequence) return null;
+        if (owner.pendingMatching().firstSequence() > throughSequence) return null;
         // 当前按完整序号或有序游标取得的命令槽
         CommandSlot pending = pollReadyPending();
         if (pending == null || pending.sequence() > throughSequence) return null;
         // 本轮完成时交给窗口的终态响应，未完成可为空
         CoreResponse response = commitReadyPending(pending, clusterTimestamp, clusterPosition);
-        owner.pendingMatching.progressChanged();
+        owner.pendingMatching().progressChanged();
         return response;
     }
 

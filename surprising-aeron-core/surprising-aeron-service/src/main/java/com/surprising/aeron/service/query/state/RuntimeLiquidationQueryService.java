@@ -9,7 +9,7 @@ import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreRiskScanContinuation;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.service.core.*;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
@@ -37,7 +37,7 @@ public final class RuntimeLiquidationQueryService {
      * @param command 需要检查是否仍可执行的强平命令，包含价格版本和执行价
      */
     public static boolean isExecutable(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, ExecuteLiquidationCommand command) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, ExecuteLiquidationCommand command) {
         // 按命令编号读到的源强平记录，阶段不再可执行时直接返回 false。
         LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
         if (liquidation == null || (liquidation.status() != CoreLiquidationState.Status.PLANNED
@@ -82,7 +82,7 @@ public final class RuntimeLiquidationQueryService {
      * @param allCandidateIds 保险推荐额计算使用的完整候选范围，不能只用当前页候选代替全局分配
      */
     public static CoreLiquidationWorkView work(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, ProductLine productLine,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, ProductLine productLine,
             CoreLiquidationWorkView.Query query, Iterable<Long> candidateIds,
             Iterable<Long> allCandidateIds) {
         // 保险用途才计算的完整候选推荐金额映射，其他用途用空映射。
@@ -100,7 +100,7 @@ public final class RuntimeLiquidationQueryService {
      * @param candidateIds 本页候选强平编号，应按递增顺序提供，跳过起始游标及之前的项
      * @param insuranceAllocations 按强平编号给出的保险推荐覆盖额，不存在的编号按 0 展示
      */
-    public static CoreLiquidationWorkView work(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static CoreLiquidationWorkView work(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             ProductLine productLine, CoreLiquidationWorkView.Query query, Iterable<Long> candidateIds,
             java.util.Map<Long, Long> insuranceAllocations) {
         // 本页已经接纳的强平执行动作，超过字节预算的最后一项不保留。
@@ -257,7 +257,7 @@ public final class RuntimeLiquidationQueryService {
      * @param value 本轮候选强平记录，缺失时不具备任何查询用途
      */
     private static boolean eligible(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, ProductLine productLine,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, ProductLine productLine,
             CoreLiquidationWorkView.Purpose purpose, LiquidationRuntime value) {
         if (value == null) return false;
         // 候选强平阶段是否符合执行、待保险或待 ADL 的查询用途。
@@ -286,7 +286,7 @@ public final class RuntimeLiquidationQueryService {
      * @param purpose 本次只选择执行、保险补亏还是 ADL 待办
      */
     public static CoreRiskScanContinuation continuation(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             CoreLiquidationWorkView.Purpose purpose) {
         if (purpose != CoreLiquidationWorkView.Purpose.EXECUTION) return null;
         // 风险扫描元数据集合，先用它的规模限制查询扫描范围。

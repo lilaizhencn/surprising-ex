@@ -8,7 +8,7 @@ import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
@@ -36,7 +36,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     /** 当前准备的任务种类，零表示尚未准备。 */
     private byte kind;
     /** 本续步关联的交易运行时，Owner 与 Lane 通过既有控制派发交接。 */
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /** 余额、划转或持仓任务的目标用户；杠杆任务使用 leverageKey 中的用户。 */
     private long userId;
     /** 需要读取返回值的账户 Lane 编号，供杠杆及持仓路径使用。 */
@@ -95,7 +95,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param userId 本次控制命令操作的用户编号
      * @param command 余额调整命令，包含资产与有符号变化金额
      */
-    public AccountControlTask prepareBalanceAdjustment(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public AccountControlTask prepareBalanceAdjustment(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                       long userId, BalanceAdjustmentCommand command) {
         if (runtime == null || identities == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid account balance adjustment");
@@ -119,7 +119,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param userId 本次控制命令操作的用户编号
      * @param command 跨产品划转命令，包含源目标身份、资产、金额及划转编号
      */
-    public AccountControlTask prepareTransferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public AccountControlTask prepareTransferOut(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                 long userId, TransferFundsCommand command) {
         if (runtime == null || identities == null || command == null || userId <= 0)
             throw new IllegalArgumentException("transfer inputs are required");
@@ -149,7 +149,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param userId 本次控制命令操作的用户编号
      * @param transferId 需要确认完成的源侧划转编号
      */
-    public AccountControlTask prepareTransferCompletion(TradingRuntimeState runtime, long userId, long transferId) {
+    public AccountControlTask prepareTransferCompletion(TradingAccountRuntime runtime, long userId, long transferId) {
         if (runtime == null || userId <= 0 || transferId <= 0)
             throw new IllegalArgumentException("invalid transfer completion");
         runtime.assertOwner();
@@ -175,7 +175,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param userId 本次控制命令操作的用户编号
      * @param command 杠杆变更命令，包含合约、保证金模式、杠杆及重定价开关
      */
-    public AccountControlTask prepareLeverageChange(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public AccountControlTask prepareLeverageChange(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                    long userId, UpdateLeverageCommand command) {
         return prepareLeverageChange(runtime, identities, userId, command, 0);
     }
@@ -188,7 +188,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param command 杠杆变更命令，包含合约、保证金模式、杠杆及重定价开关
      * @param beforeRevision 当前命令开始前的产品修订号，用于变更标记比较
      */
-    public AccountControlTask prepareLeverageChange(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public AccountControlTask prepareLeverageChange(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                    long userId, UpdateLeverageCommand command, long beforeRevision) {
         clear();
         this.kind = KIND_LEVERAGE;
@@ -210,7 +210,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param userId 本次控制命令操作的用户编号
      * @param command 目标持仓模式命令
      */
-    public AccountControlTask preparePositionModeChange(TradingRuntimeState runtime, long userId,
+    public AccountControlTask preparePositionModeChange(TradingAccountRuntime runtime, long userId,
                                                        UpdatePositionModeCommand command) {
         return preparePositionModeChange(runtime, userId, command, 0);
     }
@@ -222,7 +222,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param command 目标持仓模式命令
      * @param beforeRevision 当前命令开始前的产品修订号，用于变更标记比较
      */
-    public AccountControlTask preparePositionModeChange(TradingRuntimeState runtime, long userId,
+    public AccountControlTask preparePositionModeChange(TradingAccountRuntime runtime, long userId,
                                                        UpdatePositionModeCommand command, long beforeRevision) {
         if (runtime == null || userId <= 0 || command == null)
             throw new IllegalArgumentException("invalid account position mode change");
@@ -246,7 +246,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param userId 本次控制命令操作的用户编号
      * @param command 逐仓保证金调整命令，正金额补入、负金额取回
      */
-    public AccountControlTask preparePositionMarginAdjustment(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public AccountControlTask preparePositionMarginAdjustment(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                                              long userId, AdjustPositionMarginCommand command) {
         clear();
         this.kind = KIND_POSITION_MARGIN;

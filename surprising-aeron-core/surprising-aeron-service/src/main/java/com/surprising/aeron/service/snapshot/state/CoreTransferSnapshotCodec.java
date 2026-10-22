@@ -3,7 +3,7 @@ package com.surprising.aeron.service.snapshot.state;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.account.TransferRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Map;
@@ -56,7 +56,7 @@ public final class CoreTransferSnapshotCodec {
                         r.text(5), r.text(6), r.text(7), r.number(8), r.text(9), r.text(10), r.number(11), r.number(12));
                 // 当前要保存或已经恢复的划转生命周期值。
                 var transfer = new TransferRuntime(r.number(1), command);
-                if (transfers.size() >= TradingRuntimeState.MAX_PENDING_TRANSFERS
+                if (transfers.size() >= TradingAccountRuntime.MAX_PENDING_TRANSFERS
                         || transfers.put(command.transferId(), transfer) != null)
                     throw new ProtocolException("invalid/duplicate pending transfer snapshot");
             }
@@ -106,7 +106,7 @@ public final class CoreTransferSnapshotCodec {
         if (version != VERSION) throw new ProtocolException("unsupported transfer snapshot version");
         // 载荷声明的待划转条目数量。
         int count = buffer.getInt();
-        if (count < 0 || count > TradingRuntimeState.MAX_PENDING_TRANSFERS) {
+        if (count < 0 || count > TradingAccountRuntime.MAX_PENDING_TRANSFERS) {
             throw new ProtocolException("invalid transfer snapshot count");
         }
         // 按划转编号构建的恢复结果，返回时包装为只读 Map。

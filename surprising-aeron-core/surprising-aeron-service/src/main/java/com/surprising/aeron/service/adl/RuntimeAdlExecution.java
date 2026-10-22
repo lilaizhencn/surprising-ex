@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
@@ -30,8 +30,8 @@ public final class RuntimeAdlExecution {
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
      * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
      */
-    public static TradingRuntimeState apply(TradingCoreState before, ExecuteAdlCommand command,
-                                            TradingRuntimeState runtime,
+    public static TradingAccountRuntime apply(TradingCoreState before, ExecuteAdlCommand command,
+                                            TradingAccountRuntime runtime,
                                             RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -46,8 +46,8 @@ public final class RuntimeAdlExecution {
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
      * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
      */
-    public static TradingRuntimeState applyRuntime(ExecuteAdlCommand command,
-                                                   TradingRuntimeState runtime,
+    public static TradingAccountRuntime applyRuntime(ExecuteAdlCommand command,
+                                                   TradingAccountRuntime runtime,
                                                    RuntimeIdentityRegistry identities) {
         if (runtime.systemLedgerStarted()) throw new IllegalStateException("active ADL requires its asynchronous continuation");
         adl(null, command, runtime, identities, false);
@@ -61,7 +61,7 @@ public final class RuntimeAdlExecution {
      * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
      */
     public static java.util.function.BooleanSupplier begin(ExecuteAdlCommand command,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         return begin(null, command, runtime, identities);
     }
 
@@ -73,7 +73,7 @@ public final class RuntimeAdlExecution {
      * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
      */
     public static AdlWork begin(AdlWork reuse, ExecuteAdlCommand command,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         return adl(reuse, command, runtime, identities, true);
     }
 
@@ -86,7 +86,7 @@ public final class RuntimeAdlExecution {
      * @param asynchronous 是否只派发跨线程工作并返回可轮询续步；同步路径在本次调用内完成
      */
     private static AdlWork adl(AdlWork reuse, ExecuteAdlCommand command,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL apply");
         }
@@ -176,7 +176,7 @@ public final class RuntimeAdlExecution {
         /** 当前 ADL 命令，保存目标持仓预期、减仓量和覆盖额，完成后释放引用。 */
         private ExecuteAdlCommand command;
         /** 该续步操作的交易运行时，用于派发账户工作并等待账本。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 源账户 Lane 捕获的强平记录，校验通过后供目标账户计算使用。 */
         private LiquidationRuntime liquidation;
         /** 本次 ADL 固定采用的合约配置引用，完成后释放。 */
@@ -217,7 +217,7 @@ public final class RuntimeAdlExecution {
          * @param settleAssetId 本合约结算资产的整数编号
          * @param targetLane 盈利目标用户所属的账户 Lane 编号
          */
-        private void prepare(ExecuteAdlCommand command, TradingRuntimeState runtime,
+        private void prepare(ExecuteAdlCommand command, TradingAccountRuntime runtime,
                 LiquidationRuntime liquidation, CoreInstrument instrument, MarkPriceRuntime mark,
                 long positionKey, int settleAssetId, int targetLane) {
             initializeLedgerCommand(runtime);
@@ -340,7 +340,7 @@ public final class RuntimeAdlExecution {
      * @param settleAssetId 本合约结算资产的整数编号
      * @param reuse 目标账户资金差额的复用缓冲区，清空后填入本次清算和亏空变化
      */
-    private static RuntimeTreasuryDelta applyAdlTarget(ExecuteAdlCommand command, TradingRuntimeState runtime,
+    private static RuntimeTreasuryDelta applyAdlTarget(ExecuteAdlCommand command, TradingAccountRuntime runtime,
             LiquidationRuntime liquidation, CoreInstrument instrument, MarkPriceRuntime mark,
             long positionKey, int settleAssetId, RuntimeTreasuryDelta reuse) {
         // 目标用户当前持仓，方向、数量、入场价和保证金模式都必须与命令预期一致。
@@ -413,7 +413,7 @@ public final class RuntimeAdlExecution {
      * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
      */
-    private static void completeAdlLiquidation(ExecuteAdlCommand command, TradingRuntimeState runtime) {
+    private static void completeAdlLiquidation(ExecuteAdlCommand command, TradingAccountRuntime runtime) {
         // 源账户当前强平记录，需要在原 Lane 上扣减本次实际覆盖金额。
         LiquidationRuntime current = runtime.liquidation(command.liquidationId());
         // 扣除本次 ADL 覆盖后仍未弥补的源强平亏空。
@@ -436,7 +436,7 @@ public final class RuntimeAdlExecution {
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
      * @param instrumentId 需要已经注册在当前运行时的外部合约编号
      */
-    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String instrumentId) {
+    private static CoreInstrument requireInstrument(TradingAccountRuntime runtime, String instrumentId) {
         // 源强平对应的合约配置，检查产品并为目标平仓计算提供金额参数。
         CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) {

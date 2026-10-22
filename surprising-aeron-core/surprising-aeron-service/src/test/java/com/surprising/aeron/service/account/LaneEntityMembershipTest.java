@@ -3,7 +3,7 @@ package com.surprising.aeron.service.account;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
@@ -17,7 +17,7 @@ class LaneEntityMembershipTest {
      */
     @Test
     void liveOrderAndReservationMembershipSurvivesUniqueIdChurnWithoutReplacingArrays() throws Exception {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingRuntimeState()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
             state.putUser(new UserRuntime(7));
             state.putUser(new UserRuntime(8));
             state.putOrder(CoreStateTestFixtures.order(1, 7, 1, 2));
@@ -82,7 +82,7 @@ class LaneEntityMembershipTest {
      */
     @Test
     void rollbackRestoresRemovedMembershipAndDropsNewOrderAndReservation() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingRuntimeState()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
             state.putUser(new UserRuntime(7));
             for (long /* 当前加入、移除或构造待回滚成员的订单编号。 */ id : new long[]{1, 2}) {
                 state.putOrder(CoreStateTestFixtures.order(id, 7, 1, 2));
@@ -133,7 +133,7 @@ class LaneEntityMembershipTest {
      */
     @Test
     void reservationAmountAndAssetChangesKeepMembershipAndPendingTotals() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingRuntimeState()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
             state.putUser(new UserRuntime(7));
             state.putBalance(new BalanceRuntime(7, 1, 1000, 0));
             state.putBalance(new BalanceRuntime(7, 2, 1000, 0));
@@ -167,19 +167,19 @@ class LaneEntityMembershipTest {
      */
     @Test
     void clientOrderIndexReusesItsPrimitiveTableUntilUserRemoval() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingRuntimeState()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
             state.putUser(new UserRuntime(7));
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
             var lane = state.onLane(7L, /* onLane 回调收到的所属 Lane，这里原样返回以便断言。 */ value -> value);
-            TradingRuntimeState.putClientOrderIndex(lane, 7, 91, 11);
+            TradingAccountRuntime.putClientOrderIndex(lane, 7, 91, 11);
             // 用户七客户身份键到订单编号的原语映射表。
             var clients = lane.clientOrderIndex.get(7);
 
-            assertThat(TradingRuntimeState.removeClientOrderIndex(lane, 7, 91)).isEqualTo(11);
+            assertThat(TradingAccountRuntime.removeClientOrderIndex(lane, 7, 91)).isEqualTo(11);
             assertThat(lane.clientOrderIndex.get(7)).isSameAs(clients);
             assertThat(clients.size()).isZero();
 
-            TradingRuntimeState.putClientOrderIndex(lane, 7, 92, 12);
+            TradingAccountRuntime.putClientOrderIndex(lane, 7, 92, 12);
             assertThat(lane.clientOrderIndex.get(7)).isSameAs(clients);
             state.removeUser(7);
             assertThat(lane.clientOrderIndex.get(7)).isNull();
@@ -198,7 +198,7 @@ class LaneEntityMembershipTest {
         var held = CoreStateTestFixtures.reservation(1, 7, 3, 13);
         lane.reservations.put(1, held);
         lane.markPendingReservation(1, 2);
-        TradingRuntimeState.putClientOrderIndex(lane, 7, 0, 1);
+        TradingAccountRuntime.putClientOrderIndex(lane, 7, 0, 1);
         // 用户七客户身份键到订单编号的原语映射表。
         var clients = lane.clientOrderIndex.get(7);
         // Agrona long 键值表底层 entries 数组的反射字段。
@@ -214,7 +214,7 @@ class LaneEntityMembershipTest {
             for (/* 当前加入、移除或构造待回滚成员的订单编号。 */ long id = first; id < first + 20; id++) {
                 lane.reservations.put(id, CoreStateTestFixtures.reservation(id, 7, 3, 5));
                 lane.markPendingReservation(id, 3L + round);
-                TradingRuntimeState.putClientOrderIndex(lane, 7, id, id);
+                TradingAccountRuntime.putClientOrderIndex(lane, 7, id, id);
             }
             if (round == 0) clientStorage = entries.get(clients); // 允许首轮按同时存活条数扩容，之后检查同一数组持续复用。
             assertThat(lane.pendingReservationCount()).isEqualTo(21);
@@ -223,7 +223,7 @@ class LaneEntityMembershipTest {
                 assertThat(lane.pendingReservationSequence(id)).isEqualTo(3L + round);
                 lane.completePendingReservation(id, 3L + round);
                 lane.reservations.remove(id);
-                assertThat(TradingRuntimeState.removeClientOrderIndex(lane, 7, id)).isEqualTo(id);
+                assertThat(TradingAccountRuntime.removeClientOrderIndex(lane, 7, id)).isEqualTo(id);
                 assertThat(lane.pendingReservationSequence(id)).isZero();
             }
             assertThat(entries.get(lane.pendingReservationSequences)).isSameAs(pendingStorage);
@@ -245,19 +245,19 @@ class LaneEntityMembershipTest {
      */
     @Test
     void rollbackRestoresReassignedRemovedAndNewClientAliases() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingRuntimeState()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
             state.putUser(new UserRuntime(7));
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
             var lane = state.onLane(7L, /* onLane 回调收到的所属 Lane，这里原样返回以便断言。 */ value -> value);
-            TradingRuntimeState.putClientOrderIndex(lane, 7, 91, 11);
-            TradingRuntimeState.putClientOrderIndex(lane, 7, 92, 12);
+            TradingAccountRuntime.putClientOrderIndex(lane, 7, 91, 11);
+            TradingAccountRuntime.putClientOrderIndex(lane, 7, 92, 12);
             state.clearChangedKeys();
             state.accountRollback().captureClientOrderBefore(7, 91);
             state.accountRollback().captureClientOrderBefore(7, 92);
             state.accountRollback().captureClientOrderBefore(7, 93);
-            TradingRuntimeState.putClientOrderIndex(lane, 7, 91, 99);
-            TradingRuntimeState.removeClientOrderIndex(lane, 7, 92);
-            TradingRuntimeState.putClientOrderIndex(lane, 7, 93, 99);
+            TradingAccountRuntime.putClientOrderIndex(lane, 7, 91, 99);
+            TradingAccountRuntime.removeClientOrderIndex(lane, 7, 92);
+            TradingAccountRuntime.putClientOrderIndex(lane, 7, 93, 99);
 
             state.accountRollback().restoreLane(lane);
 
@@ -280,7 +280,7 @@ class LaneEntityMembershipTest {
      */
     @Test
     void positionUpdatesPreserveMembershipAndOnlyFlatTransitionsChangeExposureIndex() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingRuntimeState()) {
+        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
             state.putUser(new UserRuntime(7));
             state.putPosition(11, position(7, 1, 10));
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。

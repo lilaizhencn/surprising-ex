@@ -60,7 +60,7 @@ public class OrderAdmissionAllocationBenchmark {
 
     @Benchmark public OrderRuntime admitWithFinalMetadata(Blackhole blackhole) {
         blackhole.consume(reservation.release(0).consume(0).withRemainingUnits(100));
-        return TradingRuntimeState.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, resolved,
+        return TradingAccountRuntime.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, resolved,
                 commandId, 0, 1000, 2000);
     }
 

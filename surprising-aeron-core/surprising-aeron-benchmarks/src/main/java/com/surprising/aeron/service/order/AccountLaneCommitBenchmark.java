@@ -4,7 +4,7 @@ import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitEvent;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -72,7 +72,7 @@ public class AccountLaneCommitBenchmark {
         @Param({"BUSY_SPIN", "BLOCKING"})
         public String waitStrategy = "BUSY_SPIN";
 
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         private long[] users;
         private java.util.List<Long> metadataUsers;
         private java.util.List<Long> metadataOrders;
@@ -91,7 +91,7 @@ public class AccountLaneCommitBenchmark {
             previousAccountLanes = System.getProperty("surprising.aeron.account-lanes");
             System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
             LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
-            runtime = new TradingRuntimeState(topology);
+            runtime = new TradingAccountRuntime(topology);
             users = new long[accountLanes];
             commits = new LaneCommitEvent[maxInFlight];
             responses = new OrderBatchPending[maxInFlight];

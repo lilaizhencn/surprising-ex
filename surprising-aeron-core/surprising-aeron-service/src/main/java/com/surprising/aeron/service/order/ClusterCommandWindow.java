@@ -20,8 +20,6 @@ public final class ClusterCommandWindow {
     private static final int MAX_TRACKED_ORDER_IDS = Math.max(
             PlaceOrderBatchCommand.MAX_ORDERS, CancelOrderBatchCommand.MAX_ORDERS);
 
-    /** 保留的四千零九十六常量，当前构造未读取它，实际阈值按窗口容量计算。 */
-    private static final int ORDER_INDEX_ROTATION_THRESHOLD = 4096;
 
     /**
      * 入口依赖原因，按精确订单和同用户旧命令区分；ACCOUNT 不代表所有同 Lane 用户相互冲突。
@@ -94,8 +92,7 @@ public final class ClusterCommandWindow {
      * 从系统属性读取窗口容量，未配置默认二百五十六，再按显式容量构造；非法数字直接抛解析异常。
      */
     public ClusterCommandWindow() {
-        this(Integer.parseInt(System.getProperty("surprising.aeron.owner-command-window",
-                Integer.toString(DEFAULT_CAPACITY))));
+        this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().ownerCommandWindow());
     }
 
     /**

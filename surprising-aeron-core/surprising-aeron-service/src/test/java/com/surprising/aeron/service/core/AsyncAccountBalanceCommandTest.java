@@ -213,9 +213,7 @@ class AsyncAccountBalanceCommandTest {
                         .isEqualTo(i == 2 || i == 4 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
                 assertThat(actual.resultCode()).isEqualTo(expected.resultCode());
                 // 反射取得首实例 ownerLaneAccess 标记，断言该轮没有借用账户所有权
-                var access = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
-                access.setAccessible(true);
-                assertThat(access.getBoolean(state.runtimeState)).isFalse();
+                assertThat(state.runtimeState.ownerLaneAccess()).isFalse();
             }
             assertThat(state.tradingState().user(user).balances().get("USDT").availableUnits()).isEqualTo(80);
             assertThat(state.tradingState().businessStateHash()).isEqualTo(serial.tradingState().businessStateHash());

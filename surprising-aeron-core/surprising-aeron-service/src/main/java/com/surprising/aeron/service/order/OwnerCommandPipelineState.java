@@ -31,7 +31,11 @@ public final class OwnerCommandPipelineState {
      * @param pipelined 是否创建普通命令响应窗口
      */
     public OwnerCommandPipelineState(boolean pipelined) {
-        commandWindow = pipelined ? new ClusterCommandWindow() : null;
+        this(pipelined, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().ownerCommandWindow());
+    }
+
+    public OwnerCommandPipelineState(boolean pipelined, int commandWindowCapacity) {
+        commandWindow = pipelined ? new ClusterCommandWindow(commandWindowCapacity) : null;
     }
     /**  正在等待直接业务或查询完成的入口条目。 返回当前控制命令的入口条目引用。 */
     @Accessors(fluent = true, chain = false)
@@ -265,13 +269,6 @@ public final class OwnerCommandPipelineState {
                 && waitingDispatchSequence == dispatchThrough
                 && waitingMatchingProgress == progressBefore
                 && !hasMatchingNotifications;
-    }
-
-    /**
-     * 清掉等待通知标记，开始一轮新的完成收集。
-     */
-    void beginMatchingPoll() {
-        waitingMatchingNotification = false;
     }
 
     /**

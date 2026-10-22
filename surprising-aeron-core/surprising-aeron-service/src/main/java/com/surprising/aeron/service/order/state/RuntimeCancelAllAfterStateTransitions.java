@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.model.CoreCancelAllAfterState;
 import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
 import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -19,7 +19,7 @@ public final class RuntimeCancelAllAfterStateTransitions {
      * @param userId 命令头所指定的计时器用户，必须与载荷一致
      * @param command 复制命令中的动作、范围、业务时间、预期版本和撤单统计
      */
-    public static void update(TradingRuntimeState runtime, long userId, CoreCancelAllAfterCommand command) {
+    public static void update(TradingAccountRuntime runtime, long userId, CoreCancelAllAfterCommand command) {
         if (runtime == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime cancel-all-after update");
         }

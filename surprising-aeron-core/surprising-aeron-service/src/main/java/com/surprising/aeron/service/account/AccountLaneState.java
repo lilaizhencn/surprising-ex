@@ -6,7 +6,7 @@ import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.admission.AdmissionOrderIndex;
@@ -65,9 +65,6 @@ public final class AccountLaneState {
         catch (/* 反射查找句柄失败的原因，转为类初始化错误暴露。 */ ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
     }
 
-    /** 本 Lane 实体表初始容量，读取 lane-initial-entities JVM 参数，默认 1024，最低 16。 */
-    private static final int INITIAL_ENTITY_CAPACITY = Math.max(16,
-            Integer.getInteger("surprising.aeron.lane-initial-entities", 1_024));
     /**  创建时固定的账户分片编号，用于路由与监控。 返回创建时固定的 Lane 编号，不申请线程所有权。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -87,31 +84,25 @@ public final class AccountLaneState {
     @Setter
     int admissionIndexCapacity = 2;
     /** 登记属于本 Lane 的用户编号集合，和 users 值表分别维护。 */
-    private final LongHashSet userIds = new LongHashSet(INITIAL_ENTITY_CAPACITY);
+    private final LongHashSet userIds;
     /** 用户编号到 Lane 权威用户元数据的表。 */
-    final LongObjectHashMap<UserRuntime> users = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<UserRuntime> users;
     /** 用户编号到资产余额表的权威数据，最内层资产键对应可变余额单元。 */
-    final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances =
-            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances;
     // 后移删除避免订单频繁增删留下删除标记，进而触发整表重新分配。
     /** 订单编号到 Lane 权威订单的表，采用后移删除避免删除标记累积触发整表重建。 */
-    final Long2ObjectHashMap<OrderRuntime> orders =
-            new Long2ObjectHashMap<>(INITIAL_ENTITY_CAPACITY, 0.65f, false);
+    final Long2ObjectHashMap<OrderRuntime> orders;
     // 用户活跃成员由 Lane 拥有，后移删除使持续更换的订单编号不积累删除标记。
     /** 按用户维护非终态订单编号集合，所属 Lane 更新；普通订单周转保留空容器。 */
-    final LongObjectHashMap<org.agrona.collections.LongHashSet> activeOrderIdsByUser =
-            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<org.agrona.collections.LongHashSet> activeOrderIdsByUser;
     /** 按订单编号保存的资金预留权威表，采用后移删除。 */
-    final Long2ObjectHashMap<ReservationRuntime> reservations =
-            new Long2ObjectHashMap<>(INITIAL_ENTITY_CAPACITY, 0.65f, false);
+    final Long2ObjectHashMap<ReservationRuntime> reservations;
     /** 按用户维护已有预留编号集合，和预留值表配套更新。 */
-    final LongObjectHashMap<org.agrona.collections.LongHashSet> reservationIdsByUser =
-            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<org.agrona.collections.LongHashSet> reservationIdsByUser;
     /** 运行时持仓键到持仓权威记录的表，可能保留零仓位记录。 */
-    final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<PositionRuntime> positions;
     /** 用户到持仓键的成员索引，便于只遍历该用户持仓。 */
-    final LongObjectHashMap<LongHashSet> positionKeysByUser =
-            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<LongHashSet> positionKeysByUser;
     /**
      *  本逻辑 Lane 复用的风险候选输出，包含同步跨多个 Lane 的调用，不能依赖线程本地共享一个批次。
      * 返回本逻辑 Lane 复用的风险候选输出缓冲。
@@ -126,8 +117,7 @@ public final class AccountLaneState {
     final IntObjectHashMap<LongObjectHashMap<LongArrayList>> positionKeysBySymbolAndUser
             = new IntObjectHashMap<>();
     /** 每个用户的客户身份键到订单编号映射，不直接以客户号文本作为热路径键。 */
-    final LongObjectHashMap<Long2LongHashMap> clientOrderIndex =
-            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<Long2LongHashMap> clientOrderIndex;
     /**  本 Lane 拥有的客户号身份行、引用计数及可复用空行。 返回本 Lane 拥有的客户订单身份字典，不创建跨线程身份副本。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -141,7 +131,7 @@ public final class AccountLaneState {
     /**  本 Lane 复用的杠杆读取结果槽。 返回可复用的杠杆查找槽，后续查找可能覆盖其中结果。 */
     @Accessors(fluent = true, chain = false)
     @Getter
-    final TradingRuntimeState.LeverageLookup leverageLookup = new TradingRuntimeState.LeverageLookup();
+    final TradingAccountRuntime.LeverageLookup leverageLookup = new TradingAccountRuntime.LeverageLookup();
     /**  本 Lane 复用的运行时身份查找工作槽。 返回本 Lane 复用的身份查找结果槽；调用方遵守所属线程或有效读取边界，不能长期保留可变结果。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -239,10 +229,9 @@ public final class AccountLaneState {
     }
     // 有效命令序号为正，零表示缺失；准入和结算频繁周转时采用后移删除，保留原表容量。
     /** 订单到待完成 Core 序号的索引，正数为有效序号，零为缺失，删除时保留原后移表。 */
-    final Long2LongHashMap pendingReservationSequences =
-            new Long2LongHashMap(INITIAL_ENTITY_CAPACITY, 0.65f, 0, false);
+    final Long2LongHashMap pendingReservationSequences;
     /** 各用户仍待完成的预留条数聚合。 */
-    private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap(INITIAL_ENTITY_CAPACITY);
+    private final LongIntHashMap pendingReservationCountsByUser;
     /** 按资产分组的用户待完成预留金额，归零只移除用户项，资产表保留容量。 */
     private final IntObjectHashMap<LongLongHashMap> pendingReservedUnitsByAsset = new IntObjectHashMap<>();
     /** 整个 Lane 仍待完成的预留条数。 */
@@ -271,10 +260,6 @@ public final class AccountLaneState {
     private long localStateHash = 0xcbf29ce484222325L;
     /** 最近重建或恢复的余额哈希缓存，只包含用户、资产及可用冻结金额。 */
     private long localFundsHash = 0xcbf29ce484222325L;
-    /** 当前类的无序哈希实现未读取的 long 缓冲字段，保留原代码，不据此声称哈希使用排序。 */
-    private long[] hashLongScratch = new long[16];
-    /** 当前类的无序哈希实现未读取的 int 缓冲字段，保留原字段布局。 */
-    private int[] hashIntScratch = new int[16];
     /** 本 Lane 唯一复用的准入汇总视图，每次查询前选择目标稠密合约编号。 */
     private final LaneAdmissionOrderIndex admissionOrderIndex = new LaneAdmissionOrderIndex();
     /**
@@ -314,6 +299,24 @@ public final class AccountLaneState {
      * @param queueCapacity 本 Lane 工作队列的正数容量
      */
     public AccountLaneState(int laneId, int queueCapacity) {
+        this(laneId, queueCapacity,
+                com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().laneInitialEntities());
+    }
+
+    public AccountLaneState(int laneId, int queueCapacity, int initialEntityCapacity) {
+        if (initialEntityCapacity < 16) throw new IllegalArgumentException("initial entity capacity must be at least 16");
+        this.userIds = new LongHashSet(initialEntityCapacity);
+        this.users = new LongObjectHashMap<>(initialEntityCapacity);
+        this.balances = new LongObjectHashMap<>(initialEntityCapacity);
+        this.orders = new Long2ObjectHashMap<>(initialEntityCapacity, 0.65f, false);
+        this.activeOrderIdsByUser = new LongObjectHashMap<>(initialEntityCapacity);
+        this.reservations = new Long2ObjectHashMap<>(initialEntityCapacity, 0.65f, false);
+        this.reservationIdsByUser = new LongObjectHashMap<>(initialEntityCapacity);
+        this.positions = new LongObjectHashMap<>(initialEntityCapacity);
+        this.positionKeysByUser = new LongObjectHashMap<>(initialEntityCapacity);
+        this.clientOrderIndex = new LongObjectHashMap<>(initialEntityCapacity);
+        this.pendingReservationSequences = new Long2LongHashMap(initialEntityCapacity, 0.65f, 0, false);
+        this.pendingReservationCountsByUser = new LongIntHashMap(initialEntityCapacity);
         if (laneId < 0 || laneId >= Long.SIZE || queueCapacity <= 0) {
             throw new IllegalArgumentException("invalid account lane");
         }
@@ -2064,13 +2067,13 @@ public final class AccountLaneState {
      * 交给运行时复制全部用户及资产余额，返回与权威余额单元分离的导出数据。
      */
     public LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balancesSnapshot() {
-        return TradingRuntimeState.copyAllBalances(balances);
+        return TradingAccountRuntime.copyAllBalances(balances);
     }
     /**
      * 复制用户客户号到订单的映射，并转为导出使用的 primitive 表类型。
      */
     public LongObjectHashMap<org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap> clientOrdersSnapshot() {
-        return TradingRuntimeState.copyClientOrderIndex(clientOrderIndex);
+        return TradingAccountRuntime.copyClientOrderIndex(clientOrderIndex);
     }
     /**
      * 复制持仓容器，保留原值引用；调用方仍须遵守查询或快照屏障，不把容器复制当作所有值的深复制。

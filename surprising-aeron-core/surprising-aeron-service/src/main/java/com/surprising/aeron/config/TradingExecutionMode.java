@@ -12,8 +12,4 @@ public enum TradingExecutionMode {
     /** 撮合与账户工作线程通过原有队列和栅栏边界协作。 */
     PIPELINED;
 
-    /** 节点启动策略配置；默认为 FUSED 单线程状态机，可通过 -Dsurprising.aeron.execution-mode=PIPELINED 切换为多线程流水线模式。 */
-    public static TradingExecutionMode configured() {
-        return valueOf(System.getProperty("surprising.aeron.execution-mode", "FUSED"));
-    }
 }

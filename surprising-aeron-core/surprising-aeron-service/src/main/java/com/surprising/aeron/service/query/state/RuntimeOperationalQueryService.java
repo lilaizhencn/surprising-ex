@@ -12,7 +12,7 @@ import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.CoreTreasuryAssetView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.service.core.*;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
@@ -38,7 +38,7 @@ public final class RuntimeOperationalQueryService {
      * @param identities 资产及币对整数编号到外部业务代码的映射
      */
     public static List<CoreTreasuryAssetView> treasuryAssets(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         return runtime.queryLedgerAtRest(/* 运行时静止读取入口传入的当前资金总账，按它组装资产视图。 */ ledger -> treasuryAssets(ledger, identities));
     }
 
@@ -81,7 +81,7 @@ public final class RuntimeOperationalQueryService {
      * @param instrumentId 要查询进度的外部币对编号，条件单过滤中空值或空串表示不限定
      */
     public static CoreFundingProgressView fundingProgress(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, String instrumentId) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId) {
         // 外部币对编号在身份表中的已注册整数编号，未注册时直接返回无进行中任务。
         Integer symbolId = identities.findSymbolId(instrumentId);
         if (symbolId == null) return new CoreFundingProgressView(0, true, 0, 0);
@@ -101,7 +101,7 @@ public final class RuntimeOperationalQueryService {
      * @param instrumentId 要查询进度的外部币对编号，条件单过滤中空值或空串表示不限定
      */
     public static CoreSettlementProgressView settlementProgress(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, String instrumentId) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId) {
         // 外部币对编号在身份表中的已注册整数编号，未注册时直接返回无进行中任务。
         Integer symbolId = identities.findSymbolId(instrumentId);
         if (symbolId == null) return new CoreSettlementProgressView(0, true, true, 0, 0, 0, 0);
@@ -128,7 +128,7 @@ public final class RuntimeOperationalQueryService {
      * @param limit 本次希望返回的最多条件单条数，调用方应先校验为合法正数
      */
     public static List<CoreTriggerOrderStateView> triggerOrders(
-            TradingRuntimeState runtime, Iterable<Long> candidateIds, long userId, String instrumentId,
+            TradingAccountRuntime runtime, Iterable<Long> candidateIds, long userId, String instrumentId,
             com.surprising.aeron.protocol.CoreTriggerOrderStatus status, long triggerOrderId,
             long beforeTriggerOrderId, boolean openOnly, int limit) {
         // 本次入口逐项组装的协议查询视图，达到其结果上限就停止。
@@ -156,7 +156,7 @@ public final class RuntimeOperationalQueryService {
      * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
      * @param algoIds 要查看的算法母单编号集合，空编号会跳过
      */
-    public static List<CoreAlgoOrderView> algoOrders(TradingRuntimeState runtime, Iterable<Long> algoIds) {
+    public static List<CoreAlgoOrderView> algoOrders(TradingAccountRuntime runtime, Iterable<Long> algoIds) {
         // 本次入口逐项组装的协议查询视图，达到其结果上限就停止。
         ArrayList<CoreAlgoOrderView> result = new ArrayList<>();
         // 本次已检查的非空候选数量，按入口规则超限时停止或抛响应过大异常。
@@ -213,7 +213,7 @@ public final class RuntimeOperationalQueryService {
      * @param keys 按用户和币对范围定位的定时撤单键集合，空键会跳过
      */
     public static List<CoreCancelAllAfterView> cancelAllAfter(
-            TradingRuntimeState runtime, Iterable<CoreCancelAllAfterKey> keys) {
+            TradingAccountRuntime runtime, Iterable<CoreCancelAllAfterKey> keys) {
         // 本次入口逐项组装的协议查询视图，达到其结果上限就停止。
         ArrayList<CoreCancelAllAfterView> result = new ArrayList<>();
         // 本次已检查的非空候选数量，按入口规则超限时停止或抛响应过大异常。

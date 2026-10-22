@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.CoreFundingPaymentView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.UserIndexPage;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
@@ -42,7 +42,7 @@ public final class RuntimePerpetualFundingProcessor {
      */
     public static FundingResult apply(TradingCoreState before, ApplyFundingCommand command,
                                       Iterable<Long> indexedUserIds, UUID chunkCommandId,
-                                      TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+                                      TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid perpetual funding apply");
@@ -61,7 +61,7 @@ public final class RuntimePerpetualFundingProcessor {
      * @param identities 币对及结算资产内部编号映射
      */
     public static FundingResult applyRuntime(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
-                                             UUID chunkCommandId, TradingRuntimeState runtime,
+                                             UUID chunkCommandId, TradingAccountRuntime runtime,
                                              RuntimeIdentityRegistry identities) {
         if (runtime.systemLedgerStarted()) throw new IllegalStateException("active funding requires its asynchronous continuation");
         // 当前页同步资金费工作对象。
@@ -81,7 +81,7 @@ public final class RuntimePerpetualFundingProcessor {
      * @param identities 币对及结算资产内部编号映射
      */
     public static FundingWork prepare(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
-            UUID chunkCommandId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            UUID chunkCommandId, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         return prepare(null, command, indexedUserIds, chunkCommandId, runtime, identities);
     }
 
@@ -95,7 +95,7 @@ public final class RuntimePerpetualFundingProcessor {
      * @param identities 币对及结算资产内部编号映射
      */
     public static FundingWork prepare(FundingWork reuse, ApplyFundingCommand command,
-            Iterable<Long> indexedUserIds, UUID chunkCommandId, TradingRuntimeState runtime,
+            Iterable<Long> indexedUserIds, UUID chunkCommandId, TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities) {
         if (command == null || indexedUserIds == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual funding apply");
@@ -164,7 +164,7 @@ public final class RuntimePerpetualFundingProcessor {
         /** 本页命令 UUID，非空表示启用分页，续页进度同时保存此标识。 */
         private UUID chunkCommandId;
         /** 原权威运行时；Owner 写元数据，各账户 Lane 与账本在所属作用域写状态。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 本轮固定的永续币对配置，续页校验要求与进度保存对象相同。 */
         private CoreInstrument instrument;
         /**
@@ -223,7 +223,7 @@ public final class RuntimePerpetualFundingProcessor {
          * @param fundingPriceSequence 该固定标记价的价格序号
          * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
          */
-        private FundingWork(ApplyFundingCommand command, UUID chunkCommandId, TradingRuntimeState runtime,
+        private FundingWork(ApplyFundingCommand command, UUID chunkCommandId, TradingAccountRuntime runtime,
                 CoreInstrument instrument, int symbolId, int settleAssetId, long fundingMark,
                 long fundingPriceSequence, Iterable<Long> indexedUserIds) {
             reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
@@ -243,7 +243,7 @@ public final class RuntimePerpetualFundingProcessor {
          * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
          */
         private FundingWork reset(ApplyFundingCommand command, UUID chunkCommandId,
-                TradingRuntimeState runtime, CoreInstrument instrument, int symbolId,
+                TradingAccountRuntime runtime, CoreInstrument instrument, int symbolId,
                 int settleAssetId, long fundingMark, long fundingPriceSequence, Iterable<Long> indexedUserIds) {
             if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns funding routes");
             initializeLedgerCommand(runtime);
@@ -282,7 +282,7 @@ public final class RuntimePerpetualFundingProcessor {
             }
             indexedUserIds = null;
             // 发布用户页完成标记前保存的运行时引用，随后用于唤醒 Owner。
-            TradingRuntimeState completion = runtime;
+            TradingAccountRuntime completion = runtime;
             usersReady = true;
             completion.signalOwnerCompletion();
         }
@@ -398,7 +398,7 @@ public final class RuntimePerpetualFundingProcessor {
      * @param markPriceTicks 整轮固定的资金费计算标记价，不随本页执行过程变化
      */
     private static LaneFundingResult applyLane(ApplyFundingCommand command, LongArrayList selectedUserIds,
-                                               TradingRuntimeState runtime, CoreInstrument instrument,
+                                               TradingAccountRuntime runtime, CoreInstrument instrument,
                                                int symbolId, int settleAssetId, long markPriceTicks) {
         // 本永续产品的资金费计算规则，区分 U 本位与币本位。
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
@@ -484,7 +484,7 @@ public final class RuntimePerpetualFundingProcessor {
      * @param payments 按用户和持仓记录的有符号实际收付明细，结果构造器会复制列表
      * @param progress 本页结束时是否整轮完成及下一用户游标
      */
-    public record FundingResult(TradingRuntimeState state, List<CoreFundingPaymentView> payments,
+    public record FundingResult(TradingAccountRuntime state, List<CoreFundingPaymentView> payments,
                                 CoreFundingProgressView progress) {
         /**
          * 要求原运行时、明细和进度非空，并复制明细列表形成只读结果；运行时对象本身仍为原可变权威状态。

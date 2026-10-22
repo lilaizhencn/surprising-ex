@@ -1272,7 +1272,7 @@ public final class LinearPerpetualBenchmarkSupport {
             executedMessages = Math.addExact(executedMessages, operationWeight);
             acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
             acceptedCoreMessages = Math.incrementExact(acceptedCoreMessages);
-            int pendingBefore = state.pendingMatching.size();
+            int pendingBefore = state.pendingMatching().size();
             ClusterCommandWindow.Entry windowEntry = null;
             CoreResponse response;
             if (clusterMatchingPipeline
@@ -1298,8 +1298,8 @@ public final class LinearPerpetualBenchmarkSupport {
             long sequence = state.matchingSequence(command.header().commandId());
             if (windowEntry != null) clusterCommandWindow.bindSequence(windowEntry, sequence);
             boolean indirectSequence = false;
-            if (sequence == 0 && pendingBefore == 0 && state.pendingMatching.size() != 0) {
-                sequence = state.pendingMatching.firstSequence();
+            if (sequence == 0 && pendingBefore == 0 && state.pendingMatching().size() != 0) {
+                sequence = state.pendingMatching().firstSequence();
                 indirectSequence = true;
             }
             PendingCommand pending = new PendingCommand(
@@ -1379,8 +1379,8 @@ public final class LinearPerpetualBenchmarkSupport {
                     throw new IllegalStateException("matching timed out for "
                             + pending.command.header().messageType()
                             + " sequence=" + pending.sequence
-                            + " firstPending=" + state.pendingMatching.firstSequence()
-                            + " pendingCount=" + state.pendingMatching.size()
+                            + " firstPending=" + state.pendingMatching().firstSequence()
+                            + " pendingCount=" + state.pendingMatching().size()
                             + " submittedCount=" + submittedMatching.size());
                 }
                 MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, pending.sequence);
@@ -1437,8 +1437,8 @@ public final class LinearPerpetualBenchmarkSupport {
                             throw new IllegalStateException("matching batch completion crossed submission order: actual="
                                     + sequence + ", expected=" + (pending == null ? 0 : pending.sequence)
                                     + ", expectedType=" + (pending == null ? "none" : pending.command.header().messageType())
-                                    + ", coreHead=" + state.pendingMatching.firstSequence()
-                                    + ", corePending=" + state.pendingMatching.size()
+                                    + ", coreHead=" + state.pendingMatching().firstSequence()
+                                    + ", corePending=" + state.pendingMatching().size()
                                     + ", submitted=" + submittedMatching.size());
                         }
                         pending.response = response;
@@ -1602,11 +1602,11 @@ public final class LinearPerpetualBenchmarkSupport {
         }
 
         public int matchingCompletionHighWaterMark() {
-            return state.matcherPipeline.completionHighWaterMark();
+            return state.matcherPipeline().completionHighWaterMark();
         }
 
         public int matchingCompletionCapacity() {
-            return state.matcherPipeline.capacity();
+            return state.matcherPipeline().capacity();
         }
 
         public int dispatchedSettlementHighWaterMark() {

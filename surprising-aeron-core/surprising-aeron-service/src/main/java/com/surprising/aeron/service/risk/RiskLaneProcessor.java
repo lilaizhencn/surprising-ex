@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
@@ -37,7 +37,7 @@ public final class RiskLaneProcessor {
      * @param expectedUserRevision 上次保留累计值时的用户修订号，变化后必须重新估值该用户
      * @param expectedMarketRevision 上次保留累计值时的市场修订号，变化后不能沿用旧的跨仓累加值
      */
-    static Page scan(TradingRuntimeState runtime, RiskScanRuntime initial,
+    static Page scan(TradingAccountRuntime runtime, RiskScanRuntime initial,
                                         LongArrayList indexedUserIds,
                                         CoreInstrument changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
@@ -96,7 +96,7 @@ public final class RiskLaneProcessor {
      * @param creations 本批新增强平需求的有界容器，Owner 稍后按固定顺序分配编号
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和用户持仓
      */
-    private static UserPage processUser(TradingRuntimeState runtime,
+    private static UserPage processUser(TradingAccountRuntime runtime,
                                         RiskScanRuntime scan, UserRuntime user,
                                         CoreInstrument changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
@@ -226,7 +226,7 @@ public final class RiskLaneProcessor {
      * @param creations 本批新增强平需求的有界容器，Owner 稍后按固定顺序分配编号
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和用户持仓
      */
-    private static void updateIsolated(TradingRuntimeState runtime, long userId, String positionKey,
+    private static void updateIsolated(TradingAccountRuntime runtime, long userId, String positionKey,
                                        PositionRuntime position, CoreInstrument instrument,
                                        MarkPriceRuntime mark, RiskLiquidationBatch creations,
                                        RuntimeIdentityRegistry identities) {
@@ -263,7 +263,7 @@ public final class RiskLaneProcessor {
      * @param creations 本批新增强平需求的有界容器，Owner 稍后按固定顺序分配编号
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和用户持仓
      */
-    private static void putRiskAndLiquidation(TradingRuntimeState runtime, long userId, String positionKey,
+    private static void putRiskAndLiquidation(TradingAccountRuntime runtime, long userId, String positionKey,
                                               PositionRuntime position, CoreInstrument instrument,
                                               long priceSequence, long equity, long unrealized, long maintenance,
                                               long ratio, RiskLiquidationBatch creations,
@@ -335,7 +335,7 @@ public final class RiskLaneProcessor {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和用户持仓
      * @param result 本 Lane 复用的持仓估值暂存区，计算成功后覆盖其中的市场与金额字段
      */
-    private static boolean risk(TradingRuntimeState runtime, PositionRuntime position,
+    private static boolean risk(TradingAccountRuntime runtime, PositionRuntime position,
                                 RuntimeIdentityRegistry identities, PositionRiskScratch result) {
         // 当前持仓的币对整数编号，定位已有强平及行情缓存时使用。
         int symbolId = position.symbolId();
@@ -403,7 +403,7 @@ public final class RiskLaneProcessor {
      * @param users 按用户编号升序排列的当前 Lane 候选用户页
      * @param cursor 最后处理的用户或记录位置，查找时只返回它后面的下一项
      */
-    private static UserRuntime nextUser(TradingRuntimeState runtime, LongArrayList users, long cursor) {
+    private static UserRuntime nextUser(TradingAccountRuntime runtime, LongArrayList users, long cursor) {
         // 用户游标在有序页中的位置，命中时向后一项，未命中时取插入点。
         int slot = users.binarySearch(cursor);
         slot = slot >= 0 ? slot + 1 : -slot - 1;
@@ -417,7 +417,7 @@ public final class RiskLaneProcessor {
      * @param userId 当前被估值或需要定位持仓、冻结记录的用户编号
      * @param cursor 最后处理的持仓业务键，短横线表示尚未开始
      */
-    private static long nextPositionKey(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    private static long nextPositionKey(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                         long userId, String cursor) {
         return runtime.nextRiskPositionKey(userId, cursor, identities);
     }
@@ -428,7 +428,7 @@ public final class RiskLaneProcessor {
      * @param userId 当前被估值或需要定位持仓、冻结记录的用户编号
      * @param cursor 最后处理的冻结委托编号，0 表示尚未开始
      */
-    private static ReservationRuntime nextReservation(TradingRuntimeState runtime, long userId, long cursor) {
+    private static ReservationRuntime nextReservation(TradingAccountRuntime runtime, long userId, long cursor) {
         // 下一份冻结委托的编号，0 表示已没有后续冻结记录。
         long id = runtime.nextRiskReservationId(userId, cursor);
         return id == 0 ? null : runtime.reservation(id);
@@ -449,7 +449,7 @@ public final class RiskLaneProcessor {
         /** 本次扫描要求的市场修订号，进入用户处理时刷新，用来识别旧行情缓存。 */
         private long scanMarketRevision = Long.MIN_VALUE;
         /** 缓存所对应的运行时引用，防止同一暂存区误用另一运行时的市场数据。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 当前成功估值使用的行情序号，写风险记录和强平计划时带上它。 */
         private long priceSequence;
         /** 当前持仓的未实现盈亏，单位为结算资产最小整数单位。 */

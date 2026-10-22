@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.realtime;
 
+import com.surprising.aeron.config.RealtimeConfiguration;
+
 import com.surprising.aeron.client.AeronRealtimeReceiver;
 import com.surprising.aeron.client.AeronRealtimeSender;
 import com.surprising.aeron.client.RealtimeOutbox;
@@ -8,7 +10,6 @@ import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.realtime.state.RealtimeStateCapture;
 import com.surprising.product.api.ProductLine;
-import io.aeron.CommonContext;
 import io.aeron.cluster.service.Cluster;
 import lombok.Getter;
 import lombok.experimental.Accessors;
@@ -18,6 +19,7 @@ import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
  * Owner 交易状态与实时传输之间的边界，持有 outbox、发送/接收资源、请求队列、角色及已提交位置。外层只在允许读取已提交状态的空闲边界调用 poll；本类不重新计算账户资金，也不把网络发送完成当作交易提交条件。
  */
 public final class TradingRealtimeBoundary implements AutoCloseable {
+    private final RealtimeConfiguration configuration;
     /** 实时控制请求队列固定二百五十六槽，满时不另建无界暂存。 */
     private static final int REQUEST_CAPACITY = 256;
     /** 新发起实时快照或盘口请求之间的十毫秒最短间隔。 */
@@ -51,11 +53,16 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
      * @param productLine 此实时边界所属的唯一产品线
      */
     public TradingRealtimeBoundary(ProductLine productLine) {
+        this(productLine, RealtimeConfiguration.standalone());
+    }
+
+    public TradingRealtimeBoundary(ProductLine productLine, RealtimeConfiguration configuration) {
+        this.configuration = java.util.Objects.requireNonNull(configuration);
         this.productLine = java.util.Objects.requireNonNull(productLine, "product line is required");
     }
 
     /**
-     * 先更新角色、非负初始日志位置并重置请求节流，再读取 JVM 实时通道配置；通道为空或 outbox 已接入则不建资源。否则创建 outbox、接入状态捕获与发送器，控制通道非空时再创建请求接收器。
+     * 先更新角色、非负初始日志位置并重置请求节流，再使用已绑定的实时通道配置；通道为空或 outbox 已接入则不建资源。否则创建 outbox、接入状态捕获与发送器，控制通道非空时再创建请求接收器。
      * @param role 当前 Cluster 角色，用来决定是否为 Leader
      * @param logPosition 启动接入的原日志位置，负值按零处理
      * @param state 本产品线当前交易运行时，提供捕获、快照及盘口读取入口
@@ -64,21 +71,20 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
         leader = role == Cluster.Role.LEADER;
         committedPosition = Math.max(0, logPosition);
         nextSnapshotNanos = 0;
-        // JVM 配置的实时输出通道，空白则保持未创建传输资源
-        String channel = System.getProperty("surprising.realtime.channel", "");
-        if (channel.isBlank() || outbox != null) return;
-
-        outbox = new RealtimeOutbox(8192, 8 * 1024 * 1024);
-        capture = state.attachRealtime(outbox);
-        // 实时资源连接的 Aeron 目录，未配置取 Aeron 默认目录
-        String directory = System.getProperty("surprising.realtime.directory", CommonContext.getAeronDirectoryName());
-        sender = new AeronRealtimeSender(outbox, directory, channel,
-                Integer.getInteger("surprising.realtime.stream", 2101));
-        // 可选实时控制通道，空白不创建接收器
-        String controlChannel = System.getProperty("surprising.realtime.control-channel", "");
-        if (!controlChannel.isBlank()) {
-            controlReceiver = new AeronRealtimeReceiver(directory, controlChannel,
-                    Integer.getInteger("surprising.realtime.control-stream", 2102), this::acceptRequest);
+        if (configuration.channel().isEmpty() || outbox != null) return;
+        try {
+            outbox = new RealtimeOutbox(8192, 8 * 1024 * 1024);
+            capture = state.attachRealtime(outbox);
+            sender = new AeronRealtimeSender(outbox, configuration.directory(),
+                    configuration.channel(), configuration.stream());
+            if (!configuration.controlChannel().isEmpty()) {
+                controlReceiver = new AeronRealtimeReceiver(configuration.directory(), configuration.controlChannel(),
+                        configuration.controlStream(), this::acceptRequest);
+            }
+        } catch (RuntimeException | Error failure) {
+            try { close(); }
+            catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            throw failure;
         }
     }
 
@@ -188,22 +194,25 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
         return capture != null;
     }
 
-    /**
-     * 先清当前请求，再依次关闭控制接收器、发送器，最后解除捕获和 outbox 引用并禁用 Leader；关闭异常直接传播，没有统一 finally 保证后续资源继续关闭。
-     */
+    /** 依次关闭全部已创建资源，保留首个异常和后续清理故障；所有引用最终解除。 */
     @Override
     public void close() {
         requests.clear();
-        if (controlReceiver != null) {
-            controlReceiver.close();
-            controlReceiver = null;
-        }
-        if (sender != null) {
-            sender.close();
+        Throwable failure = null;
+        try { if (controlReceiver != null) controlReceiver.close(); }
+        catch (RuntimeException | Error problem) { failure = problem; }
+        finally { controlReceiver = null; }
+        try { if (sender != null) sender.close(); }
+        catch (RuntimeException | Error problem) {
+            if (failure == null) failure = problem;
+            else if (failure != problem) failure.addSuppressed(problem);
+        } finally {
             sender = null;
+            capture = null;
+            outbox = null;
+            leader = false;
         }
-        capture = null;
-        outbox = null;
-        leader = false;
+        if (failure instanceof Error error) throw error;
+        if (failure instanceof RuntimeException runtime) throw runtime;
     }
 }

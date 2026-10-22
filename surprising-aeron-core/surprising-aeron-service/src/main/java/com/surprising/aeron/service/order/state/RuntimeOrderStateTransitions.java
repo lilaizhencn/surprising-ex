@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
@@ -26,7 +26,7 @@ public final class RuntimeOrderStateTransitions {
      * @param commandId 原业务命令 UUID，用于订单和冻结归属
      * @param requiredReservation 已经计算的正数应冻结金额，账户写入时仍核对可用余额
      */
-    public static void place(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void place(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                       long userId, ResolvedPlaceOrder command, UUID commandId,
                       long requiredReservation) {
         if (runtime == null || identities == null || command == null || commandId == null || userId <= 0
@@ -56,7 +56,7 @@ public final class RuntimeOrderStateTransitions {
      * @param assetId 订单冻结资产的运行时编号
      */
     public static void placePrepared(
-            TradingRuntimeState runtime, long userId, ResolvedPlaceOrder command, UUID commandId,
+            TradingAccountRuntime runtime, long userId, ResolvedPlaceOrder command, UUID commandId,
             long requiredReservation, long clientKey, int symbolId, int assetId) {
         if (runtime == null || command == null || commandId == null || userId <= 0
                 || requiredReservation <= 0 || clientKey < 0 || symbolId < 0 || assetId < 0) {
@@ -102,7 +102,7 @@ public final class RuntimeOrderStateTransitions {
      * @param lifecycleSettled 该币对是否已完成到期结算，交给原准入规则检查
      * @param fundingInProgress 该币对资金费持仓截面是否仍在处理中
      */
-    public static OrderRuntime placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
+    public static OrderRuntime placeTriggerChildInLane(TradingAccountRuntime runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
             RuntimeIdentityRegistry identities, long clientKey, int assetId,
             boolean lifecycleSettled, boolean fundingInProgress) {
@@ -137,7 +137,7 @@ public final class RuntimeOrderStateTransitions {
      * @param assetId 订单冻结资产的运行时编号
      * @param coreSequence 触发、批次或拒单所属的正数 Core 命令序号，用来核对待完成预留
      */
-    public static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,
+    public static void reserveBatchOrderInLane(TradingAccountRuntime runtime, long userId,
             ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
             long clientKey, int assetId, long coreSequence) {
         // 当前命令实际持有的账户 Lane，必须与用户拓扑一致。
@@ -169,7 +169,7 @@ public final class RuntimeOrderStateTransitions {
      * @param userId 订单与冻结所属用户编号
      * @param orderId 需要取消或拒绝的原订单编号
      */
-    public static boolean cancel(TradingRuntimeState runtime, long userId, long orderId) {
+    public static boolean cancel(TradingAccountRuntime runtime, long userId, long orderId) {
         if (runtime == null || userId <= 0 || orderId <= 0) {
             throw new IllegalArgumentException("invalid runtime cancel order");
         }
@@ -196,7 +196,7 @@ public final class RuntimeOrderStateTransitions {
      * @param orderId 需要取消或拒绝的原订单编号
      * @param coreSequence 触发、批次或拒单所属的正数 Core 命令序号，用来核对待完成预留
      */
-    static void reject(TradingRuntimeState runtime, long userId, long orderId, long coreSequence) {
+    static void reject(TradingAccountRuntime runtime, long userId, long orderId, long coreSequence) {
         if (runtime == null || userId <= 0 || orderId <= 0 || coreSequence <= 0) {
             throw new IllegalArgumentException("invalid runtime rejected order");
         }

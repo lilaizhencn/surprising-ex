@@ -38,18 +38,14 @@ public final class SectionedCoreSnapshotCodec {
     public static final int BASE_SECTION_COUNT = 9;
     /** 九个固定段加最多六十四个账户 Lane 段的总段数上限。 */
     public static final int MAX_SECTION_COUNT = BASE_SECTION_COUNT + Long.SIZE;
-    /** 部署配置的快照总字节上限系统属性名，类初始化时读取一次。 */
-    public static final String MAX_SNAPSHOT_BYTES_PROPERTY = "surprising.aeron.snapshot.max-bytes";
     /** 未配置时的总字节上限一 GiB，用于限制异常或损坏快照的分配规模。 */
     public static final int DEFAULT_MAX_SNAPSHOT_BYTES = 1024 * 1024 * 1024;
-    /** 系统属性允许的最小总上限六十四 MiB，显式恢复器构造不使用此下限。 */
+    /** 部署配置允许的最小总上限六十四 MiB，显式恢复器构造不使用此下限。 */
     public static final int MIN_MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
-    /** 最大可配置字节数，保留数组实现需要的长度余量。 */
-    public static final int MAX_CONFIGURABLE_SNAPSHOT_BYTES = Integer.MAX_VALUE - 8;
-    /** 类初始化时确定的本部署总快照字节上限。 */
-    public static final int MAX_SNAPSHOT_BYTES = configuredMaximumSnapshotBytes();
+    /** 协议和数组实现允许的硬上限；部署预算在配置中独立绑定。 */
+    public static final int HARD_MAX_SNAPSHOT_BYTES = Integer.MAX_VALUE - 8;
     /** 按总上限扣除封套及最大数量段头得出的单段负载上限，总长度仍需额外核对。 */
-    public static final int MAX_SECTION_BYTES = MAX_SNAPSHOT_BYTES
+    public static final int HARD_MAX_SECTION_BYTES = HARD_MAX_SNAPSHOT_BYTES
             - ENVELOPE_LENGTH - MAX_SECTION_COUNT * SECTION_HEADER_LENGTH;
 
     /**
@@ -61,27 +57,6 @@ public final class SectionedCoreSnapshotCodec {
             throw new IllegalArgumentException("invalid account lane section count");
         }
         return BASE_SECTION_COUNT + accountLaneCount;
-    }
-
-    /**
-     * 类初始化时读取最大快照字节系统属性，未配置或空白使用一 GiB；非空值必须可解析且位于允许范围，否则直接使类初始化失败。
-     */
-    private static int configuredMaximumSnapshotBytes() {
-        // 最大快照字节系统属性原文，空白使用默认值。
-        String configured = System.getProperty(MAX_SNAPSHOT_BYTES_PROPERTY);
-        if (configured == null || configured.isBlank()) return DEFAULT_MAX_SNAPSHOT_BYTES;
-        // 解析后的 long 字节上限，范围检查后再转 int。
-        final long bytes;
-        try {
-            bytes = Long.parseLong(configured);
-        } catch (/* 配置不是合法 long 的异常，此处以明确配置消息使类初始化失败。 */ NumberFormatException invalid) {
-            throw new ExceptionInInitializerError("invalid " + MAX_SNAPSHOT_BYTES_PROPERTY + ": " + configured);
-        }
-        if (bytes < MIN_MAX_SNAPSHOT_BYTES || bytes > MAX_CONFIGURABLE_SNAPSHOT_BYTES) {
-            throw new ExceptionInInitializerError(MAX_SNAPSHOT_BYTES_PROPERTY + " must be in ["
-                    + MIN_MAX_SNAPSHOT_BYTES + ',' + MAX_CONFIGURABLE_SNAPSHOT_BYTES + "]");
-        }
-        return Math.toIntExact(bytes);
     }
 
     /**
@@ -134,6 +109,16 @@ public final class SectionedCoreSnapshotCodec {
         return recovery(snapshot).decode(expectedProductLine);
     }
 
+    public static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+        return recovery(snapshot, configuration.snapshot().maxBytes()).decode(expectedProductLine, configuration);
+    }
+
+    public static TradingCoreRuntime decodePassive(byte[] snapshot, ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+        return recovery(snapshot, configuration.snapshot().maxBytes()).decodePassive(expectedProductLine, configuration);
+    }
+
     /**
      * 完整接收并解析快照、核对产品线及组件配对后返回清单，不激活真实运行时；内部仍需解码状态并在返回时关闭临时终态保留索引。
      * @param snapshot 待探测或恢复的完整快照字节数组
@@ -148,9 +133,13 @@ public final class SectionedCoreSnapshotCodec {
      * @param snapshot 待探测或恢复的完整快照字节数组
      */
     private static RecoveryBuffer recovery(byte[] snapshot) {
+        return recovery(snapshot, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
+    }
+
+    private static RecoveryBuffer recovery(byte[] snapshot, int maximumSnapshotBytes) {
         if (snapshot == null) throw new ProtocolException("snapshot is null");
         // 接收整个快照的内部有界恢复缓冲。
-        RecoveryBuffer recovery = new RecoveryBuffer();
+        RecoveryBuffer recovery = new RecoveryBuffer(maximumSnapshotBytes);
         recovery.accept(new UnsafeBuffer(snapshot), 0, snapshot.length);
         return recovery;
     }
@@ -166,7 +155,7 @@ public final class SectionedCoreSnapshotCodec {
          * 以本部署配置的最大快照字节数创建增量恢复器。
          */
         public RecoveryBuffer() {
-            this(MAX_SNAPSHOT_BYTES);
+            this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
         }
 
         /**
@@ -193,6 +182,16 @@ public final class SectionedCoreSnapshotCodec {
          */
         public TradingCoreRuntime decode(ProductLine expectedProductLine) {
             return delegate.decode(expectedProductLine);
+        }
+
+        public TradingCoreRuntime decode(ProductLine expectedProductLine,
+                com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+            return delegate.decode(expectedProductLine, configuration);
+        }
+
+        public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
+                com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+            return delegate.decodePassive(expectedProductLine, configuration);
         }
 
         /**

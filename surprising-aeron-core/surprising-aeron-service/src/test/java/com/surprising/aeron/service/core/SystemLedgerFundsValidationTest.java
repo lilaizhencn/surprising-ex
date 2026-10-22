@@ -19,7 +19,7 @@ class SystemLedgerFundsValidationTest {
     @Test
     void unbalancedControlPostingFailsOnLedgerBeforeOwnerCanCommit() {
         // 本例账户与财库运行时，显式启动账本
-        var runtime = new TradingRuntimeState(LaneTopology.characterization());
+        var runtime = new TradingAccountRuntime(LaneTopology.characterization());
         runtime.bindOwner();
         runtime.startSystemLedgerLane();
         // 故意产生不守恒分账的匿名财务命令

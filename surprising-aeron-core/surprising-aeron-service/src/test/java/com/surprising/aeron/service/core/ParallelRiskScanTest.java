@@ -338,7 +338,7 @@ class ParallelRiskScanTest {
      * @param index 按币对及 Lane 定位持仓用户的索引
      * @param budget 本批允许的工作量，小预算用来验证跨页继续而非一次处理完整用户
      */
-    private static int run(TradingRuntimeState runtime, RuntimeIdentityRegistry ids, PositionUserIndex index, int budget) {
+    private static int run(TradingAccountRuntime runtime, RuntimeIdentityRegistry ids, PositionUserIndex index, int budget) {
         runtime.enterAsynchronousCommandScope();
         try {
             // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。

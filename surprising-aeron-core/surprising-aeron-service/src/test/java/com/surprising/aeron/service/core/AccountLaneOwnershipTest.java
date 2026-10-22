@@ -20,7 +20,7 @@ class AccountLaneOwnershipTest {
     @Test
     void failedWorkerKeepsItsOriginalCauseWhenRuntimeIsClosed() {
         // 本例账户运行时，按当前显式或资源关闭路径结束工作资源
-        var runtime = new TradingRuntimeState(LaneTopology.characterization());
+        var runtime = new TradingAccountRuntime(LaneTopology.characterization());
         runtime.startAccountLanes();
         // 真实工作任务故意抛出的原运行时异常
         var original = new IllegalStateException("worker failure");
@@ -64,7 +64,7 @@ class AccountLaneOwnershipTest {
      */
     @Test
     void activeRuntimeRejectsOwnerScopesAndReadsButDispatchesQueriesToActualWorker() throws Exception {
-        try (/* 本例账户运行时，按当前显式或资源关闭路径结束工作资源 */ var runtime = new TradingRuntimeState(LaneTopology.characterization())) {
+        try (/* 本例账户运行时，按当前显式或资源关闭路径结束工作资源 */ var runtime = new TradingAccountRuntime(LaneTopology.characterization())) {
             runtime.bindOwner();
             runtime.startAccountLanes();
             assertThatThrownBy(() -> runtime.onLane(0, /* 本例原账户状态，启动前登记用户，交接期间由明确拥有者访问 */ lane -> lane.userCount())).isInstanceOf(IllegalStateException.class);

@@ -266,7 +266,7 @@ class ClusterCommandPipelineTest {
             // 确认 Matcher 已执行到阻塞点的门闩或 Future
             var entered = new CountDownLatch(1);
             // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-            var gate = state.matcherPipeline.readAtSubmissionFence(
+            var gate = state.matcherPipeline().readAtSubmissionFence(
                     state.matchingAdapter().matcherShardId("1"), () -> {
                         entered.countDown();
                         try {
@@ -282,9 +282,9 @@ class ClusterCommandPipelineTest {
             live.send(first);
             live.send(second);
             // 第一条命令仍占用的原命令槽
-            var firstPending = state.pendingMatching.get(state.matchingSequence(first.header().commandId()));
+            var firstPending = state.pendingMatching().get(state.matchingSequence(first.header().commandId()));
             // 第二条命令仍占用的原命令槽
-            var secondPending = state.pendingMatching.get(state.matchingSequence(second.header().commandId()));
+            var secondPending = state.pendingMatching().get(state.matchingSequence(second.header().commandId()));
             live.progressUntil(() -> firstPending.settlementEvent() != null
                     && firstPending.settlementEvent().dispatched()
                     && secondPending.settlementEvent() != null && secondPending.settlementEvent().dispatched());
@@ -335,7 +335,7 @@ class ClusterCommandPipelineTest {
                 // 确认 Matcher 已执行到阻塞点的门闩或 Future
                 var entered = new CountDownLatch(1);
                 // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-                var gate = state.matcherPipeline.readAtSubmissionFence(
+                var gate = state.matcherPipeline().readAtSubmissionFence(
                         state.matchingAdapter().matcherShardId("1"), () -> {
                             entered.countDown();
                             try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher timeout"); }
@@ -352,7 +352,7 @@ class ClusterCommandPipelineTest {
                     long sequence = state.matchingSequence(command.header().commandId());
                     live.progressUntil(() -> {
                         // 仍在生命周期中的原命令槽
-                        var pending = state.pendingMatching.get(sequence);
+                        var pending = state.pendingMatching().get(sequence);
                         // 普通、批量或当前子项持有的直达结算事件
                         var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
                         // 撮合前已经可见的准入回执，测试保留它检查身份及稳定输入
@@ -362,7 +362,7 @@ class ClusterCommandPipelineTest {
                         return event != null && event.dispatched() && receipt != null;
                     });
                     // 仍在生命周期中的原命令槽
-                    var pending = state.pendingMatching.get(sequence);
+                    var pending = state.pendingMatching().get(sequence);
                     // 批次所属项保存的可空准入订单副本
                     var admitted = batch ? pending.orderBatch.preparedAdmittedOrders[0] : null;
                     // 普通下单已解析的准入输入，批次分支为空
@@ -431,7 +431,7 @@ class ClusterCommandPipelineTest {
                 // 确认 Matcher 已执行到阻塞点的门闩或 Future
                 var entered = new CountDownLatch(1);
                 // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-                var gate = state.matcherPipeline.readAtSubmissionFence(state.matchingAdapter().matcherShardId("1"), () -> {
+                var gate = state.matcherPipeline().readAtSubmissionFence(state.matchingAdapter().matcherShardId("1"), () -> {
                     entered.countDown();
                     try {
                         if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("matcher gate timeout");
@@ -447,7 +447,7 @@ class ClusterCommandPipelineTest {
                 long sequence = state.matchingSequence(command.header().commandId());
                 live.progressUntil(() -> {
                     // 仍在生命周期中的原命令槽
-                    var pending = state.pendingMatching.get(sequence);
+                    var pending = state.pendingMatching().get(sequence);
                     // 普通、批量或当前子项持有的直达结算事件
                     var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
                     // 撮合前已经可见的准入回执，测试保留它检查身份及稳定输入
@@ -457,7 +457,7 @@ class ClusterCommandPipelineTest {
                     return event != null && event.dispatched() && receipt != null;
                 });
                 // 仍在生命周期中的原命令槽
-                var pending = state.pendingMatching.get(sequence);
+                var pending = state.pendingMatching().get(sequence);
                 // 普通、批量或当前子项持有的直达结算事件
                 var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
                 assertThat(event.direct()).isTrue();
@@ -489,7 +489,7 @@ class ClusterCommandPipelineTest {
                     assertThat(state.batches().orderBatchMatcherShard(pending.orderBatch))
                             .isEqualTo(state.matchingAdapter().matcherShardId("1"));
                 }
-                assertThat(state.pendingMatching.required(sequence).hasMatchingCompletion()).isFalse();
+                assertThat(state.pendingMatching().required(sequence).hasMatchingCompletion()).isFalse();
                 assertThat(live.responses).isEmpty();
                 assertThat(event.plan().tradeCount()).isPositive();
                 for (/* 当前需要核对客户身份已释放的子订单下标 */ int item = 0; item < (batch ? 20 : 1); item++) {
@@ -601,7 +601,7 @@ class ClusterCommandPipelineTest {
             // 确认 Matcher 已执行到阻塞点的门闩或 Future
             var entered = new CountDownLatch(1);
             // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-            var gate = live.service.state().matcherPipeline.readAtSubmissionFence(
+            var gate = live.service.state().matcherPipeline().readAtSubmissionFence(
                     live.service.state().matchingAdapter().matcherShardId(firstSymbol), () -> {
                         entered.countDown();
                         try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout"); }
@@ -672,25 +672,23 @@ class ClusterCommandPipelineTest {
                     registeredField.get(scope);
             // 故障注入使 native 返回真实的 ORDER_BOOK_ID 拒绝；不伪造成交或资金结果。
             int instrumentId = symbols.get("1");
-            live.service.state().matcherPipeline.call(shardId, () -> registered.add(instrumentId),
+            live.service.state().matcherPipeline().call(shardId, () -> registered.add(instrumentId),
                     TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
             // 故障注入前的请求账户全部余额，拒单后应完全恢复
             var before = live.service.state().tradingState().user(11).balances();
             // 需要触发原生拒绝的原始下单消息
             var request = live.place(11, "1", 1000, 80, 1, CoreOrderSide.BUY);
             try { live.apply(request); }
-            finally { live.service.state().matcherPipeline.call(shardId, () -> registered.remove(instrumentId),
+            finally { live.service.state().matcherPipeline().call(shardId, () -> registered.remove(instrumentId),
                     TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS); }
             assertThat(live.responses).hasSize(1);
             assertThat(live.responses.getFirst().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(live.responses.getFirst().resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
             assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(before);
             assertThat(live.service.state().tradingState().user(11).reservations()).isEmpty();
-            assertThat(live.service.state().pendingMatching.size()).isZero();
+            assertThat(live.service.state().pendingMatching().size()).isZero();
             // Owner 是否持有账户访问权的反射字段
-            var access = live.service.state().runtimeState().getClass().getDeclaredField("ownerLaneAccess");
-            access.setAccessible(true);
-            assertThat(access.getBoolean(live.service.state().runtimeState())).isFalse();
+            assertThat(live.service.state().runtimeState().ownerLaneAccess()).isFalse();
             try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 // 已释放资金或完成恢复后再次尝试的新订单消息
@@ -925,7 +923,7 @@ class ClusterCommandPipelineTest {
             // 当前仍在途的批次上下文，可能已经提前完成而为空
             var batch = state.batches().batch(sequence);
             // 仍在生命周期中的原命令槽
-            var pending = state.pendingMatching.get(sequence);
+            var pending = state.pendingMatching().get(sequence);
             if (batch != null) {
                 // 模拟延迟激活已开始提交、但 Lane 批量准入尚未被 owner 收集的边界。
                 if (!batch.commitStarted()) state.batches().beginOrderBatchCommitContext(batch, pending);
@@ -1017,10 +1015,8 @@ class ClusterCommandPipelineTest {
             // 交易动作开始前该账户全部资产余额，用于检查下撤单后恢复
             var beforeBalances = state.tradingState().user(11).balances();
             // 账户所有权交接代数的反射字段
-            var epoch = state.runtimeState().getClass().getDeclaredField("laneHandoffEpoch");
-            epoch.setAccessible(true);
             // 本轮交易动作开始前的账户交接代数
-            long before = epoch.getLong(state.runtimeState());
+            long before = state.runtimeState().laneHandoffEpoch();
             live.apply(live.place(11, "1", 101, 80, 1, CoreOrderSide.BUY));
             live.apply(live.message(CoreMessageType.AMEND_ORDER, 11, TradingCommandCodec.encodeAmendOrder(
                     new AmendOrderCommand(101, 102, "amend-102", 90L, 1L, CoreTimeInForce.GTC, false))));
@@ -1037,7 +1033,7 @@ class ClusterCommandPipelineTest {
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(live.responses.getLast(), 20)).isEqualTo(-1);
             live.apply(live.cancel(11, 999_999));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(epoch.getLong(state.runtimeState())).isEqualTo(before);
+            assertThat(state.runtimeState().laneHandoffEpoch()).isEqualTo(before);
             assertThat(state.tradingState().user(11).balances()).isEqualTo(beforeBalances);
             try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
@@ -1064,15 +1060,13 @@ class ClusterCommandPipelineTest {
             live.apply(live.place(user, "1", 102, 80, 1, CoreOrderSide.BUY));
             live.apply(live.place(maker, "1", 103, 100, 1, CoreOrderSide.SELL));
             // 账户所有权交接代数的反射字段
-            var epoch = live.service.state().runtimeState().getClass().getDeclaredField("laneHandoffEpoch");
-            epoch.setAccessible(true);
             // 本轮交易前记录的账户交接代数，动作完成后要求不增加
-            long handoffBefore = epoch.getLong(live.service.state().runtimeState());
+            long handoffBefore = live.service.state().runtimeState().laneHandoffEpoch();
             live.responses.clear();
             live.apply(live.message(CoreMessageType.AMEND_ORDER, user, TradingCommandCodec.encodeAmendOrder(
                     new AmendOrderCommand(102, 104, "reject-104", 100L, 1L, CoreTimeInForce.GTX, true))));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(epoch.getLong(live.service.state().runtimeState())).isEqualTo(handoffBefore);
+            assertThat(live.service.state().runtimeState().laneHandoffEpoch()).isEqualTo(handoffBefore);
             // 已拒绝改单响应解码出的订单结果，核对原单取消视图
             var result = CoreCommandResultCodec.decode(live.responses.getLast().data());
             assertThat(result.orders()).filteredOn(/* 从改单结果中筛选并检查取消状态的订单视图 */ order -> order.orderId() == 102)
@@ -1115,9 +1109,7 @@ class ClusterCommandPipelineTest {
                 long timestamp = command.header().submittedAtEpochMillis();
                 state.applyClusterCommand(command, timestamp, 0);
                 // Owner 是否持有账户访问权的反射字段
-                var access = state.runtimeState().getClass().getDeclaredField("ownerLaneAccess");
-                access.setAccessible(true);
-                assertThat(access.getBoolean(state.runtimeState())).as("batch=%s", batch).isFalse();
+                assertThat(state.runtimeState().ownerLaneAccess()).as("batch=%s", batch).isFalse();
                 // 当前原命令登记得到的完整 Core 序号
                 long sequence = state.matchingSequence(command.header().commandId());
                 assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus())
@@ -1175,7 +1167,7 @@ class ClusterCommandPipelineTest {
                 CoreResponse firstResponse = state.completeMatching(sequence, matching, timestamp, 0);
                 if (firstResponse != null) {
                     assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                    assertThat(state.pendingMatching.get(sequence)).isNull();
+                    assertThat(state.pendingMatching().get(sequence)).isNull();
                 }
                 state.applyClusterCommand(next, next.header().submittedAtEpochMillis(), 0);
                 if (firstResponse == null)
@@ -1262,16 +1254,14 @@ class ClusterCommandPipelineTest {
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
                 live.responses.clear();
                 // 账户交接代数的反射字段，用来证明交易工作留在固定 Lane
-                var handoff = com.surprising.aeron.service.core.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
-                handoff.setAccessible(true);
                 // 执行触发命令之前记录的账户交接代数
-                long beforeHandoff = handoff.getLong(live.service.state().runtimeState());
+                long beforeHandoff = live.service.state().runtimeState().laneHandoffEpoch();
                 try (/* 可空 Owner 账户表读取守卫，存在时在作用域结束还原表 */ var guard = recovery ? null : new OwnerAccountReadGuard(live.service.state().runtimeState())) {
                     if (internalScan) scanTriggers(live, 1);
                     else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                             CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
                 }
-                assertThat(handoff.getLong(live.service.state().runtimeState()))
+                assertThat(live.service.state().runtimeState().laneHandoffEpoch())
                         .as("trigger claim/reserve/settle stays on permanent Account Lane")
                         .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r ->
@@ -1351,14 +1341,12 @@ class ClusterCommandPipelineTest {
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
                 live.responses.clear();
                 // 账户交接代数的反射字段，用来证明交易工作留在固定 Lane
-                var handoff = com.surprising.aeron.service.core.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
-                handoff.setAccessible(true);
                 // 执行触发命令之前记录的账户交接代数
-                long beforeHandoff = handoff.getLong(live.service.state().runtimeState());
+                long beforeHandoff = live.service.state().runtimeState().laneHandoffEpoch();
                 if (internalScan) scanTriggers(live, 1);
                 else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                         CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
-                assertThat(handoff.getLong(live.service.state().runtimeState()))
+                assertThat(live.service.state().runtimeState().laneHandoffEpoch())
                         .as("trigger claim/reserve/settle stays on permanent Account Lane")
                         .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r ->
@@ -1427,16 +1415,14 @@ class ClusterCommandPipelineTest {
             // 当前 Core 中所属账户及风险扫描的权威运行时
             var runtime = live.service.state().runtimeState();
             // 账户所有权交接代数的反射字段
-            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
-            epoch.setAccessible(true);
             // 触发失败前导出的用户账户状态，用来检查资金没有残留变化
             var accountsBefore = live.service.state().tradingState().users();
             // 执行失败触发命令之前的账户交接代数
-            long before = epoch.getLong(runtime);
+            long before = runtime.laneHandoffEpoch();
             live.responses.clear();
             live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, user,
                     CoreTriggerOrderCodec.encodeExecute(9101, 1, 100, TIME)));
-            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
             assertThat(live.responses.getLast().commandStatus())
                     .isEqualTo(overflow ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9101).status())
@@ -1516,13 +1502,11 @@ class ClusterCommandPipelineTest {
                 // 当前 Core 中所属账户及风险扫描的权威运行时
                 var runtime = live.service.state().runtimeState();
                 // 账户所有权交接代数的反射字段
-                var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
-                epoch.setAccessible(true);
                 // 单项批次开始前的账户交接代数
-                long before = epoch.getLong(runtime);
+                long before = runtime.laneHandoffEpoch();
                 live.responses.clear();
                 live.apply(batch); serial.apply(batch);
-                assertThat(epoch.getLong(runtime)).as("single-item admission/settlement never takes Lane ownership")
+                assertThat(runtime.laneHandoffEpoch()).as("single-item admission/settlement never takes Lane ownership")
                         .isEqualTo(before);
                 // 单项批次响应解码得到的一项结果列表
                 var result = TradingOrderBatchCodec.decodeResult(live.responses.getFirst().data()).items();
@@ -1608,7 +1592,7 @@ class ClusterCommandPipelineTest {
             // 用于放行 Matcher 测试栅栏的门闩或 Future
             var releaseMatcher = new java.util.concurrent.CompletableFuture<Void>();
             // 在 Matcher 队列中先于订单执行的阻塞栅栏 Future
-            var matcherFence = live.service.state().matcherPipeline.readAtSubmissionFence(
+            var matcherFence = live.service.state().matcherPipeline().readAtSubmissionFence(
                     live.service.state().matchingAdapter().matcherShardId("1"), () -> {
                         releaseMatcher.join();
                         return true;
@@ -1651,7 +1635,7 @@ class ClusterCommandPipelineTest {
             // 当前原命令登记得到的完整 Core 序号
             long sequence = state.matchingSequence(command.header().commandId());
             // 登记后取得的原命令槽局部引用，当前用例随后没有再读取它
-            var context = state.pendingMatching.required(sequence);
+            var context = state.pendingMatching().required(sequence);
             // 完成入口已经取得的 Matcher 事实
             var result = CoreTestCompletion.awaitMatchingResult(state, sequence, TimeUnit.SECONDS.toNanos(5));
             assertThat(result).isNotNull();
@@ -1783,7 +1767,7 @@ class ClusterCommandPipelineTest {
             assertThat(window.decoded(command)).isSameAs(decoded);
             state.applyClusterCommand(command, TIME, 1000, decoded);
             // 仍在生命周期中的原命令槽
-            var pending = state.pendingMatching.get(state.matchingSequence(command.header().commandId()));
+            var pending = state.pendingMatching().get(state.matchingSequence(command.header().commandId()));
             assertThat(pending.decodedCommand()).isSameAs(decoded);
             // 当前已完成并可核对状态与逐项结果的 Core 响应
             var completed = CoreTestCompletion.completeMatchingSynchronously(state, pending.sequence(), TIME, 1000);
@@ -1808,7 +1792,7 @@ class ClusterCommandPipelineTest {
             // 依赖前缀账户的第三条原消息
             var c = live.place(11, "1", 3000, 79, 1, CoreOrderSide.BUY);
             // 实际 Matcher 管线组，用于安排精确执行栅栏
-            var matcher = live.service.state().matcherPipeline;
+            var matcher = live.service.state().matcherPipeline();
             // 确认 Matcher 已执行到阻塞点的门闩或 Future
             var entered = new CountDownLatch(1);
             // 阻塞工作线程后用于放行的门闩或 Future，清理路径负责释放
@@ -1825,7 +1809,7 @@ class ClusterCommandPipelineTest {
             try {
                 live.send(a);
                 // 仍在生命周期中的原命令槽
-                var pending = live.service.state().pendingMatching.get(live.service.state().matchingSequence(a.header().commandId()));
+                var pending = live.service.state().pendingMatching().get(live.service.state().matchingSequence(a.header().commandId()));
                 // 当前有界等待的 nanoTime 截止点
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 while (!pending.isMatchingSubmitted() && System.nanoTime() < deadline)
@@ -2163,7 +2147,7 @@ class ClusterCommandPipelineTest {
             // 当前原命令登记得到的完整 Core 序号
             long sequence = state.matchingSequence(first.header().commandId());
             // 仍在生命周期中的原命令槽
-            var pending = state.pendingMatching.get(sequence);
+            var pending = state.pendingMatching().get(sequence);
             // 普通、批量或当前子项持有的直达结算事件
             var event = pending.settlementEvent();
             assertThat(event).isNotNull();
@@ -2348,7 +2332,7 @@ class ClusterCommandPipelineTest {
             // 阻塞工作线程后用于放行的门闩或 Future，清理路径负责释放
             var release = new java.util.concurrent.CompletableFuture<Void>();
             // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-            var gate = live.service.state().matcherPipeline.readAtSubmissionFence(
+            var gate = live.service.state().matcherPipeline().readAtSubmissionFence(
                     live.service.state().matchingAdapter().matcherShardId("1"), () -> {
                         entered.complete(null);
                         release.orTimeout(5, TimeUnit.SECONDS).join();
@@ -2426,7 +2410,7 @@ class ClusterCommandPipelineTest {
                 // 阻塞工作线程后用于放行的门闩或 Future，清理路径负责释放
                 var release = new CountDownLatch(1);
                 // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-                var gate = state.matcherPipeline.readAtSubmissionFence(0, () -> {
+                var gate = state.matcherPipeline().readAtSubmissionFence(0, () -> {
                     entered.countDown();
                     try {
                         if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout");
@@ -2448,7 +2432,7 @@ class ClusterCommandPipelineTest {
                     assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                     live.send(amend);
                     // 仍在生命周期中的原命令槽
-                    var pending = state.pendingMatching.get(state.matchingSequence(amend.header().commandId()));
+                    var pending = state.pendingMatching().get(state.matchingSequence(amend.header().commandId()));
                     assertThat(pending).isNotNull();
                     // 等待当前单项直达事件已经准备的五秒截止点
                     long prepDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -2467,7 +2451,7 @@ class ClusterCommandPipelineTest {
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                     while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                     assertThat(event.complete()).as("Lane completes without an Owner turn").isTrue();
-                    assertThat(state.pendingMatching.get(pending.sequence())).isSameAs(pending);
+                    assertThat(state.pendingMatching().get(pending.sequence())).isSameAs(pending);
                 } finally { release.countDown(); }
                 assertThat(gate.join()).isOne();
                 live.tick(); serial.apply(amend);
@@ -2507,7 +2491,7 @@ class ClusterCommandPipelineTest {
             // 阻塞工作线程后用于放行的门闩或 Future，清理路径负责释放
             var release = new CountDownLatch(1);
             // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-            var gate = state.matcherPipeline.readAtSubmissionFence(0, () -> {
+            var gate = state.matcherPipeline().readAtSubmissionFence(0, () -> {
                 entered.countDown();
                 try {
                     if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout");
@@ -2523,7 +2507,7 @@ class ClusterCommandPipelineTest {
                 assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                 live.send(cancel);
                 // 仍在生命周期中的原命令槽
-                var pending = state.pendingMatching.get(state.matchingSequence(cancel.header().commandId()));
+                var pending = state.pendingMatching().get(state.matchingSequence(cancel.header().commandId()));
                 assertThat(pending).isNotNull();
                 // 普通、批量或当前子项持有的直达结算事件
                 var event = pending.orderBatch.itemSettlementEvent;
@@ -2541,7 +2525,7 @@ class ClusterCommandPipelineTest {
                 assertThat(TradingOrderBatchCodec.decodeResult(pending.orderBatch.preparedResponse,
                         pending.orderBatch.preparedResponseLength).items())
                         .allSatisfy(/* 当前批量响应的一项，读取其状态、订单或明细 */ item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
-                assertThat(state.pendingMatching.get(pending.sequence())).isSameAs(pending);
+                assertThat(state.pendingMatching().get(pending.sequence())).isSameAs(pending);
             } finally { release.countDown(); }
             assertThat(gate.join()).isOne();
             live.tick(); serial.apply(cancel);
@@ -2569,7 +2553,7 @@ class ClusterCommandPipelineTest {
             // 阻塞工作线程后用于放行的门闩或 Future，清理路径负责释放
             var release = new CountDownLatch(1);
             // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-            var gate = state.matcherPipeline.readAtSubmissionFence(0, () -> {
+            var gate = state.matcherPipeline().readAtSubmissionFence(0, () -> {
                 entered.countDown();
                 try {
                     if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout");
@@ -2585,7 +2569,7 @@ class ClusterCommandPipelineTest {
                 assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                 live.send(cancel);
                 // 仍在生命周期中的原命令槽
-                var pending = state.pendingMatching.get(state.matchingSequence(cancel.header().commandId()));
+                var pending = state.pendingMatching().get(state.matchingSequence(cancel.header().commandId()));
                 assertThat(pending).isNotNull();
                 // 普通、批量或当前子项持有的直达结算事件
                 var event = pending.settlementEvent();
@@ -2598,7 +2582,7 @@ class ClusterCommandPipelineTest {
                 // 此处不轮询 Owner，Matcher 必须自行唤醒账户并完成结算。
                 while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(event.complete()).isTrue();
-                assertThat(state.pendingMatching.get(pending.sequence())).isSameAs(pending);
+                assertThat(state.pendingMatching().get(pending.sequence())).isSameAs(pending);
             } finally { release.countDown(); }
             assertThat(gate.join()).isOne();
             live.tick(); serial.apply(cancel);
@@ -2644,7 +2628,7 @@ class ClusterCommandPipelineTest {
             // 用于放行 Matcher 测试栅栏的门闩或 Future
             var releaseMatcher = new java.util.concurrent.CompletableFuture<Void>();
             // 标准品种场景中先于订单执行的 Matcher 阻塞任务 Future，放行后检查完成
-            var fence = f.service.state().matcherPipeline.readAtSubmissionFence(
+            var fence = f.service.state().matcherPipeline().readAtSubmissionFence(
                     f.service.state().matchingAdapter().matcherShardId("1"), () -> {
                         releaseMatcher.join();
                         return true;
@@ -2715,7 +2699,7 @@ class ClusterCommandPipelineTest {
             // 当前 Fixture 内的实际 Core 运行时
             var state = live.service.state();
             // 在 Matcher 提交栅栏执行的测试任务 Future，放行后检查其结果
-            var gate = state.matcherPipeline.readAtSubmissionFence(0, () -> {
+            var gate = state.matcherPipeline().readAtSubmissionFence(0, () -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout"); }
                 catch (/* 等待 Matcher 测试门闩时发生的中断异常，转为运行失败 */ InterruptedException error) { throw new IllegalStateException(error); }
@@ -2769,7 +2753,7 @@ class ClusterCommandPipelineTest {
             // 清理路径保留的门闩，当前用例未安排线程等待它，不代表实际阻塞了账户
             var releaseLanes = new CountDownLatch(1);
             // 独立结算预派发场景的 Matcher 阻塞 Future
-            var matcherGate = state.matcherPipeline.readAtSubmissionFence(0, () -> {
+            var matcherGate = state.matcherPipeline().readAtSubmissionFence(0, () -> {
                 matcherEntered.countDown();
                 try { if (!releaseMatcher.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout"); }
                 catch (/* 等待 Matcher 测试门闩时发生的中断异常，转为运行失败 */ InterruptedException error) { throw new IllegalStateException(error); }
@@ -2788,10 +2772,10 @@ class ClusterCommandPipelineTest {
                 long secondSequence = state.matchingSequence(second.header().commandId());
                 // 当前有界等待的 nanoTime 截止点
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while ((!state.pendingMatching.get(firstSequence).isMatchingSubmitted()
-                        || !state.pendingMatching.get(secondSequence).isMatchingSubmitted()) && System.nanoTime() < deadline)
+                while ((!state.pendingMatching().get(firstSequence).isMatchingSubmitted()
+                        || !state.pendingMatching().get(secondSequence).isMatchingSubmitted()) && System.nanoTime() < deadline)
                     live.service.pollCommands();
-                assertThat(state.pendingMatching.get(secondSequence).isMatchingSubmitted()).isTrue();
+                assertThat(state.pendingMatching().get(secondSequence).isMatchingSubmitted()).isTrue();
                 // Matcher 阻塞时，有序直达邮箱已排到账户。
                 // 此后再追加的 Lane 阻塞任务会排在这些邮箱后，不能用它抢先阻塞当前交接。
                 deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
@@ -2799,7 +2783,7 @@ class ClusterCommandPipelineTest {
                     live.service.pollCommands();
                 assertThat(state.commits.dispatchedSettlementInFlight()).isEqualTo(2);
                 assertThat(live.responses).isEmpty();
-                assertThat(state.pendingMatching.firstSequence()).isEqualTo(firstSequence);
+                assertThat(state.pendingMatching().firstSequence()).isEqualTo(firstSequence);
             } finally { releaseMatcher.countDown(); releaseLanes.countDown(); }
             live.tick(); serial.apply(first); serial.apply(second);
             assertThat(matcherGate.join()).isOne();
@@ -2865,12 +2849,10 @@ class ClusterCommandPipelineTest {
             // 当前 Core 中所属账户及风险扫描的权威运行时
             var runtime = live.service.state().runtimeState();
             // 账户所有权交接代数的反射字段
-            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
-            epoch.setAccessible(true);
             // 触发扫描前的资金状态哈希，扫描完成后必须相同
             long funds = com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(live.service.state().tradingState());
             // 当前分段开始前的账户交接代数，中途恢复快照后重新取基线
-            long before = epoch.getLong(runtime);
+            long before = runtime.laneHandoffEpoch();
             live.sequence += 1000; // 后续命令时间越过条件单有效期及新标记价时间。
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
@@ -2898,13 +2880,13 @@ class ClusterCommandPipelineTest {
                         assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                     }
                     resumed = true;
-                    before = epoch.getLong(runtime);
+                    before = runtime.laneHandoffEpoch();
                 } else {
                     resumed |= scan.triggerOcoOrderId() != 0;
                     live.apply(command);
                 }
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                assertThat(epoch.getLong(runtime)).isEqualTo(before);
+                assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
             }
             assertThat(resumed).as("cross-command OCO continuation exercised").isTrue();
             assertThat(runtime.firstIncompleteRiskScan()).isNull();

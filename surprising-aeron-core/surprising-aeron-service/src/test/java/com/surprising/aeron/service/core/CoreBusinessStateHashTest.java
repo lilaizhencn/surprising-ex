@@ -72,10 +72,10 @@ class CoreBusinessStateHashTest {
             long expected = TradingCoreRuntime.canonicalBusinessStateHash(base, policies, orderedTransfers);
             assertThat(expected).isNotEqualTo(TradingCoreRuntime.canonicalBusinessStateHash(base, policies, Map.of()));
             assertThat(expected).isNotEqualTo(TradingCoreRuntime.canonicalBusinessStateHash(base, Map.of(), orderedTransfers));
-            assertThat(core.runtimeState.ownerLaneAccess).isFalse();
+            assertThat(core.runtimeState.ownerLaneAccess()).isFalse();
             assertThatThrownBy(() -> core.runtimeState.pendingTransfersSnapshot()).isInstanceOf(IllegalStateException.class);
             assertThat(core.stateHash()).isEqualTo(expected);
-            assertThat(core.runtimeState.ownerLaneAccess).isFalse();
+            assertThat(core.runtimeState.ownerLaneAccess()).isFalse();
             assertThatThrownBy(() -> core.runtimeState.pendingTransfersSnapshot()).isInstanceOf(IllegalStateException.class);
             assertThat(CoreTestCompletion.applyAsynchronously(core, command).status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(core.stateHash()).isEqualTo(expected);
@@ -85,7 +85,7 @@ class CoreBusinessStateHashTest {
             long epoch = core.runtimeState.laneHandoffEpoch();
             try {
                 assertThat(core.stateHash()).isEqualTo(expected);
-                assertThat(core.runtimeState.ownerLaneAccess).isTrue();
+                assertThat(core.runtimeState.ownerLaneAccess()).isTrue();
                 assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(epoch);
             } finally { core.runtimeState.releaseOwnerLaneAccess(); }
 
@@ -101,7 +101,7 @@ class CoreBusinessStateHashTest {
             apply(core, CoreMessageType.ADJUST_BALANCE, first,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
             assertThat(core.stateHash()).isNotEqualTo(completedHash);
-            assertThat(core.runtimeState.ownerLaneAccess).isFalse();
+            assertThat(core.runtimeState.ownerLaneAccess()).isFalse();
             core.assertClusterCallbackComplete();
         }
     }

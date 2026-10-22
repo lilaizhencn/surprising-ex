@@ -173,7 +173,7 @@ class CoreSelfTradePrefixTest {
                     var trade = place(core, taker, 102, CoreOrderSide.BUY, priorFill);
                     assertThat(submit(core, trade).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                     // 先前成交在原撮合环中的命令槽，观察已发布与已结算完成的区别
-                    var tradeSlot = core.pendingMatching.get(core.matchingSequence(trade.header().commandId()));
+                    var tradeSlot = core.pendingMatching().get(core.matchingSequence(trade.header().commandId()));
                     // 当前等待 Matcher 发布或收齐终态的五秒单调时钟截止值
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                     while (!tradeSlot.settlementEvent().ready()) {
@@ -193,7 +193,7 @@ class CoreSelfTradePrefixTest {
                 releaseMaker.countDown();
                 // 当前等待 Matcher 发布或收齐终态的五秒单调时钟截止值
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (core.pendingMatching.size() != 0) {
+                while (core.pendingMatching().size() != 0) {
                     core.commits.commitReadyMatching(16, TIME, sequence, false,
                             (/* 当前子单业务 ID，或终态接收回调提供的 Core 序号 */ id, /* 当前批次或提交回调提供的原最终响应 */ response) -> terminals.put(id, response.commandStatus()));
                     if (System.nanoTime() >= deadline) throw new AssertionError("self-trade prefix did not finish");

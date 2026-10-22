@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.account;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.command.AccountLaneOperationType;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
@@ -23,7 +23,7 @@ public final class ControlLaneDispatcher {
     /** long 数组元素的 VarHandle，完成发布用 release、Owner 观察用 acquire。 */
     private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
     /** 持有控制命令生命周期与发布水位的运行时。 */
-    private final TradingRuntimeState owner;
+    private final TradingAccountRuntime owner;
     /** 按实际账户 Lane 编号排列的复用控制任务槽。 */
     private LaneControlTask[] tasks;
     /** 每 Lane 间隔存放的完成标记，零未完成、非零已发布结果。 */
@@ -121,7 +121,7 @@ public final class ControlLaneDispatcher {
             if (!owner.accountLanesStarted()) {
                 tasks[laneId].execute(owner.accountLane(laneId));
             } else {
-                owner.laneWorkers[laneId].submit(tasks[laneId]);
+                owner.submitAccountCommand(laneId, tasks[laneId]);
             }
         }
     }

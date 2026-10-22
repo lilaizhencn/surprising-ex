@@ -6,7 +6,7 @@ import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.LaneClientIdentities;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import java.util.Collections;
@@ -111,7 +111,7 @@ public final class RuntimeIdentityRegistry {
         clientTopology = java.util.Objects.requireNonNull(topology, "topology");
     }
     /** 客户端身份权威表所在运行时，尚未绑定时为空。 */
-    private TradingRuntimeState clientRuntime;
+    private TradingAccountRuntime clientRuntime;
 
     /** 仅独立冷构建按用户保存的身份表，成功迁入运行时后清空并释放。 */
     private org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<LaneClientIdentities> unboundClients;
@@ -120,7 +120,7 @@ public final class RuntimeIdentityRegistry {
      * 仅在新旧账户工作线程均未启动时迁移客户端身份：先导入新运行时，成功后清旧表并切换权威引用。导入失败保留旧来源，不发布不完整的新运行时。
      * @param runtime 要接入客户端身份的冷运行时，账户线程尚未启动
      */
-    public void bindClientLanes(TradingRuntimeState runtime) {
+    public void bindClientLanes(TradingAccountRuntime runtime) {
         assertOwner();
         if (clientRuntime == runtime) return;
         if (runtime.accountLanesStarted() || clientRuntime != null && clientRuntime.accountLanesStarted())

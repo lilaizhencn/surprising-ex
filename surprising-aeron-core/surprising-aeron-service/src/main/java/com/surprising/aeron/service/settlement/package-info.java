@@ -15,7 +15,7 @@
  *       RuntimeDerivativeMatchProcessor，衍生品金额由 RuntimeDerivativeFillCalculator
  *       按产品计算；MatcherSettlementChanges 整理终态、修订及资金增量，Lane 交回完成位。</li>
  *   <li>4.5：Event.submitTreasurySettlement 登记财务槽，账户完成后核对资金并应用系统差额。</li>
- *   <li>4.6：Owner 等发布、账户和财务工作完成，经 TradingRuntimeState.collectMatcherSettlement
+ *   <li>4.6：Owner 等发布、账户和财务工作完成，经 TradingAccountRuntime.collectMatcherSettlement
  *       收集变化，交给 orchestration.trade.commit 按命令顺序发布终态。</li>
  * </ol>
  *

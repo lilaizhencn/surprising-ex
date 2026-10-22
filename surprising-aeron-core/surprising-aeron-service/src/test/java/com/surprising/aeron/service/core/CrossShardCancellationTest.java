@@ -84,7 +84,7 @@ class CrossShardCancellationTest {
             // 第一品种所在的 Matcher 分片，测试通过控制调用阻塞它。
             int shard = state.matchingAdapter.matcherShardId(first);
             // 阻塞控制调用的负 token，放行后须先收集该队头结果。
-            long token = state.matcherPipeline.submitControl(shard, () -> {
+            long token = state.matcherPipeline().submitControl(shard, () -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("blocked matcher timed out"); }
                 catch (/* 测试阻塞控制调用等待中断，转换为 AssertionError。 */ InterruptedException failure) { throw new AssertionError(failure); }
@@ -98,18 +98,18 @@ class CrossShardCancellationTest {
                 assertThat(release.getCount()).isOne();
                 // 轮询跨分片撤单开始标记的两秒截止点。
                 long checkDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (!state.pendingMatching.get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted()) {
+                while (!state.pendingMatching().get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted()) {
                     if (System.nanoTime() >= checkDeadline) throw new AssertionError("liquidation Lane check timeout");
                     state.matchingProgress.progressPlaceBatchAdmissions();
                     Thread.onSpinWait();
                 }
-                assertThat(state.pendingMatching.get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted()).isTrue();
+                assertThat(state.pendingMatching().get(state.matchingSequence(batch.header().commandId())).crossShardCancellationStarted()).isTrue();
                 release.countDown();
                 // 收集阻塞控制动作完成结果的两秒截止点。
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 // 控制调用轮询返回的可空结果，最终必须是 Boolean.TRUE。
                 Object complete;
-                do { complete = state.matcherPipeline.pollControl(shard, token); Thread.onSpinWait(); }
+                do { complete = state.matcherPipeline().pollControl(shard, token); Thread.onSpinWait(); }
                 while (complete == null && System.nanoTime() < deadline);
                 assertThat(complete).isEqualTo(Boolean.TRUE);
                 // 放行后由测试完成器收齐的强平批次终态，要求 APPLIED。

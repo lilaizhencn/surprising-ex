@@ -14,7 +14,7 @@ public final class BenchmarkMatchingAwait {
         if (state.fatalFailure() != null) return null;
         if (timeoutNanos <= 0) return null;
         long deadline = System.nanoTime() + timeoutNanos;
-        CommandSlot pending = state.pendingMatching.get(sequence);
+        CommandSlot pending = state.pendingMatching().get(sequence);
         while (pending != null && state.matchingFlow.placeAdmissionOutstanding(pending)
                 && !state.matchingFlow.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
             state.matchingProgress.progressPlaceBatchAdmissions();
@@ -22,7 +22,7 @@ public final class BenchmarkMatchingAwait {
         }
         if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         int idle = 0;
-        while (state.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
+        while (state.pendingMatching().contains(sequence) && System.nanoTime() < deadline) {
             state.matchingProgress.drainMatchingCompletions();
             if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
             var result = state.takeMatchingResult(sequence);

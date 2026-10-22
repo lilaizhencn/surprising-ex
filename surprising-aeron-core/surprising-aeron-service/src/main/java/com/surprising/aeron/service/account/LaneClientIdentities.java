@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.account;
 
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import java.util.Arrays;
 import java.util.Map;
@@ -192,7 +192,7 @@ public final class LaneClientIdentities {
      * 把存活行连同引用次数按目标拓扑复制到未发布的目标 Lane，逐目标校验所有者；本方法不清源表，全部成功后的源清理由字典重绑定流程负责。
      * @param target 尚未发布、已准备好 Lane 拓扑的目标运行时
      */
-    public void copyTo(TradingRuntimeState target) {
+    public void copyTo(TradingAccountRuntime target) {
         assertOwner();
         for (/* 本次查找、导入或遍历使用的身份数组下标，只有引用非零的行才存活。 */ int row = 0; row < nextRow; row++) {
             if (references[row] == 0) continue;

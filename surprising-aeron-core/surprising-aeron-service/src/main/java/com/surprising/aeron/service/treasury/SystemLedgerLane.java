@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.treasury;
 
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration.LedgerWaitStrategy;
+
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -26,13 +29,6 @@ public final class SystemLedgerLane implements AutoCloseable {
          */
         default boolean ready() { return true; }
     }
-
-    /** 账本等待策略的 JVM 属性名，只接受 BUSY_SPIN 或 BLOCKING。 */
-    private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.system-ledger-wait-strategy";
-    /**
-     * 账本没有可执行队首时采用的等待方式，由 JVM 属性在构造时固定。
-     */
-    public enum WaitStrategy { /** 没有可执行队首时持续忙等，不进入定时停车。 */ BUSY_SPIN, /** 先有界忙等，再按停车标记唤醒或每次约一百微秒定时复查。 */ BLOCKING }
 
     /**
      * 序号值之前的代码布局填充层，不保存任何资金或命令状态。
@@ -119,7 +115,7 @@ public final class SystemLedgerLane implements AutoCloseable {
     /** 原财库所有权迁移时同步迁移账本独占业务索引的回调。 */
     private final Consumer<Thread> businessOwnerBinder;
     /** 构造时读取并固定的忙等或阻塞等待方式。 */
-    private final WaitStrategy waitStrategy;
+    private final LedgerWaitStrategy waitStrategy;
     /** 仅生产者使用的所有权记录，true 时账本线程无已发布工作，Owner 持原财库内联执行。 */
     private boolean producerHoldsLedger;
     /** 是否继续运行的 volatile 标记，关闭或故障置 false。 */
@@ -152,6 +148,12 @@ public final class SystemLedgerLane implements AutoCloseable {
      */
     public SystemLedgerLane(TreasuryRuntime ledger, int capacity, Consumer<Throwable> failurePublisher,
                      Consumer<Thread> businessOwnerBinder) {
+        this(ledger, capacity, failurePublisher, businessOwnerBinder,
+                CoreRuntimeConfiguration.standalone().systemLedgerWaitStrategy());
+    }
+
+    public SystemLedgerLane(TreasuryRuntime ledger, int capacity, Consumer<Throwable> failurePublisher,
+            Consumer<Thread> businessOwnerBinder, LedgerWaitStrategy waitStrategy) {
         if (ledger == null || capacity <= 0 || failurePublisher == null || businessOwnerBinder == null)
             throw new IllegalArgumentException("system ledger, capacity and failure publisher are required");
         this.businessOwnerBinder = businessOwnerBinder;
@@ -162,7 +164,7 @@ public final class SystemLedgerLane implements AutoCloseable {
         this.ring = new Entry[ringSize];
         this.mask = ringSize - 1;
         this.failurePublisher = failurePublisher;
-        this.waitStrategy = configuredWaitStrategy();
+        this.waitStrategy = java.util.Objects.requireNonNull(waitStrategy);
         producer = Thread.currentThread();
         thread = new Thread(this::run, "core-system-ledger-lane");
         thread.setDaemon(true);
@@ -202,7 +204,7 @@ public final class SystemLedgerLane implements AutoCloseable {
             producerHoldsLedger = false;
         }
         producerSequence.value = nextSeq;
-        if (waitStrategy == WaitStrategy.BLOCKING && parked) {
+        if (waitStrategy == LedgerWaitStrategy.BLOCKING && parked) {
             LockSupport.unpark(thread);
         }
         return true;
@@ -301,7 +303,7 @@ public final class SystemLedgerLane implements AutoCloseable {
                 }
                 if (!running && head != null)
                     throw new IllegalStateException("system ledger stopped before settlement was ready");
-                if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+                if (waitStrategy == LedgerWaitStrategy.BUSY_SPIN) {
                     Thread.onSpinWait();
                     continue;
                 }
@@ -324,20 +326,6 @@ public final class SystemLedgerLane implements AutoCloseable {
         } finally {
             ledger.transferOwner(null);
             started = true;
-        }
-    }
-
-    /**
-     * 读取 JVM 等待策略属性，去首尾空白并转大写，未配置默认 BUSY_SPIN；非法值按配置错误拒绝。
-     */
-    private static WaitStrategy configuredWaitStrategy() {
-        // 从 JVM 属性取得的等待策略文本，缺失时为 BUSY_SPIN。
-        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BUSY_SPIN.name());
-        try {
-            return WaitStrategy.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
-        } catch (/* 非法等待策略转换时捕获的异常，用来说明配置错误。 */ RuntimeException failure) {
-            throw new IllegalArgumentException(
-                    WAIT_STRATEGY_PROPERTY + " must be BUSY_SPIN or BLOCKING", failure);
         }
     }
 

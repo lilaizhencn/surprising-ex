@@ -65,7 +65,7 @@ public final class OrderBatchExecutor {
      */
     public OrderBatchPending batch(long sequence) {
         // 按原序号取得或随当前项更新的命令槽
-        CommandSlot pending = owner.pendingMatching.get(sequence);
+        CommandSlot pending = owner.pendingMatching().get(sequence);
         return pending == null ? null : pending.orderBatch;
     }
 
@@ -76,7 +76,7 @@ public final class OrderBatchExecutor {
      */
     void registerBatch(CommandSlot pending, OrderBatchPending batch) {
         if (pending.orderBatch != null || pending.sequence() != batch.sequence
-                || owner.pendingMatching.get(batch.sequence) != pending
+                || owner.pendingMatching().get(batch.sequence) != pending
                 || batch.previousBatch != null || batch.nextBatch != null
                 || lastBatch != null && lastBatch.sequence >= batch.sequence)
             throw new IllegalStateException("invalid batch command registration");
@@ -113,7 +113,7 @@ public final class OrderBatchExecutor {
      */
     public void clearPendingBatches() {
         while (firstBatch != null)
-            unregisterBatch(owner.pendingMatching.get(firstBatch.sequence), firstBatch);
+            unregisterBatch(owner.pendingMatching().get(firstBatch.sequence), firstBatch);
     }
 
     /** 各品种最新在途流水批次引用，辅助保持既有依赖，不保存订单事实。 */
@@ -161,16 +161,16 @@ public final class OrderBatchExecutor {
         owner.matchingFlow.putPendingMatching(pending);
         owner.admissions().registerPendingLifecycle(pending);
         registerBatch(pending, batch);
-        owner.pendingMatching.registerSubmission(sequence, orderBatchMatcherShard(batch));
+        owner.pendingMatching().registerSubmission(sequence, orderBatchMatcherShard(batch));
         owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
         // 激活时直接得到的可空整批终态
         CoreResponse completed = tryActivatePipelinedOrderBatch(batch, pending)
                 ? null
-                : !pending.clusterIndependent && owner.pendingMatching.firstSequence() == sequence
+                : !pending.clusterIndependent && owner.pendingMatching().firstSequence() == sequence
                 ? activateOrderBatch(batch, pending, false) : null;
         if (completed != null) return completed;
         owner.runtimeState().releaseOwnerLaneAccess();
-        return message.matchingPendingResponse(TradingCoreRuntime.matchingPendingCode(), owner.appliedCommandCount());
+        return message.matchingPendingResponse(com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
@@ -214,7 +214,7 @@ public final class OrderBatchExecutor {
             return true;
         }
         if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE
-                || owner.pendingMatching.hasEarlierUser(batch.sequence, pending.command().header().userId())
+                || owner.pendingMatching().hasEarlierUser(batch.sequence, pending.command().header().userId())
                 || !pending.clusterIndependent && conflictsWithEarlierPipelinedBatch(batch)) {
             return false;
         }
@@ -341,8 +341,8 @@ public final class OrderBatchExecutor {
         int shard = owner.matchingAdapter().matcherShardId(batch.preparedSymbols.getFirst());
         batch.settlementEvent = preparePipelinedPlaceBatch(pending, batch, shard);
         batch.pipelinedPlaceBatchSubmission.prepare(this, pending, batch, userId, shard);
-        owner.matcherPipeline.submit(shard, pending.sequence(), batch.pipelinedPlaceBatchSubmission, batch.settlementEvent);
-        owner.pendingMatching.progressChanged();
+        owner.matcherPipeline().submit(shard, pending.sequence(), batch.pipelinedPlaceBatchSubmission, batch.settlementEvent);
+        owner.pendingMatching().progressChanged();
         batch.markPredispatched();
         pending.countPipelinedSettlement();
         owner.commits.dispatchedSettlementInFlight(owner.commits.dispatchedSettlementInFlight() + 1);
@@ -442,7 +442,7 @@ public final class OrderBatchExecutor {
                     batch.itemAdmission = null;
                 }
                 pending = pending.withPreMatchingCancellations(batch.currentPreMatchingCancellationOrderIds);
-                owner.pendingMatching.put(pending);
+                owner.pendingMatching().put(pending);
                 owner.matchingFlow.submitMatching(pending);
                 // 撮合跨回调完成；变更上下文归本序号持有，不能占用下一条命令的 owner。
                 owner.suspendMatchingCommitContext(pending);
@@ -718,7 +718,7 @@ public final class OrderBatchExecutor {
             batch.items.get(batch.nextIndex).captureAdmittedOrder(direct.admittedOrder());
             if (owner.realtimeCapture() != null) batch.items.get(batch.nextIndex).realtimeTakerOrder = batch.items.get(batch.nextIndex).admittedOrder;
         }
-        owner.matcherPipeline.submit(shard, pending.sequence(),
+        owner.matcherPipeline().submit(shard, pending.sequence(),
                 prepareOrderBatchMatchingCommand(
                         pending, batch, batch.items.get(batch.nextIndex), shard, direct), direct);
     }
@@ -778,7 +778,7 @@ public final class OrderBatchExecutor {
                 pending, batch, shard, finalChunk, end - start);
         batch.itemSettlementEvent = direct;
         batch.cancelBatchChunkSubmission.prepare(this, pending, batch, shard, start, chunkEnd, direct);
-        owner.matcherPipeline.submit(shard, pending.sequence(), batch.cancelBatchChunkSubmission, direct);
+        owner.matcherPipeline().submit(shard, pending.sequence(), batch.cancelBatchChunkSubmission, direct);
     }
 
     /**
@@ -792,7 +792,7 @@ public final class OrderBatchExecutor {
                                                     MatchingResult matchingResult,
                                                     long clusterTimestamp, long clusterPosition) {
         // 按原序号取得或随当前项更新的命令槽
-        CommandSlot pending = owner.pendingMatching.get(sequence);
+        CommandSlot pending = owner.pendingMatching().get(sequence);
         // 新借、查询或当前正在处理的批次上下文
         OrderBatchPending batch = batch(sequence);
         if (pending == null || batch == null || matchingResult == null) return null;
@@ -934,19 +934,6 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 中止发布标记，按本批检查点回滚未发布账户变化及预备客户、持仓身份；按参数决定是否结束批次变更作用域。不会撤销已经发生的 Matcher 事实。
-     * @param batch 本条批量命令的复用上下文
-     * @param endScope 回滚后是否同时结束账户批次变更作用域
-     */
-    void rollbackOrderBatchMutations(OrderBatchPending batch, boolean endScope) {
-        owner.commits.publication.abort();
-        owner.runtimeState().rollbackActiveCommand(batch.runtimeCheckpoint, batch.sequence);
-        batch.rollbackPreparedClientKeys(owner.identities());
-        owner.identities().rollbackPositionKeys(batch.positionIdentityCheckpoint);
-        if (endScope) owner.runtimeState().endOrderBatchMutationScope();
-    }
-
-    /**
      * 标记 Matcher 故障，清未登记触发子单并停止仍占用槽的撮合续步，结束批次账户作用域，再交原运行时生成致命恢复异常。调用方抛出该异常，不能继续当普通项拒绝处理。
      * @param batch 本条批量命令的复用上下文
      * @param pending 本批仍占用的命令槽
@@ -960,7 +947,7 @@ public final class OrderBatchExecutor {
         owner.matchingAdapter().poisonFromOwner("fatal order batch divergence sequence=" + batch.sequence
                 + " detail=" + detail);
         owner.admissions().clearQueuedMatching();
-        owner.pendingMatching.forEach(/* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value -> {
+        owner.pendingMatching().forEach(/* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value -> {
             if (value.claimed) {
                 value.resetMatchingContinuation();
             }
@@ -1180,7 +1167,7 @@ public final class OrderBatchExecutor {
         // 尚未提交后缀仍可能访问的 Matcher 分片位图
         long mask = 0;
         if (batch.pipelined && batch.sequence != 0
-                && owner.pendingMatching.get(batch.sequence).isMatchingSubmitted()) return 0;
+                && owner.pendingMatching().get(batch.sequence).isMatchingSubmitted()) return 0;
         // 排除当前已派发子项或撤单片段后的第一个后缀下标
         int firstUnsubmitted = batch.nextIndex;
         if (batch.itemSettlementEvent != null) {
@@ -1390,7 +1377,7 @@ public final class OrderBatchExecutor {
         unregisterPipelinedBatchSymbols(batch);
         releaseBatchAmendAdmission(batch);
         batch.clear();
-        if (orderBatchPendingPool.size() < TradingCoreRuntime.MAX_PENDING_MATCHING) orderBatchPendingPool.addFirst(batch);
+        if (orderBatchPendingPool.size() < owner.configuration().maxPendingMatching()) orderBatchPendingPool.addFirst(batch);
     }
 
     /**

@@ -4,7 +4,7 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -20,7 +20,7 @@ public final class RuntimeAccountStateTransitions {
      * @param userId 本次余额或划转操作的账户用户编号
      * @param command 包含业务资产及有符号变化金额的余额命令
      */
-    public static void adjustBalance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void adjustBalance(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                               long userId, BalanceAdjustmentCommand command) {
         if (runtime == null || identities == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime balance adjustment");
@@ -43,7 +43,7 @@ public final class RuntimeAccountStateTransitions {
      * @param assetId 本产品账户所使用的资产整数编号
      * @param deltaUnits 有符号可用余额变化金额，负数表示扣减
      */
-    static void adjustAccountBalance(TradingRuntimeState runtime, long userId, int assetId, long deltaUnits) {
+    static void adjustAccountBalance(TradingAccountRuntime runtime, long userId, int assetId, long deltaUnits) {
         // 当前资产的权威余额，首次入账时可以不存在。
         BalanceRuntime current = runtime.balance(userId, assetId);
         // 当前可用余额，资产还没有记录时按零处理。
@@ -72,7 +72,7 @@ public final class RuntimeAccountStateTransitions {
      * @param userId 本次余额或划转操作的账户用户编号
      * @param command 需要登记源侧转出的完整划转命令
      */
-    public static boolean transferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static boolean transferOut(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                long userId, TransferFundsCommand command) {
         if (identities == null) throw new IllegalArgumentException("transfer identities are required");
         // 通过幂等与来源校验准备的新待完成划转，null 表示同命令已登记。
@@ -93,7 +93,7 @@ public final class RuntimeAccountStateTransitions {
      * @param userId 本次余额或划转操作的账户用户编号
      * @param command 用于匹配已有待完成记录或新建记录的完整划转命令
      */
-    static TransferRuntime prepareTransferOut(TradingRuntimeState runtime, long userId,
+    static TransferRuntime prepareTransferOut(TradingAccountRuntime runtime, long userId,
                                               TransferFundsCommand command) {
         validateTransferSource(runtime, userId, command);
         // 同划转编号的已有待完成记录，用户及整个命令必须一致。
@@ -114,7 +114,7 @@ public final class RuntimeAccountStateTransitions {
      * @param userId 本次余额或划转操作的账户用户编号
      * @param command 包含源用户及源产品线的划转命令
      */
-    static void validateTransferSource(TradingRuntimeState runtime, long userId, TransferFundsCommand command) {
+    static void validateTransferSource(TradingAccountRuntime runtime, long userId, TransferFundsCommand command) {
         if (runtime == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid runtime transfer out");
         runtime.assertOwner();
@@ -130,7 +130,7 @@ public final class RuntimeAccountStateTransitions {
      * @param assetId 本产品账户所使用的资产整数编号
      * @param amountUnits 命令已经校验的正数转出金额，只从可用余额扣减
      */
-    static void debitTransferAccount(TradingRuntimeState runtime, long userId, int assetId, long amountUnits) {
+    static void debitTransferAccount(TradingAccountRuntime runtime, long userId, int assetId, long amountUnits) {
         // 源账户此资产的权威余额，缺失或可用不足时拒绝转出。
         BalanceRuntime balance = runtime.balance(userId, assetId);
         if (balance == null || balance.availableUnits() < amountUnits)
@@ -152,7 +152,7 @@ public final class RuntimeAccountStateTransitions {
      * @param userId 本次余额或划转操作的账户用户编号
      * @param command 包含目标用户、目标产品线、资产与入账金额的划转命令
      */
-    public static void transferIn(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void transferIn(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                            long userId, TransferFundsCommand command) {
         if (runtime == null || identities == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime transfer in");
@@ -172,7 +172,7 @@ public final class RuntimeAccountStateTransitions {
      * @param userId 本次余额或划转操作的账户用户编号
      * @param transferId 要确认完成的源侧待完成划转编号
      */
-    public static boolean completeTransfer(TradingRuntimeState runtime, long userId, long transferId) {
+    public static boolean completeTransfer(TradingAccountRuntime runtime, long userId, long transferId) {
         if (runtime == null || userId <= 0 || transferId <= 0) {
             throw new IllegalArgumentException("invalid runtime transfer completion");
         }

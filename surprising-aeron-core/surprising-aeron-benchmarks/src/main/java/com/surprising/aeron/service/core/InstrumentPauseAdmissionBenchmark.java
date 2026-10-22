@@ -87,7 +87,7 @@ public class InstrumentPauseAdmissionBenchmark {
         }
         long requested = core.matchingSequence(message.header().commandId());
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (core.pendingMatching.firstSequence() != 0) {
+        while (core.pendingMatching().firstSequence() != 0) {
             core.commits.commitReadyMatching(256, message.header().submittedAtEpochMillis(),
                     message.header().sourceSequence(), false,
                     (sequence, response) -> { if (sequence == requested) result[0] = response; });

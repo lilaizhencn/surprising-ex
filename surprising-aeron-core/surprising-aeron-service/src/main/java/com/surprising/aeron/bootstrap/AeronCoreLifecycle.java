@@ -1,6 +1,8 @@
 package com.surprising.aeron.bootstrap;
 
 import com.surprising.aeron.config.ClusterTopology;
+import com.surprising.aeron.config.CoreTransportConfiguration;
+import com.surprising.aeron.config.CoreTransportConfiguration.ServiceIdleStrategy;
 import com.surprising.aeron.controller.AeronTradingClusterService;
 import io.aeron.archive.Archive;
 import io.aeron.archive.ArchiveThreadingMode;
@@ -9,10 +11,8 @@ import io.aeron.cluster.ClusteredMediaDriver;
 import io.aeron.cluster.ConsensusModule;
 import io.aeron.cluster.service.ClusteredServiceContainer;
 import io.aeron.driver.MediaDriver;
-import io.aeron.driver.ThreadingMode;
 import io.aeron.exceptions.AeronException;
 import java.io.File;
-import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +44,8 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
     private final ClusterTopology topology;
     /** 接收复制日志和集群回调的交易服务，启动容器时交给 Aeron 托管。 */
     private final AeronTradingClusterService clusteredService;
+    /** Spring 启动时已绑定并校验的网络和线程配置。 */
+    private final CoreTransportConfiguration transport;
     /** 主线程等待的关闭信号；Spring 关闭和 Aeron 终止都唤醒同一个等待点。 */
     private final ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
 
@@ -54,7 +56,7 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
     @SuppressWarnings("try")
     public void startAndAwaitShutdown() {
         // 每个交易容器独立创建空闲等待策略；未配置时保留 Aeron 自己的默认策略。
-        Supplier<IdleStrategy> serviceIdleStrategy = serviceIdleStrategySupplier();
+        Supplier<IdleStrategy> serviceIdleStrategy = serviceIdleStrategySupplier(transport.service().idleStrategy());
         // 本成员自己的磁盘目录，归档和共识日志会继续放进不同子目录。
         File nodeDirectory = topology.nodeDirectory().toFile();
         // 本节点 MediaDriver 的共享内存目录名，不是磁盘日志的根目录。
@@ -63,7 +65,7 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
         // 配置实际负责网络收发和共享缓冲区的驱动，并统一接入组件错误处理。
         MediaDriver.Context mediaDriverContext = new MediaDriver.Context()
                 .aeronDirectoryName(aeronDirectoryName)
-                .threadingMode(coreThreadingMode())
+                .threadingMode(transport.core().threadingMode())
                 .clientLivenessTimeoutNs(coreClientLivenessTimeoutNs())
                 .publicationUnblockTimeoutNs(corePublicationUnblockTimeoutNs())
                 .termBufferSparseFile(false)
@@ -78,7 +80,7 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
                 .archiveDir(new File(nodeDirectory, "archive"))
                 .controlChannel(topology.archiveControlChannel())
                 .archiveClientContext(replicationArchiveContext)
-                .localControlChannel(localArchiveControlChannel())
+                .localControlChannel(transport.archiveLocalControlChannel())
                 .recordingEventsEnabled(false)
                 .recordChecksum(io.aeron.archive.checksum.Checksums.crc32c())
                 .replayChecksum(io.aeron.archive.checksum.Checksums.crc32c())
@@ -94,20 +96,15 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
 
         // 共识日志与集群元数据的子目录，与 Archive 录制目录分开。
         File clusterDirectory = new File(nodeDirectory, "cluster");
-        // 同时允许存在的客户端会话上限，不是单个会话的在途命令数量。
-        int maxConcurrentSessions = Integer.getInteger("surprising.aeron.max-concurrent-sessions", 64);
-        if (maxConcurrentSessions < 1 || maxConcurrentSessions > 1_024) {
-            throw new IllegalArgumentException("surprising.aeron.max-concurrent-sessions must be in [1,1024]");
-        }
         // 共识模块负责选主、复制和命令排序，产品线和成员编号必须与拓扑一致。
         ConsensusModule.Context consensusContext = new ConsensusModule.Context()
                 .clusterId(topology.clusterId())
                 .clusterMemberId(topology.nodeId())
                 .clusterMembers(topology.clusterMembers())
                 .clusterDir(clusterDirectory)
-                .ingressChannel(clusterIngressChannel())
+                .ingressChannel(transport.clusterIngressChannel())
                 .replicationChannel(topology.replicationChannel())
-                .maxConcurrentSessions(maxConcurrentSessions)
+                .maxConcurrentSessions(transport.maxConcurrentSessions())
                 .archiveContext(localArchiveClient.clone())
                 .errorHandler(errorHandler("consensus-module"));
 
@@ -184,53 +181,17 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
         };
     }
 
-    /** 依次读取 JVM 属性、环境变量和 CPU 数量默认值，决定 MediaDriver 如何安排工作线程。 */
-    static ThreadingMode coreThreadingMode() {
-        // 启动参数优先；只有没有显式设置时才读取环境变量或根据机器规模选择默认模式。
-        String configured = System.getProperty("surprising.aeron.core.threading-mode");
-        if (configured == null || configured.isBlank()) {
-            configured = System.getenv().get("AERON_CORE_THREADING_MODE");
-        }
-        if (configured == null || configured.isBlank()) {
-            configured = Runtime.getRuntime().availableProcessors() >= 12 ? "DEDICATED" : "SHARED_NETWORK";
-        }
-        try {
-            return ThreadingMode.valueOf(configured.trim().toUpperCase(Locale.ROOT));
-        } catch (/* 保留非法模式的原始原因，并在新错误中指出具体配置项。 */ IllegalArgumentException exception) {
-            throw new IllegalArgumentException(
-                    "surprising.aeron.core.threading-mode must be a valid Aeron ThreadingMode: " + configured,
-                    exception);
-        }
-    }
-
     /** 返回驱动判定客户端失去活跃状态的超时时间，单位为纳秒，当前为 30 秒。 */
     static long coreClientLivenessTimeoutNs() {
         return TimeUnit.SECONDS.toNanos(30);
     }
 
-    /** 读取交易服务专用的空闲策略配置，不改变 Consensus 或其他 Aeron 组件的全局配置。 */
-    static Supplier<IdleStrategy> serviceIdleStrategySupplier() {
-        // JVM 属性优先，空值时才读取环境变量；具体名称校验交给另一个重载处理。
-        String configured = System.getProperty("surprising.aeron.service.idle-strategy");
-        if (configured == null || configured.isBlank()) {
-            configured = System.getenv().get("AERON_SERVICE_IDLE_STRATEGY");
-        }
-        return serviceIdleStrategySupplier(configured);
-    }
-
-    /**
-     * 把配置名称转换成策略工厂，保证每个容器拿到自己的可变策略实例。
-     * @param configured 空值表示沿用 Aeron 默认值，否则只接受 BACKOFF 或 YIELDING
-     * @return 创建策略的工厂；null 表示不覆盖 Aeron 的默认策略
-     */
-    static Supplier<IdleStrategy> serviceIdleStrategySupplier(String configured) {
-        // 未配置时不强行设置策略，保留 Aeron 自带的工厂和全局属性行为。
-        if (configured == null || configured.isBlank()) return null;
-        return switch (configured.trim().toUpperCase(Locale.ROOT)) {
-            case "BACKOFF" -> () -> io.aeron.driver.Configuration.agentIdleStrategy("backoff", null);
-            case "YIELDING" -> YieldingIdleStrategy::new;
-            default -> throw new IllegalArgumentException(
-                    "surprising.aeron.service.idle-strategy must be BACKOFF or YIELDING: " + configured);
+    /** 每个交易容器独立创建可变等待策略，null 保留 Aeron 自己的默认工厂。 */
+    static Supplier<IdleStrategy> serviceIdleStrategySupplier(ServiceIdleStrategy strategy) {
+        if (strategy == null) return null;
+        return switch (strategy) {
+            case BACKOFF -> () -> io.aeron.driver.Configuration.agentIdleStrategy("backoff", null);
+            case YIELDING -> YieldingIdleStrategy::new;
         };
     }
 
@@ -239,33 +200,4 @@ public final class AeronCoreLifecycle implements ApplicationListener<ContextClos
         return TimeUnit.SECONDS.toNanos(60);
     }
 
-    /** 读取接收客户端命令的 Cluster ingress 通道，未配置时使用默认 UDP 通道。 */
-    static String clusterIngressChannel() {
-        return configuredChannel("surprising.aeron.cluster-ingress-channel",
-                "AERON_CLUSTER_INGRESS_CHANNEL", "aeron:udp?term-length=16m");
-    }
-
-    /** 读取节点内部访问 Archive 的控制通道，未配置时使用 IPC。 */
-    static String localArchiveControlChannel() {
-        return configuredChannel("surprising.aeron.archive-local-control-channel",
-                "AERON_ARCHIVE_LOCAL_CONTROL_CHANNEL", "aeron:ipc?term-length=1m");
-    }
-
-    /**
-     * 按 JVM 属性、环境变量、默认值的优先顺序读取通道，并拒绝明显不是 Aeron URI 的值。
-     * @param property JVM 系统属性名称
-     * @param environment 对应的环境变量名称
-     * @param defaultValue 两种来源都未提供时采用的通道 URI
-     */
-    private static String configuredChannel(String property, String environment, String defaultValue) {
-        // 只保存本次解析到的通道配置，去空格后再检查协议前缀。
-        String value = System.getProperty(property);
-        if (value == null || value.isBlank()) value = System.getenv(environment);
-        if (value == null || value.isBlank()) value = defaultValue;
-        value = value.trim();
-        if (!value.startsWith("aeron:")) {
-            throw new IllegalArgumentException(property + " must be an Aeron channel URI");
-        }
-        return value;
-    }
 }

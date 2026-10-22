@@ -39,7 +39,7 @@ flowchart LR
     O --> SN[snapshot: 账户 / Matcher / 幂等 / 游标]
 ```
 
-[`ProductTradingRulesRegistry`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/ProductTradingRulesRegistry.java) 按产品选择 `SpotTradingRules`、`LinearPerpetualTradingRules`、`InversePerpetualTradingRules`、`LinearDeliveryTradingRules`、`InverseDeliveryTradingRules`、`OptionTradingRules`。共用命令骨架不意味着共用资金公式、账户或风险模型。
+[`ProductTradingRulesRegistry`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/ProductTradingRulesRegistry.java) 为六条产品线分别保留规则实例：现货使用 `SpotTradingRules`，永续使用固定合约类型的 `PerpetualTradingRules`，交割使用固定合约类型的 `DeliveryTradingRules`，期权使用 `OptionTradingRules`。线性与反向金额仍由合约类型选择原公式，规则实例拒绝其他产品的合约；账户、订单簿和风险状态按产品隔离。
 
 ## 启动与配置
 
@@ -81,7 +81,11 @@ sequenceDiagram
 
 ### 配置入口
 
-需区分 Spring 绑定与源码直接读取的 JVM 配置：`System.getProperty` / `Integer.getInteger` 使用的参数应传 JVM `-D`；仅放进 YAML 或 `--参数` 不会自动生效。
+正式节点在启动时统一绑定并校验：`CoreConfiguration` 管拓扑，`CoreRuntimeConfiguration` 管执行与存储预算，
+`CoreTransportConfiguration` 管 Driver/Archive/Service，`RealtimeConfiguration` 管可选实时传输。
+YAML、标准环境变量、JVM `-D` 和 Spring 命令行服从 Spring 优先级；
+旧 `AERON_*` 部署环境名只在发布的 `application.yml` 中显式映射。
+非 Spring 工具使用 config 中的独立绑定入口，不隐式加载 YAML。
 
 | 配置 | 读取方 / 来源 | 默认或限制 |
 | --- | --- | --- |
@@ -90,18 +94,25 @@ sequenceDiagram
 | `surprising.aeron.hostnames` | 同上 | `localhost,localhost,localhost`；本地单成员显式传 `localhost` |
 | `surprising.aeron.data-dir` | 同上 | `data/aeron`；节点目录为 `<data-dir>/<product>/node<N>` |
 | `surprising.aeron.cpu-affinity.*` | `CoreConfiguration`，见 [`application.yml`](surprising-aeron-service/src/main/resources/application.yml) | 默认关闭；开启需配置四个不同 CPU；macOS 跳过绑定 |
-| `surprising.aeron.execution-mode` | `TradingExecutionMode.configured()`，JVM `-D` | `FUSED`；另可选 `PIPELINED`，区分大小写 |
+| `surprising.aeron.execution-mode` | `CoreRuntimeConfiguration`，Spring 统一绑定 | `FUSED`；另可选 `PIPELINED`，由 Binder 转换枚举 |
 | `surprising.aeron.matching-engines` / `account-lanes` | `CoreConfiguration.laneTopology()`，Spring YAML、环境变量、JVM 属性或命令行 | `1` / `2`，须为允许范围内的 2 次幂；恢复使用快照拓扑 |
 | `surprising.aeron.risk-engines` | 同上 | `0`；不代表另启同数量风险线程，账户风控经账户 Lane 执行 |
 | `surprising.aeron.account-lane-seed` | 同上 | `7640891576956012809`；随快照保存，不按新配置重新路由已有账户 |
 | `surprising.aeron.matcher-window-size` / `matching-completion-capacity` / `account-lane-queue-capacity` | 同上 | 均为 `4096`，须为允许范围内的 2 次幂 |
-| `surprising.aeron.core.threading-mode` | `AeronCoreLifecycle`，`-D` 优先，其次 `AERON_CORE_THREADING_MODE` | CPU ≥ 12 时 `DEDICATED`，否则 `SHARED_NETWORK` |
-| `surprising.aeron.service.idle-strategy` | 同上，`-D` 优先，其次 `AERON_SERVICE_IDLE_STRATEGY` | 未配置沿用 Aeron 默认；可选 `BACKOFF`、`YIELDING` |
-| `surprising.aeron.max-concurrent-sessions` | `AeronCoreLifecycle`，JVM `-D` | `64`，范围 `[1,1024]` |
-| `surprising.aeron.cluster-ingress-channel` | 同上，`-D` 优先，其次 `AERON_CLUSTER_INGRESS_CHANNEL` | `aeron:udp?term-length=16m` |
-| `surprising.aeron.archive-local-control-channel` | 同上，`-D` 优先，其次 `AERON_ARCHIVE_LOCAL_CONTROL_CHANNEL` | `aeron:ipc?term-length=1m` |
-| `surprising.realtime.channel` / `control-channel` | `TradingRealtimeBoundary.start()`，JVM `-D` | 默认空；先配置输出通道，控制通道才会启用 |
-| `surprising.realtime.directory` / `stream` / `control-stream` | 同上，JVM `-D` | directory 默认 `CommonContext` 目录，部署时需与目标 Driver 一致；stream 默认 `2101` / `2102` |
+| `surprising.aeron.core.threading-mode` | `CoreTransportConfiguration`，Spring 统一绑定 | CPU ≥ 12 时 `DEDICATED`，否则 `SHARED_NETWORK` |
+| `surprising.aeron.service.idle-strategy` | 同上 | 未配置沿用 Aeron 默认；可选 `BACKOFF`、`YIELDING` |
+| `surprising.aeron.max-concurrent-sessions` | `CoreTransportConfiguration`，Spring 统一绑定 | `64`，范围 `[1,1024]` |
+| `surprising.aeron.cluster-ingress-channel` | 同上 | `aeron:udp?term-length=16m` |
+| `surprising.aeron.archive-local-control-channel` | 同上 | `aeron:ipc?term-length=1m` |
+| `surprising.aeron.owner-input-batch-size` / `owner-command-window` | `CoreRuntimeConfiguration` | `64` / `256`，启动前检查范围及窗口二次幂 |
+| `surprising.aeron.owner-wait-strategy` / `matcher-pipeline-wait-strategy` / `settlement-wait-strategy` / `system-ledger-wait-strategy` | 同上 | 均默认 `BUSY_SPIN`，各线程按自己的枚举选择；不存在 `matcher-wait-strategy` 配置 |
+| `surprising.aeron.max-pending-matching` / `lane-completion-spins` / `settlement-spin-limit` | 同上 | `4096` / `1024` / `0`，构造后固定 |
+| `surprising.aeron.matcher-group-size` / `matcher-group-nanos` / `lane-initial-entities` | 同上 | `256` / `10000 ns` / `1024`，必须为有效正值，实体容量至少 16 |
+| `surprising.aeron.funds-index-directory` | 同上 | 默认平台临时目录；资金索引首次 I/O 前已固定根目录，恢复使用同一配置 |
+| `surprising.aeron.snapshot.max-bytes` / `snapshot-timeout-seconds` / `standalone-snapshot-timeout-seconds` | 同上 | `1 GiB` / `300s` / `300s`，部署上限与协议硬上限分开 |
+| `surprising.aeron.owner-role-change-timeout-seconds` / `decoder-cache-slots` | 同上 | `600s` / `4096`，启动前校验 |
+| `surprising.realtime.channel` / `control-channel` | `RealtimeConfiguration`，Spring 统一绑定 | 默认空；先配置输出通道，控制通道才会启用 |
+| `surprising.realtime.directory` / `stream` / `control-stream` | 同上 | directory 默认 `CommonContext` 目录，部署时需与目标 Driver 一致；stream 默认 `2101` / `2102` |
 
 端口与目录见 [`ClusterTopology`](surprising-aeron-service/src/main/java/com/surprising/aeron/config/ClusterTopology.java) 和 [`ProductLineClusterLayout`](surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ProductLineClusterLayout.java)。`ClusterTopology.fromSystemProperties` 是带 `SPOT` 默认值的工具入口；Spring 节点入口仍要求显式产品线。
 
@@ -136,8 +147,8 @@ java --enable-native-access=ALL-UNNAMED \
 | Cluster Service agent | `ClusteredServiceContainer.launch` | Session、解码槽、回包、快照 Publication；向输入环交接命令、sessionId、Cluster 时间、日志位置与指纹 |
 | `trading-owner-<memberId>` | `TradingOwnerLoop.start` | 命令生命周期、产品元数据与提交水位；复制时间/顺序决定业务，系统纳秒时钟用于等待和观测 |
 | `core-matcher-<id>`，仅 PIPELINED | `MatcherPipelineGroup.start` → `MatcherCommandPipeline.start` | 分片订单簿与 Matcher 序号；接收确定性输入，发布撮合证据/结算事件 |
-| `core-account-lane-<id>`，仅 PIPELINED | `TradingRuntimeState.startAccountLanes` → `SettlementLaneWorker` | 按 userId 路由的余额、冻结、持仓、订单和风险；同用户跨币对全仓状态在同一 Lane |
-| `core-system-ledger-lane`，两种模式均有 | `TradingRuntimeState.startSystemLedgerLane` → `SystemLedgerLane` | 系统资金、Treasury 与持久化资金索引；完成回执参与业务完成条件 |
+| `core-account-lane-<id>`，仅 PIPELINED | `TradingAccountRuntime` → `AccountLaneLifecycle.start` → `SettlementLaneWorker` | 按 userId 路由的余额、冻结、持仓、订单和风险；同用户跨币对全仓状态在同一 Lane |
+| `core-system-ledger-lane`，两种模式均有 | `TradingAccountRuntime` → `AccountLaneLifecycle.startLedger` → `SystemLedgerLane` | 系统资金、Treasury 与持久化资金索引；完成回执参与业务完成条件 |
 | `realtime-aeron-sender`，可选 | `TradingRealtimeBoundary.start` → `AeronRealtimeSender` | 配置输出通道后启动；拥有 Publication，读取实时 outbox，不在交易 Owner 调用网络传输 |
 | `realtime-aeron-receiver`，可选 | 同上 → `AeronRealtimeReceiver` | 同时配置控制通道后启动；解码快照/盘口请求，经有界请求队列交给 Owner |
 
@@ -381,7 +392,7 @@ sequenceDiagram
 | 风控：估值与计划 | `service.risk` | `RuntimeDerivativeRiskProcessor` → `RiskScanCoordinator` → `RiskLaneProcessor`；共用的风险与强平记录仍在此包 |
 | 强平：执行与结果确认 | `service.liquidation` | `RuntimeDerivativeLiquidationProcessor.ExecutionCheck` → 撤单完成 → `ExecutionWork` / `BatchFinancialWork`；后续命令进入 `RuntimeLiquidationResolution` |
 | ADL：自动减仓 | `service.adl` | `RuntimeAdlExecution.AdlWork`：源账户校验 → 目标账户减仓 → 源强平补亏 → 账本完成 |
-| 产品差异 | `service.product.spot` / `service.product.linear` / `service.product.inverse` / `service.product.option` | 六套产品规则和资金计算 |
+| 产品差异 | `service.product.spot` / `service.product.derivative` / `service.product.option` | 六产品独立规则实例及对应资金计算 |
 | 公共状态与恢复 | `model`、`service.core.index`、`service.core.identity`、`service.snapshot`、`service.retention`、`service.replay` | 模型、索引、协议、恢复和查询不强制步骤编号 |
 
 当前目录以入口、配置、启动和业务服务分层；原 state / orchestration 的业务实现归入对应 `service` 分类。

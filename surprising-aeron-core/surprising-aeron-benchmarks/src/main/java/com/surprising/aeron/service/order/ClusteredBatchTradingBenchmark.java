@@ -702,7 +702,7 @@ public class ClusteredBatchTradingBenchmark {
                     if (!business.getAsBoolean()) return false;
                     // Deliberate capacity fault: this sentinel must be cleared before dispatch.
                     owner.admissions().queuedMatching.addAll(java.util.Collections.nCopies(
-                                owner.pendingMatching.capacity() + 1, null));
+                                owner.pendingMatching().capacity() + 1, null));
                     return true;
                 });
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -935,7 +935,7 @@ public class ClusteredBatchTradingBenchmark {
                 for (int user = 0; user < 256; user++) send(command(CoreMessageType.CANCEL_ORDER, 1_000 + user,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(firstOrders[user]))));
                 drain();
-                boolean pipelined = TradingExecutionMode.configured() == TradingExecutionMode.PIPELINED;
+                boolean pipelined = com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().executionMode() == TradingExecutionMode.PIPELINED;
                 if (terminal - before != 512 || (pipelined && service.commandWindowHighWaterMark() < 2))
                     throw new IllegalStateException("independent commands did not pipeline and complete");
             } finally { singleResponses = false; }
@@ -989,7 +989,7 @@ public class ClusteredBatchTradingBenchmark {
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
             }
             drain();
-            boolean pipelined = TradingExecutionMode.configured() == TradingExecutionMode.PIPELINED;
+            boolean pipelined = com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().executionMode() == TradingExecutionMode.PIPELINED;
             if (terminal - before != 512 || (pipelined && service.commandWindowHighWaterMark() < 2))
                 throw new IllegalStateException("independent batches did not pipeline and complete");
         }
@@ -1074,7 +1074,7 @@ public class ClusteredBatchTradingBenchmark {
             enqueueCommittedCommand(session.id(), messageDecoder.decode(
                             new UnsafeBuffer(bytes), 0, bytes.length),
                     1_700_000_000_000L, header.position(), null);
-            maxBacklog = Math.max(maxBacklog, service.state().pendingMatching.size());
+            maxBacklog = Math.max(maxBacklog, service.state().pendingMatching().size());
         }
 
         private void enqueueCommittedCommand(long sessionId, CoreMessage command, long timestamp, long position,

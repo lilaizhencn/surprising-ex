@@ -37,7 +37,7 @@ class RuntimeStateQueryServiceTest {
         // 本用例共用的运行时身份映射，客户端身份路由绑定到同一个运行时。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本测试直接写入账户及订单索引的运行时，查询与物化参照都从它读取。
-        TradingRuntimeState runtime = new TradingRuntimeState();
+        TradingAccountRuntime runtime = new TradingAccountRuntime();
         identities.bindClientLanes(runtime);
         runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 7);
         // 合约 1 的整数编号，冻结、持仓和订单都使用同一身份。
@@ -93,7 +93,7 @@ class RuntimeStateQueryServiceTest {
         // 本用例共用的运行时身份映射，客户端身份路由绑定到同一个运行时。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本测试直接写入账户及订单索引的运行时，查询与物化参照都从它读取。
-        TradingRuntimeState runtime = new TradingRuntimeState();
+        TradingAccountRuntime runtime = new TradingAccountRuntime();
         identities.bindClientLanes(runtime);
         // 缺失客户端查询之前的身份表数量，查询后不能增加。
         long before = identities.clientIdentityCount();
@@ -113,7 +113,7 @@ class RuntimeStateQueryServiceTest {
         // 本用例共用的运行时身份映射，客户端身份路由绑定到同一个运行时。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本测试直接写入账户及订单索引的运行时，查询与物化参照都从它读取。
-        TradingRuntimeState runtime = new TradingRuntimeState();
+        TradingAccountRuntime runtime = new TradingAccountRuntime();
         identities.bindClientLanes(runtime);
         runtime.setMetadata(ProductLine.SPOT, 1);
         runtime.putUser(new UserRuntime(ProductLine.SPOT, 1001, 1, CorePositionMode.ONE_WAY));

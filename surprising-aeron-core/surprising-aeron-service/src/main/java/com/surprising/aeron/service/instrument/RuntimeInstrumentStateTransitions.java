@@ -3,7 +3,7 @@ package com.surprising.aeron.service.instrument;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreMaintenanceCodec;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -18,7 +18,7 @@ public final class RuntimeInstrumentStateTransitions {
      * @param identities 本运行时的标的和资产整数身份表
      * @param command 已解码且由协议构造器检查基础边界的注册或更新配置
      */
-    public static void applyConfiguration(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void applyConfiguration(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                          RegisterInstrumentCommand command) {
         if (runtime == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime instrument update");
@@ -84,7 +84,7 @@ public final class RuntimeInstrumentStateTransitions {
      * @param identities 本运行时的标的和资产整数身份表
      * @param command 带预期原任务 ID 和目标维护状态的已解码命令
      */
-    public static void updateMaintenance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void updateMaintenance(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                    CoreMaintenanceCodec.Command command) {
         if (runtime == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime instrument maintenance update");

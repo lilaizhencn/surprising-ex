@@ -9,7 +9,7 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.RuntimeOrderStateTransitions;
@@ -112,9 +112,9 @@ class ControlOrderMetadataLeaseTest {
     /**
      * 准备用户七及资产三可用一千的独立运行时，清空初始化变化，使测试命令捕获只覆盖本次业务。
      */
-    private static TradingRuntimeState fundedRuntime() {
+    private static TradingAccountRuntime fundedRuntime() {
         // 用户已入金的独立交易运行时，结束时自动关闭工作线程。
-        var state = new TradingRuntimeState();
+        var state = new TradingAccountRuntime();
         state.putUser(new UserRuntime(7)); state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
         state.clearChangedKeys();
         return state;
@@ -137,7 +137,7 @@ class ControlOrderMetadataLeaseTest {
      * @param state 用于检查账户工作线程健康的运行时
      * @param done 返回指定事件是否已经完成的推进条件
      */
-    private static void await(TradingRuntimeState state, BooleanSupplier done) {
+    private static void await(TradingAccountRuntime state, BooleanSupplier done) {
         // 等待指定租约或回执完成的三秒单调时钟截止时间。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!done.getAsBoolean()) {

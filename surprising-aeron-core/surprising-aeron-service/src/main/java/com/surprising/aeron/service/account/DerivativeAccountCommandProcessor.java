@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderReservation;
@@ -25,7 +25,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param userId 需要改变账户设置或保证金的用户编号
      * @param command 目标持仓模式命令
      */
-    public static boolean updatePositionMode(TradingRuntimeState runtime, long userId,
+    public static boolean updatePositionMode(TradingAccountRuntime runtime, long userId,
                                              UpdatePositionModeCommand command) {
         if (runtime == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime position mode update");
@@ -47,7 +47,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param userId 需要改变账户设置或保证金的用户编号
      * @param command 目标持仓模式命令
      */
-    public static boolean updateAccountPositionMode(TradingRuntimeState runtime, long userId,
+    public static boolean updateAccountPositionMode(TradingAccountRuntime runtime, long userId,
                                              UpdatePositionModeCommand command) {
         if (!runtime.productLine().isDerivative())
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "position mode requires derivative product line");
@@ -71,7 +71,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param userId 需要改变账户设置或保证金的用户编号
      * @param command 合约、模式、杠杆及重定价开关命令
      */
-    public static boolean updateLeverage(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static boolean updateLeverage(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                          long userId, UpdateLeverageCommand command) {
         if (runtime == null) throw new IllegalArgumentException("invalid runtime leverage update");
         // 产品及合约校验后得到的杠杆业务键，或保证金路径解析出的持仓键。
@@ -90,7 +90,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param userId 需要改变账户设置或保证金的用户编号
      * @param command 要进行产品与合约规则校验的杠杆命令
      */
-    static CoreLeverageKey leverageKey(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    static CoreLeverageKey leverageKey(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                        long userId, UpdateLeverageCommand command) {
         runtime.assertOwner();
         if (userId <= 0 || command == null || identities == null)
@@ -126,7 +126,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param symbolId 目标合约的稠密编号
      * @param leveragePpm 目标杠杆，按百万分之一保存
      */
-    static boolean updateAccountLeverage(TradingRuntimeState runtime, CoreLeverageKey key,
+    static boolean updateAccountLeverage(TradingAccountRuntime runtime, CoreLeverageKey key,
                                          int symbolId, long leveragePpm) {
         return updateAccountLeverage(runtime, key, symbolId, leveragePpm, false);
     }
@@ -139,7 +139,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param leveragePpm 目标杠杆，按百万分之一保存
      * @param repriceCrossMargin 是否显式降低全仓杠杆并按持仓补足保证金
      */
-    static boolean updateAccountLeverage(TradingRuntimeState runtime, CoreLeverageKey key,
+    static boolean updateAccountLeverage(TradingAccountRuntime runtime, CoreLeverageKey key,
                                          int symbolId, long leveragePpm, boolean repriceCrossMargin) {
         if (repriceCrossMargin) return runtime.onLane(key.userId(), /* onLane 回调提供的用户所属 Lane，全仓重定价只读写这个账户分区。 */ lane ->
                 lowerCrossLeverage(runtime, key, symbolId, leveragePpm, lane));
@@ -161,7 +161,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param leveragePpm 目标杠杆，按百万分之一保存
      * @param lane 当前实际拥有该用户账户数据的 Lane
      */
-    private static boolean lowerCrossLeverage(TradingRuntimeState runtime, CoreLeverageKey key,
+    private static boolean lowerCrossLeverage(TradingAccountRuntime runtime, CoreLeverageKey key,
             int symbolId, long leveragePpm, AccountLaneState lane) {
         if (key.marginMode() != com.surprising.aeron.protocol.CoreMarginMode.CROSS)
             throw new CoreStateRejectedException("LEVERAGE_REPRICE_REQUIRES_CROSS", "cross margin is required");
@@ -262,7 +262,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param userId 需要改变账户设置或保证金的用户编号
      * @param command 有符号逐仓保证金增减命令
      */
-    public static void adjustPositionMargin(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void adjustPositionMargin(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                             long userId, AdjustPositionMarginCommand command) {
         // 产品及合约校验后得到的杠杆业务键，或保证金路径解析出的持仓键。
         long key = positionMarginKey(runtime, identities, userId, command);
@@ -279,7 +279,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param userId 需要改变账户设置或保证金的用户编号
      * @param command 含合约、持仓腿、逐仓模式和非零调整额的命令
      */
-    static long positionMarginKey(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    static long positionMarginKey(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                   long userId, AdjustPositionMarginCommand command) {
         if (runtime == null || identities == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid runtime position margin adjustment");
@@ -301,7 +301,7 @@ public final class DerivativeAccountCommandProcessor {
      * @param positionKey 已解析的用户合约持仓腿运行时键
      * @param command 已解析身份、准备在账户应用的逐仓保证金命令
      */
-    static int adjustAccountPositionMargin(TradingRuntimeState runtime, long userId, long positionKey,
+    static int adjustAccountPositionMargin(TradingAccountRuntime runtime, long userId, long positionKey,
                                            AdjustPositionMarginCommand command) {
         // 当前 Lane 权威持仓，最终写回循环中则为已计算的新持仓键值项。
         PositionRuntime position = runtime.position(positionKey);

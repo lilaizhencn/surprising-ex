@@ -16,7 +16,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     /** Owner 现有命令槽环，Matcher 完成结果直接发布到其中，组内不另存一份业务结果表。 */
     private final CommandSlotRing contexts;
     /** Matcher 发布完成时置位、Owner 一次取清的就绪位图，用来筛选需要回收的分片。 */
-    private final com.surprising.aeron.service.core.TradingRuntimeState.PaddedReadyMask completedShardMask;
+    private final com.surprising.aeron.service.core.TradingAccountRuntime.PaddedReadyMask completedShardMask;
     /** 是否已安装分片完成通知，置位后不再走未配置时的全分片探查路径。 */
     private volatile boolean completionSignalConfigured;
 
@@ -43,14 +43,20 @@ public final class MatcherPipelineGroup implements AutoCloseable {
      * @param contexts 用于匹配 Core 序号与完成结果的现有命令槽环
      */
     public MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately, CommandSlotRing contexts) {
+        this(shardCount, capacityPerShard, startImmediately, contexts,
+                com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().matcherPipelineWaitStrategy());
+    }
+
+    public MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately,
+            CommandSlotRing contexts, com.surprising.aeron.config.CoreRuntimeConfiguration.MatcherWaitStrategy waitStrategy) {
         if (shardCount <= 0 || (shardCount & (shardCount - 1)) != 0) {
             throw new IllegalArgumentException("matcher shard count must be a power of two");
         }
         this.contexts = java.util.Objects.requireNonNull(contexts, "matching sequence contexts");
-        completedShardMask = new com.surprising.aeron.service.core.TradingRuntimeState.PaddedReadyMask(shardCount);
+        completedShardMask = new com.surprising.aeron.service.core.TradingAccountRuntime.PaddedReadyMask(shardCount);
         shards = new MatcherCommandPipeline[shardCount];
         for (/* 当前操作的分片流水线，构造循环中则是分片下标。 */ int shard = 0; shard < shardCount; shard++) {
-            shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false);
+            shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false, waitStrategy);
         }
         if (startImmediately) start((IntConsumer) null);
     }
@@ -319,6 +325,11 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     /**
      * 关闭全部分片，不附带最终外层关闭动作。
      */
+    public boolean workersStopped() {
+        for (MatcherCommandPipeline shard : shards) if (!shard.workerStopped()) return false;
+        return true;
+    }
+
     @Override
     public void close() { close(null); }
 
@@ -328,18 +339,19 @@ public final class MatcherPipelineGroup implements AutoCloseable {
      */
     public void closeShards(IntConsumer action) {
         // 提交失败或关闭流程的首个运行异常，按所在方法释放路由或汇总后抛出。
-        RuntimeException failure = null;
+        Throwable failure = null;
         for (/* 当前遍历的全局 Matcher 分片号。 */ int shardId = 0; shardId < shards.length; shardId++) {
             // 当前回调固定捕获的分片号，避免依赖下一轮循环。
             int currentShardId = shardId;
             try {
                 shards[shardId].close(action == null ? null : () -> action.accept(currentShardId));
-            } catch (/* 当前分片关闭或最终动作的运行异常，附加到首个失败。 */ RuntimeException closeFailure) {
+            } catch (/* 当前分片关闭或最终动作的运行异常，附加到首个失败。 */ RuntimeException | Error closeFailure) {
                 if (failure == null) failure = closeFailure;
-                else failure.addSuppressed(closeFailure);
+                else if (failure != closeFailure) failure.addSuppressed(closeFailure);
             }
         }
-        if (failure != null) throw failure;
+        if (failure instanceof Error error) throw error;
+        if (failure instanceof RuntimeException runtime) throw runtime;
     }
 
     /**

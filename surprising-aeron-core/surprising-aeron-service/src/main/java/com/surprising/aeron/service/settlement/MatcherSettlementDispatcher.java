@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
@@ -11,7 +11,7 @@ import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import static com.surprising.aeron.service.core.TradingRuntimeState.*;
+import static com.surprising.aeron.service.core.TradingAccountRuntime.*;
 
 /**
  * 下单步骤 4.1、4.3 与 4.6 的交接入口：Owner 准备和回收事件，单个 Matcher 发布方直接投递所属账户，顺序批量收集时接续余额边界。产品资金计算仍由结算处理器完成。事件池只有 Owner 访问，不能把 Matcher 投递方法误当成 Owner 方法。
@@ -21,7 +21,7 @@ import static com.surprising.aeron.service.core.TradingRuntimeState.*;
 @RequiredArgsConstructor
 public final class MatcherSettlementDispatcher {
     /** 所属运行时；准备及回收在 Owner，publishMatcherOwned 在单 Matcher 发布方执行。 */
-    final TradingRuntimeState owner;
+    final TradingAccountRuntime owner;
 
     /**
      * 为单笔或批量已准入订单准备直达结算事件，委托内部入口处理元数据和复用存储。
@@ -281,7 +281,7 @@ public final class MatcherSettlementDispatcher {
             int laneId = Long.numberOfTrailingZeros(lanes);
             lanes &= lanes - 1;
             event.markLaneQueued(laneId);
-            owner.laneWorkers[laneId].publishMatcherSettlement(shard, event);
+            owner.publishMatcherSettlement(laneId, shard, event);
         }
     }
 
@@ -323,7 +323,7 @@ public final class MatcherSettlementDispatcher {
      */
     public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
             MatcherSettlementEvent event, RuntimeFundsAccumulator funds,
-            TradingRuntimeState.TerminalOrderSink terminalOrderSink) {
+            TradingAccountRuntime.TerminalOrderSink terminalOrderSink) {
         owner.assertOwner();
         if (!owner.orderBatchMutationScope() || !event.complete())
             throw new IllegalStateException("batch item settlement is not ready to collect");

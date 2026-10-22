@@ -162,7 +162,7 @@ class CoreActiveLaneIngressTest {
         long requested = core.matchingSequence(message.header().commandId());
         // 固定单槽保存目标命令终态，供完成回调写入
         CoreResponse[] terminal = {response};
-        while (core.pendingMatching.firstSequence() != 0) {
+        while (core.pendingMatching().firstSequence() != 0) {
             core.commits.commitReadyMatching(16, TIME, message.header().sourceSequence(), false,
                     (/* 已完成撮合的 Core 序号，只有匹配目标序号才保存结果 */ id, /* 当前完成回调交出的撮合终态 */ result) -> { if (id == requested) terminal[0] = result; });
             if (System.nanoTime() >= deadline) throw new AssertionError("matching completion timeout");

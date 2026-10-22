@@ -51,7 +51,7 @@ class TriggerOrderIndexTest {
      */
     @Test
     void closeTriggerCommitPublishesOnlyAfterLanesAndDoesNotRepeatOnReuse() {
-        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             // 从用户八开始找出与用户七不同账户 Lane 的用户 ID
             long second = 8;
             while (runtime.topology().accountLaneId(second) == runtime.topology().accountLaneId(7)) second++;
@@ -88,7 +88,7 @@ class TriggerOrderIndexTest {
                 assertThat(runtime.revision()).isEqualTo(10);
                 assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
                 assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                assertThat(runtime.ownerLaneAccess).isFalse();
+                assertThat(runtime.ownerLaneAccess()).isFalse();
                 runtime.releaseLaneCommit(event);
                 assertThat(runtime.revision()).isEqualTo(12);
                 assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
@@ -109,7 +109,7 @@ class TriggerOrderIndexTest {
      * @param runtime 本次负责关闭的运行时，等待现有账户工作完成
      * @param event 本次需要等待的 Lane 提交事件，完成后由用例显式释放
      */
-    private static void awaitCommit(TradingRuntimeState runtime, LaneCommitEvent event) {
+    private static void awaitCommit(TradingAccountRuntime runtime, LaneCommitEvent event) {
         // 等待本次 Lane 提交完成的单调时钟五秒期限
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         while (!runtime.laneCommitComplete(event)) {
@@ -123,7 +123,7 @@ class TriggerOrderIndexTest {
      */
     @Test
     void accountThreadMutatesTriggerWhileOwnerUsesOnlyCommitReceipts() {
-        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             // 按拓扑从一开始搜索目标账户 Lane 的用户 ID
             long user = 1;
             // 生产拓扑中的最后一个账户 Lane 编号
@@ -144,7 +144,7 @@ class TriggerOrderIndexTest {
             // 观察到的触发 ID 到本命令新值表，删除时保存 null
             var observed = new java.util.TreeMap<Long, com.surprising.aeron.model.CoreTriggerOrderState>();
             // 只记录触发变更的新值观察器，Owner 通过它接回账户事实
-            var consumer = /* 只收集本命令触发单新值的匿名观察器，供账户更新、删除和回滚断言 */ new TradingRuntimeState.ChangedIndexConsumer() {
+            var consumer = /* 只收集本命令触发单新值的匿名观察器，供账户更新、删除和回滚断言 */ new TradingAccountRuntime.ChangedIndexConsumer() {
                 /**
                  * 收到触发单变更时仅把 ID 到新值记入观察表，before 不参与断言；新值为空表示本命令删除。
                  * @param id 测试触发单或变更回调的业务 ID
@@ -231,7 +231,7 @@ class TriggerOrderIndexTest {
 
         // 本用例索引、投影及物化共用的整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities)) {
+        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities)) {
             assertThat(runtime.hasTriggerClient(7, "client-1")).isTrue();
             assertThat(runtime.hasTriggerClient(8, "client-1")).isFalse();
             runtime.removeTriggerOrder(1);

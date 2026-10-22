@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.order.admission;
 
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.settlement.MatcherSettlementPlan;
@@ -14,13 +14,13 @@ import org.agrona.collections.Long2LongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
-import static com.surprising.aeron.service.core.TradingRuntimeState.*;
+import static com.surprising.aeron.service.core.TradingAccountRuntime.*;
 
 /** 未完成订单预留的路由和计数。Owner 保留命令序号、用户归属及批次收据，真实冻结仍在账户 Lane；收到完成事实后只移除对应路由和计数，回退及账户状态由原入口处理。 构造约定：绑定所属运行时，路由计数、账户访问和回滚捕获继续沿用原所有权边界。 参数 owner：提供原账户访问、回滚和变更标记入口的所属运行时 */
 @RequiredArgsConstructor
 public final class PendingReservationTracker {
     /** 所属运行时，路由在原所有权范围维护，真实冻结仍由各账户 Lane 持有。 */
-    final TradingRuntimeState owner;
+    final TradingAccountRuntime owner;
 
     /** 单项路径的命令序号到待完成订单编号索引，批次路径另存借用收据。 */
     final PendingReservationSequenceIndex pendingReservationsBySequence =
@@ -515,7 +515,7 @@ public final class PendingReservationTracker {
      * 活动 Lane 未交接给 Owner 时只核对 Owner 路由、批次剩余和用户总数；具备账户访问条件时逐 Lane 比较权威待完成总量。
      */
     public void assertPendingReservationCounts() {
-        if (owner.accountLanesStarted() && !owner.ownerLaneAccess) {
+        if (owner.accountLanesStarted() && !owner.ownerLaneAccess()) {
             // Owner 单项归属条数加各批剩余项的总数，用于与全局及用户计数交叉核对。
             int tracked = pendingReservationUsers.size();
             for (PendingBatch /* 本次正在查找或检查的原批次借用收据，剩余计数和订单租约仍归该命令。 */ batch : batches.values()) tracked = Math.addExact(tracked, batch.remaining);

@@ -1,5 +1,8 @@
 package com.surprising.aeron.bootstrap;
 
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration.OwnerWaitStrategy;
+
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.Objects;
@@ -10,8 +13,6 @@ import java.util.function.BooleanSupplier;
  * Owner 线程的等待与唤醒工具：默认持续自旋，可选逐步退避。仅查询已有工作提示并通知等待线程，命令队列和完成标记仍是事实来源，本类不维护第二份业务状态。
  */
 public final class OwnerIdleStrategy {
-    /** 选择 Owner 等待策略的 JVM 属性名。 */
-    private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.owner-wait-strategy";
     /** 通知位的字段句柄，用于跨线程原子比较交换。 */
     private static final VarHandle PARK_REQUESTED;
     /** 建立通知位的原子访问句柄；反射失败直接阻止使用等待器。 */
@@ -22,7 +23,7 @@ public final class OwnerIdleStrategy {
     /** 复查原输入和完成条件的轻量函数，不复制业务状态。 */
     private final BooleanSupplier workAvailable;
     /** 构造时固定的自旋或自适应等待方式。 */
-    private final WaitStrategy waitStrategy;
+    private final OwnerWaitStrategy waitStrategy;
     /** 完成生产者共用的通知单元，与 Owner 退避计数分离。 */
     private final Wakeup wakeup = new Wakeup();
     /** bindOwner 登记的实际 Owner 线程，作为 unpark 目标。 */
@@ -37,7 +38,7 @@ public final class OwnerIdleStrategy {
      * @param workAvailable 判断已有输入或完成状态能否产生进展的函数
      */
     public OwnerIdleStrategy(BooleanSupplier workAvailable) {
-        this(workAvailable, configuredWaitStrategy());
+        this(workAvailable, CoreRuntimeConfiguration.standalone().ownerWaitStrategy());
     }
 
     /**
@@ -45,7 +46,7 @@ public final class OwnerIdleStrategy {
      * @param workAvailable 判断已有输入或完成状态能否产生进展的函数
      * @param waitStrategy 显式选择的等待模式
      */
-    OwnerIdleStrategy(BooleanSupplier workAvailable, WaitStrategy waitStrategy) {
+    public OwnerIdleStrategy(BooleanSupplier workAvailable, OwnerWaitStrategy waitStrategy) {
         this.workAvailable = Objects.requireNonNull(workAvailable);
         this.waitStrategy = Objects.requireNonNull(waitStrategy);
     }
@@ -59,7 +60,7 @@ public final class OwnerIdleStrategy {
      * 自适应模式下，只有已请求休眠才尝试原子取走通知位并 unpark；通知仅提示重新检查事实，不证明命令已经完成。
      */
     public void signal() {
-        if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) LockSupport.unpark(owner);
+        if (waitStrategy != OwnerWaitStrategy.BUSY_SPIN && wakeup.requested != 0 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) LockSupport.unpark(owner);
     }
 
     /**
@@ -74,7 +75,7 @@ public final class OwnerIdleStrategy {
             if (idleCount != 0) { idleCount = 0; parkNanos = 1_000; }
             return;
         }
-        if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+        if (waitStrategy == OwnerWaitStrategy.BUSY_SPIN) {
             Thread.onSpinWait();
             return;
         }
@@ -88,25 +89,6 @@ public final class OwnerIdleStrategy {
         } finally { wakeup.requested = 0; }
         parkNanos = Math.min(100_000, parkNanos * 2);
     }
-
-    /**
-     * 读取等待策略 JVM 属性，默认 BUSY_SPIN；去掉首尾空白并统一大小写，其他值作为配置错误抛出。
-     */
-    private static WaitStrategy configuredWaitStrategy() {
-        // 读取到的等待策略文本，随后去空白并统一大小写
-        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BUSY_SPIN.name());
-        try {
-            return WaitStrategy.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
-        } catch (/* 句柄查找或配置解析失败的异常，保留为启动错误原因 */ RuntimeException failure) {
-            throw new IllegalArgumentException(
-                    WAIT_STRATEGY_PROPERTY + " must be BUSY_SPIN or ADAPTIVE", failure);
-        }
-    }
-
-    /**
-     * Owner 空轮次的等待方式，控制 CPU 使用与唤醒方式，不改变交易完成条件。
-     */
-    enum WaitStrategy { /** 空轮次调用自旋提示，不进入工作探测或休眠分支。 */ BUSY_SPIN, /** 空轮次先自旋、再让步和有界休眠，由通知或超时恢复探测。 */ ADAPTIVE }
 
     /**
      * 生产者与 Owner 共用的通知单元；填充字段把通知位与其他可变字段隔开，但不构成硬性缓存行布局保证。

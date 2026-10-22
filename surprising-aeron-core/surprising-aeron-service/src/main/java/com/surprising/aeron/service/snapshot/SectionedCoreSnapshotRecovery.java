@@ -23,7 +23,7 @@ public final class SectionedCoreSnapshotRecovery {
      * 使用类初始化时确定的部署总字节上限创建接收状态。
      */
     public SectionedCoreSnapshotRecovery() {
-        this(SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES);
+        this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
     }
 
     /**
@@ -34,7 +34,7 @@ public final class SectionedCoreSnapshotRecovery {
         if (maximumSnapshotBytes < SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
                 + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
                 + SectionedCoreSnapshotCodec.FOOTER_LENGTH
-                || maximumSnapshotBytes > SectionedCoreSnapshotCodec.MAX_CONFIGURABLE_SNAPSHOT_BYTES) {
+                || maximumSnapshotBytes > SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES) {
             throw new IllegalArgumentException("invalid maximum snapshot bytes");
         }
         this.maximumSnapshotBytes = maximumSnapshotBytes;
@@ -127,7 +127,18 @@ public final class SectionedCoreSnapshotRecovery {
      * @param expectedProductLine 调用方明确要求恢复或检查的产品线
      */
     public TradingCoreRuntime decode(ProductLine expectedProductLine) {
-        return components(expectedProductLine).restore(expectedProductLine);
+        return decode(expectedProductLine, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone());
+    }
+
+    public TradingCoreRuntime decode(ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+        return components(expectedProductLine, configuration).restore(expectedProductLine, configuration, true);
+    }
+
+    /** 节点启动恢复只重建被动状态，外层 Owner 使用已绑定的 affinity 首次激活。 */
+    public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+        return components(expectedProductLine, configuration).restore(expectedProductLine, configuration, false);
     }
 
     /**
@@ -136,7 +147,8 @@ public final class SectionedCoreSnapshotRecovery {
      */
     public CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
         // 本次完整解析生成的组件，提取清单后关闭其终态索引。
-        var components = components(expectedProductLine);
+        var components = components(expectedProductLine,
+                com.surprising.aeron.config.CoreRuntimeConfiguration.standalone());
         try { return components.manifest(expectedProductLine); }
         finally { components.retention().close(); }
     }
@@ -209,7 +221,7 @@ public final class SectionedCoreSnapshotRecovery {
                     ? SectionedCoreSnapshotCodec.FOOTER_LENGTH
                     : Integer.BYTES * 2 + Long.BYTES * 5;
         };
-        if (sectionLength < minimumLength || sectionLength > SectionedCoreSnapshotCodec.MAX_SECTION_BYTES
+        if (sectionLength < minimumLength || sectionLength > SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES
                 || sectionIndex == 0 && sectionLength != SectionedCoreSnapshotCodec.HEADER_LENGTH
                 || sectionIndex == sectionCount - 1
                         && sectionLength != SectionedCoreSnapshotCodec.FOOTER_LENGTH) {
@@ -246,10 +258,11 @@ public final class SectionedCoreSnapshotRecovery {
      * 先要求接收完整，再交 Parser 解析配对；协议异常保留，其他运行异常包装成带 cause 的 ProtocolException。
      * @param expectedProductLine 调用方明确要求恢复或检查的产品线
      */
-    private SectionedCoreSnapshotParser.Components components(ProductLine expectedProductLine) {
+    private SectionedCoreSnapshotParser.Components components(ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
         ensureComplete();
         try {
-            return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine);
+            return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine, configuration.fundsIndexDirectory());
         } catch (/* 解析组件抛出的异常，协议异常保留，其他运行异常带 cause 包装。 */ ProtocolException exception) {
             throw exception;
         } catch (/* 解析组件抛出的异常，协议异常保留，其他运行异常带 cause 包装。 */ RuntimeException exception) {

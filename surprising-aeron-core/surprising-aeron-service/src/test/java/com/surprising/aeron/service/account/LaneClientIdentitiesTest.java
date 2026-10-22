@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.account;
 
 import com.surprising.aeron.service.core.AccountLaneQueryTestSupport;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import java.lang.reflect.Field;
 import org.junit.jupiter.api.Test;
@@ -94,7 +94,7 @@ class LaneClientIdentitiesTest {
         long second = identities.clientKey(8, "second");
         // 首次 Lane 绑定前记录的字典版本，冷重绑定应保持此版本。
         long version = identities.dictionaryVersion();
-        try (/* 首次接收身份权威表的旧运行时，作用域结束自动关闭。 */ var oldRuntime = new TradingRuntimeState(); /* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 首次接收身份权威表的旧运行时，作用域结束自动关闭。 */ var oldRuntime = new TradingAccountRuntime(); /* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingAccountRuntime()) {
             identities.bindClientLanes(oldRuntime);
             // 旧运行时中用户七的身份表，冷迁移成功后其存活数量应归零。
             var oldTable = oldRuntime.accountLane(oldRuntime.topology().accountLaneId(7)).clientIdentities;
@@ -117,7 +117,7 @@ class LaneClientIdentitiesTest {
     @Test void activeOwnerCannotReadOrMutateIdentityRowsAndDelayedReadersKeepOwnedNames() {
         // 被验证冷绑定与 Lane 路由规则的运行时身份字典。
         var identities = new RuntimeIdentityRegistry();
-        try (/* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingAccountRuntime()) {
             identities.bindClientLanes(runtime);
             // 本轮需要准备、读取或释放的客户身份整数键。
             long key = identities.prepareClientKey(7, "retained-name");
@@ -139,7 +139,7 @@ class LaneClientIdentitiesTest {
             assertThat(name).isEqualTo("retained-name");
             assertThat(identities.clientIdentityCount()).isOne();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.findClientKeyValue(7, "retained-name"))).isZero();
-            try (/* 用来检查活跃状态下不允许冷重绑定的另一个独立运行时。 */ var otherRuntime = new TradingRuntimeState()) {
+            try (/* 用来检查活跃状态下不允许冷重绑定的另一个独立运行时。 */ var otherRuntime = new TradingAccountRuntime()) {
                 assertThatThrownBy(() -> identities.bindClientLanes(otherRuntime)).isInstanceOf(IllegalStateException.class);
             }
         }
@@ -151,7 +151,7 @@ class LaneClientIdentitiesTest {
     @Test void equalNumericKeysOnDifferentLanesRemainIndependentAndForeignLaneObjectsAreRejected() {
         // 被验证冷绑定与 Lane 路由规则的运行时身份字典。
         var identities = new RuntimeIdentityRegistry();
-        try (/* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingAccountRuntime()) {
             identities.bindClientLanes(runtime);
             // 第一个测试用户编号，作为不同 Lane 路由的参照。
             // 逐步调整直到与第一用户落到不同 Lane 的用户编号。
@@ -217,7 +217,7 @@ class LaneClientIdentitiesTest {
      * 轮询当前运行时的控制 Lane 完成结果，等待上限五秒，超时直接令测试失败。
      * @param runtime 要等待控制 Lane 全部完成的运行时
      */
-    private static void await(TradingRuntimeState runtime) {
+    private static void await(TradingAccountRuntime runtime) {
         // 控制 Lane 轮询允许等待的单调时钟截止时间，单位为纳秒。
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (!runtime.pollControlLanes()) {

@@ -3,7 +3,7 @@ package com.surprising.aeron.service.settlement;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -31,8 +31,8 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param runtime 当前所属交易运行时，具体读写边界由通用或 Lane 入口决定
      * @param identities 运行时资产及预准备持仓身份字典
      */
-    public static TradingRuntimeState apply(TradingCoreState before, long takerOrderId,
-                                            List<MatcherEvent> matches, TradingRuntimeState runtime,
+    public static TradingAccountRuntime apply(TradingCoreState before, long takerOrderId,
+                                            List<MatcherEvent> matches, TradingAccountRuntime runtime,
                                             RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -48,8 +48,8 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param runtime 当前所属交易运行时，具体读写边界由通用或 Lane 入口决定
      * @param identities 运行时资产及预准备持仓身份字典
      */
-    public static TradingRuntimeState applyRuntime(long takerOrderId, List<MatcherEvent> matches,
-                                                   TradingRuntimeState runtime,
+    public static TradingAccountRuntime applyRuntime(long takerOrderId, List<MatcherEvent> matches,
+                                                   TradingAccountRuntime runtime,
                                                    RuntimeIdentityRegistry identities) {
         if (matches == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid perpetual match apply");
@@ -120,7 +120,7 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param identities 运行时资产及预准备持仓身份字典
      */
     static void validateAndPrepare(long takerOrderId, List<MatcherEvent> matches,
-                                   TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+                                   TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         // 本次主动订单的当前权威值，每笔应用前按既有入口重新读取。
         OrderRuntime taker = requireOpen(runtime, takerOrderId);
         validateMatches(runtime, taker, matches);
@@ -152,7 +152,7 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param commitPosition 成交结果需要保存的复制日志位置
      */
     static void applyLane(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
-                          TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                          TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                           CoreInstrument instrument, int settleAssetId,
                           RuntimeTreasuryDelta treasuryDelta,
                           long commitTimestamp, long commitPosition) {
@@ -200,7 +200,7 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param commitPosition 成交结果需要保存的复制日志位置
      */
     private static void applyLaneDirect(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
-                                        TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                        TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                         CoreInstrument instrument, int settleAssetId,
                                         RuntimeTreasuryDelta treasuryDelta,
                                         long commitTimestamp, long commitPosition) {
@@ -251,7 +251,7 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param localTaker 当前 Lane 持有的主动订单，其他 Lane 可以为空
      */
     private static void applyLaneAccumulated(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
-                                             TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                              CoreInstrument instrument, int settleAssetId,
                                              RuntimeTreasuryDelta treasuryDelta,
                                              long commitTimestamp, long commitPosition,
@@ -298,7 +298,7 @@ public final class RuntimeDerivativeMatchProcessor {
         private final java.util.ArrayDeque<RuntimeDerivativeFillCalculator.FillCursor> free =
                 new java.util.ArrayDeque<>();
         /** 本轮账户写入与修订捕获使用的交易运行时。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 本轮累加器独占服务的账户 Lane，不共享给其他账户线程。 */
         private AccountLaneState lane;
         /** 读取已经准备持仓身份的运行时字典。 */
@@ -322,7 +322,7 @@ public final class RuntimeDerivativeMatchProcessor {
          * @param commitTimestamp 成交结果需要保存的复制业务时间
          * @param commitPosition 成交结果需要保存的复制日志位置
          */
-        void reset(TradingRuntimeState runtime, AccountLaneState lane, RuntimeIdentityRegistry identities,
+        void reset(TradingAccountRuntime runtime, AccountLaneState lane, RuntimeIdentityRegistry identities,
                    CoreInstrument instrument, int settleAssetId,
                    long commitTimestamp, long commitPosition) {
             this.runtime = runtime;
@@ -438,7 +438,7 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param taker 已经读取并确认可成交的主动订单
      * @param matches 原始撮合事件列表，只有 TRADE 参与成交计算
      */
-    private static void validateMatches(TradingRuntimeState runtime, OrderRuntime taker,
+    private static void validateMatches(TradingAccountRuntime runtime, OrderRuntime taker,
                                         List<MatcherEvent> matches) {
         // 逐成交扣减后主动订单的累计剩余量，仅用于提前校验。
         long takerRemaining = taker.remainingQuantitySteps();
@@ -489,7 +489,7 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param settleAssetId 结算资产的运行时编号
      * @param treasuryDelta 当前 Lane 的系统财务差额接收槽
      */
-    private static void applyFill(TradingRuntimeState runtime,
+    private static void applyFill(TradingAccountRuntime runtime,
                                   RuntimeIdentityRegistry identities, CoreInstrument instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta) {
@@ -512,7 +512,7 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param commitTimestamp 成交结果需要保存的复制业务时间
      * @param commitPosition 成交结果需要保存的复制日志位置
      */
-    private static void applyFill(TradingRuntimeState runtime, AccountLaneState lane,
+    private static void applyFill(TradingAccountRuntime runtime, AccountLaneState lane,
                                   RuntimeIdentityRegistry identities, CoreInstrument instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta,
@@ -544,7 +544,7 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param runtime 当前所属交易运行时，具体读写边界由通用或 Lane 入口决定
      * @param orderId 当前要累加、刷新或读取的订单编号
      */
-    private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {
+    private static OrderRuntime requireOpen(TradingAccountRuntime runtime, long orderId) {
         // 当前首次累加或发布后重新取得的权威订单引用。
         OrderRuntime order = runtime.order(orderId);
         if (order == null || order.canceled() || order.remainingQuantitySteps() == 0) {

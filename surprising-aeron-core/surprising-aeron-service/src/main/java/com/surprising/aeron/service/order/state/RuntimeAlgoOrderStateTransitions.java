@@ -4,7 +4,7 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreAlgoOrderState;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
@@ -100,7 +100,7 @@ public final class RuntimeAlgoOrderStateTransitions {
      * @param userId 算法父单和新子单共同所属用户编号
      * @param view 外部复制命令携带的父单状态视图，不能覆盖账户维护的退休成交进度
      */
-    public static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void upsert(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                        long userId, CoreAlgoOrderView view) {
         if (runtime == null || identities == null || view == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime algo order update");
@@ -115,7 +115,7 @@ public final class RuntimeAlgoOrderStateTransitions {
      * @param view 外部复制命令携带的父单状态视图，不能覆盖账户维护的退休成交进度
      * @param symbolId 本次父单绑定的币对稠密身份，追加子单时核对一致
      */
-    public static void upsert(TradingRuntimeState runtime, long userId,
+    public static void upsert(TradingAccountRuntime runtime, long userId,
                        CoreAlgoOrderView view, int symbolId) {
         if (runtime == null || view == null || userId <= 0 || symbolId < 0)
             throw new IllegalArgumentException("invalid prepared algo update");

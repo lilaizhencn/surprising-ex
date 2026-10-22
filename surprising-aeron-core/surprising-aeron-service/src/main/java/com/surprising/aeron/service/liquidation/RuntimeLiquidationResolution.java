@@ -4,7 +4,7 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
@@ -26,9 +26,9 @@ public final class RuntimeLiquidationResolution {
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
      * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
      */
-    public static TradingRuntimeState apply(TradingCoreState before,
+    public static TradingAccountRuntime apply(TradingCoreState before,
                                             ResolveLiquidationCommand command,
-                                            TradingRuntimeState runtime,
+                                            TradingAccountRuntime runtime,
                                             RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -44,8 +44,8 @@ public final class RuntimeLiquidationResolution {
      * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
      * @param candidateIds 参与保险分配的候选强平编号，准备阶段按源强平结算资产过滤
      */
-    public static TradingRuntimeState applyRuntime(ResolveLiquidationCommand command,
-                                                   TradingRuntimeState runtime,
+    public static TradingAccountRuntime applyRuntime(ResolveLiquidationCommand command,
+                                                   TradingAccountRuntime runtime,
                                                    RuntimeIdentityRegistry identities,
                                                    Iterable<Long> candidateIds) {
         if (runtime.systemLedgerStarted()) throw new IllegalStateException("active resolution requires its asynchronous continuation");
@@ -61,7 +61,7 @@ public final class RuntimeLiquidationResolution {
      * @param candidateIds 参与保险分配的候选强平编号，准备阶段按源强平结算资产过滤
      */
     public static java.util.function.BooleanSupplier begin(ResolveLiquidationCommand command,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
         return begin(null, command, runtime, identities, candidateIds);
     }
 
@@ -74,7 +74,7 @@ public final class RuntimeLiquidationResolution {
      * @param candidateIds 参与保险分配的候选强平编号，准备阶段按源强平结算资产过滤
      */
     public static ResolutionWork begin(ResolutionWork reuse, ResolveLiquidationCommand command,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
         return resolve(reuse, command, runtime, identities, candidateIds, true);
     }
 
@@ -88,7 +88,7 @@ public final class RuntimeLiquidationResolution {
      * @param asynchronous 是否只派发跨线程工作并返回可轮询续步；同步路径在本次调用内完成
      */
     private static ResolutionWork resolve(ResolutionWork reuse, ResolveLiquidationCommand command,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds,
             boolean asynchronous) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
@@ -140,7 +140,7 @@ public final class RuntimeLiquidationResolution {
         /** 账本处理本决议时复用的保险余额和亏空变化缓冲，每次准备命令先清空。 */
         private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         /** 本续步操作的运行时，Owner 通过它派发账户和账本工作。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 当前保险补亏或完成命令，成功结束时释放引用。 */
         private ResolveLiquidationCommand command;
         /** liquidation：源账户 Lane 捕获的待处理强平记录，账本根据它判断剩余亏空与阶段；nextLiquidation：账本根据实际覆盖额生成的新强平记录，随后交回源账户 Lane 写入。 */
@@ -174,7 +174,7 @@ public final class RuntimeLiquidationResolution {
          * @param assetId 源强平结算资产的整数编号，保险和亏空总账都按该资产记账
          * @param allocation 确定性保险分配的输入快照，异步路径先留空，等待账户回执后由账本准备
          */
-        private void prepare(TradingRuntimeState runtime, ResolveLiquidationCommand command,
+        private void prepare(TradingAccountRuntime runtime, ResolveLiquidationCommand command,
                 LiquidationRuntime liquidation, int assetId, InsuranceAllocationPolicy.ResolutionInputs allocation) {
             initializeLedgerCommand(runtime);
             runtime.requireRevisionCapacity();
@@ -335,7 +335,7 @@ public final class RuntimeLiquidationResolution {
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
      * @param instrumentId 需要已经注册在当前运行时的外部合约编号
      */
-    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String instrumentId) {
+    private static CoreInstrument requireInstrument(TradingAccountRuntime runtime, String instrumentId) {
         // 源强平或当前候选的合约配置，用来确定并过滤结算资产。
         CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) {

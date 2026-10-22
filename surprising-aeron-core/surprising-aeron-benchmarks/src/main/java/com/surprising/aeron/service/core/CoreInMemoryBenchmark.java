@@ -84,13 +84,13 @@ public final class CoreInMemoryBenchmark {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.SPOT,
                 source, source == CommandSource.OPERATIONS ? 9 : 7, sourceSequence, USER_ID,
                 1_000, correlationId), payload);
-        int pendingBefore = state.pendingMatching.size();
+        int pendingBefore = state.pendingMatching().size();
         ResponseStatus status = state.apply(message).status();
         if (status != ResponseStatus.APPLIED && status != ResponseStatus.OK) {
             throw new IllegalStateException("benchmark command rejected type=" + type);
         }
-        while (state.pendingMatching.size() > pendingBefore) {
-            long sequence = state.pendingMatching.firstSequence();
+        while (state.pendingMatching().size() > pendingBefore) {
+            long sequence = state.pendingMatching().firstSequence();
             com.surprising.aeron.service.matcher.MatchingResult matching = null;
             long deadline = System.nanoTime() + 30_000_000_000L;
             while (matching == null && System.nanoTime() < deadline) {

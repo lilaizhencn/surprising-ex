@@ -38,7 +38,7 @@ class CoreMatcherLedgerTest {
                 assertThatThrownBy(() -> state.runtimeOrder(1)).isInstanceOf(IllegalStateException.class);
                 assertThatThrownBy(() -> state.runtimeOrder(999)).isInstanceOf(IllegalStateException.class);
                 // 模拟Lane删除回执已收集、Owner活跃路由尚未发布的提交窗口。
-                var field = com.surprising.aeron.service.core.TradingRuntimeState.class.getDeclaredField("changedOrders");
+                var field = com.surprising.aeron.service.core.TradingAccountRuntime.class.getDeclaredField("changedOrders");
                 field.setAccessible(true);
                 // 当前运行时订单变更缓冲，用 null 值模拟已收集删除。
                 var changes = field.get(state.runtimeState);

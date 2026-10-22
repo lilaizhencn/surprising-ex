@@ -1,13 +1,14 @@
 package com.surprising.aeron.service.snapshot.state;
 
 import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.model.TradingCoreState.ClientOrderKey;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.*;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
@@ -43,7 +44,7 @@ public final class RuntimeStateProjector {
      * @param source 已经过快照或上游业务校验的只读交易状态
      * @param identities 本次恢复使用并绑定账户 Lane 的身份表，不是在本方法内新建的副本
      */
-    public static TradingRuntimeState project(TradingCoreState source, RuntimeIdentityRegistry identities) {
+    public static TradingAccountRuntime project(TradingCoreState source, RuntimeIdentityRegistry identities) {
         return project(source, identities,
                 CoreConfiguration.standaloneLaneTopology());
     }
@@ -54,11 +55,16 @@ public final class RuntimeStateProjector {
      * @param identities 本次恢复使用并绑定账户 Lane 的身份表，不是在本方法内新建的副本
      * @param topology 恢复后账户 Lane 的数量与用户路由拓扑
      */
-    public static TradingRuntimeState project(
+    public static TradingAccountRuntime project(
             TradingCoreState source, RuntimeIdentityRegistry identities, LaneTopology topology) {
+        return project(source, identities, topology, CoreRuntimeConfiguration.standalone());
+    }
+
+    public static TradingAccountRuntime project(TradingCoreState source, RuntimeIdentityRegistry identities,
+            LaneTopology topology, CoreRuntimeConfiguration configuration) {
         if (source == null || identities == null) throw new IllegalArgumentException("source and identities are required");
         // 按给定拓扑新建的可变运行时，装载完成后才交接线程归属。
-        TradingRuntimeState runtime = new TradingRuntimeState(topology);
+        TradingAccountRuntime runtime = new TradingAccountRuntime(topology, configuration);
         identities.bindClientLanes(runtime);
         runtime.replaceAuxiliaryState(source);
         source.instruments().values().forEach(/* 当前需要登记币对和三种资产身份的注册配置。 */ instrument -> {
@@ -186,7 +192,7 @@ public final class RuntimeStateProjector {
      * @param runtime 正在构建且尚未交接线程归属的运行时
      * @param identities 本次恢复使用并绑定账户 Lane 的身份表，不是在本方法内新建的副本
      */
-    private static void validateClientIndex(TradingCoreState source, TradingRuntimeState runtime,
+    private static void validateClientIndex(TradingCoreState source, TradingAccountRuntime runtime,
                                              RuntimeIdentityRegistry identities) {
         for (Map.Entry<ClientOrderKey, Long> /* 旧状态的一条客户订单别名映射。 */ entry : source.clientOrderIndex().entrySet()) {
             // 待核对的用户编号与客户订单号业务键。

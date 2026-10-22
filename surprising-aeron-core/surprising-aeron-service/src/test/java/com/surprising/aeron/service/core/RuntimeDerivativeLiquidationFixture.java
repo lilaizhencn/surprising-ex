@@ -24,7 +24,7 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param command 本次最终执行的强平命令，没有额外撤单回执
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingRuntimeState simulateExecution(TradingCoreState before,
+    public static TradingAccountRuntime simulateExecution(TradingCoreState before,
                                                         ExecuteLiquidationCommand command,
                                                         RuntimeIdentityRegistry identities) {
         return simulateExecution(before, command, List.of(), identities);
@@ -37,7 +37,7 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param canceledOrders 本次 Matcher 已撤订单的业务记录，转换为撤单路由后交账户步骤解冻
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingRuntimeState simulateExecution(TradingCoreState before,
+    public static TradingAccountRuntime simulateExecution(TradingCoreState before,
                                                         ExecuteLiquidationCommand command,
                                                         Collection<CoreOrderState> canceledOrders,
                                                         RuntimeIdentityRegistry identities) {
@@ -45,7 +45,7 @@ public final class RuntimeDerivativeLiquidationFixture {
             throw new IllegalArgumentException("invalid perpetual liquidation simulation");
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         return applyExecutionRuntime(command, RuntimeTestStateTransitions.cancellationRoutes(canceledOrders), runtime, identities);
     }
 
@@ -57,7 +57,7 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param nextCursorOrderId 这批撤单之后仍待撤的下一订单编号，继续撤单时必须为正
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingRuntimeState simulateCancellationAdvance(TradingCoreState before,
+    public static TradingAccountRuntime simulateCancellationAdvance(TradingCoreState before,
                                                                   ExecuteLiquidationCommand command,
                                                                   Collection<CoreOrderState> canceledOrders,
                                                                   long nextCursorOrderId,
@@ -67,7 +67,7 @@ public final class RuntimeDerivativeLiquidationFixture {
             throw new IllegalArgumentException("invalid liquidation cancellation simulation");
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         return applyCancellationAdvanceRuntime(command, RuntimeTestStateTransitions.cancellationRoutes(canceledOrders), nextCursorOrderId, runtime, identities);
     }
 
@@ -77,14 +77,14 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param command 本次保险补亏或完成决议命令
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingRuntimeState simulateResolution(TradingCoreState before,
+    public static TradingAccountRuntime simulateResolution(TradingCoreState before,
                                                          ResolveLiquidationCommand command,
                                                          RuntimeIdentityRegistry identities) {
         if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution simulation");
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         return RuntimeLiquidationResolution.applyRuntime(command, runtime, identities,
                 before.riskState().liquidations().keySet());
     }
@@ -95,13 +95,13 @@ public final class RuntimeDerivativeLiquidationFixture {
      * @param command 本次目标减仓并覆盖源强平亏空的 ADL 命令
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingRuntimeState simulateAdl(TradingCoreState before, ExecuteAdlCommand command,
+    public static TradingAccountRuntime simulateAdl(TradingCoreState before, ExecuteAdlCommand command,
                                                   RuntimeIdentityRegistry identities) {
         if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL simulation");
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         return RuntimeAdlExecution.applyRuntime(command, runtime, identities);
     }
 }

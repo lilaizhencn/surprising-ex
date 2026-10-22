@@ -3,7 +3,7 @@ package com.surprising.aeron.service.account;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.service.core.AccountLaneQueryTestSupport;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
@@ -16,7 +16,7 @@ class ControlLaneDispatcherTest {
      */
     @Test
     void controlTasksExecuteOnPermanentWorkersAndPublishOnlyAfterCompletion() throws Exception {
-        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             runtime.startAccountLanes();
             // 发起控制命令的测试线程，用于核对回调确实在常驻 Lane 线程执行。
             Thread owner = Thread.currentThread();
@@ -61,7 +61,7 @@ class ControlLaneDispatcherTest {
      */
     @Test
     void businessRejectionWaitsForOtherLanesAndDoesNotPoisonTheNextCommand() throws Exception {
-        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             runtime.startAccountLanes();
             // 计数为二的门闩，确认两条目标 Lane 都已进入。
             var entered = new java.util.concurrent.CountDownLatch(2);
@@ -101,7 +101,7 @@ class ControlLaneDispatcherTest {
      */
     @Test
     void reservationAndAccountStateAccessibleAfterDispatch() {
-        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime()) {
             runtime.putUser(new UserRuntime(7));
             runtime.putBalance(new com.surprising.aeron.service.account.BalanceRuntime(7, 3, 1000, 0));
             runtime.clearChangedKeys();
@@ -124,7 +124,7 @@ class ControlLaneDispatcherTest {
      */
     @Test
     void invalidDispatchThrowsIllegalStateException() {
-        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             runtime.startAccountLanes();
             assertThatThrownBy(() -> runtime.dispatchControlLanes(0, /* 控制派发回调接收的目标 Lane 编号。 */ lane -> lane))
                     .isInstanceOf(IllegalStateException.class);
@@ -137,7 +137,7 @@ class ControlLaneDispatcherTest {
      * 轮询控制任务完成，使用单调时钟等待最多五秒，超时使测试失败。
      * @param runtime 需要等待控制派发收齐完成回执的运行时
      */
-    private static void awaitControl(TradingRuntimeState runtime) {
+    private static void awaitControl(TradingAccountRuntime runtime) {
         // 控制任务完成等待的五秒单调时钟截止时间。
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         while (!runtime.pollControlLanes()) {

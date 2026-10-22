@@ -3,7 +3,7 @@ package com.surprising.aeron.service.settlement.lifecycle;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -38,7 +38,7 @@ public final class RuntimeLifecycleSettlementContinuation {
     public static SettlementWork prepare(SettleInstrumentCommand command,
                                               Iterable<Long> indexedUserIds, UUID chunkCommandId,
                                               ActiveOrderIndex activeOrderIndex,
-                                              TradingRuntimeState runtime,
+                                              TradingAccountRuntime runtime,
                                               RuntimeIdentityRegistry identities) {
         return prepare(null, command, indexedUserIds, chunkCommandId, activeOrderIndex, runtime, identities);
     }
@@ -56,7 +56,7 @@ public final class RuntimeLifecycleSettlementContinuation {
     public static SettlementWork prepare(SettlementWork reuse, SettleInstrumentCommand command,
                                               Iterable<Long> indexedUserIds, UUID chunkCommandId,
                                               ActiveOrderIndex activeOrderIndex,
-                                              TradingRuntimeState runtime,
+                                              TradingAccountRuntime runtime,
                                               RuntimeIdentityRegistry identities) {
         if (command == null || indexedUserIds == null || chunkCommandId == null
                 || activeOrderIndex == null || runtime == null || identities == null) {
@@ -150,7 +150,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         /** 本页命令 UUID，保存结算进度时一并记录。 */
         private UUID chunkCommandId;
         /** 原权威运行时，Owner、账户 Lane 与账本按各自作用域访问。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 本次结算使用的币对配置。 */
         private CoreInstrument instrument;
         /** 该币对产品的固定价格结算计算规则。 */
@@ -226,7 +226,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
          */
         private SettlementWork(SettleInstrumentCommand command, UUID chunkCommandId,
-                TradingRuntimeState runtime, CoreInstrument instrument,
+                TradingAccountRuntime runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
                 List<CancellationOrder> selectedOrders, boolean moreOrders, Iterable<Long> indexedUserIds) {
@@ -245,7 +245,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param result 无需再执行账户操作的结算完成回执
          */
         @SuppressWarnings("unchecked")
-        private SettlementWork(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+        private SettlementWork(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
             initializeLedgerCommand(runtime);
             this.command = null; this.chunkCommandId = null;
             this.runtime = runtime; this.instrument = null; this.kernel = null;
@@ -283,7 +283,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
          */
         private SettlementWork reset(SettleInstrumentCommand command, UUID chunkCommandId,
-                TradingRuntimeState runtime, CoreInstrument instrument,
+                TradingAccountRuntime runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
                 List<CancellationOrder> selectedOrders, boolean moreOrders, Iterable<Long> indexedUserIds) {
@@ -341,7 +341,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             userLaneMask = RuntimeLifecycleSettlement.laneMask(usersByLane);
             indexedUserIds = null;
             // 发布完成标记前保存的运行时引用，用于随后唤醒 Owner。
-            TradingRuntimeState completion = runtime;
+            TradingAccountRuntime completion = runtime;
             usersReady = true;
             completion.signalOwnerCompletion();
         }
@@ -359,7 +359,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param runtime 保持原身份的权威运行时，元数据由 Owner 推进
          * @param result 无需再执行账户操作的结算完成回执
          */
-        private SettlementWork resetCompleted(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+        private SettlementWork resetCompleted(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
             if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns settlement routes");
             initializeLedgerCommand(runtime);
             this.command = null; this.chunkCommandId = null; this.runtime = runtime;
@@ -397,7 +397,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param runtime 保持原身份的权威运行时，元数据由 Owner 推进
          * @param result 无需再执行账户操作的结算完成回执
          */
-        static SettlementWork completed(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+        static SettlementWork completed(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
             return new SettlementWork(runtime, result);
         }
 

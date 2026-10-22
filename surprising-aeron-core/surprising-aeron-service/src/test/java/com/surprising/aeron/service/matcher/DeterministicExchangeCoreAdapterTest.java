@@ -481,6 +481,15 @@ class DeterministicExchangeCoreAdapterTest {
 
         // Matcher 清单编码字节，损坏测试只修改内存副本。
         byte[] encoded = MatcherSnapshotCodec.encode(snapshot);
+        // 同一真实小快照：恰好预算成功，少一字节及很小预算均在有界正文缓冲拒绝。
+        assertThat(MatcherSnapshotCodec.encode(snapshot, encoded.length)).containsExactly(encoded);
+        assertThatThrownBy(() -> MatcherSnapshotCodec.encode(snapshot, encoded.length - 1))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("maximum size");
+        assertThatThrownBy(() -> MatcherSnapshotCodec.encode(snapshot, 64))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("maximum size");
+        assertThatThrownBy(() -> MatcherSnapshotCodec.encode(snapshot, Long.BYTES))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("byte limit");
+
         // 从编码字节恢复出的 Matcher 清单。
         MatcherSnapshot decoded = MatcherSnapshotCodec.decode(encoded);
         assertThat(decoded.symbols()).containsEntry(instrumentId, Integer.parseInt(instrumentId));

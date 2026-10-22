@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.matcher.pipeline;
 
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration.MatcherWaitStrategy;
+
 import com.surprising.aeron.bootstrap.matcher.MatcherThread;
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
@@ -20,9 +23,6 @@ import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
  */
 @Slf4j
 public final class MatcherCommandPipeline implements AutoCloseable {
-    /** 配置独立 Matcher 空闲等待策略的系统属性名。 */
-    private static final String WAIT_STRATEGY_PROPERTY =
-            "surprising.aeron.matcher-pipeline-wait-strategy";
     /** Owner 等启动或控制结果时先自旋的次数。 */
     private static final int IDLE_SPINS = 1_024;
     /** Owner 超过自旋次数后的单次短暂等待纳秒上限。 */
@@ -55,7 +55,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     /** 容量减一，用于把递增位置映射为环形下标。 */
     private final int mask;
     /** 构造时读取的独立 worker 空闲等待策略。 */
-    private final WaitStrategy waitStrategy;
+    private final MatcherWaitStrategy waitStrategy;
     /** 队列模式的 Matcher 工作线程，启动后不清空，禁止重启。 */
     private volatile Thread worker;
     /** 融合模式唯一拥有线程，在该线程同步执行所有 Matcher 动作。 */
@@ -130,7 +130,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         var future = new java.util.concurrent.CompletableFuture<T>();
         if (!backgroundReads.offer(new BackgroundRead<>(submittedPosition.value, read, future))) {
             future.completeExceptionally(new RejectedExecutionException("matcher read mailbox unavailable"));
-        } else if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0L
+        } else if (waitStrategy != MatcherWaitStrategy.BUSY_SPIN && wakeup.requested != 0L
                 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) {
             LockSupport.unpark(worker);
         }
@@ -180,12 +180,17 @@ public final class MatcherCommandPipeline implements AutoCloseable {
      * @param startImmediately 是否在构造时立即启动独立 worker
      */
     public MatcherCommandPipeline(int workerId, int requestedCapacity, boolean startImmediately) {
+        this(workerId, requestedCapacity, startImmediately, CoreRuntimeConfiguration.standalone().matcherPipelineWaitStrategy());
+    }
+
+    public MatcherCommandPipeline(int workerId, int requestedCapacity, boolean startImmediately,
+            MatcherWaitStrategy waitStrategy) {
         if (workerId < 0) throw new IllegalArgumentException("matcher worker id must be non-negative");
         if (requestedCapacity <= 0 || (requestedCapacity & (requestedCapacity - 1)) != 0) {
             throw new IllegalArgumentException("matcher pipeline capacity must be a power of two");
         }
         this.workerId = workerId;
-        this.waitStrategy = configuredWaitStrategy();
+        this.waitStrategy = java.util.Objects.requireNonNull(waitStrategy);
         this.requestedCapacity = requestedCapacity;
         mask = requestedCapacity - 1;
         if (startImmediately) start(null);
@@ -392,7 +397,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 submissionHighWaterMark = depth;
             }
         }
-        if (waitStrategy != WaitStrategy.BUSY_SPIN && wakeup.requested != 0L
+        if (waitStrategy != MatcherWaitStrategy.BUSY_SPIN && wakeup.requested != 0L
                 && PARK_REQUESTED.compareAndSet(wakeup, 1L, 0L)) {
             LockSupport.unpark(worker);
         }
@@ -678,7 +683,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 if (position >= cachedSubmitted) {
                     cachedSubmitted = submittedPosition.value;
                     if (position >= cachedSubmitted) {
-                        if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+                        if (waitStrategy == MatcherWaitStrategy.BUSY_SPIN) {
                             Thread.onSpinWait();
                         } else if (idle++ < WORKER_IDLE_SPINS) {
                             Thread.onSpinWait();
@@ -774,30 +779,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     /**
-     * 读取系统属性并规范大小写，只允许 BUSY_SPIN 或 ADAPTIVE，空白和其他取值明确拒绝。
-     */
-    private static WaitStrategy configuredWaitStrategy() {
-        // 系统属性中的等待策略原文，规范大小写后解析枚举。
-        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BUSY_SPIN.name());
-        try {
-            return WaitStrategy.valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
-        } catch (/* 当前捕获或观察到的失败原因，按所在边界写入 Future、槽位或启动/发布故障标记。 */ RuntimeException failure) {
-            throw new IllegalArgumentException(
-                    WAIT_STRATEGY_PROPERTY + " must be BUSY_SPIN or ADAPTIVE", failure);
-        }
-    }
-
-    /**
-     * 独立 Matcher 队列空闲时的等待方式，不改变命令执行顺序。
-     */
-    private enum WaitStrategy {
-        /** 空闲时持续自旋，提交时不走 park 唤醒。 */
-        BUSY_SPIN,
-        /** 空闲先短暂自旋，再设置唤醒请求并有限 park。 */
-        ADAPTIVE
-    }
-
-    /**
      * 把工作线程发布阶段的可见故障抛给 Owner，保留 RuntimeException 或 Error 类型，其他异常包装为 IllegalStateException。
      */
     private void rethrowPublicationFailure() {
@@ -834,6 +815,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     /**
      * 不附带业务关闭动作地停止流水线。
      */
+    public boolean workerStopped() { return worker == null || !worker.isAlive(); }
+
     @Override
     public void close() {
         close(null);

@@ -4,7 +4,7 @@ import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.position.PositionCloseCapacity;
@@ -58,7 +58,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     @Getter
     private int laneId;
     /** 提供账户写入、账本输入和完成通知的所属运行时。 */
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /** 当前产品身份表，客户标识由 Lane 准备，失败时回退该次准备。 */
     private RuntimeIdentityRegistry identities;
     /** Owner 绑定的本命令价格事实，Lane 据此完成价格决策。 */
@@ -144,7 +144,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     public PlaceAdmissionEvent prepare(long coreSequence, long userId, UUID commandId,
                                 TreasuryRuntime.SettlementStatus settlementStatus,
                                 int assetId, int laneId, boolean matcherWaitRequired,
-                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0
                 || intent() == null || commandId == null
@@ -268,7 +268,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         identityAllocations = lane.clientIdentityAllocations() - allocationsBefore;
         // 完成位可见前先取得通知所需的运行时引用；排队事件仍保留到本命令的 Matcher 续步消费完回执。
         // 发布完成或消费位之前先取得的通知目标，避免对象回收清理 runtime 后再读取该字段。
-        TradingRuntimeState completionRuntime = runtime;
+        TradingAccountRuntime completionRuntime = runtime;
         lane.recordCommandOperation();
         completed = true;
         completionRuntime.publishPlaceAdmissionReady(laneId, coreSequence);
@@ -377,7 +377,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         if (rejection == null) target.addAdmissionCancellations(closeCapacityCancellations);
         // 先取得通知目标，再发布消费位。Owner 可能立即清空池化事件；消费位可见后 Matcher 只使用已捕获引用，不再读取事件字段。
         // 发布完成或消费位之前先取得的通知目标，避免对象回收清理 runtime 后再读取该字段。
-        TradingRuntimeState completionRuntime = runtime;
+        TradingAccountRuntime completionRuntime = runtime;
         matcherConsumed = true;
         completionRuntime.signalOwnerCompletion();
     }

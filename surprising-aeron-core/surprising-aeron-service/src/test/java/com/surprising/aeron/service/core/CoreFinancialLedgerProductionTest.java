@@ -191,7 +191,7 @@ class CoreFinancialLedgerProductionTest {
      * @param before 冷对照投影前的业务状态
      * @param mutation 在冷运行时应用原底层业务转换的回调
      */
-    private TradingCoreState expected(TradingCoreState before, BiConsumer<TradingRuntimeState, RuntimeIdentityRegistry> mutation) {
+    private TradingCoreState expected(TradingCoreState before, BiConsumer<TradingAccountRuntime, RuntimeIdentityRegistry> mutation) {
         // 与冷对照运行时配套的身份注册表
         var identities = new RuntimeIdentityRegistry();
         try (/* 冷对照回调实际操作的账户运行时 */ var runtime = RuntimeStateProjector.project(before, identities)) {

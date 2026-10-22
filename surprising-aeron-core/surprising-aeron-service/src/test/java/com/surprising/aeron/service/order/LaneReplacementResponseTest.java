@@ -57,7 +57,7 @@ class LaneReplacementResponseTest {
         // 品种编号解析用的运行时身份表
         var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
         assertThat(identities.symbolId("1")).isZero();
-        try (/* 当前测试创建并自动关闭的账户运行时 */ var runtime = new com.surprising.aeron.service.core.TradingRuntimeState()) {
+        try (/* 当前测试创建并自动关闭的账户运行时 */ var runtime = new com.surprising.aeron.service.core.TradingAccountRuntime()) {
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
             runtime.putOrder(order(11, false));
             // 用户七所属的权威账户 Lane

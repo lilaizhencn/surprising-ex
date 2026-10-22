@@ -4,7 +4,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.core.LedgerControlTestSupport;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.RuntimeIndexedChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.position.PositionRuntime;
@@ -207,7 +207,7 @@ class LedgerPositionPublicationTest {
      * @param runtime 已启动账本工作资源的运行时
      * @param operation 必须在账本业务线程执行的操作和断言
      */
-    private static void onLedger(TradingRuntimeState runtime, Runnable operation) throws Exception {
+    private static void onLedger(TradingAccountRuntime runtime, Runnable operation) throws Exception {
         // 通知测试线程账本查询已经执行完的门闩
         var done = new CountDownLatch(1);
         // 把账本查询操作抛出的异常带回测试线程的原子槽

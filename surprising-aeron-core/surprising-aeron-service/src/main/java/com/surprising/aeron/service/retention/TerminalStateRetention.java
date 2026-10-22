@@ -2,7 +2,7 @@ package com.surprising.aeron.service.retention;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.result.FundsCommandIndex;
 import java.io.ByteArrayInputStream;
@@ -26,7 +26,7 @@ import lombok.experimental.Accessors;
  * 参数 fundsCommands：已重建的长期资金身份索引
  */
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-public final class TerminalStateRetention implements TradingRuntimeState.TerminalOrderSink, AutoCloseable {
+public final class TerminalStateRetention implements TradingAccountRuntime.TerminalOrderSink, AutoCloseable {
 
     // 内存终态身份由当前产品 Owner 管理；资金 I/O 单独交给 Ledger，快照输出为独立字节。
 
@@ -49,7 +49,11 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
      * 创建空候选表、终态 FIFO 和尚未开库的资金身份索引。
      */
     public TerminalStateRetention() {
-        this(new LinkedHashMap<>(), new TerminalTombstoneStore(), new FundsCommandIndex());
+        this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().fundsIndexDirectory());
+    }
+
+    public TerminalStateRetention(java.nio.file.Path fundsIndexDirectory) {
+        this(new LinkedHashMap<>(), new TerminalTombstoneStore(), new FundsCommandIndex(fundsIndexDirectory));
     }
 
     /**
@@ -192,7 +196,7 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
         /** 当前任务借用的终态保留器，Ledger 经它访问资金索引。 */
         private TerminalStateRetention retention;
         /** 已排队任务要通知的运行时，完成发布前先捕获为局部引用。 */
-        private TradingRuntimeState completionRuntime;
+        private TradingAccountRuntime completionRuntime;
         /** 准备时可空的原 UUID 引用，实际 I/O 使用两段数值。 */
         private UUID commandId;
         /** 本次资金 UUID 高位。 */
@@ -307,7 +311,7 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
             if (write) retention.fundsCommands.put(commandIdMsb, commandIdLsb, fingerprint);
             else retained = retention.fundsCommands.get(commandIdMsb, commandIdLsb);
             // 发布完成位前捕获的通知运行时，任务复用后只访问这个局部引用
-            TradingRuntimeState completion = completionRuntime;
+            TradingAccountRuntime completion = completionRuntime;
             completed = true;
             if (completion != null) completion.signalOwnerCompletion();
         }
@@ -368,6 +372,10 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
      * @param encoded 完整终态保留快照段
      */
     public static TerminalStateRetention decode(byte[] encoded) {
+        return decode(encoded, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().fundsIndexDirectory());
+    }
+
+    public static TerminalStateRetention decode(byte[] encoded, java.nio.file.Path fundsIndexDirectory) {
         if (encoded == null) throw new IllegalArgumentException("terminal retention payload is required");
         try {
             // 读取本次独立快照字节的二进制流
@@ -387,7 +395,7 @@ public final class TerminalStateRetention implements TradingRuntimeState.Termina
                 throw new IllegalArgumentException("invalid funds command retention count");
             }
             // 本次恢复新建的资金索引，失败时尝试关闭
-            FundsCommandIndex fundsCommands = new FundsCommandIndex();
+            FundsCommandIndex fundsCommands = new FundsCommandIndex(fundsIndexDirectory);
             try {
                 for (/* 当前回执槽或快照记录的遍历下标 */ int index = 0; index < fundsCommandCount; index++) {
                     // 当前资金快照记录的完整 UUID

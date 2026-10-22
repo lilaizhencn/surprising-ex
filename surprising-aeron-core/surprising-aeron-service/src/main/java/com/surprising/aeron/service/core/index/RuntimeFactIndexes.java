@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.model.CoreCancelAllAfterState;
 import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.OwnerIndexedChanges;
 import com.surprising.aeron.service.core.change.RuntimeIndexedChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -18,7 +18,7 @@ import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
 /**
  * 把账户已发布变化应用到现有派生索引的入口。Owner 维护订单及条件任务轻量路由，持仓用户、未平仓量及 ADL 业务索引可绑定给 System Ledger；不另存账户正文，不把各索引更新包装成自动事务。
  */
-public final class RuntimeFactIndexes implements TradingRuntimeState.ChangedIndexConsumer {
+public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIndexConsumer {
     /** 现有标的到持仓用户的派生索引，可绑定业务线程。 */
     private final PositionUserIndex positionUsers;
     /** 现有标的未平仓量索引，可绑定业务线程。 */
@@ -251,7 +251,7 @@ public final class RuntimeFactIndexes implements TradingRuntimeState.ChangedInde
      * @param runtime 提供当前变更 ID 和发布值的原交易运行时
      * @param identities 内部资产及标的编号对应的已准备身份表
      */
-    public void applyCurrent(TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+    public void applyCurrent(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null || activeIdentities != null) {
             throw new IllegalArgumentException("runtime changed indexes are invalid");
         }

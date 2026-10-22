@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitEvent;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
@@ -17,7 +17,7 @@ class OrderBatchSettlementWaitTest {
      */
     @Test
     void incompleteItemCannotBeCollectedOrRecycled() throws Exception {
-        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingAccountRuntime()) {
             runtime.beginOrderBatchMutationScope();
             // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
             var event = incompleteEvent();
@@ -35,7 +35,7 @@ class OrderBatchSettlementWaitTest {
      */
     @Test
     void laneCommitTimeoutPreservesUnfinishedSequenceAndCannotRecycle() {
-        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingAccountRuntime()) {
             // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
             var event = incompleteLaneCommit(runtime);
             assertThatThrownBy(() -> runtime.awaitLaneCommit(event, System.nanoTime() - 1))
@@ -52,7 +52,7 @@ class OrderBatchSettlementWaitTest {
      */
     @Test
     void laneCommitInterruptionDoesNotClearInterruptOrClaimCompletion() {
-        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingAccountRuntime()) {
             // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
             var event = incompleteLaneCommit(runtime);
             Thread.currentThread().interrupt();
@@ -167,7 +167,7 @@ class OrderBatchSettlementWaitTest {
      * 构造只有一个必需 Lane、尚未执行及提交的账户变更事件，供超时和中断等待检查。
      * @param runtime 给账户变更事件提供拓扑及通知边界的测试运行时
      */
-    private static LaneCommitEvent incompleteLaneCommit(TradingRuntimeState runtime) {
+    private static LaneCommitEvent incompleteLaneCommit(TradingAccountRuntime runtime) {
         return new LaneCommitEvent(1).prepare(1, 1,
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] {
                     new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList()

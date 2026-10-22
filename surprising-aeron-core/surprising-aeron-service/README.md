@@ -4,6 +4,17 @@
 HTTP 接入、价格生产、生命周期调度和外部查询投影由其他服务承担。
 六条产品线的账户、订单簿和风险模型各自隔离，公共执行骨架通过产品规则选择资金计算。
 
+`TradingCoreState`、`CoreUserState` 和 `CoreTreasuryState` 是快照、恢复和核对边界的完整冷状态。
+它们在构造时校验业务身份、客户端订单索引、冻结金额及结算进度，再通过
+`StateMapSupport.freezeSorted` 提供有序只读映射。在线修改仍由账户 Lane 和系统账本执行；
+冷状态不再维护增量树、延迟加载、版本血缘或额外的可解释冻结金额缓存。
+
+期货规则按永续、交割收敛为 `service.product.derivative.PerpetualTradingRules` 和
+`DeliveryTradingRules`，每个实例固定线性或反向合约类型。永续仍需维护门禁才能进行管理结算，
+普通到期现金计算和管理结算计算保留各自语义。六产品的身份、公式、资金与状态边界独立。
+
+本轮四类精简的测试结果、独立差异及未测范围见 [清理验证记录](validation/simplify-20261022.json)。
+
 产品线、永久币对 ID、topic 命名和共享合约公式统一来自
 [`surprising-instrument-api`](../../surprising-instrument-api/README.md)。
 币对纯计算能否共享以及 `CoreContractMath`、`OptionContractMath`、`CoreArithmetic`
@@ -53,17 +64,23 @@ flowchart TD
 | 1–2 配置 | [`SurprisingCoreApplication`](src/main/java/com/surprising/aeron/bootstrap/SurprisingCoreApplication.java)、[`CoreConfiguration`](src/main/java/com/surprising/aeron/config/CoreConfiguration.java) | 加载 Spring 配置，绑定 `surprising.aeron`，创建集群拓扑、交易拓扑和 CPU 配置；不创建初始业务余额 |
 | 3–5 Aeron 资源 | [`AeronCoreLifecycle`](src/main/java/com/surprising/aeron/bootstrap/AeronCoreLifecycle.java) | 启动 Driver、Archive、Consensus 和 Service Container，等待关闭并逆序释放资源 |
 | 6–8 恢复与 Owner | [`AeronTradingClusterService`](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java)、[`TradingOwnerLoop`](src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java)、[`TradingCoreOwner`](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | 回调线程读取快照分块；在 Owner 线程创建或恢复交易运行时 |
-| 9 工作资源 | [`TradingCoreRuntime`](src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java)、[`TradingRuntimeState`](src/main/java/com/surprising/aeron/service/core/TradingRuntimeState.java) | 激活恢复后的拓扑与状态；启动工作资源后才收窄 Owner 的 CPU mask |
+| 9 工作资源 | [`TradingCoreRuntime`](src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java)、[`TradingAccountRuntime`](src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) | 激活恢复后的拓扑与状态；启动工作资源后才收窄 Owner 的 CPU mask |
 | 10 回放 | `AeronTradingClusterService.onSessionMessage` → `TradingOwnerLoop.enqueue` | 把已复制日志及其时间、位置交给 Owner；回放与在线命令沿用同一交易规则 |
 
-`CoreConfiguration` 统一绑定产品线、成员地址、目录、交易拓扑和 CPU 配置。
+`CoreConfiguration` 统一装配拓扑、CPU、执行、网络和实时配置 Bean。
 Matcher 数量、账户 Lane 数量、路由种子与队列容量的默认值见 [application.yml](src/main/resources/application.yml)，
 可通过外部 YAML、环境变量、JVM `-D` 或 Spring 命令行参数覆盖；节点启动还必须指定产品线。
 例如账户 Lane 数可通过 `SURPRISING_AERON_ACCOUNTLANES=4` 或 `--surprising.aeron.account-lanes=4` 覆盖。
 `laneTopology` Bean → `TradingOwnerLoop` → `TradingCoreOwner` → `TradingCoreRuntime` → Matcher 与账户状态，
 整条启动路径共用同一份拓扑，`LaneTopology` 本身不读取外部配置。
 非 Spring 的工具和基准通过 `CoreConfiguration.standaloneLaneTopology()` 使用同一套绑定字段，
-读取系统属性与环境变量，不隐式加载节点 YAML。`TradingExecutionMode` 等其他 JVM 属性仍通过 `java -D...` 设置。
+读取系统属性与环境变量，不隐式加载节点 YAML。执行模式、等待方式、在途容量和快照预算统一由
+[`CoreRuntimeConfiguration`](src/main/java/com/surprising/aeron/config/CoreRuntimeConfiguration.java) 绑定、校验后注入；
+非 Spring 工具使用它的 `standalone()` 显式绑定相同键。Spring 启动和恢复共用已绑定实例，运行时不再自行重新读取这些值。
+`CoreTransportConfiguration` 绑定 Driver/Service、会话与通道；`RealtimeConfiguration` 绑定 `surprising.realtime`。
+原 `AERON_*` 环境名只由 `application.yml` 显式映射，正常配置优先级不改变。
+Matcher/Ledger 等待、原生 batching、Lane 初始容量、资金索引目录和快照部署上限也沿同一构造/恢复配置传递。
+节点恢复只解码被动状态，`TradingOwnerLoop` 在交接 Owner 后首次携带 affinity 激活；工具的 `decode` 保留即用激活职责。
 币对、余额和标记价通过业务命令进入日志，重启从快照与日志恢复，不从数据库自动补载。
 
 | 线程 / 模式 | 负责的状态或工作 |
@@ -80,6 +97,13 @@ Matcher 数量、账户 Lane 数量、路由种子与队列容量的默认值见
 启动后，先顺着 `TradingOwnerLoop.run` 看线程循环，再进入
 `TradingCoreOwner.pollCommands` 看业务推进。两者分别管理线程和命令生命周期，
 账户状态仍归所属 Lane；不要把它们看成两份交易状态。
+
+[`AccountLaneLifecycle`](src/main/java/com/surprising/aeron/bootstrap/account/AccountLaneLifecycle.java)
+拥有账户工作线程数组、创建失败回滚、关闭、交接轮次和首次故障。`TradingAccountRuntime`
+保留账户准入、结算、变化收集和快照事实，不创建或逐条关闭工作线程；无第二份账户镜像。
+`TradingCoreRuntime.pendingMatching()` 与 `matcherPipeline()` 借用既有组件时先检查 Owner，
+资源数组和交接标记不再是公开可替换字段。测试故障注入集中在测试源集，生产不增加注入接口。
+关闭会逐项尝试停止所有资源并保留首异常与 suppressed；只有确认 Matcher/Account/Ledger 已退出，才清理仍可能被它们借用的命令槽和索引。
 
 ```mermaid
 flowchart TD
@@ -108,14 +132,24 @@ flowchart TD
 | 5 快照与角色边界 | `TradingOwnerLoop.boundary` → `TradingCoreOwner.finishCommands` | 先完成动作之前的命令；快照再固定日志位置及时间，角色切换再更新角色与响应 epoch。等待方通过 Future 收结果或异常 |
 | 6 停止与释放 | `TradingOwnerLoop.terminate / run` → `TradingCoreOwner.terminate` | 正常退出先完成前缀；Owner 最终关闭运行时、工作资源，再释放借用输入并恢复 CPU 绑定。外层确认线程已退出后才清理余留输入 |
 
-以上等待参数直接读取 JVM system property：
+以下执行参数在启动时统一绑定；默认值见 `application.yml`，可由外部 YAML、环境变量、JVM 属性或命令行覆盖：
 
 | 属性 | 读取时机与含义 |
 | --- | --- |
-| `surprising.aeron.owner-input-batch-size` | `TradingCoreOwner` 类加载时读取，每轮输入预算默认 64，范围 1–256 |
-| `surprising.aeron.owner-wait-strategy` | 等待器构造时读取，默认 `BUSY_SPIN`，也可选 `ADAPTIVE`；去空白并忽略大小写 |
-| `surprising.aeron.owner-role-change-timeout-seconds` | `TradingOwnerLoop` 类加载时读取，角色切换动作预算默认 600 秒，范围 30–1800 秒 |
-| `surprising.aeron.snapshot-timeout-seconds` | `TradingCoreOwner` 类加载时读取，快照及内部完成前缀的预算默认 300 秒 |
+| `surprising.aeron.owner-input-batch-size` | 每轮输入预算默认 64，范围 1–256 |
+| `surprising.aeron.owner-wait-strategy` | 默认 `BUSY_SPIN`，也可选 `ADAPTIVE`；由 Spring Binder 转换枚举 |
+| `surprising.aeron.owner-role-change-timeout-seconds` | 角色切换动作预算默认 600 秒，范围 30–1800 秒 |
+| `surprising.aeron.snapshot-timeout-seconds` | 快照及内部完成前缀的预算默认 300 秒，必须为正 |
+| `surprising.aeron.execution-mode` | `FUSED` 或 `PIPELINED`，在 Owner 与运行时激活之间保持一致 |
+| `surprising.aeron.max-pending-matching` | 在途撮合上限默认 4096，与 Matcher 窗口取较小值 |
+| `surprising.aeron.lane-completion-spins` | 同步 Lane 完成等待的自旋预算默认 1024，不允许负值 |
+| `surprising.aeron.settlement-wait-strategy / settlement-spin-limit` | Lane 空闲策略与 BLOCKING 自旋预算，在建立工作线程前校验 |
+| `surprising.aeron.standalone-snapshot-timeout-seconds` | 独立快照等待预算默认 300 秒，必须为正 |
+| `surprising.aeron.owner-command-window / decoder-cache-slots` | 固定响应窗口与复用解码容量，启动前校验，不在类初始化时固定 |
+| `surprising.aeron.matcher-pipeline-wait-strategy / system-ledger-wait-strategy` | Matcher 与账本真实等待策略；不存在 `matcher-wait-strategy` 配置 |
+| `surprising.aeron.matcher-group-size / matcher-group-nanos` | 原生同步 Matcher batching，默认 256 / 10000 ns |
+| `surprising.aeron.lane-initial-entities / funds-index-directory` | 每 Lane 实体表初始容量与资金索引根目录，在分配/开库前固定 |
+| `surprising.aeron.snapshot.max-bytes` | 部署预算默认 1 GiB，在编解码边界使用；协议硬界限仍为数组允许上限 |
 
 外层普通动作的等待预算默认 30 秒；输入入队等待和动作完成等待分别计时，
 内部完成前缀还使用快照预算，不能把它们理解成一个统一的端到端超时。
@@ -178,7 +212,7 @@ flowchart LR
 | 4.4 应用账户变化 | `MatcherSettlementEvent.execute / applyPlan` → [`RuntimeSpotMatchProcessor.applyLane`](src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java) 或 [`RuntimeDerivativeMatchProcessor.applyLane`](src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java) | 各账户所有者只写自己的订单、预留、余额与持仓；衍生品成交计算由 [`RuntimeDerivativeFillCalculator`](src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeFillCalculator.java) 承担 |
 | 4.4 收尾与回执 | [`MatcherSettlementChanges.prepareLaneTerminal`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementChanges.java) → `MatcherSettlementEvent.publishCompletion` | 所属 Lane 整理用户修订、终态身份、持仓及余额资金增量，然后发布自己的完成位 |
 | 4.5 财务完成 | `MatcherSettlementEvent.submitTreasurySettlement` → `TreasurySettlement` / [`SystemLedgerLane`](src/main/java/com/surprising/aeron/service/treasury/SystemLedgerLane.java) | Owner 尝试投递财务槽；账本等账户回执到齐后应用 Treasury 差额、校验资金守恒并更新持仓索引 |
-| 4.6 交回提交 | [`TradingRuntimeState.collectMatcherSettlement`](src/main/java/com/surprising/aeron/service/core/TradingRuntimeState.java) → `OrderedCommitCoordinator` | Owner 等发布、账户和已登记的财务工作完成后，收集变更与终态身份，再按命令顺序提交；事件归还对象池前还须交出变更缓冲 |
+| 4.6 交回提交 | [`TradingAccountRuntime.collectMatcherSettlement`](src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) → `OrderedCommitCoordinator` | Owner 等发布、账户和已登记的财务工作完成后，收集变更与终态身份，再按命令顺序提交；事件归还对象池前还须交出变更缓冲 |
 
 ```mermaid
 flowchart TD
@@ -333,8 +367,8 @@ flowchart LR
 | --- | --- |
 | [controller](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java) | `AeronTradingClusterService` 负责协议回调；借用输入交给 Owner，真正的网络响应仍在 Cluster 线程发送 |
 | [config](src/main/java/com/surprising/aeron/config/CoreConfiguration.java) | `CoreConfiguration` 绑定配置；`ClusterTopology`、`LaneTopology`、`TradingExecutionMode` 描述启动参数 |
-| [bootstrap](src/main/java/com/surprising/aeron/bootstrap/SurprisingCoreApplication.java) | `SurprisingCoreApplication` → `AeronCoreLifecycle`；`TradingOwnerLoop` 管理 Owner 线程、动作边界和退出 |
-| [service.core](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | `TradingCoreOwner` 编排复制命令；`TradingCoreRuntime` 连接各业务；`TradingRuntimeState` 管理状态所属 Lane |
+| [bootstrap](src/main/java/com/surprising/aeron/bootstrap/SurprisingCoreApplication.java) | `SurprisingCoreApplication` → `AeronCoreLifecycle`；`TradingOwnerLoop` 管理 Owner 线程、动作边界和退出；`AccountLaneLifecycle` 拥有账户工作资源与所有权交接 |
+| [service.core](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | `TradingCoreOwner` 编排复制命令；`TradingCoreRuntime` 连接各业务；`TradingAccountRuntime` 保存并处理唯一账户业务状态 |
 | [service.order](src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java) | `MatchingCommandAdmission` → `CoreMatchingFlow` → `OrderedCommitCoordinator`，依次完成准入、撮合交接及终态提交 |
 | [service.matcher](src/main/java/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.java) | `DeterministicExchangeCoreAdapter` 操作订单簿；`pipeline` 保留分片串行执行、完成回执与关闭协议 |
 | [service.settlement](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.java) | Matcher 事实交给所属账户；资金、费用和持仓应用后收集账户与系统账本完成回执 |
@@ -394,7 +428,7 @@ flowchart LR
 `DerivativeAccountCommandProcessor.adjustAccountPositionMargin` 按“校验逐仓持仓与余额 →
 计算新的可用、冻结、仓位保证金与版本 → 写入余额、持仓及用户版本”顺序执行。
 全仓降低杠杆的保证金重定价也先完成算术校验再写入。
-两处直接调用现有 `TradingRuntimeState.replaceBalance(userId, assetId, available, locked)`，
+两处直接调用现有 `TradingAccountRuntime.replaceBalance(userId, assetId, available, locked)`，
 删除构造后立即拆开的临时 `BalanceRuntime`；余额权威单元、所属 Lane 和回滚捕获仍由该入口负责。
 
 五条衍生产品线逐仓增减与四条期货线杠杆重定价均有实际 Account Lane、资金及快照核对。
@@ -439,7 +473,7 @@ HotSpot JDK 27 的干净构建及 167 项撮合、资金、并发顺序、撤单
 
 ### 2026-10-11 Lane 活动上下文与停车唤醒
 
-`DeterministicExchangeCoreAdapter` 的命令时间戳/scope 和 primitive 用户注册表分别归每个 Matcher 分片线程，不再以一个共享字段替代 ThreadLocal。`TradingRuntimeState.currentLaneCommandScope()` 根据实际工作线程取得所属 Lane，Owner 使用独立的控制 scope；无关查询线程不能借 Owner 的活动 scope 获得写权限。Scope 进入、完成和回收不新增业务镜像。 这是当时移除 ThreadLocal 后的实现，仍有线程身份比较和 worker 线性遍历成本，不能视为 Lane 上下文开销已根除；2026-10-15 的显式 Lane 参数改造继续消除实际业务路径上的反查。
+`DeterministicExchangeCoreAdapter` 的命令时间戳/scope 和 primitive 用户注册表分别归每个 Matcher 分片线程，不再以一个共享字段替代 ThreadLocal。`TradingAccountRuntime.currentLaneCommandScope()` 根据实际工作线程取得所属 Lane，Owner 使用独立的控制 scope；无关查询线程不能借 Owner 的活动 scope 获得写权限。Scope 进入、完成和回收不新增业务镜像。 这是当时移除 ThreadLocal 后的实现，仍有线程身份比较和 worker 线性遍历成本，不能视为 Lane 上下文开销已根除；2026-10-15 的显式 Lane 参数改造继续消除实际业务路径上的反查。
 
 `SettlementLaneWorker` 先公布停车标记，再复查准入邮箱、控制队列、直接 Matcher 事件和所有权交接；生产者在停车标记为 true 时才 unpark，忙时不逐任务调用。仍保留 100µs 定时兜底和关闭唤醒。226项回归及50项边界/微基准测试执行全部通过（含Owner/Lane并发隔离）。固定256窗口的最新真实单节点观测408,903.948业务项/s、资金差/未完成0；CPU限频使容量证据无效，不宣称50万或完整Owner迁移完成。JMH提交边界约1472B/次，整链路仍有对象分配。
 
@@ -459,7 +493,7 @@ Owner仍有部分权威业务读取及Treasury写入，因此 pending reservatio
 
 两侧完成后，账本在原 `TreasuryRuntime` 上应用手续费等原语 delta，将账户和财库的资金变化放入槽内缓冲并校验守恒。发布财务完成前捕获通知目标，此后不再访问事件；Owner acquire 完成后交换原语缓冲，再收集路由及终态结果。重复收集、非空目标、提前回收均受校验；非空目标拒绝不会消费回执。
 
-新增财务槽承担跨线程所有权和回收边界，既不复制账户状态，也不新增全局资金镜像。该路径已用跨 Lane 实际手续费和满队列/复用用例独立验证，但 `TradingRuntimeState` 尚未启用生产 `SystemLedgerLane`。剩余资金费、保险、强平和提交/查询路径完成迁移后才可启用；当前仍不可宣称 Owner 已退出资金写入。记录见 `../../docs/validation/matcher-ledger-receipt-20261011.json`。
+新增财务槽承担跨线程所有权和回收边界，既不复制账户状态，也不新增全局资金镜像。该路径已用跨 Lane 实际手续费和满队列/复用用例独立验证，但 `TradingAccountRuntime` 尚未启用生产 `SystemLedgerLane`。剩余资金费、保险、强平和提交/查询路径完成迁移后才可启用；当前仍不可宣称 Owner 已退出资金写入。记录见 `../../docs/validation/matcher-ledger-receipt-20261011.json`。
 
 
 ### 2026-10-11 普通改单准入由所属 Lane 判断
@@ -507,7 +541,7 @@ HotSpot JDK27的18个必要测试执行通过：六产品线直接/扫描触发�
 
 生产 `SystemLedgerLane` 已由 `TradingCoreRuntime.activate` 自动启动。原先 `financialHeadReady` 只在响应队首投递财务事实，导致后续独立命令即使完成账户结算，也要等 Owner 退休前一条响应才能进入账本。
 
-现在 `PendingMatchingRing.ledgerDispatchHead` 只表示尚未投递的日志前缀，复用原有槽位和 `nextSlots`，由 Owner 单线程维护。`OrderedCommitCoordinator.advanceMatchingProgress` 先推进 Matcher/Lane，再连续投递已派发的独立命令与流水下单批次；`TradingRuntimeState.dispatchMatcherFinancialSettlement` 只负责非阻塞投递，原 `pollMatcherFinancialSettlement` 继续用于队首完成检查。Ledger 单写者按 FIFO 等账户完成位、应用原 Treasury 并验证资金守恒；Owner 只消费既有回执，响应和槽位回收仍等原终态条件。
+现在 `PendingMatchingRing.ledgerDispatchHead` 只表示尚未投递的日志前缀，复用原有槽位和 `nextSlots`，由 Owner 单线程维护。`OrderedCommitCoordinator.advanceMatchingProgress` 先推进 Matcher/Lane，再连续投递已派发的独立命令与流水下单批次；`TradingAccountRuntime.dispatchMatcherFinancialSettlement` 只负责非阻塞投递，原 `pollMatcherFinancialSettlement` 继续用于队首完成检查。Ledger 单写者按 FIFO 等账户完成位、应用原 Treasury 并验证资金守恒；Owner 只消费既有回执，响应和槽位回收仍等原终态条件。
 
 控制命令、顺序批次和尚未就绪的前缀不能被跳过。Mailbox 满时不推进游标、不重建或回收事实；已有 Owner 本地工作判定保留有界重试，避免没有新 Matcher 通知时停止推进。没有新增线程、业务镜像、队列或全窗口重复扫描，等待配置及在途上限不变。
 
@@ -584,7 +618,7 @@ Lane结算通过已有 `RuntimePositionChangeBuffer` 交接冻结after-image，�
 
 ### Lane余额及杠杆热查询（2026-10-15）
 
-`TradingRuntimeState.replaceBalance` 在已有Lane命令作用域内直接调用 `replaceBalanceInLane`，保留余额前像和after-image，不创建路由lambda；作用域与用户路由必须匹配。`RuntimeOrderAdmission.effectiveLeverage` 使用现有primitive参数查询，查询键由各Lane自己的 `LeverageLookup` 复用并在查询后清除引用，不再逐单创建 `CoreLeverageKey`。不存在新增共享scratch或余额镜像。
+`TradingAccountRuntime.replaceBalance` 在已有Lane命令作用域内直接调用 `replaceBalanceInLane`，保留余额前像和after-image，不创建路由lambda；作用域与用户路由必须匹配。`RuntimeOrderAdmission.effectiveLeverage` 使用现有primitive参数查询，查询键由各Lane自己的 `LeverageLookup` 复用并在查询后清除引用，不再逐单创建 `CoreLeverageKey`。不存在新增共享scratch或余额镜像。
 
 并发Lane配置查询、跨Lane写入拒绝、余额回滚、六产品线成交与Ledger的必要验证见 [余额与杠杆路径](../../docs/validation/lane-balance-leverage-direct-20261015.json)。这只减少对应临时对象，完整Core百字节分配和Owner业务索引迁移仍未完成。
 
@@ -656,7 +690,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 `ActiveOrderIndex` 仍仅保存Owner路由身份。用户和币对的最后订单离开后即移除身份键，空primitive成员表最多缓存64个、单表容量最多4096，过大的表直接释放；清空的路由对象最多缓存4096个。币对表改用开放寻址以保留数组容量，没有新账户镜像或永久历史用户桶。查询游标仍必须在下一次索引修改前消费。
 
-`MatcherSettlementEvent.BatchStorage` 的元数据槽改用以-1表示缺失的primitive表，清空后保留容量，symbolId及槽号0均有效。`TradingRuntimeState.reserveOrderInLane` 在已有Lane作用域直接执行原冻结步骤；`RuntimeIndexedChangeBuffer` 直接把冻结值和可选删除证明交给目标缓冲，再清空源，避免捕获型回调。Owner控制及终态收据的相关小循环沿用原顺序，不再逐次创建lambda；这尚未把所有收据业务搬离Owner。
+`MatcherSettlementEvent.BatchStorage` 的元数据槽改用以-1表示缺失的primitive表，清空后保留容量，symbolId及槽号0均有效。`TradingAccountRuntime.reserveOrderInLane` 在已有Lane作用域直接执行原冻结步骤；`RuntimeIndexedChangeBuffer` 直接把冻结值和可选删除证明交给目标缓冲，再清空源，避免捕获型回调。Owner控制及终态收据的相关小循环沿用原顺序，不再逐次创建lambda；这尚未把所有收据业务搬离Owner。
 
 必要用例覆盖数量替换和部分成交、跨分组复用、0及最大symbolId、用户移除顺序、缓存上限、独立输出租约、拒绝及回滚、六产品线双币对反复交错批量、风险查询、触发及Ledger，见 [索引周转功能验证](../../docs/validation/admission-routing-reuse-20261015.json)。局部索引生命周期基准与进程内交易流水线JMH/JFR分开记录，仅保留本地数值；不做真实单节点压测、Cluster快照/恢复或wallet。Owner剩余控制/输出及完整Core百字节目标继续保持未完成。
 
@@ -684,7 +718,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 116个必要用例及选择范围见 [单笔入口与响应功能验证](../../docs/validation/single-ingress-reuse-20261015.json)，覆盖满入口队列、等待中断、两轮真实Owner槽周转、协议边界、延迟出口、生命周期隔离以及六产品线成交、拒绝、触发、资金和实时事件。没有执行Cluster快照/恢复、wallet或真实单节点压测。分配数值只保留本地；完整Core百字节目标，以及Owner其他业务收据、控制及输出职责继续保持未完成。
 
-本轮诊断入口曾误用旧shaded Jar中的协议类，新增编码方法缺失导致预热失败；已要求重新打包并锁定实际JAR指纹，失败轮次单独保留。该故障暴露的空闲故障传播也已修复：`SettlementLaneWorker` 先保留原始故障，再发布通知，报告回调异常不能盖掉原故障；`TradingRuntimeState` 在完成探测时检查原故障引用并唤醒Owner。关闭时无论RuntimeException还是Error，都继续停止其余Account Lane和Ledger，最后再抛故障。补充用例覆盖Error身份、通知失败及所有线程退出，不将异常当作未完成请求持续等待。
+本轮诊断入口曾误用旧shaded Jar中的协议类，新增编码方法缺失导致预热失败；已要求重新打包并锁定实际JAR指纹，失败轮次单独保留。该故障暴露的空闲故障传播也已修复：`SettlementLaneWorker` 先保留原始故障，再发布通知，报告回调异常不能盖掉原故障；`TradingAccountRuntime` 在完成探测时检查原故障引用并唤醒Owner。关闭时无论RuntimeException还是Error，都继续停止其余Account Lane和Ledger，最后再抛故障。补充用例覆盖Error身份、通知失败及所有线程退出，不将异常当作未完成请求持续等待。
 
 
 ### 指纹与提交访问的槽生命周期（2026-10-15）
@@ -693,7 +727,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 `CoreMessage.matchingPendingResponse` 复用独立的待撮合元数据单元，覆盖普通、延后及批量入口；它与终态响应分开，不能在同一输入租约内改变序号。最后一个Header/出口读者退出后，指纹和两种响应单元一起清除。没有新增业务状态表、线程、队列或执行阶段。
 
-`TradingRuntimeState.visitChangedIndexes` 直接遍历已有primitive变更缓冲，保留direct、Lane号及订单/持仓/强平/算法单/触发单/定时器的原访问顺序；准备好的持仓索引和删除标记仍沿原字段传递。Ledger启用时，Owner继续跳过持仓业务索引。提交后的风险身份先于持仓身份清理，随后才清空缓冲。`LaneCommitDelta` 的用户交接和批量身份登记改用原位循环；`RuntimeFundsAccumulator` 跳过空流水迭代器，非空流水仍按原顺序核算。
+`TradingAccountRuntime.visitChangedIndexes` 直接遍历已有primitive变更缓冲，保留direct、Lane号及订单/持仓/强平/算法单/触发单/定时器的原访问顺序；准备好的持仓索引和删除标记仍沿原字段传递。Ledger启用时，Owner继续跳过持仓业务索引。提交后的风险身份先于持仓身份清理，随后才清空缓冲。`LaneCommitDelta` 的用户交接和批量身份登记改用原位循环；`RuntimeFundsAccumulator` 跳过空流水迭代器，非空流水仍按原顺序核算。
 
 130个必要用例及修正夹具见 [指纹和提交访问功能验证](../../docs/validation/commit-fingerprint-reuse-20261015.json)，包括独立canonical摘要向量、六产品线摘要与槽周转、结果记录淘汰、旧暴露值独立、冲突不变更状态、划转重复/淘汰/错误收款人、提交顺序及删除标记、Ledger和六产品线成交/拒绝/风险/触发/实时事件。主矩阵129例通过后，协议小范围收尾及新增固定向量由9例协议测试验证，重复项不计入130个独立用例。未执行Cluster快照/恢复或wallet。
 
@@ -783,7 +817,7 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 
 ### D2 旧派发、兼容查询与响应回退清理（2026-10-15）
 
-`MatcherSettlementDispatcher` 和 `TradingRuntimeState` 的 Owner 直达派发入口已删除，改单也统一预留 Matcher 发布槽；Matcher 将成交事实交给各 Lane，Owner 不再补派发或修改事件 fence。`ClusterCommandWindow.complete()` 的扫描回调删除，普通订单由有序队首接收结果；控制回调只保存自身序号的响应，触发/OCO 子单继续独立提交。
+`MatcherSettlementDispatcher` 和 `TradingAccountRuntime` 的 Owner 直达派发入口已删除，改单也统一预留 Matcher 发布槽；Matcher 将成交事实交给各 Lane，Owner 不再补派发或修改事件 fence。`ClusterCommandWindow.complete()` 的扫描回调删除，普通订单由有序队首接收结果；控制回调只保存自身序号的响应，触发/OCO 子单继续独立提交。
 
 `ActiveOrderIndex` 的 boxed `ids()` API 及无调用的旧平仓检查删除。`ImmutableLongArrayList` 保留实际命令、分页和协议 List 契约所需的 primitive 存储，删除无调用的兼容工厂。Lane 必须提供已捕获响应及长度，包括未变化订单、终态后镜像和明确的空结果，Owner 不再回查或重编码；每个命令槽仅增加本代响应项的捕获位，复用时清零。响应存储申请合为一处，大响应及池槽被传输/幂等结果保留时仍使用独立存储，防止丢失已提交命令的响应。
 
@@ -883,7 +917,7 @@ surprising:
 
 ### 核心币对身份与条件单索引的 primitive 存储（2026-10-18）
 
-数据库永久 `instrumentId` 是正 int；之前的文本来自线协议、查询及快照契约。`CoreInstrument.instrumentIdValue()` 现在在注册入口固定数值，原 `instrumentId()` 只复用已校验的规范文本。HTTP/WebSocket、协议和快照字段不改格式，不在逐笔路径重新生成文本。`TradingRuntimeState` 的规范 instrument 注册表使用 `IntObjectHashMap`；`RuntimeIdentityRegistry` 使用 `IntIntHashMap` 把永久 ID 映射到原有稠密 `symbolId`，保留运行时 ID 0 的合法性和 -1 未命中语义。稠密数组不按数据库最大 ID 分配，支持大 ID。查询和恢复边界才导出文本键的有序视图。
+数据库永久 `instrumentId` 是正 int；之前的文本来自线协议、查询及快照契约。`CoreInstrument.instrumentIdValue()` 现在在注册入口固定数值，原 `instrumentId()` 只复用已校验的规范文本。HTTP/WebSocket、协议和快照字段不改格式，不在逐笔路径重新生成文本。`TradingAccountRuntime` 的规范 instrument 注册表使用 `IntObjectHashMap`；`RuntimeIdentityRegistry` 使用 `IntIntHashMap` 把永久 ID 映射到原有稠密 `symbolId`，保留运行时 ID 0 的合法性和 -1 未命中语义。稠密数组不按数据库最大 ID 分配，支持大 ID。查询和恢复边界才导出文本键的有序视图。
 
 `CoreMatchingOrder` 直接保存 int ID；普通和批量撮合从规范 instrument 取数值，并先检查 Matcher 所属执行作用域已有的 primitive 注册集合。首次注册仍维护原协议/快照字典，后续撮合不再逐笔查 String→Integer 并发字典。资金费、风险和到期结算在取得规范 instrument 后也直接使用数值身份。
 

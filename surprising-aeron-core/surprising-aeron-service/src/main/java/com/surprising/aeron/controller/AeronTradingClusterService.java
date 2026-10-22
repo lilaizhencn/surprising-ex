@@ -1,6 +1,7 @@
 package com.surprising.aeron.controller;
 
 import com.surprising.aeron.bootstrap.TradingOwnerLoop;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.WireMessageKind;
@@ -34,17 +35,13 @@ import org.springframework.stereotype.Component;
 @Component
 public final class AeronTradingClusterService implements ClusteredService {
     /** 一次快照读取或发布允许等待的最长时间，转换成单调时钟使用的纳秒。 */
-    private static final long SNAPSHOT_TIMEOUT_NS = TimeUnit.SECONDS.toNanos(
-            Long.getLong("surprising.aeron.snapshot-timeout-seconds", 300L));
+    private final long snapshotTimeoutNanos;
+    private final int maximumSnapshotBytes;
     /** 当前服务的会话和响应发送出口，只在 Cluster 线程真正操作 Aeron 会话。 */
     private final ClusterServiceEgress egress;
     /** 交易状态所属的专用 Owner 循环，通过输入环接收已复制命令。 */
     private final TradingOwnerLoop owner;
-    /** 默认可复用解码槽数量；槽位仍被在途命令使用时不能提前覆盖。 */
-    private static final int DEFAULT_DECODER_CACHE_SLOTS = 4096;
-    /** 在 Cluster 回调线程解码协议帧，并把解码槽的使用权交给 Owner。 */
-    private final CoreMessageFlyweightDecoder messageDecoder = new CoreMessageFlyweightDecoder(
-            Integer.getInteger("surprising.aeron.decoder-cache-slots", DEFAULT_DECODER_CACHE_SLOTS));
+    private final CoreMessageFlyweightDecoder messageDecoder;
     /** 复用的命令指纹计算器，用来区分正常重试与同一命令编号携带不同内容的冲突。 */
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
     /** 连续收到这么多输入后主动发送一轮响应，减少逐条输入都排水的开销。 */
@@ -59,8 +56,16 @@ public final class AeronTradingClusterService implements ClusteredService {
      * @param owner 接收复制命令并处理交易状态的专用循环
      * @param egress 与该 Owner 配套的会话和响应出口
      */
-    @Autowired
     public AeronTradingClusterService(TradingOwnerLoop owner, ClusterServiceEgress egress) {
+        this(owner, egress, CoreRuntimeConfiguration.standalone());
+    }
+
+    @Autowired
+    public AeronTradingClusterService(TradingOwnerLoop owner, ClusterServiceEgress egress,
+            CoreRuntimeConfiguration configuration) {
+        snapshotTimeoutNanos = TimeUnit.SECONDS.toNanos(configuration.snapshotTimeoutSeconds());
+        maximumSnapshotBytes = configuration.snapshot().maxBytes();
+        messageDecoder = new CoreMessageFlyweightDecoder(configuration.decoderCacheSlots());
         this.egress = java.util.Objects.requireNonNull(egress);
         this.owner = java.util.Objects.requireNonNull(owner);
     }
@@ -79,8 +84,7 @@ public final class AeronTradingClusterService implements ClusteredService {
      * @param egress 调用方提供的响应出口
      */
     public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress) {
-        this.egress = java.util.Objects.requireNonNull(egress);
-        this.owner = new TradingOwnerLoop(productLine, egress);
+        this(new TradingOwnerLoop(productLine, egress), egress);
     }
 
     /**
@@ -292,9 +296,9 @@ public final class AeronTradingClusterService implements ClusteredService {
     private SectionedCoreSnapshotCodec.RecoveryBuffer readSnapshot(Image image, Cluster cluster) {
         if (image == null) return null;
         // 按段收集和校验输入，随后交给 Owner 在启动边界恢复状态。
-        var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
+        var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer(maximumSnapshotBytes);
         // 一次恢复共用的截止时间，不能每收到一段就无限延长等待。
-        long deadline = System.nanoTime() + SNAPSHOT_TIMEOUT_NS;
+        long deadline = System.nanoTime() + snapshotTimeoutNanos;
         while (!image.isEndOfStream()) {
             // 本次已处理的片段数，空闲策略据此决定是否需要等待。
             int work = image.poll((/* 当前片段所在的 Aeron 缓冲区。 */ buffer,
@@ -319,7 +323,7 @@ public final class AeronTradingClusterService implements ClusteredService {
     private void writeSnapshot(SectionedCoreSnapshotCodec.SectionedSnapshot snapshot,
                               ExclusivePublication publication, LongConsumer awaitProgress) {
         // 整次快照写入共用的截止时间，单个片段成功不会重置它。
-        long deadline = System.nanoTime() + SNAPSHOT_TIMEOUT_NS;
+        long deadline = System.nanoTime() + snapshotTimeoutNanos;
         for (/* 快照中的一个连续字节块，可能还要拆成多个传输负载。 */ byte[] chunk : snapshot.chunks()) {
             // 用 Aeron 接口需要的缓冲区视图包装原字节块，不再复制整份快照。
             var buffer = new UnsafeBuffer(chunk);

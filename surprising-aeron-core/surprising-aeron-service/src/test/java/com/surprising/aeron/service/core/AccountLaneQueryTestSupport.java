@@ -15,8 +15,8 @@ public final class AccountLaneQueryTestSupport {
      * @param userId 决定目标账户 Lane 的用户编号
      * @param query 需要在目标 Lane 合法只读范围内执行的查询函数
      */
-    public static <T> T read(TradingRuntimeState runtime, long userId, Supplier<T> query) {
-        if (!runtime.accountLanesStarted) return query.get();
+    public static <T> T read(TradingAccountRuntime runtime, long userId, Supplier<T> query) {
+        if (!runtime.accountLanesStarted()) return query.get();
         // 账户 Lane 向调用测试线程交付查询结果或原始失败的异步凭据。
         var result = new CompletableFuture<T>();
         // 目标用户所属账户 Lane 的位集合，只把查询派发到正确的 Lane。

@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.matcher;
 
 import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.model.CoreOrderState;
@@ -76,6 +77,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         public String nativeResultCode;
     }
 
+    private final CoreRuntimeConfiguration startupConfiguration;
     /** 按全局 Matcher 分片号排列的同步引擎数组，激活创建，关闭后清空。 */
     private SynchronousMatchingEngine[] engines;
     /** 收集与导入快照模块字节的共享内存存储，导出后按快照号删除。 */
@@ -213,7 +215,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param startImmediately 是否立即创建引擎，假时留给后续激活
      */
     public DeterministicExchangeCoreAdapter(LaneTopology topology, boolean startImmediately) {
-        this(topology, startImmediately, /* 实际持久化动作在调用线程直接执行。 */ submission -> submission.get());
+        this(topology, startImmediately, CoreRuntimeConfiguration.standalone());
+    }
+
+    public DeterministicExchangeCoreAdapter(LaneTopology topology, boolean startImmediately,
+            CoreRuntimeConfiguration configuration) {
+        this(topology, startImmediately, /* 实际持久化动作在调用线程直接执行。 */ submission -> submission.get(), configuration);
     }
 
     /**
@@ -223,7 +230,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     DeterministicExchangeCoreAdapter(
             Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
                     snapshotPersistence) {
-        this(CoreConfiguration.standaloneLaneTopology(), true, snapshotPersistence);
+        this(CoreConfiguration.standaloneLaneTopology(), true, snapshotPersistence, CoreRuntimeConfiguration.standalone());
     }
 
     /**
@@ -236,7 +243,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             LaneTopology topology,
             boolean startImmediately,
             Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
-                    snapshotPersistence) {
+                    snapshotPersistence, CoreRuntimeConfiguration configuration) {
+        this.startupConfiguration = java.util.Objects.requireNonNull(configuration);
         this.topology = java.util.Objects.requireNonNull(topology, "topology");
         initializeCommandScopes();
         this.matcherEvidence = new MatcherEvidenceLedger(topology);
@@ -296,6 +304,14 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             MatcherSnapshot snapshot,
             boolean startImmediately,
             long expectedCoreBusinessStateHash) {
+        this(state, activeOrders, coreSequence, snapshot, startImmediately,
+                expectedCoreBusinessStateHash, CoreRuntimeConfiguration.standalone());
+    }
+
+    public DeterministicExchangeCoreAdapter(TradingCoreState state, Iterable<CoreOrderState> activeOrders,
+            long coreSequence, MatcherSnapshot snapshot, boolean startImmediately,
+            long expectedCoreBusinessStateHash, CoreRuntimeConfiguration configuration) {
+        this.startupConfiguration = java.util.Objects.requireNonNull(configuration);
         this.snapshotPersistence = /* 注入函数收到的真实持久化动作，默认立即调用。 */ submission -> submission.get();
         if (snapshot == null || activeOrders == null) {
             throw new IllegalArgumentException("matcher snapshot is required");
@@ -1967,10 +1983,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .matchingEnginesNum(1)
                         .riskEnginesNum(topology.riskEngineCount())
                         .directMatchingOnlyPipeline(true)
-                        .msgsInGroupLimit(Math.max(1,
-                                Integer.getInteger("surprising.aeron.matcher-group-size", 256)))
-                        .maxGroupDurationNs(Math.max(1,
-                                Integer.getInteger("surprising.aeron.matcher-group-nanos", 10_000)))
+                        .msgsInGroupLimit(startupConfiguration.matcherGroupSize())
+                        .maxGroupDurationNs(startupConfiguration.matcherGroupNanos())
                         .waitStrategy(CoreWaitStrategy.BLOCKING).build())
                 .initStateCfg(initialState)
                 .serializationCfg(SerializationConfiguration.builder()

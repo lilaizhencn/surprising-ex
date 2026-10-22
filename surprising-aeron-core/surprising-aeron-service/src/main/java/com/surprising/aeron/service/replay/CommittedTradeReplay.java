@@ -110,7 +110,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
             // 只有独立回放在这里有界等待；在线 Owner 继续使用自己的调度，撮合和账户仍由原所有者结算。
             // 撮合无进展时逐步增加的休眠间隔，一微秒起、上限一百微秒
             long idleNanos = 1_000L;
-            while (state.pendingMatching.firstSequence() != 0) {
+            while (state.pendingMatching().firstSequence() != 0) {
                 if (Thread.currentThread().isInterrupted())
                     throw new IllegalStateException("committed replay interrupted; checkpoint must not advance");
                 if (state.commits.commitReadyMatching(

@@ -2,7 +2,7 @@ package com.surprising.aeron.service.treasury;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -17,7 +17,7 @@ public final class RuntimeInsuranceFundStateTransitions {
      * @param identities 解析保险资产编号的运行时字典
      * @param command 包含保险资产和有符号调整金额的复制命令
      */
-    public static void adjust(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void adjust(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                        AdjustInsuranceFundCommand command) {
         if (runtime == null || identities == null || command == null) {
             throw new IllegalArgumentException("invalid runtime insurance adjustment");
@@ -37,7 +37,7 @@ public final class RuntimeInsuranceFundStateTransitions {
      * @param identities 解析保险资产编号的运行时字典
      * @param command 包含保险资产和有符号调整金额的复制命令
      */
-    public static AdjustmentWork prepare(AdjustmentWork reuse, TradingRuntimeState runtime,
+    public static AdjustmentWork prepare(AdjustmentWork reuse, TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities, AdjustInsuranceFundCommand command) {
         runtime.assertOwner();
         // 本轮复用或新建并已初始化的保险调整续步。
@@ -56,7 +56,7 @@ public final class RuntimeInsuranceFundStateTransitions {
      */
     public static final class AdjustmentWork extends SystemLedgerCommand implements java.util.function.BooleanSupplier {
         /** 本轮任务所属运行时，Owner 用它投递及发布产品修订。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 本次保险增减的资产稠密编号。 */
         private int assetId;
         /**

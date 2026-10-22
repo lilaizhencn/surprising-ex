@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.treasury;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 
 /**
@@ -13,7 +13,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
     /** 本命令独占并复用的关闭任务，保留原前值及持仓索引撤销边界。 */
     private final ScopeClose close = new ScopeClose();
     /** 当前代所属运行时，提供账本投递、账户资金和完成通知。 */
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /** 当前账本执行阶段的 volatile 完成位，初始无任务时为 true。 */
     private volatile boolean completed = true;
     /** 账本阶段捕获的业务、算术或参数拒绝，Owner 观察完成后读取。 */
@@ -36,7 +36,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
      * 要求旧代可复用且旧资金收据已消费，再保存所属运行时并初始化本轮提交、拒绝及关闭请求标记；不在这里执行业务记账。
      * @param runtime 本控制命令所属的交易运行时
      */
-    protected final void initializeLedgerCommand(TradingRuntimeState runtime) {
+    protected final void initializeLedgerCommand(TradingAccountRuntime runtime) {
         if (!reusable()) throw new IllegalStateException("Ledger still owns this command scope");
         if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds receipt was not consumed");
         this.runtime = runtime;
@@ -95,7 +95,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
             scopeCompleted = true;
         }
         // 发布完成位前保存的运行时通知目标，发布后不再读可复用命令字段。
-        TradingRuntimeState completion = runtime;
+        TradingAccountRuntime completion = runtime;
         completed = true;
         completion.signalOwnerCompletion();
     }
@@ -221,7 +221,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
             } else positionUndo.clear();
             ledger.clearChangedKeys();
             // 发布完成位前保存的运行时通知目标，发布后不再读可复用命令字段。
-            TradingRuntimeState completion = runtime;
+            TradingAccountRuntime completion = runtime;
             completed = true;
             completion.signalOwnerCompletion();
         }

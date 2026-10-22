@@ -26,7 +26,7 @@ public final class RuntimePerpetualFundingFixture {
             throw new IllegalArgumentException("invalid perpetual funding simulation");
         }
         // 从旧状态新投影出的独立可变运行时，不替换被测实例。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         // 本次模拟使用的用户索引来源。
         Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
         return applyRuntime(command, users, chunkCommandId, runtime, identities);

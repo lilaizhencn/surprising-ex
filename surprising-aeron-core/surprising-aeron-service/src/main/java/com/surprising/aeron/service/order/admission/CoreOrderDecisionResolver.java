@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -31,7 +31,7 @@ public final class CoreOrderDecisionResolver {
      * @param intent 尚待决策的原始订单意图，包含方向、数量、限价和订单类型
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
      */
-    public static ResolvedPlaceOrder resolve(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static ResolvedPlaceOrder resolve(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                              long userId, PlaceOrderCommand intent, long clusterTimestamp) {
         if (runtime == null || identities == null || intent == null || userId <= 0 || clusterTimestamp <= 0) {
             throw new IllegalArgumentException("invalid order decision input");
@@ -57,7 +57,7 @@ public final class CoreOrderDecisionResolver {
      * @param intent 尚待决策的原始订单意图，包含方向、数量、限价和订单类型
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
      */
-    public static void prepare(PlaceAdmissionEvent target, TradingRuntimeState runtime,
+    public static void prepare(PlaceAdmissionEvent target, TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities, long userId, PlaceOrderCommand intent, long clusterTimestamp) {
         if (target == null || runtime == null || identities == null || intent == null
                 || userId <= 0 || clusterTimestamp <= 0)
@@ -138,7 +138,7 @@ public final class CoreOrderDecisionResolver {
      * @param instrumentId 需要准备决策输入的永久币对编号，文本入口先解析成正整数
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
      */
-    public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                   long userId, String instrumentId, long clusterTimestamp) {
         return context(runtime, identities, userId, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), clusterTimestamp);
     }
@@ -151,7 +151,7 @@ public final class CoreOrderDecisionResolver {
      * @param instrumentId 需要准备决策输入的永久币对编号，文本入口先解析成正整数
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
      */
-    public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                   long userId, int instrumentId, long clusterTimestamp) {
         runtime.assertOwner();
         // 按永久编号取得的本次币对配置，缺失时不能继续解析订单。
@@ -184,7 +184,7 @@ public final class CoreOrderDecisionResolver {
      * @param instrumentId 需要准备决策输入的永久币对编号，文本入口先解析成正整数
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
      */
-    public static Context queryContext(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static Context queryContext(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             long userId, String instrumentId, long clusterTimestamp) {
         // 预检开始时取得的原配置上下文，后续仅捕获查询需要固定的币对及价格身份。
         Context source = context(runtime, identities, userId, instrumentId, clusterTimestamp);

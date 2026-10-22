@@ -175,9 +175,7 @@ class AsyncFundingCommandTest {
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.directCommand.active()).isFalse();
             // 反射取得的 ownerLaneAccess 字段，用来核对最终没有重新授权读取。
-            var access = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
-            access.setAccessible(true);
-            assertThat(access.getBoolean(state.runtimeState)).isFalse();
+            assertThat(state.runtimeState.ownerLaneAccess()).isFalse();
             return response;
         } finally {
             state.runtimeState.exitAsynchronousCommandScope();

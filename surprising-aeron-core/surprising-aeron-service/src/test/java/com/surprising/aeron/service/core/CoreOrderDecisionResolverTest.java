@@ -124,7 +124,7 @@ class CoreOrderDecisionResolverTest {
         // 当前测试的运行时身份映射，为币对 1 提供同一稠密编号。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 当前测试直接调用决策入口的运行时，保存规范币对、价格和费率。
-        TradingRuntimeState runtime = runtime(linearInstrument());
+        TradingAccountRuntime runtime = runtime(linearInstrument());
         // 当前币对 1 的稠密身份，所有价格替换使用同一编号。
         int symbolId = identities.symbolId("1");
         runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
@@ -155,7 +155,7 @@ class CoreOrderDecisionResolverTest {
         // 当前测试的运行时身份映射，为币对 1 提供同一稠密编号。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 当前测试直接调用决策入口的运行时，保存规范币对、价格和费率。
-        TradingRuntimeState runtime = runtime(linearInstrument());
+        TradingAccountRuntime runtime = runtime(linearInstrument());
         runtime.putMarkPrice(new MarkPriceRuntime(identities.symbolId("1"),
                 runtime.instrument("1"), 60_000, 9, 1_000));
         // 当前用例尚待解析的原始订单意图，按场景检查费率、鲜度或现货资产。
@@ -183,7 +183,7 @@ class CoreOrderDecisionResolverTest {
         // 当前测试的运行时身份映射，为币对 1 提供同一稠密编号。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 当前测试直接调用决策入口的运行时，保存规范币对、价格和费率。
-        TradingRuntimeState runtime = runtime(spotInstrument());
+        TradingAccountRuntime runtime = runtime(spotInstrument());
         identities.symbolId("1");
         // 当前用例尚待解析的原始订单意图，按场景检查费率、鲜度或现货资产。
         PlaceOrderCommand intent = new PlaceOrderCommand(91, "1", CoreOrderSide.SELL, 60_000, 2,
@@ -272,9 +272,9 @@ class CoreOrderDecisionResolverTest {
      * 创建仅用于直接决策测试的运行时，设置所属产品线并注册给定规范币对，不启动外部服务。
      * @param instrument 要注册到直接决策测试运行时的规范币对配置
      */
-    private static TradingRuntimeState runtime(CoreInstrument instrument) {
+    private static TradingAccountRuntime runtime(CoreInstrument instrument) {
         // 当前测试直接调用决策入口的运行时，保存规范币对、价格和费率。
-        TradingRuntimeState runtime = new TradingRuntimeState();
+        TradingAccountRuntime runtime = new TradingAccountRuntime();
         runtime.setMetadata(instrument.contractType().productLine(), 0);
         runtime.registerInstrument(instrument);
         return runtime;

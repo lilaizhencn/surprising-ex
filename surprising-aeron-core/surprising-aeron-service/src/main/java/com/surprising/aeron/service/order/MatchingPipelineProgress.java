@@ -40,7 +40,7 @@ public final class MatchingPipelineProgress {
      */
     void batchCompleted() {
         for (/* 当前扫描或推进的全局分片号。 */ int shard = 0; shard < owner.matchingAdapter().topology().matchingEngineCount(); shard++) {
-            if (owner.pendingMatching.submissionHead(shard) != null) readyShardMask |= 1L << shard;
+            if (owner.pendingMatching().submissionHead(shard) != null) readyShardMask |= 1L << shard;
         }
     }
 
@@ -50,11 +50,11 @@ public final class MatchingPipelineProgress {
      */
     boolean submissionDeferred(long sequence) {
         // 当前提交头、延后项或通知序号对应的命令槽。
-        CommandSlot pending = owner.pendingMatching.get(sequence);
+        CommandSlot pending = owner.pendingMatching().get(sequence);
         if (pending != null) {
             // 该命令当前项真正需要的分片号。
             int shardId = owner.matchingFlow.pendingSubmissionShard(pending);
-            if (!owner.pendingMatching.isSubmissionHead(sequence, shardId)) return true;
+            if (!owner.pendingMatching().isSubmissionHead(sequence, shardId)) return true;
         }
         if (!owner.batches().hasPendingBatches() || sequence <= owner.batches().firstBatch().sequence)
             return false;
@@ -69,13 +69,13 @@ public final class MatchingPipelineProgress {
      * @param pending 当前准备释放提交链接或检查拒绝的命令槽
      */
     public void submissionCompleted(CommandSlot pending) {
-        owner.pendingMatching.progressChanged();
+        owner.pendingMatching().progressChanged();
         // 当前扫描或推进的全局分片号。
         int shard = owner.matchingFlow.pendingSubmissionShard(pending);
-        owner.pendingMatching.completeSubmission(pending.sequence());
+        owner.pendingMatching().completeSubmission(pending.sequence());
         // 提交头释放后立即提示同分片后继，避免普通下单后的撤单或控制项还在等一个不会再来的 Lane 通知。
-        if (pending.orderBatch != null || owner.pendingMatching.submissionHead(shard) != null
-                || owner.pendingMatching.hasDeferred()) {
+        if (pending.orderBatch != null || owner.pendingMatching().submissionHead(shard) != null
+                || owner.pendingMatching().hasDeferred()) {
             readyShardMask |= 1L << shard;
         }
     }
@@ -87,7 +87,7 @@ public final class MatchingPipelineProgress {
         drainPlaceAdmissionNotifications();
         if (readyShardMask == 0 && hasDeferredMatchingSubmission()) {
             // 当前全局队首，用于补充可推进分片或判断本地续步。
-            CommandSlot head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
+            CommandSlot head = owner.pendingMatching().get(owner.pendingMatching().firstSequence());
             readyShardMask |= 1L << owner.matchingFlow.pendingSubmissionShard(head);
         }
         // 本轮开始时的就绪位副本，逐位选出要推进的分片。
@@ -100,7 +100,7 @@ public final class MatchingPipelineProgress {
             readyShards &= ~shardBit;
             while ((readyShardMask & shardBit) != 0) {
                 // 当前提交头、延后项或通知序号对应的命令槽。
-                CommandSlot pending = owner.pendingMatching.submissionHead(shard);
+                CommandSlot pending = owner.pendingMatching().submissionHead(shard);
                 if (pending == null) {
                     readyShardMask &= ~shardBit;
                     break;
@@ -187,7 +187,7 @@ public final class MatchingPipelineProgress {
                         if (owner.batches().remainingMatcherShardMask(orderBatch) == 0)
                             submissionCompleted(pending);
                     }
-                    if (owner.pendingMatching.isSubmissionHead(pending.sequence(), shard)) {
+                    if (owner.pendingMatching().isSubmissionHead(pending.sequence(), shard)) {
                         // 后续批次项仍占该分片提交边界，Matcher/Lane 运行期间不在这里反复探查已完成准入。
                         readyShardMask &= ~shardBit;
                         break;
@@ -216,28 +216,28 @@ public final class MatchingPipelineProgress {
      * 比较最早延后命令和未激活批次的 Core 序号，先推进较早项；流水批次可尝试并行激活，顺序准入必须等到全局队首，使用原时间、位置和来源恢复延后命令。
      */
     public void submitDeferredMatchingAfterBatch() {
-        while (!owner.pendingMatching.isEmpty()) {
+        while (!owner.pendingMatching().isEmpty()) {
             // 批次链与延后项都按递增 Core 序号登记，只比较各自最早项再推进。
             // 最早批次或当前队首关联的批次。
             OrderBatchPending batch = owner.batches().firstBatch();
             // 全局顺序中最早的延后撮合项。
-            CommandSlot deferredPending = owner.pendingMatching.firstDeferred();
+            CommandSlot deferredPending = owner.pendingMatching().firstDeferred();
             // 该延后项的可空 Core 序号，供与批次头比较。
             Long deferredSequence = deferredPending == null ? null : deferredPending.sequence();
             // 当前提交头、延后项或通知序号对应的命令槽。
             CommandSlot pending;
             if (deferredSequence != null && (batch == null || deferredSequence < batch.sequence)) {
-                pending = owner.pendingMatching.get(deferredSequence);
+                pending = owner.pendingMatching().get(deferredSequence);
                 batch = null;
             } else if (batch != null && !batch.activated()) {
-                pending = owner.pendingMatching.get(batch.sequence);
+                pending = owner.pendingMatching().get(batch.sequence);
             } else {
                 return;
             }
             if (batch != null && !batch.activated()) {
                 if (owner.batches().tryActivatePipelinedOrderBatch(batch, pending)) continue;
                 // 顺序准入共用当前回滚/提交边界，前序命令尚能发布该边界时不能启动。
-                if (owner.pendingMatching.firstSequence() != batch.sequence) return;
+                if (owner.pendingMatching().firstSequence() != batch.sequence) return;
                 owner.batches().activateOrderBatch(batch, pending, true);
                 return;
             }
@@ -260,7 +260,7 @@ public final class MatchingPipelineProgress {
         return owner.crossShardCancellations().hasPending()
                 || readyShardMask != 0
                 || owner.runtimeState().hasMatchingNotifications()
-                || owner.matcherPipeline.hasMatchingCompletions()
+                || owner.matcherPipeline().hasMatchingCompletions()
                 || hasLocalMatchingWork();
     }
 
@@ -274,9 +274,9 @@ public final class MatchingPipelineProgress {
                 || hasDeferredMatchingSubmission()) {
             progressPlaceBatchAdmissions();
         }
-        if (owner.matcherPipeline.hasMatchingCompletions()) {
-            owner.matcherPipeline.drainMatchingCompletions();
-            owner.pendingMatching.progressChanged();
+        if (owner.matcherPipeline().hasMatchingCompletions()) {
+            owner.matcherPipeline().drainMatchingCompletions();
+            owner.pendingMatching().progressChanged();
         }
         if (owner.runtimeState().hasSettlementNotifications()) owner.commits.drainMatcherSettlementCompletions();
     }
@@ -295,12 +295,12 @@ public final class MatchingPipelineProgress {
             long sequence;
             while ((sequence = owner.runtimeState().pollPlaceAdmissionReady(laneId)) != 0) {
                 // 当前提交头、延后项或通知序号对应的命令槽。
-                CommandSlot pending = owner.pendingMatching.get(sequence);
+                CommandSlot pending = owner.pendingMatching().get(sequence);
                 if (pending == null || pending.placeAdmission() == null) continue;
                 if (!pending.isMatchingSubmitted()) {
                     readyShardMask |= 1L << owner.matchingFlow.pendingSubmissionShard(pending);
                 } else if (owner.matchingFlow.collectPlaceAdmissionIfReady(pending)) {
-                    owner.pendingMatching.progressChanged();
+                    owner.pendingMatching().progressChanged();
                 }
             }
         }
@@ -312,7 +312,7 @@ public final class MatchingPipelineProgress {
     public boolean hasLocalMatchingWork() {
         if (readyShardMask != 0 || owner.commits.hasFinancialDispatchWork()) return true;
         // 当前全局队首，用于补充可推进分片或判断本地续步。
-        CommandSlot head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
+        CommandSlot head = owner.pendingMatching().get(owner.pendingMatching().firstSequence());
         // 最早批次或当前队首关联的批次。
         OrderBatchPending batch = head == null ? null : head.orderBatch;
         // 交接和最终元数据提交可能没有新的结算通知，仍要推进这些有界 Owner 续步。
@@ -328,7 +328,7 @@ public final class MatchingPipelineProgress {
      */
     private boolean hasDeferredMatchingSubmission() {
         // 当前全局队首，用于补充可推进分片或判断本地续步。
-        CommandSlot head = owner.pendingMatching.get(owner.pendingMatching.firstSequence());
+        CommandSlot head = owner.pendingMatching().get(owner.pendingMatching().firstSequence());
         return head != null && !ownerHasPendingMatchingRejection(head)
                 && !head.isMatchingSubmitted() && !head.deferredMatching()
                 && head.orderBatch == null;
@@ -359,6 +359,6 @@ public final class MatchingPipelineProgress {
             owner.assertHealthy();
             nextHealthCheckNs = now + 1_000_000L;
         }
-        return owner.runtimeState().hasMatchingNotifications() || owner.matcherPipeline.hasMatchingCompletions();
+        return owner.runtimeState().hasMatchingNotifications() || owner.matcherPipeline().hasMatchingCompletions();
     }
 }

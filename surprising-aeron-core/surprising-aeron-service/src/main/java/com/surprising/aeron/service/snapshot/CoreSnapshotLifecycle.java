@@ -80,13 +80,13 @@ public final class CoreSnapshotLifecycle {
             TradingCoreState state, Iterable<CoreOrderState> activeOrders) {
         try {
             if (owner.matchingAdapter().topology().matchingEngineCount() == 1) {
-                return CompletableFuture.completedFuture(owner.matcherPipeline.call(
+                return CompletableFuture.completedFuture(owner.matcherPipeline().call(
                         () -> owner.matchingAdapter().snapshotAsync(snapshotId, coreSequence,
                                 businessStateHash, state, activeOrders).join(),
                         TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS));
             }
             // 依次在各 Matcher 分片完成捕获后收集的哈希结果列表。
-            var shards = owner.matcherPipeline.callEach(/* 当前控制调用负责捕获的全局 Matcher 分片号。 */ shardId -> owner.matchingAdapter().captureShardSnapshot(
+            var shards = owner.matcherPipeline().callEach(/* 当前控制调用负责捕获的全局 Matcher 分片号。 */ shardId -> owner.matchingAdapter().captureShardSnapshot(
                     shardId, snapshotId, coreSequence, activeOrders), TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
             return CompletableFuture.completedFuture(owner.matchingAdapter().finishShardedSnapshot(
                     snapshotId, coreSequence, businessStateHash, state, shards));
@@ -112,7 +112,7 @@ public final class CoreSnapshotLifecycle {
         owner.assertHealthy();
         // 本次独立快照按固定超时计算的单调时钟截止点。
         long deadlineNanos = Math.addExact(System.nanoTime(), java.util.concurrent.TimeUnit.SECONDS.toNanos(
-                TradingCoreRuntime.STANDALONE_SNAPSHOT_TIMEOUT_SECONDS));
+                owner.configuration().standaloneSnapshotTimeoutSeconds()));
         beginSnapshot(snapshotId, deadlineNanos);
         while (true) {
             // 本次轮询已完成的可空分段结果。
@@ -134,7 +134,7 @@ public final class CoreSnapshotLifecycle {
         if (snapshotId <= 0 || deadlineNanos <= 0) {
             throw new IllegalArgumentException("invalid snapshot fence");
         }
-        if (owner.directCommand.active() || owner.commits.controlPending(owner.pendingMatching.firstSequence()))
+        if (owner.directCommand.active() || owner.commits.controlPending(owner.pendingMatching().firstSequence()))
             throw new TradingCoreRuntime.SnapshotNotReadyException();
         if (snapshotFence != null) {
             if (snapshotFence.snapshotId == snapshotId) {
@@ -173,16 +173,18 @@ public final class CoreSnapshotLifecycle {
                 if (!fence.encodedSnapshot.isDone()) return null;
                 // 已经完成编码的分段快照，成功取出后推进最近快照编号。
                 SectionedCoreSnapshotCodec.SectionedSnapshot encoded = fence.encodedSnapshot.join();
+                if (encoded.length() > owner.configuration().snapshot().maxBytes())
+                    throw new IllegalArgumentException("core snapshot exceeds deployment byte limit");
                 lastSnapshotId = Math.max(lastSnapshotId, fence.snapshotId);
                 snapshotFence = null;
                 return encoded;
             }
             owner.matchingProgress.drainMatchingCompletions();
-            while (!owner.pendingMatching.isEmpty()) {
+            while (!owner.pendingMatching().isEmpty()) {
                 // 待撮合队列中当前最早的 Core 命令序号，必须先推进该项。
-                long sequence = owner.pendingMatching.firstSequence();
+                long sequence = owner.pendingMatching().firstSequence();
                 // 当前最早序号对应的命令槽，保存结算事件或普通结果。
-                CommandSlot pending = owner.pendingMatching.get(sequence);
+                CommandSlot pending = owner.pendingMatching().get(sequence);
                 // 当前命令已发布的撮合事实，缺失或结算尚未结束时本次轮询返回空。
                 MatchingResult result =
                         pending != null && pending.settlementEvent() != null
@@ -195,7 +197,7 @@ public final class CoreSnapshotLifecycle {
                 if (owner.commits.completeMatching(sequence, result, clusterTimestamp, clusterPosition) == null) return null;
                 owner.matchingProgress.drainMatchingCompletions();
             }
-            if (owner.pendingMatching.inFlight() != 0) {
+            if (owner.pendingMatching().inFlight() != 0) {
                 throw new IllegalStateException("snapshot fence contains unfinished lane or matcher work");
             }
             if (owner.snapshotHasPendingCommands()
@@ -204,7 +206,7 @@ public final class CoreSnapshotLifecycle {
             }
             owner.runtimeState().requireSnapshotFenceReady();
             // 本轮是否需要临时取得 Owner 对账户 Lane 的读取权限；成功取得后在 finally 释放。
-            boolean acquired = (owner.runtimeState().accountLanesStarted() || owner.runtimeState().systemLedgerStarted()) && !owner.runtimeState().ownerLaneAccess;
+            boolean acquired = (owner.runtimeState().accountLanesStarted() || owner.runtimeState().systemLedgerStarted()) && !owner.runtimeState().ownerLaneAccess();
             try {
                 if (acquired) {
                     while (!owner.runtimeState().tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
@@ -234,7 +236,7 @@ public final class CoreSnapshotLifecycle {
                 if (!fence.matcherSnapshot.isDone()) return null;
                 // 原生捕获已经完成的快照值，取出后仍需核对 Core 水位和待处理队列没有变化。
                 MatcherSnapshot matcherSnapshot = fence.matcherSnapshot.getNow(null);
-                if (matcherSnapshot == null || owner.appliedCommandCount() != fence.coreSequence || !owner.pendingMatching.isEmpty()) {
+                if (matcherSnapshot == null || owner.appliedCommandCount() != fence.coreSequence || !owner.pendingMatching().isEmpty()) {
                     throw new IllegalStateException("snapshot fence state changed during capture");
                 }
                 // Matcher 完成且 Core 水位未变时再次从运行时捕获的编码输入，随后执行完整哈希审计。

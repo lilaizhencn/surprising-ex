@@ -2,6 +2,8 @@ package com.surprising.aeron.bootstrap;
 
 import com.surprising.aeron.config.ClusterTopology;
 import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.RealtimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.model.OwnerLogContext;
@@ -32,14 +34,7 @@ public final class TradingOwnerLoop implements Runnable {
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(TradingOwnerLoop.class);
     /** 普通输入、动作等待和线程退出使用的默认三十秒预算。 */
     private static final long DEADLINE_NS = 30_000_000_000L;
-    /** 角色切换等待预算的 JVM 属性名。 */
-    private static final String ROLE_CHANGE_TIMEOUT_SECONDS_PROPERTY =
-            "surprising.aeron.owner-role-change-timeout-seconds";
-    /** 未配置角色切换预算时使用的六百秒。 */
-    private static final long DEFAULT_ROLE_CHANGE_TIMEOUT_SECONDS = 600;
-    /** 类加载时解析得到的角色切换等待纳秒预算。 */
-    private static final long ROLE_CHANGE_DEADLINE_NS = configuredRoleChangeDeadlineNanos(
-            System.getProperty(ROLE_CHANGE_TIMEOUT_SECONDS_PROPERTY));
+    private final long roleChangeDeadlineNanos;
     /** 与 Core Owner 共用的唯一输入环，回调线程生产、Owner 线程消费。 */
     private final OwnerIngressRing input;
     /** Cluster 回调线程发送响应的出口，Owner 只把终态交入队列。 */
@@ -47,7 +42,7 @@ public final class TradingOwnerLoop implements Runnable {
     /** 在 Owner 线程持有并推进实际交易状态的对象。 */
     private final TradingCoreOwner coreOwner;
     /** 以现有输入和完成条件为依据的 Owner 等待器。 */
-    private final OwnerIdleStrategy ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable);
+    private final OwnerIdleStrategy ownerIdle;
     /** 跨线程可见的首个 Owner 故障，后续调用据此终止。 */
     private volatile Throwable failure;
     /** Owner 主循环停止标记，启动前重置、退出动作在 Owner 内设置。 */
@@ -82,8 +77,9 @@ public final class TradingOwnerLoop implements Runnable {
      */
     @Autowired
     public TradingOwnerLoop(ClusterTopology topology, ClusterServiceEgress egress,
-            TradingCpuAffinity affinity, LaneTopology laneTopology) {
-        this(topology.productLine(), egress, affinity, laneTopology);
+            TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration,
+            RealtimeConfiguration realtimeConfiguration) {
+        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration);
     }
 
     /**
@@ -116,9 +112,21 @@ public final class TradingOwnerLoop implements Runnable {
      */
     public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress,
             TradingCpuAffinity affinity, LaneTopology laneTopology) {
+        this(productLine, egress, affinity, laneTopology, CoreRuntimeConfiguration.standalone());
+    }
+
+    public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress,
+            TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration) {
+        this(productLine, egress, affinity, laneTopology, configuration, RealtimeConfiguration.standalone());
+    }
+
+    public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress, TradingCpuAffinity affinity,
+            LaneTopology laneTopology, CoreRuntimeConfiguration configuration, RealtimeConfiguration realtimeConfiguration) {
+        roleChangeDeadlineNanos = java.util.concurrent.TimeUnit.SECONDS.toNanos(configuration.ownerRoleChangeTimeoutSeconds());
+        ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable, configuration.ownerWaitStrategy());
         this.affinityConfiguration = java.util.Objects.requireNonNull(affinity);
         this.egress = egress;
-        coreOwner = new TradingCoreOwner(productLine, this::publishResponse, laneTopology);
+        coreOwner = new TradingCoreOwner(productLine, this::publishResponse, laneTopology, configuration, realtimeConfiguration);
         input = coreOwner.ingress();
     }
 
@@ -192,7 +200,7 @@ public final class TradingOwnerLoop implements Runnable {
             ownerEpoch = nextEpoch;
             coreOwner.roleChange(role);
             return null;
-        }, true, ROLE_CHANGE_DEADLINE_NS);
+        }, true, roleChangeDeadlineNanos);
     }
 
     /**
@@ -378,21 +386,6 @@ public final class TradingOwnerLoop implements Runnable {
         long deadline = System.nanoTime() + timeoutNanos;
         while (!completion.isDone()) awaitProgress(deadline);
         return completion.join();
-    }
-
-    /**
-     * 解析角色切换秒数，空值默认十分钟，允许 30 至 1800 秒；数字格式错误保留原解析异常。
-     * @param configuredSeconds 可空角色切换秒数字符串，允许首尾空白
-     */
-    static long configuredRoleChangeDeadlineNanos(String configuredSeconds) {
-        // 解析并校验后的角色切换秒数
-        long seconds = configuredSeconds == null || configuredSeconds.isBlank()
-                ? DEFAULT_ROLE_CHANGE_TIMEOUT_SECONDS
-                : Long.parseLong(configuredSeconds.trim());
-        if (seconds < 30 || seconds > 1_800) {
-            throw new IllegalArgumentException(ROLE_CHANGE_TIMEOUT_SECONDS_PROPERTY + " must be in [30,1800]");
-        }
-        return java.util.concurrent.TimeUnit.SECONDS.toNanos(seconds);
     }
 
     /**

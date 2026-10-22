@@ -343,7 +343,7 @@ public final class DirectCommandSlot {
      */
     public RiskScanCoordinator reusableRiskScanCoordinator(int maxUsers,
             com.surprising.aeron.service.core.index.PositionUserIndex positionUserIndex,
-            com.surprising.aeron.service.core.TradingRuntimeState runtime,
+            com.surprising.aeron.service.core.TradingAccountRuntime runtime,
             com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities) {
         if (reusableRiskCoordinator == null) {
             reusableRiskCoordinator = new RiskScanCoordinator(maxUsers, positionUserIndex, runtime, identities);
@@ -358,14 +358,6 @@ public final class DirectCommandSlot {
      */
     public com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
         return reusableInsuranceAdjustment;
-    }
-
-    /**
-     * 记住保险基金调整工作供以后复用，传空也会直接保存。
-     * @param work 当前要保存、替换或轮询的业务续步
-     */
-    public void rememberInsuranceAdjustment(com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions.AdjustmentWork work) {
-        reusableInsuranceAdjustment = work;
     }
 
     /**

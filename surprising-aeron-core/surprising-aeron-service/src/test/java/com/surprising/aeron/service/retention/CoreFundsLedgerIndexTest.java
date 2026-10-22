@@ -196,30 +196,32 @@ class CoreFundsLedgerIndexTest {
         Files.createDirectories(root);
         // 故意作为资金索引根使用的普通文件，finally 删除
         Path invalidRoot = Files.createTempFile(root, "funds-index-invalid-root-", ".file");
-        // 本场景自动关闭或故障后显式关闭的真实 Core
-        var core = new TradingCoreRuntime(ProductLine.SPOT);
         try {
+            // 配置在构造时绑定，必须在创建 Core 前注入故障目录。
             System.setProperty(INDEX_DIRECTORY, invalidRoot.toString());
-            core.activate();
-            // 当前要检查、重试或等待的真实命令
-            var request = command(core, CoreMessageType.ADJUST_BALANCE, 7,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
-            assertThat(core.apply(request)).isNull();
-            assertThatThrownBy(() -> drain(core)).isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("funds command index unavailable");
-            assertThat(core.appliedCommandCount()).isZero();
-            assertThat(core.directCommand.publicationComplete()).isTrue();
-            assertThat(core.directCommand.active()).isTrue();
-            assertThat(core.resultLedger().get(request.header().commandId())).isNull();
-            assertThatThrownBy(core::assertHealthy).isInstanceOf(IllegalStateException.class);
-        } finally {
-            if (previous == null) System.clearProperty(INDEX_DIRECTORY);
-            else System.setProperty(INDEX_DIRECTORY, previous);
+            var core = new TradingCoreRuntime(ProductLine.SPOT);
             try {
+                core.activate();
+                // 当前要检查、重试或等待的真实命令
+                var request = command(core, CoreMessageType.ADJUST_BALANCE, 7,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
+                assertThat(core.apply(request)).isNull();
+                assertThatThrownBy(() -> drain(core)).isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("funds command index unavailable");
+                assertThat(core.appliedCommandCount()).isZero();
+                assertThat(core.directCommand.publicationComplete()).isTrue();
+                assertThat(core.directCommand.active()).isTrue();
+                assertThat(core.resultLedger().get(request.header().commandId())).isNull();
+                assertThatThrownBy(core::assertHealthy).isInstanceOf(IllegalStateException.class);
+            } finally {
                 assertThatThrownBy(core::close).isInstanceOf(IllegalStateException.class)
                         .hasMessageContaining("Core workers stopped with a failure")
                         .hasRootCauseInstanceOf(java.nio.file.FileAlreadyExistsException.class);
-            } finally { Files.deleteIfExists(invalidRoot); }
+            }
+        } finally {
+            if (previous == null) System.clearProperty(INDEX_DIRECTORY);
+            else System.setProperty(INDEX_DIRECTORY, previous);
+            Files.deleteIfExists(invalidRoot);
         }
     }
 

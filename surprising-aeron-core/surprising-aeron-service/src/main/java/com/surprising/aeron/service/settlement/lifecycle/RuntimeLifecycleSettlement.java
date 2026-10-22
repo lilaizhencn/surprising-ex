@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -42,7 +42,7 @@ public final class RuntimeLifecycleSettlement {
      */
     public static CoreSettlementProgressView apply(TradingCoreState before, SettleInstrumentCommand command,
                                                    Iterable<Long> indexedUserIds, UUID chunkCommandId,
-                                                   ActiveOrderIndex activeOrderIndex, TradingRuntimeState runtime,
+                                                   ActiveOrderIndex activeOrderIndex, TradingAccountRuntime runtime,
                                                    RuntimeIdentityRegistry identities) {
         if (before == null || command == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid runtime settlement");
@@ -66,7 +66,7 @@ public final class RuntimeLifecycleSettlement {
     public static CoreSettlementProgressView applyRuntime(SettleInstrumentCommand command,
                                                           Iterable<Long> indexedUserIds, UUID chunkCommandId,
                                                           ActiveOrderIndex activeOrderIndex,
-                                                          TradingRuntimeState runtime,
+                                                          TradingAccountRuntime runtime,
                                                           RuntimeIdentityRegistry identities) {
         if (command == null || indexedUserIds == null || activeOrderIndex == null
                 || runtime == null || identities == null) {
@@ -213,7 +213,7 @@ public final class RuntimeLifecycleSettlement {
      */
     public static void advanceCancellation(TradingCoreState before, SettleInstrumentCommand command,
                                            Collection<CancellationOrder> orders, long nextCursorOrderId,
-                                           UUID chunkCommandId, TradingRuntimeState runtime,
+                                           UUID chunkCommandId, TradingAccountRuntime runtime,
                                            RuntimeIdentityRegistry identities) {
         if (nextCursorOrderId <= 0 || chunkCommandId == null) {
             throw new IllegalArgumentException("settlement cursor must advance");
@@ -236,7 +236,7 @@ public final class RuntimeLifecycleSettlement {
      */
     public static void advanceCancellationRuntime(SettleInstrumentCommand command,
                                                   Collection<CancellationOrder> orders, long nextCursorOrderId,
-                                                  UUID chunkCommandId, TradingRuntimeState runtime,
+                                                  UUID chunkCommandId, TradingAccountRuntime runtime,
                                                   RuntimeIdentityRegistry identities) {
         if (nextCursorOrderId <= 0 || chunkCommandId == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("settlement cursor must advance");
@@ -281,7 +281,7 @@ public final class RuntimeLifecycleSettlement {
      * @param symbolId 币对的内部编号
      * @param assetId 结算资产的内部编号
      */
-    static List<UserSettlement> prepareLane(TradingRuntimeState runtime, CoreInstrument instrument,
+    static List<UserSettlement> prepareLane(TradingAccountRuntime runtime, CoreInstrument instrument,
                                             ProductTradingRules kernel, SettleInstrumentCommand command,
                                             LongArrayList users, int symbolId, int assetId) {
         // 当前 Lane 准备好的用户结算后值列表，尚未写回账户。
@@ -357,7 +357,7 @@ public final class RuntimeLifecycleSettlement {
      * @param assetId 结算资产的内部编号
      * @param plans 本 Lane 已完成计算且已确认整页保险预算的账户后值
      */
-    static RuntimeTreasuryDelta applyLane(TradingRuntimeState runtime, int assetId,
+    static RuntimeTreasuryDelta applyLane(TradingAccountRuntime runtime, int assetId,
                                           List<UserSettlement> plans) {
         // 当前 Lane 应用账户后返回的财库清算变化。
         RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta();
@@ -381,7 +381,7 @@ public final class RuntimeLifecycleSettlement {
      * @param startCursorUserId 用户页的排他下界，只选择更大编号
      * @param limit 本页最多选取的记录数
      */
-    static UserPage selectUsers(Iterable<Long> indexedUserIds, TradingRuntimeState runtime,
+    static UserPage selectUsers(Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
                                 int startLaneId, long startCursorUserId, int limit) {
         // 命令游标按全局用户编号推进，与 Core 使用同一顺序；不按账户 Lane 单独分页。
         // 索引选出的当前页及续页位置。
@@ -399,7 +399,7 @@ public final class RuntimeLifecycleSettlement {
      * @param startCursorOrderId 传给活动订单索引的订单续页游标
      * @param limit 本页最多选取的记录数
      */
-    static OrderPage selectOrders(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    static OrderPage selectOrders(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                   ActiveOrderIndex index, String instrumentId, int startLaneId,
                                   long startCursorOrderId, int limit) {
         // 索引选出的当前页及续页位置。
@@ -424,7 +424,7 @@ public final class RuntimeLifecycleSettlement {
      * @param index 活动订单路由索引
      * @param instrumentId 需要结算并清空订单的币对名称
      */
-    private static List<CancellationOrder> openOrders(TradingRuntimeState runtime,
+    private static List<CancellationOrder> openOrders(TradingAccountRuntime runtime,
                                                    RuntimeIdentityRegistry identities,
                                                    ActiveOrderIndex index, String instrumentId) {
         // 币对活动订单编号的降序数组。
@@ -446,7 +446,7 @@ public final class RuntimeLifecycleSettlement {
      * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
      * @param orders 本次要在账户侧取消的订单路由集合
      */
-    private static void cancelOrders(TradingRuntimeState runtime, Collection<CancellationOrder> orders) {
+    private static void cancelOrders(TradingAccountRuntime runtime, Collection<CancellationOrder> orders) {
         if (orders == null || orders.isEmpty()) return;
         // 按用户路由归类的撤单记录数组。
         @SuppressWarnings("unchecked") ArrayList<CancellationOrder>[] ordersByLane =
@@ -462,7 +462,7 @@ public final class RuntimeLifecycleSettlement {
      * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
      * @param orders 本次要在账户侧取消的订单路由集合
      */
-    static void cancelOrdersOnLane(TradingRuntimeState runtime, Collection<CancellationOrder> orders) {
+    static void cancelOrdersOnLane(TradingAccountRuntime runtime, Collection<CancellationOrder> orders) {
         if (orders == null || orders.isEmpty()) return;
         for (var /* 当前订单路由，包含其用户与币对。 */ order : orders) {
             if (!runtime.currentLaneOwns(order.userId())) continue;
@@ -478,7 +478,7 @@ public final class RuntimeLifecycleSettlement {
      * @param userIds 需要按账户 Lane 分组的用户编号
      * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
      */
-    private static LongArrayList[] groupUsers(List<Long> userIds, TradingRuntimeState runtime) {
+    private static LongArrayList[] groupUsers(List<Long> userIds, TradingAccountRuntime runtime) {
         // 按账户 Lane 编号排列的用户或订单分组数组。
         LongArrayList[] groups = new LongArrayList[runtime.topology().accountLaneCount()];
         for (/* 当前账户 Lane 编号。 */ int lane = 0; lane < groups.length; lane++) groups[lane] = new LongArrayList();
@@ -516,7 +516,7 @@ public final class RuntimeLifecycleSettlement {
      * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
      */
     private static ArrayList<CancellationOrder>[] groupOrders(Collection<CancellationOrder> orders,
-                                                            TradingRuntimeState runtime) {
+                                                            TradingAccountRuntime runtime) {
         // 按账户 Lane 编号排列的用户或订单分组数组。
         @SuppressWarnings("unchecked") ArrayList<CancellationOrder>[] groups =
                 (ArrayList<CancellationOrder>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
@@ -537,7 +537,7 @@ public final class RuntimeLifecycleSettlement {
      * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
      * @param command 固定结算价、结算编号及订单和用户分页参数
      */
-    static CoreInstrument requireInstrument(TradingRuntimeState runtime,
+    static CoreInstrument requireInstrument(TradingAccountRuntime runtime,
                                                  SettleInstrumentCommand command) {
         // 已确认存在的本次结算币对配置。
         CoreInstrument instrument = runtime.instrument(command.instrumentId());

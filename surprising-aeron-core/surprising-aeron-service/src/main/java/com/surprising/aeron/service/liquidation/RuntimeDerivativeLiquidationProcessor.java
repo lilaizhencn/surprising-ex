@@ -9,7 +9,7 @@ import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
@@ -43,10 +43,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
      * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
      */
-    public static TradingRuntimeState applyExecution(TradingCoreState before,
+    public static TradingAccountRuntime applyExecution(TradingCoreState before,
                                                      ExecuteLiquidationCommand command,
                                                      Collection<CancellationOrder> canceledOrders,
-                                                     TradingRuntimeState runtime,
+                                                     TradingAccountRuntime runtime,
                                                      RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -62,9 +62,9 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
      * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
      */
-    public static TradingRuntimeState applyExecutionRuntime(ExecuteLiquidationCommand command,
+    public static TradingAccountRuntime applyExecutionRuntime(ExecuteLiquidationCommand command,
                                                             Collection<CancellationOrder> canceledOrders,
-                                                            TradingRuntimeState runtime,
+                                                            TradingAccountRuntime runtime,
                                                             RuntimeIdentityRegistry identities) {
         if (runtime.systemLedgerStarted()) throw new IllegalStateException("active liquidation requires its asynchronous continuation");
         execute(null, command, canceledOrders, 0, runtime, identities, false);
@@ -82,7 +82,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
      */
     public static ExecutionWork beginExecution(ExecutionWork reuse, ExecuteLiquidationCommand command,
             Collection<CancellationOrder> canceledOrders, long nextCursorOrderId,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         return execute(reuse, command, canceledOrders, nextCursorOrderId, runtime, identities, true);
     }
 
@@ -117,7 +117,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         /** 各动作的检查结果字节，Lane 写入后通过既有控制完成位发布给 Owner。 */
         private byte[] results = new byte[4];
         /** 本次步骤或续步所绑定的交易运行时。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 本批前置检查的有效动作数量，只有这个数组前缀参与校验和清理。 */
         private int count;
         /** 本批前置检查涉及的账户 Lane 位集合，Owner 据此只派发相关 Lane。 */
@@ -134,7 +134,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
-        public void prepare(ExecuteLiquidationCommand command, TradingRuntimeState runtime,
+        public void prepare(ExecuteLiquidationCommand command, TradingAccountRuntime runtime,
                             RuntimeIdentityRegistry identities) {
             initialize(runtime, 1);
             prepareAction(0, command.liquidationId(), command.triggerPriceSequence(),
@@ -147,7 +147,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
-        public void prepare(ExecuteLiquidationBatchCommand command, TradingRuntimeState runtime,
+        public void prepare(ExecuteLiquidationBatchCommand command, TradingAccountRuntime runtime,
                             RuntimeIdentityRegistry identities) {
             initialize(runtime, command.actions().size());
             for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < count; index++) {
@@ -163,7 +163,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param count 本命令需要校验的强平动作数量，用作并行数组的有效长度
          */
-        private void initialize(TradingRuntimeState runtime, int count) {
+        private void initialize(TradingAccountRuntime runtime, int count) {
             runtime.assertOwner();
             if (this.runtime != null) throw new IllegalStateException("liquidation checks already prepared");
             if (count > results.length) {
@@ -331,7 +331,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
      */
     public static java.util.function.BooleanSupplier beginExecutionBatch(
-            List<ExecutionRequest> requests, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            List<ExecutionRequest> requests, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (requests == null || requests.isEmpty() || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid liquidation execution batch");
         }
@@ -368,7 +368,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
     private static final class BatchFinancialWork extends SystemLedgerCommand
             implements java.util.function.BooleanSupplier {
         /** 本次步骤或续步所绑定的交易运行时。 */
-        private final TradingRuntimeState runtime;
+        private final TradingAccountRuntime runtime;
         /** 本批各请求的账户执行步骤，所属 Lane 完成后 Owner 读取其用户与修订信息。 */
         private final BatchExecutionStage[] stages;
         /** 本批账户资金回执数组，Owner 收集完成后由账本按原请求顺序应用。 */
@@ -388,7 +388,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param stages 与请求同下标的账户执行步骤，由所属 Lane 准备并写入
          * @param results 与账户步骤同下标的资金结果数组，账户阶段完成后供 Owner 和账本读取
          */
-        private BatchFinancialWork(TradingRuntimeState runtime, BatchExecutionStage[] stages,
+        private BatchFinancialWork(TradingAccountRuntime runtime, BatchExecutionStage[] stages,
                                    RuntimeTreasuryDelta[] results) {
             initializeLedgerCommand(runtime);
             this.runtime = runtime; this.stages = stages; this.results = results;
@@ -445,7 +445,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         /** 只推进撤单的阶段标记，true 时保存下一游标，不执行持仓平仓。 */
         private boolean advance;
         /** 本次步骤或续步所绑定的交易运行时。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 本账户步骤读取的源强平记录，后续检查及执行以它为输入。 */
         private LiquidationRuntime liquidation;
         /** 源强平合约的配置引用，最终执行时用于持仓检查和金额计算。 */
@@ -473,7 +473,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          */
         private BatchExecutionStage(ExecuteLiquidationCommand command, long[] orderIds,
                                     long nextCursorOrderId, boolean advance,
-                                    TradingRuntimeState runtime, LiquidationRuntime liquidation,
+                                    TradingAccountRuntime runtime, LiquidationRuntime liquidation,
                                     CoreInstrument instrument, int assetId, long positionKey) {
             reset(command, orderIds, nextCursorOrderId, advance, runtime, liquidation,
                     instrument, assetId, positionKey);
@@ -493,7 +493,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          */
         private void reset(ExecuteLiquidationCommand command, long[] orderIds,
                            long nextCursorOrderId, boolean advance,
-                           TradingRuntimeState runtime, LiquidationRuntime liquidation,
+                           TradingAccountRuntime runtime, LiquidationRuntime liquidation,
                            CoreInstrument instrument, int assetId, long positionKey) {
             this.command = command; this.orderIds = orderIds; this.nextCursorOrderId = nextCursorOrderId;
             this.canceledCount = orderIds == null ? 0 : orderIds.length;
@@ -510,7 +510,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
         private static BatchExecutionStage prepare(ExecutionRequest request,
-                                                    TradingRuntimeState runtime,
+                                                    TradingAccountRuntime runtime,
                                                     RuntimeIdentityRegistry identities) {
             return prepare(null, request.command(), request.canceledOrders(), request.nextCursorOrderId(),
                     runtime, identities);
@@ -529,7 +529,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                                                     ExecuteLiquidationCommand command,
                                                     Collection<CancellationOrder> canceledOrders,
                                                     long nextCursorOrderId,
-                                                    TradingRuntimeState runtime,
+                                                    TradingAccountRuntime runtime,
                                                     RuntimeIdentityRegistry identities) {
             if (!runtime.productLine().isDerivative()) {
                 throw new IllegalArgumentException("liquidation requires derivative product");
@@ -654,7 +654,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
      */
     private static ExecutionWork execute(ExecutionWork reuse, ExecuteLiquidationCommand command,
             Collection<CancellationOrder> canceledOrders, long nextCursorOrderId,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
         if (command == null || runtime == null || identities == null || nextCursorOrderId < 0
                 || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation account stage");
@@ -682,7 +682,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         /** 单笔命令复用的账户执行步骤，Lane 准备后由 Owner 等待其结果。 */
         private BatchExecutionStage stage;
         /** 本次步骤或续步所绑定的交易运行时。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 本笔强平命令，提供执行价格、费率和撤单游标等固定输入。 */
         private ExecuteLiquidationCommand command;
         /** 本次从 Matcher 收到的撤单回执，命令槽回收时释放集合引用。 */
@@ -711,7 +711,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
         private void prepare(ExecuteLiquidationCommand command, Collection<CancellationOrder> canceledOrders,
-                long nextCursorOrderId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+                long nextCursorOrderId, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
             initializeLedgerCommand(runtime);
             this.command = command; this.canceledOrders = canceledOrders;
             this.nextCursorOrderId = nextCursorOrderId; this.identities = identities;
@@ -801,7 +801,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param treasuryDelta 本笔强平需要应用到保险、亏空及清算总账的资金差额，可为空
      * @param canceledCount 本笔实际应用的撤单数量，用于决定全局修订号增加一还是二
      */
-    private static void finishExecution(TradingRuntimeState runtime, long userId, int assetId,
+    private static void finishExecution(TradingAccountRuntime runtime, long userId, int assetId,
             long positionKey, RuntimeTreasuryDelta treasuryDelta, int canceledCount) {
         if (treasuryDelta != null) {
             runtime.recordUserSettlementChanges(userId, assetId, positionKey);
@@ -820,7 +820,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param positionKey 源强平目标持仓腿的运行时整数键，0 表示尚未定位到有效持仓
      */
     private static RuntimeTreasuryDelta executeAccountLiquidation(ExecuteLiquidationCommand command,
-            TradingRuntimeState runtime, LiquidationRuntime liquidation, CoreInstrument instrument,
+            TradingAccountRuntime runtime, LiquidationRuntime liquidation, CoreInstrument instrument,
             int settleAssetId, long positionKey) {
         // 源账户最新持仓，实际强平数量、剩余入场信息和保证金都从它计算。
         PositionRuntime position = runtime.position(positionKey);
@@ -897,11 +897,11 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
      * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
      */
-    public static TradingRuntimeState applyCancellationAdvance(TradingCoreState before,
+    public static TradingAccountRuntime applyCancellationAdvance(TradingCoreState before,
                                                                ExecuteLiquidationCommand command,
                                                                Collection<CancellationOrder> canceledOrders,
                                                                long nextCursorOrderId,
-                                                               TradingRuntimeState runtime,
+                                                               TradingAccountRuntime runtime,
                                                                RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -918,10 +918,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
      * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
      */
-    public static TradingRuntimeState applyCancellationAdvanceRuntime(ExecuteLiquidationCommand command,
+    public static TradingAccountRuntime applyCancellationAdvanceRuntime(ExecuteLiquidationCommand command,
                                                                       Collection<CancellationOrder> canceledOrders,
                                                                       long nextCursorOrderId,
-                                                                      TradingRuntimeState runtime,
+                                                                      TradingAccountRuntime runtime,
                                                                       RuntimeIdentityRegistry identities) {
         if (nextCursorOrderId <= 0) throw new IllegalArgumentException("invalid liquidation cancellation cursor");
         execute(null, command, canceledOrders, nextCursorOrderId, runtime, identities, false);
@@ -989,7 +989,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param instrument 目标合约配置，最终强平时用于验证产品和计算金额，只推进撤单时可为空
      * @param positionKey 源强平目标持仓腿的运行时整数键，0 表示尚未定位到有效持仓
      */
-    private static boolean executable(TradingRuntimeState runtime, LiquidationRuntime liquidation,
+    private static boolean executable(TradingAccountRuntime runtime, LiquidationRuntime liquidation,
                                       CoreInstrument instrument, long positionKey) {
         if (instrument == null || !CoreRiskPolicy.canLiquidate(
                 instrument.contractType(), liquidation.signedQuantitySteps())) return false;
@@ -1011,7 +1011,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
      * @param liquidation 源账户当前强平记录，提供用户、币对、持仓腿和计划平仓量
      * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
      */
-    private static void validatePrice(TradingRuntimeState runtime, LiquidationRuntime liquidation,
+    private static void validatePrice(TradingAccountRuntime runtime, LiquidationRuntime liquidation,
                                       ExecuteLiquidationCommand command) {
         // 强平目标币对当前行情，触发序号和执行价都必须与它一致。
         MarkPriceRuntime mark = runtime.markPrice(liquidation.symbolId());

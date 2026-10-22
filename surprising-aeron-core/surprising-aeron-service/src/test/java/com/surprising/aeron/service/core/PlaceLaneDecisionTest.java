@@ -63,7 +63,7 @@ class PlaceLaneDecisionTest {
             var release = new CountDownLatch(1);
             // 用户七所属的实际账户 Lane 下标
             int laneId = runtime.topology().accountLaneId(7);
-            runtime.laneWorkers[laneId].submit(/* 当前执行阻塞工作的账户 Lane */ lane -> {
+            runtime.submitAccountCommand(laneId, /* 当前执行阻塞工作的账户 Lane */ lane -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timed out"); }
                 catch (/* 门闩等待中断，转成测试失败 */ InterruptedException failure) { throw new AssertionError(failure); }
@@ -112,7 +112,7 @@ class PlaceLaneDecisionTest {
      * @param runtime 拥有真实账户工作资源的原运行时
      * @param event 已派发且仍保留租约的准入事件
      */
-    private static void await(TradingRuntimeState runtime, PlaceAdmissionEvent event) {
+    private static void await(TradingAccountRuntime runtime, PlaceAdmissionEvent event) {
         // 等本次准入完成的三秒单调时钟截止时间
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!event.complete()) {

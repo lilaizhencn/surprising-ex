@@ -3,7 +3,7 @@ package com.surprising.aeron.service.order.state;
 import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
 import lombok.AccessLevel;
@@ -16,7 +16,7 @@ import lombok.experimental.Accessors;
  */
 public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     /** 提供原结算范围、取消和完成通知的所属运行时。 */
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /** 本命令原有结算变化缓冲，Lane 写完后由 Owner 接管一次。 */
     private MatcherSettlementChanges changes;
     /**  最终结果及变更捕获采用的当前产品身份表。 返回本次借用的产品身份表，仅在原事件生命周期内使用。 */
@@ -73,7 +73,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
      */
     public LaneCancelEvent prepare(long sequence, long ownerUserId, long targetOrderId,
                             long timestamp, long clusterPosition, int ownerLaneId,
-                            TradingRuntimeState owner,
+                            TradingAccountRuntime owner,
                             RuntimeIdentityRegistry identityRegistry,
                             MatcherSettlementChanges commandChanges) {
         if (sequence <= 0 || ownerUserId <= 0 || targetOrderId <= 0 || timestamp < 0 || clusterPosition < 0
@@ -104,7 +104,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     public LaneCancelEvent prepare(long sequence, long ownerUserId, long[] targetOrderIds, int targetOrderCount,
                             long timestamp, long clusterPosition, int ownerLaneId,
                             boolean commitAccountLane,
-                            TradingRuntimeState owner,
+                            TradingAccountRuntime owner,
                             RuntimeIdentityRegistry identityRegistry,
                             MatcherSettlementChanges commandChanges) {
         if (sequence <= 0 || ownerUserId <= 0 || targetOrderIds == null
@@ -173,7 +173,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         }
         lane.recordSettlementOperation();
         // 完成位发布前取得的运行时通知目标，发布后不再读可回收事件字段。
-        TradingRuntimeState completionRuntime = runtime;
+        TradingAccountRuntime completionRuntime = runtime;
         // 提前捕获的目标 Lane 编号，完成通知沿用原路由。
         int completionLaneId = laneId;
         // 提前捕获的本次 Core 序号，防止事件复用后误通知下一命令。

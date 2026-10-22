@@ -25,7 +25,7 @@ public final class RuntimeStateParityChecker {
      * @param actual 需要物化并比较的实际运行时
      */
     public static TradingCoreState assertMatches(
-            TradingCoreState expected, RuntimeIdentityRegistry identities, TradingRuntimeState actual) {
+            TradingCoreState expected, RuntimeIdentityRegistry identities, TradingAccountRuntime actual) {
         if (expected == null || identities == null || actual == null) {
             throw new IllegalArgumentException("parity arguments are required");
         }
@@ -33,7 +33,7 @@ public final class RuntimeStateParityChecker {
         TradingCoreState materialized = RuntimeStateMaterializer.materialize(actual, identities);
         if (!expected.equals(materialized) || expected.businessStateHash() != materialized.businessStateHash()) {
             // 只在失败诊断分支投影的预期运行时，本方法没有另行关闭它
-            TradingRuntimeState projected = RuntimeStateProjector.project(expected, identities);
+            TradingAccountRuntime projected = RuntimeStateProjector.project(expected, identities);
             // 按预期修订捕获的预期运行时诊断快照
             TradingRuntimeSnapshot expectedSnapshot = RuntimeSnapshotBuilder.capture(projected, expected.revision());
             // 同样按预期修订捕获的实际运行时诊断快照，不是重新决定业务修订

@@ -13,7 +13,7 @@ class OwnerIndexChurnTest {
      */
     @Test
     void ownerIndexesKeepTheirStorageAcrossBoundedInsertDeleteChurn() throws Exception {
-        try (/* 未启动账户或账本工作线程的默认测试运行时，离开资源作用域关闭 */ var state = new TradingRuntimeState()) {
+        try (/* 未启动账户或账本工作线程的默认测试运行时，离开资源作用域关闭 */ var state = new TradingAccountRuntime()) {
             for (String /* 当前被检查字段名，原数组只包含 pendingReservationUsers 这一项 */ name : new String[]{"pendingReservationUsers"}) {
                 // 字段所在对象，本用例实际为运行时的 pendingReservations 容器
                 Object target = name.equals("pendingReservationUsers") ? state.pendingReservations : state;

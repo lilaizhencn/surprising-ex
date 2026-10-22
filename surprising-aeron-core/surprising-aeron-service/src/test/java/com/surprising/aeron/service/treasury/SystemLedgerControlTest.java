@@ -5,7 +5,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.core.LedgerControlTestSupport;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -68,9 +68,8 @@ class SystemLedgerControlTest {
         try (/* 由空永续冷状态投影并按需启动真实账户与账本线程的运行时，try 退出时关闭。 */ var runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities)) {
             identities.assetId("USDT"); runtime.startSystemLedgerLane();
             // 反射取得的运行时系统账本执行器字段。
-            var field = TradingRuntimeState.class.getDeclaredField("systemLedger"); field.setAccessible(true);
             // 运行时实际持有的系统账本执行器，用于填满其邮箱。
-            var ledger = (SystemLedgerLane) field.get(runtime);
+            var ledger = com.surprising.aeron.service.core.AccountLaneTestAccess.ledger(runtime);
             // 控制空队首是否就绪的原子开关，finally 保证放行。
             var ready = new java.util.concurrent.atomic.AtomicBoolean();
             assertThat(ledger.offer(/* 用原子就绪开关卡住账本队首的测试占位任务，不修改系统资金。 */ new SystemLedgerLane.Entry() {

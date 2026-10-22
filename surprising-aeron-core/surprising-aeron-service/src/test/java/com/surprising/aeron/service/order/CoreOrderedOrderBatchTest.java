@@ -31,7 +31,7 @@ import com.surprising.aeron.service.core.AccountLaneQueryTestSupport;
 import com.surprising.aeron.service.core.CoreFaults;
 import com.surprising.aeron.service.core.PipelinedExecutionExtension;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline;
@@ -90,12 +90,10 @@ class CoreOrderedOrderBatchTest {
     }
 
     /**
-     * 仅在逐次撮合日志开关为一时执行，检查单笔下单及撤单成功、预留清空、报价资金全数可用；没有单独断言统计计数。
+     * 单笔下单及撤单成功后，预留清空且报价资金全数可用。
      */
     @Test
-    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(
-            named = "surprising.aeron.matching-phase-log-interval", matches = "1")
-    void singleCancelFlushesMatchingPhaseStatisticsAndReleasesFunds() {
+    void singleCancelReleasesReservedFunds() {
         try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
@@ -168,7 +166,7 @@ class CoreOrderedOrderBatchTest {
                             place(85_001, "funds-original", 1_000))))));
 
             // 继续准入前记录的账户所有权交接代数，完成后核对没有临时借走 Lane
-            long handoffBefore = (long) field(state.runtimeState(), "laneHandoffEpoch");
+            long handoffBefore = state.runtimeState().laneHandoffEpoch();
             // 资金不足而预期被拒绝的改单消息
             CoreMessage rejectedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 5,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
@@ -186,7 +184,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().order(85_000)).isNotNull();
             assertThat(state.tradingState().order(85_002)).isNull();
 
-            handoffBefore = (long) field(state.runtimeState(), "laneHandoffEpoch");
+            handoffBefore = state.runtimeState().laneHandoffEpoch();
             // 降价后能够复用原冻结资金的改单消息
             CoreMessage appliedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
@@ -195,7 +193,7 @@ class CoreOrderedOrderBatchTest {
             // 成功改单的 Core 终态响应
             CoreResponse applied = asynchronous ? CoreTestCompletion.applyAsynchronously(state, appliedCommand)
                     : drainBatch(state, appliedCommand);
-            if (asynchronous) assertThat((long) field(state.runtimeState(), "laneHandoffEpoch"))
+            if (asynchronous) assertThat(state.runtimeState().laneHandoffEpoch())
                     .as("amend preflight and reservation stay on the permanent Lane").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(applied, 1)).isEqualTo(-1);
             assertThat(state.tradingState().order(85_001)).isNull();
@@ -247,11 +245,11 @@ class CoreOrderedOrderBatchTest {
             // 必须在提交批次之前注入故障，因为 Matcher 会直接发布给账户。
             // 若先等撮合结果再破坏余额，账户结算可能已经完成；这里让真实账户入账检查触发溢出。
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingRuntimeState runtime = field(state, "runtimeState");
+            TradingAccountRuntime runtime = field(state, "runtimeState");
             // 当前运行时的资产、品种、客户号及持仓身份字典
             RuntimeIdentityRegistry identities = field(state, "identities");
             // 故障注入是否临时取得 Owner 账户访问权，finally 只释放本次取得的一层
-            boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess;
+            boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
             try {
                 if (acquired) runtime.acquireOwnerLaneAccess();
                 runtime.putBalance(new com.surprising.aeron.service.account.BalanceRuntime(
@@ -308,10 +306,10 @@ class CoreOrderedOrderBatchTest {
         } finally {
             // 故障工作线程关闭时仍会抛错；测试清理也要继续停止其他工作线程。
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingRuntimeState runtime = field(state, "runtimeState");
+            TradingAccountRuntime runtime = field(state, "runtimeState");
             org.assertj.core.api.Assertions.catchThrowable(state::close);
             if (runtime != null) {
-                for (Object /* 本场景需要显式停止或放行的账户工作线程 */ worker : (Object[]) field(runtime, "laneWorkers")) {
+                for (Object /* 本场景需要显式停止或放行的账户工作线程 */ worker : (Object[]) com.surprising.aeron.service.core.AccountLaneTestAccess.workers(runtime)) {
                     if (worker instanceof AutoCloseable /* 已经确认可关闭的工作线程对象，故障清理仍要停止其他线程 */ closeable) {
                         org.assertj.core.api.Assertions.catchThrowable(closeable::close);
                     }
@@ -361,7 +359,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             // 当前待完成命令的完整 Core 序号
             long sequence = state.matchingSequence(message.header().commandId());
-            assertThat(state.pendingMatching.get(sequence).orderBatch.pipelined).isTrue();
+            assertThat(state.pendingMatching().get(sequence).orderBatch.pipelined).isTrue();
             // 当前已收到或由完成回调交出的 Core 响应
             CoreResponse response = drainBatchAfterFirst(state, message, sequence);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 4)).isEqualTo(-1);
@@ -408,11 +406,11 @@ class CoreOrderedOrderBatchTest {
                     UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(
                             new PlaceOrderBatchCommand(List.of(sell, buy))));
             // 继续准入前记录的账户所有权交接代数，完成后核对没有临时借走 Lane
-            long handoffBefore = (long) field(state.runtimeState(), "laneHandoffEpoch");
+            long handoffBefore = state.runtimeState().laneHandoffEpoch();
             // 当前已收到或由完成回调交出的 Core 响应
             CoreResponse response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, batch)
                     : drainBatch(state, batch);
-            if (asynchronous) assertThat((long) field(state.runtimeState(), "laneHandoffEpoch"))
+            if (asynchronous) assertThat(state.runtimeState().laneHandoffEpoch())
                     .as("sequential admission must not borrow Lane ownership").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
@@ -465,7 +463,7 @@ class CoreOrderedOrderBatchTest {
                     FatalMatchingDivergenceException.class);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingRuntimeState runtime = field(state, "runtimeState");
+            TradingAccountRuntime runtime = field(state, "runtimeState");
             // 当前运行时的资产、品种、客户号及持仓身份字典
             RuntimeIdentityRegistry identities = field(state, "identities");
             // 字典解析出的 USDT 资产编号
@@ -512,9 +510,9 @@ class CoreOrderedOrderBatchTest {
                 state.apply(batch);
                 // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
                 long deadline = System.nanoTime() + 5_000_000_000L;
-                while (state.pendingMatching.size() != 0 && System.nanoTime() < deadline)
+                while (state.pendingMatching().size() != 0 && System.nanoTime() < deadline)
                     state.commits.commitReadyMatching(256, 2_000, 6, false, (/* 当前待完成命令的完整 Core 序号 */ sequence, /* 当前已收到或由完成回调交出的 Core 响应 */ response) -> {});
-                assertThat(state.pendingMatching.size()).isZero();
+                assertThat(state.pendingMatching().size()).isZero();
                 drainBatch(state, command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 4 + cycle * 3L,
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
                                 new CancelOrderCommand(id), new CancelOrderCommand(id + 1), new CancelOrderCommand(id + 2))))));
@@ -553,19 +551,19 @@ class CoreOrderedOrderBatchTest {
                 assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 expected.add(state.matchingSequence(message.header().commandId()));
             }
-            assertThat(state.pendingMatching.deferredCount()).isEqualTo(2);
+            assertThat(state.pendingMatching().deferredCount()).isEqualTo(2);
             // 有序提交回调实际收集到的终态 Core 序号列表
             var completed = new ArrayList<Long>();
             // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
             long deadline = System.nanoTime() + 5_000_000_000L;
-            while (state.pendingMatching.size() != 0 && System.nanoTime() < deadline) {
+            while (state.pendingMatching().size() != 0 && System.nanoTime() < deadline) {
                 state.commits.commitReadyMatching(256, 2_000, 6, false,
                         (/* 当前待完成命令的完整 Core 序号 */ sequence, /* 当前已收到或由完成回调交出的 Core 响应 */ response) -> completed.add(sequence));
             }
             assertThat(completed).containsExactlyElementsOf(expected);
-            assertThat(state.pendingMatching.deferredCount()).isZero();
+            assertThat(state.pendingMatching().deferredCount()).isZero();
             assertThat(state.batches().hasPendingBatches()).isFalse();
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(TradingOrderBatchCodec.decodeResult(
                     state.commandResults().get(commands.get(2).header().commandId()).responseData()).items())
                     .allSatisfy(/* 当前批量结果的一项，读取其状态、结果码、订单或成交明细 */ item -> assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED));
@@ -610,14 +608,14 @@ class CoreOrderedOrderBatchTest {
             var responses = new ArrayList<CoreResponse>();
             // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
             long deadline = System.nanoTime() + 5_000_000_000L;
-            while (state.pendingMatching.size() != 0 && System.nanoTime() < deadline) {
+            while (state.pendingMatching().size() != 0 && System.nanoTime() < deadline) {
                 state.commits.commitReadyMatching(256, 2_000, 4, false, (/* 当前待完成命令的完整 Core 序号 */ sequence, /* 当前已收到或由完成回调交出的 Core 响应 */ response) -> {
                     actual.add(sequence);
                     responses.add(response);
                 });
             }
             assertThat(actual).containsExactlyElementsOf(expected);
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(TradingOrderBatchCodec.decodeResult(responses.get(1).data()).items())
                     .allSatisfy(/* 当前批量结果的一项，读取其状态、结果码、订单或成交明细 */ item -> {
                         assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED);
@@ -687,7 +685,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(items.get(3).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
             assertThat(items).extracting(CoreOrderBatchResult.Item::index).containsExactly(0, 1, 2, 3, 4, 5);
             assertThat(shards[0].submittedPosition() - submittedBefore).isEqualTo(2);
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.tradingState().users().get(1001L).balances()).isEqualTo(before);
             assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
             assertThat(state.tradingState().users().get(1001L).positions()).isEmpty();
@@ -734,7 +732,7 @@ class CoreOrderedOrderBatchTest {
                     ResponseStatus.APPLIED, ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                     ResponseStatus.REJECTED, ResponseStatus.APPLIED, ResponseStatus.APPLIED);
             assertThat(items.get(6).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(CoreTestCompletion.applyAsynchronously(state,
                     command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 11,
                             TradingCommandCodec.encodePlaceOrder(place(19_009, "after-async-chunk", 1_000))))
@@ -778,7 +776,7 @@ class CoreOrderedOrderBatchTest {
             // 同一前置批次推进到下一项后取得的 Matcher 事实
             var second = awaitMatching(state, batchSequence);
 
-            assertThat(state.pendingMatching.required(laterSequence).hasMatchingCompletion()).isFalse();
+            assertThat(state.pendingMatching().required(laterSequence).hasMatchingCompletion()).isFalse();
 
             // 前置批次完成时的终态响应
             CoreResponse batchResponse = completeEventually(state, batchSequence, second, 2_001, 4);
@@ -793,7 +791,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(batchResponse.appliedCommandCount()).isLessThan(laterResponse.appliedCommandCount());
             assertThat(state.commandResults().get(batchId).responseData()).containsExactly(batchResponse.data());
             assertThat(state.commandResults().get(laterId).responseData()).containsExactly(laterResponse.data());
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(TradingOrderBatchCodec.decodeResult(batchResponse.data()).items())
                     .extracting(/* 当前批量结果的一项，读取其状态、结果码、订单或成交明细 */ item -> item.order().orderId())
                     .containsExactly(9_001L, 9_002L);
@@ -840,7 +838,7 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(CoreResultCode.STALE_SOURCE_SEQUENCE);
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(duplicate.appliedCommandCount()).isEqualTo(deferred.appliedCommandCount());
-            assertThat(state.pendingMatching.snapshot()).containsKeys(
+            assertThat(state.pendingMatching().snapshot()).containsKeys(
                     state.matchingSequence(laterId), state.matchingSequence(lastId));
             assertThat(state.commandResults()).doesNotContainKey(laterId);
             assertThat(state.commandResults()).doesNotContainKey(lastId);
@@ -852,7 +850,7 @@ class CoreOrderedOrderBatchTest {
             // 前置批次完成时的终态响应
             CoreResponse batchResponse = completeEventually(state, batchSequence, batchMatching, 2_000, 4);
             assertThat(batchResponse).isNotNull();
-            assertThat(state.pendingMatching.snapshot()).containsKeys(
+            assertThat(state.pendingMatching().snapshot()).containsKeys(
                     state.matchingSequence(laterId), state.matchingSequence(lastId));
             assertThat(batchResponse.appliedCommandCount()).isEqualTo(batchSequence);
             assertThat(state.commandResults().get(batchId).responseData()).containsExactly(batchResponse.data());
@@ -879,7 +877,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(laterResponse.appliedCommandCount()).isLessThan(lastResponse.appliedCommandCount());
             assertThat(state.commandResults().get(laterId).responseData()).containsExactly(laterResponse.data());
             assertThat(state.commandResults().get(lastId).responseData()).containsExactly(lastResponse.data());
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrder(9_101L, 9_102L, 9_103L);
         }
@@ -1095,7 +1093,7 @@ class CoreOrderedOrderBatchTest {
             var user = state.tradingState().user(1001);
             assertThat(user.reservations()).containsOnlyKeys(19_001L);
             assertThat(user.balances().get("USDT").totalUnits()).isEqualTo(1_000_000);
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             // 当前成功业务状态的恢复快照字节
             byte[] snapshot = state.snapshot();
             try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
@@ -1147,7 +1145,7 @@ class CoreOrderedOrderBatchTest {
             // 随后要注入致命事实的原批次 UUID
             UUID fatalId = UUID.randomUUID();
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingRuntimeState runtime = field(state, "runtimeState");
+            TradingAccountRuntime runtime = field(state, "runtimeState");
             // 当前运行时的资产、品种、客户号及持仓身份字典
             RuntimeIdentityRegistry identities = field(state, "identities");
             // USDT 资产编号，供账户合法读取及预留资产断言
@@ -1184,7 +1182,7 @@ class CoreOrderedOrderBatchTest {
             // 过早标记故障可能挡住该项预留，使后面的断言失去场景前提。
             assertThat(awaitMatching(state, fatalSequence).accepted()).isTrue();
             // 故障批次仍占用的原命令槽，用于检查没有残留可再次消费的完成引用
-            CommandSlot claimedContext = state.pendingMatching.required(fatalSequence);
+            CommandSlot claimedContext = state.pendingMatching().required(fatalSequence);
             // 故障批次首项推进后复制的分片水位，后续故障不能错误覆盖
             long[] matcherAfterFirst = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
@@ -1216,8 +1214,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004).totalReservedUnits())).isEqualTo(1_000L);
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_005).totalReservedUnits())).isEqualTo(1_000L);
             assertThat(state.commandResults()).doesNotContainKey(fatalId);
-            assertThat(state.pendingMatching.get(fatalSequence)).isNotNull();
-            assertThat(state.pendingMatching.size()).isOne();
+            assertThat(state.pendingMatching().get(fatalSequence)).isNotNull();
+            assertThat(state.pendingMatching().size()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
             assertThat(state.snapshotHasPendingCommands()).isTrue();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
@@ -1244,7 +1242,7 @@ class CoreOrderedOrderBatchTest {
      * 按用途收集财库各类余额、结算和游标查询结果，便于测试观察；只整理返回值，不是持久化恢复快照。
      * @param runtime 要观察财库返回值的账户运行时
      */
-    private static Map<String, Object> treasurySnapshot(TradingRuntimeState runtime) {
+    private static Map<String, Object> treasurySnapshot(TradingAccountRuntime runtime) {
         // 当前运行时财库查询入口
         var treasury = runtime.treasury();
         return Map.ofEntries(
@@ -1390,7 +1388,7 @@ class CoreOrderedOrderBatchTest {
 
             // 确认目标工作线程已经到达阻塞点的门闩
             var entered = new java.util.concurrent.CountDownLatch(1);
-            state.matcherPipeline.readAtSubmissionFence(0, () -> {
+            state.matcherPipeline().readAtSubmissionFence(0, () -> {
                 entered.countDown();
                 try {
                     if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS))
@@ -1409,9 +1407,9 @@ class CoreOrderedOrderBatchTest {
             // 一旦命令已有直达结算事件，Owner 另传的令牌就不是该路径的权威事实。
             // 等待真实改单准入及直达事件建立的两秒截止点
             long admissionDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
-            while (state.pendingMatching.get(sequence).orderBatch.itemSettlementEvent == null) {
+            while (state.pendingMatching().get(sequence).orderBatch.itemSettlementEvent == null) {
                 // 当前仍在队列中的批次命令槽
-                var pending = state.pendingMatching.get(sequence);
+                var pending = state.pendingMatching().get(sequence);
                 if (!pending.orderBatch.activated())
                     state.batches().activateOrderBatch(pending.orderBatch, pending, true);
                 state.runtimeState().assertAccountLanesHealthy();
@@ -1419,7 +1417,7 @@ class CoreOrderedOrderBatchTest {
                 Thread.onSpinWait();
             }
             // 已经派发并等待准入或结算的真实事件
-            var event = state.pendingMatching.get(sequence).orderBatch.itemSettlementEvent;
+            var event = state.pendingMatching().get(sequence).orderBatch.itemSettlementEvent;
             assertThat(event).isNotNull();
             // 注入的原生旧单撤销成功事实
             var nativeCancellation = nativeResult(CommandResultCode.SUCCESS, 12_101);
@@ -1444,15 +1442,15 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
             assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 1001, () -> state.runtimeState().order(12_102))).isNull();
             assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 1001, () -> state.runtimeState().order(12_103))).isNull();
-            assertThat(state.pendingMatching.size()).isEqualTo(1);
+            assertThat(state.pendingMatching().size()).isEqualTo(1);
             assertThat(state.commandResults()).doesNotContainKey(commandId);
-            assertThat(state.pendingMatching.get(sequence)).isNotNull();
+            assertThat(state.pendingMatching().get(sequence)).isNotNull();
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
                     .isSameAs(divergence);
         } finally {
             release.countDown();
             org.assertj.core.api.Assertions.catchThrowable(state::close);
-            for (Object /* 本场景需要显式停止或放行的账户工作线程 */ worker : (Object[]) field(state.runtimeState(), "laneWorkers")) {
+            for (Object /* 本场景需要显式停止或放行的账户工作线程 */ worker : (Object[]) com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.runtimeState())) {
                 if (worker instanceof AutoCloseable /* 已经确认可关闭的工作线程对象，故障清理仍要停止其他线程 */ closeable)
                     org.assertj.core.api.Assertions.catchThrowable(closeable::close);
             }
@@ -1595,14 +1593,14 @@ class CoreOrderedOrderBatchTest {
             state.activate();
             if (ledger) state.runtimeState().startSystemLedgerLane();
             // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-            long handoff = (long) field(state.runtimeState(), "laneHandoffEpoch");
+            long handoff = state.runtimeState().laneHandoffEpoch();
             // 当前已收到或由完成回调交出的 Core 响应
             var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
                     UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             linearOrder(98_301, "sell-for-proceeds", CoreOrderSide.SELL, 1_000, 1),
                             linearOrder(98_302, "buy-with-proceeds", CoreOrderSide.BUY, 1_000, 1))))));
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
-            assertThat((long) field(state.runtimeState(), "laneHandoffEpoch")).isEqualTo(handoff);
+            assertThat(state.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
             var trading = state.tradingState();
             assertThat(trading.order(98_300)).isNull();
@@ -1662,7 +1660,7 @@ class CoreOrderedOrderBatchTest {
                     }
                 }
                 // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-                long handoff = (long) field(state.runtimeState(), "laneHandoffEpoch");
+                long handoff = state.runtimeState().laneHandoffEpoch();
                 // 当前已收到或由完成回调交出的 Core 响应
                 var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
                         UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1684,7 +1682,7 @@ class CoreOrderedOrderBatchTest {
                 assertThat(TradingOrderBatchCodec.decodeResult(rejected.data()).items())
                         .extracting(CoreOrderBatchResult.Item::resultCode)
                         .containsExactly(CoreResultCode.DUPLICATE_ORDER_ID, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-                assertThat((long) field(state.runtimeState(), "laneHandoffEpoch")).isEqualTo(handoff);
+                assertThat(state.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
             } finally {
                 for (/* 当前账户 Lane 数组下标 */ int lane = 0; lane < lanes.length; lane++) {
                     for (/* 当前订单项、分片或账户表的遍历下标 */ int index = 0; index < names.length; index++) {
@@ -1722,7 +1720,7 @@ class CoreOrderedOrderBatchTest {
             // 账户线程完成拒绝客户号查询后回传的两项键值 Future
             var clientKeys = new java.util.concurrent.CompletableFuture<long[]>();
             // 当前运行时账户工作线程数组
-            Object[] workers = field(state.runtimeState(), "laneWorkers");
+            Object[] workers = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.runtimeState());
             // 用户一千零一固定路由到的账户 Lane 编号
             int laneId = state.runtimeState().topology().accountLaneId(1001);
             ((com.surprising.aeron.bootstrap.account.SettlementLaneWorker) workers[laneId]).submit(/* 在用户所属账户线程收到的 Lane，用于查询被拒订单的客户身份是否已释放 */ lane ->
@@ -1752,7 +1750,7 @@ class CoreOrderedOrderBatchTest {
             // 当前运行时各账户 Lane 对象数组
             Object[] lanes = field(state.runtimeState(), "accountLanes");
             // 当前运行时账户工作线程数组
-            Object[] workers = field(state.runtimeState(), "laneWorkers");
+            Object[] workers = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state.runtimeState());
             // 用户一千零一固定路由到的账户 Lane 编号
             int laneId = state.runtimeState().topology().accountLaneId(1001);
             // 本场景需要显式停止或放行的账户工作线程
@@ -2065,7 +2063,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.commandResults()).doesNotContainKey(commandId);
             assertThat(state.tradingState().order(13_001).status())
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
@@ -2084,7 +2082,7 @@ class CoreOrderedOrderBatchTest {
         applySpotInstrument(state);
         applyBalance(state, 1001, 20_000);
         // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-        TradingRuntimeState runtime = field(state, "runtimeState");
+        TradingAccountRuntime runtime = field(state, "runtimeState");
         // 当前运行时的资产、品种、客户号及持仓身份字典
         RuntimeIdentityRegistry identities = field(state, "identities");
         // USDT 资产编号，供账户合法读取及预留资产断言
@@ -2147,7 +2145,7 @@ class CoreOrderedOrderBatchTest {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingRuntimeState runtime = field(state, "runtimeState");
+            TradingAccountRuntime runtime = field(state, "runtimeState");
             // 当前运行时的资产、品种、客户号及持仓身份字典
             RuntimeIdentityRegistry identities = field(state, "identities");
             // 品种一的永久编号
@@ -2184,7 +2182,7 @@ class CoreOrderedOrderBatchTest {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingRuntimeState runtime = field(state, "runtimeState");
+            TradingAccountRuntime runtime = field(state, "runtimeState");
             // 故障前浅观察的业务索引值，当前用例没有再比较该局部基线
             var indexesBefore = allIndexSnapshots(state);
             // 执行当前批次前的运行时业务修订
@@ -2240,7 +2238,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(drainBatch(state, maker).status()).isEqualTo(ResponseStatus.APPLIED);
 
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
-            TradingRuntimeState runtime = field(state, "runtimeState");
+            TradingAccountRuntime runtime = field(state, "runtimeState");
             // 当前运行时的资产、品种、客户号及持仓身份字典
             RuntimeIdentityRegistry identities = field(state, "identities");
             // 故障前复制的身份字典观察值
@@ -2370,7 +2368,7 @@ class CoreOrderedOrderBatchTest {
 
             state.close();
 
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.snapshotHasPendingCommands()).isFalse();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(fatalMatcherSequences);
             assertThat(state.takeMatchingResult(sequence)).isNull();
@@ -2405,7 +2403,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.commandResults()).doesNotContainKey(commandId);
         }
     }
@@ -2447,7 +2445,7 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             postOnly, place(97_002, "reject-funds", 1000)))));
             // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-            long handoff = (long) field(state.runtimeState(), "laneHandoffEpoch");
+            long handoff = state.runtimeState().laneHandoffEpoch();
             // 两项均拒绝但整批已完成的 Core 响应
             var result = CoreTestCompletion.applyAsynchronously(state, message);
             // 按原输入下标排列的批量单项结果列表
@@ -2456,7 +2454,7 @@ class CoreOrderedOrderBatchTest {
                     .containsExactly(ResponseStatus.REJECTED, ResponseStatus.REJECTED);
             assertThat(items).extracting(CoreOrderBatchResult.Item::resultCode)
                     .containsExactly(CoreResultCode.MATCHING_REJECTED, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-            assertThat((long) field(state.runtimeState(), "laneHandoffEpoch")).isEqualTo(handoff);
+            assertThat(state.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
             // 两种拒绝全部完成后导出的请求用户状态
             var user = state.tradingState().user(1001);
             assertThat(user.reservations()).isEmpty();
@@ -2552,7 +2550,7 @@ class CoreOrderedOrderBatchTest {
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
             // 当前全局队首命令槽，未激活批次由等待辅助入口推进
-            CommandSlot head = state.pendingMatching.get(state.pendingMatching.firstSequence());
+            CommandSlot head = state.pendingMatching().get(state.pendingMatching().firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches().activateOrderBatch(head.orderBatch, head, true);
             state.matchingProgress.drainMatchingCompletions();

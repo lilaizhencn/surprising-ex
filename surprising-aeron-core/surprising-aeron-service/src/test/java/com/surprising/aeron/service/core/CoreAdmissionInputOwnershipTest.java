@@ -141,7 +141,7 @@ class CoreAdmissionInputOwnershipTest {
                 var command = message(core, CoreMessageType.PLACE_ORDER, 7, TradingCommandCodec.encodePlaceOrder(place(401, 1)));
                 assertThat(core.apply(command).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 // 该命令登记的真实撮合槽，检查尚未提交及准入未完成
-                var pending = core.pendingMatching.required(core.matchingSequence(command.header().commandId()));
+                var pending = core.pendingMatching().required(core.matchingSequence(command.header().commandId()));
                 assertThat(pending.isMatchingSubmitted()).isFalse();
                 assertThat(pending.placeAdmission().accountReady()).isFalse();
                 assertThat(pending.placeAdmission().complete()).isFalse();
@@ -150,7 +150,7 @@ class CoreAdmissionInputOwnershipTest {
                 var terminal = new CoreResponse[1];
                 // 本次等待查询或异步终态的五秒单调截止时间
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (core.pendingMatching.firstSequence() != 0) {
+                while (core.pendingMatching().firstSequence() != 0) {
                     core.commits.commitReadyMatching(64, TIME, command.header().sourceSequence(), false,
                             (/* 撮合完成回调附带的 Core 序号，本场景只有当前待项，不单独读取 */ sequence, /* 初始请求或完成回调交出的业务响应 */ response) -> terminal[0] = response);
                     if (System.nanoTime() >= deadline) throw new AssertionError("FUSED admission did not resume");

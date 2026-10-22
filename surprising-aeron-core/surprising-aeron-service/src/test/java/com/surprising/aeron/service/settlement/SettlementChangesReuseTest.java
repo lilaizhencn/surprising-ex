@@ -4,7 +4,7 @@ import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.account.AccountLaneTestAccess;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.change.LaneCommitTestAccess;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -20,7 +20,7 @@ class SettlementChangesReuseTest {
      * 同次包含部分成交和全部成交，核对终态清理及累计费用；清空变化后再次撤单，检查只发布新代订单并保留原累计费用。
      */
     @Test void mixedSettlementKeepsFinalCountersAndTerminalCleanupAcrossReuse() {
-        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingAccountRuntime()) {
             // 用户七所属账户 Lane 编号。
             int laneId = runtime.topology().accountLaneId(7);
             // 本用例持有的账户 Lane，或池轮转用例当前 Lane 数组下标。
@@ -88,7 +88,7 @@ class SettlementChangesReuseTest {
      * 在大、小及空终态前缀间反复复用变化缓冲，检查编号和用户有效数、clear 后订单为空，并反射核对客户身份引用列全部释放。
      */
     @Test void terminalReceiptReuseReadsOnlyTheNewCountAndReleasesReferences() throws Exception {
-        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingAccountRuntime()) {
             // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
             var delta = new LaneCommitDelta();
             // 跨复用轮次单调增加的测试订单编号。
@@ -126,7 +126,7 @@ class SettlementChangesReuseTest {
         // 池化缓冲跨 Lane 轮转用例使用的四账户 Lane 拓扑。
         var topology = new LaneTopology(1,0,0,4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,16,16,16);
-        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingRuntimeState(topology)) {
+        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingAccountRuntime(topology)) {
             for (/* 当前借还变化缓冲的轮次。 */ int turn = 0; turn < 100; turn++) {
                 // 本用例持有的账户 Lane，或池轮转用例当前 Lane 数组下标。
                 int lane = turn % 4;
@@ -146,7 +146,7 @@ class SettlementChangesReuseTest {
      * 直接把持仓初值、原位更新后值及删除标记写入变化缓冲并提交，检查 Owner 发布变化跟随新代；不代表真实成交持仓计算。
      */
     @Test void positionPublicationTracksChangedPositions() {
-        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingRuntimeState()) {
+        try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingAccountRuntime()) {
             // 当前待准备、发布或清理的 Lane 实体及终态变化缓冲。
             var delta = new LaneCommitDelta();
             // 直接构造测试持仓使用的规范币对对象。

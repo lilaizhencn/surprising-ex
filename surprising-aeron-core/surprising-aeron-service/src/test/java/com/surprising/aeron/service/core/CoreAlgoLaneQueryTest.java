@@ -85,7 +85,7 @@ class CoreAlgoLaneQueryTest {
             assertThat(core.activeOrderIndex.activeOrderRoute(104)).isNull();
             // 查询前账户所有权交接计数，查询后不能因 Owner 读账户而增加。
             long handoff = core.runtimeState.laneHandoffEpoch();
-            assertThat(java.util.Arrays.stream(TradingRuntimeState.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
+            assertThat(java.util.Arrays.stream(TradingAccountRuntime.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
                     .doesNotContain("publishedAlgoOrders");
             try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 assertThat(query(core, 0, 0, "", 0, 10).data()).isEqualTo(CoreAlgoOrderCodec.encodeList(expected));

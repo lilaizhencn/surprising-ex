@@ -38,7 +38,8 @@ public final class SectionedCoreSnapshotParser {
      * @param payloads 已按协议顺序接收完整且通过外层 CRC 的负载数组表
      * @param expectedProductLine 调用方明确要求恢复或检查的产品线
      */
-    static Components parse(byte[][] payloads, ProductLine expectedProductLine) {
+    static Components parse(byte[][] payloads, ProductLine expectedProductLine,
+            java.nio.file.Path fundsIndexDirectory) {
         // 从第一段读取且产品线已核对的内部元数据。
         HeaderManifest manifest = SectionedCoreSnapshotValidation.parseHeader(payloads[0], expectedProductLine);
         // 解码的来源消费水位表，重复来源键会被拒绝。
@@ -73,7 +74,7 @@ public final class SectionedCoreSnapshotParser {
         long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
                 .order(ByteOrder.LITTLE_ENDIAN).getLong();
         // 最后解码的终态保留索引，恢复或查看清单的调用方负责结束其生命周期。
-        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7]);
+        TerminalStateRetention retention = TerminalStateRetention.decode(payloads[7], fundsIndexDirectory);
         return new Components(manifest.productLine(), manifest.appliedCommandCount(),
                 commandResults, sourceSequences, matcherSnapshot, tradingState, feePolicies,
                 pendingTransfers, retention, accountLanes, manifest, checksum);
@@ -303,18 +304,19 @@ public final class SectionedCoreSnapshotParser {
          * 核对产品线和账户 Lane 清单与 Core 状态配对，准备尚未激活的候选运行时，恢复 Lane 元数据后激活订单簿并返回；运行异常关闭候选或未移交的终态索引，关闭失败附加为 suppressed，再包装协议异常。
          * @param expectedProductLine 调用方明确要求恢复或检查的产品线
          */
-        TradingCoreRuntime restore(ProductLine expectedProductLine) {
+        TradingCoreRuntime restore(ProductLine expectedProductLine,
+                com.surprising.aeron.config.CoreRuntimeConfiguration configuration, boolean activate) {
             requireProductLine(expectedProductLine);
             // 尚在准备或已经激活的候选运行时，失败时尝试关闭。
             TradingCoreRuntime candidate = null;
             try {
-                com.surprising.aeron.service.core.TradingRuntimeState.validateAccountLaneSnapshotManifest(
+                com.surprising.aeron.service.core.TradingAccountRuntime.validateAccountLaneSnapshotManifest(
                         accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
                 candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount,
                         commandResults, sourceSequences, tradingState, retention, matcherForRestoredState(),
-                        manifest.projectionSequence(), feePolicies, pendingTransfers);
+                        manifest.projectionSequence(), feePolicies, pendingTransfers, configuration);
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
-                candidate.activate();
+                if (activate) candidate.activate();
                 return candidate;
             } catch (/* 当前解析或候选恢复的运行异常，按所在边界转为协议错误并清理已移交资源。 */ RuntimeException exception) {
                 if (candidate == null) retention.close();

@@ -485,10 +485,10 @@ class RuntimeCommitRecoveryTest {
                                     current.nextCancelOrderId(), 1)));
                 }
                 // 原强平页执行前账户所有权交接代号
-                long handoffBefore = (long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch");
+                long handoffBefore = uninterrupted.state().runtimeState.laneHandoffEpoch();
                 replayClustered(uninterrupted, List.of(executeLiquidation));
-                assertThat((long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch")).isEqualTo(handoffBefore);
-                assertThat((boolean) field(uninterrupted.state().runtimeState, "ownerLaneAccess")).isFalse();
+                assertThat(uninterrupted.state().runtimeState.laneHandoffEpoch()).isEqualTo(handoffBefore);
+                assertThat(uninterrupted.state().runtimeState.ownerLaneAccess()).isFalse();
                 current = liquidation(uninterrupted.state(), planned.liquidationId());
             }
             assertThat(liquidationPages).isEqualTo(3);
@@ -532,10 +532,10 @@ class RuntimeCommitRecoveryTest {
                 assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.expectedCoverage(
                         uninterrupted.state().tradingState(), planned.liquidationId())).isEqualTo(25);
                 // 部分保险确认前的原账户交接代号，执行不得接管其他 Lane
-                long insuranceHandoff = (long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch");
+                long insuranceHandoff = uninterrupted.state().runtimeState.laneHandoffEpoch();
                 // 原入口执行部分保险确认的响应
                 ReplayResult partialReference = replayClustered(uninterrupted, List.of(partialInsurance.getLast()));
-                assertThat((long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch"))
+                assertThat(uninterrupted.state().runtimeState.laneHandoffEpoch())
                         .as("insurance resolution must not take Lane ownership").isEqualTo(insuranceHandoff);
                 // 保险前恢复入口执行相同确认的响应
                 ReplayResult partialRecovered = replayClustered(restoredBeforeInsurance, List.of(partialInsurance.getLast()));
@@ -570,7 +570,7 @@ class RuntimeCommitRecoveryTest {
                         // 错误目标 ADL 前保存的完整冷状态
                         var beforeRejected = rejectedState.tradingState();
                         // 错误目标 ADL 前的原账户所有权交接代号
-                        long handoff = (long) field(rejectedState.runtimeState, "laneHandoffEpoch");
+                        long handoff = rejectedState.runtimeState.laneHandoffEpoch();
                         // 将 ADL 预期价格改成一百零一的目标冲突消息
                         var invalid = operationsCommand(adlSequence, CoreMessageType.EXECUTE_ADL,
                                 TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(planned.liquidationId(),
@@ -579,7 +579,7 @@ class RuntimeCommitRecoveryTest {
                         var rejected = CoreTestCompletion.applyAsynchronously(rejectedState, invalid);
                         assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                         assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.ADL_POSITION_CONFLICT);
-                        assertThat((long) field(rejectedState.runtimeState, "laneHandoffEpoch")).isEqualTo(handoff);
+                        assertThat(rejectedState.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
                         assertThat(rejectedState.tradingState()).as("all participating Lanes roll back on target rejection")
                                 .isEqualTo(beforeRejected);
                         try (/* 从拒绝后快照再次恢复的运行时，继续正确 ADL */ var again = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, rejectedState.snapshot())) {
@@ -597,10 +597,10 @@ class RuntimeCommitRecoveryTest {
                     // 正确 ADL 前本夹具口径经济权益，减仓不应凭空改变它
                     long beforeAdlEconomic = economicEquityUsdt(uninterrupted.state());
                     // 正确 ADL 前原账户交接代号
-                    long adlHandoff = (long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch");
+                    long adlHandoff = uninterrupted.state().runtimeState.laneHandoffEpoch();
                     // 原入口执行正确 ADL 的响应清单
                     ReplayResult adlReference = replayClustered(uninterrupted, List.of(adl));
-                    assertThat((long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch"))
+                    assertThat(uninterrupted.state().runtimeState.laneHandoffEpoch())
                             .as("ADL target and liquidation remain on their own Lanes").isEqualTo(adlHandoff);
                     // 保险前恢复并已继续保险的入口执行同一 ADL 响应
                     ReplayResult adlFromBeforeCut = replayClustered(restoredBeforeInsurance, List.of(adl));
@@ -983,7 +983,7 @@ class RuntimeCommitRecoveryTest {
     private static void assertParity(TradingCoreRuntime actualState, TradingCoreRuntime expectedState,
                                      ReplayResult actual, ReplayResult expected) {
         assertThat(actual.responses()).isEqualTo(expected.responses());
-        assertThat(actualState.pendingMatching.size()).isZero();
+        assertThat(actualState.pendingMatching().size()).isZero();
         assertThat(actualState.tradingState()).isEqualTo(expectedState.tradingState());
         assertThat(actualState.tradingState().users()).isEqualTo(expectedState.tradingState().users());
         assertThat(actualState.tradingState().orders()).isEqualTo(expectedState.tradingState().orders());
@@ -1275,7 +1275,7 @@ class RuntimeCommitRecoveryTest {
      * @param assetId 原内部资产编号
      */
     private static RuntimeFinancialView runtimeFinancialView(
-            com.surprising.aeron.service.core.TradingRuntimeState runtime, int assetId) {
+            com.surprising.aeron.service.core.TradingAccountRuntime runtime, int assetId) {
         // 固定用户一千零一的原余额
         var buyer = runtime.balance(1001, assetId);
         // 固定用户二千零一的原余额
@@ -1349,8 +1349,8 @@ class RuntimeCommitRecoveryTest {
     private static void assertNoUnfinishedCommands(TradingCoreRuntime state) throws Exception {
         assertThat(state.factContextActive).isFalse();
         assertThat(state.directCommand.active()).isFalse();
-        assertThat(state.pendingMatching.size()).isZero();
-        assertThat(state.pendingMatching.inFlight()).isZero();
+        assertThat(state.pendingMatching().size()).isZero();
+        assertThat(state.pendingMatching().inFlight()).isZero();
         state.runtimeState.requireSnapshotFenceReady();
     }
 

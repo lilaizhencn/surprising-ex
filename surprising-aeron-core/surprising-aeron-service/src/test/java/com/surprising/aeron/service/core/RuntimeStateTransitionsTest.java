@@ -65,7 +65,7 @@ class RuntimeStateTransitionsTest {
         // 本次投影独用的整数身份表，与对应运行时成对使用
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         // 同一用户七从现货向正向永续划转二百五十的请求，目标或源用例分别执行相应一步
         TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
@@ -89,7 +89,7 @@ class RuntimeStateTransitionsTest {
         // 本次投影独用的整数身份表，与对应运行时成对使用
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingRuntimeState runtime = RuntimeStateProjector.project(
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities);
         // 同一用户七从现货向正向永续划转二百五十的请求，目标或源用例分别执行相应一步
         TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
@@ -118,7 +118,7 @@ class RuntimeStateTransitionsTest {
             // 本次投影独用的整数身份表，与对应运行时成对使用
             RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
             // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-            TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+            TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
             RuntimeAccountStateTransitions.adjustBalance(runtime, identities, 7, command);
 
@@ -139,7 +139,7 @@ class RuntimeStateTransitionsTest {
         // 本次投影独用的整数身份表，与对应运行时成对使用
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         assertThatThrownBy(() -> RuntimeAccountStateTransitions.adjustBalance(
                 runtime, identities, 7, new BalanceAdjustmentCommand("USDT", -11)))
@@ -163,7 +163,7 @@ class RuntimeStateTransitionsTest {
         // 本次投影独用的整数身份表，与对应运行时成对使用
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         RuntimeRiskStateTransitions.updateScanControl(runtime, command, 123);
 
@@ -186,7 +186,7 @@ class RuntimeStateTransitionsTest {
         // 本次投影独用的整数身份表，与对应运行时成对使用
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         RuntimeInstrumentStateTransitions.applyConfiguration(runtime, identities, command);
 
@@ -207,7 +207,7 @@ class RuntimeStateTransitionsTest {
         // 本次投影独用的整数身份表，与对应运行时成对使用
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         assertThat(DerivativeAccountCommandProcessor.updatePositionMode(runtime, 7, command)).isTrue();
 
@@ -235,7 +235,7 @@ class RuntimeStateTransitionsTest {
         // 本次投影独用的整数身份表，与对应运行时成对使用
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         assertThat(DerivativeAccountCommandProcessor.updateLeverage(runtime, identities, 7, command)).isTrue();
 

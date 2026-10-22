@@ -8,6 +8,36 @@ surprising:
     matcher-window-size: 4096
     matching-completion-capacity: 4096
     account-lane-queue-capacity: 4096
+    # 节点执行参数由 CoreRuntimeConfiguration 一次绑定、校验后注入；JVM/环境变量仍按 Spring 优先级覆盖。
+    execution-mode: FUSED
+    owner-wait-strategy: BUSY_SPIN
+    settlement-wait-strategy: BUSY_SPIN
+    settlement-spin-limit: 0
+    lane-completion-spins: 1024
+    max-pending-matching: 4096
+    standalone-snapshot-timeout-seconds: 300
+    snapshot-timeout-seconds: 300
+    owner-role-change-timeout-seconds: 600
+    owner-input-batch-size: 64
+    owner-command-window: 256
+    decoder-cache-slots: 4096
+    # Matcher 与 Ledger 使用自己的真实等待入口；原 matcher-wait-strategy 无读取者，不再保留。
+    matcher-pipeline-wait-strategy: BUSY_SPIN
+    matcher-group-size: 256
+    matcher-group-nanos: 10000
+    system-ledger-wait-strategy: BUSY_SPIN
+    lane-initial-entities: 1024
+    funds-index-directory: ${java.io.tmpdir}
+    snapshot:
+      max-bytes: 1073741824
+    # 旧部署环境名只在此处显式映射，实际装配仍服从 Spring 配置优先级。
+    max-concurrent-sessions: 64
+    core:
+      threading-mode: ${AERON_CORE_THREADING_MODE:}
+    service:
+      idle-strategy: ${AERON_SERVICE_IDLE_STRATEGY:}
+    cluster-ingress-channel: ${AERON_CLUSTER_INGRESS_CHANNEL:aeron:udp?term-length=16m}
+    archive-local-control-channel: ${AERON_ARCHIVE_LOCAL_CONTROL_CHANNEL:aeron:ipc?term-length=1m}
     cpu-affinity:
       # 仅绑定 Owner、Matcher 0、Account Lane 0/1；macOS 始终跳过。
       enabled: false
@@ -16,3 +46,9 @@ surprising:
       matcher-cpu: -1
       lane0-cpu: -1
       lane1-cpu: -1
+  realtime:
+    # 留空时不开启实时传输；启用后可以按部署覆盖目录、通道与 stream。
+    channel: ""
+    stream: 2101
+    control-channel: ""
+    control-stream: 2102

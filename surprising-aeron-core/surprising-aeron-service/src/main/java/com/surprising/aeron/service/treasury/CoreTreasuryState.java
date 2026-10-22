@@ -1,18 +1,14 @@
 package com.surprising.aeron.service.treasury;
 
-import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.snapshot.state.StateMapSupport;
-import java.util.Collections;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.UUID;
 
 /**
- * 快照、恢复和冷状态推进使用的系统账本值。保存七类有符号资产余额，以及资金费和生命周期完成编号、分页进度；修改入口返回新值，不替代 TreasuryRuntime 在线单写者。普通 Map 会规范化并冻结，既有冻结或延迟状态 Map 沿 StateMapSupport 的可信边界复用，不在每次构造全表重新校验。
+ * 快照与恢复使用的系统账本值。保存七类有符号资产余额，以及资金费和生命周期完成编号、分页进度；在线修改由 TreasuryRuntime 单写者执行。普通 Map 会规范化并冻结，既有冻结状态 Map 沿 StateMapSupport 的可信边界复用，不在每次构造全表重新校验。
  * @param feeBalances 按规范资产名保存的有符号手续费余额
  * @param insuranceBalances 保险基金有符号余额
  * @param insuranceDeficits 保险亏空有符号余额
@@ -158,105 +154,6 @@ public record CoreTreasuryState(
     }
 
     /**
-     * 规范化资产并精确增加手续费余额，保留其他状态列，返回新冷账本。
-     * @param asset 要校验或调整的资产名称
-     * @param deltaUnits 本次有符号金额增减
-     */
-    public CoreTreasuryState adjustFee(String asset, long deltaUnits) {
-        return new CoreTreasuryState(adjust(feeBalances, asset, deltaUnits, true),
-                insuranceBalances, insuranceDeficits, liquidationFeeBalances, fundingResidualBalances,
-                roundingResidualBalances, clearingPnlBalances, fundingSettlements, lifecycleSettlements,
-                fundingProgress, lifecycleProgress);
-    }
-
-    /**
-     * 精确增加保险基金有符号余额，返回保留其他子账和进度的新值。
-     * @param asset 要校验或调整的资产名称
-     * @param deltaUnits 本次有符号金额增减
-     */
-    public CoreTreasuryState adjustInsurance(String asset, long deltaUnits) {
-        return new CoreTreasuryState(feeBalances, adjust(insuranceBalances, asset, deltaUnits, true),
-                insuranceDeficits, liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances,
-                clearingPnlBalances, fundingSettlements, lifecycleSettlements,
-                fundingProgress, lifecycleProgress);
-    }
-
-    /**
-     * 精确调整独立强平费子账并返回新值，不自动并入保险基金。
-     * @param asset 要校验或调整的资产名称
-     * @param deltaUnits 本次有符号金额增减
-     */
-    public CoreTreasuryState adjustLiquidationFee(String asset, long deltaUnits) {
-        return withSubledger(liquidationFeeBalances, adjust(liquidationFeeBalances, asset, deltaUnits, true), 0);
-    }
-
-    /**
-     * 精确调整资金费残差子账。
-     * @param asset 要校验或调整的资产名称
-     * @param deltaUnits 本次有符号金额增减
-     */
-    public CoreTreasuryState adjustFundingResidual(String asset, long deltaUnits) {
-        return withSubledger(fundingResidualBalances, adjust(fundingResidualBalances, asset, deltaUnits, true), 1);
-    }
-
-    /**
-     * 精确调整舍入残差子账。
-     * @param asset 要校验或调整的资产名称
-     * @param deltaUnits 本次有符号金额增减
-     */
-    public CoreTreasuryState adjustRoundingResidual(String asset, long deltaUnits) {
-        return withSubledger(roundingResidualBalances, adjust(roundingResidualBalances, asset, deltaUnits, true), 2);
-    }
-
-    /**
-     * 精确调整系统清算盈亏子账。
-     * @param asset 要校验或调整的资产名称
-     * @param deltaUnits 本次有符号金额增减
-     */
-    public CoreTreasuryState adjustClearingPnl(String asset, long deltaUnits) {
-        return withSubledger(clearingPnlBalances, adjust(clearingPnlBalances, asset, deltaUnits, true), 3);
-    }
-
-    /**
-     * 精确调整保险亏空有符号余额，其他状态列保留。
-     * @param asset 要校验或调整的资产名称
-     * @param deltaUnits 本次有符号金额增减
-     */
-    public CoreTreasuryState adjustDeficit(String asset, long deltaUnits) {
-        return new CoreTreasuryState(feeBalances, insuranceBalances,
-                adjust(insuranceDeficits, asset, deltaUnits, true), liquidationFeeBalances,
-                fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
-                fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
-    }
-
-    /**
-     * 写入严格递增的资金费完成编号，并从新值中移除该币对当前资金费进度。
-     * @param instrumentId 需要读写的业务币对名称
-     * @param settlementId 本次资金费或生命周期结算编号，完成记录入口要求严格递增
-     */
-    public CoreTreasuryState recordFunding(String instrumentId, long settlementId) {
-        // 从资金费进度建立的可写增量 Map，或当前回调校验的非空进度记录。
-        Map<String, FundingProgress> progress = StateMapSupport.delta(fundingProgress);
-        progress.remove(OrderReservation.requireInstrumentId(instrumentId));
-        return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
-                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
-                recordMarker(fundingSettlements, instrumentId, settlementId), lifecycleSettlements, progress,
-                lifecycleProgress);
-    }
-
-    /**
-     * 写入严格递增的交割或行权完成编号，并移除该币对生命周期进度。
-     * @param instrumentId 需要读写的业务币对名称
-     * @param settlementId 本次资金费或生命周期结算编号，完成记录入口要求严格递增
-     */
-    public CoreTreasuryState recordLifecycle(String instrumentId, long settlementId) {
-        return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
-                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
-                fundingSettlements, recordMarker(lifecycleSettlements, instrumentId, settlementId), fundingProgress,
-                clearLifecycleProgress(instrumentId));
-    }
-
-    /**
      * 校验并规范化业务币对名称后读取资金费进度，缺失返回空。
      * @param instrumentId 需要读写的业务币对名称
      */
@@ -289,119 +186,13 @@ public record CoreTreasuryState(
     }
 
     /**
-     * 在原进度 Map 的增量后继中写入或删除指定币对资金费进度，返回其他状态列不变的新值。
-     * @param instrumentId 需要读写的业务币对名称
-     * @param progress 待设置或校验的对应进度值，with 入口可传空表示删除
-     */
-    public CoreTreasuryState withFundingProgress(String instrumentId, FundingProgress progress) {
-        // 已经通过业务校验的规范币对名称。
-        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
-        // 本次写入后的进度增量 Map，或资产精确加法的新金额，按所在入口区分。
-        Map<String, FundingProgress> next = StateMapSupport.delta(fundingProgress);
-        if (progress == null) next.remove(normalizedSymbol);
-        else next.put(normalizedSymbol, progress);
-        return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
-                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
-                fundingSettlements, lifecycleSettlements, next, lifecycleProgress);
-    }
-
-    /**
-     * 在生命周期进度增量后继中写入或删除当前币对进度，不改变已完成编号。
-     * @param instrumentId 需要读写的业务币对名称
-     * @param progress 待设置或校验的对应进度值，with 入口可传空表示删除
-     */
-    public CoreTreasuryState withLifecycleProgress(String instrumentId, LifecycleProgress progress) {
-        // 已经通过业务校验的规范币对名称。
-        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
-        // 本次写入后的进度增量 Map，或资产精确加法的新金额，按所在入口区分。
-        Map<String, LifecycleProgress> next = StateMapSupport.delta(lifecycleProgress);
-        if (progress == null) next.remove(normalizedSymbol);
-        else next.put(normalizedSymbol, progress);
-        return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
-                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
-                fundingSettlements, lifecycleSettlements, fundingProgress, next);
-    }
-
-    /**
-     * 合并七类余额状态 Map 暴露的变化键，返回按资产排序的只读集合，不包含纯进度变化。
-     */
-    public Set<String> changedAssets() {
-        // 手续费状态 Map 暴露的本次变化资产键集合。
-        Set<String> fee = StateMapSupport.changedKeys(feeBalances);
-        // 保险余额状态 Map 暴露的本次变化资产键集合。
-        Set<String> insurance = StateMapSupport.changedKeys(insuranceBalances);
-        // 保险亏空状态 Map 暴露的本次变化资产键集合。
-        Set<String> deficits = StateMapSupport.changedKeys(insuranceDeficits);
-        // 七个子账变化键合并后按资产名称排序的集合。
-        TreeSet<String> assets = new TreeSet<>();
-        assets.addAll(fee);
-        assets.addAll(insurance);
-        assets.addAll(deficits);
-        assets.addAll(StateMapSupport.changedKeys(liquidationFeeBalances));
-        assets.addAll(StateMapSupport.changedKeys(fundingResidualBalances));
-        assets.addAll(StateMapSupport.changedKeys(roundingResidualBalances));
-        assets.addAll(StateMapSupport.changedKeys(clearingPnlBalances));
-        return Collections.unmodifiableSet(assets);
-    }
-
-    /**
-     * 按内部列号替换强平费、资金费残差、舍入或清算子账；原新 Map 同一引用时直接复用本值。
-     * @param current 当前独立子账 Map，用于判断是否可以直接复用本对象
-     * @param next 本次调整后的独立子账状态 Map
-     * @param ledger 内部子账列号：零强平费、一资金费残差、二舍入残差、三清算盈亏
-     */
-    private CoreTreasuryState withSubledger(Map<String, Long> current, Map<String, Long> next, int ledger) {
-        if (current == next) return this;
-        return new CoreTreasuryState(feeBalances, insuranceBalances, insuranceDeficits,
-                ledger == 0 ? next : liquidationFeeBalances,
-                ledger == 1 ? next : fundingResidualBalances,
-                ledger == 2 ? next : roundingResidualBalances,
-                ledger == 3 ? next : clearingPnlBalances,
-                fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
-    }
-
-    /**
-     * 规范化资产后精确计算新金额，按 signed 开关决定是否允许负值，在源 Map 的增量后继中写入或删零。
-     * @param source 本次需要读取、规范化或建立增量后继的原状态 Map
-     * @param asset 要校验或调整的资产名称
-     * @param deltaUnits 本次有符号金额增减
-     * @param signed 是否允许负金额，当前七类资金列按 true 处理
-     */
-    private static Map<String, Long> adjust(
-            Map<String, Long> source,
-            String asset,
-            long deltaUnits,
-            boolean signed) {
-        // 本条金额使用的规范资产名称。
-        String normalizedAsset = AssetBalance.normalizeAsset(asset);
-        // 本次写入后的进度增量 Map，或资产精确加法的新金额，按所在入口区分。
-        long next = Math.addExact(source.getOrDefault(normalizedAsset, 0L), deltaUnits);
-        if (!signed && next < 0) {
-            throw new IllegalArgumentException("treasury balance must not be negative");
-        }
-        // 本次建立的增量 Map 或用于全量规范化的有序 Map。
-        Map<String, Long> result = StateMapSupport.delta(source);
-        putOrRemove(result, normalizedAsset, next);
-        return result;
-    }
-
-    /**
-     * 冻结资产金额 Map：已冻结或延迟 Map 复用可信边界，增量只校验存活变化键，普通 Map 则规范化全部非零资产并拒绝非零重复规范键。
-     * @param source 本次需要读取、规范化或建立增量后继的原状态 Map
+     * 冻结资产金额 Map：已冻结 Map 复用可信边界，其他 Map 规范化全部非零资产并拒绝非零重复规范键。
+     * @param source 本次需要规范化并冻结的完整状态 Map
      * @param signed 是否允许负金额，当前七类资金列按 true 处理
      */
     private static Map<String, Long> normalized(Map<String, Long> source, boolean signed) {
         if (StateMapSupport.isFrozen(source)) return source;
-        if (StateMapSupport.isDeferred(source)) return StateMapSupport.freezeSorted(source);
-        if (StateMapSupport.isDelta(source)) {
-            for (Object /* 当前增量中需要校验的变化键，删除项不再检查旧值。 */ key : StateMapSupport.changedKeys(source)) {
-                if (source.containsKey(key)) {
-                    validateNormalized((String) key, source.get(key), signed);
-                }
-            }
-            return StateMapSupport.freezeSorted(source);
-        }
-        // 本次建立的增量 Map 或用于全量规范化的有序 Map。
+        // 本次建立的用于全量规范化的有序 Map。
         Map<String, Long> result = new TreeMap<>();
         source.forEach((/* 普通金额 Map 当前回调输入的原资产名称。 */ asset, /* 普通金额 Map 当前回调输入的可空金额。 */ units) -> {
             // 本条金额使用的规范资产名称。
@@ -417,28 +208,14 @@ public record CoreTreasuryState(
     }
 
     /**
-     * 冻结币对完成编号 Map，普通 Map 全量校验规范名称及正编号，增量只校验存活变化项，已冻结或延迟 Map 沿原可信边界复用。
-     * @param source 本次需要读取、规范化或建立增量后继的原状态 Map
+     * 冻结币对完成编号 Map，完整校验规范名称及正编号，已冻结 Map 沿原可信边界复用。
+     * @param source 本次需要规范化并冻结的完整状态 Map
      */
     private static Map<String, Long> markers(Map<String, Long> source) {
         if (StateMapSupport.isFrozen(source)) return source;
-        if (StateMapSupport.isDeferred(source)) return StateMapSupport.freezeSorted(source);
-        if (StateMapSupport.isDelta(source)) {
-            for (Object /* 当前增量中需要校验的变化键，删除项不再检查旧值。 */ key : StateMapSupport.changedKeys(source)) {
-                if (source.containsKey(key)) {
-                    // 当前完成编号 Map 变化项或回调中的结算编号。
-                    Long settlementId = source.get(key);
-                    if (!OrderReservation.requireInstrumentId((String) key).equals(key)
-                            || settlementId == null || settlementId <= 0) {
-                        throw new IllegalArgumentException("invalid settlement marker");
-                    }
-                }
-            }
-            return StateMapSupport.freezeSorted(source);
-        }
-        // 本次建立的增量 Map 或用于全量规范化的有序 Map。
+        // 本次建立的用于全量规范化的有序 Map。
         Map<String, Long> result = new TreeMap<>();
-        source.forEach((/* 当前普通进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 当前完成编号 Map 变化项或回调中的结算编号。 */ settlementId) -> {
+        source.forEach((/* 当前完整进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 当前完成编号 Map 变化项或回调中的结算编号。 */ settlementId) -> {
             // 已经通过业务校验的规范币对名称。
             String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
             if (settlementId == null || settlementId <= 0 || result.put(normalizedSymbol, settlementId) != null) {
@@ -449,21 +226,14 @@ public record CoreTreasuryState(
     }
 
     /**
-     * 冻结资金费进度 Map，普通或增量输入检查对应范围的规范币对及非空值，拒绝普通 Map 规范化后的重复键。
-     * @param source 本次需要读取、规范化或建立增量后继的原状态 Map
+     * 冻结资金费进度 Map，完整检查规范币对及非空值，拒绝普通 Map 规范化后的重复键。
+     * @param source 本次需要规范化并冻结的完整状态 Map
      */
     private static Map<String, FundingProgress> progresses(Map<String, FundingProgress> source) {
         if (StateMapSupport.isFrozen(source)) return source;
-        if (StateMapSupport.isDeferred(source)) return StateMapSupport.freezeSorted(source);
-        if (StateMapSupport.isDelta(source)) {
-            for (Object /* 当前增量中需要校验的变化键，删除项不再检查旧值。 */ key : StateMapSupport.changedKeys(source)) {
-                if (source.containsKey(key)) validateProgress((String) key, source.get(key));
-            }
-            return StateMapSupport.freezeSorted(source);
-        }
-        // 本次建立的增量 Map 或用于全量规范化的有序 Map。
+        // 本次建立的用于全量规范化的有序 Map。
         Map<String, FundingProgress> result = new TreeMap<>();
-        source.forEach((/* 当前普通进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 从资金费进度建立的可写增量 Map，或当前回调校验的非空进度记录。 */ progress) -> {
+        source.forEach((/* 当前完整进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 当前完整进度表中的非空记录。 */ progress) -> {
             // 已经通过业务校验的规范币对名称。
             String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
             validateProgress(normalizedSymbol, progress);
@@ -476,20 +246,13 @@ public record CoreTreasuryState(
 
     /**
      * 按与资金费相同的状态 Map 边界冻结生命周期进度，校验需要检查范围的规范键和非空值。
-     * @param source 本次需要读取、规范化或建立增量后继的原状态 Map
+     * @param source 本次需要规范化并冻结的完整状态 Map
      */
     private static Map<String, LifecycleProgress> lifecycleProgresses(Map<String, LifecycleProgress> source) {
         if (StateMapSupport.isFrozen(source)) return source;
-        if (StateMapSupport.isDeferred(source)) return StateMapSupport.freezeSorted(source);
-        if (StateMapSupport.isDelta(source)) {
-            for (Object /* 当前增量中需要校验的变化键，删除项不再检查旧值。 */ key : StateMapSupport.changedKeys(source)) {
-                if (source.containsKey(key)) validateLifecycleProgress((String) key, source.get(key));
-            }
-            return StateMapSupport.freezeSorted(source);
-        }
-        // 本次建立的增量 Map 或用于全量规范化的有序 Map。
+        // 本次建立的用于全量规范化的有序 Map。
         Map<String, LifecycleProgress> result = new TreeMap<>();
-        source.forEach((/* 当前普通进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 从资金费进度建立的可写增量 Map，或当前回调校验的非空进度记录。 */ progress) -> {
+        source.forEach((/* 当前完整进度或完成 Map 回调中的币对名称。 */ instrumentId, /* 当前完整进度表中的非空记录。 */ progress) -> {
             // 已经通过业务校验的规范币对名称。
             String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
             validateLifecycleProgress(normalizedSymbol, progress);
@@ -498,50 +261,6 @@ public record CoreTreasuryState(
             }
         });
         return StateMapSupport.freezeSorted(result);
-    }
-
-    /**
-     * 创建生命周期进度的增量后继并删除指定币对，不直接修改原值。
-     * @param instrumentId 需要读写的业务币对名称
-     */
-    private Map<String, LifecycleProgress> clearLifecycleProgress(String instrumentId) {
-        // 本次写入后的进度增量 Map，或资产精确加法的新金额，按所在入口区分。
-        Map<String, LifecycleProgress> next = StateMapSupport.delta(lifecycleProgress);
-        next.remove(OrderReservation.requireInstrumentId(instrumentId));
-        return next;
-    }
-
-    /**
-     * 要求本次结算编号严格大于已有编号，否则按 STALE_SETTLEMENT_ID 拒绝；在增量后继记录新编号。
-     * @param source 本次需要读取、规范化或建立增量后继的原状态 Map
-     * @param instrumentId 需要读写的业务币对名称
-     * @param settlementId 本次资金费或生命周期结算编号，完成记录入口要求严格递增
-     */
-    private static Map<String, Long> recordMarker(Map<String, Long> source, String instrumentId, long settlementId) {
-        // 已经通过业务校验的规范币对名称。
-        String normalizedSymbol = OrderReservation.requireInstrumentId(instrumentId);
-        // 当前币对已经保存的完成编号，缺失为零。
-        long current = source.getOrDefault(normalizedSymbol, 0L);
-        if (settlementId <= current) {
-            throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "settlement id must increase");
-        }
-        // 本次建立的增量 Map 或用于全量规范化的有序 Map。
-        Map<String, Long> result = StateMapSupport.delta(source);
-        result.put(normalizedSymbol, settlementId);
-        return result;
-    }
-
-    /**
-     * 检查资产名已经规范化、金额非空，signed 为 false 时还拒绝负数；此校验本身不移除零。
-     * @param asset 要校验或调整的资产名称
-     * @param units 待校验或保存的有符号金额
-     * @param signed 是否允许负金额，当前七类资金列按 true 处理
-     */
-    private static void validateNormalized(String asset, Long units, boolean signed) {
-        if (!AssetBalance.normalizeAsset(asset).equals(asset)
-                || units == null || (!signed && units < 0)) {
-            throw new IllegalArgumentException("invalid treasury units");
-        }
     }
 
     /**
@@ -563,20 +282,6 @@ public record CoreTreasuryState(
     private static void validateLifecycleProgress(String instrumentId, LifecycleProgress progress) {
         if (!OrderReservation.requireInstrumentId(instrumentId).equals(instrumentId) || progress == null) {
             throw new IllegalArgumentException("invalid lifecycle progress");
-        }
-    }
-
-    /**
-     * 向本次可写增量 Map 保存非零金额，金额为零删除该资产键。
-     * @param values 本次可写的增量金额 Map
-     * @param asset 要校验或调整的资产名称
-     * @param units 待校验或保存的有符号金额
-     */
-    private static void putOrRemove(Map<String, Long> values, String asset, long units) {
-        if (units == 0) {
-            values.remove(asset);
-        } else {
-            values.put(asset, units);
         }
     }
 

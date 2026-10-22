@@ -62,7 +62,7 @@ public final class CoreAcceptFreezeBenchmark {
             log.info("{}", String.format(java.util.Locale.ROOT, "coreAcceptFreezeBenchmark=PASS productLine=%s orders=%d "
                             + "elapsedSeconds=%.3f acceptedPerSec=%.3f pendingMatching=%d%n",
                     ProductLine.LINEAR_PERPETUAL, orders, elapsed / 1_000_000_000.0,
-                    orders / (elapsed / 1_000_000_000.0), state.pendingMatching.size()).stripTrailing());
+                    orders / (elapsed / 1_000_000_000.0), state.pendingMatching().size()).stripTrailing());
         }
     }
 

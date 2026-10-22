@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.LaneBalancePatches;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -171,7 +171,7 @@ public final class MatcherSettlementChanges {
      * @param runtime 所属运行时参数；此收尾实现不读取它
      * @param sequence 本代 Core 序号，用于设置订单再次复用前必须越过的退休边界
      */
-    public void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingRuntimeState runtime, long sequence) {
+    public void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingAccountRuntime runtime, long sequence) {
         applyUserRevisions(laneId, lane);
         // 当前 Lane 的实体、终态及发布变化缓冲。
         LaneCommitDelta changes = laneDeltas[laneId];
@@ -235,7 +235,7 @@ public final class MatcherSettlementChanges {
         }
         changes.preparePositionRetirement(lane);
         changes.preparePublication();
-        TradingRuntimeState.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
+        TradingAccountRuntime.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
     }
 
     /**
@@ -243,8 +243,8 @@ public final class MatcherSettlementChanges {
      * @param laneId 当前操作的账户 Lane 编号
      * @param runtime 所属运行时参数；当前准入资金准备不读取它
      */
-    public void prepareAdmissionLane(int laneId, TradingRuntimeState runtime) {
-        TradingRuntimeState.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
+    public void prepareAdmissionLane(int laneId, TradingAccountRuntime runtime) {
+        TradingAccountRuntime.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
     }
 
     /**
@@ -282,7 +282,7 @@ public final class MatcherSettlementChanges {
      * 把参与 Lane 的待退休订单交回对应账户的回收缓存；对象能否再次初始化仍受退休序号约束。
      * @param runtime 用于把退休订单交回各账户 Lane 的所属运行时
      */
-    public void returnRetiredOrders(TradingRuntimeState runtime) {
+    public void returnRetiredOrders(TradingAccountRuntime runtime) {
         // 本次尚未遍历的 Lane 位图，每次移除最低有效位。
         long lanes = activeLaneMask;
         while (lanes != 0) {

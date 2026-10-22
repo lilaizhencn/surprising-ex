@@ -3,7 +3,7 @@ package com.surprising.aeron.service.order.admission;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.RuntimeOrderStateTransitions;
@@ -22,7 +22,7 @@ import lombok.experimental.Accessors;
  */
 public final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object>, SystemLedgerLane.Entry, java.util.function.BooleanSupplier {
     /** 为本项提供原账本、账户控制派发和完成通知的所属运行时。 */
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /** 当前产品的身份表，客户键准备不建立第二份订单字典。 */
     private RuntimeIdentityRegistry identities;
     /** 本项币对、价格、费率及结算事实的既有决策输入。 */
@@ -73,7 +73,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
      * @param source 原批次命令槽的输入及订单租约保存入口
      * @param sourceIndex 当前项在原批次中的下标
      */
-    public void prepare(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public void prepare(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             long sequence, long userId, UUID commandId, PlaceOrderCommand command,
             PlaceBatchIntentSource.Decision decision, PlaceBatchIntentSource source, int sourceIndex) {
         if (runtime == null || identities == null || sequence <= 0 || userId <= 0
@@ -125,7 +125,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     @Override public void apply(TreasuryRuntime ignored) {
         openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.context().instrument().instrumentId());
         // 输入就绪发布前取得的完成通知目标，发布后只用此引用唤醒 Owner。
-        TradingRuntimeState completion = runtime;
+        TradingAccountRuntime completion = runtime;
         inputReady = true;
         completion.signalOwnerCompletion();
     }

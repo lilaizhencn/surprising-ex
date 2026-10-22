@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core.change;
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.CoreAlgoOrderState;
 import com.surprising.aeron.model.CoreTriggerOrderState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
@@ -20,12 +20,12 @@ class CommittedIndexVisitTest {
      * 先访问直接订单持仓删除项，再反向接管两条 Lane 的变化和其他业务删除，要求访问顺序稳定、null 不被跳过，清理后源中新命令仍在。
      */
     @Test void directAndBorrowedLaneTombstonesKeepPublicationOrderUntilTheCommitClearsThem() {
-        try (/* 当前场景独立运行时，直接构造已提交变化，不启动真实集群。 */ var state = new TradingRuntimeState()) {
+        try (/* 当前场景独立运行时，直接构造已提交变化，不启动真实集群。 */ var state = new TradingAccountRuntime()) {
             state.setMetadata(ProductLine.SPOT, 1);
             // 按实际访问顺序收集业务类型及编号的断言列表。
             var visited = new ArrayList<String>();
             // 测试专用变化访问器，即使前后值都为空也记录删除通知。
-            var consumer = /* 测试专用的已提交变化访问器，逐业务类型核对 null 删除通知并记录访问顺序。 */ new TradingRuntimeState.ChangedIndexConsumer() {
+            var consumer = /* 测试专用的已提交变化访问器，逐业务类型核对 null 删除通知并记录访问顺序。 */ new TradingAccountRuntime.ChangedIndexConsumer() {
                 /**
                  * 核对本场景订单前后值均为 null，仍记录一次订单删除访问。
                  * @param id 被访问的业务实体编号

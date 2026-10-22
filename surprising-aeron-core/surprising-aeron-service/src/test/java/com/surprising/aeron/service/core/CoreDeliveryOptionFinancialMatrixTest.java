@@ -137,7 +137,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState expected = reducer.settleInstrument(opening, command);
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingRuntimeState runtime = RuntimeStateProjector.project(opening, identities)) {
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(opening, identities)) {
             // 直接结算方法返回的用户和订单游标及完成状态
             CoreSettlementProgressView actual = RuntimeLifecycleSettlement.applyRuntime(command,
                     List.of(USER_ID, SECOND_MAKER_ID), null, new ActiveOrderIndex(opening), runtime, identities);
@@ -607,7 +607,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             // 本次投影、业务辅助和物化共用的独立整数身份表
             RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
             // 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭
-            TradingRuntimeState runtime = RuntimeStateProjector.project(restored, identities);
+            TradingAccountRuntime runtime = RuntimeStateProjector.project(restored, identities);
             try {
                 // 从恢复状态建立的 ADL 持仓索引，供运行时查询候选
                 var index = new AdlPositionIndex(restored, identities);
@@ -649,7 +649,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭
-        TradingRuntimeState runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
+        TradingAccountRuntime runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
                 opening, mark, opening.users().keySet(), identities);
         try {
             RuntimeStateParityChecker.assertMatches(marked, identities, runtime);
@@ -795,7 +795,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingRuntimeState runtime = RuntimeDerivativeMatchFixture.simulate(
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeDerivativeMatchFixture.simulate(
                 beforeMatch, 302, matches, identities)) {
             RuntimeStateParityChecker.assertMatches(matched, identities, runtime);
         }
@@ -829,7 +829,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
         // 平仓成交对照单独投影使用的身份表
         RuntimeIdentityRegistry closeIdentities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingRuntimeState runtime = RuntimeDerivativeMatchFixture.simulate(
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeDerivativeMatchFixture.simulate(
                 beforeClose, 303, closeMatches, closeIdentities)) {
             RuntimeStateParityChecker.assertMatches(closed, closeIdentities, runtime);
         }
@@ -853,7 +853,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities)) {
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities)) {
             assertThatThrownBy(() -> DerivativeAccountCommandProcessor.updateLeverage(
                     runtime, identities, USER_ID, command))
                     .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -870,10 +870,10 @@ class CoreDeliveryOptionFinancialMatrixTest {
      */
     private static void assertRuntimeParity(TradingCoreState before, TradingCoreState expected,
                                             java.util.function.Function<RuntimeIdentityRegistry,
-                                                    TradingRuntimeState> operation) {
+                                                    TradingAccountRuntime> operation) {
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingRuntimeState runtime = operation.apply(identities)) {
+        try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = operation.apply(identities)) {
             RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
         }
     }

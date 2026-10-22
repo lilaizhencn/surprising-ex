@@ -19,7 +19,7 @@ import org.springframework.core.env.StandardEnvironment;
  */
 @Getter
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties
+@EnableConfigurationProperties({CoreRuntimeConfiguration.class, CoreTransportConfiguration.class, RealtimeConfiguration.class})
 @ConfigurationProperties(prefix = "surprising.aeron")
 public class CoreConfiguration {
 

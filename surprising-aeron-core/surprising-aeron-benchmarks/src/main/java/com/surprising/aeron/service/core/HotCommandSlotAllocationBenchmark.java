@@ -74,7 +74,7 @@ public class HotCommandSlotAllocationBenchmark {
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, client);
             resolved[index] = new ResolvedPlaceOrder(order, instrument, 0, 100, 100, 100,
                     ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
-            sourceOrders[index] = TradingRuntimeState.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7,
+            sourceOrders[index] = TradingAccountRuntime.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7,
                     resolved[index], commandId, 0, 1, 1);
             decoded[index] = PlaceOrderCommand.commandSlot();
             nativeSlots[index] = MatcherResult.commandSlot();

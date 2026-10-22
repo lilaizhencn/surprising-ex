@@ -5,7 +5,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -38,7 +38,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param identities 解析实际币对及资产编号的运行时字典
      */
     public static void apply(TradingCoreState before, long takerOrderId, String baseAsset, String quoteAsset,
-                             List<MatcherEvent> matches, TradingRuntimeState runtime,
+                             List<MatcherEvent> matches, TradingAccountRuntime runtime,
                              RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -55,7 +55,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param identities 解析实际币对及资产编号的运行时字典
      */
     public static void applyRuntime(long takerOrderId, List<MatcherEvent> matches,
-                                    TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+                                    TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (matches == null || runtime == null || identities == null || runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid spot match apply");
         }
@@ -126,7 +126,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param commitPosition 成交结果写回的复制日志位置
      */
     static void applyLane(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
-                          TradingRuntimeState runtime, CoreInstrument instrument,
+                          TradingAccountRuntime runtime, CoreInstrument instrument,
                           int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
                           long commitTimestamp, long commitPosition) {
         if (plan == null || treasuryDelta == null || laneId < 0
@@ -169,7 +169,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param localTaker 当前 Lane 持有的主动订单，其他 Lane 可为空
      */
     private static void applyLaneDirect(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
-                                        TradingRuntimeState runtime, CoreInstrument instrument,
+                                        TradingAccountRuntime runtime, CoreInstrument instrument,
                                         int baseAssetId, int quoteAssetId,
                                         RuntimeTreasuryDelta treasuryDelta,
                                         long commitTimestamp, long commitPosition,
@@ -214,7 +214,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param localTaker 当前 Lane 持有的主动订单，其他 Lane 可为空
      */
     private static void applyLaneAccumulated(long takerOrderId, MatcherSettlementPlan plan, AccountLaneState lane, int laneId,
-                                             TradingRuntimeState runtime, CoreInstrument instrument,
+                                             TradingAccountRuntime runtime, CoreInstrument instrument,
                                              int baseAssetId, int quoteAssetId,
                                              RuntimeTreasuryDelta treasuryDelta,
                                              long commitTimestamp, long commitPosition,
@@ -250,7 +250,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param matches 原始撮合事件列表，非 TRADE 事件不应用成交
      * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
      */
-    static void validate(long takerOrderId, List<MatcherEvent> matches, TradingRuntimeState runtime) {
+    static void validate(long takerOrderId, List<MatcherEvent> matches, TradingAccountRuntime runtime) {
         validateMatches(runtime, requireOpen(runtime, takerOrderId), matches);
     }
 
@@ -266,7 +266,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param quoteAssetId 计价及收费资产的运行时编号
      * @param treasuryDelta 所属 Lane 系统费用差额接收槽
      */
-    private static OrderRuntime applyFill(TradingRuntimeState runtime, CoreInstrument instrument, OrderRuntime order,
+    private static OrderRuntime applyFill(TradingAccountRuntime runtime, CoreInstrument instrument, OrderRuntime order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
                                   int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
         return applyFill(runtime, runtime.accountLaneForUser(order.userId()), instrument, order, fillPriceTicks, fillQuantitySteps, taker,
@@ -288,7 +288,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param commitTimestamp 成交结果写回的复制业务时间
      * @param commitPosition 成交结果写回的复制日志位置
      */
-    private static OrderRuntime applyFill(TradingRuntimeState runtime, AccountLaneState lane, CoreInstrument instrument, OrderRuntime order,
+    private static OrderRuntime applyFill(TradingAccountRuntime runtime, AccountLaneState lane, CoreInstrument instrument, OrderRuntime order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
                                   int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
                                        long commitTimestamp, long commitPosition) {
@@ -380,7 +380,7 @@ public final class RuntimeSpotMatchProcessor {
         private final java.util.ArrayDeque<IntObjectHashMap<SpotBalanceState>> freeBalanceMaps =
                 new java.util.ArrayDeque<>();
         /** 本轮账户写回和修订捕获的所属运行时。 */
-        private TradingRuntimeState runtime;
+        private TradingAccountRuntime runtime;
         /** 本轮独占服务的账户 Lane。 */
         private AccountLaneState lane;
         /** 本轮所有成交共用的规范现货币对。 */
@@ -404,7 +404,7 @@ public final class RuntimeSpotMatchProcessor {
          * @param commitTimestamp 成交结果写回的复制业务时间
          * @param commitPosition 成交结果写回的复制日志位置
          */
-        void reset(TradingRuntimeState runtime, AccountLaneState lane, CoreInstrument instrument,
+        void reset(TradingAccountRuntime runtime, AccountLaneState lane, CoreInstrument instrument,
                    int baseAssetId, int quoteAssetId, long commitTimestamp, long commitPosition) {
             this.runtime = runtime;
             this.lane = lane;
@@ -531,7 +531,7 @@ public final class RuntimeSpotMatchProcessor {
              * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
              * @param lane 当前线程持有的账户 Lane
              */
-            void publish(TradingRuntimeState runtime, AccountLaneState lane) {
+            void publish(TradingAccountRuntime runtime, AccountLaneState lane) {
                 if (exists) runtime.replaceBalance(lane, userId, assetId, available, locked);
                 else runtime.putBalance(lane, new BalanceRuntime(userId, assetId, available, locked));
             }
@@ -645,7 +645,7 @@ public final class RuntimeSpotMatchProcessor {
              * 有成交才写回预留及订单累计值，按成交次数推进订单与用户修订；达到终态后释放剩余预留，已有余额在外层先行发布。
              * @param state 用于写回当前所属账户结果的交易运行时
              */
-            void publish(TradingRuntimeState state) {
+            void publish(TradingAccountRuntime state) {
                 if (fills == 0) return;
                 // 游标最终剩余量对应的 OPEN 或 FILLED 订单状态。
                 CoreOrderStatus status = remaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
@@ -688,7 +688,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param available 要写回的可用余额
      * @param locked 要写回的冻结余额
      */
-    private static void replaceBalance(TradingRuntimeState runtime, AccountLaneState lane, long userId, int assetId,
+    private static void replaceBalance(TradingAccountRuntime runtime, AccountLaneState lane, long userId, int assetId,
                                        BalanceRuntime current, long available, long locked) {
         if (current == null) runtime.putBalance(lane, new BalanceRuntime(userId, assetId, available, locked));
         else runtime.replaceBalance(lane, userId, assetId, available, locked);
@@ -699,7 +699,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
      * @param orderId 当前要累加、读取或释放预留的订单编号
      */
-    private static void releaseTerminalReservation(TradingRuntimeState runtime, long orderId) {
+    private static void releaseTerminalReservation(TradingAccountRuntime runtime, long orderId) {
         // 当前首次累加、终态释放或读取时取得的权威订单。
         OrderRuntime order = runtime.order(orderId);
         if (order != null) releaseTerminalReservation(runtime, runtime.accountLaneForUser(order.userId()), orderId);
@@ -711,7 +711,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param lane 当前线程持有的账户 Lane
      * @param orderId 当前要累加、读取或释放预留的订单编号
      */
-    private static void releaseTerminalReservation(TradingRuntimeState runtime, AccountLaneState lane, long orderId) {
+    private static void releaseTerminalReservation(TradingAccountRuntime runtime, AccountLaneState lane, long orderId) {
         // 当前首次累加、终态释放或读取时取得的权威订单。
         OrderRuntime order = lane.order(orderId);
         if (order == null || !order.canceled()) return;
@@ -732,7 +732,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param taker 已经读取并确认可成交的主动订单
      * @param matches 原始撮合事件列表，非 TRADE 事件不应用成交
      */
-    private static void validateMatches(TradingRuntimeState runtime, OrderRuntime taker,
+    private static void validateMatches(TradingAccountRuntime runtime, OrderRuntime taker,
                                         List<MatcherEvent> matches) {
         // 验证过程中主动订单逐成交扣减后的累计剩余量。
         long takerRemaining = taker.remainingQuantitySteps();
@@ -788,7 +788,7 @@ public final class RuntimeSpotMatchProcessor {
      * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
      * @param orderId 当前要累加、读取或释放预留的订单编号
      */
-    private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {
+    private static OrderRuntime requireOpen(TradingAccountRuntime runtime, long orderId) {
         // 当前首次累加、终态释放或读取时取得的权威订单。
         OrderRuntime order = runtime.order(orderId);
         if (order == null || order.canceled() || order.remainingQuantitySteps() == 0) {

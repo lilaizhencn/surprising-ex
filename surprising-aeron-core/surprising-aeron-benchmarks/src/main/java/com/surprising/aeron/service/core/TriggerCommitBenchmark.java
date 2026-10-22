@@ -38,7 +38,7 @@ import org.openjdk.jmh.annotations.*;
 @Threads(1)
 public class TriggerCommitBenchmark {
     @Param("2") public int accountLanes;
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     private TriggerOrderIndex triggerIndex;
     private List<Long> users, triggerIds;
     private CoreInstrument instrument;
@@ -48,7 +48,7 @@ public class TriggerCommitBenchmark {
     public void setup() {
         var topology = new LaneTopology(1, 0, 0, accountLanes,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256);
-        runtime = new TradingRuntimeState(topology);
+        runtime = new TradingAccountRuntime(topology);
         var initial = TradingCoreState.empty(ProductLine.SPOT);
         var identities = new RuntimeIdentityRegistry();
         triggerIndex = new TriggerOrderIndex(initial);

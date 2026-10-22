@@ -26,7 +26,7 @@ class RuntimeRiskQueryServiceTest {
     /** 本测试运行时共用的币对、资产及持仓身份映射。 */
     private final RuntimeIdentityRegistry ids = new RuntimeIdentityRegistry();
     /** 本测试直接准备账户、持仓、行情和风险缓存的运行时。 */
-    private final TradingRuntimeState runtime = new TradingRuntimeState();
+    private final TradingAccountRuntime runtime = new TradingAccountRuntime();
 
     /**
      * 在线性和反向永续、交割中放入一份故意过期的风险缓存，再按最新行情查询价格、盈亏、权益、维持保证金和等级；原缓存对象和运行时修订号应保持原值。

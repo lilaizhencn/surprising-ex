@@ -22,7 +22,7 @@ import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.account.UserRuntime;
 import com.surprising.aeron.service.core.RuntimeDerivativeMatchFixture;
 import com.surprising.aeron.service.core.RuntimeStateParityChecker;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderReservation;
@@ -68,10 +68,10 @@ class RuntimeDerivativeMatchProcessorTest {
         // 当前投影对照使用的资产、合约及持仓身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         // applyRuntime 返回的同一运行时引用，用于核对原位应用契约。
-        TradingRuntimeState applied = RuntimeDerivativeMatchProcessor.applyRuntime(
+        TradingAccountRuntime applied = RuntimeDerivativeMatchProcessor.applyRuntime(
                 11, matches, runtime, identities);
 
         assertThat(applied).isSameAs(runtime);
@@ -97,7 +97,7 @@ class RuntimeDerivativeMatchProcessorTest {
         // 当前投影对照使用的资产、合约及持仓身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         assertThatThrownBy(() -> RuntimeDerivativeMatchProcessor.apply(before, 11,
                 List.of(trade(12, 8, 100, 1, true, true),
@@ -132,7 +132,7 @@ class RuntimeDerivativeMatchProcessorTest {
         // 当前投影对照使用的资产、合约及持仓身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         runtime.putUser(new UserRuntime(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
 
         RuntimeDerivativeMatchFixture.applyTransition(before, expected, 11, matches, runtime, identities);
@@ -168,7 +168,7 @@ class RuntimeDerivativeMatchProcessorTest {
         // 当前投影对照使用的资产、合约及持仓身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 测试辅助投影并调用生产成交入口得到的运行时结果。
-        TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
+        TradingAccountRuntime simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
 
         // 本次读取系统费用、保险及亏空的 USDT 资产编号。
         int assetId = identities.assetId("USDT");
@@ -218,7 +218,7 @@ class RuntimeDerivativeMatchProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
         // 测试辅助投影并调用生产成交入口得到的运行时结果。
-        TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, List.of(), identities);
+        TradingAccountRuntime simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, List.of(), identities);
 
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);
     }
@@ -299,7 +299,7 @@ class RuntimeDerivativeMatchProcessorTest {
         // 当前投影对照使用的资产、合约及持仓身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
-        TradingRuntimeState runtime = RuntimeDerivativeMatchFixture.simulateTransition(
+        TradingAccountRuntime runtime = RuntimeDerivativeMatchFixture.simulateTransition(
                 readyToClose, closed, 14, betterFill, identities);
         RuntimeStateParityChecker.assertMatches(closed, identities, runtime);
     }
@@ -336,7 +336,7 @@ class RuntimeDerivativeMatchProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
         // 测试辅助投影并调用生产成交入口得到的运行时结果。
-        TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
+        TradingAccountRuntime simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
 
         // 本次读取系统费用、保险及亏空的 USDT 资产编号。
         int assetId = identities.assetId("USDT");

@@ -1,10 +1,9 @@
 package com.surprising.aeron.service.product;
 
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.product.inverse.delivery.InverseDeliveryTradingRules;
-import com.surprising.aeron.service.product.inverse.perpetual.InversePerpetualTradingRules;
-import com.surprising.aeron.service.product.linear.delivery.LinearDeliveryTradingRules;
-import com.surprising.aeron.service.product.linear.perpetual.LinearPerpetualTradingRules;
+import com.surprising.aeron.service.product.derivative.DeliveryTradingRules;
+import com.surprising.aeron.service.product.derivative.PerpetualTradingRules;
+import com.surprising.instrument.api.model.ContractType;
 import com.surprising.aeron.service.product.option.OptionTradingRules;
 import com.surprising.aeron.service.product.spot.SpotTradingRules;
 import com.surprising.product.api.ProductLine;
@@ -18,13 +17,13 @@ public final class ProductTradingRulesRegistry {
     /** 现货规则，买卖分别预留报价资产或基础资产。 */
     private static final ProductTradingRules SPOT = new SpotTradingRules();
     /** U 本位永续规则，使用线性合约盈亏、资金费和准入计算。 */
-    private static final ProductTradingRules LINEAR_PERPETUAL = new LinearPerpetualTradingRules();
+    private static final ProductTradingRules LINEAR_PERPETUAL = new PerpetualTradingRules(ContractType.LINEAR_PERPETUAL);
     /** 币本位永续规则，使用反向合约盈亏、资金费和准入计算。 */
-    private static final ProductTradingRules INVERSE_PERPETUAL = new InversePerpetualTradingRules();
+    private static final ProductTradingRules INVERSE_PERPETUAL = new PerpetualTradingRules(ContractType.INVERSE_PERPETUAL);
     /** U 本位交割规则，处理线性合约交易及到期或维护结算。 */
-    private static final ProductTradingRules LINEAR_DELIVERY = new LinearDeliveryTradingRules();
+    private static final ProductTradingRules LINEAR_DELIVERY = new DeliveryTradingRules(ContractType.LINEAR_DELIVERY);
     /** 币本位交割规则，处理反向合约交易及到期或维护结算。 */
-    private static final ProductTradingRules INVERSE_DELIVERY = new InverseDeliveryTradingRules();
+    private static final ProductTradingRules INVERSE_DELIVERY = new DeliveryTradingRules(ContractType.INVERSE_DELIVERY);
     /** 期权规则，区分权利金现金收支、卖方保证金和到期现金结算。 */
     private static final ProductTradingRules OPTION = new OptionTradingRules();
 

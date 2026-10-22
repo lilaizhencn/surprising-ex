@@ -111,7 +111,7 @@ class SectionedCoreSnapshotCodecTest {
                 sectionIds[index] = buffer.getInt();
                 // 当前段头声明的负载字节数。
                 int sectionLength = buffer.getInt();
-                assertThat(sectionLength).isBetween(1, SectionedCoreSnapshotCodec.MAX_SECTION_BYTES);
+                assertThat(sectionLength).isBetween(1, SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES);
                 buffer.position(Math.addExact(buffer.position(), sectionLength));
             }
             assertThat(sectionIds).containsExactly(
@@ -138,7 +138,7 @@ class SectionedCoreSnapshotCodecTest {
             // 第一段负载长度声明超出单段上限的克隆。
             byte[] invalidLength = snapshot.clone();
             ByteBuffer.wrap(invalidLength).order(ByteOrder.LITTLE_ENDIAN)
-                    .putInt(ENVELOPE_LENGTH + Integer.BYTES, SectionedCoreSnapshotCodec.MAX_SECTION_BYTES + 1);
+                    .putInt(ENVELOPE_LENGTH + Integer.BYTES, SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES + 1);
             // 第一段元数据负载长度被声明为一的克隆。
             byte[] shortHeader = snapshot.clone();
             ByteBuffer.wrap(shortHeader).order(ByteOrder.LITTLE_ENDIAN)
@@ -171,14 +171,64 @@ class SectionedCoreSnapshotCodecTest {
         }
     }
 
-    /**
-     * 在默认配置前提下断言总上限大于六十四 MiB 且等于默认一 GiB；未在此生成或恢复一个实际大于六十四 MiB 的快照，也未覆盖系统属性覆盖值。
-     */
+    /** 部署默认仍是一 GiB，默认恢复器实际使用该预算；协议硬界限独立约束数组长度。 */
     @Test
-    void productionSnapshotLimitIsNoLongerTheLegacy64MiBBoundary() {
-        assertThat(SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES)
+    void deploymentSnapshotLimitAndProtocolHardLimitRemainSeparate() throws Exception {
+        var defaults = new org.springframework.boot.context.properties.bind.Binder(
+                new org.springframework.boot.context.properties.source.MapConfigurationPropertySource())
+                .bindOrCreate("surprising.aeron", org.springframework.boot.context.properties.bind.Bindable.of(
+                        com.surprising.aeron.config.CoreRuntimeConfiguration.class));
+        assertThat(defaults.snapshot().maxBytes())
                 .isGreaterThan(64 * 1024 * 1024)
                 .isEqualTo(SectionedCoreSnapshotCodec.DEFAULT_MAX_SNAPSHOT_BYTES);
+        String previous = System.getProperty("surprising.aeron.snapshot.max-bytes");
+        System.clearProperty("surprising.aeron.snapshot.max-bytes");
+        try {
+            var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
+            var delegateField = recovery.getClass().getDeclaredField("delegate");
+            delegateField.setAccessible(true);
+            Object delegate = delegateField.get(recovery);
+            var budgetField = delegate.getClass().getDeclaredField("maximumSnapshotBytes");
+            budgetField.setAccessible(true);
+            assertThat(budgetField.getInt(delegate)).isEqualTo(defaults.snapshot().maxBytes());
+        } finally {
+            if (previous == null) System.clearProperty("surprising.aeron.snapshot.max-bytes");
+            else System.setProperty("surprising.aeron.snapshot.max-bytes", previous);
+        }
+        assertThat(SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES).isEqualTo(Integer.MAX_VALUE - 8);
+        assertThat(SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES).isLessThan(
+                SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES);
+    }
+
+    /** 剩余预算在 Matcher 编码前传入，不能等完整嵌套数组构造后才在总长度检查拒绝。 */
+    @Test
+    void writerPassesRemainingBudgetToMatcherBeforeEncoding() {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            var image = new java.util.concurrent.atomic.AtomicReference<
+                    com.surprising.aeron.service.snapshot.CoreSnapshotImage>();
+            state.snapshots.snapshotEncoder(snapshotImage -> {
+                image.set(snapshotImage);
+                return java.util.concurrent.CompletableFuture.completedFuture(
+                        com.surprising.aeron.service.snapshot.SectionedCoreSnapshotWriter.encode(
+                                snapshotImage, state.configuration().snapshot().maxBytes()));
+            });
+            byte[] encoded = state.snapshot(19);
+            ByteBuffer buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
+            int sectionCount = buffer.getInt(8);
+            int encodedPrefixBytes = 0;
+            buffer.position(ENVELOPE_LENGTH);
+            for (int section = 0; section < 3; section++) {
+                buffer.getInt();
+                int length = buffer.getInt();
+                encodedPrefixBytes += length;
+                buffer.position(buffer.position() + length);
+            }
+            int budget = ENVELOPE_LENGTH + sectionCount * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
+                    + SectionedCoreSnapshotCodec.FOOTER_LENGTH + encodedPrefixBytes + 64;
+            assertThatThrownBy(() -> com.surprising.aeron.service.snapshot.SectionedCoreSnapshotWriter.encode(
+                    image.get(), budget)).isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("matcher snapshot exceeds maximum size");
+        }
     }
 
     /**

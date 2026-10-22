@@ -1,9 +1,11 @@
 package com.surprising.aeron.bootstrap.account;
 
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration.SettlementWaitStrategy;
+
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
-import java.util.Locale;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -138,10 +140,6 @@ abstract class SettlementLaneWorkerRhsPadding extends SettlementLaneWorkerParked
  */
 @Slf4j
 public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding implements AutoCloseable {
-    /** 选择账户等待策略的 JVM 属性名。 */
-    private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.settlement-wait-strategy";
-    /** BLOCKING 空闲阶段允许先自旋次数的 JVM 属性名。 */
-    private static final String SPIN_LIMIT_PROPERTY = "surprising.aeron.settlement-spin-limit";
     /** 普通队首等输入时由自旋切换到 yield 的次数阈值，固定为 1024。 */
     private static final int BUSY_SPIN_YIELD_THRESHOLD = 1024;
 
@@ -173,7 +171,7 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
     /** 独立准入邮箱下标掩码。 */
     private final int admissionIndexMask;
     /** 构造时从 JVM 属性固定的等待策略。 */
-    private final WaitStrategy waitStrategy;
+    private final SettlementWaitStrategy waitStrategy;
     /** BLOCKING 空闲阶段 park 前自旋预算，构造时限定为 0 至 4096。 */
     private final int spinLimit;
     /** 本工作线程唯一拥有的账户 Lane。 */
@@ -251,6 +249,13 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
     public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
                          java.util.function.Consumer<Throwable> failurePublisher,
                          int matcherShardCount, TradingCpuAffinity affinity) {
+        this(role, lane, requestedCapacity, failurePublisher, matcherShardCount, affinity,
+                CoreRuntimeConfiguration.standalone());
+    }
+
+    public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
+            java.util.function.Consumer<Throwable> failurePublisher, int matcherShardCount,
+            TradingCpuAffinity affinity, CoreRuntimeConfiguration configuration) {
         this.failurePublisher = java.util.Objects.requireNonNull(failurePublisher);
         if (role == null || role.isBlank() || lane == null || requestedCapacity <= 0
                 || matcherShardCount <= 0) {
@@ -266,10 +271,8 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
             matcherSettlementRings[shard] = new MatcherSettlementRing(capacity);
         indexMask = capacity - 1;
         admissionIndexMask = capacity - 1;
-        waitStrategy = configuredWaitStrategy();
-        spinLimit = Integer.parseInt(System.getProperty(SPIN_LIMIT_PROPERTY, "0"));
-        if (spinLimit < 0 || spinLimit > 4096)
-            throw new IllegalArgumentException("settlement spin limit must be in [0,4096]");
+        waitStrategy = configuration.settlementWaitStrategy();
+        spinLimit = configuration.settlementSpinLimit();
         this.lane = lane;
         thread = new LaneThread("core-" + role + "-lane-" + lane.laneId(), () -> run(affinity), lane);
         lane.bindWorker(thread);
@@ -542,7 +545,7 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
 
                     // 普通队首合法但输入尚未就绪，需要让出 CPU 给能够补齐输入的线程。
                     // BUSY_SPIN 先短暂自旋，达到阈值后调用 yield；本分支并不 park。
-                    if (waitStrategy == WaitStrategy.BUSY_SPIN) {
+                    if (waitStrategy == SettlementWaitStrategy.BUSY_SPIN) {
                         backoffPayloadWait(payloadWaitSpins++);
                         continue;
                     }
@@ -753,25 +756,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         if (thread.isAlive()) throw new IllegalStateException("settlement lane did not stop");
         rethrowFailure();
     }
-
-    /**
-     * 读取等待策略属性，默认 BUSY_SPIN，去空白并按固定区域转大写；无法解析则抛出带可选值的参数异常。
-     */
-    private static WaitStrategy configuredWaitStrategy() {
-        // 从 JVM 属性读取的原等待策略文本，随后去空白并转大写
-        String configured = System.getProperty(WAIT_STRATEGY_PROPERTY, WaitStrategy.BUSY_SPIN.name());
-        try {
-            return WaitStrategy.valueOf(configured.trim().toUpperCase(Locale.ROOT));
-        } catch (/* 等待策略文本无法解析，包装为列出合法值的参数异常 */ IllegalArgumentException | NullPointerException exception) {
-            throw new IllegalArgumentException(
-                    "settlement wait strategy must be BUSY_SPIN, YIELDING or BLOCKING", exception);
-        }
-    }
-
-    /**
-     * 账户工作循环的三种等待方式；公开类型沿用服务模块 API，具体执行由主循环和输入等待分支决定。
-     */
-    public enum WaitStrategy { /** 无工作通常自旋；普通队首等输入达到阈值后 yield，不强制 park。 */ BUSY_SPIN, /** 无工作或等待账户归还时让出 CPU，再继续检查输入。 */ YIELDING, /** 按预算自旋后先声明休眠、重新检查输入，再最多 park 十万纳秒。 */ BLOCKING }
 
     /**
      * 邮箱游标之前的填充，隔开生产者和消费者的频繁写入。

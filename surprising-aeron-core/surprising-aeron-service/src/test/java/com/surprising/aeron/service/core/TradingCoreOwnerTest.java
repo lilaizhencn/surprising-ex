@@ -133,7 +133,7 @@ class TradingCoreOwnerTest {
             do {
                 service.pollCommands();
                 // 原撮合环当前按序提交头
-                var head = core.pendingMatching.head();
+                var head = core.pendingMatching().head();
                 event = head == null ? null : head.settlementEvent();
                 if (event != null && event.completedLaneMask() == event.requiredLaneMask()
                         && !core.matchingProgress.hasNotifications() && !service.ownerWorkAvailable()) break;
@@ -263,7 +263,7 @@ class TradingCoreOwnerTest {
                     boolean accountsComplete = true;
                     for (CoreMessage /* 本轮逐项检查或入队的原协议请求 */ request : requests) {
                         // 按原 UUID 找到的在途撮合槽
-                        var pending = core.pendingMatching.findByCommandId(request.header().commandId());
+                        var pending = core.pendingMatching().findByCommandId(request.header().commandId());
                         // 当前原命令账户/财务结算事件，分别检查发布、账户完成及最终完成
                         var event = pending == null ? null : pending.orderBatch() == null
                                 ? pending.settlementEvent() : pending.orderBatch().settlementEvent();
@@ -274,7 +274,7 @@ class TradingCoreOwnerTest {
                     if (System.nanoTime() > deadline) throw new AssertionError("Independent Lane facts were not ready");
                     java.util.concurrent.locks.LockSupport.parkNanos(100_000);
                 } while (true);
-                assertThat(core.pendingMatching.size()).isEqualTo(2);
+                assertThat(core.pendingMatching().size()).isEqualTo(2);
                 assertThat(responses).hasSize(before);
                 // 查询排在整个资金前缀之后；放行账本前停止 Owner 轮询，
                 // 检查首响应尚未交出时，两条命令的资金仍都能完成。
@@ -372,8 +372,8 @@ class TradingCoreOwnerTest {
                 for (var /* 本轮逐项检查或入队的原协议请求 */ request : List.of(first, control, following))
                     service.acceptCommittedCommand(clientSession(responses), request, 2_000, 2_000);
                 awaitPipelineAccounts(service, List.of(first));
-                assertThat(core.pendingMatching.size()).isEqualTo(1);
-                assertThat(core.pendingMatching.findByCommandId(following.header().commandId())).isNull();
+                assertThat(core.pendingMatching().size()).isEqualTo(1);
+                assertThat(core.pendingMatching().findByCommandId(following.header().commandId())).isNull();
                 assertThat(responses).hasSize(before);
                 assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
                     observedFees.set(ledger.fee(assetId));
@@ -455,19 +455,19 @@ class TradingCoreOwnerTest {
                 for (var /* 本轮逐项检查或入队的原协议请求 */ request : List.of(first, following))
                     service.acceptCommittedCommand(clientSession(responses), request, 2_000, 2_000);
                 awaitPipelineAccounts(service, List.of(first, following));
-                assertThat(core.pendingMatching.ledgerDispatchHead().command().header().commandId())
+                assertThat(core.pendingMatching().ledgerDispatchHead().command().header().commandId())
                         .isEqualTo(first.header().commandId());
                 assertThat(core.matchingProgress.hasNotifications()).isFalse();
                 assertThat(core.matchingProgress.hasLocalMatchingWork()).isTrue();
                 assertThat(responses).hasSize(before);
                 // 原账户事实已就绪，即使不标记为独立输入路径，
                 // 首响应交出前也必须把既有资金前缀继续交给账本。
-                PipelineTestAccess.clusterIndependent(core.pendingMatching.findByCommandId(first.header().commandId()), false);
-                PipelineTestAccess.clusterIndependent(core.pendingMatching.findByCommandId(following.header().commandId()), false);
+                PipelineTestAccess.clusterIndependent(core.pendingMatching().findByCommandId(first.header().commandId()), false);
+                PipelineTestAccess.clusterIndependent(core.pendingMatching().findByCommandId(following.header().commandId()), false);
                 release.countDown();
                 // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (core.pendingMatching.ledgerDispatchHead() != null) {
+                while (core.pendingMatching().ledgerDispatchHead() != null) {
                     core.commits.dispatchReadyMatcherFinancialSettlements(Long.MAX_VALUE);
                     if (System.nanoTime() >= deadline) throw new AssertionError("Ledger dispatch still waits for response retirement");
                     Thread.onSpinWait();
@@ -481,7 +481,7 @@ class TradingCoreOwnerTest {
                 assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> { fees.set(ledger.fee(asset)); inspected.countDown(); })).isTrue();
                 assertThat(inspected.await(2, TimeUnit.SECONDS)).isTrue();
                 assertThat(fees).hasValue(4);
-                assertThat(core.pendingMatching.size()).isEqualTo(2);
+                assertThat(core.pendingMatching().size()).isEqualTo(2);
                 assertThat(responses).hasSize(before);
                 finishCommands(service);
             }
@@ -489,7 +489,7 @@ class TradingCoreOwnerTest {
             for (/* 遍历原响应或请求清单的当前下标 */ int index = before; index < responses.size(); index++)
                 assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.get(index)).payload()).commandStatus())
                         .isEqualTo(ResponseStatus.APPLIED);
-            assertThat(core.pendingMatching.ledgerDispatchHead()).isNull();
+            assertThat(core.pendingMatching().ledgerDispatchHead()).isNull();
             // 相关原命令完成后取得的已提交冷状态，供资金与订单断言
             var state = core.tradingState();
             assertThat(state.treasuryState().feeBalances()).containsEntry("USDT", 4L);
@@ -528,7 +528,7 @@ class TradingCoreOwnerTest {
             boolean ready = true;
             for (var /* 本轮逐项检查或入队的原协议请求 */ request : requests) {
                 // 按原 UUID 找到的在途撮合槽
-                var pending = core.pendingMatching.findByCommandId(request.header().commandId());
+                var pending = core.pendingMatching().findByCommandId(request.header().commandId());
                 // 当前原命令账户/财务结算事件，分别检查发布、账户完成及最终完成
                 var event = pending == null ? null : pending.settlementEvent();
                 ready &= event != null && event.ready() && event.completedLaneMask() != 0
@@ -683,7 +683,7 @@ class TradingCoreOwnerTest {
             do {
                 service.pollCommands();
                 // 原撮合环当前按序提交头
-                var head = core.pendingMatching.head();
+                var head = core.pendingMatching().head();
                 // 当前命令槽原批次状态，参数生成回调中为是否批次的布尔值
                 var batch = head == null ? null : head.orderBatch();
                 event = batch == null ? null : batch.itemSettlementEvent() != null
@@ -777,10 +777,8 @@ class TradingCoreOwnerTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10000))))
                     .status()).isEqualTo(ResponseStatus.APPLIED);
             // 只供测试观察账户所有权交接代号的反射字段
-            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
-            epoch.setAccessible(true);
             // 本次原业务执行前账户所有权交接代号，完成或拒绝后均应不变
-            long before = epoch.getLong(runtime);
+            long before = runtime.laneHandoffEpoch();
             // 本轮逐项检查或入队的原协议请求
             var request = command(CoreMessageType.ADJUST_BALANCE, 2, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
@@ -805,7 +803,7 @@ class TradingCoreOwnerTest {
                     if (!business.getAsBoolean()) return false;
                     if (capacityFailure) {
                         // 这里只制造排队溢出，条目须在实际派发前被拒绝并清空。
-                        PipelineTestAccess.overflowQueuedMatching(owner.admissions, owner.pendingMatching.capacity() + 1);
+                        PipelineTestAccess.overflowQueuedMatching(owner.admissions, owner.pendingMatching().capacity() + 1);
                     } else {
                         owner.resultBuilder.commandChangedOrderIds = /* 只在终态盖元数据调用栈中抛错的测试列表，故障只存在本测试源码。 */ new java.util.AbstractList<Long>() {
                             /**
@@ -842,7 +840,7 @@ class TradingCoreOwnerTest {
                         assertThat(balance.availableUnits()).isEqualTo(10000);
                         assertThat(balance.lockedUnits()).isZero();
                     });
-            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
             assertThat(owner.admissions.queuedMatchingCount()).isZero();
             // 重复原请求取得的已记录拒绝终态
             var duplicate = CoreTestCompletion.applyAsynchronously(owner, request);
@@ -866,10 +864,8 @@ class TradingCoreOwnerTest {
             // 当前真实账户与账本工作资源所在的原运行时
             var runtime = service.state().runtimeState;
             // 只供测试观察账户所有权交接代号的反射字段
-            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
-            epoch.setAccessible(true);
             // 本次原业务执行前账户所有权交接代号，完成或拒绝后均应不变
-            long before = epoch.getLong(runtime);
+            long before = runtime.laneHandoffEpoch();
             for (/* 算法单当前要发布的一到三修订号 */ int revision = 1; revision <= 3; revision++) {
                 // 本轮要写入的原算法状态视图
                 var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "1", 0,
@@ -882,7 +878,7 @@ class TradingCoreOwnerTest {
                 assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(revision);
                 assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).userId()).isEqualTo(1001);
             }
-            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
             // 主动设全局元数据为 long 上限之前保存的原修订
             long revisionBeforeFailure = runtime.revision();
             runtime.setMetadata(ProductLine.SPOT, Long.MAX_VALUE);
@@ -905,7 +901,7 @@ class TradingCoreOwnerTest {
             assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getLast()).payloadUnsafe()).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(4);
-            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
 
         } finally { service.onTerminate(null); }
     }
@@ -924,10 +920,8 @@ class TradingCoreOwnerTest {
             // 当前真实账户与账本工作资源所在的原运行时
             var runtime = service.state().runtimeState;
             // 只供测试观察账户所有权交接代号的反射字段
-            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
-            epoch.setAccessible(true);
             // 本次原业务执行前账户所有权交接代号，完成或拒绝后均应不变
-            long before = epoch.getLong(runtime);
+            long before = runtime.laneHandoffEpoch();
             onSessionMessage(service, responses,
                     command(CoreMessageType.ADJUST_BALANCE, 1, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 3))));
             finishCommands(service);
@@ -941,7 +935,7 @@ class TradingCoreOwnerTest {
             onSessionMessage(service, responses, command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 3, 1001,
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
             finishCommands(service);
-            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
             assertThat(testBalance(service.state(), 1001)).isEqualTo(3);
             assertThat(runtime.cancelAllAfterTimer(new com.surprising.aeron.model.CoreCancelAllAfterKey(
                     1001, "1")).revision()).isEqualTo(1);
@@ -1033,7 +1027,7 @@ class TradingCoreOwnerTest {
             // 通知测试线程被阻塞的 Lane、Matcher 或账本工作已经进入的门闩
             var entered = new java.util.concurrent.CountDownLatch(1);
             // 本次阻塞 Matcher 控制任务的原队列身份
-            long token = service.state().matcherPipeline.submitControl(0, () -> {
+            long token = service.state().matcherPipeline().submitControl(0, () -> {
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher release timeout"); }
                 catch (/* 当前被注入或捕获的原测试故障，按所在异常边界处理 */ InterruptedException failure) { throw new AssertionError(failure); }
@@ -1061,7 +1055,7 @@ class TradingCoreOwnerTest {
             release.countDown();
             // 本轮原业务、Matcher 控制或撮合结果，未就绪可为空
             Object result;
-            do { result = service.state().matcherPipeline.pollControl(0, token); Thread.onSpinWait(); }
+            do { result = service.state().matcherPipeline().pollControl(0, token); Thread.onSpinWait(); }
             while (result == null && System.nanoTime() < deadline);
             assertThat(result).isEqualTo(Boolean.TRUE);
             finishCommands(service);
@@ -1499,7 +1493,7 @@ class TradingCoreOwnerTest {
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "later")));
             onSessionMessage(service, responses, later);
             assertThat(state.matchingSequence(later.header().commandId())).isZero();
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(responses).hasSize(2);
 
             // 测试阻塞/填满账本的空查询或原异步只读消息
@@ -1573,7 +1567,7 @@ class TradingCoreOwnerTest {
             service.onTimerEvent(service.state().appliedCommandCount(), 1_001);
             assertThat(service.doBackgroundWork(0)).isZero();
 
-            assertThat(service.state().pendingMatching.size()).isZero();
+            assertThat(service.state().pendingMatching().size()).isZero();
             assertThat(responses).hasSize(1);
             assertThat(CoreTestCompletion.orderState(service.state(), 1001, 904).status())
                     .isEqualTo("OPEN");
@@ -1605,7 +1599,7 @@ class TradingCoreOwnerTest {
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(906, "1", CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence")),
                     UUID.fromString("00000000-0000-0000-0000-000000000013"));
             onSessionMessage(service, responses, place);
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(responses).hasSize(1);
 
             onSessionMessage(service, responses, command(CoreMessageType.ADJUST_BALANCE, 3, 1001,
@@ -1613,7 +1607,7 @@ class TradingCoreOwnerTest {
                     UUID.fromString("00000000-0000-0000-0000-000000000014")));
             assertThat(service.doBackgroundWork(0)).isZero();
 
-            assertThat(state.pendingMatching.size()).isZero();
+            assertThat(state.pendingMatching().size()).isZero();
             assertThat(CoreTestCompletion.orderState(state, 1001, 906).status())
                     .isEqualTo("OPEN");
             assertThat(responses).hasSize(2);
@@ -1698,10 +1692,10 @@ class TradingCoreOwnerTest {
      */
     @Test
     void rejectsSnapshotFragmentsBeyondBoundedRecoveryBuffer() {
-        TradingOwnerTestSupport.ensureSnapshotCapacity(SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 1);
+        TradingOwnerTestSupport.ensureSnapshotCapacity(SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES - 1, 1);
 
         assertThatThrownBy(() -> TradingOwnerTestSupport.ensureSnapshotCapacity(
-                SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - 1, 2))
+                SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES - 1, 2))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Aeron core snapshot exceeds maximum size");
     }
@@ -1841,7 +1835,7 @@ class TradingCoreOwnerTest {
 
             service.onTimerEvent(Long.MAX_VALUE - 1, 31_000);
 
-            assertThat(service.state().pendingMatching.get(sequence)).isNotNull();
+            assertThat(service.state().pendingMatching().get(sequence)).isNotNull();
         } finally {
             service.onTerminate(null);
         }
@@ -1908,8 +1902,8 @@ class TradingCoreOwnerTest {
                     .hasMessageStartingWith("unfinished business work outside cluster log callback");
 
             // 核对原状态和结果
-            assertThat(service.state().pendingMatching.size()).isOne();
-            assertThat(service.state().pendingMatching.get(pendingSequence)).isNotNull();
+            assertThat(service.state().pendingMatching().size()).isOne();
+            assertThat(service.state().pendingMatching().get(pendingSequence)).isNotNull();
         } finally {
             service.onTerminate(null);
         }

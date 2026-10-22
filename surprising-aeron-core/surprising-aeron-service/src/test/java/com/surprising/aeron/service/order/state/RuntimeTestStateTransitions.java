@@ -29,7 +29,7 @@ import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.account.RuntimeAccountStateTransitions;
 import com.surprising.aeron.service.adl.RuntimeAdlExecution;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
@@ -292,7 +292,7 @@ public final class RuntimeTestStateTransitions {
                                               Iterable<Long> userIds, UUID chunkCommandId) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities)) {
+        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
             // 生产资金费处理返回的实际支付事实和分页进度，与物化后状态一起交给测试。
             var result = RuntimePerpetualFundingProcessor.apply(before, command,
                     userIds, chunkCommandId, runtime, identities);
@@ -337,7 +337,7 @@ public final class RuntimeTestStateTransitions {
                                                         ActiveOrderIndex activeOrders) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities)) {
+        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
             // 生产生命周期处理返回的确定分页进度。
             var progress = RuntimeLifecycleSettlement.apply(before, command, userIds, chunkCommandId,
                     activeOrders, runtime, identities);
@@ -458,7 +458,7 @@ public final class RuntimeTestStateTransitions {
     public List<CoreAdlCandidateView> adlCandidates(TradingCoreState before, String asset, int limit) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities)) {
+        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
             return RuntimeRiskQueryService.adlCandidates(runtime, identities, asset,
                     new AdlPositionIndex(before, identities).positions(asset), limit);
         }
@@ -472,7 +472,7 @@ public final class RuntimeTestStateTransitions {
     public List<CoreRiskSnapshotView> riskSnapshots(TradingCoreState before, long userId) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities)) {
+        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
             return RuntimeRiskQueryService.snapshots(runtime, identities, userId);
         }
     }
@@ -493,7 +493,7 @@ public final class RuntimeTestStateTransitions {
     private static TradingCoreState mutate(TradingCoreState before, Mutation mutation) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities)) {
+        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
             mutation.apply(runtime, identities);
             return RuntimeStateMaterializer.materialize(runtime, identities);
         }
@@ -509,7 +509,7 @@ public final class RuntimeTestStateTransitions {
          * @param runtime 只属于本次操作的冷可变运行时，动作结束后由统一入口物化并关闭
          * @param identities 与本次投影运行时配套的身份映射，不跨多次操作复用
          */
-        public void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities);
+        public void apply(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities);
     }
 
     /**

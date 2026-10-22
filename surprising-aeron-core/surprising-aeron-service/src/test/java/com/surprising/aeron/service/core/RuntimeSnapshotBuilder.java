@@ -21,7 +21,7 @@ public final class RuntimeSnapshotBuilder {
      * @param state 调用方已建立合法快照读取边界的可变运行时
      * @param revision 给测试投影指定的非负修订号
      */
-    public static TradingRuntimeSnapshot capture(TradingRuntimeState state, long revision) {
+    public static TradingRuntimeSnapshot capture(TradingAccountRuntime state, long revision) {
         state.assertOwner();
         if (revision < 0) {
             throw new IllegalArgumentException("snapshot revision must not be negative");

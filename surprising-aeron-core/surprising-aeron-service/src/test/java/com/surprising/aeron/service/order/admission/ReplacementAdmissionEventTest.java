@@ -21,7 +21,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.AccountLaneTestAccess;
 import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -95,7 +95,7 @@ class ReplacementAdmissionEventTest {
             var workerHeld = new CountDownLatch(1);
             // 放行目标 worker 的门闩，finally 中同样释放避免遗留阻塞。
             var releaseWorker = new CountDownLatch(1);
-            runtime.laneWorkers[laneId].submit(/* 目标 worker 回调传入的 Lane 参数，本回调只等待门闩，不读实体。 */ value -> {
+            runtime.submitAccountCommand(laneId, /* 目标 worker 回调传入的 Lane 参数，本回调只等待门闩，不读实体。 */ value -> {
                 workerHeld.countDown();
                 try { if (!releaseWorker.await(3, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timed out"); }
                 catch (/* 目标 worker 等待门闩期间的中断，包装为保留原因的断言失败。 */ InterruptedException failure) { throw new AssertionError(failure); }
@@ -111,8 +111,7 @@ class ReplacementAdmissionEventTest {
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
                 // 另一账户 Lane 任务的完成门闩，证明目标 Lane 阻塞不挡住它。
                 var independent = new CountDownLatch(1);
-                runtime.laneWorkers[(laneId + 1) % runtime.topology().accountLaneCount()]
-                        .submit(/* 另一 worker 回调的 Lane 参数，回调只通知该 Lane 已正常运行。 */ value -> independent.countDown());
+                runtime.submitAccountCommand((laneId + 1) % runtime.topology().accountLaneCount(), /* 另一 worker 回调的 Lane 参数，回调只通知该 Lane 已正常运行。 */ value -> independent.countDown());
                 assertThat(independent.await(3, TimeUnit.SECONDS)).isTrue();
                 releaseWorker.countDown();
                 await(runtime, event);
@@ -152,7 +151,7 @@ class ReplacementAdmissionEventTest {
      * @param runtime 持有当前真实账户 worker 的测试运行时
      * @param event 等待 Lane 发布完成的改单准入事件
      */
-    private static void await(TradingRuntimeState runtime, ReplacementAdmissionEvent event) {
+    private static void await(TradingAccountRuntime runtime, ReplacementAdmissionEvent event) {
         // 等待账户准入回执的三秒单调时钟上限，不改变业务时间。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!event.complete()) {

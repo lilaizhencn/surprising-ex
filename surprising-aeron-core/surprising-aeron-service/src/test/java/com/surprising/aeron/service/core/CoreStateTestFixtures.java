@@ -132,7 +132,7 @@ public final class CoreStateTestFixtures {
      * @param assetId 预留及冻结使用的内部资产索引
      * @param reservedUnits 实际传给运行时的冻结数量；预留正文单独以至少一单位构造
      */
-    public static void reserveOrder(TradingRuntimeState runtime, long orderId, long userId, long clientKey,
+    public static void reserveOrder(TradingAccountRuntime runtime, long orderId, long userId, long clientKey,
                              int symbolId, long quantitySteps, int assetId, long reservedUnits) {
         // 本次待直接登记的测试订单
         OrderRuntime order = order(orderId, userId, symbolId, quantitySteps);

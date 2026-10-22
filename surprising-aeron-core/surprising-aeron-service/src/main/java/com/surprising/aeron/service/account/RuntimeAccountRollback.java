@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.account;
 
 import com.surprising.aeron.model.CoreTriggerOrderState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.RuntimeUserChangeBuffer;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
@@ -15,7 +15,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
  */
 public final class RuntimeAccountRollback {
     /** 拥有产品元数据及账户 Lane 路由的交易运行时。 */
-    private final TradingRuntimeState state;
+    private final TradingAccountRuntime state;
     /** 按 Lane 保存用户首次修改前值及必要的可复用用户槽。 */
     final RuntimeUserChangeBuffer[] patchUsersBeforeByLane;
     /** 按 Lane 保存用户资产余额前值和最终后值，发布后单独清空。 */
@@ -39,7 +39,7 @@ public final class RuntimeAccountRollback {
      * @param laneCount 按当前拓扑分配的账户 Lane 数量
      */
     public @SuppressWarnings("unchecked")
-    RuntimeAccountRollback(TradingRuntimeState state, int laneCount) {
+    RuntimeAccountRollback(TradingAccountRuntime state, int laneCount) {
         this.state = java.util.Objects.requireNonNull(state);
         patchUsersBeforeByLane = new RuntimeUserChangeBuffer[laneCount];
         patchBalancesBeforeByLane = new LaneBalancePatches[laneCount];
@@ -129,10 +129,10 @@ public final class RuntimeAccountRollback {
             long userId = clients.userId(index);
             // 需要恢复订单指向的客户身份整数键。
             long clientKey = clients.clientKey(index);
-            TradingRuntimeState.removeClientOrderIndex(lane, userId, clientKey);
+            TradingAccountRuntime.removeClientOrderIndex(lane, userId, clientKey);
             // 当前实体保存的命令前值，null 表示该实体原来不存在。
             Long before = clients.beforeOrderId(index);
-            if (before != null) TradingRuntimeState.putClientOrderIndex(lane, userId, clientKey, before);
+            if (before != null) TradingAccountRuntime.putClientOrderIndex(lane, userId, clientKey, before);
         }
         // 当前 Lane 的订单前值缓冲，恢复时先移除现有记录再重装原权威对象。
         LaneLongCaptures<PatchOrderBefore> orders = patchOrdersBeforeByLane[laneId];
@@ -177,12 +177,12 @@ public final class RuntimeAccountRollback {
             long positionKey = positions.key(index);
             // 刚从权威表移除的当前预留或持仓，先用它清理现有成员索引。
             PositionRuntime current = lane.positions.remove(positionKey);
-            if (current != null) TradingRuntimeState.unindexPosition(lane, positionKey, current);
+            if (current != null) TradingAccountRuntime.unindexPosition(lane, positionKey, current);
             // 当前实体保存的命令前值，null 表示该实体原来不存在。
             PositionRuntime before = positions.value(index);
             if (before != null) {
                 lane.positions.put(positionKey, before.laneValue());
-                TradingRuntimeState.indexPosition(lane, positionKey, before);
+                TradingAccountRuntime.indexPosition(lane, positionKey, before);
             }
         }
         // 本 Lane 的余额补丁，恢复金额后还要捕获回滚最终后值。

@@ -127,7 +127,7 @@ class ProductionSourceBoundaryTest {
      */
     @Test
     void d2HasNoOwnerDirectDispatchScanCallbackOrOptionalLaneResponse() throws Exception {
-        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.core.TradingRuntimeState.class
+        assertThat(java.util.Arrays.stream(com.surprising.aeron.service.core.TradingAccountRuntime.class
                 .getDeclaredMethods()).map(java.lang.reflect.Method::getName))
                 .doesNotContain("dispatchOwnerControlledSettlement");
         assertThat(java.util.Arrays.stream(ClusterCommandWindow.class.getDeclaredMethods())
@@ -210,13 +210,13 @@ class ProductionSourceBoundaryTest {
     @Test
     void ownerRetainsNoPersistentLaneBusinessViews() {
         // 运行时声明字段流，供检查指定旧正文表名称不存在
-        var fields = java.util.Arrays.stream(com.surprising.aeron.service.core.TradingRuntimeState.class.getDeclaredFields());
+        var fields = java.util.Arrays.stream(com.surprising.aeron.service.core.TradingAccountRuntime.class.getDeclaredFields());
         assertThat(fields.map(java.lang.reflect.Field::getName)).doesNotContain(
                 "publishedOrders", "publishedUsers", "publishedAlgoOrders", "publishedTriggerOrders",
                 "publishedLiquidations", "publishedRiskSnapshots");
         // 不允许 Owner 持久表保存的四类账户正文类型名
         var businessTypes = java.util.Set.of("CoreAlgoOrderState", "CoreTriggerOrderState", "LiquidationRuntime", "RiskSnapshotRuntime");
-        for (var /* 当前待核对类型或字段名的反射字段 */ field : com.surprising.aeron.service.core.TradingRuntimeState.class.getDeclaredFields()) {
+        for (var /* 当前待核对类型或字段名的反射字段 */ field : com.surprising.aeron.service.core.TradingAccountRuntime.class.getDeclaredFields()) {
             if (!java.util.Map.class.isAssignableFrom(field.getType())
                     && !field.getType().getName().endsWith("LongObjectHashMap")) continue;
             assertThat(businessTypes.stream().anyMatch(/* 当前待反射或读取源文件的类型；业务泛型检查中为待排除的正文类型名 */ type -> field.getGenericType().getTypeName().contains(type)))

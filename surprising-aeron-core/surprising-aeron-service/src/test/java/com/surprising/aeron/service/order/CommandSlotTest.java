@@ -143,7 +143,7 @@ class CommandSlotTest {
         try (/* 提供待队列和批次链入口的真实运行时。 */ var owner = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             for (/* 当前槽位复用代际，循环共三次。 */ int generation = 0; generation < 3; generation++) {
                 // 首条直接命令，批次代际测试中则为当前代首个 Core 序号。
-                long first = 1000L + (long) generation * owner.pendingMatching.capacity();
+                long first = 1000L + (long) generation * owner.pendingMatching().capacity();
                 // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
                 var pending = new CommandSlot[3];
                 // 本代三个批次上下文数组。
@@ -151,7 +151,7 @@ class CommandSlotTest {
                 for (/* 当前创建或清理的三个批次/命令下标。 */ int i = 0; i < 3; i++) {
                     pending[i] = owner.admissions().newPendingMatching(first + i,
                             CommandSlot.Operation.PLACE, command(first + i));
-                    owner.pendingMatching.put(pending[i]);
+                    owner.pendingMatching().put(pending[i]);
                     batches[i] = new OrderBatchPending(1, owner.responseArena());
                     batches[i].sequence = first + i;
                     owner.batches().registerBatch(pending[i], batches[i]);
@@ -174,7 +174,7 @@ class CommandSlotTest {
                     assertThat(pending[i].orderBatch).isNull();
                     assertThat(batches[i].previousBatch).isNull();
                     assertThat(batches[i].nextBatch).isNull();
-                    owner.pendingMatching.remove(first + i);
+                    owner.pendingMatching().remove(first + i);
                 }
             }
         }

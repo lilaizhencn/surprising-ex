@@ -56,12 +56,17 @@ class CoreConfigurationTest {
         // 故意提供非法低优先级属性，检查运行时内部不会绕过 Spring 再读一遍。
         String previous = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "3");
+        String previousMode = System.setProperty("surprising.aeron.execution-mode", "INVALID_LOW_PRIORITY");
         try (/* 只装配配置、出口与真实 Owner，不启动网络驱动。 */ var context = application().run(
                 "--spring.config.location=" + yaml.toUri(),
                 "--surprising.aeron.product-line=SPOT", "--surprising.aeron.hostnames=localhost",
-                "--surprising.aeron.account-lanes=8")) {
+                "--surprising.aeron.account-lanes=8", "--surprising.aeron.execution-mode=FUSED")) {
             // Spring 绑定后唯一的启动拓扑。
             var topology = context.getBean(LaneTopology.class);
+            var runtimeConfiguration = context.getBean(CoreRuntimeConfiguration.class);
+            assertThat(runtimeConfiguration.executionMode()).isEqualTo(TradingExecutionMode.FUSED);
+            assertThat(runtimeConfiguration.matcherGroupSize()).isEqualTo(17);
+            assertThat(runtimeConfiguration.laneInitialEntities()).isEqualTo(32);
             assertThat(topology).isEqualTo(new LaneTopology(2, 0, 1, 8, 42, 32, 64, 128));
             // 用最小 Cluster 元数据启动真实 Owner 线程，并捕获它实际使用的拓扑。
             var cluster = cluster();
@@ -70,14 +75,17 @@ class CoreConfigurationTest {
             egress.start(cluster);
             try {
                 owner.start(cluster, null);
-                assertThat(TradingCoreRuntime.inspectSnapshot(ProductLine.SPOT,
-                        owner.captureSnapshot(1, 0)).topology()).isEqualTo(topology);
+                try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decodePassive(
+                        owner.captureSnapshot(1, 0), ProductLine.SPOT, runtimeConfiguration)) {
+                    assertThat(restored.runtimeState().topology()).isEqualTo(topology);
+                }
             } finally {
                 owner.terminate();
                 egress.clear();
             }
         } finally {
             restoreProperty("surprising.aeron.account-lanes", previous);
+            restoreProperty("surprising.aeron.execution-mode", previousMode);
         }
     }
 
@@ -157,6 +165,8 @@ class CoreConfigurationTest {
                     matcher-window-size: 32
                     matching-completion-capacity: 64
                     account-lane-queue-capacity: 128
+                    matcher-group-size: 17
+                    lane-initial-entities: 32
                 """);
     }
 

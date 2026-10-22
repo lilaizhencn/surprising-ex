@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
@@ -64,7 +64,7 @@ public final class MatcherSettlementEvent implements
     /**  当前代所属运行时，事件归还前解除引用。 借用事件关联的所属交易运行时，回收后引用为空。 */
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /**  当前代解析资产、币对及持仓身份的运行时字典。 借用当前代运行时身份字典，事件回收后引用为空。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -318,7 +318,7 @@ public final class MatcherSettlementEvent implements
      * @param target 在事件租约内接收最终订单值的命令目标，可为空
      */
     void prepareDirect(long sequence, long laneMask, long timestamp, long position,
-                       java.util.UUID commandId, int shard, TradingRuntimeState runtime,
+                       java.util.UUID commandId, int shard, TradingAccountRuntime runtime,
                        RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
                        LaneOrderResultTarget target) {
         prepareDirect(sequence, sequence, laneMask, timestamp, position, commandId, shard,
@@ -341,7 +341,7 @@ public final class MatcherSettlementEvent implements
      * @param target 在事件租约内接收最终订单值的命令目标，可为空
      */
     void prepareDirect(long coreSequence, long commitSequence, long laneMask, long timestamp, long position,
-                       java.util.UUID commandId, int shard, TradingRuntimeState runtime,
+                       java.util.UUID commandId, int shard, TradingAccountRuntime runtime,
                        RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
                        LaneOrderResultTarget target) {
         if (coreSequence <= 0 || commitSequence < 0 || laneMask == 0 || timestamp < 0 || position < 0 || commandId == null
@@ -882,7 +882,7 @@ public final class MatcherSettlementEvent implements
      */
     private void notifyDirectPublication() {
         // 发布完成前提前保存的运行时通知目标，完成位发布后只使用此局部引用。
-        TradingRuntimeState completionRuntime = runtime;
+        TradingAccountRuntime completionRuntime = runtime;
         // 队列中的已发布事实一旦可见，Lane 就能开始消费；
         // 发布方释放传输占用并完成全部入队前，Owner 仍不能回收事件。
         matcherPublicationDeferred = true;
@@ -1193,7 +1193,7 @@ public final class MatcherSettlementEvent implements
         // 当前执行或检查的账户 Lane 编号。
         int laneId = lane.laneId();
         // 发布完成前提前保存的运行时通知目标，完成位发布后只使用此局部引用。
-        TradingRuntimeState completionRuntime = runtime;
+        TradingAccountRuntime completionRuntime = runtime;
         lane.recordSettlementOperation();
         // 该账户完成标记在间隔数组中的实际下标。
         int completionOffset = laneId * CACHE_LINE_LONGS;
@@ -1613,7 +1613,7 @@ public final class MatcherSettlementEvent implements
             runtime.applyLedgerSettlementPositions(changes, requiredLaneMask, identities);
             treasury.clearChangedKeys();
             // 发布完成前提前保存的运行时通知目标，完成位发布后只使用此局部引用。
-            TradingRuntimeState completionRuntime = runtime;
+            TradingAccountRuntime completionRuntime = runtime;
             // Owner 观察完成后可立即接管缓冲并复用财务槽，因此先保存通知目标；
             // 发布完成位后不再读取本槽或事件的任何字段。
             completed = true;

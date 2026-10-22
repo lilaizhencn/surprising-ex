@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core.identity;
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -191,7 +191,7 @@ class RuntimeIdentityRegistryTest {
         long userId = 17;
         // 决定用户账户 Lane 的固定拓扑
         var topology = CoreConfiguration.standaloneLaneTopology();
-        try (/* 仅供身份归属测试的冷账户运行时，资源作用域退出时关闭 */ var runtime = new TradingRuntimeState(topology)) {
+        try (/* 仅供身份归属测试的冷账户运行时，资源作用域退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
             identities.bindClientLanes(runtime);
             // 按测试用户路由构造或从冷运行时取得的所属账户 Lane
             var lane = runtime.accountLane(topology.accountLaneId(userId));

@@ -78,7 +78,7 @@ class OwnerPositionRetirementTest {
         /** Owner 持有的业务身份注册表。 */
         final RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         /** 执行实际 Lane 操作的账户运行时。 */
-        final TradingRuntimeState runtime;
+        final TradingAccountRuntime runtime;
         /** 本夹具持仓的规范身份键。 */
         final long key;
         /** 夹具初始及重新开仓时使用的持仓值。 */

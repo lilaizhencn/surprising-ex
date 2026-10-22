@@ -10,7 +10,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.position.RuntimePositionIndexValue;
-import com.surprising.aeron.service.snapshot.state.StateMapSupport;
+import java.util.TreeMap;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -44,7 +44,7 @@ class PositionUserIndexTest {
         assertThat(index.users("1")).containsExactly(1L);
 
         // 原用户映射的变更视图，把唯一有仓用户替换为无持仓用户。
-        Map<Long, CoreUserState> afterUsers = StateMapSupport.delta(before.users());
+        Map<Long, CoreUserState> afterUsers = new TreeMap<>(before.users());
         afterUsers.put(1L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 1));
         // 移除目标用户持仓后的业务状态，重建后旧合约应没有有效成员或非零总量。
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, afterUsers,
@@ -79,7 +79,7 @@ class PositionUserIndexTest {
         assertThat(index.shortQuantity("2")).isZero();
 
         // 原用户映射的变更视图，把唯一有仓用户替换为无持仓用户。
-        Map<Long, CoreUserState> afterUsers = StateMapSupport.delta(before.users());
+        Map<Long, CoreUserState> afterUsers = new TreeMap<>(before.users());
         afterUsers.put(1L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 1));
         // 移除目标用户持仓后的业务状态，重建后旧合约应没有有效成员或非零总量。
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, afterUsers,

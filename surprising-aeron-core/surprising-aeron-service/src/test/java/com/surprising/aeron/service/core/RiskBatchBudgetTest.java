@@ -71,13 +71,11 @@ class RiskBatchBudgetTest {
                     Thread.onSpinWait();
                 }
                 // 运行时 Lane 所有权交接代次的反射字段，用来确认异步续步没有再次借用账户表。
-                var epoch = state.runtimeState.getClass().getDeclaredField("laneHandoffEpoch");
-                epoch.setAccessible(true);
                 // 准备阶段已取得访问权之后的交接代次，整批异步续步不应再次增加它。
-                long handoffBefore = epoch.getLong(state.runtimeState);
+                long handoffBefore = state.runtimeState.laneHandoffEpoch();
                 // 原运行时本批执行的最终响应，需要与同步或恢复参照逐字节一致。
                 var actual = apply(state, firstBatch);
-                assertThat(epoch.getLong(state.runtimeState)).isEqualTo(handoffBefore);
+                assertThat(state.runtimeState.laneHandoffEpoch()).isEqualTo(handoffBefore);
                 assertThat(actual.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(actual.data()).isEqualTo(expected.data());
                 assertThat(state.tradingState().businessStateHash())
@@ -378,12 +376,7 @@ class RiskBatchBudgetTest {
             response = CoreTestCompletion.completeMatchingSynchronously(state,
                     state.matchingSequence(command.header().commandId()), command.header().submittedAtEpochMillis(),
                     command.header().sourceSequence());
-        try {
-            // 运行时 ownerLaneAccess 的反射字段，确认同步执行结束已归还借用的账户访问权。
-            var field = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
-            field.setAccessible(true);
-            assertThat(field.getBoolean(state.runtimeState)).isFalse();
-        } catch (/* 测试反射读取访问权标记失败的原因，包装成断言失败直接暴露。 */ ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        assertThat(state.runtimeState.ownerLaneAccess()).isFalse();
         return response;
     }
 

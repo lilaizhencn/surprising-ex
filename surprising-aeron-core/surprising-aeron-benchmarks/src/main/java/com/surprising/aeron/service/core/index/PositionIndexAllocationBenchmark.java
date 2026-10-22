@@ -2,7 +2,7 @@ package com.surprising.aeron.service.core.index;
 
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.RuntimePositionChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -19,7 +19,7 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1, jvmArgsAppend = {"-Xms512m", "-Xmx512m", "-XX:+UseG1GC"})
 public class PositionIndexAllocationBenchmark {
     @Param({"RESIZE", "REVERSE", "CLOSE_REOPEN"}) public String transition;
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
     private PositionRuntime source;
     private RuntimeFactIndexes indexes;

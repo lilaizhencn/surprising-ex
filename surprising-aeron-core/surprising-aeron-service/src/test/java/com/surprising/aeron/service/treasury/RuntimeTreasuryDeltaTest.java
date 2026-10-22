@@ -3,7 +3,7 @@ package com.surprising.aeron.service.treasury;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.settlement.FundsPosting;
@@ -189,13 +189,13 @@ class RuntimeTreasuryDeltaTest {
         // 空账本加七种单列变化状态的业务哈希集合，重复值会使构造失败。
         Set<Long> hashes = Set.of(
                 state(empty, 1).businessStateHash(),
-                state(empty.adjustFee("USDT", 1), 1).businessStateHash(),
-                state(empty.adjustInsurance("USDT", 1), 1).businessStateHash(),
-                state(empty.adjustDeficit("USDT", 1), 1).businessStateHash(),
-                state(empty.adjustLiquidationFee("USDT", 1), 1).businessStateHash(),
-                state(empty.adjustFundingResidual("USDT", 1), 1).businessStateHash(),
-                state(empty.adjustRoundingResidual("USDT", 1), 1).businessStateHash(),
-                state(empty.adjustClearingPnl("USDT", 1), 1).businessStateHash());
+                state(CoreTreasuryState.ofSubledgers(Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of()), 1).businessStateHash(),
+                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of()), 1).businessStateHash(),
+                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L)), 1).businessStateHash(),
+                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of()), 1).businessStateHash(),
+                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of()), 1).businessStateHash(),
+                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of()), 1).businessStateHash(),
+                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of()), 1).businessStateHash());
 
         assertThat(hashes).hasSize(8);
     }
@@ -216,7 +216,7 @@ class RuntimeTreasuryDeltaTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
         // 从冷状态投影的内存运行时，不启动真实账本线程。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(expected, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(expected, identities);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
         assertThat(expected.businessStateHash()).isEqualTo(expected.fullBusinessStateHash());
@@ -245,18 +245,16 @@ class RuntimeTreasuryDeltaTest {
         TradingCoreState before = state(beforeTreasury, 1);
 
         // 按同样预期变化生成的冷账本结果，允许保险有符号余额。
-        CoreTreasuryState afterTreasury = beforeTreasury
-                .adjustFee("USDT", -100)
-                .adjustInsurance("USDT", -100)
-                .recordFunding("1", 8)
-                .recordLifecycle("2", 4);
+        CoreTreasuryState afterTreasury = new CoreTreasuryState(
+                Map.of("BTC", 200L), Map.of("USDT", -50L), Map.of(),
+                Map.of("1", 8L), Map.of("2", 4L), Map.of(), Map.of());
         // 手工运行时最终结果应物化得到的完整冷核心状态。
         TradingCoreState after = state(afterTreasury, 2);
 
         // 当前冷运行时投影共用的资产和币对身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 从冷状态投影的内存运行时，不启动真实账本线程。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         // 本用例独占的权威 TreasuryRuntime，用于设置前值及检查变化和回滚。
         TreasuryRuntime treasury = runtime.treasury();

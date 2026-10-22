@@ -12,7 +12,7 @@ import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.UserRuntime;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.core.RuntimeSnapshotBuilder;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -45,7 +45,7 @@ class RuntimeDerivativeFillCalculatorTest {
      * @param leverage 本笔使用的百万分比杠杆
      * @param assetId 结算资产的运行时编号
      */
-    private static void applyFill(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    private static void applyFill(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             CoreInstrument instrument, OrderRuntime order, long positionKey, long price, long quantity,
             boolean taker, long leverage, int assetId) {
         // 本笔直接成交记录系统费用和实际盈亏的临时差额，随后应用到测试财库。
@@ -157,7 +157,7 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingRuntimeState runtime = runtime(symbolId, assetId, 200);
+        TradingAccountRuntime runtime = runtime(symbolId, assetId, 200);
         // 本用例起点的两单位买入订单引用。
         OrderRuntime order = runtime.order(11);
 
@@ -196,7 +196,7 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingRuntimeState runtime = runtime(symbolId, assetId, 21);
+        TradingAccountRuntime runtime = runtime(symbolId, assetId, 21);
         // 本轮操作前捕获的内存状态快照，用来判断未发布计算是否泄漏到账户。
         TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
 
@@ -223,7 +223,7 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+        TradingAccountRuntime runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 1, false, 800, 120, 100);
 
         applyFill(runtime, identities, instrument, runtime.order(11),
@@ -260,7 +260,7 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+        TradingAccountRuntime runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.BUY, 1, false, 800, 40, 20);
 
         applyFill(runtime, identities, instrument, runtime.order(11),
@@ -292,7 +292,7 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+        TradingAccountRuntime runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, false, 800, 220, 200);
 
         applyFill(runtime, identities, instrument, runtime.order(11),
@@ -329,7 +329,7 @@ class RuntimeDerivativeFillCalculatorTest {
         // 本用例用户七的当前合约持仓身份键。
         long positionKey = identities.positionKey(7, instrument.instrumentId());
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
+        TradingAccountRuntime runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, true, 800, 220, 200);
         // 本轮操作前捕获的内存状态快照，用来判断未发布计算是否泄漏到账户。
         TradingRuntimeSnapshot before = RuntimeSnapshotBuilder.capture(runtime, 1);
@@ -346,9 +346,9 @@ class RuntimeDerivativeFillCalculatorTest {
      * @param assetId 结算资产的运行时编号
      * @param reservationUnits 测试订单起点可使用的预留金额
      */
-    private static TradingRuntimeState runtime(int symbolId, int assetId, long reservationUnits) {
+    private static TradingAccountRuntime runtime(int symbolId, int assetId, long reservationUnits) {
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingRuntimeState runtime = new TradingRuntimeState();
+        TradingAccountRuntime runtime = new TradingAccountRuntime();
         runtime.putUser(new UserRuntime(7));
         runtime.putBalance(new BalanceRuntime(7, assetId, 800, 200));
         runtime.putOrder(new OrderRuntime(11, 7, symbolId, instrument(), CoreOrderSide.BUY, 100, false,
@@ -370,11 +370,11 @@ class RuntimeDerivativeFillCalculatorTest {
      * @param locked 辅助运行时的起点冻结余额
      * @param reservationUnits 测试订单起点可使用的预留金额
      */
-    private static TradingRuntimeState runtimeWithPosition(int symbolId, int assetId, long positionKey,
+    private static TradingAccountRuntime runtimeWithPosition(int symbolId, int assetId, long positionKey,
                                                            CoreOrderSide side, long quantity, boolean reduceOnly,
                                                            long available, long locked, long reservationUnits) {
         // 本用例构造的内存运行时，用于直接调用计算器与读取账户结果。
-        TradingRuntimeState runtime = new TradingRuntimeState();
+        TradingAccountRuntime runtime = new TradingAccountRuntime();
         runtime.putUser(new UserRuntime(7));
         runtime.putBalance(new BalanceRuntime(7, assetId, available, locked));
         runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId, CoreMarginMode.CROSS,

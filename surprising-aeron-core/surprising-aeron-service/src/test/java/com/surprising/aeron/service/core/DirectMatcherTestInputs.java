@@ -54,7 +54,7 @@ public final class DirectMatcherTestInputs {
     public static MatcherSettlementEvent preparePlace(DeterministicExchangeCoreAdapter adapter,
             long sequence, UUID commandId, long timestamp, long userId, CoreMatchingOrder order,
             List<Long> cancellations) {
-        try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var runtime = new TradingRuntimeState()) {
+        try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var runtime = new TradingAccountRuntime()) {
             // 局部资产和标的身份表，供事件路由准备使用
             var identities = new RuntimeIdentityRegistry();
             // 按 Matcher 输入标的构造的现货测试合约
@@ -122,7 +122,7 @@ public final class DirectMatcherTestInputs {
      */
     public static MatcherSettlementEvent cancelDirect(DeterministicExchangeCoreAdapter adapter,
             long sequence, UUID commandId, long timestamp, long userId, long orderId, String instrumentId) {
-        try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var runtime = new TradingRuntimeState()) {
+        try (/* 仅用于准备真实 Direct 事件槽的临时冷运行时，返回前自动关闭 */ var runtime = new TradingAccountRuntime()) {
             // 已保留 Matcher 发布租约的 Direct 事件，供适配器写入证据及订单簿结果
             var target = runtime.prepareDirectCancellation(sequence, userId, orderId, commandId,
                     adapter.matcherShardId(instrumentId), new RuntimeIdentityRegistry(), timestamp, 0);

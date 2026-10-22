@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.account;
 
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
@@ -218,7 +218,7 @@ public final class LaneBalancePatches {
      * @param state 提供实时捕获器的运行时，不从中重新读取余额
      * @param index 本轮连续存储前缀中的下标
      */
-    public void publishAvailableAt(TradingRuntimeState state, int index) {
+    public void publishAvailableAt(TradingAccountRuntime state, int index) {
         if (index < 0 || index >= size || !capturedAfter[index]) {
             throw new IllegalStateException("balance mutation did not publish its lane after-state");
         }

@@ -2,6 +2,8 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.RealtimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.model.OwnerLogContext;
@@ -37,10 +39,6 @@ import static com.surprising.aeron.support.egress.ClusterServiceEgress.NO_SESSIO
 @Slf4j
 public final class TradingCoreOwner {
 
-    /** 快照和显式完成前缀使用的秒数预算，JVM 配置默认 300 秒。 */
-    private static final long SNAPSHOT_TIMEOUT_SECONDS = Long.getLong(
-            "surprising.aeron.snapshot-timeout-seconds", 300L);
-
     /** Owner 独占的命令阶段、依赖等待、控制槽和有序提交状态。 */
     private final OwnerCommandPipelineState commandPipeline;
     /** 仅 FUSED 使用的复用解码槽，终态交接前保留；PIPELINED 为 null。 */
@@ -50,7 +48,7 @@ public final class TradingCoreOwner {
     @Getter
     private final OwnerIngressRing ingress = new OwnerIngressRing();
     /** 每轮输入推进预算，类加载时读取并校验，默认 64 条。 */
-    private static final int INPUT_BATCH_SIZE = configuredInputBatchSize();
+    private final CoreRuntimeConfiguration configuration;
 
     /** 已提交响应的交接出口，不执行交易状态变化。 */
     private final ResponseSink responseSink;
@@ -114,17 +112,28 @@ public final class TradingCoreOwner {
      */
     public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink,
             LaneTopology startupTopology) {
+        this(productLine, responseSink, startupTopology, CoreRuntimeConfiguration.standalone());
+    }
+
+    public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink,
+            LaneTopology startupTopology, CoreRuntimeConfiguration configuration) {
+        this(productLine, responseSink, startupTopology, configuration, RealtimeConfiguration.standalone());
+    }
+
+    public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink, LaneTopology startupTopology,
+            CoreRuntimeConfiguration configuration, RealtimeConfiguration realtimeConfiguration) {
+        this.configuration = java.util.Objects.requireNonNull(configuration);
         if (productLine == null) {
             throw new IllegalArgumentException("product line is required");
         }
         this.productLine = productLine;
         this.startupTopology = java.util.Objects.requireNonNull(startupTopology, "startupTopology");
         this.responseSink = java.util.Objects.requireNonNull(responseSink, "response sink");
-        this.realtimeBoundary = new TradingRealtimeBoundary(productLine);
-        this.executionMode = TradingExecutionMode.configured();
+        this.realtimeBoundary = new TradingRealtimeBoundary(productLine, realtimeConfiguration);
+        this.executionMode = configuration.executionMode();
         // 当前执行模式是否需要独立命令窗口
         boolean pipelined = executionMode == TradingExecutionMode.PIPELINED;
-        commandPipeline = new OwnerCommandPipelineState(pipelined);
+        commandPipeline = new OwnerCommandPipelineState(pipelined, configuration.ownerCommandWindow());
         matchingCommitHandler = commandPipeline::completeControlMatching;
         fusedDecoder = pipelined ? null
                 : com.surprising.aeron.service.order.command.DecodedMatchingCommand.commandSlot();
@@ -136,29 +145,13 @@ public final class TradingCoreOwner {
      */
     public void start(OwnerLogContext logContext) {
         this.logContext = logContext;
-        if (state == null) state = new TradingCoreRuntime(productLine, startupTopology);
+        if (state == null) state = new TradingCoreRuntime(productLine, startupTopology, configuration);
         processingLogCallback = false;
         commandPipeline.reset();
         if (fusedDecoder != null) fusedDecoder.clearCommandSlot();
         idleStrategy = logContext.idle();
         log.info("Aeron core role productLine={} role={} mode={}", productLine, logContext.role(), executionMode);
         realtimeBoundary.start(logContext.role(), logContext.position(), state);
-    }
-
-    /**
-     * 读取 JVM 的每轮输入预算，默认 64，允许 1 至 256；空白、非数字或越界配置包装成带属性名的配置异常。
-     */
-    private static int configuredInputBatchSize() {
-        // 每轮输入预算的 JVM 属性名
-        String property = "surprising.aeron.owner-input-batch-size";
-        try {
-            // 解析后的输入条数，随后校验范围
-            int value = Integer.parseInt(System.getProperty(property, "64").trim());
-            if (value < 1 || value > 256) throw new IllegalArgumentException();
-            return value;
-        } catch (/* 当前读取或推进失败的异常，附带上下文后继续抛出 */ RuntimeException failure) {
-            throw new IllegalArgumentException(property + " must be an integer in [1,256]", failure);
-        }
     }
 
     /**
@@ -192,7 +185,7 @@ public final class TradingCoreOwner {
      * FUSED 主流程：每轮按预算推进队首。先接续控制工作，再取得必要账户访问权、记录原日志元数据并执行；终态未交接前保留原输入，不建立流水命令窗口。
      */
     private void progressFusedCommands() {
-        for (/* 本轮 FUSED 已尝试推进的循环计数，受输入预算限制 */ int completed = 0; completed < INPUT_BATCH_SIZE; completed++) {
+        for (/* 本轮 FUSED 已尝试推进的循环计数，受输入预算限制 */ int completed = 0; completed < configuration.ownerInputBatchSize(); completed++) {
             if (commandPipeline.hasActiveControl()) {
                 if (!pollControl()) return;
                 continue;
@@ -239,7 +232,7 @@ public final class TradingCoreOwner {
 
         // 阶段二：紧凑批量填充 Ingress 命令，最大化流水线并发吞吐
         int admittedInputs = 0;
-        while (admittedInputs < INPUT_BATCH_SIZE && window.size() < window.capacity() && !commandPipeline.hasActiveControl()) {
+        while (admittedInputs < configuration.ownerInputBatchSize() && window.size() < window.capacity() && !commandPipeline.hasActiveControl()) {
             // 当前输入环借出的队首条目，取走或释放后不能继续访问
             var next = ingress.first();
             if (next == null || next.action() != null) break;
@@ -253,7 +246,7 @@ public final class TradingCoreOwner {
             // 本条是否可以进入独立撮合窗口
             boolean eligible = state.prepareClusterPipelineScope(next.command(), window);
             // 当前 UUID 是否对应尚未完成的已登记撮合命令
-            boolean retry = eligible && !state.pendingMatching.isEmpty()
+            boolean retry = eligible && !state.pendingMatching().isEmpty()
                     && state.matchingSequence(next.command().header().commandIdMsb(), next.command().header().commandIdLsb()) != 0;
             // 当前命令必须等待的窗口前缀长度，零表示该栅栏已解除
             int prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
@@ -262,7 +255,7 @@ public final class TradingCoreOwner {
                     beginCommandCommit();
                 }
                 if (pollCommandCommitBatch(true, OwnerCommandPipelineState.COMPLETION_BATCH_SIZE) > 0) {
-                    retry = eligible && !state.pendingMatching.isEmpty()
+                    retry = eligible && !state.pendingMatching().isEmpty()
                             && state.matchingSequence(next.command().header().commandIdMsb(), next.command().header().commandIdLsb()) != 0;
                     prefix = !eligible || retry ? window.size() : window.conflictingPrefixSize();
                 }
@@ -303,7 +296,7 @@ public final class TradingCoreOwner {
             CoreResponse result = state.applyDecodedCommand(entry.request, entry.timestamp, entry.position,
                     window.decoded(entry.request), true, fingerprint);
             // 本命令需要等待的撮合 Core 序号；无需撮合时为零
-            long sequence = result != null && result.resultCode() == TradingCoreRuntime.matchingPendingCode()
+            long sequence = result != null && result.resultCode() == com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING
                     ? result.committedCoreSequence() : 0;
             window.bindSequence(entry, sequence);
             entry.response = sequence == 0 ? result : null;
@@ -340,14 +333,6 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 以一条提交预算尝试推进窗口队首，返回本轮是否真正退休了一条命令。
-     * @param advanceMatching 是否显式推进撮合与财务进度；批次首轮仍会进行必要探测
-     */
-    private boolean pollCommandCommit(boolean advanceMatching) {
-        return pollCommandCommitBatch(advanceMatching, 1) > 0;
-    }
-
-    /**
      * 按预算逐个检查窗口提交头；可提前派发财务后缀，但终态仍按队首顺序交出。等 Matcher、账户及账本条件满足后提交实时变化、交响应并释放窗口阶段。
      * @param advanceMatching 是否显式推进撮合与财务进度；批次首轮仍会进行必要探测
      * @param maxBatch 本轮最多退休的窗口命令数
@@ -369,7 +354,7 @@ public final class TradingCoreOwner {
             // 本次队首检查是否还需要刷新撮合和财务进度
             boolean adv = advanceMatching || committedCount == 0;
             if (!adv && last.sequence != 0) {
-                adv = !state.commits.matchingCommitReady(state.pendingMatching.get(last.sequence));
+                adv = !state.commits.matchingCommitReady(state.pendingMatching().get(last.sequence));
             }
             if (last.sequence != 0) {
                 // 已满足提交条件的撮合终态，空表示本轮继续等待
@@ -411,7 +396,7 @@ public final class TradingCoreOwner {
         }
         state.commits.commitReadyMatching(OwnerCommandPipelineState.COMPLETION_BATCH_SIZE,
                 activeControl.timestamp(), activeControl.position(), false, matchingCommitHandler);
-        if (state.pendingMatching.firstSequence() != 0) { checkProgressDeadline(); return false; }
+        if (state.pendingMatching().firstSequence() != 0) { checkProgressDeadline(); return false; }
         if (commandPipeline.hasMatchingResponseSequence()) {
             if (commandPipeline.matchingResponse() == null) {
                 throw new IllegalStateException("missing terminal callback result");
@@ -470,7 +455,7 @@ public final class TradingCoreOwner {
         // 当前窗口提交头，空表示窗口没有在途命令
         var head = window == null || window.size() == 0 ? null : window.get(0);
         // 当前待撮合队列的队首，用于故障诊断
-        var pending = state.pendingMatching.head();
+        var pending = state.pendingMatching().head();
         // 当前输入环队首的诊断引用
         var ingressHead = ingress.first();
         // 当前控制输入的诊断引用
@@ -486,8 +471,8 @@ public final class TradingCoreOwner {
                         + pending.matchingLifecycleName())
                 + " ingressHead=" + (ingressHead == null ? "none" : ingressHead.action() != null ? "BOUNDARY" : ingressHead.command().header().messageType()
                         + "/" + ingressHead.command().header().commandId())
-                + " matcherSubmissionDepth=" + state.matcherPipeline.submissionDepth()
-                + " matcherCompletionDepth=" + state.matcherPipeline.completionDepth()
+                + " matcherSubmissionDepth=" + state.matcherPipeline().submissionDepth()
+                + " matcherCompletionDepth=" + state.matcherPipeline().completionDepth()
                 + " controlLanes=" + state.runtimeState.controlLaneDiagnostics()
                 + " completionAvailable=" + ownerCompletionAvailable()
                 + " localMatchingWork=" + state.matchingProgress.hasLocalMatchingWork()
@@ -620,7 +605,7 @@ public final class TradingCoreOwner {
      */
     private long snapshotDeadline() {
         return Math.addExact(System.nanoTime(),
-                java.util.concurrent.TimeUnit.SECONDS.toNanos(SNAPSHOT_TIMEOUT_SECONDS));
+                java.util.concurrent.TimeUnit.SECONDS.toNanos(configuration.snapshotTimeoutSeconds()));
     }
 
     /**
@@ -728,7 +713,7 @@ public final class TradingCoreOwner {
      */
     public void ownerCompletionSignal(Runnable signal) {
         state.runtimeState.ownerCompletionSignal(signal);
-        state.matcherPipeline.completionSignal(signal);
+        state.matcherPipeline().completionSignal(signal);
     }
 
     /**
@@ -736,7 +721,7 @@ public final class TradingCoreOwner {
      */
     boolean ownerCompletionAvailable() {
         return state != null && (state.runtimeState.hasMatchingNotifications()
-                || state.matcherPipeline.hasMatchingCompletions()
+                || state.matcherPipeline().hasMatchingCompletions()
                 || state.hasCompletedLaneCommit());
     }
 
@@ -747,7 +732,7 @@ public final class TradingCoreOwner {
         // 本轮推进前的命令生命周期进度号
         long before = commandPipeline.commandProgress();
         // 本轮推进前的撮合派发修订号
-        long matchingBefore = state.pendingMatching.dispatchRevision();
+        long matchingBefore = state.pendingMatching().dispatchRevision();
         processingLogCallback = true;
         try {
             progressCommands();
@@ -755,7 +740,7 @@ public final class TradingCoreOwner {
             int realtimeWork = pendingCommandCount() == 0 && realtimeBoundary.enabled()
                     ? progressRealtimeReads(System.nanoTime()) : 0;
             return (before != commandPipeline.commandProgress()
-                    || matchingBefore != state.pendingMatching.dispatchRevision() ? 1 : 0)
+                    || matchingBefore != state.pendingMatching().dispatchRevision() ? 1 : 0)
                     + realtimeWork;
         } catch (/* 已是 Agent 终止异常的故障，保留原类型继续抛出 */ org.agrona.concurrent.AgentTerminationException fatal) {
             throw fatal;
@@ -821,7 +806,7 @@ public final class TradingCoreOwner {
                     (/* 当前快照片段所在的原输入缓冲 */ buffer, /* 片段在输入缓冲中的起始字节偏移 */ offset, /* 当前片段的有效字节数 */ length, /* 快照片段附带的 Aeron 头，恢复字节收集不读取该值 */ header) -> recovery.accept(buffer, offset, length), 10);
             idleStrategy.idle(fragments);
         }
-        replaceState(recovery.decode(productLine));
+        replaceState(recovery.decodePassive(productLine, configuration));
     }
 
     /**
@@ -831,7 +816,7 @@ public final class TradingCoreOwner {
      */
     public static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
         if (currentLength < 0 || fragmentLength < 0
-                || currentLength > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES - fragmentLength) {
+                || currentLength > SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES - fragmentLength) {
             throw new IllegalStateException("Aeron core snapshot exceeds maximum size");
         }
     }
@@ -841,7 +826,7 @@ public final class TradingCoreOwner {
      * @param snapshot 完整快照的编码字节
      */
     void restoreSnapshot(byte[] snapshot) {
-        replaceState(TradingCoreRuntime.fromSnapshot(productLine, snapshot));
+        replaceState(SectionedCoreSnapshotCodec.decodePassive(snapshot, productLine, configuration));
     }
 
     /**
@@ -850,7 +835,7 @@ public final class TradingCoreOwner {
      */
     public void restoreSnapshot(SectionedCoreSnapshotCodec.RecoveryBuffer recovery) {
         if (recovery == null) throw new IllegalArgumentException("snapshot recovery is null");
-        replaceState(recovery.decode(productLine));
+        replaceState(recovery.decodePassive(productLine, configuration));
     }
 
     /**

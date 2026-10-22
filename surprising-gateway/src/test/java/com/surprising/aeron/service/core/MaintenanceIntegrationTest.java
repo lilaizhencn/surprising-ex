@@ -388,7 +388,7 @@ class MaintenanceIntegrationTest {
             }
             long requestedSequence = state.matchingSequence(message.header().commandId());
             CoreResponse[] completed = {response};
-            while (state.pendingMatching.firstSequence() != 0) {
+            while (state.pendingMatching().firstSequence() != 0) {
                 state.commits.commitReadyMatching(64, timestamp, position, false,
                         (id, result) -> { if (id == requestedSequence) completed[0] = result; });
                 if (System.nanoTime() >= deadline) throw new AssertionError("matching command timeout");

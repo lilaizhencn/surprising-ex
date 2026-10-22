@@ -167,14 +167,14 @@ class MatcherTreasurySettlementTest {
             // 只允许首个账本通知被阻塞的原子开关。
             var holdFirstFinancialSignal = new java.util.concurrent.atomic.AtomicBoolean(true);
             runtime.ownerCompletionSignal(() -> {
-                if (Thread.currentThread() == runtime.laneWorkers[takerLane].thread()) takerFinished.countDown();
+                if (Thread.currentThread() == runtime.accountWorkerThread(takerLane)) takerFinished.countDown();
                 if (Thread.currentThread().getName().equals("core-system-ledger-lane")
                         && holdFirstFinancialSignal.compareAndSet(true, false)) {
                     financialSignalling.countDown();
                     await(releaseFinancialSignal);
                 }
             });
-            runtime.laneWorkers[makerLane].submit(/* 阻塞任务收到的 maker 账户 Lane，本任务只等门闩而不读账户。 */ lane -> {
+            runtime.submitAccountCommand(makerLane, /* 阻塞任务收到的 maker 账户 Lane，本任务只等门闩而不读账户。 */ lane -> {
                 makerParked.countDown();
                 await(releaseMaker);
             });

@@ -8,7 +8,7 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReplaceOrderCommand;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -38,7 +38,7 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
     /** Owner 固定的币对决策输入，Lane 读取后写入本事件继承的解析字段。 */
     private CoreOrderDecisionResolver.Context decision;
     /** 提供原账户与账本交接的所属运行时。 */
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     /** 当前产品身份查询表，不在此创建订单身份镜像。 */
     private RuntimeIdentityRegistry identities;
     /** 成功后生成的新单准入结果，引用本事件的解析输入，命令须保留到终态。 */
@@ -69,7 +69,7 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
     public ReplacementAdmissionEvent prepare(long sequence, long userId, long originalOrderId,
             AmendOrderCommand amend, ReplaceOrderCommand replace,
             CoreOrderDecisionResolver.Context decision, int matcherShard,
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (sequence <= 0 || userId <= 0 || originalOrderId <= 0 || (amend == null) == (replace == null)
                 || decision == null || runtime == null || identities == null
                 || matcherShard < 0 || matcherShard >= runtime.topology().matchingEngineCount())
@@ -91,7 +91,7 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
     @Override public void execute(AccountLaneState lane) {
         if (!inputReady) throw new IllegalStateException("Ledger replacement input is incomplete");
         // 完成位发布前先取得的通知目标，发布后不再从可回收事件读取运行时。
-        TradingRuntimeState completionRuntime = runtime;
+        TradingAccountRuntime completionRuntime = runtime;
         // 提前捕获的 Matcher 通知分片，避免事件复用后读取新命令路由。
         int completionShard = matcherShard;
         // 实际执行的账户 Lane 编号，必须与用户所属 Lane 一致。

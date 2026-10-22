@@ -16,7 +16,7 @@ public final class LedgerControlTestSupport {
      * @param runtime 当前测试独占并推进控制命令的运行时
      * @param completion 用于继续投递或检查当前业务完成的 BooleanSupplier
      */
-    public static void await(TradingRuntimeState runtime, BooleanSupplier completion) {
+    public static void await(TradingAccountRuntime runtime, BooleanSupplier completion) {
         // 从单调时钟计算的本次五秒轮询截止点。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!completion.getAsBoolean()) {
@@ -31,7 +31,7 @@ public final class LedgerControlTestSupport {
      * @param runtime 当前测试独占并推进控制命令的运行时
      * @param external 是否允许外部资金调整，传给原守恒验证入口
      */
-    public static void awaitFunds(TradingRuntimeState runtime, boolean external) {
+    public static void awaitFunds(TradingAccountRuntime runtime, boolean external) {
         // 从单调时钟计算的本次五秒轮询截止点。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!runtime.pollControlFundsValidation(external)) {
@@ -47,11 +47,11 @@ public final class LedgerControlTestSupport {
      * @param identities 冷状态物化使用的资产、币对及持仓身份字典
      * @param external 是否允许外部资金调整，传给原守恒验证入口
      */
-    public static TradingCoreState commit(TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean external) {
+    public static TradingCoreState commit(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, boolean external) {
         awaitFunds(runtime, external);
         runtime.clearChangedKeys();
         // 本次是否需要临时取得账户读取所有权，真正取得在后续轮询结束时完成。
-        boolean acquired = runtime.accountLanesStarted && !runtime.ownerLaneAccess;
+        boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
         try {
             if (acquired) while (!runtime.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
             return RuntimeStateMaterializer.materialize(runtime, identities);

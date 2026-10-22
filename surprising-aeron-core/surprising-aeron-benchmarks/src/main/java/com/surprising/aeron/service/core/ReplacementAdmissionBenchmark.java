@@ -40,7 +40,7 @@ public class ReplacementAdmissionBenchmark {
     private static final int WINDOW = 256;
     @Param({"1", "2"}) public int laneCount;
     @Param({"LINEAR_PERPETUAL", "SPOT"}) public String productLine;
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
     private CoreOrderDecisionResolver.Context decision;
     private final AmendOrderCommand[] commands = new AmendOrderCommand[WINDOW];

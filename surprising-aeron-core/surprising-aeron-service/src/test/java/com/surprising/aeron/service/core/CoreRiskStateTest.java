@@ -226,7 +226,7 @@ class CoreRiskStateTest {
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
         // 应用标记价前的全局修订号，用来确认行情登记只增加一次修订。
         long revisionBefore = runtime.revision();
 
@@ -543,7 +543,7 @@ class CoreRiskStateTest {
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
         runtime.startAccountLanes();
         try {
             RuntimeDerivativeRiskProcessor.applyMarkPrice(
@@ -587,7 +587,7 @@ class CoreRiskStateTest {
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
         runtime.startAccountLanes();
         try {
             RuntimeDerivativeRiskProcessor.applyMarkPrice(
@@ -630,7 +630,7 @@ class CoreRiskStateTest {
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
-        TradingRuntimeState runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
+        TradingAccountRuntime runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
                 state, latest, state.users().keySet(), identities);
         RuntimeStateParityChecker.assertMatches(after, identities, runtime);
         assertThat(after.riskState().scan().scanStartPriceSequence()).isEqualTo(1);

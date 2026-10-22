@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.query.state;
 
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import java.math.BigInteger;
 import java.util.*;
@@ -41,7 +41,7 @@ public record CommittedTradingActivity(long openOrders, long usersWithPositions,
      * @param identities 币对整数编号到外部编号的身份映射
      * @param now 统计待触发条件单是否已到期的 Unix 毫秒时间戳
      */
-    public static CommittedTradingActivity capture(TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long now) {
+    public static CommittedTradingActivity capture(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long now) {
         runtime.assertOwner();
         // 进入方法时是否尚无账户读取权，只有本方法临时取得的权限才在 finally 释放。
         boolean acquired = !runtime.ownerLaneAccess();

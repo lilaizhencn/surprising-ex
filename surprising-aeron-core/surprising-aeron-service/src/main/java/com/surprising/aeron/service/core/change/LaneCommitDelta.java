@@ -3,7 +3,7 @@ package com.surprising.aeron.service.core.change;
 import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
@@ -279,7 +279,7 @@ public final class LaneCommitDelta {
      * @param changedOrders 可选的本命令变化订单键集合，不需要时为 null
      */
     public void drainTo(int laneId,
-                 TradingRuntimeState state,
+                 TradingAccountRuntime state,
                  com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
                  com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         if (changedUsers != null || changedOrders != null) {
@@ -323,8 +323,8 @@ public final class LaneCommitDelta {
      * @param changedUsers 可选的本命令变化用户键集合，不需要时为 null
      * @param changedOrders 可选的本命令变化订单键集合，不需要时为 null
      */
-    public void commitTerminalToOwner(TradingRuntimeState state, int laneId,
-                               TradingRuntimeState.TerminalOrderSink terminalOrderSink, long coreSequence,
+    public void commitTerminalToOwner(TradingAccountRuntime state, int laneId,
+                               TradingAccountRuntime.TerminalOrderSink terminalOrderSink, long coreSequence,
                                com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
                                com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         publishTriggersToOwner(state);
@@ -361,7 +361,7 @@ public final class LaneCommitDelta {
      * @param changedOrders 可选的本命令变化订单键集合，不需要时为 null
      */
     private void publishPreparedToOwner(
-            TradingRuntimeState state,
+            TradingAccountRuntime state,
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         // 这里只收集本命令变化键及用户、预留元数据，订单和持仓另走物理缓冲交接。
@@ -411,7 +411,7 @@ public final class LaneCommitDelta {
      * @param state 接收本边界发布变化及计数的 Owner 运行时
      * @param laneId 当前收据实际所属的账户 Lane 编号
      */
-    public void commitBatchAdmissionToOwner(TradingRuntimeState state, int laneId) {
+    public void commitBatchAdmissionToOwner(TradingAccountRuntime state, int laneId) {
         if (state == null || laneId < 0 || laneId >= state.accountLaneCount()) {
             throw new IllegalArgumentException("invalid batch admission owner handoff");
         }
@@ -458,7 +458,7 @@ public final class LaneCommitDelta {
      * 把算法与触发变化交入 Owner 变化集合，再清空源列，保持原命令顺序。
      * @param state 接收本边界发布变化及计数的 Owner 运行时
      */
-    public void publishTriggersToOwner(TradingRuntimeState state) {
+    public void publishTriggersToOwner(TradingAccountRuntime state) {
         if (algos != null) algos.drainTo(state.changedAlgoOrders()::put);
         if (triggers == null || triggers.isEmpty()) return;
         triggers.forEach((/* 当前用户、订单、预留或持仓列中的业务键。 */ id, /* 当前强平、预留、持仓或风险变化值，null 保留删除含义。 */ value) -> {
@@ -472,7 +472,7 @@ public final class LaneCommitDelta {
      * @param state 接收本边界发布变化及计数的 Owner 运行时
      * @param laneId 当前收据实际所属的账户 Lane 编号
      */
-    public void recordControlChanges(TradingRuntimeState state, int laneId) {
+    public void recordControlChanges(TradingAccountRuntime state, int laneId) {
         publishPositionCountToOwner(state, laneId);
         for (/* 当前正在消费的收据连续有效槽。 */ int index = 0; index < users.size(); index++) {
             state.changedUser(users.keyAt(index));
@@ -496,7 +496,7 @@ public final class LaneCommitDelta {
      * @param state 接收本边界发布变化及计数的 Owner 运行时
      * @param laneId 当前收据实际所属的账户 Lane 编号
      */
-    private void publishPositionCountToOwner(TradingRuntimeState state, int laneId) {
+    private void publishPositionCountToOwner(TradingAccountRuntime state, int laneId) {
         if (positionCount < 0) return;
         state.publishLanePositionCount(laneId, positionCount);
         positionCount = -1;

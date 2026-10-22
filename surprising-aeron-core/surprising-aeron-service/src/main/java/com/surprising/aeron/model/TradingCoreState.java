@@ -8,11 +8,10 @@ import com.surprising.aeron.service.snapshot.state.StateMapSupport;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
 
 /**
- * 单个产品线的冷状态视图，用于恢复、导出和明确边界上的业务核对。保存用户、订单、合约、风险、财库及条件任务，在线可变账户仍由 TradingRuntimeState 和所属 Lane 管理。映射按现有冻结、增量或延迟视图规则接入，不在撮合热路径每条命令重建此记录。
+ * 单个产品线的冷状态视图，用于恢复、导出和明确边界上的业务核对。保存用户、订单、合约、风险、财库及条件任务，在线可变账户仍由 TradingAccountRuntime 和所属 Lane 管理。映射按键排序并封闭写入口，不在撮合热路径每条命令重建此记录。
  * @param productLine 本状态唯一所属产品线
  * @param revision 本状态非负业务修订
  * @param users 按用户 ID 保存的冷用户正文
@@ -40,9 +39,7 @@ public record TradingCoreState(
         Map<ClientOrderKey, Long> clientOrderIndex,
         Map<Long, CoreTriggerOrderState> triggerOrders) {
 
-    /**
-     * 检查必要分量及非负修订，按现有映射规则冻结有序视图。普通图检查全部用户、订单、计时器和触发单，增量只查变化键，延迟图信任其恢复边界；客户端订单索引必须显式提供并按相应模式核对，不补造第二份权威订单。
-     */
+    /** 检查完整冷状态的身份、客户端索引、计时器和触发单，再冻结有序映射。 */
     public TradingCoreState {
         if (productLine == null || revision < 0 || users == null || orders == null
                 || instruments == null || riskState == null || treasuryState == null || leverages == null
@@ -50,95 +47,28 @@ public record TradingCoreState(
                 || triggerOrders == null) {
             throw new IllegalArgumentException("invalid trading core state");
         }
-        // 原用户图是否为增量图，决定只核对变化键还是全部记录
-        boolean usersDelta = StateMapSupport.isDelta(users);
-        // 原订单图是否为增量图，决定只核对变化键还是全部记录
-        boolean ordersDelta = StateMapSupport.isDelta(orders);
-        // 按现有映射规则冻结的有序用户图
         Map<Long, CoreUserState> sortedUsers = StateMapSupport.freezeSorted(users);
-        // 按现有映射规则冻结的有序订单图
         Map<Long, CoreOrderState> sortedOrders = StateMapSupport.freezeSorted(orders);
-        if (!StateMapSupport.isDeferred(users)) {
-            if (!usersDelta) {
-                sortedUsers.forEach((/* 用户图校验回调提供的原用户 ID */ userId, /* 当前冷用户值或校验回调参数，删除项为空时跳过 */ user) -> validateUser(productLine, userId, user));
-            } else {
-                for (Object /* 当前增量变化的图键，或新派生的用户客户端单号键 */ key : StateMapSupport.changedKeys(users)) {
-                    // 当前冷用户值或校验回调参数，删除项为空时跳过
-                    CoreUserState user = sortedUsers.get(key);
-                    if (user != null) validateUser(productLine, (Long) key, user);
-                }
-            }
-        }
-        if (!StateMapSupport.isDeferred(orders)) {
-            if (!ordersDelta) {
-                sortedOrders.forEach((/* 当前客户端索引映射到的订单号，或逐变化 ID 遍历的订单号 */ orderId, /* 当前校验、比较提交元数据、派生客户端索引或混合哈希的冷订单 */ order) -> validateOrder(productLine, sortedUsers, orderId, order));
-            } else {
-                for (Object /* 当前增量变化的图键，或新派生的用户客户端单号键 */ key : StateMapSupport.changedKeys(orders)) {
-                    // 当前校验、比较提交元数据、派生客户端索引或混合哈希的冷订单
-                    CoreOrderState order = sortedOrders.get(key);
-                    if (order != null) validateOrder(productLine, sortedUsers, (Long) key, order);
-                }
-            }
-        }
-        // 按传入模式冻结并核对后的用户客户端单号索引
-        Map<ClientOrderKey, Long> derivedIndex;
-        if (clientOrderIndex != null && StateMapSupport.isDeferred(clientOrderIndex)) {
-            derivedIndex = StateMapSupport.freezeSorted(clientOrderIndex);
-        } else if (clientOrderIndex != null && StateMapSupport.isDelta(clientOrderIndex)) {
-            derivedIndex = StateMapSupport.freezeSorted(clientOrderIndex);
-            for (Object /* 当前增量变化的图键，或新派生的用户客户端单号键 */ key : StateMapSupport.changedKeys(clientOrderIndex)) {
-                // 当前客户端索引映射到的订单号，或逐变化 ID 遍历的订单号
-                Long orderId = derivedIndex.get(key);
-                if (orderId != null) {
-                    // 当前校验、比较提交元数据、派生客户端索引或混合哈希的冷订单
-                    CoreOrderState order = sortedOrders.get(orderId);
-                    if (order == null || order.clientOrderId().isEmpty()
-                            || !new ClientOrderKey(order.userId(), order.clientOrderId()).equals(key)) {
-                        throw new IllegalArgumentException("client order index does not match authoritative orders");
-                    }
-                }
-            }
-        } else if (clientOrderIndex == null) {
+        sortedUsers.forEach((userId, user) -> validateUser(productLine, userId, user));
+        sortedOrders.forEach((orderId, order) -> validateOrder(productLine, sortedUsers, orderId, order));
+        if (clientOrderIndex == null) {
             throw new IllegalArgumentException("client order index is required for an authoritative state transition");
-        } else {
-            derivedIndex = StateMapSupport.freezeSorted(clientOrderIndex);
-            if (!derivedIndex.equals(deriveClientOrderIndex(sortedOrders))) {
-                throw new IllegalArgumentException("client order index does not match authoritative orders");
-            }
+        }
+        Map<ClientOrderKey, Long> sortedClientOrders = StateMapSupport.freezeSorted(clientOrderIndex);
+        if (!sortedClientOrders.equals(deriveClientOrderIndex(sortedOrders))) {
+            throw new IllegalArgumentException("client order index does not match authoritative orders");
         }
         users = sortedUsers;
         orders = sortedOrders;
         instruments = StateMapSupport.freezeSorted(instruments);
         leverages = StateMapSupport.freezeSorted(leverages);
         algoOrders = StateMapSupport.freezeSorted(algoOrders);
-        // 冻结后的有序全撤计时器图
         Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> sortedTimers = StateMapSupport.freezeSorted(cancelAllAfterTimers);
-        if (!StateMapSupport.isDeferred(cancelAllAfterTimers)) {
-            if (!StateMapSupport.isDelta(cancelAllAfterTimers)) {
-                sortedTimers.forEach(TradingCoreState::validateTimer);
-            } else {
-                for (Object /* 当前增量变化的图键，或新派生的用户客户端单号键 */ key : StateMapSupport.changedKeys(cancelAllAfterTimers)) {
-                    // 当前变化槽对应计时器，或参与哈希的完整计时器状态
-                    CoreCancelAllAfterState timer = sortedTimers.get(key);
-                    if (timer != null) validateTimer((CoreCancelAllAfterKey) key, timer);
-                }
-            }
-        }
+        sortedTimers.forEach(TradingCoreState::validateTimer);
         cancelAllAfterTimers = sortedTimers;
-        clientOrderIndex = StateMapSupport.freezeSorted(derivedIndex);
-        // 冻结后的有序触发单图
+        clientOrderIndex = sortedClientOrders;
         Map<Long, CoreTriggerOrderState> sortedTriggers = StateMapSupport.freezeSorted(triggerOrders);
-        if (!StateMapSupport.isDeferred(triggerOrders)) {
-            if (!StateMapSupport.isDelta(triggerOrders)) {
-                sortedTriggers.forEach((/* 当前触发单图回调或增量变化提供的业务键 */ id, /* 当前待校验或混合的触发单状态，哈希只纳入仍 open 的项 */ trigger) -> validateTrigger(productLine, sortedUsers, id, trigger));
-            } else {
-                for (Object /* 当前触发单图回调或增量变化提供的业务键 */ id : StateMapSupport.changedKeys(triggerOrders)) {
-                    // 当前待校验或混合的触发单状态，哈希只纳入仍 open 的项
-                    CoreTriggerOrderState trigger = sortedTriggers.get(id);
-                    if (trigger != null) validateTrigger(productLine, sortedUsers, id, trigger);
-                }
-            }
-        }
+        sortedTriggers.forEach((id, trigger) -> validateTrigger(productLine, sortedUsers, id, trigger));
         triggerOrders = sortedTriggers;
     }
 
@@ -285,69 +215,6 @@ public record TradingCoreState(
         // 当前客户端索引映射到的订单号，或逐变化 ID 遍历的订单号
         Long orderId = clientOrderIndex.get(new ClientOrderKey(userId, clientOrderId));
         return orderId == null ? null : orders.get(orderId);
-    }
-
-    /**
-     * 比较当前与原订单，为发生变化且仍存在的订单写提交时间和日志位置；未给变化集合时扫描全部订单。
-     * @param before 本次变更之前的冷状态，用于只给实际改变的订单盖元数据
-     * @param timestamp 本次原复制命令的业务提交时间
-     * @param clusterPosition 本次原复制日志位置
-     */
-    public TradingCoreState stampOrderChanges(
-            TradingCoreState before,
-            long timestamp,
-            long clusterPosition) {
-        return stampOrderChanges(before, timestamp, clusterPosition, null);
-    }
-
-    /**
-     * 未给变化 ID 时复制全订单图逐项比较；给出 ID 时仅建订单增量图，跳空 ID、删除项及未变项。没有实际改写返回原对象，否则重建冷状态并沿原客户端索引保持一致。
-     * @param before 本次变更之前的冷状态，用于只给实际改变的订单盖元数据
-     * @param timestamp 本次原复制命令的业务提交时间
-     * @param clusterPosition 本次原复制日志位置
-     * @param changedOrderIds 可空的原订单变化 ID 集合，空引用表示全图比较
-     */
-    public TradingCoreState stampOrderChanges(
-            TradingCoreState before,
-            long timestamp,
-            long clusterPosition,
-            Iterable<Long> changedOrderIds) {
-        // 盖提交元数据的候选订单图，按调用方式为全量复制或增量覆盖
-        Map<Long, CoreOrderState> stamped = changedOrderIds == null
-                ? new TreeMap<>(orders) : StateMapSupport.delta(orders);
-        // 本次是否真的给至少一个变化订单写入提交元数据
-        boolean changed = false;
-        if (changedOrderIds == null) {
-            for (CoreOrderState /* 当前校验、比较提交元数据、派生客户端索引或混合哈希的冷订单 */ order : orders.values()) {
-                // 同一订单在 before 状态中的原值，用相等判断是否发生变化
-                CoreOrderState previous = before.orders().get(order.orderId());
-                if (!order.equals(previous)) {
-                    stamped.put(order.orderId(), order.withCommitMetadata(timestamp, clusterPosition));
-                    changed = true;
-                }
-            }
-        } else {
-            for (Long /* 当前客户端索引映射到的订单号，或逐变化 ID 遍历的订单号 */ orderId : changedOrderIds) {
-                if (orderId == null) continue;
-                // 当前校验、比较提交元数据、派生客户端索引或混合哈希的冷订单
-                CoreOrderState order = orders.get(orderId);
-                if (order == null) continue;
-                // 同一订单在 before 状态中的原值，用相等判断是否发生变化
-                CoreOrderState previous = before.orders().get(orderId);
-                if (!order.equals(previous)) {
-                    stamped.put(orderId, order.withCommitMetadata(timestamp, clusterPosition));
-                    changed = true;
-                }
-            }
-        }
-        if (!changed) return this;
-        if (changedOrderIds == null) {
-            return new TradingCoreState(productLine, revision, users, stamped,
-                    instruments, riskState, treasuryState, leverages, algoOrders, cancelAllAfterTimers, triggerOrders);
-        }
-        return new TradingCoreState(productLine, revision, users, stamped,
-                instruments, riskState, treasuryState, leverages, algoOrders, cancelAllAfterTimers,
-                StateMapSupport.delta(clientOrderIndex), triggerOrders);
     }
 
     /**
@@ -658,69 +525,6 @@ public record TradingCoreState(
     }
 
     /**
-     * 按风险强平映射原变化记录取得 ID 集合，不重新比较所有强平。
-     */
-    public Set<Long> changedLiquidationIds() {
-        return StateMapSupport.changedKeys(riskState.liquidations());
-    }
-
-    /**
-     * 取得风险快照映射的原变化键集合。
-     */
-    public Set<String> changedRiskSnapshotKeys() {
-        return StateMapSupport.changedKeys(riskState.snapshots());
-    }
-
-    /**
-     * 取得用户映射的原变化 ID 集合。
-     */
-    public Set<Long> changedUserIds() {
-        return StateMapSupport.changedKeys(users);
-    }
-
-    /**
-     * 取得订单映射的原变化 ID 集合。
-     */
-    public Set<Long> changedOrderIds() {
-        return StateMapSupport.changedKeys(orders);
-    }
-
-    /**
-     * 取得触发单映射的原变化 ID 集合。
-     */
-    public Set<Long> changedTriggerOrderIds() {
-        return StateMapSupport.changedKeys(triggerOrders);
-    }
-
-    /**
-     * 取得算法单映射的原变化 ID 集合。
-     */
-    public Set<Long> changedAlgoOrderIds() {
-        return StateMapSupport.changedKeys(algoOrders);
-    }
-
-    /**
-     * 取得客户端订单索引的原变化键集合。
-     */
-    public Set<ClientOrderKey> changedClientOrderKeys() {
-        return StateMapSupport.changedKeys(clientOrderIndex);
-    }
-
-    /**
-     * 取得全撤计时器映射的原变化键集合。
-     */
-    public Set<CoreCancelAllAfterKey> changedCancelAllAfterKeys() {
-        return StateMapSupport.changedKeys(cancelAllAfterTimers);
-    }
-
-    /**
-     * 交由财库冷状态返回本次变化资产集合。
-     */
-    public Set<String> changedTreasuryAssets() {
-        return treasuryState.changedAssets();
-    }
-
-    /**
      * 在既有哈希上混合用户身份、修订、持仓模式、余额、剩余预留非零的冻结及全部持仓字段；不把已释放的零剩余预留作为新事实。
      * @param initial 此前已经累计的哈希状态
      * @param user 当前要验证或混合哈希的冷用户正文
@@ -809,7 +613,7 @@ public record TradingCoreState(
         if (orders != null) {
             for (CoreOrderState /* 当前校验、比较提交元数据、派生客户端索引或混合哈希的冷订单 */ order : orders.values()) {
                 if (!order.clientOrderId().isEmpty()) {
-                    // 当前增量变化的图键，或新派生的用户客户端单号键
+                    // 用户与客户端单号组成的索引键
                     ClientOrderKey key = new ClientOrderKey(order.userId(), order.clientOrderId());
                     if (index.put(key, order.orderId()) != null) {
                         throw new IllegalArgumentException("duplicate clientOrderId for user");

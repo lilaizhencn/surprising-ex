@@ -28,13 +28,13 @@ class TransferLaneCapacityTest {
             // 预填第一项与后续相同重试共用的划转参数
             var first = command(1);
             // 直接冷填有限容量状态，再启动账户线程；本例没有快照恢复。
-            for (/* 预填待完成记录的正值身份循环下标 */ int id = 1; id <= TradingRuntimeState.MAX_PENDING_TRANSFERS; id++)
+            for (/* 预填待完成记录的正值身份循环下标 */ int id = 1; id <= TradingAccountRuntime.MAX_PENDING_TRANSFERS; id++)
                 runtime.putPendingTransfer(new TransferRuntime(7, id == 1 ? first : command(id)));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
             assertThat(runtime.hasPendingTransferCapacity()).isFalse();
             // 超过初始容量的下一个新划转身份
-            var next = command(TradingRuntimeState.MAX_PENDING_TRANSFERS + 1L);
+            var next = command(TradingAccountRuntime.MAX_PENDING_TRANSFERS + 1L);
             // 复用的账户转出控制任务
             var task = new AccountControlTask();
             assertThatThrownBy(() -> task.prepareTransferOut(runtime, identities, 7, next))

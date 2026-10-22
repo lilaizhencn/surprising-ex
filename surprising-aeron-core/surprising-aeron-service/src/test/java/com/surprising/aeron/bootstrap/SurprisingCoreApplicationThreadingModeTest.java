@@ -1,5 +1,6 @@
 package com.surprising.aeron.bootstrap;
 
+import com.surprising.aeron.config.CoreTransportConfiguration;
 import io.aeron.cluster.client.ClusterEvent;
 import io.aeron.driver.MediaDriver;
 import io.aeron.driver.ThreadingMode;
@@ -9,42 +10,23 @@ import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.agrona.ErrorHandler;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 /** 检查驱动线程模式、存活超时和启动失败退出，避免配置错误留下仍在运行的节点进程。 */
 class SurprisingCoreApplicationThreadingModeTest {
 
-    /** 被测试的 MediaDriver 线程模式属性；每个测试结束后清除，避免串扰。 */
-    private static final String PROPERTY = "surprising.aeron.core.threading-mode";
     /** 当前测试独占的驱动目录和子进程日志目录，由 JUnit 在测试结束时清理。 */
     @TempDir
     Path tempDirectory;
 
-    /** 清掉本类修改的线程模式配置，让后续测试重新读取自己的配置或默认值。 */
-    @AfterEach
-    void clearProperty() {
-        System.clearProperty(PROPERTY);
-    }
-
-    /** 显式配置 DEDICATED 时应使用独立驱动线程模式。 */
+    /** 未配置时仍按机器可用 CPU 数量选择驱动线程模式。 */
     @Test
-    void acceptsConfiguredThreadingMode() {
-        System.setProperty(PROPERTY, "DEDICATED");
-
-        assertThat(AeronCoreLifecycle.coreThreadingMode()).isEqualTo(ThreadingMode.DEDICATED);
-    }
-
-    /** 无法识别的驱动模式必须报告配置错误，不能偷偷换一个模式继续启动。 */
-    @Test
-    void rejectsUnknownThreadingMode() {
-        System.setProperty(PROPERTY, "invalid");
-
-        assertThatIllegalArgumentException().isThrownBy(AeronCoreLifecycle::coreThreadingMode)
-                .withMessageContaining("valid Aeron ThreadingMode");
+    void choosesDefaultThreadingModeForAvailableProcessors() {
+        assertThat(new CoreTransportConfiguration.Driver(null).threadingMode()).isEqualTo(
+                Runtime.getRuntime().availableProcessors() >= 12
+                        ? ThreadingMode.DEDICATED : ThreadingMode.SHARED_NETWORK);
     }
 
     /** 检查客户端存活超时固定为 30 秒，防止诊断暂停被过短超时误判为掉线。 */

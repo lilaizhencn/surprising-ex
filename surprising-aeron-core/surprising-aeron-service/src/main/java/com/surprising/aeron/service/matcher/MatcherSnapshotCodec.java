@@ -34,21 +34,31 @@ public final class MatcherSnapshotCodec {
     /** 本 Codec 唯一写入和接受的清单版本八。 */
     private static final int VERSION = 8;
     /** 沿用分段 Core 快照规定的最大区段字节数，包含末尾八字节校验值。 */
-    private static final int MAX_SNAPSHOT_BYTES = SectionedCoreSnapshotCodec.MAX_SECTION_BYTES;
+    private static final int HARD_MAX_SNAPSHOT_BYTES = SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES;
     /** 解码每类注册表、进度或模块区段允许的通用百万条目粗上限。 */
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     /** 单个原生模块载荷上限，在总快照限额内预留一百二十八字节空间。 */
-    private static final int MAX_MODULE_BYTES = MAX_SNAPSHOT_BYTES - 128;
+    private static final int MAX_MODULE_BYTES = HARD_MAX_SNAPSHOT_BYTES - 128;
 
     /**
      * 用限长正文缓冲写版本八清单，按清单现有迭代顺序保存注册表、进度及模块，最后追加八字节无符号 CRC32C 值。模块类型沿当前实现写 ordinal，单模块与总字节限长在这里检查；不额外执行 decode 的百万条目数上限。
      * @param snapshot 已经完成清单构造校验、输入引用在编码期间稳定的 MatcherSnapshot
      */
     public static byte[] encode(MatcherSnapshot snapshot) {
+        int deploymentLimit = com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes()
+                - SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
+                - SectionedCoreSnapshotCodec.MAX_SECTION_COUNT * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH;
+        return encode(snapshot, Math.min(deploymentLimit, HARD_MAX_SNAPSHOT_BYTES));
+    }
+
+    /** 在调用方已经扣除外层封套/段头和已编码部分的预算内写入，扩容前拒绝超限。 */
+    public static byte[] encode(MatcherSnapshot snapshot, int maximumSnapshotBytes) {
+        if (maximumSnapshotBytes <= Long.BYTES || maximumSnapshotBytes > HARD_MAX_SNAPSHOT_BYTES)
+            throw new IllegalArgumentException("invalid matcher snapshot byte limit");
         try {
             // 只容纳正文、不包含末尾八字节 CRC 的有上限输出缓冲。
             BoundedByteArrayOutputStream body =
-                    new BoundedByteArrayOutputStream(MAX_SNAPSHOT_BYTES - Long.BYTES);
+                    new BoundedByteArrayOutputStream(maximumSnapshotBytes - Long.BYTES);
             try (/* 当前正文大端写入流，关闭后保留底层已写字节。 */ DataOutputStream output = new DataOutputStream(body)) {
                 output.writeInt(MAGIC);
                 output.writeInt(VERSION);
@@ -96,7 +106,7 @@ public final class MatcherSnapshotCodec {
             }
             // 正文已经写入的实际字节数，最终再加八字节校验尾部。
             int bodyLength = body.size();
-            if (bodyLength > MAX_SNAPSHOT_BYTES - Long.BYTES) {
+            if (bodyLength > maximumSnapshotBytes - Long.BYTES) {
                 throw new IllegalArgumentException("matcher snapshot exceeds maximum size");
             }
             // 本次新分配的最终数组，前部为正文，尾部保存无符号 CRC32C 的 long。
@@ -115,7 +125,7 @@ public final class MatcherSnapshotCodec {
      * @param encoded 包含正文及末尾八字节 CRC32C 的完整快照字节
      */
     public static MatcherSnapshot decode(byte[] encoded) {
-        if (encoded != null && encoded.length > MAX_SNAPSHOT_BYTES) {
+        if (encoded != null && encoded.length > HARD_MAX_SNAPSHOT_BYTES) {
             throw new ProtocolException("matcher snapshot exceeds maximum size");
         }
         if (encoded == null || encoded.length < 64) {

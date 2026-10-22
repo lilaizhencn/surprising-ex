@@ -14,7 +14,7 @@ import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.OwnerAccountReadGuard;
 import com.surprising.aeron.service.core.PipelinedExecutionExtension;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
@@ -242,7 +242,7 @@ class CoreAccountLaneQueryTest {
             // 从单 Lane 位集合取出的 Lane 编号，用于找到测试要监测的账户分区。
             int laneId = Long.numberOfTrailingZeros(mask);
             // 反射取得的账户 Lane 数组字段，仅用于测试安装读取监测。
-            var lanesField = TradingRuntimeState.class.getDeclaredField("accountLanes");
+            var lanesField = TradingAccountRuntime.class.getDeclaredField("accountLanes");
             lanesField.setAccessible(true);
             // 用户 1 的真实账户 Lane，反射安装守卫后仍由原线程消费任务。
             var lane = ((AccountLaneState[]) lanesField.get(core.runtimeState()))[laneId];

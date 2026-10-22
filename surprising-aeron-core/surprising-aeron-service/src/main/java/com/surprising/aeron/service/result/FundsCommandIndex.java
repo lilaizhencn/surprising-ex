@@ -22,6 +22,16 @@ import org.rocksdb.WriteOptions;
 public final class FundsCommandIndex implements AutoCloseable {
     /** 类初始化时装载 RocksDB 本地库，装载失败不能使用该资金索引。 */
     static { RocksDB.loadLibrary(); }
+    private final Path rootDirectory;
+
+    public FundsCommandIndex() {
+        this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().fundsIndexDirectory());
+    }
+
+    public FundsCommandIndex(Path rootDirectory) {
+        this.rootDirectory = java.util.Objects.requireNonNull(rootDirectory);
+    }
+
     /** 本实例在配置根下创建的独立临时目录，不是可复用恢复源。 */
     private Path directory;
     /** 配置为八 MiB 的 RocksDB block cache 资源。 */
@@ -160,12 +170,8 @@ public final class FundsCommandIndex implements AutoCloseable {
     private void open() {
         if (database != null) return;
         try {
-            // JVM 配置的资金索引根目录，未配置使用 java.io.tmpdir
-            String configured = System.getProperty("surprising.aeron.funds-index-directory", System.getProperty("java.io.tmpdir"));
-            // 创建本实例临时子目录的配置根路径
-            Path root = Path.of(configured);
-            Files.createDirectories(root);
-            directory = Files.createTempDirectory(root, "surprising-funds-index-");
+            Files.createDirectories(rootDirectory);
+            directory = Files.createTempDirectory(rootDirectory, "surprising-funds-index-");
             cache = new LRUCache(8L * 1024 * 1024);
             options = new Options().setCreateIfMissing(true)
                     .setWriteBufferSize(4L * 1024 * 1024).setMaxWriteBufferNumber(2)

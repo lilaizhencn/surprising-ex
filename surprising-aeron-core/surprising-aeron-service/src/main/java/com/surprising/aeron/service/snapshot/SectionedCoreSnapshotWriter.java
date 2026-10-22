@@ -39,7 +39,7 @@ public final class SectionedCoreSnapshotWriter {
             long clusterTimestamp,
             long clusterPosition) {
         return encode(capture(state, matcherSnapshot, snapshotId, coreSequence,
-                clusterTimestamp, clusterPosition));
+                clusterTimestamp, clusterPosition), state.configuration().snapshot().maxBytes());
     }
 
     /**
@@ -58,7 +58,7 @@ public final class SectionedCoreSnapshotWriter {
             long coreSequence,
             long clusterTimestamp,
             long clusterPosition) {
-        if (!state.pendingMatching.isEmpty()) {
+        if (!state.pendingMatching().isEmpty()) {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
         // 捕获点物化的交易状态；header 方法中仅取得引用而未继续使用。
@@ -88,6 +88,12 @@ public final class SectionedCoreSnapshotWriter {
      * @param image 输入引用在编码期间保持稳定的快照镜像
      */
     public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image) {
+        return encode(image, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
+    }
+
+    public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image, int maximumSnapshotBytes) {
+        if (maximumSnapshotBytes <= 0 || maximumSnapshotBytes > SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES)
+            throw new IllegalArgumentException("invalid snapshot byte limit");
         // 本次镜像已经配对的 Matcher 快照引用。
         MatcherSnapshot matcherSnapshot = image.matcherSnapshot();
         // 捕获点物化的交易状态；header 方法中仅取得引用而未继续使用。
@@ -99,7 +105,15 @@ public final class SectionedCoreSnapshotWriter {
         payloads.add(header(image));
         payloads.add(sources(image.sourceSequences()));
         payloads.add(results(image.commandResults()));
-        payloads.add(MatcherSnapshotCodec.encode(matcherSnapshot));
+        long remainingMatcherBudget = maximumSnapshotBytes - (long) SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
+                - (long) SectionedCoreSnapshotCodec.sectionCount(matcherSnapshot.accountLaneCount())
+                    * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
+                - SectionedCoreSnapshotCodec.FOOTER_LENGTH;
+        for (byte[] payload : payloads) remainingMatcherBudget -= payload.length;
+        if (remainingMatcherBudget <= Long.BYTES)
+            throw new IllegalArgumentException("core snapshot exceeds maximum size before matcher encoding");
+        payloads.add(MatcherSnapshotCodec.encode(matcherSnapshot, (int) Math.min(remainingMatcherBudget,
+                SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES)));
         payloads.add(TradingStateSnapshotCodec.encode(snapshotState));
         payloads.add(CoreFeePolicySnapshotCodec.encode(image.feePolicies()));
         payloads.add(CoreTransferSnapshotCodec.encode(image.pendingTransfers()));
@@ -120,7 +134,7 @@ public final class SectionedCoreSnapshotWriter {
             requireSectionLength(payload.length);
             totalLength = Math.addExact(totalLength, payload.length);
         }
-        if (totalLength > SectionedCoreSnapshotCodec.MAX_SNAPSHOT_BYTES) {
+        if (totalLength > maximumSnapshotBytes) {
             throw new IllegalArgumentException("core snapshot exceeds maximum size");
         }
 
@@ -291,7 +305,7 @@ public final class SectionedCoreSnapshotWriter {
      * @param length 需要检查的单段负载长度
      */
     private static void requireSectionLength(int length) {
-        if (length <= 0 || length > SectionedCoreSnapshotCodec.MAX_SECTION_BYTES) {
+        if (length <= 0 || length > SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES) {
             throw new IllegalArgumentException("invalid snapshot section length");
         }
     }

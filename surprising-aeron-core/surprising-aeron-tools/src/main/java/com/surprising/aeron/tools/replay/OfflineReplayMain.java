@@ -46,7 +46,7 @@ public final class OfflineReplayMain {
                             + ", actual=" + encoded.length);
                 }
                 CoreMessage message = CoreMessageCodec.decode(encoded);
-                int pendingBefore = state.pendingMatching.size();
+                int pendingBefore = state.pendingMatching().size();
                 long position = messages + 1;
                 CoreResponse response = state.apply(message, message.header().submittedAtEpochMillis(), position);
                 long directDeadline = System.nanoTime() + 30_000_000_000L;
@@ -58,7 +58,7 @@ public final class OfflineReplayMain {
                 }
                 if (response == null) throw new IllegalStateException("replay command has no response");
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING
-                        || state.pendingMatching.size() > pendingBefore) {
+                        || state.pendingMatching().size() > pendingBefore) {
                     drainMatching(state, pendingBefore, message, position);
                 }
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
@@ -78,7 +78,7 @@ public final class OfflineReplayMain {
     private static void drainMatching(TradingCoreRuntime state, int pendingBefore,
             CoreMessage message, long position) {
         long deadline = System.nanoTime() + 30_000_000_000L;
-        while (state.pendingMatching.size() > pendingBefore) {
+        while (state.pendingMatching().size() > pendingBefore) {
             // Reuse the live Owner's ordered completion path, including admission rejection,
             // Lane receipts and asynchronous Ledger publication.
             int completed = state.commits.commitReadyMatching(64,

@@ -10,7 +10,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -41,7 +41,7 @@ import org.openjdk.jmh.annotations.Warmup;
 @Measurement(iterations = 3, time = 1)
 @Fork(1)
 public class OwnerPublicationBenchmark {
-    private final TradingRuntimeState runtime = new TradingRuntimeState();
+    private final TradingAccountRuntime runtime = new TradingAccountRuntime();
     private final LaneCommitDelta delta = new LaneCommitDelta();
     private final RuntimeIndexedChangeBuffer<String, String> lane = new RuntimeIndexedChangeBuffer<>();
     private final OwnerIndexedChanges<String, String> owner = new OwnerIndexedChanges<>();

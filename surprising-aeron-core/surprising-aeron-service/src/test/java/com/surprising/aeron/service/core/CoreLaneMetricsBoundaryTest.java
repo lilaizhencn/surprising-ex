@@ -45,7 +45,7 @@ class CoreLaneMetricsBoundaryTest {
             // 目标用户所属账户 Lane 索引
             int laneId = Long.numberOfTrailingZeros(mask);
             // Owner 风险变化缓冲的反射字段
-            var changedField = TradingRuntimeState.class.getDeclaredField("changedRiskSnapshots");
+            var changedField = TradingAccountRuntime.class.getDeclaredField("changedRiskSnapshots");
             changedField.setAccessible(true);
             // 实际 Owner 风险变化缓冲，测试检查它何时可见
             var changed = changedField.get(core.runtimeState);

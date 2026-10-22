@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.risk;
 
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -62,7 +62,7 @@ public final class RiskLiquidationBatch {
      * 原账户 Lane 使用 Owner 已分配的编号，把本批需求逐条落为 PLANNED 强平记录；每条先计划平掉对应持仓的全部绝对数量。
      * @param runtime 接收强平计划的运行时，调用方必须在正确的状态所有权范围内执行
      */
-    void apply(TradingRuntimeState runtime) {
+    void apply(TradingAccountRuntime runtime) {
         if (firstId <= 0) throw new IllegalStateException("risk liquidation IDs not assigned");
         for (/* 当前需要落地的需求下标，同时决定它相对本批起点的连续强平编号。 */ int i = 0; i < count; i++) {
             // 风险扫描时保存的持仓记录，提供用户、币对、保证金模式和带方向数量。

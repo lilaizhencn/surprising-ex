@@ -41,7 +41,7 @@ import org.openjdk.jmh.infra.IterationParams;
         "--enable-native-access=ALL-UNNAMED", "-Xms1g", "-Xmx1g", "-XX:+UseG1GC",
         "-Dsurprising.aeron.matching-engines=1", "-Dsurprising.aeron.account-lanes=2",
         "-Dsurprising.aeron.owner-command-window=256", "-Dsurprising.aeron.matcher-window-size=256",
-        "-Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN", "-Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN",
+        "-Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN",
         "-Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN", "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN"})
 public class InProcessTradingAllocationBenchmark {
     private static final int WINDOW = 256, OPERATIONS = 4096;

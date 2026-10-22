@@ -16,7 +16,7 @@ class MatchingNotificationProbeTest {
         // 本场景明确的 Matcher 与账户拓扑，队列容量足以容纳逐项确认窗口
         var topology = new LaneTopology(1, 0, 0, 2,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingRuntimeState(topology)) {
+        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
             // 每条 Lane 应发布的完成序号数量，固定两千
             int rounds = 2000;
             // Owner 已消费数量的原子确认数组，限制每生产者最多一个未确认项
@@ -71,7 +71,7 @@ class MatchingNotificationProbeTest {
         // 本场景明确的 Matcher 与账户拓扑，队列容量足以容纳逐项确认窗口
         var topology = new LaneTopology(2, 0, 1, 2,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingRuntimeState(topology)) {
+        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
             runtime.publishAccountAdmissionReadyShard(1);
             runtime.publishAccountAdmissionReadyShard(0);
             runtime.publishAccountAdmissionReadyShard(1);
@@ -86,7 +86,7 @@ class MatchingNotificationProbeTest {
      */
     @Test
     void lateSettlementNotificationRemainsVisibleAfterFirstIsConsumed() {
-        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingRuntimeState()) {
+        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime()) {
             runtime.expectMatcherSettlement(1);
             runtime.expectMatcherSettlement(1);
             assertThat(runtime.takeMatcherSettlementReadyLaneMask()).isZero();
@@ -108,7 +108,7 @@ class MatchingNotificationProbeTest {
         // 本场景明确的 Matcher 与账户拓扑，队列容量足以容纳逐项确认窗口
         var topology = new LaneTopology(1, 0, 0, 2,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingRuntimeState(topology)) {
+        try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
             assertThat(runtime.hasMatchingNotifications()).isFalse();
             runtime.expectMatcherSettlement(3);
             // 当前等待退出的发布线程，或本例一次性发布两条通知的线程

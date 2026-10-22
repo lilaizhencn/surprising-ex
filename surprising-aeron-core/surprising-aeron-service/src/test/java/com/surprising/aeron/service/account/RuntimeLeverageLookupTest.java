@@ -3,7 +3,7 @@ package com.surprising.aeron.service.account;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.protocol.CoreMarginMode;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -18,7 +18,7 @@ class RuntimeLeverageLookupTest {
      */
     @Test
     void blockedLaneLookupSurvivesAnotherLanesLookupAndCleanup() throws Exception {
-        try (/* 测试使用默认拓扑的独立运行时，结束关闭常驻账户线程。 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 测试使用默认拓扑的独立运行时，结束关闭常驻账户线程。 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             // 在杠杆表读取中主动阻塞的用户编号。
             // 用于寻找与参照用户落在不同 Lane 的候选用户编号。
             long blockedUser = 8, candidate = 9;
@@ -86,7 +86,7 @@ class RuntimeLeverageLookupTest {
      */
     @Test
     void activeLanesReuseTheirOwnLookupAndUpdateBalancesWithoutOwnerAccess() throws Exception {
-        try (/* 测试使用默认拓扑的独立运行时，结束关闭常驻账户线程。 */ var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+        try (/* 测试使用默认拓扑的独立运行时，结束关闭常驻账户线程。 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
             // 用于寻找与参照用户落在不同 Lane 的候选用户编号。
             // 第一个账户用户编号，作为寻找不同 Lane 的参照。
             long first = 7, candidate = 8;

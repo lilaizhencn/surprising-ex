@@ -136,7 +136,8 @@ class CoreLedgerQueryTest {
         var state = new TradingCoreState(LINE, 0,
                 Map.of(1001L, CoreUserState.empty(LINE, 1001), 1002L, CoreUserState.empty(LINE, 1002)),
                 Map.of(), Map.of("1", instrument), new CoreRiskState(Map.of(), Map.of(), Map.of(1L, first, 2L, second), Map.of(), 3),
-                CoreTreasuryState.empty().adjustInsurance("USDT", 25));
+                CoreTreasuryState.ofSubledgers(Map.of(), Map.of("USDT", 25L),
+                        Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {
             core.activate();
             assertThat(core.runtimeState().systemLedgerStarted()).isTrue();

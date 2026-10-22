@@ -28,7 +28,7 @@ import org.openjdk.jmh.infra.IterationParams;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 public class AccountQueryProjectionBenchmark {
     @Param({"USER", "ORDER", "CLIENT"}) public String queryType;
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
     private AccountLaneState lane;
     private long calls, startedCalls, startedMillis;

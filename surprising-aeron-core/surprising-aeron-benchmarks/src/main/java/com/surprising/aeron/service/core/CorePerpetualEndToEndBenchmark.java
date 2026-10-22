@@ -74,7 +74,7 @@ public final class CorePerpetualEndToEndBenchmark {
             run(state, sequences, warmupCycles, makerDepth, false);
             Result result = run(state, sequences, cycles, makerDepth, true);
             return new BaselineResult(result.cycles(), result.makerDepth(), result.elapsedNanos(), result.latencies(),
-                    result.matchedQuantity(), state.pendingMatching.size(),
+                    result.matchedQuantity(), state.pendingMatching().size(),
                     state.terminalRetentionTombstoneCount());
         }
     }
@@ -133,7 +133,7 @@ public final class CorePerpetualEndToEndBenchmark {
         if (accepted.status() != ResponseStatus.OK) {
             throw new IllegalStateException("place order was not accepted: " + accepted.status());
         }
-        long sequence = state.pendingMatching.firstSequence();
+        long sequence = state.pendingMatching().firstSequence();
         if (sequence == 0) throw new IllegalStateException("matching was not queued");
         MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, sequence, 30_000_000_000L);
         if (matching == null) throw new IllegalStateException("matching timed out");

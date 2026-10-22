@@ -17,14 +17,14 @@ public final class RuntimeDerivativeRiskFixture {
      * @param indexedUserIds 本次风险扫描使用的有序用户编号集合
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingRuntimeState simulateMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
+    public static TradingAccountRuntime simulateMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
                                                         Iterable<Long> indexedUserIds,
                                                         RuntimeIdentityRegistry identities) {
         if (before == null || command == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual risk simulation");
         }
         // 由本次业务状态新投影的独立运行时，真实风险实现只修改它，不改输入记录。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         applyMarkPriceRuntime(command, runtime, identities);
         if (runtime.riskScanControl().enabled()) {
             applyContinuationRuntime(runtime.riskScanControl().scanBatchSize(), indexedUserIds, runtime, identities);
@@ -39,7 +39,7 @@ public final class RuntimeDerivativeRiskFixture {
      * @param indexedUserIds 本次风险扫描使用的有序用户编号集合
      * @param identities 本次投影和结果比对共用的业务编号映射
      */
-    public static TradingRuntimeState simulateContinuation(TradingCoreState before, int maxWork,
+    public static TradingAccountRuntime simulateContinuation(TradingCoreState before, int maxWork,
                                                            Iterable<Long> indexedUserIds,
                                                            RuntimeIdentityRegistry identities) {
         if (before == null || identities == null) {
@@ -47,7 +47,7 @@ public final class RuntimeDerivativeRiskFixture {
         }
         if (maxWork <= 0 || maxWork > 4096) throw new IllegalArgumentException("invalid risk scan batch size");
         // 由本次业务状态新投影的独立运行时，真实风险实现只修改它，不改输入记录。
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
         applyContinuationRuntime(maxWork, indexedUserIds, runtime, identities);
         return runtime;
     }

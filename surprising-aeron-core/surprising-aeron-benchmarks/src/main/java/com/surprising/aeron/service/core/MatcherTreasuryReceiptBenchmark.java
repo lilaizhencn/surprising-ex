@@ -24,7 +24,7 @@ import org.openjdk.jmh.annotations.*;
 @State(Scope.Thread)
 public class MatcherTreasuryReceiptBenchmark {
     @Param({"1", "2"}) public int laneCount;
-    private TradingRuntimeState runtime;
+    private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
     private SystemLedgerLane ledger;
     private OrderRuntime original;
@@ -33,7 +33,7 @@ public class MatcherTreasuryReceiptBenchmark {
     private final UUID commandId = new UUID(1, 2);
 
     @Setup public void setup() {
-        runtime = new TradingRuntimeState(new LaneTopology(1, 0, 0,
+        runtime = new TradingAccountRuntime(new LaneTopology(1, 0, 0,
                 laneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256));
         identities = new RuntimeIdentityRegistry();
         runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);

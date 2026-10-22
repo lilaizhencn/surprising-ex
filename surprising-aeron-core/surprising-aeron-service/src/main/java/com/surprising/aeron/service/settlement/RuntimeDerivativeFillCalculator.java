@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
@@ -43,7 +43,7 @@ public final class RuntimeDerivativeFillCalculator {
      * @param commitTimestamp 订单写回时使用的复制业务时间，负值沿既有调用约定处理
      * @param commitPosition 订单写回时使用的复制日志位置
      */
-    static void apply(TradingRuntimeState runtime, AccountLaneState lane, RuntimeIdentityRegistry identities,
+    static void apply(TradingAccountRuntime runtime, AccountLaneState lane, RuntimeIdentityRegistry identities,
                       CoreInstrument instrument, OrderRuntime order,
                       long positionKey, long fillPriceTicks, long fillQuantitySteps,
                       boolean taker, long leveragePpm, int settleAssetId,
@@ -223,7 +223,7 @@ public final class RuntimeDerivativeFillCalculator {
          * @param positionKey 此订单用户、合约及持仓方向对应的运行时键
          * @param treasury 本笔财务差额接收槽；publish 中可为空以避免重复记入逐笔差额
          */
-        OrderRuntime publish(TradingRuntimeState runtime, AccountLaneState lane, long positionKey, RuntimeTreasuryDelta treasury) {
+        OrderRuntime publish(TradingAccountRuntime runtime, AccountLaneState lane, long positionKey, RuntimeTreasuryDelta treasury) {
             if (fills == 0) return null;
             // 根据最终剩余量确定的订单状态，全部成交为 FILLED，否则保留原状态。
             CoreOrderStatus nextStatus = remaining == 0 ? CoreOrderStatus.FILLED : originalOrder.status();
@@ -266,7 +266,7 @@ public final class RuntimeDerivativeFillCalculator {
      * @param timestamp 本轮订单业务时间
      * @param position 本轮复制日志位置
      */
-    static void begin(FillCursor cursor, TradingRuntimeState runtime, AccountLaneState lane, CoreInstrument instrument,
+    static void begin(FillCursor cursor, TradingAccountRuntime runtime, AccountLaneState lane, CoreInstrument instrument,
                       OrderRuntime order, long positionKey, long leverage, int assetId,
                       long timestamp, long position) {
         if (cursor == null || runtime == null || instrument == null || order == null

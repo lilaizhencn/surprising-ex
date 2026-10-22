@@ -9,7 +9,7 @@ import com.surprising.aeron.model.CoreRiskSnapshot;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -25,31 +25,18 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 import lombok.AccessLevel;
-import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.experimental.Accessors;
 
 /** 在快照、查询和审计边界把运行时实体转回可导出的交易值。先各遍历一次预留和持仓并按用户分组，再构造用户、订单、风险与财库；尚未提交的预约从导出中排除，并还原对应余额和修订号。它不在撮合热路径维护另一份权威账户状态。 构造约定：工具类不创建实例。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeStateMaterializer {
 
     /**
-     * 在 Owner 上导出当前可见的已提交交易状态，不启用测试用遍历计数器。
-     * @param runtime 由调用方安排好快照边界的原权威运行时，入口要求 Owner 线程
-     * @param identities 把内部资产、币对、持仓和客户别名编号解析为业务名称的原身份表
-     */
-    public static TradingCoreState materialize(TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        return materialize(runtime, identities, null);
-    }
-
-    /**
      * 在 Owner 上取得快照视图，过滤待完成预约，将其冻结金额移回可用余额并减去预约贡献的修订次数；随后转换用户、订单、风险、客户别名等。财库通过原账本查询边界取得，预留或持仓引用了不存在的用户时拒绝导出。调用方须保证快照所需的线程和一致性边界。
      * @param runtime 由调用方安排好快照边界的原权威运行时，入口要求 Owner 线程
      * @param identities 把内部资产、币对、持仓和客户别名编号解析为业务名称的原身份表
-     * @param traversalProbe 可选测试计数器，只观察预留和持仓遍历，不参与业务决策
      */
-    static TradingCoreState materialize(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                        SnapshotTraversalProbe traversalProbe) {
+    public static TradingCoreState materialize(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null) throw new IllegalArgumentException("runtime and identities required");
         runtime.assertOwner();
         // 当前快照边界可读的运行时用户视图。
@@ -59,9 +46,9 @@ public final class RuntimeStateMaterializer {
 
         // 本次导出临时按用户归组的已提交资金预留，避免构造每个用户时重扫全表。
         Map<Long, Map<Long, OrderReservation>> reservationsByUser = new HashMap<>();
-        if (traversalProbe != null) traversalProbe.reservationTraversalStarted();
+
         runtime.reservationsForSnapshot().forEachKeyValue((/* 当前预留、订单或客户别名所对应的订单编号。 */ orderId, /* 当前运行时预留值，未完成预约随后从导出中跳过。 */ reservation) -> {
-            if (traversalProbe != null) traversalProbe.reservationEntryVisited();
+
             if (runtime.pendingReservations().pendingReservation(orderId, reservation.userId())) return;
             if (!runtimeUsers.containsKey(reservation.userId())) {
                 throw new IllegalStateException("reservation owner is not registered: " + reservation.userId());
@@ -74,9 +61,9 @@ public final class RuntimeStateMaterializer {
         });
         // 本次导出临时按用户归组的持仓业务值。
         Map<Long, Map<String, CorePositionState>> positionsByUser = new HashMap<>();
-        if (traversalProbe != null) traversalProbe.positionTraversalStarted();
+
         runtime.positionsForSnapshot().forEachKeyValue((/* 运行时持仓或风险快照的内部键。 */ positionKey, /* 当前要复制为业务值的持仓。 */ position) -> {
-            if (traversalProbe != null) traversalProbe.positionEntryVisited();
+
             if (!runtimeUsers.containsKey(position.userId())) {
                 throw new IllegalStateException("position owner is not registered: " + position.userId());
             }
@@ -382,54 +369,4 @@ public final class RuntimeStateMaterializer {
                 value.triggerOcoCursor(), value.lastScheduledRevision(), value.laneProgress());
     }
 
-    /**
-     * 导出测试使用的普通累计计数器，观察预留和持仓是否按表遍历；只由本次导出线程使用，没有原子计数或并发测量能力，也没有自动清零接口。
-     */
-    static final class SnapshotTraversalProbe {
-        /**  本探针累计观察到的预留表遍历启动次数，不自动重置。 返回该探针自创建以来累计的预留全表遍历次数。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private int reservationTraversals;
-        /**  本探针累计访问的预留条目数，包含待完成预约。 返回累计访问的预留条目数，包含随后被过滤的预约。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private int reservationEntries;
-        /**  本探针累计观察到的持仓表遍历启动次数，不自动重置。 返回该探针自创建以来累计的持仓全表遍历次数。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private int positionTraversals;
-        /**  本探针累计访问的持仓条目数。 返回累计访问的持仓条目数。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private int positionEntries;
-
-        /**
-         * 在预留全表遍历开始时累计一次，即使表为空也计数。
-         */
-        void reservationTraversalStarted() {
-            reservationTraversals++;
-        }
-
-        /**
-         * 访问一条预留时累计一次，发生在过滤待完成预约之前。
-         */
-        void reservationEntryVisited() {
-            reservationEntries++;
-        }
-
-        /**
-         * 在持仓全表遍历开始时累计一次，即使表为空也计数。
-         */
-        void positionTraversalStarted() {
-            positionTraversals++;
-        }
-
-        /**
-         * 每访问一条运行时持仓累计一次。
-         */
-        void positionEntryVisited() {
-            positionEntries++;
-        }
-
-    }
 }

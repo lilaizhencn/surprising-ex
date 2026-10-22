@@ -9,7 +9,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -39,7 +39,7 @@ public final class RuntimeOrderAdmission {
      * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
      */
     public static long requiredReservation(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId,
             ResolvedPlaceOrder order, long openInterestSteps, AdmissionOrderIndex activeOrders) {
         return requiredReservation(runtime, identities, userId, order, openInterestSteps, activeOrders, 0);
     }
@@ -55,7 +55,7 @@ public final class RuntimeOrderAdmission {
      * @param excludedOrderId 改单时排除的原订单编号，普通下单使用 0
      */
     public static long requiredReservation(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, long userId,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId,
             ResolvedPlaceOrder order, long openInterestSteps, AdmissionOrderIndex activeOrders,
             long excludedOrderId) {
         if (runtime == null || identities == null || order == null || activeOrders == null || userId <= 0) {
@@ -85,7 +85,7 @@ public final class RuntimeOrderAdmission {
      * @param order 已经完成价格、费率和冻结资产决策的订单输入
      */
     public static AdmissionIdentity admissionIdentity(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             long userId, ResolvedPlaceOrder order) {
         if (runtime == null || identities == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission identity");
@@ -109,7 +109,7 @@ public final class RuntimeOrderAdmission {
      * @param identity 已经准备好的客户、币对、持仓身份和账本结算事实
      */
     public static long requiredReservationPrepared(
-            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, AdmissionIdentity identity) {
         if (runtime == null || order == null || activeOrders == null || identity == null || userId <= 0) {
             throw new IllegalArgumentException("invalid prepared runtime order admission input");
@@ -134,7 +134,7 @@ public final class RuntimeOrderAdmission {
      * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
      */
     public static long requiredReservationPrepared(
-            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders,
             long clientKey, int symbolId, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress) {
@@ -160,7 +160,7 @@ public final class RuntimeOrderAdmission {
      * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
      */
     static long requiredReplacementReservationPrepared(
-            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
             long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
         // 改单要替换的原订单，必须属于当前 Lane。
@@ -190,7 +190,7 @@ public final class RuntimeOrderAdmission {
      * @param excludedSymbol 被替换原单的币对编号文本，用于核对原单归属和币对一致性
      */
     private static long requiredReservation(
-            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
             long clientKey, int symbolId, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol) {
@@ -207,7 +207,7 @@ public final class RuntimeOrderAdmission {
      * @param openInterestSteps 账本或调用方固定的该币对 OI 数量步数，用于比例限额检查
      * @param identity 已经准备好的客户、币对、持仓身份和账本结算事实
      */
-    public static long requiredReservationForQuery(TradingRuntimeState runtime, AccountLaneState lane, long userId,
+    public static long requiredReservationForQuery(TradingAccountRuntime runtime, AccountLaneState lane, long userId,
             ResolvedPlaceOrder order, long openInterestSteps, AdmissionIdentity identity) {
         if (lane == null || runtime.topology().accountLaneId(userId) != lane.laneId()
                 || order == null || identity == null)
@@ -235,7 +235,7 @@ public final class RuntimeOrderAdmission {
      * @param queryInstrument 只读预检捕获的配置副本，null 表示读取当前运行态规范币对
      */
     private static long requiredReservation(
-            TradingRuntimeState runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
             long clientKey, int symbolId, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument) {
@@ -416,7 +416,7 @@ public final class RuntimeOrderAdmission {
      * @param leverage 本次准入使用的有效杠杆，单位与币对杠杆百万分比契约一致
      */
     private static void validateRiskLimits(
-            TradingRuntimeState runtime, CoreInstrument instrument, PositionRuntime position,
+            TradingAccountRuntime runtime, CoreInstrument instrument, PositionRuntime position,
             ResolvedPlaceOrder order, AdmissionSummary admissionSummary, long userId, long openInterestSteps,
             OrderRuntime excluded, long leverage) {
         if (!instrument.contractType().productLine().isDerivative() || order.reduceOnly()) return;

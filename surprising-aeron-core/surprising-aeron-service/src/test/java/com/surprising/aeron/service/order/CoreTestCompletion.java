@@ -170,16 +170,16 @@ public final class CoreTestCompletion {
             long requestedSequence = owner.matchingSequence(message.header().commandId());
             // 保存目标响应的单元素数组，供完成回调原位写入。
             CoreResponse[] completed = {response};
-            while (owner.pendingMatching.firstSequence() != 0) {
+            while (owner.pendingMatching().firstSequence() != 0) {
                 owner.commits.commitReadyMatching(64, timestamp, position, false,
                         (/* 当前回调完成或主循环准备推进的 Core 序号。 */ sequence, /* 当前完成回调或事实轮询取得的响应/撮合结果。 */ result) -> { if (sequence == requestedSequence) completed[0] = result; });
                 if (System.nanoTime() >= deadline) throw new AssertionError("matching command timeout " + message.header().messageType()
                         + " independent=" + independent + " requested=" + requestedSequence
-                        + " first=" + owner.pendingMatching.firstSequence()
+                        + " first=" + owner.pendingMatching().firstSequence()
                         + " control=" + owner.commits.controlPending(requestedSequence)
-                        + " completion=" + owner.pendingMatching.required(requestedSequence).hasMatchingCompletion()
-                        + " result=" + owner.pendingMatching.required(requestedSequence).matchingResult()
-                        + " submitted=" + owner.pendingMatching.get(requestedSequence).isMatchingSubmitted());
+                        + " completion=" + owner.pendingMatching().required(requestedSequence).hasMatchingCompletion()
+                        + " result=" + owner.pendingMatching().required(requestedSequence).matchingResult()
+                        + " submitted=" + owner.pendingMatching().get(requestedSequence).isMatchingSubmitted());
                 Thread.onSpinWait();
             }
             return completed[0];
@@ -214,8 +214,8 @@ public final class CoreTestCompletion {
             owner.commits.advanceMatchingProgress(clusterTimestamp, clusterPosition, Long.MAX_VALUE);
             owner.matchingProgress.drainMatchingCompletions();
             // 当前回调完成或主循环准备推进的 Core 序号。
-            long sequence = requestedSequence != 0 && owner.pendingMatching.contains(requestedSequence)
-                    ? requestedSequence : owner.pendingMatching.firstSequence();
+            long sequence = requestedSequence != 0 && owner.pendingMatching().contains(requestedSequence)
+                    ? requestedSequence : owner.pendingMatching().firstSequence();
             if (sequence == 0) break;
             owner.matchingProgress.progressPlaceBatchAdmissions();
             // 当前协议入口或续步返回的可空响应。
@@ -224,7 +224,7 @@ public final class CoreTestCompletion {
                 response = owner.commits.completeRejectedMatching(sequence);
             } else {
                 // 当前等待的命令槽，可能已经拥有批次或结算事件。
-                CommandSlot pending = owner.pendingMatching.get(sequence);
+                CommandSlot pending = owner.pendingMatching().get(sequence);
                 // 选取的批次、普通或直达撮合事实，缺失时尝试等待。
                 com.surprising.aeron.service.matcher.MatchingResult matching =
                         pending != null && pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
@@ -232,7 +232,7 @@ public final class CoreTestCompletion {
                                 ? pending.orderBatch.lastMatchingResult
                                 : pending != null && (pending.settlementEvent() != null
                                 || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
-                                ? owner.pendingMatching.required(sequence).matchingResult()
+                                ? owner.pendingMatching().required(sequence).matchingResult()
                                 : awaitMatchingResult(owner, sequence);
                 if (matching == null) matching = awaitMatchingResult(owner, sequence);
                 if (matching == null && owner.matchingFlow.hasPendingMatchingRejection(sequence)) {
@@ -285,7 +285,7 @@ public final class CoreTestCompletion {
         // 当前辅助阶段的 nanoTime 截止点，不覆盖内部所有嵌套等待。
         long deadline = System.nanoTime() + timeoutNanos;
         // 当前等待的命令槽，可能已经拥有批次或结算事件。
-        CommandSlot pending = state.pendingMatching.get(sequence);
+        CommandSlot pending = state.pendingMatching().get(sequence);
         while (pending != null && state.matchingFlow.placeAdmissionOutstanding(pending)
                 && !state.matchingFlow.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
             state.matchingProgress.progressPlaceBatchAdmissions();
@@ -294,21 +294,21 @@ public final class CoreTestCompletion {
         if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         // 连续空探查次数，达到阈值后从自旋转为短暂 park。
         int idle = 0;
-        while (state.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
+        while (state.pendingMatching().contains(sequence) && System.nanoTime() < deadline) {
             // 当前最早待命令，尚未激活的批次先通过现有业务入口激活。
-            CommandSlot head = state.pendingMatching.get(state.pendingMatching.firstSequence());
+            CommandSlot head = state.pendingMatching().get(state.pendingMatching().firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches().activateOrderBatch(head.orderBatch, head, true);
             state.matchingProgress.drainMatchingCompletions();
             if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
             // 所请求序号的严格占用槽，读取现有事实或取普通完成。
-            CommandSlot context = state.pendingMatching.required(sequence);
+            CommandSlot context = state.pendingMatching().required(sequence);
             // 当前完成回调或事实轮询取得的响应/撮合结果。
             com.surprising.aeron.service.matcher.MatchingResult result = context.matchingResult();
             if (result == null) result = context.takeMatchingCompletion();
             if (result == null) {
                 // 当前仍在队中的请求槽，用于选择直达事件。
-                var active = state.pendingMatching.get(sequence);
+                var active = state.pendingMatching().get(sequence);
                 // 普通或批次当前持有的结算事件，direct 且 ready 才可取事实。
                 var event = active.settlementEvent();
                 if (event == null && active.orderBatch != null)

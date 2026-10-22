@@ -178,21 +178,6 @@ public final class PositionRuntime {
     public PositionRuntime publicationValue() { return mutable ? snapshot() : this; }
 
     /**
-     * Owner 镜像收到新发布状态时，先核对用户、币对、资产、保证金模式和持仓腿身份，再原位更新金额；由持有该镜像的线程调用。
-     * @param source 需要同步到当前 Owner 镜像的新发布持仓，其身份必须与当前对象一致
-     */
-    void copyStateFrom(PositionRuntime source) {
-        if (source == null || userId != source.userId || symbolId != source.symbolId
-                || assetId != source.assetId || marginMode != source.marginMode
-                || positionSide != source.positionSide
-                || (instrument != source.instrument && (source.instrument == null || !instrument.instrumentId().equals(source.instrument.instrumentId())))) {
-            throw new IllegalArgumentException("position publication identity changed");
-        }
-        applyInPlace(instrument, source.signedQuantitySteps, source.entryPriceTicks,
-                source.entryValueTicks, source.realizedPnlUnits, source.positionMarginUnits);
-    }
-
-    /**
      * 在原对象上更新数量、入场信息、盈亏及保证金；要求配置指向同一合约并通过持仓校验，调用方负责遵守线程所有权和发布引用使用期。
      * @param instrument 该持仓的合约配置引用，更新时必须保持同一个业务合约
      * @param signedQuantitySteps 带方向的持仓数量步数，正数为多头、负数为空头、0 为无持仓

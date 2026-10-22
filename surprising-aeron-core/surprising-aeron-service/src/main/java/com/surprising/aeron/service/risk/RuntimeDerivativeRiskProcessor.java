@@ -5,7 +5,7 @@ import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.RiskLaneProgress;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -27,7 +27,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
     public static void applyMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
-                                      Iterable<Long> indexedUserIds, TradingRuntimeState runtime,
+                                      Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
                                       RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -45,7 +45,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
-    public static void applyMarkPriceRuntime(ApplyMarkPriceCommand command, TradingRuntimeState runtime,
+    public static void applyMarkPriceRuntime(ApplyMarkPriceCommand command, TradingAccountRuntime runtime,
                                              RuntimeIdentityRegistry identities) {
         if (command == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual risk apply");
@@ -104,7 +104,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
     public static void applyContinuation(TradingCoreState before, int maxWork,
-                                         Iterable<Long> indexedUserIds, TradingRuntimeState runtime,
+                                         Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
                                          RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -121,7 +121,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
     public static void applyContinuationRuntime(int maxWork, Iterable<Long> indexedUserIds,
-                                                TradingRuntimeState runtime,
+                                                TradingAccountRuntime runtime,
                                                 RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null || indexedUserIds == null) {
             throw new IllegalArgumentException("invalid perpetual risk continuation apply");
@@ -143,7 +143,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
     public static int applyContinuationRuntime(int maxWork, int symbolId, Iterable<Long> indexedUserIds,
-                                               TradingRuntimeState runtime,
+                                               TradingAccountRuntime runtime,
                                                RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null || indexedUserIds == null) {
             throw new IllegalArgumentException("invalid perpetual risk continuation apply");
@@ -179,7 +179,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
     public static int applyContinuationRuntime(int maxWork, int symbolId, PositionUserIndex positionUsers,
-                                               TradingRuntimeState runtime,
+                                               TradingAccountRuntime runtime,
                                                RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null || positionUsers == null) {
             throw new IllegalArgumentException("invalid perpetual risk continuation apply");
@@ -214,7 +214,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
     public static int continueRiskBudget(int maxWork, PositionUserIndex positionUsers,
-                                         TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+                                         TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (runtime == null || identities == null || positionUsers == null || maxWork <= 0 || maxWork > 4096) {
             throw new IllegalArgumentException("invalid risk scan budget");
         }
@@ -245,7 +245,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
-    public static void syncScanProgress(TradingCoreState source, TradingRuntimeState runtime,
+    public static void syncScanProgress(TradingCoreState source, TradingAccountRuntime runtime,
                                         RuntimeIdentityRegistry identities) {
         if (source == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid runtime risk scan synchronization");
@@ -264,7 +264,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
      */
-    private static int continueScan(TradingRuntimeState runtime, CoreInstrument instrument,
+    private static int continueScan(TradingAccountRuntime runtime, CoreInstrument instrument,
             long priceSequence, int maxWork, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
             RuntimeIdentityRegistry identities) {
         return RiskScanCoordinator.runSlice(maxWork, identities.symbolId(instrument.instrumentIdValue()), positionUsers,
@@ -276,7 +276,7 @@ public final class RuntimeDerivativeRiskProcessor {
      * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
      * @param instrumentId 对外的币对或合约编号，需要已注册到当前运行时
      */
-    private static CoreInstrument requireInstrument(TradingRuntimeState runtime, String instrumentId) {
+    private static CoreInstrument requireInstrument(TradingAccountRuntime runtime, String instrumentId) {
         // 运行时已经注册的币对配置，提供结算资产和期权价格校验条件。
         CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");

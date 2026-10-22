@@ -8,7 +8,7 @@ import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.TradingRuntimeState;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.position.PositionRuntime;
@@ -27,7 +27,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param userId 条件单共同所属的正数用户编号
      * @param view 需要登记的新条件单视图，携带意图、触发条件和执行参数
      */
-    public static void upsert(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    public static void upsert(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                        long userId, CoreTriggerOrderStateView view) {
         if (runtime == null || identities == null || view == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime trigger order update");
@@ -50,7 +50,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param positionKey 衍生品对应的用户持仓腿身份键，现货为 0
      * @param instrumentSettled Owner 或账本输入固定的币对已经结算标记
      */
-    public static void upsert(TradingRuntimeState runtime, long userId,
+    public static void upsert(TradingAccountRuntime runtime, long userId,
                        CoreTriggerOrderStateView view, int symbolId,
                        long positionKey, boolean instrumentSettled) {
         runtime.requireRevisionCapacity();
@@ -70,7 +70,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param positionKey 衍生品对应的用户持仓腿身份键，现货为 0
      * @param instrumentSettled Owner 或账本输入固定的币对已经结算标记
      */
-    public static void placeOcoPair(TradingRuntimeState runtime, long userId,
+    public static void placeOcoPair(TradingAccountRuntime runtime, long userId,
                                    CoreTriggerOrderStateView takeProfit, CoreTriggerOrderStateView stopLoss,
                                    int symbolId, long positionKey, boolean instrumentSettled) {
         validateOcoPair(takeProfit, stopLoss);
@@ -116,7 +116,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param positionKey 衍生品对应的用户持仓腿身份键，现货为 0
      * @param instrumentSettled Owner 或账本输入固定的币对已经结算标记
      */
-    private static CoreTriggerOrderState preparePlacement(TradingRuntimeState runtime, long userId,
+    private static CoreTriggerOrderState preparePlacement(TradingAccountRuntime runtime, long userId,
                        CoreTriggerOrderStateView view, int symbolId,
                        long positionKey, boolean instrumentSettled) {
         if (runtime == null || view == null || userId <= 0 || symbolId < 0 || positionKey < 0) {
@@ -155,7 +155,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param userId 条件单共同所属的正数用户编号
      * @param triggerOrderId 要读取或推进的正数条件单编号
      */
-    public static boolean cancel(TradingRuntimeState runtime, long userId, long triggerOrderId) {
+    public static boolean cancel(TradingAccountRuntime runtime, long userId, long triggerOrderId) {
         requireInput(runtime, userId, triggerOrderId);
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
@@ -173,7 +173,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param runtime 提供原用户、持仓、条件单及版本写入入口的所属运行时
      * @param triggerId 提交阶段准备取消的条件单编号
      */
-    public static boolean cancelPendingForCommit(TradingRuntimeState runtime, long triggerId) {
+    public static boolean cancelPendingForCommit(TradingAccountRuntime runtime, long triggerId) {
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
         CoreTriggerOrderState current = require(runtime, triggerId);
         if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
@@ -200,7 +200,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param triggeredPriceTicks 触发条件成立时固定的价格刻度
      * @param triggeredAtEpochMillis 本次认领采用的业务时间，写入本轮状态更新时间
      */
-    public static boolean claim(TradingRuntimeState runtime, long triggerOrderId, long triggerSequence,
+    public static boolean claim(TradingAccountRuntime runtime, long triggerOrderId, long triggerSequence,
                          long triggeredPriceTicks, long triggeredAtEpochMillis) {
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
@@ -219,7 +219,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param rejectReason 触发执行的拒绝原因或需要保留的已有原因
      * @param completedAtEpochMillis 本次触发执行完成的业务时间
      */
-    public static boolean complete(TradingRuntimeState runtime, long triggerOrderId, boolean success,
+    public static boolean complete(TradingAccountRuntime runtime, long triggerOrderId, boolean success,
                             long placedOrderId, String rejectReason, long completedAtEpochMillis) {
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
@@ -238,7 +238,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param lowestPriceTicks 上游计算的移动止损最低价格水位
      * @param activatedAtEpochMillis 移动止损激活的业务时间，用于更新记录时间边界
      */
-    public static boolean updateTrailing(TradingRuntimeState runtime, long triggerOrderId,
+    public static boolean updateTrailing(TradingAccountRuntime runtime, long triggerOrderId,
                                   long highestPriceTicks, long lowestPriceTicks,
                                   long activatedAtEpochMillis) {
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
@@ -266,7 +266,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param triggerOrderId 要读取或推进的正数条件单编号
      * @param expiredAtEpochMillis 本次检查到期采用的业务时间
      */
-    public static boolean expire(TradingRuntimeState runtime, long triggerOrderId, long expiredAtEpochMillis) {
+    public static boolean expire(TradingAccountRuntime runtime, long triggerOrderId, long expiredAtEpochMillis) {
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (current.status() != CoreTriggerOrderStatus.PENDING || current.expiresAtEpochMillis() == 0
@@ -283,7 +283,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param staleBeforeEpochMillis 只允许重试更新时间不晚于此值的已认领记录
      * @param retryAtEpochMillis 写入重试后状态的业务更新时间
      */
-    public static boolean retry(TradingRuntimeState runtime, long triggerOrderId,
+    public static boolean retry(TradingAccountRuntime runtime, long triggerOrderId,
                          long staleBeforeEpochMillis, long retryAtEpochMillis) {
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
@@ -344,7 +344,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param positionKey 衍生品对应的用户持仓腿身份键，现货为 0
      * @param view 需要登记的新条件单视图，携带意图、触发条件和执行参数
      */
-    private static void validatePlacement(TradingRuntimeState runtime, long userId, int symbolId,
+    private static void validatePlacement(TradingAccountRuntime runtime, long userId, int symbolId,
                                           long positionKey, CoreTriggerOrderStateView view) {
         // 当前用户元数据，提供单向或双向持仓模式。
         UserRuntime user = runtime.user(userId);
@@ -394,7 +394,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param rejectReason 触发执行的拒绝原因或需要保留的已有原因
      * @param updatedAt 本次后状态的业务更新时间
      */
-    private static void update(TradingRuntimeState runtime, CoreTriggerOrderState current,
+    private static void update(TradingAccountRuntime runtime, CoreTriggerOrderState current,
                                CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
                                long triggeredPriceTicks, String rejectReason, long updatedAt) {
         runtime.requireRevisionCapacity();
@@ -436,7 +436,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param runtime 提供原用户、持仓、条件单及版本写入入口的所属运行时
      * @param triggerOrderId 要读取或推进的正数条件单编号
      */
-    private static CoreTriggerOrderState require(TradingRuntimeState runtime, long triggerOrderId) {
+    private static CoreTriggerOrderState require(TradingAccountRuntime runtime, long triggerOrderId) {
         if (runtime == null || triggerOrderId <= 0) throw new IllegalArgumentException("invalid runtime trigger order");
         runtime.assertOwner();
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
@@ -453,7 +453,7 @@ public final class RuntimeTriggerOrderStateTransitions {
      * @param userId 条件单共同所属的正数用户编号
      * @param triggerOrderId 要读取或推进的正数条件单编号
      */
-    private static void requireInput(TradingRuntimeState runtime, long userId, long triggerOrderId) {
+    private static void requireInput(TradingAccountRuntime runtime, long userId, long triggerOrderId) {
         if (runtime == null || userId <= 0 || triggerOrderId <= 0) {
             throw new IllegalArgumentException("invalid runtime trigger order");
         }

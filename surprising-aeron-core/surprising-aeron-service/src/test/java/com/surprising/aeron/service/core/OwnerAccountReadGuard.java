@@ -19,7 +19,7 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
     /** 创建哨兵的测试线程，代表当前 Owner；以线程对象身份判断访问方。 */
     private final Thread owner = Thread.currentThread();
     /** 当前受检查的运行时，用于访问账户 Lane 和判断是否为 FUSED 模式。 */
-    private final TradingRuntimeState runtime;
+    private final TradingAccountRuntime runtime;
     /** 只能由 Owner 写入的用户和冻结委托变更集合字段名。 */
     private final String[] changeNames = {"changedUsers", "changedReservations"};
     /** 安装哨兵前的变更集合引用，关闭时把临时集合内容写回这些原集合。 */
@@ -29,7 +29,7 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
      * 保存账户表和变更集合引用，复制原内容并安装带线程检查的替代容器；仅供测试验证状态所有权。
      * @param runtime 需要检查 Owner 与账户 Lane 访问边界的运行时
      */
-    public OwnerAccountReadGuard(TradingRuntimeState runtime) throws ReflectiveOperationException {
+    public OwnerAccountReadGuard(TradingAccountRuntime runtime) throws ReflectiveOperationException {
         this.runtime = runtime;
         // 运行时内部账户 Lane 数组的反射字段，需要绕过可见性以安装测试哨兵。
         Field field = runtime.getClass().getDeclaredField("accountLanes");
