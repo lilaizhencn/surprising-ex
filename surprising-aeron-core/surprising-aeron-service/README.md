@@ -257,6 +257,10 @@ flowchart TD
 → `CoreSnapshotLifecycle`。先排空快照边界前的命令，再捕获同一 fence 的账户、Matcher、账本、
 幂等和业务游标；恢复时一起还原，不能只加载订单簿或余额。完整时序见 [快照与恢复](../README.md#快照与恢复)。
 
+[`LaneTopology`](src/main/java/com/surprising/aeron/service/lane/LaneTopology.java) 保存分片数、账户路由种子和队列容量，
+恢复时使用快照中的这些参数。兼容性由 `SectionedCoreSnapshotCodec`、`MatcherSnapshotCodec` 等快照编解码器的格式版本检查；
+修改路由算法或这些参数的含义时，须同步评估快照版本和恢复约束。
+
 ## 包结构：业务包配合步骤导航
 
 `state` 根包保留 `TradingCoreState`（恢复和导出状态）与 `TradingRuntimeState`（在线状态入口）；

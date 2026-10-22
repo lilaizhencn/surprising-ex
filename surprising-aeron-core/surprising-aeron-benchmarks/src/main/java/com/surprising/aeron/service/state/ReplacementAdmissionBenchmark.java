@@ -73,7 +73,7 @@ public class ReplacementAdmissionBenchmark {
         // Initialize the fixture once; there is no snapshot or restore operation in measurement.
         runtime = RuntimeStateProjector.project(new TradingCoreState(product, 1,
                 users, orders, Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty()),
-                identities, new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, laneCount,
+                identities, new LaneTopology(1, 0, 0, laneCount,
                         LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, WINDOW, WINDOW, WINDOW));
         decision = new CoreOrderDecisionResolver.Context(instrument, identities.symbolId("1"),
                 new MarkPriceRuntime(identities.symbolId("1"), instrument, 100, 1, 1_000),

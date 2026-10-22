@@ -26,7 +26,7 @@ public class TransferLaneAllocationBenchmark {
     @Setup public void setup() {
         identities = new RuntimeIdentityRegistry();
         runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.SPOT), identities,
-                new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 4,
+                new LaneTopology(1, 0, 0, 4,
                         LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256));
         RuntimeAccountStateTransitions.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 1_000_000_000_000L));

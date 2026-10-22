@@ -8,12 +8,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 /**
- * 逐产品线验证空白运行时的 Core 与原生 Matcher 快照能够配对恢复，核对产品线、路由版本及订单簿哈希；没有注册品种、成交或资金变动场景。
+ * 逐产品线验证空白运行时的 Core 与原生 Matcher 快照能够配对恢复，核对产品线、路由拓扑及订单簿哈希；没有注册品种、成交或资金变动场景。
  */
 class CoreNativeSnapshotProductLineTest {
 
     /**
-     * 对 ProductLine 每个枚举值保存编号一百零一的空状态快照，关闭原运行时后检查清单并恢复，要求产品线不串用、路由版本为三且订单簿哈希相同。
+     * 对 ProductLine 每个枚举值保存编号一百零一的空状态快照，关闭原运行时后检查清单并恢复，要求产品线不串用、路由拓扑及订单簿哈希相同。
      * @param productLine 参数化测试当前覆盖的一条产品线
      */
     @ParameterizedTest
@@ -32,7 +32,7 @@ class CoreNativeSnapshotProductLineTest {
         CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(productLine, snapshot);
         try (/* 从同产品线快照恢复并激活的运行时，退出时关闭。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
             assertThat(manifest.productLine()).isEqualTo(productLine);
-            assertThat(manifest.topology().routeVersion()).isEqualTo(3);
+            assertThat(restored.laneTopology()).isEqualTo(manifest.topology());
             assertThat(restored.productLine()).isEqualTo(productLine);
             assertThat(restored.matchingFlow.matchingStateHashAsync().join()).isEqualTo(bookHash);
         }

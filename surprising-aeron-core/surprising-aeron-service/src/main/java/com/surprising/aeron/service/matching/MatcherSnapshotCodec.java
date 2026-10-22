@@ -142,8 +142,7 @@ public final class MatcherSnapshotCodec {
             // 从固定产品线编码恢复的独立产品线。
             ProductLine productLine = ProductLineWireCode.decode(input.readInt());
             // 从清单保存的引擎、账户路由和队列容量重建的拓扑。
-            LaneTopology topology = new LaneTopology(LaneTopology.ROUTE_VERSION,
-                    input.readInt(), input.readInt(), input.readInt(),
+            LaneTopology topology = new LaneTopology(input.readInt(), input.readInt(), input.readInt(),
                     input.readInt(), input.readLong(), input.readInt(), input.readInt(), input.readInt());
             // 所有模块必须共同归属的快照编号。
             long snapshotId = input.readLong();

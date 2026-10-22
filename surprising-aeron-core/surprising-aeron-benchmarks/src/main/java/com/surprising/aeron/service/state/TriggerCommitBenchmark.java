@@ -45,7 +45,7 @@ public class TriggerCommitBenchmark {
 
     @Setup(Level.Trial)
     public void setup() {
-        var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, accountLanes,
+        var topology = new LaneTopology(1, 0, 0, accountLanes,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256);
         runtime = new TradingRuntimeState(topology);
         var initial = TradingCoreState.empty(ProductLine.SPOT);

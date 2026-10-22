@@ -11,14 +11,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class LaneTopologyTest {
 
     /**
-     * 核对默认路由版本为三、一个 Matcher、零独立风险线程、两个账户 Lane 及单分片掩码。
+     * 核对默认一个 Matcher、零独立风险线程、两个账户 Lane 及单分片掩码。
      */
     @Test
-    void productionDefaultsUseVersionedMatcherRiskAndAccountLanes() {
+    void productionDefaultsUseMatcherRiskAndAccountLanes() {
         // 本例生产默认拓扑，用于核对实际数量或路由
         LaneTopology topology = LaneTopology.productionDefault();
 
-        assertThat(topology.routeVersion()).isEqualTo(3);
         assertThat(topology.matchingEngineCount()).isEqualTo(1);
         assertThat(topology.riskEngineCount()).isZero();
         assertThat(topology.matcherShardMask()).isZero();
@@ -60,17 +59,17 @@ class LaneTopologyTest {
     }
 
     /**
-     * 对给定三组旧版本或不合法拓扑组合断言构造拒绝，不据此宣称逐个隔离了每个字段的拒绝原因。
+     * 分别验证分片掩码与 Matcher 数量不符、Matcher 数量不是二次幂、账户 Lane 数量不是二次幂时拒绝构造。
      */
     @Test
-    void rejectsNonPowerOfTwoOrOldRouteTopology() {
-        assertThatThrownBy(() -> new LaneTopology(1, 4, 1, 3, 4,
+    void rejectsInvalidShardMaskOrNonPowerOfTwoCounts() {
+        assertThatThrownBy(() -> new LaneTopology(4, 1, 2, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LaneTopology(3, 3, 1, 2, 4,
+        assertThatThrownBy(() -> new LaneTopology(3, 1, 2, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LaneTopology(3, 4, 1, 3, 3,
+        assertThatThrownBy(() -> new LaneTopology(4, 1, 3, 3,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
     }

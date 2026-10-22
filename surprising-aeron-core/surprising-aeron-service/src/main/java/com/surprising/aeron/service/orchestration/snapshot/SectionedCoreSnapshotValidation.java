@@ -25,7 +25,7 @@ final class SectionedCoreSnapshotValidation {
     }
 
     /**
-     * 按固定小端字段读取元数据，使用当前 ROUTE_VERSION 构造并校验拓扑，检查预期产品线、正快照号、非负水位/时间及投影水位反码；必须读尽该段。Core 数量与 Matcher 的配对另由 validatePairing 核对。
+     * 按固定小端字段读取元数据，使用快照保存的路由参数构造并校验拓扑，检查预期产品线、正快照号、非负水位/时间及投影水位反码；必须读尽该段。Core 数量与 Matcher 的配对另由 validatePairing 核对。
      * @param encoded 已确认固定段长度的元数据负载字节
      * @param expectedProductLine 调用方明确要求恢复或检查的产品线
      */
@@ -37,11 +37,10 @@ final class SectionedCoreSnapshotValidation {
         if (productLine != expectedProductLine) {
             throw new ProtocolException("snapshot product line mismatch: " + productLine);
         }
-        // 从快照各分片参数构造的当前版本路由拓扑。
+        // 从快照各分片参数构造的路由拓扑。
         LaneTopology topology;
         try {
-            topology = new LaneTopology(LaneTopology.ROUTE_VERSION,
-                    header.getInt(), header.getInt(), header.getInt(),
+            topology = new LaneTopology(header.getInt(), header.getInt(), header.getInt(),
                     header.getInt(), header.getLong(), header.getInt(), header.getInt(), header.getInt());
         } catch (/* 拓扑字段不合法的异常，转为带消息的协议异常。 */ IllegalArgumentException exception) {
             throw new ProtocolException("snapshot route mismatch: " + exception.getMessage());

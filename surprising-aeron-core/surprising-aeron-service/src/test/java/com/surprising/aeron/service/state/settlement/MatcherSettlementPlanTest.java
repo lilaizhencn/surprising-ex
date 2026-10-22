@@ -302,7 +302,7 @@ class MatcherSettlementPlanTest {
     @org.junit.jupiter.api.Timeout(15)
     void directEventCannotRecycleBeforeReservedNonTradingLanesConsumeTheirTickets() throws Exception {
         // 用例显式使用的四账户 Lane 路由拓扑。
-        var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 4,
+        var topology = new LaneTopology(1, 0, 0, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState(topology)) {
             // 当前用例解析币对编号及持仓身份的运行时字典。
@@ -435,7 +435,7 @@ class MatcherSettlementPlanTest {
     @Test
     void pooledPlanSwitchesFromDeepMakerLaneIndexBackToOneFillWithoutStaleLinks() {
         // 用例显式使用的四账户 Lane 路由拓扑。
-        var topology = new LaneTopology(LaneTopology.ROUTE_VERSION,1,0,0,4,
+        var topology = new LaneTopology(1,0,0,4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,16,16,16);
         try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingRuntimeState(topology)) {
             // 当前用例解析币对编号及持仓身份的运行时字典。

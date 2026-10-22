@@ -6,7 +6,6 @@ package com.surprising.aeron.service.lane;
  * matcher 数量和币对路由不得改变保证金共享范围。六产品账户间仍通过显式划转连接。
  * 路由和种子随快照保存，恢复时不能重新按当前配置分配已有账户。
  *
- * @param routeVersion 路由规则的版本，恢复快照时必须能够识别
  * @param matchingEngineCount Matcher 分片数量，必须是允许范围内的 2 次幂
  * @param riskEngineCount 配置中保留的风险引擎数量；本值本身不负责启动风险线程
  * @param matcherShardMask 选取 Matcher 分片用的位掩码，固定等于分片数减一
@@ -17,7 +16,6 @@ package com.surprising.aeron.service.lane;
  * @param accountLaneQueueCapacity 单个账户 Lane 输入队列的容量
  */
 public record LaneTopology(
-        int routeVersion,
         int matchingEngineCount,
         int riskEngineCount,
         int matcherShardMask,
@@ -27,8 +25,6 @@ public record LaneTopology(
         int matchingCompletionCapacity,
         int accountLaneQueueCapacity) {
 
-    /** 当前支持的路由版本，用于拒绝与现有算法不兼容的快照拓扑。 */
-    public static final int ROUTE_VERSION = 3;
     /** 未显式配置时使用一个 Matcher，订单簿仍按固定分片规则寻址。 */
     public static final int DEFAULT_MATCHING_ENGINE_COUNT = 1;
     /** 风险引擎数量配置的默认值；账户风控由账户 Lane 负责。 */
@@ -42,7 +38,7 @@ public record LaneTopology(
     /** 默认队列槽位数，供完成队列和账户输入队列使用。 */
     public static final int DEFAULT_QUEUE_CAPACITY = 4_096;
 
-    /** 创建前统一检查数量、容量和路由版本，避免位掩码算法收到不合法的参数。 */
+    /** 创建前统一检查数量、容量和分片掩码，避免位掩码算法收到不合法的参数。 */
     public LaneTopology {
         requirePowerOfTwo(matchingEngineCount, 1, 64, "matchingEngineCount");
         requirePowerOfTwo(riskEngineCount, 0, 64, "riskEngineCount");
@@ -50,7 +46,7 @@ public record LaneTopology(
         requirePowerOfTwo(matcherWindowSize, 1, 1 << 20, "matcherWindowSize");
         requirePowerOfTwo(matchingCompletionCapacity, 1, 1 << 20, "matchingCompletionCapacity");
         requirePowerOfTwo(accountLaneQueueCapacity, 1, 1 << 20, "accountLaneQueueCapacity");
-        if (routeVersion != ROUTE_VERSION || matcherShardMask != matchingEngineCount - 1) {
+        if (matcherShardMask != matchingEngineCount - 1) {
             throw new IllegalArgumentException("invalid deterministic lane topology");
         }
     }
@@ -62,7 +58,7 @@ public record LaneTopology(
 
     /** 创建只有一个 Matcher 和一个账户 Lane 的固定测试拓扑，便于核对基础行为。 */
     public static LaneTopology characterization() {
-        return new LaneTopology(ROUTE_VERSION, 1, 0, 0, 1, DEFAULT_ACCOUNT_LANE_SEED,
+        return new LaneTopology(1, 0, 0, 1, DEFAULT_ACCOUNT_LANE_SEED,
                 DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
     }
 
@@ -85,7 +81,7 @@ public record LaneTopology(
         int completion = Integer.getInteger("surprising.aeron.matching-completion-capacity", DEFAULT_QUEUE_CAPACITY);
         // 每个账户 Lane 可保留的待执行任务数量。
         int laneQueue = Integer.getInteger("surprising.aeron.account-lane-queue-capacity", DEFAULT_QUEUE_CAPACITY);
-        return new LaneTopology(ROUTE_VERSION, matching, risk, matching - 1, accounts, seed,
+        return new LaneTopology(matching, risk, matching - 1, accounts, seed,
                 window, completion, laneQueue);
     }
 
