@@ -141,7 +141,7 @@ public class AdminComplianceController {
                                 @RequestBody byte[] body,
                                 HttpServletRequest httpRequest) {
         try {
-            KycUpdateRequest request = readBody(body, KycUpdateRequest.class);
+            KycUpdateRequest request = ComplianceRequestBinding.review(readBody(body, KycUpdateRequest.class));
             return withApproval(() -> complianceService.adminUpsertKyc(
                     authorization, userId, request, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {
@@ -196,7 +196,7 @@ public class AdminComplianceController {
                                  @RequestBody byte[] body,
                                  HttpServletRequest httpRequest) {
         try {
-            RiskTagCreateRequest request = readBody(body, RiskTagCreateRequest.class);
+            RiskTagCreateRequest request = ComplianceRequestBinding.riskTag(readBody(body, RiskTagCreateRequest.class));
             return withApproval(() -> complianceService.adminCreateRiskTag(
                     authorization, userId, request, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {
@@ -227,7 +227,7 @@ public class AdminComplianceController {
                                  @RequestBody byte[] body,
                                  HttpServletRequest httpRequest) {
         try {
-            AmlCaseCreateRequest request = readBody(body, AmlCaseCreateRequest.class);
+            AmlCaseCreateRequest request = ComplianceRequestBinding.amlCase(readBody(body, AmlCaseCreateRequest.class));
             return withApproval(() -> complianceService.adminCreateAmlCase(
                     authorization, userId, request, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {
@@ -243,7 +243,7 @@ public class AdminComplianceController {
                                        @RequestBody byte[] body,
                                        HttpServletRequest httpRequest) {
         try {
-            AmlCaseStatusUpdateRequest request = readBody(body, AmlCaseStatusUpdateRequest.class);
+            AmlCaseStatusUpdateRequest request = ComplianceRequestBinding.amlStatus(readBody(body, AmlCaseStatusUpdateRequest.class));
             return withApproval(() -> complianceService.adminUpdateAmlCaseStatus(
                     authorization, caseId, request, requestMetadata(httpRequest), body));
         } catch (IllegalArgumentException ex) {

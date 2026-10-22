@@ -128,4 +128,19 @@ public final class ComplianceValidation {
         Timestamp value = rs.getTimestamp(column);
         return value == null ? null : value.toInstant();
     }
+    public static String applicantType(String value) {
+        String normalized = value == null ? "" : value.trim().toUpperCase();
+        if (!normalized.equals("INDIVIDUAL") && !normalized.equals("BUSINESS")) {
+            throw new IllegalArgumentException("applicantType must be INDIVIDUAL or BUSINESS");
+        }
+        return normalized;
+    }
+
+    public static String faceStatus(String value) {
+        String normalized = value == null || value.isBlank() ? "NOT_REQUIRED" : value.trim().toUpperCase();
+        if (!normalized.matches("NOT_REQUIRED|PENDING")) {
+            throw new IllegalArgumentException("faceVerificationStatus may only be NOT_REQUIRED or PENDING");
+        }
+        return normalized;
+    }
 }

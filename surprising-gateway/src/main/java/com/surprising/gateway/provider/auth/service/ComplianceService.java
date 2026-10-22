@@ -237,7 +237,8 @@ public class ComplianceService {
         KycProvider.KycProviderSession session = kycProviders.start(userId, request, documents);
         ComplianceModels.KycSubmissionRequest providerRequest = new ComplianceModels.KycSubmissionRequest(
                 request.applicantType(), request.kycLevel(), request.country(), request.documentType(),
-                session.provider(), session.providerReference(), request.submittedDocuments(),
+                ComplianceValidation.provider(session.provider()),
+                ComplianceValidation.providerReference(ComplianceValidation.provider(session.provider()), session.providerReference()), request.submittedDocuments(),
                 "SELF".equals(session.provider()) ? request.faceVerificationStatus() : "PENDING", request.documentIds(),
                 request.documentExpiresOn(), request.addressIssuedOn(), request.documentIssuedOn());
         String submittedDocuments = kycDocumentService.references(documents, request.documentExpiresOn(),
@@ -249,7 +250,6 @@ public class ComplianceService {
 
     @Transactional
     public KycProfile applyProviderCallback(String provider, Map<String, String> headers, byte[] body) {
-        provider = ComplianceValidation.provider(provider);
         KycProvider.KycProviderResult result = kycProviders.verifyCallback(provider, headers, body)
                 .orElseThrow(() -> new IllegalArgumentException("KYC callback could not be verified"));
         Long userId;
@@ -262,8 +262,7 @@ public class ComplianceService {
                 || (result.providerReference() != null && !result.providerReference().equals(previous.providerReference()))) {
             throw new IllegalArgumentException("KYC callback does not match the current verification session");
         }
-        KycProfile updated = kycRepository.applyProviderResult(userId, provider, result.status(),
-                result.rejectionReason(), Instant.now());
+        KycProfile updated = applyProviderResult(previous, provider, result.status(), result.rejectionReason(), Instant.now());
         if (!kycProviders.simulationEnabled()) enqueueKycTransition(previous, updated);
         return updated;
     }
@@ -287,8 +286,28 @@ public class ComplianceService {
         if (!java.util.Objects.equals(previous, locked)) throw new IllegalStateException("the KYC session changed before its result was saved");
         String status = switch (decision) { case "APPROVED" -> "VERIFIED"; case "REJECTED" -> "REJECTED"; default -> "PENDING"; };
         String reason = "REJECTED".equals(status) ? "Simulated provider rejection" : null;
-        KycProfile updated = kycRepository.applyProviderResult(userId, selected, status, reason, Instant.now());
+        KycProfile updated = applyProviderResult(locked, selected, status, reason, Instant.now());
         return updated;
+    }
+
+    private KycProfile applyProviderResult(KycProfile current, String provider, String rawStatus,
+                                           String rejectionReason, Instant now) {
+        // 提供方允许的结果及其与人脸状态的联动属于业务状态机；当前行已由调用入口加锁。
+        String status = ComplianceValidation.kycStatus(rawStatus);
+        if (!List.of("PENDING", "VERIFIED", "REJECTED").contains(status)) {
+            throw new IllegalArgumentException("provider KYC status is invalid");
+        }
+        String faceStatus = current.faceVerificationStatus();
+        if ("PENDING".equals(faceStatus)) {
+            faceStatus = switch (status) {
+                case "VERIFIED" -> "VERIFIED";
+                case "REJECTED" -> "FAILED";
+                default -> faceStatus;
+            };
+        }
+        return kycRepository.applyProviderResult(current.userId(), provider, status,
+                "REJECTED".equals(status) ? ComplianceValidation.blankToNull(rejectionReason) : null,
+                "PENDING".equals(status) ? null : now, faceStatus, now);
     }
 
     private void enqueueKycTransition(KycProfile previous, KycProfile updated) {
@@ -299,6 +318,7 @@ public class ComplianceService {
         }
     }
 
+    @Transactional
     public RiskTag adminCreateRiskTag(String authorization,
                                       long userId,
                                       RiskTagCreateRequest request,
@@ -309,6 +329,7 @@ public class ComplianceService {
         return createRiskTag(userId, principal.userId(), request, Instant.now());
     }
 
+    @Transactional
     public RiskTag adminResolveRiskTag(String authorization,
                                        long tagId,
                                        AdminRequestMetadata metadata,
@@ -317,6 +338,7 @@ public class ComplianceService {
         return resolveRiskTag(tagId, principal.userId(), Instant.now());
     }
 
+    @Transactional
     public AmlCase adminCreateAmlCase(String authorization,
                                       long userId,
                                       AmlCaseCreateRequest request,
@@ -327,6 +349,7 @@ public class ComplianceService {
         return createAmlCase(userId, principal.userId(), request, Instant.now());
     }
 
+    @Transactional
     public AmlCase adminUpdateAmlCaseStatus(String authorization,
                                             long caseId,
                                             AmlCaseStatusUpdateRequest request,
@@ -413,11 +436,16 @@ public class ComplianceService {
                                  long adminUserId,
                                  RiskTagCreateRequest request,
                                  Instant now) {
-        return riskTagRepository.create(userId, adminUserId, request, now);
+        try {
+            return riskTagRepository.create(userId, adminUserId, request, now);
+        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+            throw new IllegalArgumentException("active risk tag already exists", duplicate);
+        }
     }
 
     public RiskTag resolveRiskTag(long tagId, long adminUserId, Instant now) {
-        return riskTagRepository.resolve(tagId, adminUserId, now);
+        return riskTagRepository.resolve(tagId, adminUserId, now)
+                .orElseThrow(() -> new IllegalArgumentException("risk tag not found"));
     }
 
     public List<AmlCase> amlCases(Long userId, String status, int limit) {
@@ -441,7 +469,9 @@ public class ComplianceService {
                                        long adminUserId,
                                        AmlCaseStatusUpdateRequest request,
                                        Instant now) {
-        return amlCaseRepository.updateStatus(caseId, adminUserId, request, now);
+        Instant closedAt = List.of("CLEARED", "CLOSED").contains(request.status()) ? now : null;
+        return amlCaseRepository.updateStatus(caseId, adminUserId, request.status(), request.riskScore(), closedAt, now)
+                .orElseThrow(() -> new IllegalArgumentException("aml case not found"));
     }
 
     /**

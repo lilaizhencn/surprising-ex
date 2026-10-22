@@ -7,7 +7,6 @@ import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 
 import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCase;
 import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseCreateRequest;
-import com.surprising.gateway.provider.auth.model.ComplianceModels.AmlCaseStatusUpdateRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -78,37 +77,32 @@ public class ComplianceAmlCaseRepository {
                 RETURNING case_id, user_id, status, risk_score, source, summary, assigned_admin_user_id,
                           created_by_user_id, reviewed_by_user_id, reviewed_at, closed_at, created_at, updated_at
                 """, (rs, rowNum) -> toAmlCase(rs),
-                userId, ComplianceValidation.amlStatus(
-                        ComplianceValidation.defaultString(request.status(), "OPEN")),
-                ComplianceValidation.riskScore(request.riskScore()),
-                ComplianceValidation.blankToNull(request.source()),
-                ComplianceValidation.requiredText(request.summary(), "summary"),
+                userId, request.status(),
+                request.riskScore(),
+                request.source(),
+                request.summary(),
                 request.assignedAdminUserId(), adminUserId, Timestamp.from(now), Timestamp.from(now));
     }
 
-    public AmlCase updateStatus(long caseId,
+    public java.util.Optional<AmlCase> updateStatus(long caseId,
                                 long adminUserId,
-                                AmlCaseStatusUpdateRequest request,
-                                Instant now) {
-        String status = ComplianceValidation.amlStatus(request.status());
-        boolean closed = List.of("CLEARED", "CLOSED").contains(status);
+                                String status, Integer riskScore, Instant closedAt, Instant now) {
         return jdbcTemplate.query("""
                 UPDATE gateway_user_aml_cases
                    SET status = ?,
                        risk_score = COALESCE(?, risk_score),
                        reviewed_by_user_id = ?,
                        reviewed_at = ?,
-                       closed_at = CASE WHEN ? THEN ? ELSE closed_at END,
+                       closed_at = COALESCE(?, closed_at),
                        updated_at = ?
                  WHERE case_id = ?
                 RETURNING case_id, user_id, status, risk_score, source, summary, assigned_admin_user_id,
                           created_by_user_id, reviewed_by_user_id, reviewed_at, closed_at, created_at, updated_at
                 """, (rs, rowNum) -> toAmlCase(rs),
-                status, request.riskScore() == null ? null : ComplianceValidation.riskScore(request.riskScore()),
-                adminUserId, Timestamp.from(now), closed, Timestamp.from(now), Timestamp.from(now), caseId)
+                status, riskScore, adminUserId, Timestamp.from(now),
+                ComplianceValidation.timestamp(closedAt), Timestamp.from(now), caseId)
                 .stream()
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("aml case not found"));
+                .findFirst();
     }
 
     private AmlCase toAmlCase(java.sql.ResultSet rs) throws java.sql.SQLException {

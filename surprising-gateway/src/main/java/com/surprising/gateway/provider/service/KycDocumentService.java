@@ -1,5 +1,8 @@
 package com.surprising.gateway.provider.service;
 
+import tools.jackson.databind.JsonNode;
+import java.util.Locale;
+import java.util.Set;
 import com.surprising.gateway.provider.storage.KycDocumentStorageService;
 import com.surprising.gateway.provider.exception.KycDocumentNotFoundException;
 import com.surprising.gateway.provider.exception.KycDocumentStorageException;
@@ -12,9 +15,7 @@ import com.surprising.gateway.provider.model.KycDocumentUpload;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -193,7 +194,7 @@ public class KycDocumentService {
     public String references(List<KycDocument> documents, java.time.LocalDate expiresOn,
                              java.time.LocalDate addressIssuedOn, java.time.LocalDate documentIssuedOn) {
         try {
-            return objectMapper.writeValueAsString(documents.stream()
+            return validateReferences(objectMapper.writeValueAsString(documents.stream()
                     .map(document -> Map.of(
                             "type", document.documentType(),
                             "reference", "document:" + document.documentId(),
@@ -201,7 +202,7 @@ public class KycDocumentService {
                             "documentExpiresOn", expiresOn == null ? "" : expiresOn.toString(),
                             "documentIssuedOn", document.documentType().startsWith("ID_CARD_") && documentIssuedOn != null ? documentIssuedOn.toString() : "",
                             "addressIssuedOn", "ADDRESS_PROOF".equals(document.documentType()) && addressIssuedOn != null ? addressIssuedOn.toString() : ""))
-                    .toList());
+                    .toList()));
         } catch (JacksonException ex) {
             throw new IllegalStateException("KYC document references cannot be serialized", ex);
         }
@@ -220,5 +221,38 @@ public class KycDocumentService {
         } catch (Exception ex) {
             throw new IllegalStateException("SHA-256 is not available", ex);
         }
+    }
+    private String validateReferences(String value) {
+        String normalized = value == null || value.isBlank() ? "[]" : value.trim();
+        try {
+            JsonNode parsed = objectMapper.readTree(normalized);
+            if (parsed == null || !parsed.isArray()) {
+                throw new IllegalArgumentException("submittedDocuments must be a JSON array");
+            }
+            if (parsed.size() > 10) {
+                throw new IllegalArgumentException("submittedDocuments may contain at most 10 items");
+            }
+            Set<String> allowedTypes = Set.of(
+                    "DRIVING_LICENSE", "DRIVING_LICENSE_FRONT", "DRIVING_LICENSE_BACK", "RESIDENCE_PERMIT", "RESIDENCE_PERMIT_FRONT", "RESIDENCE_PERMIT_BACK", "ID_CARD", "ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
+            for (JsonNode document : parsed) {
+                if (!document.isObject()) {
+                    throw new IllegalArgumentException("each submitted document must be an object");
+                }
+                JsonNode type = document.get("type");
+                JsonNode reference = document.get("reference");
+                String normalizedType = type == null ? "" : type.asString("").trim().toUpperCase(Locale.ROOT);
+                String normalizedReference = reference == null ? "" : reference.asString("").trim();
+                if (!allowedTypes.contains(normalizedType) || normalizedReference.isBlank()
+                        || normalizedReference.length() > 240) {
+                    throw new IllegalArgumentException("submitted document type or reference is invalid");
+                }
+            }
+        } catch (JacksonException ex) {
+            throw new IllegalArgumentException("submittedDocuments must be valid JSON", ex);
+        }
+        if (normalized.length() > 8000) {
+            throw new IllegalArgumentException("submittedDocuments must be a JSON array");
+        }
+        return normalized;
     }
 }

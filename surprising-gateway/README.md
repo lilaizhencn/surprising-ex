@@ -552,3 +552,5 @@ Binance APIKey请求由 `auth.controller.ApiKeyRequestBinding` 绑定原生 `Api
 审批Header通过 `AdminApprovalRequestBinding.reference` 在Controller绑定为 `AdminApprovalReference`，`AdminRequestMetadata`位于auth.model；原生审批失败位于provider.exception。引用记录精确Long与输入格式事实，普通审批开关/C2C强制双人审批仍归Service判断，不保留原始Header字符串。
 
 客服工单的参数和格式校验由 `provider.controller.SupportRequestBinding` 负责；工单列表正limit夹取100，备注夹取1..500、默认创建时间正序。`SupportTicketService`负责权限、工单和备注事务以及状态元数据，Repository只接受原生AuthPageQuery与待持久化字段。重新打开工单会清空关闭时间并保留上一处理人；共享结果归auth.model，原生失败归provider.exception。
+
+合规写入的HTTP格式通过 `auth.controller.ComplianceRequestBinding` 绑定；`ComplianceService` 在事务内处理管理员审批消费、KYC结果/人脸状态、AML关闭时间与风险标签冲突。三个合规Repository各自只操作一张表并返回持久化事实。资料引用由 `KycDocumentService` 按用户实际拥有的资料生成并验证；客户端提交的引用提示不作为存储事实。AML重新打开保留原关闭时间，空分数沿用原值。

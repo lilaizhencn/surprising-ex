@@ -148,13 +148,15 @@ class ComplianceServiceTest {
                 org.mockito.ArgumentMatchers.startsWith("SIMULATION:"), org.mockito.ArgumentMatchers.any())).thenReturn(true);
         when(kycRepository.applyProviderResult(org.mockito.ArgumentMatchers.eq(42L),
                 org.mockito.ArgumentMatchers.eq("SUMSUB"), org.mockito.ArgumentMatchers.eq("VERIFIED"),
-                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any()))
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("VERIFIED"), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(verified);
 
         assertThat(service.completeKycSimulation("Bearer user-token", "APPROVED").status()).isEqualTo("VERIFIED");
         verify(kycRepository).applyProviderResult(org.mockito.ArgumentMatchers.eq(42L),
                 org.mockito.ArgumentMatchers.eq("SUMSUB"), org.mockito.ArgumentMatchers.eq("VERIFIED"),
-                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any());
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("VERIFIED"), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -186,6 +188,6 @@ class ComplianceServiceTest {
         verify(kycRepository, org.mockito.Mockito.never()).applyProviderResult(
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.nullable(String.class),
-                org.mockito.ArgumentMatchers.any());
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
     }
 }

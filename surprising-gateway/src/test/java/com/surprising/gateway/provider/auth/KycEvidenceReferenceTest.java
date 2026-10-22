@@ -29,14 +29,14 @@ class KycEvidenceReferenceTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = {"DRIVING_LICENSE", "RESIDENCE_PERMIT"})
     void persistsAdditionalIdentityEvidence(String type) {
-        var repository = new ComplianceKycRepository(mock(JdbcTemplate.class), new ObjectMapper());
+        var repository = new ComplianceKycRepository(mock(JdbcTemplate.class));
         var request = new ComplianceModels.KycSubmissionRequest("INDIVIDUAL", "BASIC", "SG", type, "SELF", null, null, "NOT_REQUIRED", List.of(1L, 2L));
         assertThatCode(() -> repository.submit(42, request,
             "[{\"type\":\"" + type + "_FRONT\",\"reference\":\"document:1\"},{\"type\":\"" + type + "_BACK\",\"reference\":\"document:2\"}]", Instant.now())).doesNotThrowAnyException();
     }
     @Test void persistsSeparatedIdentityCardEvidenceWithDates() {
         var jdbc = mock(JdbcTemplate.class);
-        var repository = new ComplianceKycRepository(jdbc, new ObjectMapper());
+        var repository = new ComplianceKycRepository(jdbc);
         var request = new ComplianceModels.KycSubmissionRequest("INDIVIDUAL", "STANDARD", "SG", "ID_CARD", "SELF", null, null, "NOT_REQUIRED", List.of(1L, 2L, 3L, 4L));
         String references = """
                 [{"type":"ID_CARD_FRONT","reference":"document:1","documentExpiresOn":"2030-01-01"},
@@ -45,8 +45,18 @@ class KycEvidenceReferenceTest {
                  {"type":"ADDRESS_PROOF","reference":"document:4","addressIssuedOn":"2026-10-01"}]
                 """;
         assertThatCode(() -> repository.submit(42, request, references, Instant.now())).doesNotThrowAnyException();
-        assertThatThrownBy(() -> repository.submit(42, request,
-                "[{\"type\":\"UNKNOWN\",\"reference\":\"document:1\"}]", Instant.now()))
+        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper());
+        var invalid = new KycDocument(1, 42, "UNKNOWN", "unknown.png", "image/png", 10,
+                "hash", "UPLOADED", Instant.now(), null);
+        assertThatThrownBy(() -> service.references(List.of(invalid)))
                 .hasMessageContaining("type or reference is invalid");
+    }
+
+    @Test void generatedEvidenceRejectsMoreThanTenDocuments() {
+        var service = new KycDocumentService(mock(), mock(), new GatewayProperties(), new ObjectMapper());
+        var document = new KycDocument(1, 42, "PASSPORT", "passport.png", "image/png", 10,
+                "hash", "UPLOADED", Instant.now(), null);
+        assertThatThrownBy(() -> service.references(java.util.Collections.nCopies(11, document)))
+                .hasMessageContaining("at most 10 items");
     }
 }

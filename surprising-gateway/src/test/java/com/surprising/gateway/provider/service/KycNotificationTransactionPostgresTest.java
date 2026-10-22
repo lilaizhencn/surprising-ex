@@ -72,7 +72,7 @@ class KycNotificationTransactionPostgresTest {
         for (String statement : Files.readString(Path.of("../deployment/migrations/20261021-security-notification-outbox.sql")).split(";")) {
             if (!statement.isBlank()) jdbc.execute(statement);
         }
-        profiles = new ComplianceKycRepository(jdbc, new ObjectMapper());
+        profiles = new ComplianceKycRepository(jdbc);
         profiles.upsert(42, 7, update("PENDING"), Instant.now().minusSeconds(1));
         notifications = new SecurityNotificationService(new SecurityEmailNotificationRepository(jdbc),
                 (recipient, subject, body) -> delivered.add(subject));

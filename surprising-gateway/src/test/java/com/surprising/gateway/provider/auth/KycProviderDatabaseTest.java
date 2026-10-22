@@ -49,7 +49,7 @@ class KycProviderDatabaseTest {
                     PRIMARY KEY(provider, event_key))
                 """);
         jdbc.update("INSERT INTO gateway_users(user_id) VALUES (1)");
-        repository = new ComplianceKycRepository(jdbc, new ObjectMapper());
+        repository = new ComplianceKycRepository(jdbc);
     }
 
     @AfterEach
@@ -65,7 +65,7 @@ class KycProviderDatabaseTest {
         assertThat(submitted.provider()).isEqualTo("SUMSUB");
         assertThat(new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc).record("SUMSUB", "event-1", now)).isTrue();
         assertThat(new com.surprising.gateway.provider.auth.repository.KycProviderEventRepository(jdbc).record("SUMSUB", "event-1", now)).isFalse();
-        var verified = repository.applyProviderResult(1L, "SUMSUB", "VERIFIED", null, now.plusSeconds(1));
+        var verified = repository.applyProviderResult(1L, "SUMSUB", "VERIFIED", null, now.plusSeconds(1), "VERIFIED", now.plusSeconds(1));
         assertThat(verified.status()).isEqualTo("VERIFIED");
         assertThat(verified.faceVerificationStatus()).isEqualTo("VERIFIED");
     }

@@ -58,7 +58,7 @@ class KycProviderConcurrencyPostgresTest {
         for(String table:List.of("gateway_user_kyc_profiles","gateway_kyc_provider_events")) {
             int a=init.indexOf("CREATE TABLE IF NOT EXISTS "+table+" (");jdbc.execute(init.substring(a,init.indexOf("\n);",a)+3));
         }
-        profiles=new ComplianceKycRepository(jdbc,new ObjectMapper()) {
+        profiles=new ComplianceKycRepository(jdbc) {
             @Override public KycProfile findForUpdate(long userId) {
                 var row=super.findForUpdate(userId);lockedReads.incrementAndGet();
                 if(pauseRead) {
@@ -109,7 +109,7 @@ class KycProviderConcurrencyPostgresTest {
             var callback=executor.submit(this::callback);Future<KycProfile> submission=null;
             try {
                 assertThat(held.await(5,TimeUnit.SECONDS)).isTrue();
-                submission=executor.submit(()->new ComplianceKycRepository(independent,new ObjectMapper()).submit(42,request("session-new"),"[]",Instant.now()));
+                submission=executor.submit(()->new ComplianceKycRepository(independent).submit(42,request("session-new"),"[]",Instant.now()));
                 long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);boolean blocked=false;
                 while(System.nanoTime()<deadline && !submission.isDone()) {
                     blocked=admin.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE application_name='mvc_kyc_resubmitter' AND wait_event_type='Lock'",Integer.class)>0;
@@ -122,7 +122,7 @@ class KycProviderConcurrencyPostgresTest {
         assertThat(profiles.find(42).providerReference()).isEqualTo("session-new");assertThat(profiles.find(42).status()).isEqualTo("PENDING");
     }
     @Test void simulationDoesNotApplyAnOldDecisionAfterItsSnapshotWasReplaced() {
-        afterEvent=()->new ComplianceKycRepository(independent,new ObjectMapper()).submit(42,request("session-new"),"[]",Instant.now());
+        afterEvent=()->new ComplianceKycRepository(independent).submit(42,request("session-new"),"[]",Instant.now());
         assertThatThrownBy(()->service.completeKycSimulation("auth","APPROVED")).isInstanceOf(IllegalStateException.class).hasMessageContaining("session changed");
         assertThat(profiles.find(42).providerReference()).isEqualTo("session-new");assertThat(profiles.find(42).status()).isEqualTo("PENDING");assertThat(events()).isZero();
     }

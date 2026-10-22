@@ -11,7 +11,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -70,25 +69,21 @@ public class ComplianceRiskTagRepository {
     }
 
     public RiskTag create(long userId, long adminUserId, RiskTagCreateRequest request, Instant now) {
-        try {
-            return jdbcTemplate.queryForObject("""
-                    INSERT INTO gateway_user_risk_tags (
-                        user_id, tag_code, severity, status, source, reason, created_by_user_id, created_at, updated_at
-                    ) VALUES (?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?)
-                    RETURNING tag_id, user_id, tag_code, severity, status, source, reason,
-                              created_by_user_id, resolved_by_user_id, created_at, resolved_at, updated_at
-                    """, (rs, rowNum) -> toRiskTag(rs),
-                    userId, ComplianceValidation.tagCode(request.tagCode()),
-                    ComplianceValidation.severity(request.severity()),
-                    ComplianceValidation.blankToNull(request.source()),
-                    ComplianceValidation.requiredText(request.reason(), "reason"), adminUserId,
-                    Timestamp.from(now), Timestamp.from(now));
-        } catch (DuplicateKeyException ex) {
-            throw new IllegalArgumentException("active risk tag already exists", ex);
-        }
+        return jdbcTemplate.queryForObject("""
+                INSERT INTO gateway_user_risk_tags (
+                    user_id, tag_code, severity, status, source, reason, created_by_user_id, created_at, updated_at
+                ) VALUES (?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?)
+                RETURNING tag_id, user_id, tag_code, severity, status, source, reason,
+                          created_by_user_id, resolved_by_user_id, created_at, resolved_at, updated_at
+                """, (rs, rowNum) -> toRiskTag(rs),
+                userId, request.tagCode(),
+                request.severity(),
+                request.source(),
+                request.reason(), adminUserId,
+                Timestamp.from(now), Timestamp.from(now));
     }
 
-    public RiskTag resolve(long tagId, long adminUserId, Instant now) {
+    public java.util.Optional<RiskTag> resolve(long tagId, long adminUserId, Instant now) {
         return jdbcTemplate.query("""
                 UPDATE gateway_user_risk_tags
                    SET status = 'RESOLVED',
@@ -100,8 +95,7 @@ public class ComplianceRiskTagRepository {
                           created_by_user_id, resolved_by_user_id, created_at, resolved_at, updated_at
                 """, (rs, rowNum) -> toRiskTag(rs), adminUserId, Timestamp.from(now), Timestamp.from(now), tagId)
                 .stream()
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("risk tag not found"));
+                .findFirst();
     }
 
     private RiskTag toRiskTag(java.sql.ResultSet rs) throws java.sql.SQLException {

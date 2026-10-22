@@ -103,7 +103,7 @@ class AdminComplianceControllerTest {
         ComplianceService service = mock(ComplianceService.class);
         Instant now = Instant.parse("2026-07-02T00:00:00Z");
         KycProfile profile = new KycProfile(42L, "STANDARD", "VERIFIED", "SG", "PASSPORT",
-                "manual", "case-1", 7L, now, null, null, now, now);
+                "SELF", "case-1", 7L, now, null, null, now, now);
         when(service.approvalHeaderName()).thenReturn("X-Admin-Approval-Id");
         when(service.adminUpsertKyc(
                 eq("Bearer admin"), eq(42L), any(), any(), any())).thenReturn(profile);
@@ -112,7 +112,7 @@ class AdminComplianceControllerTest {
                 "POST", "/api/v1/admin/compliance/users/42/kyc");
         request.addHeader("X-Admin-Approval-Id", "77");
         byte[] body = """
-                {"kycLevel":"STANDARD","status":"VERIFIED","country":"SG","documentType":"PASSPORT","provider":"manual","providerReference":"case-1"}
+                {"kycLevel":"STANDARD","status":"VERIFIED","country":"SG","documentType":"PASSPORT","provider":"SELF","providerReference":"case-1"}
                 """.getBytes();
 
         var response = controller.updateKyc("Bearer admin", 42L, body, request);

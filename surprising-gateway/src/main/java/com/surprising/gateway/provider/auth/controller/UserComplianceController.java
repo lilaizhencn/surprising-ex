@@ -91,7 +91,7 @@ public class UserComplianceController {
     public KycSubmissionResponse submitKyc(@RequestHeader("Authorization") String authorization,
                                 @Valid @RequestBody KycSubmissionRequest request) {
         try {
-            return complianceService.submitUserKyc(authorization, request);
+            return complianceService.submitUserKyc(authorization, ComplianceRequestBinding.submission(request));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -118,7 +118,7 @@ public class UserComplianceController {
     public ResponseEntity<Void> providerWebhook(@PathVariable String provider,
             @RequestHeader HttpHeaders headers, @RequestBody byte[] body) {
         try {
-            complianceService.applyProviderCallback(provider, headers.toSingleValueMap(), body);
+            complianceService.applyProviderCallback(com.surprising.gateway.provider.auth.utils.ComplianceValidation.provider(provider), headers.toSingleValueMap(), body);
             return ResponseEntity.ok().build();
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, ex.getMessage(), ex);

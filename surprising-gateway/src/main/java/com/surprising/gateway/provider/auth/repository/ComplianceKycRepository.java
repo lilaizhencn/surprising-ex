@@ -7,13 +7,8 @@ import com.surprising.gateway.provider.auth.model.ComplianceModels.KycSubmission
 import com.surprising.gateway.provider.auth.model.ComplianceModels.KycUpdateRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.Locale;
-import java.util.Set;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import tools.jackson.core.JacksonException;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
 /**
  * 只负责 {@code gateway_user_kyc_profiles} 表。
@@ -22,11 +17,9 @@ import tools.jackson.databind.ObjectMapper;
 public class ComplianceKycRepository {
 
     private final JdbcTemplate jdbcTemplate;
-    private final ObjectMapper objectMapper;
 
-    public ComplianceKycRepository(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    public ComplianceKycRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
-        this.objectMapper = java.util.Objects.requireNonNull(objectMapper,"KYC JSON mapper is required");
     }
 
     public KycProfile upsert(long userId, long adminUserId, KycUpdateRequest request, Instant now) {
@@ -51,13 +44,12 @@ public class ComplianceKycRepository {
                           reviewed_by_user_id, reviewed_at, rejection_reason, expires_at, created_at, updated_at,
                           applicant_type, submitted_documents::text, face_verification_status
                 """, (rs, rowNum) -> toProfile(rs),
-                userId, ComplianceValidation.kycLevel(request.kycLevel()),
-                ComplianceValidation.kycStatus(request.status()), ComplianceValidation.country(request.country()),
-                ComplianceValidation.blankToNull(request.documentType()),
-                ComplianceValidation.provider(request.provider()),
-                ComplianceValidation.providerReference(ComplianceValidation.provider(request.provider()),
-                        request.providerReference()), adminUserId, Timestamp.from(now),
-                ComplianceValidation.blankToNull(request.rejectionReason()),
+                userId, request.kycLevel(),
+                request.status(), request.country(),
+                request.documentType(),
+                request.provider(),
+                request.providerReference(), adminUserId, Timestamp.from(now),
+                request.rejectionReason(),
                 ComplianceValidation.timestamp(request.expiresAt()), Timestamp.from(now), Timestamp.from(now));
     }
 
@@ -91,15 +83,14 @@ public class ComplianceKycRepository {
                           reviewed_by_user_id, reviewed_at, rejection_reason, expires_at, created_at, updated_at,
                           applicant_type, submitted_documents::text, face_verification_status
                 """, (rs, rowNum) -> toProfile(rs),
-                userId, ComplianceValidation.kycLevel(request.kycLevel()),
-                ComplianceValidation.country(request.country()),
-                ComplianceValidation.blankToNull(request.documentType()),
-                ComplianceValidation.provider(request.provider()),
-                ComplianceValidation.providerReference(ComplianceValidation.provider(request.provider()),
-                        request.providerReference()),
-                documents(submittedDocuments),
-                applicantType(request.applicantType()),
-                faceStatus(request.faceVerificationStatus()),
+                userId, request.kycLevel(),
+                request.country(),
+                request.documentType(),
+                request.provider(),
+                request.providerReference(),
+                submittedDocuments,
+                request.applicantType(),
+                request.faceVerificationStatus(),
                 Timestamp.from(now), Timestamp.from(now));
     }
 
@@ -124,31 +115,20 @@ public class ComplianceKycRepository {
                 """, (rs, rowNum) -> toProfile(rs), userId).stream().findFirst().orElse(null);
     }
 
-
-
-
-    public KycProfile applyProviderResult(long userId, String provider, String status, String rejectionReason, Instant now) {
-        String normalizedStatus = ComplianceValidation.kycStatus(status);
-        if (!Set.of("PENDING", "VERIFIED", "REJECTED").contains(normalizedStatus)) {
-            throw new IllegalArgumentException("provider KYC status is invalid");
-        }
+    public KycProfile applyProviderResult(long userId, String provider, String status, String rejectionReason, Instant reviewedAt, String faceStatus, Instant now) {
         return jdbcTemplate.queryForObject("""
                 UPDATE gateway_user_kyc_profiles
                    SET status = ?, rejection_reason = ?,
                        reviewed_by_user_id = NULL,
-                       reviewed_at = CASE WHEN ? = 'PENDING' THEN NULL::timestamptz ELSE ?::timestamptz END,
-                       face_verification_status = CASE WHEN ? = 'VERIFIED' AND face_verification_status = 'PENDING' THEN 'VERIFIED'
-                                                       WHEN ? = 'REJECTED' AND face_verification_status = 'PENDING' THEN 'FAILED'
-                                                       ELSE face_verification_status END,
+                       reviewed_at = ?,
+                       face_verification_status = ?,
                        updated_at = ?
                  WHERE user_id = ? AND provider = ?
                 RETURNING user_id, kyc_level, status, country, document_type, provider, provider_reference,
                           reviewed_by_user_id, reviewed_at, rejection_reason, expires_at, created_at, updated_at,
                           applicant_type, submitted_documents::text, face_verification_status
-                """, (rs, rowNum) -> toProfile(rs), normalizedStatus,
-                "REJECTED".equals(normalizedStatus) ? ComplianceValidation.blankToNull(rejectionReason) : null,
-                normalizedStatus, Timestamp.from(now), normalizedStatus, normalizedStatus, Timestamp.from(now), userId,
-                ComplianceValidation.provider(provider));
+                """, (rs, rowNum) -> toProfile(rs), status, rejectionReason,
+                ComplianceValidation.timestamp(reviewedAt), faceStatus, Timestamp.from(now), userId, provider);
     }
 
     private KycProfile toProfile(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -170,53 +150,4 @@ public class ComplianceKycRepository {
                 rs.getString("face_verification_status"));
     }
 
-    private String documents(String value) {
-        String normalized = value == null || value.isBlank() ? "[]" : value.trim();
-        try {
-            JsonNode parsed = objectMapper.readTree(normalized);
-            if (parsed == null || !parsed.isArray()) {
-                throw new IllegalArgumentException("submittedDocuments must be a JSON array");
-            }
-            if (parsed.size() > 10) {
-                throw new IllegalArgumentException("submittedDocuments may contain at most 10 items");
-            }
-            Set<String> allowedTypes = Set.of(
-                    "DRIVING_LICENSE", "DRIVING_LICENSE_FRONT", "DRIVING_LICENSE_BACK", "RESIDENCE_PERMIT", "RESIDENCE_PERMIT_FRONT", "RESIDENCE_PERMIT_BACK", "ID_CARD", "ID_CARD_FRONT", "ID_CARD_BACK", "ID_CARD_SELFIE", "PASSPORT", "ADDRESS_PROOF", "BUSINESS_LICENSE", "FACE_IMAGE");
-            for (JsonNode document : parsed) {
-                if (!document.isObject()) {
-                    throw new IllegalArgumentException("each submitted document must be an object");
-                }
-                JsonNode type = document.get("type");
-                JsonNode reference = document.get("reference");
-                String normalizedType = type == null ? "" : type.asString("").trim().toUpperCase(Locale.ROOT);
-                String normalizedReference = reference == null ? "" : reference.asString("").trim();
-                if (!allowedTypes.contains(normalizedType) || normalizedReference.isBlank()
-                        || normalizedReference.length() > 240) {
-                    throw new IllegalArgumentException("submitted document type or reference is invalid");
-                }
-            }
-        } catch (JacksonException ex) {
-            throw new IllegalArgumentException("submittedDocuments must be valid JSON", ex);
-        }
-        if (normalized.length() > 8000) {
-            throw new IllegalArgumentException("submittedDocuments must be a JSON array");
-        }
-        return normalized;
-    }
-
-    private String applicantType(String value) {
-        String normalized = value == null ? "" : value.trim().toUpperCase();
-        if (!normalized.equals("INDIVIDUAL") && !normalized.equals("BUSINESS")) {
-            throw new IllegalArgumentException("applicantType must be INDIVIDUAL or BUSINESS");
-        }
-        return normalized;
-    }
-
-    private String faceStatus(String value) {
-        String normalized = value == null || value.isBlank() ? "NOT_REQUIRED" : value.trim().toUpperCase();
-        if (!normalized.matches("NOT_REQUIRED|PENDING")) {
-            throw new IllegalArgumentException("faceVerificationStatus may only be NOT_REQUIRED or PENDING");
-        }
-        return normalized;
-    }
 }
