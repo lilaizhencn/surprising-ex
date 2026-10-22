@@ -1,0 +1,853 @@
+{
+  "objective": "把原始17项MVC职责问题彻底解决",
+  "verified_at_utc": "2026-10-22T02:57:09.081226+00:00",
+  "head_before_completion_report": "fb7c194e0cfa63d8512f789942d436f234ef2c3e",
+  "requirements": [
+    {
+      "id": "ADD-063",
+      "original_rule": "REPOSITORY_REQUEST_PAGINATION",
+      "original_path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/repository/AdlEventRepository.java",
+      "original_requirement": "深扫确认：Repository仍调用AdminCursorPage.limit/parseSort/decodeCursor解释原始HTTP分页与游标；需Controller绑定原生查询，保留SQL排序、seek和数据库事实映射。",
+      "current_evidence": "docs/validation/java-mvc17-lifecycle-history-20261022.json",
+      "batch": "lifecycle-history",
+      "source_checks": [
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/repository/AdlEventRepository.java",
+          "required_literals": [
+            "AdlEventPageQuery"
+          ],
+          "forbidden_literals": [
+            "AdminCursorPage.decodeCursor",
+            "AdminCursorPage.parseSort",
+            "AdminCursorPage.limit"
+          ],
+          "sha256": "ddf3bf2c61616d5f32a334defcfcb3a9307addeca51c1c92eca23691d44fa0cc"
+        },
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/controller/AdlController.java",
+          "required_literals": [
+            "AdlEventPageQuery"
+          ],
+          "forbidden_literals": [],
+          "sha256": "b133990c1499b4d98b7e7cfb66b962c80fb56512676d7027e6ffde9e81f8b766"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-064",
+      "original_rule": "REPOSITORY_REQUEST_PAGINATION",
+      "original_path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/repository/InsuranceCoverageRepository.java",
+      "original_requirement": "深扫确认：Repository仍调用AdminCursorPage.limit/parseSort/decodeCursor解释原始HTTP分页与游标；需Controller绑定原生查询，保留SQL排序、seek和数据库事实映射。",
+      "current_evidence": "docs/validation/java-mvc17-lifecycle-history-20261022.json",
+      "batch": "lifecycle-history",
+      "source_checks": [
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/repository/InsuranceCoverageRepository.java",
+          "required_literals": [
+            "InsuranceHistoryPageQuery"
+          ],
+          "forbidden_literals": [
+            "AdminCursorPage.decodeCursor",
+            "AdminCursorPage.parseSort",
+            "AdminCursorPage.limit"
+          ],
+          "sha256": "387d5aa06d7071345f5be06388efdfb5586ee15df8918d63f3c601db6b55b069"
+        },
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/controller/InsuranceController.java",
+          "required_literals": [
+            "InsuranceHistoryPageQuery"
+          ],
+          "forbidden_literals": [],
+          "sha256": "920aa586213b427fe250b4bef2046ff1569ddf935ccf51dd1a633c5805235ec4"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-065",
+      "original_rule": "REPOSITORY_REQUEST_PAGINATION",
+      "original_path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/repository/InsuranceFundLedgerRepository.java",
+      "original_requirement": "深扫确认：Repository仍调用AdminCursorPage.limit/parseSort/decodeCursor解释原始HTTP分页与游标；需Controller绑定原生查询，保留SQL排序、seek和数据库事实映射。",
+      "current_evidence": "docs/validation/java-mvc17-lifecycle-history-20261022.json",
+      "batch": "lifecycle-history",
+      "source_checks": [
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/repository/InsuranceFundLedgerRepository.java",
+          "required_literals": [
+            "InsuranceHistoryPageQuery"
+          ],
+          "forbidden_literals": [
+            "AdminCursorPage.decodeCursor",
+            "AdminCursorPage.parseSort",
+            "AdminCursorPage.limit"
+          ],
+          "sha256": "bd0a440b0c8da7c5f0883254dcc1b5dee9787bc8c57d4ef5b442716be611d49a"
+        },
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/controller/InsuranceController.java",
+          "required_literals": [
+            "InsuranceHistoryPageQuery"
+          ],
+          "forbidden_literals": [],
+          "sha256": "920aa586213b427fe250b4bef2046ff1569ddf935ccf51dd1a633c5805235ec4"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-081",
+      "original_rule": "REPOSITORY_REQUEST_PAGINATION",
+      "original_path": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/repository/InMemoryMarketMakerRunEventRepository.java",
+      "original_requirement": "深扫确认：Repository仍调用AdminCursorPage.limit/parseSort/decodeCursor解释原始HTTP分页与游标；需Controller绑定原生查询，保留SQL排序、seek和数据库事实映射。",
+      "current_evidence": "docs/validation/java-mvc17-maker-20261022.json",
+      "batch": "maker",
+      "source_checks": [
+        {
+          "path": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/repository/InMemoryMarketMakerRunEventRepository.java",
+          "required_literals": [
+            "MarketMakerRunEventPageQuery",
+            "CAPACITY = 2048"
+          ],
+          "forbidden_literals": [
+            "AdminCursorPage.decodeCursor",
+            "AdminCursorPage.parseSort",
+            "AdminCursorPage.limit"
+          ],
+          "sha256": "d39ad623a4608b906aed6c69d1d55a1688a013050caa908e2aee90db0c381192"
+        },
+        {
+          "path": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/controller/AdminMarketMakerController.java",
+          "required_literals": [
+            "eventPage(limit, cursor, sort)"
+          ],
+          "forbidden_literals": [],
+          "sha256": "fd49be35c4351dc1e4a66654e56fc38c5aa6ed8cacffcabd325afacf1ee614de"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-082",
+      "original_rule": "SERVICE_REQUEST_PAGINATION",
+      "original_path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java",
+      "original_requirement": "清算候选状态、limit、sort、cursor仍由Service解析；还有用户/资产/ruleCode格式，需区分产品/风险规则业务不变量。",
+      "current_evidence": "docs/validation/java-mvc17-risk-20261022.json",
+      "batch": "risk",
+      "source_checks": [
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java",
+          "required_literals": [
+            "LiquidationCandidatePageQuery"
+          ],
+          "forbidden_literals": [
+            "decodeCursor(",
+            "parseSort("
+          ],
+          "sha256": "8a1c31f4ebf212d56614014fc95fb50705fc674f86284489629b21b0461a1273"
+        },
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/controller/RiskRequestBinding.java",
+          "required_literals": [
+            "LiquidationCandidatePageQuery",
+            "candidates("
+          ],
+          "forbidden_literals": [],
+          "sha256": "c2411f4718cd88bd5c9e59af88fd4d732a71031e676cb4a84a52604479925830"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-084",
+      "original_rule": "SERVICE_REQUEST_FORMAT",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthService.java",
+      "original_requirement": "登录/注册/管理员操作仍在Service校验并解析username/email/phone/password/role/permission格式，需入口格式与账号注册开关/权限业务规则分开。",
+      "current_evidence": "docs/validation/java-mvc17-auth-input-20261022.json",
+      "batch": "auth-input",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthService.java",
+          "required_literals": [],
+          "forbidden_literals": [
+            "normalizeUsername(",
+            "normalizeLoginIdentifier(",
+            "validatePassword(",
+            "normalizeEmail(",
+            "normalizePhone(",
+            "normalizeRole(",
+            "normalizePermission("
+          ],
+          "sha256": "f62e620e3691e4e4b4822cac4a8ed69fac2f7dc249333a8dadb9d0a4a90adfb7"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/controller/AuthController.java",
+          "required_literals": [
+            "AuthRequestBinding.register(request)",
+            "AuthRequestBinding.login(request)"
+          ],
+          "forbidden_literals": [],
+          "sha256": "7e670bf95b179d32eeb428737a27ab64b3efd5b0cc31852f2726f2bfc87327f9"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-086",
+      "original_rule": "SERVICE_REQUEST_FORMAT",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/asset/service/AssetConfigurationService.java",
+      "original_requirement": "资产及网络输入码regex仍由Service检查；资产存在、精度变更和资金影响属于业务判断应保留。",
+      "current_evidence": "docs/validation/java-mvc17-asset-input-20261022.json",
+      "batch": "asset-input",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/asset/service/AssetConfigurationService.java",
+          "required_literals": [
+            "@Transactional",
+            "requireRevision",
+            "requireAmount"
+          ],
+          "forbidden_literals": [
+            "matches(",
+            "requireText("
+          ],
+          "sha256": "98ee5a7a481554be1a8a7af20b77701b19ebf02602328e4094786dffb1d13a82"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/asset/controller/AssetConfigurationController.java",
+          "required_literals": [
+            "validateAsset(json.readValue",
+            "validateNetwork(json.readValue",
+            "[A-Z0-9]{2,20}",
+            "[A-Z0-9][A-Z0-9_-]{0,31}"
+          ],
+          "forbidden_literals": [],
+          "sha256": "3d0edc23b770f417ac5da902c16137d760269143b3adc20ebd6e38c03931bef8"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-087",
+      "original_rule": "SERVICE_REQUEST_FORMAT",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminMarkets.java",
+      "original_requirement": "管理市场版本字符串格式与long转换仍在Service；需前移实际Controller，保留乐观版本比较和审批业务。",
+      "current_evidence": "docs/validation/java-mvc17-c2c-input-20261022.json",
+      "batch": "c2c-input",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminMarkets.java",
+          "required_literals": [],
+          "forbidden_literals": [
+            "static long version(",
+            "static void reason(",
+            "Long.parseLong("
+          ],
+          "sha256": "62251180ab6dc7bbf44125e711719f9f62624f3f8d15b6013d4497616af62e70"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cAdminController.java",
+          "required_literals": [
+            "Long.parseLong(value)",
+            "MerchantDecision(version(input.revision()",
+            "PaymentDecision(version(input.revision()",
+            "AdDecision(version(input.revision()"
+          ],
+          "forbidden_literals": [],
+          "sha256": "eb4617623ab415ffb7f70fad901028ca7f404733b8be257315a12d63c2b964ec"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-088",
+      "original_rule": "SERVICE_REQUEST_FORMAT",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cPaymentAccounts.java",
+      "original_requirement": "银行名称和卡号输入格式在Service；需入口格式检查，保留付款账号所有权、锁、配额与安全验证。",
+      "current_evidence": "docs/validation/java-mvc17-c2c-input-20261022.json",
+      "batch": "c2c-input",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cPaymentAccounts.java",
+          "required_literals": [
+            "methodPolicy.requiresBankName() && !input.bankDetailsComplete()"
+          ],
+          "forbidden_literals": [
+            "matches(\"[0-9]{8,40}\")"
+          ],
+          "sha256": "83d223181c536f221cc5d84fb581ee0dad5834ae6767ae1d20b78eb6168cd996"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cController.java",
+          "required_literals": [
+            "C2cPaymentFormats.input(request.details())"
+          ],
+          "forbidden_literals": [],
+          "sha256": "5ecbde4a41ef3e4976781111bb687fe6820616f74deb76bb50f4e3390649c5e5"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-089",
+      "original_rule": "SERVICE_REQUEST_FORMAT",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountService.java",
+      "original_requirement": "资产、requestId与clientId输入格式仍由Service执行；需入口归一，产品归属和资金幂等业务约束保留。 历史查询的ID/资产/引用格式已前移；实时余额/持仓入口格式仍需继续，故不关闭此项。",
+      "current_evidence": "docs/validation/java-mvc17-account-input-20261022.json",
+      "batch": "account-input",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountService.java",
+          "required_literals": [
+            "MarginMode marginMode",
+            "requireDerivativeProduct",
+            "ProductLineConfiguration.requireSame"
+          ],
+          "forbidden_literals": [
+            "normalizeAsset(",
+            "normalizeSymbol(",
+            "normalizeMarginMode(",
+            "normalizePositionSide(",
+            "String marginMode",
+            "String positionSide",
+            "requestId",
+            "clientId"
+          ],
+          "sha256": "a459d9b057cdd4d8393c265291951ff3ecfad7ce8e55696d2393f93f1f85f1d0"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountRequestController.java",
+          "required_literals": [
+            "AccountInputBinding.asset(asset)",
+            "AccountInputBinding.instrument(instrumentId)",
+            "AccountInputBinding.marginMode(marginMode)",
+            "AccountInputBinding.positionSide(positionSide)",
+            "AccountInputBinding.adjustment(request)",
+            "AccountInputBinding.productAdjustment(request)",
+            "AccountInputBinding.positionMode(withProductLine",
+            "AccountInputBinding.positionMargin(request)"
+          ],
+          "forbidden_literals": [],
+          "sha256": "b52341bf2366fd32611e07ba9a0637894a4ba516044ddf3a926b3538cfda37ac"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/trading/order/controller/MakerQuoteInputsController.java",
+          "required_literals": [
+            "request.marginMode(), com.surprising.trading.api.model.PositionSide.NET"
+          ],
+          "forbidden_literals": [],
+          "sha256": "7475b5d9ddbe1652b31b3c0ecb8d31f379fbecb3db3186423ecbc0e91b127042"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-090",
+      "original_rule": "SERVICE_REQUEST_CURSOR",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderService.java",
+      "original_requirement": "活动订单游标前缀和long转换仍在Service；历史查询的原生游标改造不能代表此独立入口已完成。",
+      "current_evidence": "docs/validation/java-mvc17-active-cursors-20261022.json",
+      "batch": "active-cursors",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderService.java",
+          "required_literals": [
+            "ActiveOrderPageQuery query"
+          ],
+          "forbidden_literals": [
+            "decodeActiveOrderCursor("
+          ],
+          "sha256": "56b3f0c956a888ea3d368fb544ce8f9adc9c3d72924d2813e51e5f604978319f"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/trading/order/controller/OrderRequestController.java",
+          "required_literals": [
+            "activePage(limit, cursor)"
+          ],
+          "forbidden_literals": [],
+          "sha256": "2b807af0090cf06103b13ee049b93c9150cfff356ac05ec71fcbf7095b53bd4b"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-091",
+      "original_rule": "SERVICE_REQUEST_CURSOR",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderService.java",
+      "original_requirement": "活动条件单游标Base64/前缀/long解码仍在Service；历史查询游标已整改，此入口仍待处理。",
+      "current_evidence": "docs/validation/java-mvc17-active-cursors-20261022.json",
+      "batch": "active-cursors",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderService.java",
+          "required_literals": [
+            "OpenTriggerPageQuery query"
+          ],
+          "forbidden_literals": [
+            "decodeOpenTriggerCursor("
+          ],
+          "sha256": "94f6d898057e0b6868c0c8c57e2599fa3ba7217027782b16e4d0db60f602e3d3"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/trading/trigger/controller/TriggerOrderRequestController.java",
+          "required_literals": [
+            "activePage(limit, cursor)"
+          ],
+          "forbidden_literals": [],
+          "sha256": "f242b46d455edda112d78b2d045bd1a072daeda0a43f53a6dcc0a40b4d83273e"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-092",
+      "original_rule": "SERVICE_REQUEST_FORMAT",
+      "original_path": "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/index/service/ExchangeRateService.java",
+      "original_requirement": "HTTP汇率查询的currency格式和amount正数检查仍在Service；需Controller绑定，并保留后台配置/行情事实的内部完整性校验。",
+      "current_evidence": "docs/validation/java-mvc17-rate-input-20261022.json",
+      "batch": "rate-input",
+      "source_checks": [
+        {
+          "path": "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/index/service/ExchangeRateService.java",
+          "required_literals": [
+            "CurrencyFormats.normalize(fiat.getBaseCurrency())",
+            "amount.multiply(rate)"
+          ],
+          "forbidden_literals": [
+            "normalizeCurrency(",
+            "amount.signum()"
+          ],
+          "sha256": "e0ce4f56779e07e6cb59c51f72fb2e9b19890de15596ce92e32bb72120493072"
+        },
+        {
+          "path": "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/index/controller/ExchangeRateController.java",
+          "required_literals": [
+            "amount.signum() <= 0",
+            "CurrencyFormats.normalize(fromCurrency)",
+            "CurrencyFormats.normalize(baseCurrency)"
+          ],
+          "forbidden_literals": [],
+          "sha256": "702efb8d819b51aaf638fe639af981f297c3255ac62256586d2d68fa2a609c9a"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-108",
+      "original_rule": "REPOSITORY_ROLE_FORMAT",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GatewayRoleRepository.java",
+      "original_requirement": "角色代码静态格式方法位于Repository且由AuthPersistenceService调用；应归Controller绑定或纯utils，Service仅编排角色关联。",
+      "current_evidence": "docs/validation/java-mvc17-auth-input-20261022.json",
+      "batch": "auth-input",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GatewayRoleRepository.java",
+          "required_literals": [],
+          "forbidden_literals": [
+            "normalizeRoleCode(",
+            "matches(",
+            "toUpperCase(",
+            "toLowerCase("
+          ],
+          "sha256": "5f3eb2bb289fe88772c780947ae038c99fbf863913e4b5defa5479f8129b014d"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/controller/AuthRequestBinding.java",
+          "required_literals": [
+            "AuthCodeFormats.role(value)"
+          ],
+          "forbidden_literals": [],
+          "sha256": "256c065d3cbe842c6cd5bb7ef608ca8e23a3e256505f8b7c6ef9870c1c9e617e"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-109",
+      "original_rule": "REPOSITORY_PERMISSION_FORMAT",
+      "original_path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GatewayPermissionRepository.java",
+      "original_requirement": "权限代码静态格式方法位于Repository且由AuthPersistenceService调用；应归Controller绑定或纯utils，Service仅编排权限关联。",
+      "current_evidence": "docs/validation/java-mvc17-auth-input-20261022.json",
+      "batch": "auth-input",
+      "source_checks": [
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GatewayPermissionRepository.java",
+          "required_literals": [],
+          "forbidden_literals": [
+            "normalizePermissionCode(",
+            "matches(",
+            "toUpperCase(",
+            "toLowerCase("
+          ],
+          "sha256": "3b9740ece8c26a571c5d8e4275b9b7b177aa5625937f575e1e2ba30a6f11a573"
+        },
+        {
+          "path": "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/controller/AuthRequestBinding.java",
+          "required_literals": [
+            "AuthCodeFormats.permission(value)"
+          ],
+          "forbidden_literals": [],
+          "sha256": "256c065d3cbe842c6cd5bb7ef608ca8e23a3e256505f8b7c6ef9870c1c9e617e"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-112",
+      "original_rule": "SHARED_SERVICE_MODELS",
+      "original_path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java",
+      "original_requirement": "RiskRulesResponse/RiskRuleResponse/RiskRuleUpdateCommand由AdminRiskController直接使用，仍公开嵌套于Service；应按共享model职责归包。",
+      "current_evidence": "docs/validation/java-mvc17-risk-20261022.json",
+      "batch": "risk",
+      "source_checks": [
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java",
+          "required_literals": [],
+          "forbidden_literals": [
+            "public record RiskRulesResponse(",
+            "public record RiskRuleResponse(",
+            "public record RiskRuleUpdateCommand("
+          ],
+          "sha256": "8a1c31f4ebf212d56614014fc95fb50705fc674f86284489629b21b0461a1273"
+        },
+        {
+          "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/model/RiskRuleModels.java",
+          "required_literals": [
+            "public record RiskRulesResponse(",
+            "public record RiskRuleResponse(",
+            "public record RiskRuleUpdateCommand("
+          ],
+          "forbidden_literals": [],
+          "sha256": "119e54a640a4f495a496395f7d17939aa9741b3fe53ae0d88e9bdf21d625a3d0"
+        }
+      ],
+      "status": "已修复并验证"
+    },
+    {
+      "id": "ADD-113",
+      "original_rule": "SHARED_SERVICE_MODELS",
+      "original_path": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/service/MarketMakerService.java",
+      "original_requirement": "做市指标/运行日志/配置契约由AdminMarketMakerController实际导入Service嵌套类型，需按共享model归包；具体类型按调用面逐一迁移。",
+      "current_evidence": "docs/validation/java-mvc17-maker-20261022.json",
+      "batch": "maker",
+      "source_checks": [
+        {
+          "path": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/service/MarketMakerService.java",
+          "required_literals": [],
+          "forbidden_literals": [
+            "public record MarketMakerAdminMetricsResponse(",
+            "public record MarketMakerRunLogQueryResponse(",
+            "public record MarketMakerStrategyConfigResponse(",
+            "public record MarketMakerStrategyConfig(",
+            "public record MarketMakerStrategyConfigUpdateRequest(",
+            "public record MarketMakerMetricsTotals(",
+            "public record MarketMakerStrategyMetric(",
+            "public record MarketMakerAnomaly(",
+            "public record MarketMakerMetricWarning(",
+            "public record MarketMakerLiquidityMetric("
+          ],
+          "sha256": "797c2ac1f67bc429f301b23e488f9ccee1dc38bfbebc2d14c2ad8daa22c42769"
+        },
+        {
+          "path": "surprising-maker/src/main/java/com/surprising/marketmaker/provider/model/MarketMakerAdminModels.java",
+          "required_literals": [
+            "public record MarketMakerAdminMetricsResponse(",
+            "public record MarketMakerRunLogQueryResponse(",
+            "public record MarketMakerStrategyConfigResponse(",
+            "public record MarketMakerStrategyConfig(",
+            "public record MarketMakerStrategyConfigUpdateRequest(",
+            "public record MarketMakerMetricsTotals(",
+            "public record MarketMakerStrategyMetric(",
+            "public record MarketMakerAnomaly(",
+            "public record MarketMakerMetricWarning(",
+            "public record MarketMakerLiquidityMetric("
+          ],
+          "forbidden_literals": [],
+          "sha256": "69c5d0be93acfa0124777c649a85ef790086546abe11f50c7b920ab6feeada69"
+        }
+      ],
+      "status": "已修复并验证"
+    }
+  ],
+  "batches": {
+    "lifecycle-history": {
+      "evidence": "docs/validation/java-mvc17-lifecycle-history-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "clean",
+        "install"
+      ],
+      "tests": 160,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 21,
+      "log_sha256": "c76656a9bff31f3ec468bf79f6fa1fb2a827c3f52376d99507f01058f25a894a",
+      "source_commit": "cf806c91d99c441bae3ea0e9ce326c49497766f9"
+    },
+    "risk": {
+      "evidence": "docs/validation/java-mvc17-risk-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "clean",
+        "install"
+      ],
+      "tests": 227,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 22,
+      "log_sha256": "4800899561a4a1fddb77bba7fea0cffbb73945975cfb82c8ade3a46c469f38f5",
+      "source_commit": "c94336b618f1962e90ca03b1c64ab7080f2657a6"
+    },
+    "c2c-input": {
+      "evidence": "docs/validation/java-mvc17-c2c-input-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=C2c*Test,!C2cR2GatewayLiveTest,!C2cR2StorageLiveTest,!C2cBrowserQaTest,MultiProductMoneyIntegrationTest,LocalMoneyCommandsTest",
+        "clean",
+        "install"
+      ],
+      "tests": 206,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 32,
+      "log_sha256": "6824f9984a0d35218b47e9881889bb51f9f7245344958e4d5041192e48880819",
+      "source_commit": "8802582be201ea0880a4e0e62f2bb9c182fbf310"
+    },
+    "maker": {
+      "evidence": "docs/validation/java-mvc17-maker-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-maker",
+        "clean",
+        "install"
+      ],
+      "tests": 173,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 17,
+      "log_sha256": "2837ff907c2ab6705f01601b00bd637c2173ae1e87be8807c67b3e78415c07a9",
+      "source_commit": "2043c95760d339341a19de900ee56c3e9c88e90f"
+    },
+    "auth-input": {
+      "evidence": "docs/validation/java-mvc17-auth-input-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Auth*Test,PrimaryAuthenticationDatabaseTest,LoginVerification*Test,MfaRecovery*Test,TelegramLogin*Test,UserSecurity*Test,AdminApproval*Test,AdminAuditApprovalPostgresTest,GatewayUserMfaRepositoryTest,GatewayApiKey*Test,ApiKey*Test,EmailVerificationServiceTest,PasswordResetServiceTest,TotpServiceTest,ClientIpResolverTest,Compliance*Test,AdminComplianceControllerTest,AuditLogPagePostgresTest,MultiProductMoneyIntegrationTest,LocalMoneyCommandsTest,GatewayProxyControllerTest,*InterceptorTest",
+        "clean",
+        "install"
+      ],
+      "tests": 334,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 37,
+      "log_sha256": "2dc3d4be7a7a024ce25eaf52e821587ac4ed8230fa881849ec22c909b90746ca",
+      "source_commit": "c1d34237440465c4dc04f645765e777d7a014c58"
+    },
+    "rate-input": {
+      "evidence": "docs/validation/java-mvc17-rate-input-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-price/surprising-price-provider",
+        "clean",
+        "install"
+      ],
+      "tests": 167,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 33,
+      "log_sha256": "629b291fcf617d94dbd98b86919781a3c1e0bcd2b4280743cf3690910ad9d4e4",
+      "source_commit": "3e2ceaee56632b95822f27927a5e272a951872a4"
+    },
+    "asset-input": {
+      "evidence": "docs/validation/java-mvc17-asset-input-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Asset*Test,WalletFundingServiceTest,MultiProductMoneyIntegrationTest,LocalMoneyCommandsTest",
+        "clean",
+        "install"
+      ],
+      "tests": 35,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 6,
+      "log_sha256": "d5fcbbde326d59f68dce5dbe4696a4214ec04e0309cd1a56b3875aaa0777ea0f",
+      "source_commit": "1ff5421029e3448497a66469132f0cf073ea0dfe"
+    },
+    "active-cursors": {
+      "evidence": "docs/validation/java-mvc17-active-cursors-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Order*Test,Trigger*Test,LocalBusinessApiTest,ActiveOrderQueryBoundaryTest,MultiProductMoneyIntegrationTest,LocalMoneyCommandsTest,GatewayProxyControllerTest,BboOrderServiceTest,AlgoOrder*Test",
+        "clean",
+        "install"
+      ],
+      "tests": 363,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 28,
+      "log_sha256": "b1ad481a5ea3de16ffd01808e995098d2f0530636f402b83d44e40773fb29e7a",
+      "source_commit": "617d657bfcec5db434328abb5082be45fb42d00b"
+    },
+    "account-input": {
+      "evidence": "docs/validation/java-mvc17-account-input-20261022.json",
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-gateway",
+        "-Dtest=Auth*Test,PrimaryAuthenticationDatabaseTest,LoginVerification*Test,MfaRecovery*Test,TelegramLogin*Test,UserSecurity*Test,AdminApproval*Test,AdminAuditApprovalPostgresTest,GatewayUserMfaRepositoryTest,GatewayApiKey*Test,ApiKey*Test,EmailVerificationServiceTest,PasswordResetServiceTest,TotpServiceTest,ClientIpResolverTest,Compliance*Test,AdminComplianceControllerTest,AuditLogPagePostgresTest,*InterceptorTest,C2c*Test,!C2cR2GatewayLiveTest,!C2cR2StorageLiveTest,!C2cBrowserQaTest,Order*Test,Trigger*Test,AlgoOrder*Test,BboOrderServiceTest,Asset*Test,WalletFundingServiceTest,Account*Test,MakerQuoteInputsControllerTest,LocalBusinessApiTest,ActiveOrderQueryBoundaryTest,MultiProductMoneyIntegrationTest,LocalMoneyCommandsTest,ProductTransfer*Test,ProductAccountAccessTest,SpotAccountClientTest,GatewayProxyControllerTest",
+        "clean",
+        "install"
+      ],
+      "tests": 1039,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "class_count": 112,
+      "log_sha256": "2ba6b571fce8f06846ff7981e23f2144123be6d1215265364b48403c330c6fbb",
+      "source_commit": "d48e5bdd9b8dfc5d99fd7b9822281e6d92ab1422"
+    }
+  },
+  "latest_module_validation_counts": {
+    "gateway": 1039,
+    "lifecycle_provider": 227,
+    "maker": 173,
+    "price_provider": 167
+  },
+  "latest_module_validation_total": 1606,
+  "current_committed_java_sha256": {
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/adl/api/utils/AdminCursorPage.java": "1ce6023b5646c4bf3302abd3ac3839b3bd710ad353986e1d291c22850267dbf5",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/insurance/api/utils/AdminCursorPage.java": "e1e52ba94edb0b63d647962f2377247539f689a6c900a89df59f746bf174cd6a",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/controller/AdlController.java": "b133990c1499b4d98b7e7cfb66b962c80fb56512676d7027e6ffde9e81f8b766",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/model/AdlEventPageQuery.java": "dd4fe8950223ddba87ba97fcc4b38de85565073cfcf1ebd5b015e8b7834020e2",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/repository/AdlEventRepository.java": "ddf3bf2c61616d5f32a334defcfcb3a9307addeca51c1c92eca23691d44fa0cc",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/service/AdlService.java": "2871a7173de9d206e3329fae29587937b77d135e498d12ece06582b3c94cffcc",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/controller/InsuranceController.java": "920aa586213b427fe250b4bef2046ff1569ddf935ccf51dd1a633c5805235ec4",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/model/InsuranceHistoryPageQuery.java": "d26f46fa946cb1749363ad1162b924809dc85e12f4ff46ff7027d979cd2e02c9",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/repository/InsuranceCoverageRepository.java": "387d5aa06d7071345f5be06388efdfb5586ee15df8918d63f3c601db6b55b069",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/repository/InsuranceFundLedgerRepository.java": "bd0a440b0c8da7c5f0883254dcc1b5dee9787bc8c57d4ef5b442716be611d49a",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/service/InsuranceService.java": "066c60eafbbd4164069c987b9644558f9ad3515b942d5df587ba2000a8f320ea",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/controller/AdminRiskController.java": "6180e807cebe410c865653e8b0649e43c283d36f7e01f95d8ca4d46028fb2d92",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/controller/RiskController.java": "a14a8449f28ae2731dc7c7ab6a4176597a5fe783b15b0eea1bb55018ae25bab9",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/controller/RiskRequestBinding.java": "c2411f4718cd88bd5c9e59af88fd4d732a71031e676cb4a84a52604479925830",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/model/LiquidationCandidatePageQuery.java": "17d54324a5e622f7d2d7f0e3330c0f5f0f23be42b57ea7277e92e5bdf355bbbc",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/model/RiskRuleModels.java": "119e54a640a4f495a496395f7d17939aa9741b3fe53ae0d88e9bdf21d625a3d0",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskRuntimeConfigService.java": "9c5d398d9c72af5115d12e0d06bde9b1122ffa47da8e1a515a8dd99da04d762d",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java": "8a1c31f4ebf212d56614014fc95fb50705fc674f86284489629b21b0461a1273",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/LifecycleHistoryBoundaryPostgresTest.java": "f0bcdbf077e2f4ef8c8f1fd559f74b5619749fd654e79481b2c6b3e9fa8f1d84",
+    "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/RiskBoundaryPostgresTest.java": "89665f215ee556c1354438c4cb03d01d7a405f2d9dc29cf39b6065ff8abb2dfc",
+    "surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountInputBinding.java": "b5138df6e32270d5d01933dee4addf1f81022cfe3604ea4ab571b2fbce7931ef",
+    "surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountRequestController.java": "b52341bf2366fd32611e07ba9a0637894a4ba516044ddf3a926b3538cfda37ac",
+    "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java": "6c1b0c8f46199c00a3ef566ffe816eafe89f048f47ff306a4a04e8fcae02ed44",
+    "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountService.java": "a459d9b057cdd4d8393c265291951ff3ecfad7ce8e55696d2393f93f1f85f1d0",
+    "surprising-gateway/src/main/java/com/surprising/asset/controller/AssetConfigurationController.java": "3d0edc23b770f417ac5da902c16137d760269143b3adc20ebd6e38c03931bef8",
+    "surprising-gateway/src/main/java/com/surprising/asset/service/AssetConfigurationService.java": "98ee5a7a481554be1a8a7af20b77701b19ebf02602328e4094786dffb1d13a82",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cAdminController.java": "eb4617623ab415ffb7f70fad901028ca7f404733b8be257315a12d63c2b964ec",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/controller/C2cController.java": "5ecbde4a41ef3e4976781111bb687fe6820616f74deb76bb50f4e3390649c5e5",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cAdminReviewModels.java": "959b734125390733b1425941039bcd6d12d0806edab15f5557b35007f9eb7f9a",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/model/C2cPaymentAccountInput.java": "9e7fe09f7a4cc621189be655221a355f3747d94d918e2771d985056dea5d0044",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminMarkets.java": "62251180ab6dc7bbf44125e711719f9f62624f3f8d15b6013d4497616af62e70",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cAdminReview.java": "a5532907fdcfabed22dd8f65f58c9d60a5e796a6db1ea52cd3c90950497b519f",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/service/C2cPaymentAccounts.java": "83d223181c536f221cc5d84fb581ee0dad5834ae6767ae1d20b78eb6168cd996",
+    "surprising-gateway/src/main/java/com/surprising/gateway/c2c/utils/C2cPaymentFormats.java": "4852826cd631901bec5a39bb1e9c038349bafd1f641ad925f24b6ca2d53d19b5",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/controller/AdminAuthController.java": "2d3db39148e7e416d8133e2c5eafd5ef0c9615a8bcbbb1fe34b7c0541c99573d",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/controller/AuthController.java": "7e670bf95b179d32eeb428737a27ab64b3efd5b0cc31852f2726f2bfc87327f9",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/controller/AuthRequestBinding.java": "256c065d3cbe842c6cd5bb7ef608ca8e23a3e256505f8b7c6ef9870c1c9e617e",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GatewayPermissionRepository.java": "3b9740ece8c26a571c5d8e4275b9b7b177aa5625937f575e1e2ba30a6f11a573",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/repository/GatewayRoleRepository.java": "5f3eb2bb289fe88772c780947ae038c99fbf863913e4b5defa5479f8129b014d",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthPersistenceService.java": "ed7d175ca0a1ffc354cb71f6fa2f1af37ffa2b331d620fe2c483063e1034d764",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/service/AuthService.java": "f62e620e3691e4e4b4822cac4a8ed69fac2f7dc249333a8dadb9d0a4a90adfb7",
+    "surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/utils/AuthCodeFormats.java": "e0c70ec485afeb0f0473af650655ddbc766b1be2d3c9a2c414ded60500dc4c3e",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/controller/MakerQuoteInputsController.java": "7475b5d9ddbe1652b31b3c0ecb8d31f379fbecb3db3186423ecbc0e91b127042",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/controller/OrderRequestController.java": "2b807af0090cf06103b13ee049b93c9150cfff356ac05ec71fcbf7095b53bd4b",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/model/ActiveOrderPageQuery.java": "640a0c7feed6bf221b4cbf62441397a5bac876be6146e8782eb9438f5c18c54a",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderService.java": "56b3f0c956a888ea3d368fb544ce8f9adc9c3d72924d2813e51e5f604978319f",
+    "surprising-gateway/src/main/java/com/surprising/trading/order/utils/ActiveOrderCursors.java": "a151563396cc1f4afcc4cd33be29bb4fc1614f3a44aa28269a325260dd3f1820",
+    "surprising-gateway/src/main/java/com/surprising/trading/trigger/controller/TriggerOrderRequestController.java": "f242b46d455edda112d78b2d045bd1a072daeda0a43f53a6dcc0a40b4d83273e",
+    "surprising-gateway/src/main/java/com/surprising/trading/trigger/model/OpenTriggerPageQuery.java": "952a84471ae2e38b639d468ee347ee34ca751e6f0dab547d5879a018853b43c0",
+    "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderService.java": "94f6d898057e0b6868c0c8c57e2599fa3ba7217027782b16e4d0db60f602e3d3",
+    "surprising-gateway/src/main/java/com/surprising/trading/trigger/utils/OpenTriggerCursors.java": "0953d8afdcb695c04a79aa6c49dd41a679068795b72a568805e8c87d603f0489",
+    "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountInputBoundaryTest.java": "cc0c26dc87c9a60099cea35135d70d6c1ad4fe1270c02afdfbe1431cb7ea810b",
+    "surprising-gateway/src/test/java/com/surprising/account/provider/service/AccountServiceLocalSnapshotTest.java": "5d6d49372e116f5943090e707a263dbd6d2cd08ad2424ecda2a7c0ea58c3a63d",
+    "surprising-gateway/src/test/java/com/surprising/asset/AssetInputBoundaryPostgresTest.java": "14451462f0f1224ea55ff1db0bf6da2ac8f39dc6d22e86aebb7651dcc07d9200",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAdminHttpPostgresTest.java": "1742ede67528a05c28bd8d402a721f6c10c38801d95bdfeaa72999cc8a31e15d",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cAttachmentsPostgresTest.java": "b9adf3cb5a410d9ea28f73b96ba66de81c4248880c8b77fa6165b0dc2cbcc43b",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cCommandValidationTest.java": "760ae6c0e7cb577e34a2cb207324ea6212440a6ab1e9e6b5bfb309ac41f76b3e",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cHttpFixture.java": "8263013f37aef280ae53551cf35f76b9725399331bf9adddf9b9583a756a9d17",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cHttpPostgresTest.java": "68daba0a2e5429b3caa3ea4898df6455686cd6325c94d26f620bee6fc42eb20b",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cInputBoundaryPostgresTest.java": "1b257a8d6a4d3bc1e53cbaec193c9fe56fc32114cbdcb2f7df61eac7c4392c0a",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cMerchantBondPostgresTest.java": "af5994cfcfc4b8449d96fe24b505bee5752f798684624b2b4e91f0ac02fe1ea3",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cOrdersPostgresTest.java": "c3ed273b7f5d75ec2bb2fa4dac8e5be88572036c780c9d102cbdddfc56186ae3",
+    "surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cReviewTransactionPostgresTest.java": "db9ea2447b827c646b5b6e29e1f23d62899f04a799390bb0b0e726a455d08a89",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/AuthInputBoundaryPostgresTest.java": "2eccc5d1e0cf0d8702447348f3b13169407800ac5e6e367b9a12b37788e176e8",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/auth/AuthServiceTest.java": "945af40253cbc02badf44ae9d40dbdc7031cc67fc14c10000163a21ca6baf1c8",
+    "surprising-gateway/src/test/java/com/surprising/gateway/provider/local/ActiveOrderQueryBoundaryTest.java": "2f5e01a22f9cde26a831b7b2007d05369c7c4e81d682231f2843017705d6211d",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/controller/MakerQuoteInputsControllerTest.java": "edd66ca7484e418b2daa305979b0807c3e846925ef49471b540ca2647c846ef5",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/controller/OrderControllerTest.java": "7eacf24a9216633e3c3d283e1e44467065047ba669c76f896b759a11c9b80502",
+    "surprising-gateway/src/test/java/com/surprising/trading/order/service/OrderServiceTest.java": "9ed3235e58207baf378c686c36f1178bf8dbf1a3846a3db891f947ff09b6834b",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/controller/AdminMarketMakerController.java": "fd49be35c4351dc1e4a66654e56fc38c5aa6ed8cacffcabd325afacf1ee614de",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/model/MarketMakerAdminModels.java": "69c5d0be93acfa0124777c649a85ef790086546abe11f50c7b920ab6feeada69",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/model/MarketMakerRunEventPageQuery.java": "7db1555dcf3829ecaebc9575d5ce3e718d21429502e5981e05cf6605b6a18b85",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/repository/InMemoryMarketMakerRunEventRepository.java": "d39ad623a4608b906aed6c69d1d55a1688a013050caa908e2aee90db0c381192",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/repository/MarketMakerRunEventRepository.java": "822613bdeb910cd7c1916e0e8be8d60268e39ed93e881774c3404a407f347a43",
+    "surprising-maker/src/main/java/com/surprising/marketmaker/provider/service/MarketMakerService.java": "797c2ac1f67bc429f301b23e488f9ccee1dc38bfbebc2d14c2ad8daa22c42769",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/controller/AdminMarketMakerControllerTest.java": "95da3c98ed2bc981851c80e239a2fc95f6cfe39f0640c355d71d5660999f4eea",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/controller/MakerRunEventBoundaryTest.java": "89b534e5ed81a56d76d167d9490b8bb8fbcd3fa5217d10793ae5ce866f183bd8",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/repository/MarketMakerMemorySettingsTest.java": "68d0a0a31960be2412d7272763c1469f0f835ea59d96000dbfee10fa5be0c7ad",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/repository/MarketMakerRunEventRepositoryTest.java": "492ffbef84f3e9f5555a168ef53804685aac03485c1a6c69334cd7b1e805bc53",
+    "surprising-maker/src/test/java/com/surprising/marketmaker/provider/service/MarketMakerServiceTest.java": "2d26db0fc0a1ebca12fec53cec06f8ef04d85fdbc87f2834e68d08055b5ffc64",
+    "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/index/controller/ExchangeRateController.java": "702efb8d819b51aaf638fe639af981f297c3255ac62256586d2d68fa2a609c9a",
+    "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/index/service/ExchangeRateService.java": "e0ce4f56779e07e6cb59c51f72fb2e9b19890de15596ce92e32bb72120493072",
+    "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/index/utils/CurrencyFormats.java": "50a0e680db88fdb153aa5e49426ee29318968e333123b6b828b939cfc13368e3",
+    "surprising-price/surprising-price-provider/src/test/java/com/surprising/price/index/controller/ExchangeRateInputBoundaryTest.java": "fb4bd9fe259915ba5074285f44204d9d815eb571a1895e9771fbfc4e7981e8e7"
+  },
+  "cleanup": {
+    "verified_at_utc": "2026-10-22T02:57:07.508173+00:00",
+    "owner_marker_verified": true,
+    "database_stopped": true,
+    "database_stop_command": [
+      "pg_ctl",
+      "-D",
+      "/tmp/surprising-mvc17-pg-ju7l8zhj/data",
+      "stop",
+      "-m",
+      "fast"
+    ],
+    "database_stop_exit_code": 0,
+    "owned_database_root_removed": true,
+    "database_root": "/tmp/surprising-mvc17-pg-ju7l8zhj",
+    "isolated_build_owner_verified": true,
+    "isolated_build_removed": true,
+    "isolated_build_root": "/tmp/surprising-mvc17-build-lq275wkh",
+    "archived_validation_logs": "所有各批摘要已归档；最终完成审计校验日志SHA后清理临时日志。"
+  },
+  "architecture_scope": "Controller绑定HTTP/本地原始输入；Service保留权限、版本、产品、状态、锁、幂等和资金业务；Repository不解析原始HTTP分页并维持既有单表SQL；纯协议工具归utils，共享契约归model。未引入运行状态、缓存或新接口。",
+  "precision_corrections": [
+    "ADL/保险分页保留完整Instant而非毫秒，数据库微秒及同刻ID续页受测",
+    "活动条件单首屏不再以Long.MAX_VALUE排除合法最大ID",
+    "大整数和BigDecimal经实际HTTP验证，密码原文及稳定命令UUID保持"
+  ],
+  "limits": "本结论覆盖原始17项及列出的验证范围。未启动外部wallet，未进行六产品真实部署总体验收，不据此声称全仓所有MVC问题或性能/恢复已经全面验收。"
+}
