@@ -159,3 +159,5 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 陈旧资金费的原生失败位于 `funding.provider.exception.StaleFundingRateException`，缓存新鲜度和资金费业务判断保持。
 
 历史ADL事件、保险赔付及保险账本的分页/筛选由对应Controller绑定，Service决定产品范围，三个单表Repository只接受原生时间/ID/方向。查询limit仍要求1..1000，默认createdAt.desc；不透明游标保留完整ISO Instant及long主键，客户端直接回传，避免微秒被截断后重复/漏项。
+
+风控候选分页和规则格式由 `risk.provider.controller.RiskRequestBinding` 为公开/管理入口绑定，Service接收原生 `LiquidationCandidatePageQuery` 与 `RiskRuleModels`。Core仍裁决全局保证金策略所有权和运行参数版本冲突，Service保留风险聚合及内部范围约束；候选列表按Core清算ID续页，默认eventTime.asc，limit要求1..1000。

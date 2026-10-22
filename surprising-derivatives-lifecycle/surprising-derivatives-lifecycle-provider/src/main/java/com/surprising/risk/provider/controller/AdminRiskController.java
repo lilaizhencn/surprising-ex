@@ -2,9 +2,9 @@ package com.surprising.risk.provider.controller;
 
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
 import com.surprising.risk.provider.service.RiskService;
-import com.surprising.risk.provider.service.RiskService.RiskRuleResponse;
-import com.surprising.risk.provider.service.RiskService.RiskRuleUpdateCommand;
-import com.surprising.risk.provider.service.RiskService.RiskRulesResponse;
+import com.surprising.risk.provider.model.RiskRuleModels.RiskRuleResponse;
+import com.surprising.risk.provider.model.RiskRuleModels.RiskRuleUpdateCommand;
+import com.surprising.risk.provider.model.RiskRuleModels.RiskRulesResponse;
 import com.surprising.risk.provider.service.RiskAeronGateway.RiskScanControlConflictException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,7 +40,7 @@ public class AdminRiskController {
             @PathVariable String ruleCode,
             @RequestBody RiskRuleUpdateCommand request) {
         try {
-            return riskService.updateRiskRule(ruleCode, requireAdmin(adminUserId), request);
+            return riskService.updateRiskRule(RiskRequestBinding.ruleCode(ruleCode), requireAdmin(adminUserId), RiskRequestBinding.command(request));
         } catch (RiskScanControlConflictException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
@@ -57,7 +57,7 @@ public class AdminRiskController {
             @RequestParam(value = "sort", required = false) String sort) {
         requireAdmin(adminUserId);
         try {
-            return riskService.liquidationCandidates(status, limit, cursor, sort);
+            return riskService.liquidationCandidates(RiskRequestBinding.candidates(status, limit, cursor, sort));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

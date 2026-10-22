@@ -1,0 +1,271 @@
+{
+  "verified_at_utc": "2026-10-22T01:52:50.685267+00:00",
+  "ids": [
+    "ADD-082",
+    "ADD-112"
+  ],
+  "stages": {
+    "focused": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "-Dtest=RiskBoundaryPostgresTest",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [],
+      "log_sha256": "b467f63c077f17e495aef4ef8bd639b0e95c31b8819ecc5ee7dbcfc7dba181cf",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "focused-fixed": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "-Dtest=RiskBoundaryPostgresTest",
+        "test"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.derivatives.lifecycle.RiskBoundaryPostgresTest",
+          "tests": 67,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "961fd8e0ae0724948f63424f89e70068289ca22b7f68e509d8baefbc66710688",
+      "tests": 67,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "negative-product": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "-Dtest=RiskBoundaryPostgresTest#assetBindingPrecedesReadsAndProductOwnershipStillGuardsCoreState",
+        "test"
+      ],
+      "exit_code": 1,
+      "classes": [
+        {
+          "class": "com.surprising.derivatives.lifecycle.RiskBoundaryPostgresTest",
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "c9fff3af4dd5463d4d13ecbb82389991b8980f9798329f42599c988539bcd029",
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "expanded-clean": {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider",
+        "clean",
+        "install"
+      ],
+      "exit_code": 0,
+      "classes": [
+        {
+          "class": "com.surprising.liquidation.provider.service.LiquidationAeronGatewayTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.service.FundingAeronGatewayTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleApplicationContextTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.config.FundingRateCachePollingTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsSchedulingEventTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.insurance.provider.service.InsuranceAeronGatewayTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.service.FundingMathTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.service.FundingTimeTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.risk.provider.service.LiquidationPriceCalculatorTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsBoundaryPostgresTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.service.FundingServiceTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.controller.FundingQueryBoundaryTest",
+          "tests": 21,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.repository.FundingHistoryPostgresTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.FundingCompositionTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleMaintenanceSchedulingTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.controller.FundingControllerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.liquidation.provider.service.LiquidationServiceTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleHistoryBoundaryPostgresTest",
+          "tests": 49,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleSettingsControllerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.funding.provider.config.FundingKafkaConfigurationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.RiskBoundaryPostgresTest",
+          "tests": 67,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "com.surprising.derivatives.lifecycle.LifecycleBusinessSettingsIntegrationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "log_sha256": "4800899561a4a1fddb77bba7fea0cffbb73945975cfb82c8ade3a46c469f38f5",
+      "tests": 227,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "preserved_complete_business_method_bodies": [
+    "riskRules",
+    "enrich",
+    "riskState",
+    "position",
+    "requireProductLine",
+    "total",
+    "snapshotSequence",
+    "sum",
+    "marginRatio",
+    "status",
+    "nonNegative",
+    "bounded",
+    "ruleFrom"
+  ],
+  "moved_complete_format_bodies": [
+    "normalizeAsset",
+    "normalizeRuleCode",
+    "requireText",
+    "ruleName"
+  ],
+  "repository": "CoreRiskLiquidationProjectionRepository完整文件与HEAD相同，原生状态/ID seek/产品范围不变",
+  "runtime": "视图和规则字段不变，HTTP入口也使用同一原生命令绑定",
+  "new_types": "一项实际共享候选查询model、一个三record模型容器及Controller绑定；没有状态/缓存/接口。",
+  "negative_control": "省略Core产品检查时1项HTTP测试预期404却200；源码精确恢复后完整模块绿色。",
+  "scope": "两组实际风控HTTP及PG投影/原生Core网关协作；没有改动Core状态机、价格、资金/持仓算法；不能替代最终真实六产品部署验收。",
+  "resources": "本目标独占PG继续供其余12项使用，最终统一清理。"
+}

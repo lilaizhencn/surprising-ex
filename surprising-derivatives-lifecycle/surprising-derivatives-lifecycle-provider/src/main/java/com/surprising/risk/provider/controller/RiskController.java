@@ -8,6 +8,7 @@ import com.surprising.risk.provider.service.RiskRuntimeConfigService;
 import com.surprising.risk.provider.service.RiskService;
 import com.surprising.risk.provider.service.RiskAeronGateway.RiskScanControlConflictException;
 import java.util.Map;
+import com.surprising.risk.provider.model.RiskRuleModels.RiskRuleUpdateCommand;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,7 +35,7 @@ public class RiskController {
                                                          @RequestParam("accountType") String accountType,
                                                          @RequestParam("settleAsset") String settleAsset) {
         try {
-            return riskService.latestAccount(userId, accountType, settleAsset);
+            return riskService.latestAccount(RiskRequestBinding.userId(userId), RiskRequestBinding.accountType(accountType), RiskRequestBinding.asset(settleAsset));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -44,6 +45,11 @@ public class RiskController {
 
     @GetMapping(RiskApiPaths.RISK_BASE_PATH + "/positions/latest")
     public RiskPositionQueryResponse latestPositionRisk(@RequestParam("userId") long userId) {
+        try {
+            RiskRequestBinding.userId(userId);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
         return riskService.latestPositions(userId);
     }
 
@@ -52,7 +58,7 @@ public class RiskController {
             @RequestParam(value = "status", defaultValue = "NEW") String status,
             @RequestParam(value = "limit", defaultValue = "100") int limit) {
         try {
-            return riskService.liquidationCandidates(status, limit);
+            return riskService.liquidationCandidates(RiskRequestBinding.candidates(status, limit, null, null));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -68,13 +74,10 @@ public class RiskController {
     public Map<String, Object> updateRuntimeConfig(@RequestHeader("X-Admin-User-Id") String adminUserId,
                                                    @RequestBody RuntimeConfigUpdate request) {
         try {
-            return runtimeConfigService.update(
-                    requireAdmin(adminUserId),
-                    request.expectedVersion(),
-                    request.calculationEnabled(),
-                    request.scanDelayMs(),
-                    request.scanBatchSize(),
-                    request.reason());
+            if (request == null) throw new IllegalArgumentException("request is required");
+            return runtimeConfigService.update(requireAdmin(adminUserId), RiskRequestBinding.command(
+                    new RiskRuleUpdateCommand(request.expectedVersion(), null, request.calculationEnabled(),
+                            request.scanDelayMs(), request.scanBatchSize(), request.reason())));
         } catch (RiskScanControlConflictException ex) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {

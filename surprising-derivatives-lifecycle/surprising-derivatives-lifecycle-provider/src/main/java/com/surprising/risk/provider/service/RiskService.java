@@ -22,7 +22,8 @@ import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
+import com.surprising.risk.provider.model.RiskRuleModels.*;
+import com.surprising.risk.provider.model.LiquidationCandidatePageQuery;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Qualifier;
 
@@ -49,11 +50,9 @@ public class RiskService {
     }
 
     public RiskAccountSnapshotResponse latestAccount(long userId, String accountType, String settleAsset) {
-        requireUserId(userId);
-        String asset = normalizeAsset(settleAsset);
+        String asset = settleAsset;
         String expectedAccountType = properties.getProductLine().accountTypeCode();
-        if (accountType != null && !accountType.isBlank()
-                && !expectedAccountType.equals(accountType.trim().toUpperCase(Locale.ROOT))) {
+        if (accountType != null && !expectedAccountType.equals(accountType)) {
             throw new IllegalArgumentException("accountType does not match risk product line");
         }
         CoreUserStateView user = aeron.userState(userId);
@@ -79,7 +78,6 @@ public class RiskService {
     }
 
     public RiskPositionQueryResponse latestPositions(long userId) {
-        requireUserId(userId);
         Instant now = Instant.now();
         List<CoreRiskSnapshotView> snapshots = riskState(userId);
         List<RiskPositionSnapshotResponse> rows = snapshots.stream()
@@ -87,21 +85,12 @@ public class RiskService {
         return new RiskPositionQueryResponse(rows.size(), rows);
     }
 
-    public LiquidationCandidateQueryResponse liquidationCandidates(String status, int limit) {
-        return liquidationCandidates(status, limit, null, null);
-    }
-
-    public LiquidationCandidateQueryResponse liquidationCandidates(String status, int limit,
-                                                                    String cursor, String sort) {
-        LiquidationCandidateStatus requested = LiquidationCandidateStatus.valueOf(requireText(status, "status")
-                .toUpperCase(Locale.ROOT));
-        int normalizedLimit = bounded(limit, 1, 1000, "limit");
-        AdminCursorPage.SortSpec sorting = AdminCursorPage.parseSort(sort, ASC, List.of(ASC, DESC));
-        AdminCursorPage.Cursor decoded = AdminCursorPage.decodeCursor(cursor);
-        List<LiquidationCandidateResponse> fetched = liquidations.find(requested, normalizedLimit + 1,
-                decoded == null ? null : decoded.id(), sorting.descending());
+    public LiquidationCandidateQueryResponse liquidationCandidates(LiquidationCandidatePageQuery query) {
+        AdminCursorPage.SortSpec sorting = query.descending() ? DESC : ASC;
+        List<LiquidationCandidateResponse> fetched = liquidations.find(query.status(), query.limit() + 1,
+                query.afterId(), query.descending());
         AdminCursorPage.CursorPage<LiquidationCandidateResponse> page = AdminCursorPage.page(fetched,
-                normalizedLimit, sorting, LiquidationCandidateResponse::eventTime,
+                query.limit(), sorting, LiquidationCandidateResponse::eventTime,
                 LiquidationCandidateResponse::candidateId);
         List<LiquidationCandidateResponse> enriched = page.items().stream().map(this::enrich).toList();
         return new LiquidationCandidateQueryResponse(enriched.size(), enriched, page.nextCursor(),
@@ -117,11 +106,9 @@ public class RiskService {
     }
 
     public RiskRuleResponse updateRiskRule(String ruleCode, String adminUserId, RiskRuleUpdateCommand command) {
-        String code = normalizeRuleCode(ruleCode);
-        String admin = requireText(adminUserId, "adminUserId");
-        if (command == null) throw new IllegalArgumentException("request is required");
-        String reason = requireText(command.reason(), "reason");
-        if (reason.length() > 500) throw new IllegalArgumentException("reason must be at most 500 characters");
+        String code = ruleCode;
+        String admin = adminUserId;
+        String reason = command.reason();
         if ("GLOBAL_MARGIN_POLICY".equals(code)) {
             throw new IllegalArgumentException(
                     "margin policy is owned by versioned Aeron Core instrument state");
@@ -131,7 +118,7 @@ public class RiskService {
             }
             CoreRiskScanControlView current = aeron.riskScanControl();
             var update = new UpdateRiskScanControlCommand(command.expectedVersion(),
-                    ruleName(command.ruleName(), current.ruleName()),
+                    command.ruleName() == null ? current.ruleName() : command.ruleName(),
                     command.enabled() == null ? current.enabled() : command.enabled(),
                     nonNegative(command.scanDelayMs() == null ? current.scanDelayMs() : command.scanDelayMs(),
                             "scanDelayMs"),
@@ -204,29 +191,11 @@ public class RiskService {
         }
         return RiskStatus.NORMAL;
     }
-    private static void requireUserId(long value) {
-        if (value <= 0) throw new IllegalArgumentException("userId must be positive");
-    }
-    private static String normalizeAsset(String value) {
-        String normalized = requireText(value, "settleAsset").toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9]{2,20}")) throw new IllegalArgumentException("invalid settleAsset");
-        return normalized;
-    }
-    private static String normalizeRuleCode(String value) {
-        String normalized = requireText(value, "ruleCode").toUpperCase(Locale.ROOT);
-        if (!normalized.matches("[A-Z0-9_.:-]{2,96}")) throw new IllegalArgumentException("invalid ruleCode");
-        return normalized;
-    }
-    private static String ruleName(String value, String fallback) {
-        if (value == null || value.isBlank()) return fallback;
-        String normalized = value.trim();
-        if (normalized.length() > 120) throw new IllegalArgumentException("ruleName must be at most 120 characters");
-        return normalized;
-    }
-    private static String requireText(String value, String field) {
-        if (value == null || value.isBlank()) throw new IllegalArgumentException(field + " is required");
-        return value.trim();
-    }
+
+
+
+
+
     private static long nonNegative(long value, String field) {
         if (value < 0) throw new IllegalArgumentException(field + " must be non-negative");
         return value;
@@ -242,11 +211,4 @@ public class RiskService {
                 value.updatedAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(value.updatedAtEpochMillis()));
     }
 
-    public record RiskRulesResponse(int ruleCount, List<RiskRuleResponse> rules) {}
-    public record RiskRuleResponse(String ruleCode, String ruleName, String ruleType, Long version, boolean enabled,
-                                   Long scanDelayMs,
-                                   Integer scanBatchSize, String source, String adminUserId, String reason,
-                                   Instant updatedAt) {}
-    public record RiskRuleUpdateCommand(Long expectedVersion, String ruleName, Boolean enabled,
-                                        Long scanDelayMs, Integer scanBatchSize, String reason) {}
 }
