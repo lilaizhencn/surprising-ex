@@ -1,0 +1,96 @@
+package com.surprising.aeron.service.core;
+
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageHeader;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
+import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
+import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+public final class CoreAcceptFreezeBenchmark {
+
+    private static final String SYMBOL = "1";
+    private static final long USER_ID = 1001L;
+    private static final long BALANCE_UNITS = 1_000_000_000_000L;
+
+    private CoreAcceptFreezeBenchmark() {
+    }
+
+    public static void main(String[] args) {
+        int orders = positive(args, 0, 100_000);
+        int warmup = positive(args, 1, 10_000);
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            long gatewaySequence = 1;
+            long operationsSequence = 1;
+            long kafkaSequence = 1;
+            apply(state, CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
+                    TradingCommandCodec.encodeRegisterInstrument(instrument()));
+            apply(state, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, kafkaSequence++, 2,
+                    TradingCommandCodec.encodeApplyMarkPrice(
+                            new ApplyMarkPriceCommand(SYMBOL, 1_000, 1, 1_000)));
+            apply(state, CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, gatewaySequence++, 2,
+                    TradingCommandCodec.encodeBalanceAdjustment(
+                            new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", BALANCE_UNITS)));
+            for (int index = 0; index < warmup; index++) {
+                apply(state, CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, gatewaySequence++,
+                        10L + index, TradingCommandCodec.encodePlaceOrder(place(1_000_000L + index)));
+            }
+            long started = System.nanoTime();
+            for (int index = 0; index < orders; index++) {
+                CoreResponse response = apply(state, CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
+                        gatewaySequence++, 1_000_000L + index,
+                        TradingCommandCodec.encodePlaceOrder(place(10_000_000L + index)));
+                if (response.status() != ResponseStatus.OK) {
+                    throw new IllegalStateException("order was not accepted: " + response.status());
+                }
+            }
+            long elapsed = System.nanoTime() - started;
+            log.info("{}", String.format(java.util.Locale.ROOT, "coreAcceptFreezeBenchmark=PASS productLine=%s orders=%d "
+                            + "elapsedSeconds=%.3f acceptedPerSec=%.3f pendingMatching=%d%n",
+                    ProductLine.LINEAR_PERPETUAL, orders, elapsed / 1_000_000_000.0,
+                    orders / (elapsed / 1_000_000_000.0), state.pendingMatching.size()).stripTrailing());
+        }
+    }
+
+    private static CoreResponse apply(TradingCoreRuntime state, CoreMessageType type, CommandSource source,
+                                      long sourceSequence, long correlationId, byte[] payload) {
+        CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(),
+                ProductLine.LINEAR_PERPETUAL, source, source == CommandSource.OPERATIONS ? 9
+                        : source == CommandSource.KAFKA_INPUT_BRIDGE ? 89 : 7,
+                sourceSequence, source == CommandSource.OPERATIONS ? 0 : USER_ID, 1_000, correlationId), payload);
+        CoreResponse response = state.apply(message);
+        if (response.status() != ResponseStatus.APPLIED && response.status() != ResponseStatus.OK) {
+            throw new IllegalStateException("command rejected type=" + type + " status=" + response.status());
+        }
+        return response;
+    }
+
+    private static PlaceOrderCommand place(long orderId) {
+        return new PlaceOrderCommand(orderId, SYMBOL, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "accept-freeze-" + orderId);
+    }
+
+    private static RegisterInstrumentCommand instrument() {
+        return new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
+                "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0);
+    }
+
+    private static int positive(String[] args, int index, int fallback) {
+        int value = args.length > index ? Integer.parseInt(args[index]) : fallback;
+        if (value <= 0) throw new IllegalArgumentException("benchmark counts must be positive");
+        return value;
+    }
+}

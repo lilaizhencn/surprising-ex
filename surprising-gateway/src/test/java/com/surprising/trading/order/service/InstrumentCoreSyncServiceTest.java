@@ -1,20 +1,20 @@
 package com.surprising.trading.order.service;
 
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.maintenance.service.MaintenanceAeronGateway;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import java.util.List;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 class InstrumentCoreSyncServiceTest {
     @ParameterizedTest @EnumSource(ProductLine.class)

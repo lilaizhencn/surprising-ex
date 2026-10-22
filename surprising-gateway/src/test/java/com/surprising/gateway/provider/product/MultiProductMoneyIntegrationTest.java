@@ -1,24 +1,23 @@
 package com.surprising.gateway.provider.product;
 
-import com.surprising.gateway.provider.client.SpotAccountClient;
-import com.surprising.account.provider.exception.AccountCommandRejectedException;
-import com.surprising.gateway.provider.model.ProductTransferCommand;
-import com.surprising.gateway.provider.model.ProductTransferStatus;
-
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.Mockito.*;
 import com.surprising.account.api.model.*;
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.account.provider.service.*;
+import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
+import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.gateway.provider.client.SpotAccountClient;
+import com.surprising.gateway.provider.model.ProductTransferCommand;
+import com.surprising.gateway.provider.model.ProductTransferStatus;
 import com.surprising.gateway.provider.service.*;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import com.surprising.aeron.service.orchestration.TradingExecutionMode;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /** 六个真实 Core 状态机、真实账户方法和划转编排；仅把 Aeron 网络边界替换为同步协议调用。 */
 class MultiProductMoneyIntegrationTest {

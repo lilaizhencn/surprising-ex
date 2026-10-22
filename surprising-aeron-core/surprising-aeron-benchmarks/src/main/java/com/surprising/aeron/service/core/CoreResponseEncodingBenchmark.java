@@ -1,0 +1,136 @@
+package com.surprising.aeron.service.core;
+
+import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreMessageCodec;
+import com.surprising.aeron.protocol.CoreMessageHeader;
+import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.TradingOrderBatchCodec;
+import com.surprising.product.api.ProductLine;
+import java.util.ArrayList;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Measurement;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Warmup;
+
+@BenchmarkMode(Mode.Throughput)
+@OutputTimeUnit(TimeUnit.SECONDS)
+@Warmup(iterations = 3, time = 1)
+@Measurement(iterations = 5, time = 1)
+@Fork(1)
+@Threads(1)
+public class CoreResponseEncodingBenchmark {
+
+    @Benchmark
+    public byte[] encodeRealtimeOrder(RealtimeOrderState state) {
+        return com.surprising.aeron.protocol.RealtimeFrameCodec.encodeOrder(state.order, 47, 0, 1_001, 0);
+    }
+
+    @State(Scope.Thread)
+    public static class RealtimeOrderState {
+        @Param({"SPOT", "LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
+        public String productLine;
+        private com.surprising.aeron.protocol.CoreOrderStateView order;
+
+        @Setup(Level.Trial)
+        public void setUp() {
+            order = new com.surprising.aeron.protocol.CoreOrderStateView(71, ProductLine.valueOf(productLine),
+                    7, "1", CoreOrderSide.BUY, 60_000, 2, 1, 1, false, "PARTIALLY_FILLED", 1);
+        }
+    }
+
+    @Benchmark
+    public int encodeCommittedResponse(ResponseState state) {
+        return CoreMessageCodec.encodeResponse(
+                state.header, state.response, state.committedCoreSequence, state.destination);
+    }
+
+    @Benchmark
+    public int constructAndEncodeOwnedResponse(ResponseState state) {
+        // Encoded bytes have the same read-only lifetime as Core's retained terminal result.
+        CoreResponse response = CoreResponse.owned(ResponseStatus.OK, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, 41, state.encodedData);
+        return CoreMessageCodec.encodeResponse(
+                state.header, response, state.committedCoreSequence, state.destination);
+    }
+
+    @Benchmark
+    public byte[] encodePlaceBatch(OrderBatchCodecState state) {
+        return TradingOrderBatchCodec.encodePlaceOrderBatch(state.command);
+    }
+
+    @Benchmark
+    public PlaceOrderBatchCommand decodePlaceBatch(OrderBatchCodecState state) {
+        return TradingOrderBatchCodec.decodePlaceOrderBatch(state.encoded);
+    }
+
+    @State(Scope.Thread)
+    public static class OrderBatchCodecState {
+        @Param("20")
+        public int batchSize;
+
+        private PlaceOrderBatchCommand command;
+        private byte[] encoded;
+
+        @Setup(Level.Trial)
+        public void setUp() {
+            ArrayList<PlaceOrderCommand> orders = new ArrayList<>(batchSize);
+            for (int index = 0; index < batchSize; index++) {
+                orders.add(new PlaceOrderCommand(10_000L + index, "BTC_USDT",
+                        CoreOrderSide.BUY, 100_000, 1, false, CoreMarginMode.CROSS,
+                        CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                        false, "codec-" + index));
+            }
+            command = new PlaceOrderBatchCommand(orders);
+            encoded = TradingOrderBatchCodec.encodePlaceOrderBatch(command);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class ResponseState {
+        @Param({"0", "4096"})
+        public int dataBytes;
+
+        private CoreMessageHeader header;
+        private CoreResponse response;
+        private byte[] encodedData;
+        private byte[] destination;
+        private long committedCoreSequence;
+
+        @Setup(Level.Trial)
+        public void setUp() {
+            CoreMessageHeader command = CoreMessageHeader.command(
+                    CoreMessageType.PLACE_ORDER, UUID.fromString("a42fd764-9430-4f41-93ab-50a559f4b7b2"),
+                    ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY,
+                    7, 11, 101, 1_700_000_000_000L, 19);
+            header = command.response(CoreMessageType.COMMAND_RESULT);
+            byte[] data = new byte[dataBytes];
+            for (int index = 0; index < data.length; index++) data[index] = (byte) index;
+            encodedData = data;
+            response = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    41, data);
+            destination = new byte[CoreMessageCodec.encodedResponseLength(header, response)];
+            committedCoreSequence = 53;
+        }
+    }
+}

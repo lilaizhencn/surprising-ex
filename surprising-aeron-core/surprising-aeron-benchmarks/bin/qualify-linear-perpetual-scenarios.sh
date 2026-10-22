@@ -294,11 +294,11 @@ run_dense_book() {
   # Build the population once. The timed path only places and cancels at a dense
   # level, preserving the resident order count without snapshot restore noise.
   run_local_jmh_case dense-book-population \
-    com.surprising.aeron.service.orchestration.LinearPerpetualCoreBenchmark.denseResidentBookAsyncPlaceCancel \
+    com.surprising.aeron.service.core.LinearPerpetualCoreBenchmark.denseResidentBookAsyncPlaceCancel \
     -p accountLanes=2 -p priceLevels="${BOOK_PRICE_LEVELS}" \
     -p ordersPerLevel="${BOOK_ORDERS_PER_LEVEL}"
   run_local_jmh_case dense-level-fill \
-    com.surprising.aeron.service.orchestration.LinearPerpetualCoreBenchmark.deepFillBurst256 \
+    com.surprising.aeron.service.core.LinearPerpetualCoreBenchmark.deepFillBurst256 \
     -p accountLanes=2 -p makerDepth=128 -p maxInFlight=256
 }
 
@@ -306,16 +306,16 @@ run_stable_positions() {
   # Every account keeps a live position. The mark moves only from 100 to 99;
   # the correctness gate requires that the complete scan produces no liquidation.
   run_local_jmh_case stable-position-risk-scan \
-    com.surprising.aeron.service.orchestration.LinearPerpetualCoreBenchmark.stablePositionRiskScan \
+    com.surprising.aeron.service.core.LinearPerpetualCoreBenchmark.stablePositionRiskScan \
     -p accountLanes=2 -p positionUsers=10000
 }
 
 run_risk_storm() {
   run_local_jmh_case risk-scan-10000 \
-    com.surprising.aeron.service.orchestration.LinearPerpetualCoreBenchmark.riskScanLanePublishedCommit \
+    com.surprising.aeron.service.core.LinearPerpetualCoreBenchmark.riskScanLanePublishedCommit \
     -p accountLanes=2 -p riskUsers=10000
   run_local_jmh_case liquidation-batch-1000 \
-    com.surprising.aeron.service.orchestration.LinearPerpetualCoreBenchmark.liquidationBurst1000 \
+    com.surprising.aeron.service.core.LinearPerpetualCoreBenchmark.liquidationBurst1000 \
     -p accountLanes=2
 }
 

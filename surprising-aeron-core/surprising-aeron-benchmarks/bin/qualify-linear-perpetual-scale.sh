@@ -178,7 +178,7 @@ run_probe_case() {
     return
   fi
   "${JAVA}" "${JVM_ARGS[@]}" -cp "${JAR}" \
-    com.surprising.aeron.service.execution.LinearPerpetualScaleProbeMain \
+    com.surprising.aeron.bootstrap.execution.LinearPerpetualScaleProbeMain \
     "$@" "${PROBE_WARMUP}" "${PROBE_MEASURE}" \
     2> "${ARTIFACT_DIR}/${case_id}.stderr.log" | tee "${ARTIFACT_DIR}/${case_id}.log"
   tail -n 1 "${ARTIFACT_DIR}/${case_id}.log" | jq -e \
@@ -309,7 +309,7 @@ run_soak() {
     "-Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/scale-soak-gc.log:time,uptime,level,tags"
   )
   "${JAVA}" "${soak_jvm_args[@]}" -cp "${JAR}" \
-    com.surprising.aeron.service.execution.LinearPerpetualScaleSoakMain \
+    com.surprising.aeron.bootstrap.execution.LinearPerpetualScaleSoakMain \
     10000 128 128 5 10 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}" \
     "${SOAK_SECONDS}" "${SOAK_SAMPLE_SECONDS}" \
     > "${ARTIFACT_DIR}/scale-soak.jsonl" 2> "${ARTIFACT_DIR}/scale-soak.stderr.log" &

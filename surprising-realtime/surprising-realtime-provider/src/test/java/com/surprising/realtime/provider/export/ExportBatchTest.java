@@ -1,14 +1,13 @@
 package com.surprising.realtime.provider.export;
 
-import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -28,7 +27,7 @@ class ExportBatchTest {
         var sink = mock(ReliableTradeKafkaSink.class);
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, repository, sink,
                 CommittedTradeExporter.ExportMode.COMMAND_RESULT_REPAIR);
-        var result = new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+        var result = new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
                 ProductLine.SPOT, 7, new java.util.UUID(0, 1), com.surprising.aeron.protocol.CoreMessageType.CANCEL_ORDER,
                 null, null, com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                 com.surprising.aeron.protocol.CoreResultCode.ORDER_NOT_FOUND, 1, 10, 1000, List.of());
@@ -48,7 +47,7 @@ class ExportBatchTest {
         var batch = new CommittedTradeExporter.ExportBatch(ProductLine.SPOT, orders, sink);
         batch.flush(0);
         clearInvocations(orders, sink);
-        var result = new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+        var result = new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
                 ProductLine.SPOT, 7, new java.util.UUID(0, 1), com.surprising.aeron.protocol.CoreMessageType.CANCEL_ORDER,
                 null, null, com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                 com.surprising.aeron.protocol.CoreResultCode.ORDER_NOT_FOUND, 1, 10, 1000, List.of());

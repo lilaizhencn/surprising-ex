@@ -1,16 +1,15 @@
 package com.surprising.realtime.provider.export;
 
-import com.surprising.realtime.provider.export.service.CommittedAlgoProjectionService;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay;
+import com.surprising.aeron.service.replay.CommittedTradeReplay;
 import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.provider.export.service.CommittedAlgoProjectionService;
 import java.util.*;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.*;
 import org.springframework.transaction.support.TransactionTemplate;
-
 import static org.assertj.core.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named="INSTRUMENT_TEST_JDBC_URL",matches=".+")

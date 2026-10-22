@@ -12,31 +12,31 @@
     <logger name="com.surprising.aeron.client.ClientSourceOrderingBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.trade.ClusteredBatchTradingBenchmark" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.CoreAcceptFreezeBenchmark" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.core.CoreAcceptFreezeBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.CoreInMemoryBenchmark" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.core.CoreInMemoryBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmark" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.core.CorePerpetualEndToEndBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.ExchangeCoreConcurrentBenchmark" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.core.ExchangeCoreConcurrentBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.LinearPerpetualScaleProbeMain" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.core.LinearPerpetualScaleProbeMain" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.LinearPerpetualScaleSoakMain" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.core.LinearPerpetualScaleSoakMain" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.MaintenanceSettlementVerificationMain" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.core.MaintenanceSettlementVerificationMain" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
-    <logger name="com.surprising.aeron.service.orchestration.ProductRulesRefactorBenchmark" level="INFO" additivity="false">
+    <logger name="com.surprising.aeron.service.core.ProductRulesRefactorBenchmark" level="INFO" additivity="false">
         <appender-ref ref="RESULT"/>
     </logger>
     <logger name="com.surprising.aeron.tools" level="INFO" additivity="false">

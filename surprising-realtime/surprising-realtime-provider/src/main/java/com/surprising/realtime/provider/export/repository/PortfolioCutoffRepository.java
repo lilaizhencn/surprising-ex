@@ -1,10 +1,9 @@
 package com.surprising.realtime.provider.export.repository;
 
+import com.surprising.aeron.service.replay.CommittedPortfolioSnapshot;
 import com.surprising.product.api.ProductLine;
-
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import com.surprising.aeron.service.orchestration.replay.CommittedPortfolioSnapshot;
 
 /** 仅访问core_portfolio_cutoff；截止元数据与权益写入由Service事务聚合，删除保留原外键级联。 */
 @Repository

@@ -1,6 +1,6 @@
 package com.surprising.realtime.provider.export.utils;
 
-import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult;
+import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult;
 import java.util.Objects;
 
 /** 提交回执的不可变事实比较，批内去重和数据库重放校验共享同一规则。 */

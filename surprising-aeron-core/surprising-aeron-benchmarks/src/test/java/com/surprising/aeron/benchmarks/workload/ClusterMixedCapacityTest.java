@@ -1,11 +1,9 @@
 package com.surprising.aeron.benchmarks.workload;
 
-import com.surprising.aeron.service.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.lane.LaneTopology;
 import java.util.List;
 import org.junit.jupiter.api.Test;
-
 import static org.assertj.core.api.Assertions.*;
 
 class ClusterMixedCapacityTest {

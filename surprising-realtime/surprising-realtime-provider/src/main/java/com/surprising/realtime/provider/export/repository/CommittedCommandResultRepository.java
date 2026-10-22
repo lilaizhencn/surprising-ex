@@ -1,14 +1,14 @@
 package com.surprising.realtime.provider.export.repository;
 
+import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult;
 import com.surprising.product.api.ProductLine;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Collections;
-import java.util.ArrayList;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult;
 import static com.surprising.realtime.provider.export.utils.CommittedCommandResults.requireSameResult;
 
 /** 仅访问core_command_result_projection，保留不可变回执校验和受锁保护的取消明细补全。 */
@@ -63,8 +63,8 @@ public class CommittedCommandResultRepository {
                         json.writeValueAsString(expected.cancelResults()), product.name(), receipt.commandId());
         }
     }
-    private List<com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CancelBatchItem> cancelItems(String raw) {
+    private List<com.surprising.aeron.service.replay.CommittedTradeReplay.CancelBatchItem> cancelItems(String raw) {
         return raw == null ? List.of() : List.of(json.readValue(raw,
-                com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CancelBatchItem[].class));
+                com.surprising.aeron.service.replay.CommittedTradeReplay.CancelBatchItem[].class));
     }
 }

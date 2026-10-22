@@ -1,15 +1,14 @@
 package com.surprising.realtime.provider.export;
 
-import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import java.util.List;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-
 import static org.assertj.core.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")
@@ -55,12 +54,12 @@ class CommittedOrderProjectionPostgresTest {
             var service = context.getBean(CommittedOrderProjectionService.class);
             var product = ProductLine.OPTION;
             long now = System.currentTimeMillis();
-            var first = new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+            var first = new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
                     product, 7, new java.util.UUID(0, 1), CoreMessageType.PLACE_ORDER, "first", "604",
                     ResponseStatus.APPLIED, CoreResultCode.NONE, 10, 10, now, List.of());
             service.persist(product, List.of(), List.of(first), 10);
             jdbc.execute("ALTER TABLE core_projection_watermark ADD CONSTRAINT mvc_watermark_fault CHECK(last_export_sequence < 20)");
-            var second = new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+            var second = new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
                     product, 7, new java.util.UUID(0, 2), CoreMessageType.PLACE_ORDER, "second", "604",
                     ResponseStatus.APPLIED, CoreResultCode.NONE, 20, 20, now, List.of());
             assertThatThrownBy(() -> service.persist(product, List.of(), List.of(second), 20))
@@ -77,19 +76,19 @@ class CommittedOrderProjectionPostgresTest {
         factory.addAdvice((org.aopalliance.intercept.MethodInterceptor)invocation->invocation.proceed());
         var proxy=(CommittedOrderProjectionService)factory.getProxy();
         assertThat(org.springframework.aop.support.AopUtils.isCglibProxy(proxy)).isTrue();
-        var result=new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(ProductLine.OPTION,7,new java.util.UUID(0,1),
+        var result=new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(ProductLine.OPTION,7,new java.util.UUID(0,1),
                 CoreMessageType.PLACE_ORDER,"client","604",ResponseStatus.APPLIED,CoreResultCode.NONE,10,10,System.currentTimeMillis(),List.of());
         proxy.persist(ProductLine.OPTION,List.of(),List.of(result),10);
-        proxy.statistics().publish(ProductLine.OPTION,new com.surprising.aeron.service.state.query.CommittedTradingActivity(0,0,0,0,0,List.of()),10,System.currentTimeMillis());
+        proxy.statistics().publish(ProductLine.OPTION,new com.surprising.aeron.service.query.state.CommittedTradingActivity(0,0,0,0,0,List.of()),10,System.currentTimeMillis());
         assertThat(jdbc.queryForObject("SELECT sum(commands) FROM core_trading_command_statistics",Long.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_trading_statistics_snapshot",Integer.class)).isEqualTo(4);
     }
 
     @Test void conflictingRetryCountsAsRejectedButCannotReplaceTheOriginalSuccessfulReceipt() {
         var line=ProductLine.OPTION;long now=System.currentTimeMillis();
-        var original=new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(line,7,new java.util.UUID(0,1),
+        var original=new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(line,7,new java.util.UUID(0,1),
                 CoreMessageType.PLACE_ORDER,"client","604",ResponseStatus.APPLIED,CoreResultCode.NONE,10,10,now,List.of());
-        var conflict=new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(line,7,original.commandId(),
+        var conflict=new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(line,7,original.commandId(),
                 CoreMessageType.PLACE_ORDER,"client","604",ResponseStatus.REJECTED,CoreResultCode.IDEMPOTENCY_CONFLICT,20,20,now,List.of());
         repository.persist(line,List.of(),List.of(original),10);repository.persist(line,List.of(),List.of(conflict),20);
         assertThat(jdbc.queryForObject("SELECT result_code FROM core_command_result_projection",String.class)).isEqualTo("NONE");
@@ -107,7 +106,7 @@ class CommittedOrderProjectionPostgresTest {
 
     @Test void actualOptionCommittedReplayContainsTheExecutionMetadataNeededBySqlWithoutCoreReads() {
         var line = ProductLine.OPTION;
-        try (var replay = new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay(line,null)) {
+        try (var replay = new com.surprising.aeron.service.replay.CommittedTradeReplay(line,null)) {
             var frames = new java.util.ArrayList<RealtimeFrame>();
             long seq = 0;
             frames.addAll(replayed(replay,++seq,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
@@ -131,7 +130,7 @@ class CommittedOrderProjectionPostgresTest {
         }
     }
 
-    private static List<RealtimeFrame> replayed(com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay replay,
+    private static List<RealtimeFrame> replayed(com.surprising.aeron.service.replay.CommittedTradeReplay replay,
             long seq,CoreMessageType type,long user,byte[] payload) {
         long time=1700000000000L+seq;
         var command=new CoreMessage(CoreMessageHeader.command(type,new java.util.UUID(99,seq),ProductLine.OPTION,
@@ -214,7 +213,7 @@ class CommittedOrderProjectionPostgresTest {
     }
 
     @Test void incompleteTriggerSnapshotIsHiddenAndReconstructionRetriesWithoutRegressingState() {
-        var replay=org.mockito.Mockito.mock(com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.class);
+        var replay=org.mockito.Mockito.mock(com.surprising.aeron.service.replay.CommittedTradeReplay.class);
         var state=CoreTriggerOrderCodec.decodeList(trigger(90,7,CoreTriggerOrderStatus.CANCELED,2).payload()).getFirst();
         org.mockito.Mockito.when(replay.retainedTriggersBefore(0,512)).thenReturn(List.of(state));
         org.mockito.Mockito.when(replay.retainedTriggersBefore(90,512)).thenThrow(new IllegalStateException("incomplete snapshot"));
@@ -234,10 +233,10 @@ class CommittedOrderProjectionPostgresTest {
 
     @Test void makerProtectionReceiptsAreRetainedWhileTransientQuoteReceiptsStayFiltered() {
         jdbc.update("INSERT INTO market_maker_strategies VALUES ('OPTION', ARRAY[900]::bigint[])");
-        var receipts=new java.util.ArrayList<com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult>();
+        var receipts=new java.util.ArrayList<com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult>();
         for(var type:List.of(CoreMessageType.PLACE_TRIGGER_OCO_PAIR,CoreMessageType.PLACE_TRIGGER_ORDER,CoreMessageType.CANCEL_TRIGGER_ORDER,CoreMessageType.CANCEL_ORDER)) {
             int i=receipts.size()+1;
-            receipts.add(new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+            receipts.add(new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
                     ProductLine.OPTION,900,new java.util.UUID(0,i),type,null,null,ResponseStatus.APPLIED,CoreResultCode.NONE,i,32L*i,1000L+i,List.of()));
         }
         repository.persist(ProductLine.OPTION,List.of(),receipts,10);
@@ -263,12 +262,12 @@ class CommittedOrderProjectionPostgresTest {
         assertThat(jdbc.queryForObject("SELECT cancel_batch_results->0->>'success' FROM core_command_result_projection", String.class)).isEqualTo("true");
     }
 
-    private static com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult batchResult(boolean conflict) {
-        return new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+    private static com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult batchResult(boolean conflict) {
+        return new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
                 ProductLine.SPOT, 7, new java.util.UUID(3, 4), CoreMessageType.CANCEL_ORDER_BATCH, null, null,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 9, 288, 1700000000009L, List.of(
-                    new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CancelBatchItem(0, 91, !conflict, conflict ? "ORDER_NOT_FOUND" : "NONE"),
-                    new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CancelBatchItem(1, 92, false, "ORDER_NOT_FOUND")));
+                    new com.surprising.aeron.service.replay.CommittedTradeReplay.CancelBatchItem(0, 91, !conflict, conflict ? "ORDER_NOT_FOUND" : "NONE"),
+                    new com.surprising.aeron.service.replay.CommittedTradeReplay.CancelBatchItem(1, 92, false, "ORDER_NOT_FOUND")));
     }
 
     @Test void rejectedCommandsWithoutOrdersRemainQueryableAfterRestartAndMoreThan128OtherResults() {
@@ -276,7 +275,7 @@ class CommittedOrderProjectionPostgresTest {
         repository.persist(ProductLine.SPOT, List.of(), List.of(result), 0);
         repository = ProjectionTestFixtures.orders(jdbc, new DataSourceTransactionManager(source));
         repository.persist(ProductLine.SPOT, List.of(), List.of(result), 0);
-        var later = new java.util.ArrayList<com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult>();
+        var later = new java.util.ArrayList<com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult>();
         for (int i=2;i<150;i++) later.add(result(i, 7, CoreResultCode.NONE));
         repository.persist(ProductLine.SPOT, List.of(), later, 0);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_command_result_projection", Integer.class)).isEqualTo(149);
@@ -313,9 +312,9 @@ class CommittedOrderProjectionPostgresTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessage("cross-product command result");
     }
 
-    private static com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult result(
+    private static com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult result(
             long id, long user, CoreResultCode code) {
-        return new com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult(
+        return new com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult(
                 ProductLine.SPOT, user, new java.util.UUID(0, id), CoreMessageType.CANCEL_ORDER,
                 null, null, code == CoreResultCode.NONE ? ResponseStatus.APPLIED : ResponseStatus.REJECTED,
                 code, id, id * 32, 1700000000000L + id, List.of());

@@ -1,10 +1,8 @@
 package com.surprising.realtime.provider.export.repository;
 
-import com.surprising.product.api.ProductLine;
-
+import com.surprising.realtime.provider.export.model.CommittedProjectionRows.FundingTotals;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import com.surprising.realtime.provider.export.model.CommittedProjectionRows.FundingTotals;
 
 /** 仅访问core_funding_settlement_projection；Service确认游标链完整后发布结算汇总。 */
 @Repository
@@ -16,7 +14,7 @@ public class CommittedFundingSettlementRepository {
         this.jdbc = jdbc;
     }
 
-    public void persist(com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedFundingPage page, FundingTotals totals) {
+    public void persist(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page, FundingTotals totals) {
         var command = page.command();
         jdbc.update("""
             INSERT INTO core_funding_settlement_projection(product_line,settlement_id,export_sequence,

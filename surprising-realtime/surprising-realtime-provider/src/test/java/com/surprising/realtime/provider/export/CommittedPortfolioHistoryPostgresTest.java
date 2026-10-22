@@ -1,10 +1,10 @@
 package com.surprising.realtime.provider.export;
 
-import com.surprising.realtime.provider.export.service.CommittedPortfolioHistoryService;
-import com.surprising.aeron.service.orchestration.replay.CommittedPortfolioSnapshot.UserEquity;
-import com.surprising.aeron.service.orchestration.replay.CommittedPortfolioSnapshot;
-import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedBalanceFlow;
+import com.surprising.aeron.service.replay.CommittedPortfolioSnapshot;
+import com.surprising.aeron.service.replay.CommittedPortfolioSnapshot.UserEquity;
+import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedBalanceFlow;
 import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.provider.export.service.CommittedPortfolioHistoryService;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,7 +17,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")

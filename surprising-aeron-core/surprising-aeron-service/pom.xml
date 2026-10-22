@@ -93,7 +93,7 @@
                                      basedir="${project.build.testOutputDirectory}"
                                      includes="**/CoreFaultAgent*.class">
                                     <manifest>
-                                        <attribute name="Premain-Class" value="com.surprising.aeron.service.orchestration.CoreFaultAgent"/>
+                                        <attribute name="Premain-Class" value="com.surprising.aeron.service.core.CoreFaultAgent"/>
                                     </manifest>
                                 </jar>
                             </target>
@@ -116,7 +116,7 @@
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers combine.self="override">
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.surprising.aeron.service.SurprisingCoreApplication</mainClass>
+                                    <mainClass>com.surprising.aeron.bootstrap.SurprisingCoreApplication</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>

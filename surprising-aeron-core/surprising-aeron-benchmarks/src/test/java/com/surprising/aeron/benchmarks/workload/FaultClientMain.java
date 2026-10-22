@@ -1,7 +1,5 @@
 package com.surprising.aeron.benchmarks.workload;
 
-import lombok.extern.slf4j.Slf4j;
-import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
@@ -11,6 +9,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -66,7 +65,7 @@ public final class FaultClientMain {
                             offset += (length + 31) & ~31;
                         }
                     }
-                    try (var state = com.surprising.aeron.service.orchestration.TradingCoreRuntime.fromSnapshot(PRODUCT, payload.toByteArray())) {
+                    try (var state = com.surprising.aeron.service.core.TradingCoreRuntime.fromSnapshot(PRODUCT, payload.toByteArray())) {
                         emit(Map.of("logPosition", snapshot.logPosition, "businessHash", state.tradingState().businessStateHash(),
                                 "coreSequence", state.committedCoreSequence()));
                     }

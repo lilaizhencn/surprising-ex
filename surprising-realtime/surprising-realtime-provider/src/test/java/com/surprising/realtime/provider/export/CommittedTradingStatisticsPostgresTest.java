@@ -1,10 +1,10 @@
 package com.surprising.realtime.provider.export;
 
-import com.surprising.realtime.provider.export.service.CommittedTradingStatisticsService;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult;
-import com.surprising.aeron.service.state.query.CommittedTradingActivity;
+import com.surprising.aeron.service.query.state.CommittedTradingActivity;
+import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult;
 import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.provider.export.service.CommittedTradingStatisticsService;
 import java.math.BigInteger;
 import java.util.*;
 import org.junit.jupiter.api.*;
@@ -13,7 +13,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.*;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
-
 import static org.assertj.core.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named="INSTRUMENT_TEST_JDBC_URL",matches=".+")

@@ -1,10 +1,8 @@
 package com.surprising.realtime.provider.export.repository;
 
-import com.surprising.product.api.ProductLine;
-
+import com.surprising.realtime.provider.export.model.CommittedProjectionRows.FundingTotals;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import com.surprising.realtime.provider.export.model.CommittedProjectionRows.FundingTotals;
 
 /** 仅访问core_funding_payment_projection；按提交页写明细，并以NUMERIC精度汇总同一结算。 */
 @Repository
@@ -16,7 +14,7 @@ public class CommittedFundingPaymentRepository {
         this.jdbc = jdbc;
     }
 
-    public void persist(com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public void persist(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
         if (!page.payments().isEmpty()) jdbc.batchUpdate("""
                 INSERT INTO core_funding_payment_projection(product_line,export_sequence,payment_index,
                   settlement_id,user_id,instrument_id,margin_mode,position_side,asset,signed_quantity_steps,
@@ -35,7 +33,7 @@ public class CommittedFundingPaymentRepository {
             }
         });
     }
-    public FundingTotals totals(com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public FundingTotals totals(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
         return jdbc.queryForObject("""
             SELECT COALESCE(sum(amount_units) FILTER (WHERE signed_quantity_steps>0),0),
                    COALESCE(sum(amount_units) FILTER (WHERE signed_quantity_steps<0),0),count(*)::integer

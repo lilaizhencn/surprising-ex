@@ -1,29 +1,27 @@
 package com.surprising.aeron.benchmarks.workload;
 
-import lombok.extern.slf4j.Slf4j;
-
 import com.surprising.aeron.client.AeronClientPool;
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreOrderBatchResult;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
-import com.surprising.aeron.protocol.CoreOrderBatchResult;
-import com.surprising.aeron.protocol.TradingOrderBatchCodec;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.service.orchestration.CoreAcceptFreezeBenchmark;
-import com.surprising.aeron.service.orchestration.CoreInMemoryBenchmark;
-import com.surprising.aeron.service.orchestration.CorePerpetualEndToEndBenchmark;
+import com.surprising.aeron.protocol.TradingOrderBatchCodec;
+import com.surprising.aeron.service.core.CoreAcceptFreezeBenchmark;
+import com.surprising.aeron.service.core.CoreInMemoryBenchmark;
+import com.surprising.aeron.service.core.CorePerpetualEndToEndBenchmark;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
@@ -31,8 +29,8 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAccumulator;
 import java.util.concurrent.locks.LockSupport;
+import lombok.extern.slf4j.Slf4j;
 import org.HdrHistogram.Histogram;
 
 @Slf4j

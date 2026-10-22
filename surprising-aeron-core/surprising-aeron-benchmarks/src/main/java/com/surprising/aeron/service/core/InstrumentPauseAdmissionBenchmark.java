@@ -1,0 +1,104 @@
+package com.surprising.aeron.service.core;
+import com.surprising.aeron.protocol.*;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import org.openjdk.jmh.annotations.*;
+
+/** Paused-instrument rejection using a recycled admission after snapshot recovery; no database or scheduler in the measured path. */
+@BenchmarkMode(Mode.AverageTime) @OutputTimeUnit(TimeUnit.NANOSECONDS)
+@Warmup(iterations=3) @Measurement(iterations=5) @Fork(1) @Threads(1)
+public class InstrumentPauseAdmissionBenchmark {
+    @State(Scope.Thread)
+    public static class Fixture {
+        @Param({"SPOT","LINEAR_PERPETUAL","INVERSE_PERPETUAL","LINEAR_DELIVERY","INVERSE_DELIVERY","OPTION"})
+        public ProductLine productLine;
+        private byte[] snapshot;
+        private TradingCoreRuntime core;
+        private CoreMessage order;
+        private long funds;
+        @Setup(Level.Trial) public void initialize() {
+            var type=ContractType.valueOf(productLine.contractTypeCode());
+            try(var state=new TradingCoreRuntime(productLine)) {
+                var config=new RegisterInstrumentCommand("1",type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",
+                        1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
+                        type.isOption()?0:-1,type.isOption()?100:0);
+                var paused=new RegisterInstrumentCommand(config.instrumentId(),config.contractTypeCode(),config.baseAsset(),
+                        config.quoteAsset(),config.settleAsset(),config.notionalMultiplierUnits(),config.priceTickUnits(),config.settleScaleUnits(),
+                        config.initialMarginRatePpm(),config.maintenanceMarginRatePpm(),config.makerFeeRatePpm(),config.takerFeeRatePpm(),
+                        config.expiryEpochMillis(),config.optionTypeCode(),config.strikePriceTicks(),config.maxLeveragePpm(),config.maxPositionNotionalUnits(),
+                        config.userOpenInterestLimitRatePpm(),config.userOpenInterestLimitFloorUnits(),config.riskLimitBrackets());
+                requireApplied(state.apply(message(productLine,1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(paused))));
+                if (productLine.isDerivative()) requireApplied(state.apply(message(productLine,2,CoreMessageType.APPLY_MARK_PRICE,
+                        TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
+                                ? new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_002L)
+                                : new ApplyMarkPriceCommand("1",100,1,1_700_000_000_002L)))));
+                requireApplied(state.apply(message(productLine,3,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
+                        CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",0,
+                                new CoreInstrumentMaintenance(1,CoreInstrumentMaintenance.Mode.HALTED,0))))));
+                requireApplied(applyAndDrain(state,message(productLine,4,CoreMessageType.ADJUST_BALANCE,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(type.isInverse()?"BTC":"USDT",20_000)))));
+                snapshot=state.snapshot(777);
+            }
+            order=message(productLine,9,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(
+                    new PlaceOrderCommand(100,"1",CoreOrderSide.BUY,100,4,false,CoreMarginMode.CROSS,
+                            CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"pause-benchmark")));
+        }
+        @Setup(Level.Invocation) public void restore() {
+            core=TradingCoreRuntime.fromSnapshot(productLine,snapshot);
+            if(core.tradingState().instruments().get("1").maintenance().mode()
+                    !=CoreInstrumentMaintenance.Mode.HALTED)
+                throw new IllegalStateException("pause lost on recovery");
+            funds=com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(core.tradingState());
+            // Exercise reuse after a completed admission, not just a freshly allocated event.
+            requireApplied(applyAndDrain(core,message(productLine,5,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
+                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",1,
+                            CoreInstrumentMaintenance.TRADING)))));
+            requireApplied(applyAndDrain(core,message(productLine,6,CoreMessageType.PLACE_ORDER,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(99,"1",CoreOrderSide.BUY,
+                            100,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC,false,"recycle-benchmark")))));
+            requireApplied(applyAndDrain(core,message(productLine,7,CoreMessageType.CANCEL_ORDER,
+                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(99)))));
+            requireApplied(applyAndDrain(core,message(productLine,8,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
+                    CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",0,
+                            new CoreInstrumentMaintenance(2,CoreInstrumentMaintenance.Mode.HALTED,0))))));
+        }
+        @TearDown(Level.Invocation) public void verify() {
+            try {
+                if(funds!=com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(core.tradingState()) || !core.tradingState().orders().isEmpty())
+                    throw new IllegalStateException("paused admission changed funds or created an order");
+            } finally { core.close(); }
+        }
+    }
+    @Benchmark public CoreResponse pausedOrder(Fixture fixture) {
+        var response=fixture.core.apply(fixture.order);
+        if(response.commandStatus()!=ResponseStatus.REJECTED || response.resultCode()!=CoreResultCode.INSTRUMENT_NOT_TRADING)
+            throw new IllegalStateException("pause did not reject admission: "+response.resultCode());
+        return response;
+    }
+    private static CoreResponse applyAndDrain(TradingCoreRuntime core, CoreMessage message) {
+        CoreResponse[] result = {core.apply(message)};
+        if (result[0] == null && core.directCommand.active()) {
+            do {
+                result[0] = core.directCommand.poll(core);
+            } while (result[0] == null);
+        }
+        long requested = core.matchingSequence(message.header().commandId());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (core.pendingMatching.firstSequence() != 0) {
+            core.commits.commitReadyMatching(256, message.header().submittedAtEpochMillis(),
+                    message.header().sourceSequence(), false,
+                    (sequence, response) -> { if (sequence == requested) result[0] = response; });
+            if (System.nanoTime() >= deadline) throw new IllegalStateException("fixture drain timed out");
+            Thread.onSpinWait();
+        }
+        return result[0];
+    }
+    private static void requireApplied(CoreResponse response) { if(response.commandStatus()!=ResponseStatus.APPLIED) throw new IllegalStateException("fixture rejected: " + response.resultCode()); }
+    private static CoreMessage message(ProductLine line,long sequence,CoreMessageType type,byte[] payload) {
+        return new CoreMessage(CoreMessageHeader.command(type,UUID.randomUUID(),line,CommandSource.OPERATIONS,994,sequence,22,
+                1_700_000_000_000L+sequence,sequence),payload);
+    }
+}

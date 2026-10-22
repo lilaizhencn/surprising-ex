@@ -1,0 +1,425 @@
+{
+  "date": "2026-10-22",
+  "module": "surprising-aeron-core/surprising-aeron-service",
+  "status": "PASS",
+  "objective": "Lombok 简化后按 controller/config/bootstrap/service.<业务>/model/support 分层；保持确定性交易与状态所有权。",
+  "commits": {
+    "lombok": "997f2dd3e"
+  },
+  "environment": {
+    "java": "Amazon Corretto HotSpot 27+33",
+    "maven": "3.9.16",
+    "os": "macOS 26.7.2 x86_64",
+    "disk_free_gib_before_full_run": 242
+  },
+  "changes": {
+    "lombok": {
+      "accessors": 471,
+      "constructors": 95,
+      "logger_fields": 3,
+      "note": "只替代直接字段访问、纯字段赋值或空构造和标准日志字段；保留校验、复制及状态转换。"
+    },
+    "layers": [
+      "controller: Aeron 回调入口",
+      "config: Spring 绑定、拓扑、执行模式及 CPU 配置",
+      "bootstrap: main、Aeron 资源与 Owner/账户/Matcher 线程",
+      "service: 按业务组织执行、在线状态及内部命令入口",
+      "model: 状态值与导出数据",
+      "support: 集合、数学、队列、协议交接及指标"
+    ],
+    "composition": "完整启动入口扫描 com.surprising.aeron；CoreConfiguration 自身不再作为 EnableConfigurationProperties 的显式注册参数，消除重复配置 Bean。",
+    "boundary_changes": [
+      "OwnerLogContext 字段封装，使用 Lombok 访问器保留直接读写语义。",
+      "Owner 对 bootstrap 开放五个实际生命周期入口；其他包内测试/内部方法继续保留包内可见性。",
+      "资金费和到期结算共用的 UserIndexPage 从原资金费内部 UserPage/selectUsers 提出到 service.account，沿用原选页算法。"
+    ],
+    "new_abstractions": "仅将已存在的共享选页逻辑与返回值移为 UserIndexPage；未新增业务服务接口、状态副本、线程、队列或提交阶段。",
+    "references": "生产引用、测试包、基准、故障 Agent 描述符、JAR mainClass、实时导出与网关消费者同步迁移。"
+  },
+  "preserved": [
+    "六产品线隔离",
+    "余额/冻结/费用/保证金/资金费计算与舍入",
+    "Owner、Matcher、Account Lane、Ledger 状态所有权",
+    "命令顺序、幂等及终态完成条件",
+    "快照二进制字段与协议格式"
+  ],
+  "verification": [
+    {
+      "name": "lombok-bytecode",
+      "result": "PASS",
+      "class_contracts": 175,
+      "accessor_instruction_sequences": 471,
+      "log": "/tmp/surprising-aeron-mvc/bytecode-audit.log"
+    },
+    {
+      "name": "lombok-service-tests",
+      "command": "mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-service -am '-Dtest=*Snapshot*Test,RuntimeCommitRecoveryTest,TradingRuntimeStateTest,RuntimeIdentityRegistryTest,CoreRiskStateTest,MatcherSettlementPlanTest,SettlementChangesReuseTest,TerminalStateRetentionTest,AccountLaneOwnershipTest,CoreConfigurationTest,TradingCpuAffinityTest,LaneTopologyTest' -Dsurefire.failIfNoSpecifiedTests=false test",
+      "result": "PASS",
+      "service": {
+        "tests": 221,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 1
+      },
+      "log": "/tmp/surprising-aeron-mvc/lombok-tests.log"
+    },
+    {
+      "name": "mvc-startup-smoke-tests",
+      "result": "PASS",
+      "service": {
+        "tests": 34,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "includes": "六产品线完整 Spring 入口装配、配置绑定、Owner 日志交接、资金费与索引分页",
+      "log": "/tmp/surprising-aeron-mvc/mvc-smoke.log"
+    },
+    {
+      "name": "source-shape-review",
+      "result": "PASS",
+      "unchanged_top_level_types_after_namespace_normalization": 236,
+      "explicitly_reviewed_files": [
+        "SurprisingCoreApplication",
+        "CoreConfiguration",
+        "OwnerLogContext",
+        "TradingOwnerLoop",
+        "TradingCoreOwner",
+        "RuntimePerpetualFundingProcessor",
+        "RuntimeLifecycleSettlement"
+      ],
+      "note": "忽略 package/import、注释和命名空间变化；七个差异文件分别核对装配、封装、生命周期可见性和共享选页。"
+    },
+    {
+      "name": "full-service-and-benchmarks",
+      "result": "PASS",
+      "log": "/tmp/surprising-aeron-mvc/mvc-full-tests.log",
+      "exit_code": 0,
+      "command": "mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks -am test",
+      "modules": {
+        "surprising-product-api": {
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-aeron-protocol": {
+          "tests": 250,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-aeron-client": {
+          "tests": 66,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-instrument-api": {
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-aeron-service": {
+          "tests": 1571,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 2
+        },
+        "surprising-aeron-tools": {
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-trading-api": {
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-account-api": {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-price-consumer": {
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-maker": {
+          "tests": 173,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-realtime-api": {
+          "tests": 40,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "surprising-price-provider": {
+          "tests": 152,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 3
+        },
+        "surprising-aeron-benchmarks": {
+          "tests": 315,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      },
+      "service_skips": [
+        {
+          "class": "com.surprising.aeron.config.TradingCpuAffinityTest",
+          "case": "linuxBindsEachRoleToTheRequestedCpuAndRestoresItsOriginalMask",
+          "reason": "Disabled on operating system: Mac OS X"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.CoreOrderedOrderBatchTest",
+          "case": "singleCancelFlushesMatchingPhaseStatisticsAndReleasesFunds",
+          "reason": "System property [surprising.aeron.matching-phase-log-interval] does not exist"
+        }
+      ]
+    },
+    {
+      "name": "codegraph-sync",
+      "result": "PASS",
+      "exit_code": 0,
+      "changed_files": 564,
+      "note": "迁移过程中同步本地缓存；此项不作为构建或业务正确性验证，提交后会再次同步新增源文件。"
+    },
+    {
+      "name": "direct-consumers",
+      "result": "PASS",
+      "exit_code": 0,
+      "command": "mvn -B -ntp -pl surprising-realtime/surprising-realtime-provider,surprising-gateway -am -Dtest=CommittedAlgoProjectionPostgresTest,CommittedDeliveryProjectionPostgresTest,CommittedDeliveryRepairIntegrationTest,CommittedFundingProjectionPostgresTest,CommittedFundingRepairIntegrationTest,CommittedOrderProjectionPostgresTest,CommittedPortfolioHistoryPostgresTest,CommittedTradeExportIntegrationTest,CommittedTradingStatisticsPostgresTest,ExportBatchTest,InstrumentCoreSyncServiceTest,MaintenanceIntegrationTest,MarketApplicationContextTest,MultiProductMoneyIntegrationTest,SharedCommandTransportIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "modules": {
+        "surprising-realtime-provider": {
+          "tests": 80,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 40
+        },
+        "surprising-gateway": {
+          "tests": 27,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 13
+        }
+      },
+      "postgres_tests": "实时导出 40 项、网关维护事务 12 项因缺少对应 PostgreSQL 集成地址跳过；共享驱动测试默认有系统属性门禁，单独开启验证。",
+      "log": "/tmp/surprising-aeron-mvc/mvc-consumer-tests.log",
+      "skips": [
+        {
+          "module": "surprising-realtime/surprising-realtime-provider",
+          "test_class": "com.surprising.realtime.provider.export.CommittedFundingProjectionPostgresTest",
+          "reason": "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist",
+          "count": 4
+        },
+        {
+          "module": "surprising-realtime/surprising-realtime-provider",
+          "test_class": "com.surprising.realtime.provider.export.CommittedTradingStatisticsPostgresTest",
+          "reason": "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist",
+          "count": 3
+        },
+        {
+          "module": "surprising-realtime/surprising-realtime-provider",
+          "test_class": "com.surprising.realtime.provider.export.CommittedAlgoProjectionPostgresTest",
+          "reason": "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist",
+          "count": 3
+        },
+        {
+          "module": "surprising-realtime/surprising-realtime-provider",
+          "test_class": "com.surprising.realtime.provider.export.CommittedPortfolioHistoryPostgresTest",
+          "reason": "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist",
+          "count": 6
+        },
+        {
+          "module": "surprising-realtime/surprising-realtime-provider",
+          "test_class": "com.surprising.realtime.provider.export.CommittedDeliveryProjectionPostgresTest",
+          "reason": "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist",
+          "count": 3
+        },
+        {
+          "module": "surprising-realtime/surprising-realtime-provider",
+          "test_class": "com.surprising.realtime.provider.export.CommittedOrderProjectionPostgresTest",
+          "reason": "Environment variable [INSTRUMENT_TEST_JDBC_URL] does not exist",
+          "count": 21
+        },
+        {
+          "module": "surprising-gateway",
+          "test_class": "com.surprising.aeron.service.core.MaintenanceIntegrationTest",
+          "reason": "Environment variable MAINTENANCE_TEST_JDBC_URL is not configured",
+          "count": 12
+        },
+        {
+          "module": "surprising-gateway",
+          "test_class": "com.surprising.gateway.provider.product.SharedCommandTransportIntegrationTest",
+          "reason": "Default run requires gateway.shared-driver.it=true; an explicit enabled run is scheduled",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "name": "package-and-renamed-shared-page-test",
+      "result": "PASS",
+      "exit_code": 0,
+      "command": "mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=UserIndexPageTest -Dsurefire.failIfNoSpecifiedTests=false package",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "note": "共享选页的原测试改名到 service.account.UserIndexPageTest，保留全部原断言；清除旧名字的编译输出，避免重复发现。",
+      "log": "/tmp/surprising-aeron-mvc/mvc-package.log"
+    },
+    {
+      "name": "packaged-single-node",
+      "result": "PASS",
+      "probe_exit_code": 0,
+      "node_exit_code": 143,
+      "termination": "SIGTERM；未强制 kill，确认进程已结束。",
+      "state_hash": "46038541423cd2ea",
+      "node": {
+        "product": "SPOT",
+        "node_command": [
+          "java",
+          "--enable-native-access=ALL-UNNAMED",
+          "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+          "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+          "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+          "-Xmx384m",
+          "-Daeron.dir=/tmp/surprising-aeron-mvc/node-smoke/driver",
+          "-Dsurprising.aeron.funds-index-directory=/tmp/surprising-aeron-mvc/node-smoke",
+          "-jar",
+          "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+          "--surprising.aeron.product-line=SPOT",
+          "--surprising.aeron.hostnames=127.0.0.1",
+          "--surprising.aeron.data-dir=/tmp/surprising-aeron-mvc/node-smoke/data"
+        ],
+        "started": true,
+        "probe_exit": 0,
+        "node_exit": 143,
+        "forced_stop": false,
+        "cleaned": true,
+        "pid": 36738,
+        "probe_status": "OK"
+      },
+      "initial_harness_note": "首次临时探测命令遗漏 README 已列出的 java.util.zip 开放参数，补齐后实际启动与查询成功；SIGTERM 对应进程退出码 143，检查显式接受该结果。",
+      "log": "/tmp/surprising-aeron-mvc/node-smoke.log",
+      "harness_exit_code": 0,
+      "command": "python3 /tmp/surprising-aeron-mvc/node_smoke.py"
+    },
+    {
+      "name": "six-product-shared-driver-integration",
+      "result": "PASS",
+      "exit_code": 0,
+      "command": "mvn -B -ntp -pl surprising-gateway -am -Dtest=SharedCommandTransportIntegrationTest -Dgateway.shared-driver.it=true -Dsurefire.failIfNoSpecifiedTests=false test",
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "scope": "逐产品线启动真实单节点 Core，四来源共享驱动；余额调整、跨来源幂等重试、关闭一个来源后继续查询，余额为 400 且无冻结或持仓。",
+      "log": "/tmp/surprising-aeron-mvc/shared-driver-tests.log"
+    },
+    {
+      "name": "source-and-navigation",
+      "result": "PASS",
+      "scope": [
+        "新包与 Java 文件路径一致",
+        "新旧命名空间编译残留为 0",
+        "service 不依赖 controller",
+        "三个当前导航文档的本地链接有效",
+        "仅共享账户分页记录为新增生产类型；保留原有六产品线与存储协议"
+      ],
+      "note": "最终 git diff --check 在提交前再次执行。"
+    }
+  ],
+  "not_run": [
+    "生产部署、HTTP/API 做市联调和长时间故障切换",
+    "JMH/JFR 性能对比；本轮不作性能提升结论",
+    "本机无法运行 Linux CPU 亲和性测试；匹配阶段日志统计用例未设置可选系统属性。",
+    "PostgreSQL 投影与维护事务集成用例缺少 INSTRUMENT_TEST_JDBC_URL / MAINTENANCE_TEST_JDBC_URL，分别跳过 40 / 12 项。"
+  ],
+  "cleanup": {
+    "stale_classes": "迁移后删除 service/benchmarks 的 classes、test-classes 和注解生成目录，避免旧包残留参与扫描。",
+    "runtime": "SPOT 打包探测节点通过 SIGTERM 停止，未使用强制 kill，独立运行目录已删除；共享驱动的六个临时节点由测试 finally 逐个停止，并检查进程已结束。",
+    "unrelated_work": "保留原有报告暂存删除、AGENTS-performance、审计文件及其他模块编辑。",
+    "temporary_evidence": {
+      "directory": "/tmp/surprising-aeron-mvc",
+      "state": "已删除本轮原始日志、临时报告、类/源码备份和脚本；摘要与哈希入档，所列 /tmp 路径仅作历史定位。临时提交范围文件提交后删除。",
+      "log_hashes": {
+        "/tmp/surprising-aeron-mvc/mvc-package.log": {
+          "bytes": 21177,
+          "sha256": "e9af1c47513959ba21bcf8b4be1fc8be8669857958c0c5ed936918f611462b06"
+        },
+        "/tmp/surprising-aeron-mvc/node-smoke-summary.log": {
+          "bytes": 898,
+          "sha256": "4a32cc0b946876802116ed82373fefb1f73691d922ef969a58b1c24bb0c631e3"
+        },
+        "/tmp/surprising-aeron-mvc/mvc-consumer-tests.log": {
+          "bytes": 771690,
+          "sha256": "e743034697c262937daf02e3ade3b40f3b25a87b3d14fea62fc3aec50408932e"
+        },
+        "/tmp/surprising-aeron-mvc/lombok-compile.log": {
+          "bytes": 11334,
+          "sha256": "ae06e847775d6fa9cf72c3fd20d680e0aa5f5642c607c1592457da0c8fa5fbc5"
+        },
+        "/tmp/surprising-aeron-mvc/accessor-audit.log": {
+          "bytes": 25,
+          "sha256": "a61958ae2b37b25e333d1961335e51a90079cb8f5508c308dc90b81c76d1a040"
+        },
+        "/tmp/surprising-aeron-mvc/node-probe.log": {
+          "bytes": 106,
+          "sha256": "92b492345efd98276465e4e8542fa911f239f519428db7196657cc28316892de"
+        },
+        "/tmp/surprising-aeron-mvc/mvc-smoke.log": {
+          "bytes": 42632,
+          "sha256": "0c855d322621a56048b8efc549f88a8ab7acbcd2dc29bf0f149eb1e5e63e91c3"
+        },
+        "/tmp/surprising-aeron-mvc/node-smoke.log": {
+          "bytes": 1641,
+          "sha256": "18e3d6a574c54a261ed1886b6009883536937db94fb51f3185cd823088322f1d"
+        },
+        "/tmp/surprising-aeron-mvc/mvc-compile.log": {
+          "bytes": 11313,
+          "sha256": "07675725449d9ea61ca5d8634502599596051ab5f9352c284580896af4ff5b4b"
+        },
+        "/tmp/surprising-aeron-mvc/shared-driver-tests.log": {
+          "bytes": 24220,
+          "sha256": "a4064a2facf1437da2afdc77ff989b5ad347f930ae535b69d6b6dc2e27798810"
+        },
+        "/tmp/surprising-aeron-mvc/bytecode-audit.log": {
+          "bytes": 75,
+          "sha256": "5ced81be8bb3405fffff2faac14551e1f25265a173c1a50ee09f31fdf5040bd5"
+        },
+        "/tmp/surprising-aeron-mvc/mvc-full-tests.log": {
+          "bytes": 723706,
+          "sha256": "b3f2475a5fad0663e8dd24bde6f516823f3cffccd4dcbc1a00184aff0ef9c9c3"
+        },
+        "/tmp/surprising-aeron-mvc/node-smoke-initial.log": {
+          "bytes": 2342,
+          "sha256": "27dd5eb75696948c39c00184610d3b6edb0824ccbf10e8997daefa1d1641d443"
+        },
+        "/tmp/surprising-aeron-mvc/constructor-audit.log": {
+          "bytes": 31,
+          "sha256": "2c4e49108b964d98405f3917a035c7ad5761f28315bf64d9bcc79f52337f02a7"
+        },
+        "/tmp/surprising-aeron-mvc/lombok-tests.log": {
+          "bytes": 46493,
+          "sha256": "f219b03dda54c884e3bed265a635ab1bc8b267ea58dbf503710a035fc7714032"
+        }
+      }
+    },
+    "build_outputs": "Maven target 编译文件与测试报告保留供本地开发使用；未删除其他会话的报告或数据。"
+  }
+}

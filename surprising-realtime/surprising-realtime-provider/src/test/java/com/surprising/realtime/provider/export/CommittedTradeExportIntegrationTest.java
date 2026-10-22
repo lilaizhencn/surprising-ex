@@ -1,15 +1,14 @@
 package com.surprising.realtime.provider.export;
 
-import com.surprising.product.api.utils.ProductTopicNames;
-
-import com.surprising.realtime.provider.export.config.TradeExportProperties;
-import com.surprising.realtime.provider.export.service.CommittedAlgoProjectionService;
-import com.surprising.realtime.provider.export.service.CommittedPortfolioHistoryService;
-import com.surprising.realtime.provider.export.service.CommittedTradingStatisticsService;
-import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.*;
+import com.surprising.product.api.utils.ProductTopicNames;
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedAlgoProjectionService;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
+import com.surprising.realtime.provider.export.service.CommittedPortfolioHistoryService;
+import com.surprising.realtime.provider.export.service.CommittedTradingStatisticsService;
 import com.surprising.trading.api.model.PublicTradeEvent;
 import io.aeron.*;
 import io.aeron.archive.*;
@@ -32,7 +31,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.kafka.test.EmbeddedKafkaKraftBroker;
 import tools.jackson.databind.ObjectMapper;
-
 import static org.assertj.core.api.Assertions.*;
 
 class CommittedTradeExportIntegrationTest {
@@ -284,9 +282,9 @@ class CommittedTradeExportIntegrationTest {
                         .filter(o -> "FILLED".equals(o.status())).map(CoreOrderStateView::orderId))
                         .contains(1L, 2L);
                 byte[] committedCheckpoint = Files.readAllBytes(checkpoint);
-                var repaired = new ArrayList<com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult>();
+                var repaired = new ArrayList<com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult>();
                 org.mockito.Mockito.doAnswer(call -> {
-                    repaired.addAll(call.<List<com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedCommandResult>>getArgument(1));
+                    repaired.addAll(call.<List<com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult>>getArgument(1));
                     return null;
                 }).when(orders).repairCommandResults(org.mockito.ArgumentMatchers.eq(ProductLine.SPOT), org.mockito.ArgumentMatchers.anyList());
                 long liveWrites = org.mockito.Mockito.mockingDetails(orders).getInvocations().stream()

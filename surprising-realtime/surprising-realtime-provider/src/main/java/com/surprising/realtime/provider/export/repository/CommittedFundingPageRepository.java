@@ -1,10 +1,9 @@
 package com.surprising.realtime.provider.export.repository;
 
-import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.provider.export.model.CommittedProjectionRows.FundingCursor;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
-import com.surprising.realtime.provider.export.model.CommittedProjectionRows.FundingCursor;
 
 /** 仅访问core_funding_page_projection；在原资金费结算身份锁内记录页并校验重放身份。 */
 @Repository
@@ -16,7 +15,7 @@ public class CommittedFundingPageRepository {
         this.jdbc = jdbc;
     }
 
-    public boolean insertOrVerify(com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public boolean insertOrVerify(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
         var command = page.command();
         jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
                 page.product().name() + ':' + command.instrumentId() + ':' + command.settlementId());
@@ -42,7 +41,7 @@ public class CommittedFundingPageRepository {
         return true;
     }
 
-    public List<FundingCursor> cursors(com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedFundingPage page) {
+    public List<FundingCursor> cursors(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage page) {
         var command = page.command();
         return jdbc.query("""
             SELECT cursor_user_id,next_cursor_user_id,funding_rate_ppm,complete

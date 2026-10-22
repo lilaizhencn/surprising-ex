@@ -1,9 +1,9 @@
 package com.surprising.realtime.provider.export;
 
-import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedFundingPage;
+import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage;
 import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.*;
@@ -13,7 +13,6 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-
 import static org.assertj.core.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named = "INSTRUMENT_TEST_JDBC_URL", matches = ".+")

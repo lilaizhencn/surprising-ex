@@ -31,7 +31,7 @@ class SharedCommandTransportIntegrationTest {
                 "-Dsurprising.aeron.data-dir=" + temporary.resolve("data"),
                 "-Dsurprising.aeron.service.idle-strategy=BACKOFF",
                 "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
-                "com.surprising.aeron.service.SurprisingCoreApplication")
+                "com.surprising.aeron.bootstrap.SurprisingCoreApplication")
                 .redirectErrorStream(true).redirectOutput(temporary.resolve("core.log").toFile()).start();
         try (var driver = SurprisingAeronClient.newMediaDriver(temporary.resolve("commands").toString())) {
             var pools = new java.util.ArrayList<AeronClientPool>();

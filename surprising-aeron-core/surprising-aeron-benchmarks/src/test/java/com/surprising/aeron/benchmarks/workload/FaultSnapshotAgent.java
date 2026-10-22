@@ -23,7 +23,7 @@ public final class FaultSnapshotAgent {
             @Override
             public byte[] transform(ClassLoader loader, String name, Class<?> cls,
                                     ProtectionDomain domain, byte[] bytes) {
-                if (!name.equals("com/surprising/aeron/service/cluster/AeronTradingClusterService")) return null;
+                if (!name.equals("com/surprising/aeron/controller/AeronTradingClusterService")) return null;
                 return ClassFile.of().transformClass(ClassFile.of().parse(bytes),
                         ClassTransform.transformingMethodBodies(method -> method.methodName().equalsString("onTakeSnapshot"),
                                 (builder, element) -> {

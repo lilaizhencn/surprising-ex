@@ -1,10 +1,10 @@
 package com.surprising.realtime.provider.export;
 
-import com.surprising.realtime.provider.export.config.TradeExportProperties;
-import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import com.surprising.realtime.provider.export.config.TradeExportProperties;
+import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
 import io.aeron.*;
 import io.aeron.archive.*;
 import io.aeron.archive.client.AeronArchive;
@@ -21,7 +21,6 @@ import java.util.concurrent.TimeUnit;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -77,7 +76,7 @@ class CommittedFundingRepairIntegrationTest {
                 assertThat(Files.readAllBytes(checkpoint)).isEqualTo(seed);
                 exporter.repairFunding(first);
                 assertThat(TradeExportCheckpoint.read(checkpoint,line).logPosition()).isEqualTo(first);
-                var pages=org.mockito.ArgumentCaptor.forClass(com.surprising.aeron.service.orchestration.replay.CommittedTradeReplay.CommittedFundingPage.class);
+                var pages=org.mockito.ArgumentCaptor.forClass(com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedFundingPage.class);
                 verify(repository,times(2)).persistFunding(pages.capture());
                 assertThat(pages.getValue().payments().getFirst().amountUnits()).isEqualTo(10);
                 assertThat(pages.getValue().progress().complete()).isFalse();
