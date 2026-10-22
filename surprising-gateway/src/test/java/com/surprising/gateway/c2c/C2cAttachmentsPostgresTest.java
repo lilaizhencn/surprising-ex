@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
+import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
 import com.surprising.gateway.c2c.controller.C2cChatController;
 import com.surprising.gateway.c2c.service.C2cPaymentAccounts;
 
@@ -91,12 +93,12 @@ class C2cAttachmentsPostgresTest {
         upload(11,original,"PAYMENT_QR",null,null,png(),"image/png",200);
         var account=fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false);
         fixture.bean(C2cPaymentAccounts.class).save(11,account.id(),account.revision(),"CNY","ALIPAY",
-                new C2cPaymentAccounts.Details("QA Maker","qa-maker-account","",original));
+                C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Maker","qa-maker-account","",original)));
         fixture.db.jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
         UUID order=order();upload(11,newQr,"PAYMENT_QR",null,null,png(),"image/png",200);
         account=fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false);
         fixture.bean(C2cPaymentAccounts.class).save(11,account.id(),account.revision(),"CNY","ALIPAY",
-                new C2cPaymentAccounts.Details("QA Maker","qa-new-account","",newQr));
+                C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Maker","qa-new-account","",newQr)));
         var response=fixture.perform(HttpMethod.GET,"/api/v1/c2c/attachments/"+original+"/content?orderId="+order,12,null).getResponse();
         assertThat(response.getStatus()).isEqualTo(200);
         fixture.call(HttpMethod.GET,"/api/v1/c2c/attachments/"+newQr+"/content?orderId="+order,12,null,403);

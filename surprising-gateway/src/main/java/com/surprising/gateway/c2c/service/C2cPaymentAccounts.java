@@ -1,5 +1,9 @@
 package com.surprising.gateway.c2c.service;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput.Details;
+import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
+
 import com.surprising.gateway.c2c.exception.C2cProblem;
 
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
@@ -23,7 +27,6 @@ import tools.jackson.databind.ObjectMapper;
 /** 收款账号仅本人/订单双方/有权限客服可见；变更需重审，在途订单仍使用原快照。 */
 @Service
 public class C2cPaymentAccounts {
-    public record Details(String holderName, String accountNumber, String bankName, UUID qrAttachmentId) { }
     private final C2cPaymentAccountRepository accounts;
     private final C2cPaymentMethodRepository methods;
     private final C2cAdsRepository ads;
@@ -54,8 +57,8 @@ public class C2cPaymentAccounts {
     }
 
     @Transactional
-    public C2cPaymentAccount saveVerified(JwtPrincipal user,UUID id,long revision,String fiat,String method,Details details,String email,String totp) {
-        access.verifySettings(user,email,totp);return save(user.userId(),id,revision,fiat,method,details);
+    public C2cPaymentAccount saveVerified(JwtPrincipal user,UUID id,long revision,String fiat,String method,C2cPaymentAccountInput input,String email,String totp) {
+        access.verifySettings(user,email,totp);return save(user.userId(),id,revision,fiat,method,input);
     }
     @Transactional
     public void disableVerified(JwtPrincipal user,UUID id,long revision,String email,String totp) {
@@ -63,8 +66,9 @@ public class C2cPaymentAccounts {
     }
 
     @Transactional
-    public C2cPaymentAccount save(long userId, UUID id, long revision, String fiat, String method, Details details) {
-        validateDetails(userId,fiat,method,details);
+    public C2cPaymentAccount save(long userId, UUID id, long revision, String fiat, String method, C2cPaymentAccountInput input) {
+        validateDetails(userId,fiat,method,input);
+        var details=input.details();
         var envelope = new C2cPaymentEnvelope("C2C_PAYMENT",Long.toString(userId),fiat,method,
                 Normalizer.normalize(details.holderName().trim(),Normalizer.Form.NFKC),details.accountNumber().trim(),
                 details.bankName()==null?"":details.bankName().trim(),details.qrAttachmentId());
@@ -101,8 +105,9 @@ public class C2cPaymentAccounts {
             if(kyc==null || !"VERIFIED".equals(kyc.status()) || (kyc.expiresAt()!=null && !kyc.expiresAt().isAfter(Instant.now())))
                 throw C2cProblem.conflict("账号本人尚无有效身份认证");
             var verified=details(value);
-            validateDetails(value.userId(),value.fiat(),value.method(),new Details(verified.holderName(),
-                    verified.accountNumber(),verified.bankName(),verified.qrAttachmentId()));
+            // 审核重核的是已持久化并解密的事实，不能信任历史方式规则仍然适用。
+            validateDetails(value.userId(),value.fiat(),value.method(),C2cPaymentFormats.input(new Details(verified.holderName(),
+                    verified.accountNumber(),verified.bankName(),verified.qrAttachmentId())));
         }
         accounts.review(id,approved?"APPROVED":"REJECTED",reason.trim(),administrator.userId());
         return get(value.userId(),id,false);
@@ -123,10 +128,10 @@ public class C2cPaymentAccounts {
                 envelope.bankName(),envelope.qrAttachmentId());
     }
 
-    private void validateDetails(long userId,String fiat,String method,Details details) {
+    private void validateDetails(long userId,String fiat,String method,C2cPaymentAccountInput input) {
+        var details=input.details();
         var methodPolicy=methods.available(method,fiat).orElseThrow(()->new IllegalArgumentException("该币种收款方式尚未开放"));
-        if(methodPolicy.requiresBankName() && (details.bankName()==null || details.bankName().isBlank()
-                || !details.accountNumber().trim().matches("[0-9]{8,40}"))) throw new IllegalArgumentException("请填写正确的银行名称和卡号");
+        if(methodPolicy.requiresBankName() && !input.bankDetailsComplete()) throw new IllegalArgumentException("请填写正确的银行名称和卡号");
         if(details.qrAttachmentId()!=null && (!methodPolicy.supportsQr() || !attachments.readyPaymentQr(details.qrAttachmentId(),userId)))
             throw new IllegalArgumentException("收款码归属不匹配");
     }

@@ -1,5 +1,8 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
+import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
+import com.surprising.gateway.c2c.model.C2cAdminReviewModels;
 import com.surprising.gateway.provider.auth.model.AuthModels;
 import com.surprising.gateway.provider.auth.service.AdminApprovalService;
 
@@ -49,7 +52,7 @@ class C2cAdminHttpPostgresTest {
 
     @Test void appealAlwaysRequiresAnotherAdministratorEvenWhenGeneralApprovalIsDisabled() throws Exception {
         var dispute=dispute();String path=decisionPath(dispute.appeal());
-        var rejected=fixture.call(HttpMethod.POST,path,9,new C2cAdminReview.AppealDecision("RELEASE","Synthetic checked payment evidence"),403);
+        var rejected=fixture.call(HttpMethod.POST,path,9,new C2cAdminReviewModels.AppealDecision("RELEASE","Synthetic checked payment evidence"),403);
         assertThat(rejected.get("code")).isEqualTo("C2C_APPROVAL_REQUIRED");
         assertThat(fixture.bean(C2cOrdersRepository.class).get(dispute.order(),false).status()).isEqualTo(C2cOrderStatus.APPEALED);
         assertThat(fixture.bean(C2cFundsRepository.class).find("ORDER",dispute.order(),"ORDER_RELEASE")).isNull();
@@ -58,9 +61,9 @@ class C2cAdminHttpPostgresTest {
 
     @Test void bodyAndPathBoundApprovalCannotBeReusedForAnotherDecisionAndReleaseKeepsOriginalParties() throws Exception {
         var dispute=dispute();String path=decisionPath(dispute.appeal());
-        var body=new C2cAdminReview.AppealDecision("RELEASE","Synthetic checked payment evidence");
+        var body=new C2cAdminReviewModels.AppealDecision("RELEASE","Synthetic checked payment evidence");
         long approval=approve(path,body,9,10);
-        approved(path,9,new C2cAdminReview.AppealDecision("REFUND",body.reason()),approval,403);
+        approved(path,9,new C2cAdminReviewModels.AppealDecision("REFUND",body.reason()),approval,403);
         assertThat(approvalStatus(approval)).isEqualTo("APPROVED");
         long wrongPath=approve(decisionPath(UUID.randomUUID()),body,9,10);
         approved(path,9,body,wrongPath,403);assertThat(approvalStatus(wrongPath)).isEqualTo("APPROVED");
@@ -81,7 +84,7 @@ class C2cAdminHttpPostgresTest {
         var dispute=dispute();String path=decisionPath(dispute.appeal());
         var sellerAdmin=new AuthModels.JwtPrincipal(11,"qa_seller_admin","NORMAL",List.of("ADMIN"),Instant.now().plusSeconds(600));
         doReturn(sellerAdmin).when(fixture.auth).authenticateAdminBearer("Bearer qa-11");
-        var body=new C2cAdminReview.AppealDecision("REFUND","Synthetic independently checked evidence");
+        var body=new C2cAdminReviewModels.AppealDecision("REFUND","Synthetic independently checked evidence");
         long approval=approve(path,body,9,11);
         approved(path,9,body,approval,403);
         assertThat(approvalStatus(approval)).isEqualTo("APPROVED");
@@ -92,7 +95,7 @@ class C2cAdminHttpPostgresTest {
     void c2cResolutionRejectsNoncanonicalApprovalHeaders(String format) throws Exception {
         var dispute = dispute();
         String path = decisionPath(dispute.appeal());
-        var body = new C2cAdminReview.AppealDecision("REFUND", "Synthetic payment verification");
+        var body = new C2cAdminReviewModels.AppealDecision("REFUND", "Synthetic payment verification");
         long approval = approve(path, body, 9, 10);
         String header = switch (format) {
             case "spaces" -> " " + approval + " ";
@@ -109,7 +112,7 @@ class C2cAdminHttpPostgresTest {
     }
 
     @Test void selfApprovalAndRevokedApproverPermissionAreRejected() throws Exception {
-        var dispute=dispute();String path=decisionPath(dispute.appeal());var body=new C2cAdminReview.AppealDecision("REFUND","Synthetic payment verification");
+        var dispute=dispute();String path=decisionPath(dispute.appeal());var body=new C2cAdminReviewModels.AppealDecision("REFUND","Synthetic payment verification");
         var service=fixture.bean(AdminApprovalService.class);
         var request=new com.surprising.gateway.provider.auth.model.AdminApprovalCommand("c2c","POST",path,null,C2cAdminAccess.hash(fixture.json.writeValueAsBytes(body)),"Synthetic independent approval reason");
         var pending=service.create("Bearer qa-9",request);
@@ -121,13 +124,13 @@ class C2cAdminHttpPostgresTest {
     }
 
     @Test void manualPaymentReviewRequiresAttestationAndSensitiveReadsRequireAnAuditWrite() throws Exception {
-        var account=fixture.bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Review Holder","qa-review-account","",null));
+        var account=fixture.bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Review Holder","qa-review-account","",null)));
         var list=fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/payment-accounts?status=PENDING",9,null,200);
         assertThat(fixture.json.writeValueAsString(list)).doesNotContain("qa-review-account","holderName","ciphertext");
         String path="/api/v1/admin/c2c/payment-accounts/"+account.id()+"/review";
-        fixture.call(HttpMethod.POST,path,9,new C2cAdminReview.PaymentDecision("1","APPROVE",false,"Synthetic manual identity check"),400);
+        fixture.call(HttpMethod.POST,path,9,new C2cAdminReviewModels.PaymentRequest("1","APPROVE",false,"Synthetic manual identity check"),400);
         assertThat(fixture.bean(C2cPaymentAccounts.class).get(11,account.id(),false).status()).isEqualTo("PENDING");
-        fixture.call(HttpMethod.POST,path,9,new C2cAdminReview.PaymentDecision("1","APPROVE",true,"Synthetic manual identity check"),200);
+        fixture.call(HttpMethod.POST,path,9,new C2cAdminReviewModels.PaymentRequest("1","APPROVE",true,"Synthetic manual identity check"),200);
         var details=fixture.call(HttpMethod.GET,"/api/v1/admin/c2c/payment-accounts/"+account.id(),9,null,200);
         assertThat(((Map<?,?>)details.get("details")).get("accountNumber")).isEqualTo("qa-review-account");
         assertThat(fixture.db.jdbc.queryForObject("SELECT count(*) FROM gateway_admin_operation_logs WHERE success AND http_method='GET'",Integer.class)).isEqualTo(1);
@@ -139,10 +142,10 @@ class C2cAdminHttpPostgresTest {
     @Test void merchantSuspensionPausesAdsAndForceCloseRequiresApprovedFixedRecipientRefund() throws Exception {
         UUID ad=fixture.publish("SELL");
         fixture.call(HttpMethod.POST,"/api/v1/admin/c2c/merchants/11/review",9,
-                new C2cAdminReview.MerchantDecision("1","SUSPEND","VERIFIED","Synthetic risk review suspension"),200);
+                new C2cAdminReviewModels.MerchantRequest("1","SUSPEND","VERIFIED","Synthetic risk review suspension"),200);
         var row=fixture.bean(C2cAdsRepository.class).get(ad,false);assertThat(row.status()).isEqualTo("PAUSED");
         String path="/api/v1/admin/c2c/ads/"+ad+"/close";
-        var command=new C2cAdminReview.AdDecision(Long.toString(row.revision()),"CLOSE","Synthetic independent closure reason");
+        var command=new C2cAdminReviewModels.AdRequest(Long.toString(row.revision()),"CLOSE","Synthetic independent closure reason");
         fixture.call(HttpMethod.POST,path,9,command,403);
         long approval=approve(path,command,9,10);
         var accepted=approved(path,9,command,approval,200);assertThat(accepted.get("status")).isEqualTo("CLOSING");

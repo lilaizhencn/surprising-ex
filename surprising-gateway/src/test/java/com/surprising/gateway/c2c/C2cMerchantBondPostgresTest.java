@@ -1,5 +1,6 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cAdminReviewModels;
 import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.controller.C2cMeController;
 import com.surprising.gateway.c2c.controller.C2cMerchantController;
@@ -57,7 +58,7 @@ class C2cMerchantBondPostgresTest {
     @Test void approvalRequiresCommittedBondAndDuplicateDepositUsesOnlyOneOriginalIntent() throws Exception {
         apply();
         f.call(HttpMethod.POST,"/api/v1/admin/c2c/merchants/12/review",9,
-                new C2cAdminReview.MerchantDecision("1","APPROVE","VERIFIED","Check merchant without committed bond"),409);
+                new C2cAdminReviewModels.MerchantRequest("1","APPROVE","VERIFIED","Check merchant without committed bond"),409);
         UUID request=UUID.randomUUID();var first=deposit(request);
         assertThat(bond(first).get("status")).isEqualTo("RESERVING");
         var unconfirmed=(Map<?,?>)((List<?>)f.call(HttpMethod.GET,"/api/v1/c2c/me",12,null,200).get("escrow")).getFirst();
@@ -65,13 +66,13 @@ class C2cMerchantBondPostgresTest {
         assertThat(bond(deposit(request)).get("bondId")).isEqualTo(bond(first).get("bondId"));
         verifyNoInteractions(f.core);
         f.call(HttpMethod.POST,"/api/v1/admin/c2c/merchants/12/review",9,
-                new C2cAdminReview.MerchantDecision("1","APPROVE","VERIFIED","Check pending bond confirmation"),409);
+                new C2cAdminReviewModels.MerchantRequest("1","APPROVE","VERIFIED","Check pending bond confirmation"),409);
         settle();
         assertThat(bond(deposit(request)).get("status")).isEqualTo("LOCKED");
         var entitlement=(Map<?,?>)((List<?>)f.call(HttpMethod.GET,"/api/v1/c2c/me",12,null,200).get("escrow")).getFirst();
         assertThat(entitlement.get("confirmedEscrowUnits")).isEqualTo("100000000");
         f.call(HttpMethod.POST,"/api/v1/admin/c2c/merchants/12/review",9,
-                new C2cAdminReview.MerchantDecision("1","APPROVE","VERIFIED","Check committed merchant bond"),200);
+                new C2cAdminReviewModels.MerchantRequest("1","APPROVE","VERIFIED","Check committed merchant bond"),200);
         assertThat(f.db.jdbc.queryForObject("SELECT count(*) FROM c2c_fund_intents WHERE owner_type='MERCHANT'",Integer.class)).isEqualTo(1);
         verify(f.core,times(1)).transferOut(any(),any());
     }
@@ -144,7 +145,7 @@ class C2cMerchantBondPostgresTest {
         UUID request=UUID.randomUUID();deposit(request);settle();
         assertThat(bond(deposit(request)).get("status")).isEqualTo("FAILED");
         f.call(HttpMethod.POST,"/api/v1/admin/c2c/merchants/12/review",9,
-                new C2cAdminReview.MerchantDecision("1","APPROVE","VERIFIED","Rejected bond cannot qualify merchant"),409);
+                new C2cAdminReviewModels.MerchantRequest("1","APPROVE","VERIFIED","Rejected bond cannot qualify merchant"),409);
         verify(f.core,never()).transferIn(any(),any());
     }
 

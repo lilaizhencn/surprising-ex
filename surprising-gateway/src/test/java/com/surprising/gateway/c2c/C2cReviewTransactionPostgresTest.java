@@ -1,5 +1,8 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
+import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
+import com.surprising.gateway.c2c.model.C2cAdminReviewModels;
 import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.repository.C2cAdsRepository;
@@ -28,7 +31,7 @@ class C2cReviewTransactionPostgresTest {
         fixture.db.jdbc.execute("DROP TABLE gateway_admin_operation_logs");
 
         fixture.call(HttpMethod.POST, "/api/v1/admin/c2c/merchants/11/review", 9,
-                new C2cAdminReview.MerchantDecision("1", "SUSPEND", "VERIFIED", "Synthetic audit failure test"), 503);
+                new C2cAdminReviewModels.MerchantRequest("1", "SUSPEND", "VERIFIED", "Synthetic audit failure test"), 503);
 
         var adAfter = fixture.bean(C2cAdsRepository.class).get(adId, false);
         assertThat(adAfter.status()).isEqualTo(adBefore.status());
@@ -45,7 +48,7 @@ class C2cReviewTransactionPostgresTest {
 
         fixture.call(HttpMethod.POST, "/api/v1/c2c/payment-accounts", 11,
                 new C2cController.PaymentSave(fixture.makerAccount, Long.toString(accountBefore.revision() + 1),
-                        "CNY", "ALIPAY", new C2cPaymentAccounts.Details("QA Updated", "qa-rejected-account", "", null),
+                        "CNY", "ALIPAY", new C2cPaymentAccountInput.Details("QA Updated", "qa-rejected-account", "", null),
                         new C2cVerification("123456", "")), 409);
 
         var adAfter = fixture.bean(C2cAdsRepository.class).get(adId, false);
@@ -57,11 +60,11 @@ class C2cReviewTransactionPostgresTest {
     @Test void paymentApprovalRollsBackWhenRequiredAuditFails() throws Exception {
         var payments = fixture.bean(C2cPaymentAccounts.class);
         var pending = payments.save(13, null, 0, "CNY", "ALIPAY",
-                new C2cPaymentAccounts.Details("QA Pending", "qa-pending-account", "", null));
+                C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Pending", "qa-pending-account", "", null)));
         fixture.db.jdbc.execute("DROP TABLE gateway_admin_operation_logs");
 
         fixture.call(HttpMethod.POST, "/api/v1/admin/c2c/payment-accounts/" + pending.id() + "/review", 9,
-                new C2cAdminReview.PaymentDecision("1", "APPROVE", true, "Synthetic audit failure test"), 503);
+                new C2cAdminReviewModels.PaymentRequest("1", "APPROVE", true, "Synthetic audit failure test"), 503);
 
         assertThat(payments.get(13, pending.id(), false)).isEqualTo(pending);
     }
@@ -73,7 +76,7 @@ class C2cReviewTransactionPostgresTest {
         fixture.db.jdbc.execute("DROP TABLE gateway_admin_operation_logs");
 
         fixture.call(HttpMethod.POST, "/api/v1/admin/c2c/reports/" + reportId + "/review", 9,
-                new C2cAdminReview.ReportDecision("REVIEWED", "Synthetic audit failure test"), 503);
+                new C2cAdminReviewModels.ReportDecision("REVIEWED", "Synthetic audit failure test"), 503);
 
         assertThat(fixture.db.jdbc.queryForMap("SELECT status,review_reason,reviewed_by FROM c2c_reports WHERE report_id=?", reportId))
                 .containsEntry("status", "OPEN").containsEntry("review_reason", null).containsEntry("reviewed_by", null);

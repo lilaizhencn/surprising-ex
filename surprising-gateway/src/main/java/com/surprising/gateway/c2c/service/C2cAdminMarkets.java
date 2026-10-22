@@ -145,12 +145,6 @@ public class C2cAdminMarkets {
         for(var balance:balances) if(result.putIfAbsent(balance.asset(),balance)!=null) throw new IllegalStateException("资金查询返回重复资产");
         return result;
     }
-    public static long version(String value,boolean zero) {
-        if(value==null || !value.matches("0|[1-9][0-9]{0,18}")) throw new IllegalArgumentException("请提供十进制版本字符串");
-        try {long version=Long.parseLong(value);if(!zero && version==0) throw new IllegalArgumentException("请提供当前版本");return version;}
-        catch(NumberFormatException failure) {throw new IllegalArgumentException("版本超出范围");}
-    }
-    public static void reason(String value) {
-        if(value==null || value.trim().length()<5 || value.length()>1000) throw new IllegalArgumentException("请填写至少 5 字、最多 1000 字的管理原因");
-    }
+
+
 }

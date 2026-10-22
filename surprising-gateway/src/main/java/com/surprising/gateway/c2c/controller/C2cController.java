@@ -1,5 +1,8 @@
 package com.surprising.gateway.c2c.controller;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
+import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
+
 import com.surprising.gateway.c2c.model.C2cVerification;
 import com.surprising.gateway.c2c.service.C2cAccess;
 import com.surprising.gateway.c2c.service.C2cAds;
@@ -39,7 +42,7 @@ public class C2cController {
     public record Reason(String reason) { }
     public record AdAction(String revision,String action,C2cVerification verification) { }
     public record AdEdit(String revision,String price,String minFiat,String maxFiat,String terms,int minCompleted) { }
-    public record PaymentSave(UUID accountId,String revision,String fiat,String methodCode,C2cPaymentAccounts.Details details,C2cVerification verification) { }
+    public record PaymentSave(UUID accountId,String revision,String fiat,String methodCode,C2cPaymentAccountInput.Details details,C2cVerification verification) { }
     public record PaymentDisable(String revision,C2cVerification verification) { }
 
     private final C2cAccess access;
@@ -223,7 +226,7 @@ public class C2cController {
         var user=access.user(authorization);validatePayment(request);
         var codes=C2cVerification.orEmpty(request.verification());
         return C2cViews.paymentAccount(payments.saveVerified(user,request.accountId(),revisionAllowZero(request.revision()),
-                request.fiat(),request.methodCode(),request.details(),codes.emailCode(),codes.totpCode()));
+                request.fiat(),request.methodCode(),C2cPaymentFormats.input(request.details()),codes.emailCode(),codes.totpCode()));
     }
     @PostMapping("/payment-accounts/{id}/disable")
     public Map<String,Object> disablePaymentAccount(@RequestHeader(value="Authorization",required=false) String authorization,

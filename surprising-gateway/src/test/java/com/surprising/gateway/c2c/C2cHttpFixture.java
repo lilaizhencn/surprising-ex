@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
+import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
 import com.surprising.gateway.provider.model.ProductAccountAdjustment;
 
 import com.surprising.gateway.provider.auth.model.ComplianceModels;
@@ -207,8 +209,8 @@ final class C2cHttpFixture implements AutoCloseable {
             context.registerBean(C2cMessages.class,()->C2cDatabaseFixture.messages(jdbc,bean(C2cConversations.class),bean(C2cAttachments.class),json));
             context.registerBean(C2cAdminChat.class,()->new C2cAdminChat(bean(C2cAdminAccess.class),bean(C2cOrdersRepository.class),bean(C2cMessages.class),bean(C2cAttachments.class)));
             context.refresh();
-            makerAccount=bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Maker","qa-maker-account","",null)).id();
-            takerAccount=bean(C2cPaymentAccounts.class).save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
+            makerAccount=bean(C2cPaymentAccounts.class).save(11,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Maker","qa-maker-account","",null))).id();
+            takerAccount=bean(C2cPaymentAccounts.class).save(12,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Taker","qa-taker-account","",null))).id();
             jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
             var controller=new C2cController(bean(C2cAccess.class),bean(C2cAds.class),bean(C2cOrders.class),bean(C2cSubmissionService.class),
                     bean(C2cQueryService.class),bean(C2cQuickQuoteService.class),bean(C2cPaymentAccounts.class),json);

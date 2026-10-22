@@ -6,6 +6,7 @@ import com.surprising.gateway.c2c.service.C2cAdminAccess;
 import com.surprising.gateway.c2c.service.C2cAdminInitialization;
 import com.surprising.gateway.c2c.service.C2cAdminMarkets;
 import com.surprising.gateway.c2c.service.C2cAdminReview;
+import com.surprising.gateway.c2c.model.C2cAdminReviewModels;
 
 import com.surprising.gateway.c2c.utils.C2cMoney;
 
@@ -124,7 +125,7 @@ public class C2cAdminController {
     public Map<String,Object> merchantReview(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable long id,@RequestBody byte[] body,HttpServletRequest http) {
         var request=requestBinding.bind(http);
-        return audited(authorization,request,body,()->review.merchant(authorization,request,body,id,read(body,C2cAdminReview.MerchantDecision.class)));
+        return audited(authorization,request,body,()->review.merchant(authorization,request,body,id,merchantDecision(body)));
     }
     @GetMapping("/payment-accounts")
     public C2cPage<C2cAdminViews.PaymentAccount> accounts(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -144,7 +145,7 @@ public class C2cAdminController {
     public Map<String,Object> accountReview(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
         var request=requestBinding.bind(http);
-        return audited(authorization,request,body,()->review.payment(authorization,request,body,id,read(body,C2cAdminReview.PaymentDecision.class)));
+        return audited(authorization,request,body,()->review.payment(authorization,request,body,id,paymentDecision(body)));
     }
     @GetMapping("/ads")
     public C2cPage<Map<String,Object>> ads(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -158,13 +159,13 @@ public class C2cAdminController {
     public Map<String,Object> ad(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
         var request=requestBinding.bind(http);
-        return audited(authorization,request,body,()->review.ad(authorization,request,body,id,read(body,C2cAdminReview.AdDecision.class)));
+        return audited(authorization,request,body,()->review.ad(authorization,request,body,id,adDecision(body)));
     }
     @PostMapping("/ads/{id}/close")
     public Map<String,Object> closeAd(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
         var request=requestBinding.bind(http);
-        return audited(authorization,request,body,()->review.closeAd(authorization,request,body,id,read(body,C2cAdminReview.AdDecision.class)));
+        return audited(authorization,request,body,()->review.closeAd(authorization,request,body,id,adDecision(body)));
     }
     @GetMapping("/orders")
     public C2cPage<Map<String,Object>> orders(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -204,7 +205,7 @@ public class C2cAdminController {
     public Map<String,Object> appeal(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
         var request=requestBinding.bind(http);
-        return audited(authorization,request,body,()->review.appeal(authorization,request,body,id,read(body,C2cAdminReview.AppealDecision.class)));
+        return audited(authorization,request,body,()->review.appeal(authorization,request,body,id,appealDecision(body)));
     }
     @GetMapping("/reports")
     public C2cPage<C2cAdminViews.Report> reports(@RequestHeader(value="Authorization",required=false) String authorization,
@@ -218,8 +219,33 @@ public class C2cAdminController {
     public Map<String,Object> report(@RequestHeader(value="Authorization",required=false) String authorization,
             @PathVariable UUID id,@RequestBody byte[] body,HttpServletRequest http) {
         var request=requestBinding.bind(http);
-        return audited(authorization,request,body,()->review.report(authorization,request,body,id,read(body,C2cAdminReview.ReportDecision.class)));
+        return audited(authorization,request,body,()->review.report(authorization,request,body,id,reportDecision(body)));
     }
+    private C2cAdminReviewModels.MerchantDecision merchantDecision(byte[] body) {
+        var input=read(body,C2cAdminReviewModels.MerchantRequest.class);reason(input.reason());
+        return new C2cAdminReviewModels.MerchantDecision(version(input.revision(),false),input.decision(),input.tier(),input.reason().trim());
+    }
+
+    private C2cAdminReviewModels.PaymentDecision paymentDecision(byte[] body) {
+        var input=read(body,C2cAdminReviewModels.PaymentRequest.class);reason(input.reason());
+        return new C2cAdminReviewModels.PaymentDecision(version(input.revision(),false),input.decision(),input.identityChecked(),input.reason().trim());
+    }
+
+    private C2cAdminReviewModels.AdDecision adDecision(byte[] body) {
+        var input=read(body,C2cAdminReviewModels.AdRequest.class);reason(input.reason());
+        return new C2cAdminReviewModels.AdDecision(version(input.revision(),false),input.action(),input.reason().trim());
+    }
+
+    private C2cAdminReviewModels.AppealDecision appealDecision(byte[] body) {
+        var input=read(body,C2cAdminReviewModels.AppealDecision.class);reason(input.reason());
+        return new C2cAdminReviewModels.AppealDecision(input.decision(),input.reason().trim());
+    }
+
+    private C2cAdminReviewModels.ReportDecision reportDecision(byte[] body) {
+        var input=read(body,C2cAdminReviewModels.ReportDecision.class);reason(input.reason());
+        return new C2cAdminReviewModels.ReportDecision(input.decision(),input.reason().trim());
+    }
+
     private static int integerDigits(java.math.BigDecimal value) {return value.precision()-value.scale();}
     private static long version(String value,boolean zero) {
         if(value==null || !value.matches("0|[1-9][0-9]{0,18}")) throw new IllegalArgumentException("请提供十进制版本字符串");

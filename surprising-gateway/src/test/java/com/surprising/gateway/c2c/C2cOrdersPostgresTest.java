@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
+import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
 import com.surprising.gateway.provider.auth.service.TotpService;
 
 import com.surprising.gateway.c2c.controller.C2cController;
@@ -64,8 +66,8 @@ class C2cOrdersPostgresTest {
         db.seedMerchantBond(11);
         var properties=new GatewayProperties();properties.getSecurity().setMfaSecretEncryptionKey("c2c-fixture-encryption-key-not-for-deployment");
         access=mock(C2cAccess.class);payments=C2cDatabaseFixture.payments(jdbc,new TotpService(properties),json,null,access);
-        makerAccount=payments.save(11,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Seller","qa-seller-account","",null)).id();
-        sellerAccount=payments.save(12,null,0,"CNY","ALIPAY",new C2cPaymentAccounts.Details("QA Taker","qa-taker-account","",null)).id();
+        makerAccount=payments.save(11,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Seller","qa-seller-account","",null))).id();
+        sellerAccount=payments.save(12,null,0,"CNY","ALIPAY",C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Taker","qa-taker-account","",null))).id();
         jdbc.update("UPDATE c2c_payment_accounts SET status='APPROVED'");
         adRows=new C2cAdsRepository(jdbc);orderRows=new C2cOrdersRepository(jdbc);intents=new C2cFundsRepository(jdbc);
         requests=new C2cSubmissions(jdbc);var markets=C2cDatabaseFixture.markets(jdbc);
@@ -149,7 +151,7 @@ class C2cOrdersPostgresTest {
         var order=create(quote,12,"qa-original-order-key-001");
         var oldSnapshot=order.paymentCiphertext();
         db.transaction(()->payments.save(11,makerAccount,payments.get(11,makerAccount,false).revision(),"CNY","ALIPAY",
-                new C2cPaymentAccounts.Details("QA Seller","qa-replacement-account","",null)));
+                C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Seller","qa-replacement-account","",null))));
         assertThat(adRows.get(ad.id(),false).status()).isEqualTo("PAUSED");
         assertThat(orderRows.get(order.id(),false).paymentCiphertext()).isEqualTo(oldSnapshot);
         assertThat(payments.get(11,makerAccount,false).ciphertext()).isNotEqualTo(oldSnapshot);

@@ -1,5 +1,7 @@
 package com.surprising.gateway.c2c;
 
+import com.surprising.gateway.c2c.model.C2cPaymentAccountInput;
+import com.surprising.gateway.c2c.utils.C2cPaymentFormats;
 import com.surprising.gateway.c2c.controller.C2cController;
 import com.surprising.gateway.c2c.controller.C2cStatusController;
 import com.surprising.gateway.c2c.model.C2cVerification;
@@ -52,7 +54,7 @@ class C2cHttpPostgresTest {
         assertThat(((Map<?,?>)create.get("result")).get("buyerReceivesUnits")).isEqualTo("199800000");
         var account=fixture.bean(C2cPaymentAccounts.class).get(11,fixture.makerAccount,false);
         fixture.bean(C2cPaymentAccounts.class).save(11,account.id(),account.revision(),"CNY","BANK_TRANSFER",
-                new C2cPaymentAccounts.Details("QA Changed","123456789012","QA Test Bank",null));
+                C2cPaymentFormats.input(new C2cPaymentAccountInput.Details("QA Changed","123456789012","QA Test Bank",null)));
         var detail=fixture.call(HttpMethod.GET,"/api/v1/c2c/orders/"+order,12,null,200);
         var payment=(Map<?,?>)detail.get("payment");
         assertThat(payment.get("methodCode")).isEqualTo("ALIPAY");
