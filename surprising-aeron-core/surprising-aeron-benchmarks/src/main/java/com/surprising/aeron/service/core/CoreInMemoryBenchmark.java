@@ -74,8 +74,8 @@ public final class CoreInMemoryBenchmark {
     }
 
     private static RegisterInstrumentCommand instrument() {
-        return new RegisterInstrumentCommand(SYMBOL, "BTC", "USDT", "USDT",
-                1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
+        return new RegisterInstrumentCommand(
+                SYMBOL, "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
     }
 
     private static void applied(TradingCoreRuntime state, CoreMessageType type, CommandSource source,

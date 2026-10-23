@@ -90,8 +90,12 @@ class OwnerPositionRetirementTest {
             // 夹具固定使用的线性永续产品线
             var line = ProductLine.LINEAR_PERPETUAL;
             // 用于建立持仓身份的测试合约
-            var instrument = CoreInstrument.from(line, new RegisterInstrumentCommand("1",
-                    "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+            var instrument = CoreInstrument.from(line, new RegisterInstrumentCommand(
+                    "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                    new CoreInstrumentRiskLimits(
+                            100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                            java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                    0, 0, 0, -1, 0));
             // 包含测试合约的初始业务状态
             var initial = new TradingCoreState(line, 0, Map.of(7L, CoreUserState.empty(line, 7)), Map.of(),
                     Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty());

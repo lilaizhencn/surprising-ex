@@ -412,7 +412,7 @@ public final class SpotMixedWorkload {
     }
 
     private static RegisterInstrumentCommand instrument(String instrumentId, String baseAsset) {
-        return new RegisterInstrumentCommand(instrumentId, baseAsset, QUOTE_ASSET,
-                QUOTE_ASSET, 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
+        return new RegisterInstrumentCommand(
+                instrumentId, baseAsset, QUOTE_ASSET, QUOTE_ASSET, 1, 1, 1, null, 0, 0, 0, -1, 0);
     }
 }

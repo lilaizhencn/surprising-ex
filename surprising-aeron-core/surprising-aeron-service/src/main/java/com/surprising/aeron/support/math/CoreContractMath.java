@@ -1,5 +1,7 @@
 package com.surprising.aeron.support.math;
 
+import com.surprising.instrument.api.model.ContractType;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
@@ -39,18 +41,12 @@ public final class CoreContractMath {
         if (quantitySteps <= 0 || instrument.contractType().isOption() && side == CoreOrderSide.BUY) {
             return 0;
         }
-        // 当前订单风险规模对应的档位；现货不选合约档位，因此可以为 null。
-        CoreRiskLimitBracket bracket = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
-                ? riskBracket(instrument, riskNotionalUnits(instrument, quantitySteps,
-                instrument.contractType().isOption() ? indexPriceTicks : priceTicks))
-                : null;
-        // 实际采用的初始保证金率，优先使用风险档位要求，单位为百万分之一。
-        long initialMarginRatePpm = bracket != null
-                ? bracket.initialMarginRatePpm()
-                : instrument.initialMarginRatePpm();
-        return openingMarginUnits(instrument, side, priceTicks, quantitySteps,
-                initialMarginRatePpm, indexPriceTicks, forwardPriceTicks,
-                bracket == null ? 1_000_000L : bracket.optionMarginFactorPpm());
+        if (instrument.contractType() == ContractType.SPOT)
+            throw new IllegalArgumentException("unsupported contract type: " + instrument.contractType());
+        CoreRiskLimitBracket bracket = riskBracket(instrument, riskNotionalUnits(instrument, quantitySteps,
+                instrument.contractType().isOption() ? indexPriceTicks : priceTicks));
+        return openingMarginUnits(instrument, side, priceTicks, quantitySteps, bracket.initialMarginRatePpm(),
+                indexPriceTicks, forwardPriceTicks, bracket.optionMarginFactorPpm());
     }
 
     /**
@@ -132,16 +128,12 @@ public final class CoreContractMath {
             long markPriceTicks,
             long indexPriceTicks,
             long forwardPriceTicks) {
-        // 按持仓绝对量和风险参考价格选出的维持档位，现货时为 null。
-        CoreRiskLimitBracket bracket = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
-                ? maintenanceRiskBracket(instrument, riskNotionalUnits(instrument,
+        if (instrument.contractType() == ContractType.SPOT)
+            throw new IllegalArgumentException("unsupported contract type: " + instrument.contractType());
+        CoreRiskLimitBracket bracket = maintenanceRiskBracket(instrument, riskNotionalUnits(instrument,
                 Math.absExact(signedQuantitySteps), instrument.contractType().isOption()
-                        ? indexPriceTicks : markPriceTicks))
-                : null;
-        // 本次维持估值采用的保证金率，优先使用已选档位的要求。
-        long maintenanceMarginRatePpm = bracket != null
-                ? bracket.maintenanceMarginRatePpm()
-                : instrument.maintenanceMarginRatePpm();
+                        ? indexPriceTicks : markPriceTicks));
+        long maintenanceMarginRatePpm = bracket.maintenanceMarginRatePpm();
         if (instrument.contractType().isOption()) {
             return OptionContractMath.maintenanceMarginUnits(instrument, signedQuantitySteps, markPriceTicks,
                 indexPriceTicks, forwardPriceTicks, bracket, maintenanceMarginRatePpm);
@@ -233,7 +225,7 @@ public final class CoreContractMath {
             return 0;
         }
         // 按当前产品口径换算的收费基数，不把现货、期权和反向合约金额混算。
-        long notional = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
+        long notional = instrument.contractType() == ContractType.SPOT
                 ? spotQuoteUnits(instrument, priceTicks, quantitySteps)
                 : instrument.contractType().isOption()
                 ? OptionContractMath.optionPremiumUnits(instrument, priceTicks, quantitySteps)
@@ -259,7 +251,7 @@ public final class CoreContractMath {
      */
     public static long notionalUnits(CoreInstrument instrument, long quantitySteps, long priceTicks) {
         if (quantitySteps <= 0) return 0;
-        if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
+        if (instrument.contractType() == ContractType.SPOT) {
             return spotQuoteUnits(instrument, priceTicks, quantitySteps);
         }
         if (instrument.contractType().isOption()) {

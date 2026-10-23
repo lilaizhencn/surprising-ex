@@ -36,9 +36,13 @@ class RiskBatchBudgetTest {
                 // 由当前下标生成的测试币对编号，让共享预算能够在多个币对之间轮转。
                 String instrumentId=Integer.toString(100+i);
                 applied(state,command(line,CoreMessageType.REGISTER_INSTRUMENT,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,"BTC","USDT",asset,1,1,type.isInverse()?1000:1,
-                                100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
-                                type.isOption()?0:-1,type.isOption()?100:0))));
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                                instrumentId, "BTC", "USDT", asset, 1, 1, type.isInverse()?1000:1,
+                                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
+                                type.isOption()?100:0))));
             }
             for (/* 注册币对、发送初始行情或推进后续有限批次的循环下标。 */ int i=0;i<2;i++) applied(state,mark(line,Integer.toString(100+i),1));
             for(/* 当前依次充值和建仓的五十个用户，前四十八个放繁忙币对，后两个放轻币对。 */ long user=1;user<=50;user++) {
@@ -110,10 +114,14 @@ class RiskBatchBudgetTest {
                 // 由当前下标生成的测试币对编号，让共享预算能够在多个币对之间轮转。
                 String instrumentId=Integer.toString(100+i);
                 applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,"BTC","USDT",type.isInverse()?"BTC":"USDT",1,1,
-                                type.isInverse()?1000:1,100_000,50_000,0,0,
-                                type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
-                                type.isOption()?0:-1,type.isOption()?100:0))));
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                                instrumentId, "BTC", "USDT", type.isInverse()?"BTC":"USDT", 1, 1,
+                                type.isInverse()?1000:1,
+                                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
+                                type.isOption()?100:0))));
             }
             for (/* 注册币对、发送初始行情或推进后续有限批次的循环下标。 */ int i=0;i<5;i++) applied(state, mark(line,Integer.toString(100+i),1));
             for(long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user:new long[]{7,8}) applied(state,command(line,CoreMessageType.ADJUST_BALANCE,user,
@@ -158,8 +166,12 @@ class RiskBatchBudgetTest {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
-                            100_000, 50_000, 0, 0, 0, -1, 0))));
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{7, 8}) {
                 applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
@@ -213,8 +225,12 @@ class RiskBatchBudgetTest {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
-                            100_000, 50_000, 0, 0, 0, -1, 0))));
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));
@@ -275,8 +291,12 @@ class RiskBatchBudgetTest {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
-                            100_000, 50_000, 0, 0, 0, -1, 0))));
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));

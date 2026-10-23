@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreLiquidationState;
@@ -850,9 +854,12 @@ class CoreLifecycleStateTest {
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
         // 本场景当前交易状态，后续赋值表示应用一条业务命令后的新值。
         TradingCoreState state = reducer.registerInstrument(TradingCoreState.empty(productLine),
-                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0,
-                        expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0));
+                new com.surprising.aeron.protocol.RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000)))),
+                        0, 0, expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0));
         return withPositionAndBalance(state, userId, quantity, entryPrice, wallet, margin);
     }
 

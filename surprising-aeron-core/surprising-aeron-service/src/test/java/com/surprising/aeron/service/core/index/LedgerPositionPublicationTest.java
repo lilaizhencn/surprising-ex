@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.CoreUserState;
@@ -38,8 +42,12 @@ class LedgerPositionPublicationTest {
         var product = ProductLine.LINEAR_PERPETUAL;
         // 本用例注册的标的一 U 本位永续合约
         var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(product,
-                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new com.surprising.aeron.protocol.RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
         // 用户七的初始净仓，数量十、保证金一百
         var position = new com.surprising.aeron.model.CorePositionState("1", "USDT",
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS, CorePositionSide.NET, 10, 100, 1000, 0, 100);

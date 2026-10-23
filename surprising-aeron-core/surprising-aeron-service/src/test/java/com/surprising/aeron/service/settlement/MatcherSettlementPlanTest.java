@@ -65,10 +65,11 @@ class MatcherSettlementPlanTest {
 
     /** 测试共用的规范 BTC/USDT U 本位永续币对及单档风险限额。 */
     private static final CoreInstrument INSTRUMENT = new CoreInstrument(
-            "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT",
-            1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, null, 0,
-            10_000_000, Long.MAX_VALUE, 0, 1,
-            List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
+            "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1_000_000,
+            new CoreInstrumentRiskLimits(
+                    100_000, 10_000_000, Long.MAX_VALUE, 0, 1,
+                    List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000))),
+            -10, 25, 0, null, 0);
 
     /**
      * 在发布完成前检查事件未就绪、没有完成位且无法收集，完成发布后拒绝撤单可收集且原订单引用未变。

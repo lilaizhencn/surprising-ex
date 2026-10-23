@@ -25,7 +25,7 @@ public final class InstrumentConfigurationCommands {
      */
     public void executeRegisterInstrument(CoreMessage message, long clusterTimestamp) {
         // 本次载荷解出的注册或更新配置
-        var command = TradingCommandCodec.decodeRegisterInstrument(message.payloadUnsafe());
+        var command = TradingCommandCodec.decodeRegisterInstrument(message.payloadUnsafe(), owner.runtimeState().productLine());
         RuntimeInstrumentStateTransitions.applyConfiguration(
                 owner.runtimeState(), owner.identities(), command);
         owner.requestCommitPublication();

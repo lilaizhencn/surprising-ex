@@ -45,8 +45,12 @@ public class ClusterBatchResponseBenchmark {
                 Duration.ofSeconds(30), "batch-response", UUID.randomUUID().toString(),
                 ClusterMixedCapacityMain.commandCapacity(256, 256));
         applied(send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                new RegisterInstrumentCommand(SYMBOL, "BTC", "USDT", asset, 1, 1, 1,
-                        100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? System.currentTimeMillis() + 3_600_000 : 0,
+                new RegisterInstrumentCommand(
+                        SYMBOL, "BTC", "USDT", asset, 1, 1, 1,
+                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                        0, 0, type.isDelivery() || type.isOption() ? System.currentTimeMillis() + 3_600_000 : 0,
                         type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))).join());
         applied(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                 ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1, System.currentTimeMillis())

@@ -1,5 +1,9 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -730,9 +734,12 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private RegisterInstrumentCommand instrument(String instrumentId) {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", settleAsset(), 1, 1,
-                type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0, expiry,
-                type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
+        return new RegisterInstrumentCommand(
+                instrumentId, "BTC", "USDT", settleAsset(), 1, 1, type.isInverse() ? 1_000 : 1,
+                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                0, 0, expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }
 
     private void adjust(long userId, String asset, long units) {

@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.TradingCoreState;
@@ -33,8 +37,12 @@ public class ActiveOrderIndexBenchmark {
         index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities);
         var instruments = new CoreInstrument[symbols];
         for (int i = 0; i < symbols; i++) instruments[i] = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand(Integer.toString(i + 1),
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        Integer.toString(i + 1), "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
         for (int i = 0; i < open.length; i++) {
             var instrument = instruments[i % symbols];
             var order = new CoreOrderState(i + 1, ProductLine.LINEAR_PERPETUAL, i % users + 1, instrument.instrumentId(),

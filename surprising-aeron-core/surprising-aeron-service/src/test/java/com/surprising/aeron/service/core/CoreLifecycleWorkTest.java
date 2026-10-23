@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreMarkPriceState;
 import com.surprising.aeron.model.CoreRiskState;
@@ -116,11 +118,13 @@ class CoreLifecycleWorkTest {
      */
     private static TradingCoreRuntime stateWithLifecycleWork() {
         // 供生命周期进度和强平记录引用的 U 本位永续币对配置。
-        CoreInstrument instrument = new CoreInstrument("1",
-                ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1,
-                100_000, 50_000, 0, 0, 0, null, 0, 10_000_000, 1_000_000,
-                0, 1, List.of(new CoreRiskLimitBracket(1, 0, 1_000_000,
-                10_000_000, 100_000, 50_000)));
+        CoreInstrument instrument = new CoreInstrument(
+                "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, 10_000_000, 1_000_000, 0, 1,
+                        List.of(new CoreRiskLimitBracket(1, 0, 1_000_000,
+                10_000_000, 100_000, 50_000))),
+                0, 0, 0, null, 0);
         // 待执行强平记录，编号一。
         var planned = liquidation(1, 1001, 0, CoreLiquidationState.Status.PLANNED);
         // 等待保险处理的记录，编号二。

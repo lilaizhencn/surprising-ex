@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreLiquidationState;
@@ -1204,11 +1206,12 @@ class CorePerpetualFinancialMatrixTest {
                 ? ContractType.INVERSE_PERPETUAL : ContractType.LINEAR_PERPETUAL;
         // 用于构造外线合约的参数；类型由外线产品决定
         RegisterInstrumentCommand wrongLine = new RegisterInstrumentCommand(
-                SYMBOL, "BTC", variant.quoteAsset(), variant.settleAsset(),
-                variant.notionalMultiplierUnits(), 1, variant.settleScaleUnits(),
-                100_000, 100_000, 0, 0, 0, -1, 0, 10_000_000,
-                1_000_000, 0, 1_000_000,
-                List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000)));
+                SYMBOL, "BTC", variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(), 1,
+                variant.settleScaleUnits(),
+                (otherType == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, 10_000_000, 1_000_000, 0, 1_000_000,
+                        List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000)))),
+                0, 0, 0, -1, 0);
         // 拒绝或计算溢出前的业务哈希，失败后必须不变
         long hash = opening.businessStateHash();
         assertThatThrownBy(() -> com.surprising.aeron.service.product.ProductTradingRulesRegistry
@@ -1606,11 +1609,12 @@ class CorePerpetualFinancialMatrixTest {
                 : List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000));
         // 单档允许十倍、双档允许五倍的标的杠杆上限
         long maxLeveragePpm = tiered ? 5_000_000 : 10_000_000;
-        return new RegisterInstrumentCommand(instrumentId, baseAsset,
-                variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(), 1,
-                variant.settleScaleUnits(), 100_000, 100_000, makerFeeRatePpm, takerFeeRatePpm,
-                0, -1, 0, maxLeveragePpm,
-                tiered ? 2_500 : 1_000_000, 0, 1_000_000, brackets);
+        return new RegisterInstrumentCommand(
+                instrumentId, baseAsset, variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(),
+                1, variant.settleScaleUnits(),
+                (variant.type() == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, maxLeveragePpm, tiered ? 2_500 : 1_000_000, 0, 1_000_000, brackets)),
+                makerFeeRatePpm, takerFeeRatePpm, 0, -1, 0);
     }
 
     /**

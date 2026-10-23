@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
@@ -20,8 +24,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class TreasuryProgressOwnershipTest {
     /** 所有进度槽共同引用的固定U本位永续标的1配置。 */
     private static final CoreInstrument INSTRUMENT = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-            new RegisterInstrumentCommand("1",
-                    "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+            new RegisterInstrumentCommand(
+                    "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                    new CoreInstrumentRiskLimits(
+                            100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                            java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                    0, 0, 0, -1, 0));
     /** 各进度记录共同引用的固定命令UUID，便于核对发布后对象身份。 */
     private static final UUID COMMAND_ID = UUID.fromString("00000000-0000-0000-0000-000000000701");
 

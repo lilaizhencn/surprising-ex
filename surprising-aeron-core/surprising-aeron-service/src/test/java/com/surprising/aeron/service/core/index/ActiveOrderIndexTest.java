@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
@@ -412,8 +416,8 @@ class ActiveOrderIndexTest {
         // 标的一选择 BTC，否则选择 ETH 的测试基础币
         String baseAsset = (instrumentId.equals("1") ? "BTC" : "ETH");
         return CoreInstrument.from(ProductLine.SPOT,
-                new RegisterInstrumentCommand(instrumentId, baseAsset,
-                        "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        instrumentId, baseAsset, "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0));
     }
 
     /**
@@ -430,10 +434,13 @@ class ActiveOrderIndexTest {
             // 按当前产品线选出的合约类型，决定币本位、到期和期权字段
             ContractType type = ContractType.valueOf(productLine.contractTypeCode());
             instruments.put(instrumentId, CoreInstrument.from(productLine,
-                    new RegisterInstrumentCommand(instrumentId, baseAsset, "USDT",
-                            type.isInverse() ? baseAsset : "USDT", 1, 1,
-                            type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
-                            type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
+                    new RegisterInstrumentCommand(
+                            instrumentId, baseAsset, "USDT", type.isInverse() ? baseAsset : "USDT", 1, 1,
+                            type.isInverse() ? 1_000 : 1,
+                            (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                            0, 0, type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
                             type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
         }
         return Map.copyOf(instruments);

@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionMode;
@@ -136,9 +140,11 @@ class RuntimeRiskQueryServiceTest {
         runtime.putBalance(new BalanceRuntime(7, asset, 9_843_770_736_865L, 152_130_614_718L));
         // 本持仓的合约与金额精度配置，决定 tick、数量步数如何换成结算金额。
         var instrument = CoreInstrument.from(product, new com.surprising.aeron.protocol.RegisterInstrumentCommand(
-                "604",
-                "BTC", "USDT", "USDT", 100_000, 10_000_000, 100_000_000,
-                10_000, 5_000, 200, 500, 0, -1, 0));
+                "604", "BTC", "USDT", "USDT", 100_000, 10_000_000, 100_000_000,
+                new CoreInstrumentRiskLimits(
+                        10_000, (1_000_000_000_000L / (10_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (10_000)), 10_000, 5_000))),
+                200, 500, 0, -1, 0));
         runtime.registerInstrument(instrument);
         // 用户 7 当前合约净持仓的整数键，用来关联该持仓的风险记录。
         long key = ids.positionKey(7, "604");

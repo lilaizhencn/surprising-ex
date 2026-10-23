@@ -63,8 +63,7 @@ public final class ClusterFundsSmokeMain {
             submitApplied(client, command(productLine, sourceId + 1_000_000, seed, 1,
                     CoreMessageType.REGISTER_INSTRUMENT,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "1", "BTC", "USDT", "USDT",
-                            1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0))));
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0))));
             submitApplied(client, command(productLine, sourceId, seed, userId, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(
                             new BalanceAdjustmentCommand("USDT", fundedUnits))));

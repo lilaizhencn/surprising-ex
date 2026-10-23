@@ -60,8 +60,8 @@ public class TriggerCommitBenchmark {
                 new ActiveOrderIndex(initial, identities),
                 new AdlPositionIndex(initial, identities)), identities);
         instrument = CoreInstrument.from(ProductLine.SPOT,
-                new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0));
         var accounts = new java.util.ArrayList<Long>();
         var ids = new java.util.ArrayList<Long>();
         for (int lane = 0; lane < accountLanes; lane++) {

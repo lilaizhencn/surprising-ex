@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -35,14 +37,16 @@ class CoreOrderDecisionResolverTest {
         // 自定义 2% 市价滑点、八秒价格年龄和启用的限价保护配置，用于协议及快照检查。
         var policy = new com.surprising.aeron.protocol.CoreOrderProtection(20_000, 8_000, true, 30_000, 4_000);
         // 包含自定义保护配置和风险档位的币对注册命令。
-        var command = new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
-                "BTC", "USDT", "USDT", 1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, -1, 0,
-                10_000_000, Long.MAX_VALUE, 0, 1,
-                List.of(new CoreRiskLimitBracket(1,0,Long.MAX_VALUE,10_000_000,100_000,50_000)),
-                1,true,true,true,3,15,1,policy);
+        var command = new com.surprising.aeron.protocol.RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1_000_000,
+                new CoreInstrumentRiskLimits(
+                        100_000, 10_000_000, Long.MAX_VALUE, 0, 1,
+                        List.of(new CoreRiskLimitBracket(1,0,Long.MAX_VALUE,10_000_000,100_000,50_000))),
+                -10, 25, 0, -1, 0, 1, true, true, true, 3, 15, 1, policy);
         // 注册命令编码后再解码的结果，应完整保留所有自定义参数。
         var decoded = com.surprising.aeron.protocol.TradingCommandCodec.decodeRegisterInstrument(
-                com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command));
+                com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command),
+                com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
         assertThat(decoded).isEqualTo(command);
         // 从解码注册命令创建的规范币对，价格事实与决策必须引用同一身份。
         var instrument=CoreInstrument.from(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,decoded);
@@ -65,7 +69,8 @@ class CoreOrderDecisionResolverTest {
         }
         try(/* 只为注册及快照恢复断言创建的核心实例，结束时关闭。 */ var core=new com.surprising.aeron.service.core.TradingCoreRuntime(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL)) {
             // 把自定义配置写入核心的注册消息，以便快照中保留真实注册状态。
-            var message=new com.surprising.aeron.protocol.CoreMessage(com.surprising.aeron.protocol.CoreMessageHeader.command(
+            var message=new com.surprising.aeron.protocol.CoreMessage(
+                    com.surprising.aeron.protocol.CoreMessageHeader.command(
                     com.surprising.aeron.protocol.CoreMessageType.REGISTER_INSTRUMENT,java.util.UUID.randomUUID(),
                     com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,com.surprising.aeron.protocol.CommandSource.OPERATIONS,0,1,0,1,1),
                     com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command));
@@ -299,10 +304,12 @@ class CoreOrderDecisionResolverTest {
      * @param contractType 当前用例需要的现货或线性永续合约类型
      */
     private static CoreInstrument instrument(ContractType contractType) {
-        return new CoreInstrument("1", contractType, "BTC", "USDT", "USDT",
-                1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, null, 0,
-                10_000_000, Long.MAX_VALUE, 0, 1,
-                List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE,
-                        10_000_000, 100_000, 50_000)));
+        return new CoreInstrument(
+                "1", contractType, "BTC", "USDT", "USDT", 1, 1, 1_000_000,
+                (contractType == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, 10_000_000, Long.MAX_VALUE, 0, 1,
+                        List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE,
+                        10_000_000, 100_000, 50_000)))),
+                -10, 25, 0, null, 0);
     }
 }

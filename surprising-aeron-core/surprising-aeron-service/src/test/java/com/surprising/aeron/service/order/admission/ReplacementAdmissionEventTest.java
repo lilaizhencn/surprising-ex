@@ -50,10 +50,12 @@ class ReplacementAdmissionEventTest {
     @Test void laneAloneReadsAccountTablesAndReusesItsAdmissionAfterRejection() throws Exception {
         // 测试永续合约 1，设定显式杠杆、持仓限额和风险档位。
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000,
-                        0, 0, 0, -1, 0, 10_000_000, 10_000, 0, 10_000,
-                        List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))));
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, 10_000_000, 10_000, 0, 10_000,
+                                List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
         // 用户 7 原有的 OPEN 限价买单 11，作为改单和替换对象。
         var order = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7, "1", CoreOrderSide.BUY,
                 100, 1, 0, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,

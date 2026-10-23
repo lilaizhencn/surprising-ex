@@ -1,4 +1,8 @@
 package com.surprising.aeron.service.core;
+
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.TradingCoreState;
@@ -393,9 +397,12 @@ public final class DerivativeMixedWorkload {
     }
 
     private static RegisterInstrumentCommand instrument(Profile profile, String instrumentId, int index) {
-        return new RegisterInstrumentCommand(instrumentId,
-                "D" + index, profile.quoteAsset(), profile.settleAsset(),
-                profile.notionalMultiplier(), 1, profile.settleScale(), 100_000, 50_000,
+        return new RegisterInstrumentCommand(
+                instrumentId, "D" + index, profile.quoteAsset(), profile.settleAsset(), profile.notionalMultiplier(), 1,
+                profile.settleScale(),
+                (profile.contractType() == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                 0, 0, profile.expiryEpochMillis(), profile.optionTypeCode(), profile.strikePrice());
     }
 

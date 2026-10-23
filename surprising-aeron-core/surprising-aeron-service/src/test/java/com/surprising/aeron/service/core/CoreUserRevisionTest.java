@@ -45,8 +45,12 @@ class CoreUserRevisionTest {
     void admissionFillAndTerminalReleaseKeepTheirExactRevisionCounts(boolean reverse) {
         try (/* 本用例实际执行并导出提交状态的交易运行时 */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             send(core, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                    new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                            1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
+                    new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0)));
             send(core, CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                     new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             for (long /* 本轮被入账或下单的用户七或八 */ user : new long[]{7, 8}) {

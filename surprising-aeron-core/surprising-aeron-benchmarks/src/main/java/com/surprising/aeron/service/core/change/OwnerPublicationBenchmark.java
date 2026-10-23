@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core.change;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -68,8 +72,12 @@ public class OwnerPublicationBenchmark {
         settlement = new MatcherSettlementChanges(runtime.topology().accountLaneCount());
         settlement.ensureOrderCapacity(settlementOrders.length, 1L << laneId);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
         countPosition = new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
                 instrument, 1, 100, 100, 0, 10);
         for (int i = 0; i < settlementOrders.length; i++) {

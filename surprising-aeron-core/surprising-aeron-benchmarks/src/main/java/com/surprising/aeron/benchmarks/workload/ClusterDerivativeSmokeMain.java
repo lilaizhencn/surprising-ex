@@ -1,5 +1,9 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.aeron.client.SurprisingAeronClient;
@@ -56,9 +60,11 @@ public final class ClusterDerivativeSmokeMain {
                 applied(client, command(productLine, sourceId + 1_000_000, seed, 1,
                         CoreMessageType.REGISTER_INSTRUMENT,
                         TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                                "1",
-                                "BTC", "USDT", "USDT", 1, 1, 1,
-                                100_000, 50_000, 0, 0, 0, -1, 0))));
+                                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                                new CoreInstrumentRiskLimits(
+                                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                                0, 0, 0, -1, 0))));
                 applied(client, command(productLine, sourceId, seed, longUser, CoreMessageType.ADJUST_BALANCE,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000))));
                 applied(client, command(productLine, sourceId, seed + 1, shortUser, CoreMessageType.ADJUST_BALANCE,

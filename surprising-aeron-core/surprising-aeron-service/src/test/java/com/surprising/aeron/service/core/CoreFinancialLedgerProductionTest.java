@@ -212,9 +212,12 @@ class CoreFinancialLedgerProductionTest {
         // 该类型是否币本位，用于选择结算资产和尺度
         boolean inverse = type.isInverse();
         applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", inverse ? "BTC" : "USDT", 1, 1, inverse ? 1_000 : 1,
-                        100_000, 50_000, 0, 0, line.isDeliveryProduct() ? TIME + 1_000 : 0,
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", inverse ? "BTC" : "USDT", 1, 1, inverse ? 1_000 : 1,
+                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                        0, 0, line.isDeliveryProduct() ? TIME + 1_000 : 0,
                         line.isOptionProduct() ? OptionType.CALL.ordinal() : -1, line.isOptionProduct() ? 100 : 0)), TIME);
     }
 

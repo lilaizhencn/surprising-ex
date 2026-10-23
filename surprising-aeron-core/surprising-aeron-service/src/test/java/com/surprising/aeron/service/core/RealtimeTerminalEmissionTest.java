@@ -34,9 +34,13 @@ class RealtimeTerminalEmissionTest {
                 // 按币本位或其他类型选择的结算资产
                 String asset=type.isInverse()?"BTC":"USDT";
                 send(state,line,CoreMessageType.REGISTER_INSTRUMENT,0,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1","BTC","USDT",asset,1,1,type.isInverse()?1000:1,
-                                100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
-                                type.isOption()?0:-1,type.isOption()?100:0)),null,null,"setup");
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                                "1", "BTC", "USDT", asset, 1, 1, type.isInverse()?1000:1,
+                                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
+                                type.isOption()?100:0)),null,null,"setup");
                 for(long /* 初始化或批次下单的用户七、八 */ user:new long[]{7,8})for(String /* 本次初始化入账的 BTC 或 USDT 资产 */ a:List.of("BTC","USDT"))
                     send(state,line,CoreMessageType.ADJUST_BALANCE,user,
                             TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(a,1_000_000)),null,null,"setup");

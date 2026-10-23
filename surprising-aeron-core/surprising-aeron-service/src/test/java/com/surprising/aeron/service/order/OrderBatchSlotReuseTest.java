@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.service.result.ResponseArena;
 import com.surprising.aeron.service.result.ResponseArenaTestAccess;
 import org.junit.jupiter.api.Test;
@@ -53,8 +57,12 @@ class OrderBatchSlotReuseTest {
         // 订单复制测试使用的 U 本位永续品种配置
         var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(
                 com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
-                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new com.surprising.aeron.protocol.RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
         return new com.surprising.aeron.service.order.state.OrderRuntime(id, 7, 1, instrument,
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, 0, false,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET,

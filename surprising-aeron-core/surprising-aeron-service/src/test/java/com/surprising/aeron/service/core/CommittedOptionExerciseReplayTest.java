@@ -39,7 +39,12 @@ class CommittedOptionExerciseReplayTest {
             byte[] snapshot;
             try(/* 本轮新建或恢复的期权已提交日志回放资源 */ var replay=new CommittedTradeReplay(ProductLine.OPTION,null)) {
                 apply(replay,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
-                        new RegisterInstrumentCommand("1","BTC","USDT","USDT",1,1,1,100_000,50_000,0,0,TIME+10_000,type.ordinal(),100)));
+                        new RegisterInstrumentCommand(
+                                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                                new CoreInstrumentRiskLimits(
+                                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                                0, 0, TIME+10_000, type.ordinal(), 100)));
                 apply(replay,CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1",10,100,105,1,TIME)));
                 for(/* 当前初始化的卖方一或买方二 */ long user=1;user<=2;user++) {
                     apply(replay,CoreMessageType.ADJUST_BALANCE,user,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",100_000)));

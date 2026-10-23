@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreLiquidationState;
@@ -1097,10 +1101,13 @@ class CoreDeliveryOptionFinancialMatrixTest {
      * @param instrumentId 本次手工持仓或委托所属的规范数字标的 ID
      */
     private RegisterInstrumentCommand instrument(Variant variant, String instrumentId) {
-        return new RegisterInstrumentCommand(instrumentId, variant.baseAsset(),
-                variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(), 1,
-                variant.settleScaleUnits(), 100_000, 100_000, 0, 0, 2_000_000_000_000L,
-                variant.optionType() == null ? -1 : variant.optionType().ordinal(),
+        return new RegisterInstrumentCommand(
+                instrumentId, variant.baseAsset(), variant.quoteAsset(), variant.settleAsset(),
+                variant.notionalMultiplierUnits(), 1, variant.settleScaleUnits(),
+                (variant.type() == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000)))),
+                0, 0, 2_000_000_000_000L, variant.optionType() == null ? -1 : variant.optionType().ordinal(),
                 variant.optionType() == null ? 0 : STRIKE_PRICE);
     }
 

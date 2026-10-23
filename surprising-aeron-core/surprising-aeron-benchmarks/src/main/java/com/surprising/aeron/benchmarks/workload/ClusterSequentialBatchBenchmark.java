@@ -35,8 +35,8 @@ public class ClusterSequentialBatchBenchmark {
                 String asset = "B" + i, instrumentId = Integer.toString(i + 1);
                 if (args[0].equals("run")) {
                     send(client, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                            new RegisterInstrumentCommand(instrumentId, asset, "USDT", "USDT",
-                                    1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
+                            new RegisterInstrumentCommand(
+                                    instrumentId, asset, "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
                     send(client, CoreMessageType.ADJUST_BALANCE, user, TradingCommandCodec.encodeBalanceAdjustment(
                             new BalanceAdjustmentCommand(asset, 1)));
                     send(client, CoreMessageType.ADJUST_BALANCE, maker, TradingCommandCodec.encodeBalanceAdjustment(

@@ -1,5 +1,11 @@
 package com.surprising.aeron.service.snapshot.state;
 
+import com.surprising.instrument.api.model.ContractType;
+
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.product.api.ProductLine;
@@ -99,6 +105,32 @@ class SnapshotFieldEvolutionTest {
                 })));
         assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(encoded, split(changed)), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("snapshot field");
+    }
+
+    @Test
+    void instrumentRiskFieldsFollowProductLine() {
+        for (ProductLine line : new ProductLine[] {ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL}) {
+            var risk = line.isDerivative() ? new CoreInstrumentRiskLimits(
+                    100_000, 10_000_000, 1_000_000, 0, 1_000_000,
+                    List.of(new CoreRiskLimitBracket(
+                            1, 0, 1_000_000, 10_000_000, 100_000, 50_000))) : null;
+            var instrument = new com.surprising.aeron.service.instrument.CoreInstrument("1",
+                    ContractType.valueOf(line.contractTypeCode()),
+                    "BTC", "USDT", "USDT", 1, 1, 1, risk, 0, 0, 0, null, 0);
+            var empty = TradingCoreState.empty(line);
+            var state = new TradingCoreState(line, 0, empty.users(), empty.orders(),
+                    Map.of("1", instrument), empty.riskState(), empty.treasuryState());
+            byte[] encoded = TradingStateSnapshotCodec.encode(state);
+            var root = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, 4, encoded.length));
+            var entries = new SnapshotFields.Reader(root.bytes(5)).list(1, bytes -> bytes);
+            assertThat(entries).hasSize(1);
+            var fields = split(entries.getFirst()).stream().map(SnapshotFieldEvolutionTest::id).toList();
+            if (line.isDerivative()) assertThat(fields).contains(9, 16, 17, 18, 19, 20).doesNotContain(10);
+            else assertThat(fields).doesNotContain(9, 10, 16, 17, 18, 19, 20);
+            var restored = TradingStateSnapshotCodec.decode(encoded, line);
+            assertThat(restored).isEqualTo(state);
+            assertThat(restored.instruments().get("1").riskLimits()).isEqualTo(risk);
+        }
     }
 
     /**

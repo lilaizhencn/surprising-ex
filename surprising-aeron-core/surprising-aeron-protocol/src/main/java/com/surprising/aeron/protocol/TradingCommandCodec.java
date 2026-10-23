@@ -10,7 +10,7 @@ import java.util.List;
 public final class TradingCommandCodec {
 
     private static final int PLACE_ORDER_VERSION = 4;
-    private static final int INSTRUMENT_MARKER = 0x49525636;
+    private static final int INSTRUMENT_MARKER = 0x49525637;
     private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
     private static final int TRANSFER_FUNDS_VERSION = 2;
 
@@ -569,100 +569,102 @@ public final class TradingCommandCodec {
         byte[] base = text(command.baseAsset());
         byte[] quote = text(command.quoteAsset());
         byte[] settle = text(command.settleAsset());
-        int bracketBytes = command.riskLimitBrackets().size() * (Integer.BYTES + Long.BYTES * 6);
-        ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES * 4 + instrumentId.length + base.length + quote.length + settle.length
-                        + Integer.BYTES * 6 + Long.BYTES * 18 + Byte.BYTES * 4 + bracketBytes)
+        CoreInstrumentRiskLimits risk = command.riskLimits();
+        int riskBytes = risk == null ? 0 : Long.BYTES * 5 + Integer.BYTES
+                + risk.riskLimitBrackets().size() * (Integer.BYTES + Long.BYTES * 6);
+        ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES * 4 + instrumentId.length + base.length + quote.length
+                        + settle.length + Integer.BYTES * 5 + Long.BYTES * 12 + Byte.BYTES * 4 + riskBytes)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) instrumentId.length).put(instrumentId)
                 .putShort((short) base.length).put(base)
                 .putShort((short) quote.length).put(quote)
                 .putShort((short) settle.length).put(settle)
                 .putLong(command.notionalMultiplierUnits()).putLong(command.priceTickUnits())
-                .putLong(command.settleScaleUnits()).putLong(command.initialMarginRatePpm())
-                .putLong(command.maintenanceMarginRatePpm()).putLong(command.makerFeeRatePpm())
+                .putLong(command.settleScaleUnits()).putLong(command.makerFeeRatePpm())
                 .putLong(command.takerFeeRatePpm()).putLong(command.expiryEpochMillis())
-                .putInt(command.optionTypeCode()).putLong(command.strikePriceTicks())
-                .putInt(INSTRUMENT_MARKER)
-                .putLong(command.maxLeveragePpm()).putLong(command.maxPositionNotionalUnits())
-                .putLong(command.userOpenInterestLimitRatePpm())
-                .putLong(command.userOpenInterestLimitFloorUnits())
-                .putInt(command.riskLimitBrackets().size());
-        for (CoreRiskLimitBracket bracket : command.riskLimitBrackets()) {
-            buffer.putInt(bracket.bracketNo()).putLong(bracket.notionalFloorUnits())
-                    .putLong(bracket.notionalCapUnits()).putLong(bracket.maxLeveragePpm())
-                    .putLong(bracket.initialMarginRatePpm()).putLong(bracket.maintenanceMarginRatePpm())
-                    .putLong(bracket.optionMarginFactorPpm());
+                .putInt(command.optionTypeCode()).putLong(command.strikePriceTicks()).putInt(INSTRUMENT_MARKER);
+        if (risk != null) {
+            buffer.putLong(risk.initialMarginRatePpm())
+                    .putLong(risk.maxLeveragePpm()).putLong(risk.maxPositionNotionalUnits())
+                    .putLong(risk.userOpenInterestLimitRatePpm()).putLong(risk.userOpenInterestLimitFloorUnits())
+                    .putInt(risk.riskLimitBrackets().size());
+            for (CoreRiskLimitBracket bracket : risk.riskLimitBrackets()) {
+                buffer.putInt(bracket.bracketNo()).putLong(bracket.notionalFloorUnits())
+                        .putLong(bracket.notionalCapUnits()).putLong(bracket.maxLeveragePpm())
+                        .putLong(bracket.initialMarginRatePpm()).putLong(bracket.maintenanceMarginRatePpm())
+                        .putLong(bracket.optionMarginFactorPpm());
+            }
         }
         buffer.putInt(command.instrumentStatusCode())
                 .put((byte) (command.marketOrderEnabled() ? 1 : 0))
                 .put((byte) (command.postOnlyEnabled() ? 1 : 0))
                 .put((byte) (command.reduceOnlyEnabled() ? 1 : 0))
-                .putInt(command.supportedOrderTypeMask())
-                .putInt(command.supportedTimeInForceMask())
-                .putLong(command.quantityStepUnits())
-                .putLong(command.orderProtection().marketMaxSlippagePpm())
+                .putInt(command.supportedOrderTypeMask()).putInt(command.supportedTimeInForceMask())
+                .putLong(command.quantityStepUnits()).putLong(command.orderProtection().marketMaxSlippagePpm())
                 .putLong(command.orderProtection().marketMaxMarkAgeMs())
-                .put((byte)(command.orderProtection().limitPriceProtectionEnabled() ? 1 : 0))
+                .put((byte) (command.orderProtection().limitPriceProtectionEnabled() ? 1 : 0))
                 .putLong(command.orderProtection().limitPriceBandPpm())
                 .putLong(command.orderProtection().limitPriceMaxMarkAgeMs());
         return buffer.array();
     }
 
-    public static RegisterInstrumentCommand decodeRegisterInstrument(byte[] payload) {
+
+    /** 产品归属由已校验的命令头提供，现货载荷没有衍生品风险段。 */
+    public static RegisterInstrumentCommand decodeRegisterInstrument(byte[] payload,
+            com.surprising.product.api.ProductLine productLine) {
+        if (productLine == null) throw new ProtocolException("instrument product line is required");
         ByteBuffer buffer = readable(payload);
         String instrumentId = readText(buffer);
         String base = readText(buffer);
         String quote = readText(buffer);
         String settle = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 9 + Integer.BYTES);
+        requireRemaining(buffer, Long.BYTES * 7 + Integer.BYTES * 2);
         long multiplier = buffer.getLong();
         long priceTick = buffer.getLong();
         long settleScale = buffer.getLong();
-        long initialMargin = buffer.getLong();
-        long maintenanceMargin = buffer.getLong();
         long makerFee = buffer.getLong();
         long takerFee = buffer.getLong();
         long expiry = buffer.getLong();
         int optionType = buffer.getInt();
         long strike = buffer.getLong();
-        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 4 + Integer.BYTES);
-        int instrumentMarker = buffer.getInt();
-        if (instrumentMarker != INSTRUMENT_MARKER) {
-            throw new ProtocolException("invalid instrument risk policy marker");
+        if (buffer.getInt() != INSTRUMENT_MARKER) throw new ProtocolException("invalid instrument layout marker");
+        CoreInstrumentRiskLimits risk = null;
+        if (productLine.isDerivative()) {
+            requireRemaining(buffer, Long.BYTES * 5 + Integer.BYTES);
+            long initialMargin = buffer.getLong();
+            long maxLeverage = buffer.getLong();
+            long maxPosition = buffer.getLong();
+            long openInterestRate = buffer.getLong();
+            long openInterestFloor = buffer.getLong();
+            int bracketCount = buffer.getInt();
+            if (bracketCount <= 0 || bracketCount > 128) throw new ProtocolException("invalid risk bracket count");
+            requireRemaining(buffer, bracketCount * (Integer.BYTES + Long.BYTES * 6));
+            List<CoreRiskLimitBracket> brackets = new ArrayList<>(bracketCount);
+            for (int index = 0; index < bracketCount; index++) {
+                brackets.add(new CoreRiskLimitBracket(buffer.getInt(), buffer.getLong(), buffer.getLong(),
+                        buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong()));
+            }
+            risk = new CoreInstrumentRiskLimits(
+                    initialMargin, maxLeverage, maxPosition, openInterestRate, openInterestFloor, brackets);
         }
-        long maxLeverage = buffer.getLong();
-        long maxPosition = buffer.getLong();
-        long openInterestRate = buffer.getLong();
-        long openInterestFloor = buffer.getLong();
-        int bracketCount = buffer.getInt();
-        if (bracketCount <= 0 || bracketCount > 128) {
-            throw new ProtocolException("invalid risk bracket count");
-        }
-        requireRemaining(buffer, bracketCount * (Integer.BYTES + Long.BYTES * 6)
-                + Integer.BYTES + Byte.BYTES * 3 + Integer.BYTES * 2);
-        java.util.List<CoreRiskLimitBracket> brackets = new java.util.ArrayList<>(bracketCount);
-        for (int index = 0; index < bracketCount; index++) {
-            brackets.add(new CoreRiskLimitBracket(buffer.getInt(), buffer.getLong(), buffer.getLong(),
-                    buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong()));
-        }
+        requireRemaining(buffer, Integer.BYTES * 3 + Byte.BYTES * 4 + Long.BYTES * 5);
         int statusCode = buffer.getInt();
         boolean marketOrderEnabled = readBoolean(buffer);
         boolean postOnlyEnabled = readBoolean(buffer);
         boolean reduceOnlyEnabled = readBoolean(buffer);
         int supportedOrderTypeMask = buffer.getInt();
         int supportedTimeInForceMask = buffer.getInt();
-        requireRemaining(buffer, Long.BYTES * 5 + Byte.BYTES);
         long quantityStepUnits = buffer.getLong();
         CoreOrderProtection orderProtection = new CoreOrderProtection(buffer.getLong(), buffer.getLong(),
                 readBoolean(buffer), buffer.getLong(), buffer.getLong());
-        RegisterInstrumentCommand command = new RegisterInstrumentCommand(instrumentId,
-                base, quote, settle, multiplier, priceTick, settleScale, initialMargin, maintenanceMargin,
-                makerFee, takerFee, expiry, optionType, strike, maxLeverage, maxPosition, openInterestRate,
-                openInterestFloor, brackets, statusCode, marketOrderEnabled, postOnlyEnabled,
-                reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, orderProtection);
+        RegisterInstrumentCommand command = new RegisterInstrumentCommand(instrumentId, base, quote, settle,
+                multiplier, priceTick, settleScale, risk, makerFee, takerFee, expiry, optionType, strike,
+                statusCode, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled, supportedOrderTypeMask,
+                supportedTimeInForceMask, quantityStepUnits, orderProtection);
         requireConsumed(buffer);
         return command;
     }
+
 
     public static byte[] encodeApplyMarkPrice(ApplyMarkPriceCommand command) {
         byte[] instrumentId = text(command.instrumentId());

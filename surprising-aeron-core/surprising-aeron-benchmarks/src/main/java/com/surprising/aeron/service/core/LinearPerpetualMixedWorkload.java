@@ -1,4 +1,8 @@
 package com.surprising.aeron.service.core;
+
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.AssetBalance;
@@ -943,8 +947,11 @@ public final class LinearPerpetualMixedWorkload {
     private static RegisterInstrumentCommand instrument(String instrumentId) {
         int symbolIndex = Integer.parseInt(instrumentId) - 10000;
         String baseAsset = "MIX" + symbolIndex;
-        return new RegisterInstrumentCommand(instrumentId,
-                baseAsset, SETTLE_ASSET, SETTLE_ASSET,
-                1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
+        return new RegisterInstrumentCommand(
+                instrumentId, baseAsset, SETTLE_ASSET, SETTLE_ASSET, 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                0, 0, 0, -1, 0);
     }
 }

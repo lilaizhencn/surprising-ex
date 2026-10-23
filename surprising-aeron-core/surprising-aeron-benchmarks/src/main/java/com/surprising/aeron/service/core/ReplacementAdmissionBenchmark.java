@@ -49,10 +49,12 @@ public class ReplacementAdmissionBenchmark {
     @Setup public void setup() {
         var product = ProductLine.valueOf(productLine);
         var instrument = CoreInstrument.from(product,
-                new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000,
-                        0, 0, 0, -1, 0, 10_000_000, 10_000, 0, 10_000,
-                        List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))));
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        (product.isDerivative() ? new CoreInstrumentRiskLimits(
+                                100_000, 10_000_000, 10_000, 0, 10_000,
+                                List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))) : null),
+                        0, 0, 0, -1, 0));
         var users = new HashMap<Long, CoreUserState>();
         var orders = new HashMap<Long, CoreOrderState>();
         for (int i = 0; i < WINDOW; i++) {

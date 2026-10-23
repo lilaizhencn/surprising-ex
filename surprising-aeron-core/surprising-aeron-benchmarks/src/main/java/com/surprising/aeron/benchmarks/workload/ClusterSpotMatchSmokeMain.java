@@ -66,8 +66,8 @@ public final class ClusterSpotMatchSmokeMain {
     }
 
     private static CoreMessage instrumentCommand(long sourceId, long sequence) {
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
-                100_000, 50_000, 0, 0, 0, -1, 0);
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
         return command(sourceId, sequence, 1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(instrument));
     }

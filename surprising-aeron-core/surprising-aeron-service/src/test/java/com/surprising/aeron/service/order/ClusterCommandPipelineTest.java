@@ -52,11 +52,13 @@ class ClusterCommandPipelineTest {
             // OI 比例限制的保底量，按反向与其他产品量纲选择
             long floor = type.isInverse() ? 20 : 200;
             live.apply(live.message(CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            "BTC", "USDT", asset, 1, 1, multiplier, 100_000, 50_000, 0, 0,
-                            type.isDelivery() || type.isOption() ? TIME + 100_000 : 0, type.isOption() ? 0 : -1,
-                            type.isOption() ? 100 : 0, 10_000_000, 1_000_000, 1_000_000, floor,
-                            List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 50_000))))));
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", asset, 1, 1, multiplier,
+                            (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                    100_000, 10_000_000, 1_000_000, 1_000_000, floor,
+                                    List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 50_000)))),
+                            0, 0, type.isDelivery() || type.isOption() ? TIME + 100_000 : 0, type.isOption() ? 0 : -1,
+                            type.isOption() ? 100 : 0))));
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                             ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
@@ -1732,8 +1734,13 @@ class ClusterCommandPipelineTest {
                 // 初始化原消息列表，复制给串行或 Follower Fixture
                 var setup = List.of(
                         live.message(CoreMessageType.REGISTER_INSTRUMENT, 0,
-                                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1_000 : 1,
-                                        100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 100_000 : 0,
+                                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                                        instrumentId, "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1_000 : 1,
+                                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0,
+                                                Long.MAX_VALUE,
+                                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                        0, 0, type.isDelivery() || type.isOption() ? TIME + 100_000 : 0,
                                         type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))),
                         live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                                 TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
@@ -3156,8 +3163,12 @@ class ClusterCommandPipelineTest {
             List<CoreMessage> commands = new ArrayList<>();
             for (String /* 当前注册、路由或故障注入使用的品种标识，具体类型见声明 */ instrumentId : List.of("1", secondSymbol)) {
                 commands.add(message(CoreMessageType.REGISTER_INSTRUMENT, 0,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1_000 : 1,
-                                100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 100_000 : 0,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                                instrumentId, "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1_000 : 1,
+                                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                0, 0, type.isDelivery() || type.isOption() ? TIME + 100_000 : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
             }
             for (String /* 当前注册、路由或故障注入使用的品种标识，具体类型见声明 */ instrumentId : List.of("1", secondSymbol)) {

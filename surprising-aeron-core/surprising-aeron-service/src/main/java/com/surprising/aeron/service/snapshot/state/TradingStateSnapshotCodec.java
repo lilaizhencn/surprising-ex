@@ -34,16 +34,16 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * 交易状态的独立持久化格式。新快照外层版本四十一，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
- * 构造约定：工具类不创建实例；当前写版本四十一，历史布局不再接受。
+ * 交易状态的独立持久化格式。新快照外层版本四十二，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
+ * 构造约定：工具类不创建实例；当前写版本四十二，历史布局不再接受。
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
-    /** 本编码器新写入的外层快照布局版本四十一。 */
-    private static final int VERSION = 41;
+    /** 本编码器新写入的外层快照布局版本四十二。 */
+    private static final int VERSION = 42;
 
     /**
-     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十一头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
+     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十二头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
      * @param value 本方法要持久化的对应业务值，字段和顺序由固定编号定义
      */
     public static byte[] encode(TradingCoreState value) {
@@ -946,87 +946,53 @@ public final class TradingStateSnapshotCodec {
                 SnapshotEnumCodes.readCorePositionMode(r.integer(7))); // 7：单向或双向持仓模式
     }
 
-    /**
-     * 按固定字段编号写入注册币对配置，保存资产、换算尺度、保证金、费用、到期参数、风险档、支持能力、数量步长和订单保护；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
-     * @param value 当前要写入的注册币对配置业务值
-     */
+    /** 当前产品的标的配置；现货不持久化保证金、杠杆、风险档或 OI 限额字段。 */
     private static byte[] writeCoreInstrument(CoreInstrument value, ProductLine productLine) {
         if (value.contractType().productLine() != productLine)
             throw new ProtocolException("snapshot instrument product line mismatch");
-        return new SnapshotFields.Writer()
-                .text(1, value.instrumentId()) // 1：币对或合约业务编号
-                .text(3, value.baseAsset()) // 3：基础资产名称
-                .text(4, value.quoteAsset()) // 4：计价资产名称
-                .text(5, value.settleAsset()) // 5：结算资产名称
-                .number(6, value.notionalMultiplierUnits()) // 6：合约名义金额乘数
-                .number(7, value.priceTickUnits()) // 7：一个价格刻度对应的整数单位
-                .number(8, value.settleScaleUnits()) // 8：结算资产金额的整数缩放单位
-                .number(9, value.initialMarginRatePpm()) // 9：初始保证金比例，百万分比
-                .number(10, value.maintenanceMarginRatePpm()) // 10：维持保证金比例，百万分比
-                .number(11, value.makerFeeRatePpm()) // 11：Maker 手续费率，百万分比
-                .number(12, value.takerFeeRatePpm()) // 12：Taker 手续费率，百万分比
-                .number(13, value.expiryEpochMillis()) // 13：交割或期权合约到期时刻，毫秒
-                .number(14, value.optionType() == null ? -1 : SnapshotEnumCodes.encode(value.optionType())) // 14：看涨或看跌期权类型
-                .number(15, value.strikePriceTicks()) // 15：期权行权价
-                .number(16, value.maxLeveragePpm()) // 16：最大杠杆，百万分比
-                .number(17, value.maxPositionNotionalUnits()) // 17：最大持仓名义金额
-                .number(18, value.userOpenInterestLimitRatePpm()) // 18：用户占总未平仓量的限制比例，百万分比
-                .number(19, value.userOpenInterestLimitFloorUnits()) // 19：用户未平仓名义金额限制的最低基准
-                .list(20, value.riskLimitBrackets(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreRiskLimitBracket(item)) // 20：按名义金额划分的风险档位列表
-                .bytes(21, writeCoreInstrumentMaintenance(value.maintenance())) // 21：币对维护任务、模式和固定结算价
-                .number(22, SnapshotEnumCodes.encode(value.instrumentStatus())) // 22：币对业务交易状态
-                .bool(23, value.marketOrderEnabled()) // 23：币对是否允许市价单
-                .bool(24, value.postOnlyEnabled()) // 24：币对是否支持只挂单标记
-                .bool(25, value.reduceOnlyEnabled()) // 25：币对是否支持只减仓标记
-                .number(26, value.supportedOrderTypeMask()) // 26：币对允许的订单类型位图
-                .number(27, value.supportedTimeInForceMask()) // 27：币对允许的订单有效方式位图
-                .number(28, value.quantityStepUnits()) // 二十八：一个数量步长对应的基础资产单位数
-                .number(29, value.orderProtection().marketMaxSlippagePpm())
+        SnapshotFields.Writer writer = new SnapshotFields.Writer()
+                .text(1, value.instrumentId())
+                .text(3, value.baseAsset()).text(4, value.quoteAsset()).text(5, value.settleAsset())
+                .number(6, value.notionalMultiplierUnits()).number(7, value.priceTickUnits())
+                .number(8, value.settleScaleUnits()).number(11, value.makerFeeRatePpm())
+                .number(12, value.takerFeeRatePpm()).number(13, value.expiryEpochMillis())
+                .number(14, value.optionType() == null ? -1 : SnapshotEnumCodes.encode(value.optionType()))
+                .number(15, value.strikePriceTicks()).bytes(21, writeCoreInstrumentMaintenance(value.maintenance()))
+                .number(22, SnapshotEnumCodes.encode(value.instrumentStatus()))
+                .bool(23, value.marketOrderEnabled()).bool(24, value.postOnlyEnabled()).bool(25, value.reduceOnlyEnabled())
+                .number(26, value.supportedOrderTypeMask()).number(27, value.supportedTimeInForceMask())
+                .number(28, value.quantityStepUnits()).number(29, value.orderProtection().marketMaxSlippagePpm())
                 .number(30, value.orderProtection().marketMaxMarkAgeMs())
                 .number(31, value.orderProtection().limitPriceProtectionEnabled() ? 1 : 0)
                 .number(32, value.orderProtection().limitPriceBandPpm())
-                .number(33, value.orderProtection().limitPriceMaxMarkAgeMs())
-                .encode();
+                .number(33, value.orderProtection().limitPriceMaxMarkAgeMs());
+        if (value.riskLimits() != null) {
+            var risk = value.riskLimits();
+            writer.number(9, risk.initialMarginRatePpm())
+                    .number(16, risk.maxLeveragePpm()).number(17, risk.maxPositionNotionalUnits())
+                    .number(18, risk.userOpenInterestLimitRatePpm()).number(19, risk.userOpenInterestLimitFloorUnits())
+                    .list(20, risk.riskLimitBrackets(), TradingStateSnapshotCodec::writeCoreRiskLimitBracket);
+        }
+        return writer.encode();
     }
-    /**
-     * 恢复注册币对与能力设置，数量步长字段二十八缺失取一；订单保护字段二十九到三十三分别使用明确历史默认值。字段三十一按非零为 true 读取，其余三个支持能力布尔字段使用严格零/一校验，不在这里统一改写历史读取规则。
-     * @param encoded 当前注册币对配置的独立字段记录字节
-     */
+
+    /** 根产品线决定风险字段是否存在；衍生品读取完整风险字段，现货没有风险配置。 */
     private static CoreInstrument readCoreInstrument(byte[] encoded, ProductLine productLine) {
-        // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
-        return new CoreInstrument(
-                r.text(1), // 1：币对或合约业务编号
-                com.surprising.instrument.api.model.ContractType.valueOf(productLine.contractTypeCode()), // 合约类型来自根产品线；编号二不再写入
-                r.text(3), // 3：基础资产名称
-                r.text(4), // 4：计价资产名称
-                r.text(5), // 5：结算资产名称
-                r.number(6), // 6：合约名义金额乘数
-                r.number(7), // 7：一个价格刻度对应的整数单位
-                r.number(8), // 8：结算资产金额的整数缩放单位
-                r.number(9), // 9：初始保证金比例，百万分比
-                r.number(10), // 10：维持保证金比例，百万分比
-                r.number(11), // 11：Maker 手续费率，百万分比
-                r.number(12), // 12：Taker 手续费率，百万分比
-                r.number(13), // 13：交割或期权合约到期时刻，毫秒
-                r.integer(14) == -1 ? null : SnapshotEnumCodes.readOptionType(r.integer(14)), // 14：看涨或看跌期权类型
-                r.number(15), // 15：期权行权价
-                r.number(16), // 16：最大杠杆，百万分比
-                r.number(17), // 17：最大持仓名义金额
-                r.number(18), // 18：用户占总未平仓量的限制比例，百万分比
-                r.number(19), // 19：用户未平仓名义金额限制的最低基准
-                r.list(20, /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreRiskLimitBracket(item)), // 20：按名义金额划分的风险档位列表
-                readCoreInstrumentMaintenance(r.bytes(21)), // 21：币对维护任务、模式和固定结算价
-                SnapshotEnumCodes.readInstrumentStatus(r.integer(22)), // 22：币对业务交易状态
-                r.bool(23), // 23：币对是否允许市价单
-                r.bool(24), // 24：币对是否支持只挂单标记
-                r.bool(25), // 25：币对是否支持只减仓标记
-                r.integer(26), // 26：币对允许的订单类型位图
-                r.integer(27), // 27：币对允许的订单有效方式位图
-                r.number(28), // 当前布局必须保存显式数量步长。
+        var risk = productLine.isDerivative() ? new CoreInstrumentRiskLimits(
+                r.number(9), r.number(16), r.number(17), r.number(18), r.number(19),
+                r.list(20, TradingStateSnapshotCodec::readCoreRiskLimitBracket)) : null;
+        return new CoreInstrument(r.text(1),
+                ContractType.valueOf(productLine.contractTypeCode()),
+                r.text(3), r.text(4), r.text(5), r.number(6), r.number(7), r.number(8), risk,
+                r.number(11), r.number(12), r.number(13),
+                r.integer(14) == -1 ? null : SnapshotEnumCodes.readOptionType(r.integer(14)), r.number(15),
+                readCoreInstrumentMaintenance(r.bytes(21)), SnapshotEnumCodes.readInstrumentStatus(r.integer(22)),
+                r.bool(23), r.bool(24), r.bool(25), r.integer(26), r.integer(27), r.number(28),
                 new com.surprising.aeron.protocol.CoreOrderProtection(r.number(29), r.number(30),
                         r.number(31) != 0, r.number(32), r.number(33)));
     }
+
 
     /**
      * 按固定字段编号写入风险业务状态，保存参考价格、账户风险、强平记录、扫描进度及扫描控制和行情修订；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。

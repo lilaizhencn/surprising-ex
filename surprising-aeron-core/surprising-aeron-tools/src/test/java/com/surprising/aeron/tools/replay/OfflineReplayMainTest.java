@@ -61,8 +61,8 @@ class OfflineReplayMainTest {
         var commands = new java.util.ArrayList<CoreMessage>();
         commands.add(message(CoreMessageType.REGISTER_INSTRUMENT, 1,
                 TradingCommandCodec.encodeRegisterInstrument(
-                        new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                                1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0))));
+                        new RegisterInstrumentCommand(
+                                "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0))));
         var balance = message(CoreMessageType.ADJUST_BALANCE, 2,
                 TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand("USDT", 1_000)));

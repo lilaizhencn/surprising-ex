@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -178,8 +182,7 @@ class RuntimeStateTransitionsTest {
         TradingCoreState before = TradingCoreState.empty(ProductLine.SPOT);
         // 标的一的现货注册命令，使用 BTC 基础资产和 USDT 报价及结算
         RegisterInstrumentCommand command = new RegisterInstrumentCommand(
-                "1", "BTC", "USDT", "USDT",
-                1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
+                "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
         // 冷转换辅助对同一输入生成的预期完整状态
         TradingCoreState expected = new RuntimeTestStateTransitions().registerInstrument(before, command);
         // 本次投影独用的整数身份表，与对应运行时成对使用
@@ -224,9 +227,12 @@ class RuntimeStateTransitionsTest {
         // 当前用例变更前的完整状态，作为投影起点及未变断言基线
         TradingCoreState before = reference.registerInstrument(
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
-                new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1,
-                        100_000, 50_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
         // 把用户七标的一的全仓杠杆改为五倍的命令
         UpdateLeverageCommand command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 5_000_000);
         // 冷转换辅助对同一输入生成的预期完整状态

@@ -58,8 +58,9 @@ public final class DirectMatcherTestInputs {
             var identities = new RuntimeIdentityRegistry();
             // 按 Matcher 输入标的构造的现货测试合约
             var instrument = CoreInstrument.from(ProductLine.SPOT,
-                    new RegisterInstrumentCommand(Integer.toString(order.instrumentId()),
-                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                    new RegisterInstrumentCommand(
+                            Integer.toString(order.instrumentId()), "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1,
+                            0));
             runtime.setMetadata(ProductLine.SPOT, 0);
             runtime.registerInstrument(instrument);
             // 为事件准备的 OPEN 准入订单，数量、方向和订单类型沿用输入

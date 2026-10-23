@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
@@ -24,10 +26,12 @@ class CoreContractMathTest {
     void optionBuyerZeroMarginDoesNotEvaluateOverflowingPremium() {
         // 使用乘数为 2 的看涨期权，让后面的极大价格一旦参与权利金乘法就会溢出。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("6",
-                        "BTC", "USDT", "USDT", 2, 1, 1,
-                        100_000, 50_000, 0, 0, 2_000_000_000_000L,
-                        OptionType.CALL.ordinal(), 100));
+                new RegisterInstrumentCommand(
+                        "6", "BTC", "USDT", "USDT", 2, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 2_000_000_000_000L, OptionType.CALL.ordinal(), 100));
 
         assertThat(CoreContractMath.openingMarginUnits(
                 instrument, CoreOrderSide.BUY, Long.MAX_VALUE, 2, 100_000, 0, 0)).isZero();
@@ -40,13 +44,14 @@ class CoreContractMathTest {
     void maintenanceMarginUsesTheInstrumentRiskBracketForCurrentNotional() {
         // 两个保证金率不同的风险档位，用来区分小规模、大规模及超出最高金额上限的情况。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1,
-                        100_000, 50_000, 0, 0, 0, -1, 0,
-                        10_000_000, 10_000, 0, 1,
-                        List.of(
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, 10_000_000, 10_000, 0, 1,
+                                List.of(
                                 new CoreRiskLimitBracket(1, 0, 1_000, 10_000_000, 100_000, 200_000),
-                                new CoreRiskLimitBracket(2, 1_000, 10_000, 5_000_000, 200_000, 500_000))));
+                                new CoreRiskLimitBracket(2, 1_000, 10_000, 5_000_000, 200_000, 500_000))),
+                        0, 0, 0, -1, 0));
 
         assertThat(CoreContractMath.maintenanceMarginUnits(instrument, 5, 100, 0, 0)).isEqualTo(100);
         assertThat(CoreContractMath.maintenanceMarginUnits(instrument, 20, 100, 0, 0)).isEqualTo(1_000);
@@ -64,12 +69,13 @@ class CoreContractMathTest {
     void optionShortMarginUsesIndexForwardOtmAndCurrentPremium() {
         // 行权价 100、保证金调整系数 1.2 的看涨期权，供手工核对保证金与市值结果。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("6",
-                        "BTC", "USDT", "USDT", 1, 1, 1,
-                        100_000, 50_000, 0, 0, 2_000_000_000_000L,
-                        OptionType.CALL.ordinal(), 100, 10_000_000, 10_000, 0, 1,
-                        List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000,
-                                200_000, 50_000, 1_200_000))));
+                new RegisterInstrumentCommand(
+                        "6", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, 10_000_000, 10_000, 0, 1,
+                                List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000,
+                                200_000, 50_000, 1_200_000))),
+                        0, 0, 2_000_000_000_000L, OptionType.CALL.ordinal(), 100));
 
         assertThat(CoreContractMath.openingMarginUnits(
                 instrument, CoreOrderSide.SELL, 10, 2, 200_000, 100, 80,
@@ -85,12 +91,13 @@ class CoreContractMathTest {
     void putShortMarginUsesPutOtmDirectionAndMarkBasedMaintenanceFloor() {
         // 使用与看涨用例相同的档位参数，仅改变期权类型来验证看跌专属公式。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("7",
-                        "BTC", "USDT", "USDT", 1, 1, 1,
-                        100_000, 50_000, 0, 0, 2_000_000_000_000L,
-                        OptionType.PUT.ordinal(), 100, 10_000_000, 10_000, 0, 1,
-                        List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000,
-                                200_000, 50_000, 1_200_000))));
+                new RegisterInstrumentCommand(
+                        "7", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, 10_000_000, 10_000, 0, 1,
+                                List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000,
+                                200_000, 50_000, 1_200_000))),
+                        0, 0, 2_000_000_000_000L, OptionType.PUT.ordinal(), 100));
 
         assertThat(CoreContractMath.openingMarginUnits(
                 instrument, CoreOrderSide.SELL, 10, 2, 200_000, 100, 120,

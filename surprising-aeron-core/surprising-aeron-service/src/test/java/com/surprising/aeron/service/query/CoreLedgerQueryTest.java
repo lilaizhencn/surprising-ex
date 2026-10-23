@@ -77,8 +77,12 @@ class CoreLedgerQueryTest {
             names = {"EXECUTION", "ADL"})
     void executionAndAdlPagesReadLanesAndKeepExistingBudgets(CoreLiquidationWorkView.Purpose purpose) throws Exception {
         // 所有本用例强平记录对应的线性永续合约 1。
-        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand("1",
-                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                0, 0, 0, -1, 0));
         // 含不同价格序号的执行计划及两笔待 ADL 缺口，用来检查资格筛选和游标推进。
         var liquidations = Map.of(
                 1L, new CoreLiquidationState(1, 1001, "1", 1, 1, 0, CoreLiquidationState.Status.PLANNED),
@@ -125,8 +129,12 @@ class CoreLedgerQueryTest {
     @Test
     void insurancePageAllocatesWholeBudgetIncludingClaimsOutsidePageWithoutAccountReads() throws Exception {
         // 所有本用例强平记录对应的线性永续合约 1。
-        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand("1",
-                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                0, 0, 0, -1, 0));
         // 用户 1001 的首笔待保险赔付计划，缺口为 70。
         var first = new CoreLiquidationState(1, 1001, "1", 1, 1, 70, CoreLiquidationState.Status.INSURANCE_REQUIRED);
         // 用户 1002 的第二笔待保险赔付计划，缺口为 30。

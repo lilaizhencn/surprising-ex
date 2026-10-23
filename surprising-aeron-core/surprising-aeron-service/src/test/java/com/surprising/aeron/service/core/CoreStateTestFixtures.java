@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -63,9 +67,12 @@ public final class CoreStateTestFixtures {
         int optionType = type.isOption() ? 0 : -1;
         // 期权固定行权价一百，非期权为零
         long strike = type.isOption() ? 100 : 0;
-        return new RegisterInstrumentCommand(instrumentId, baseAsset, quoteAsset, settleAsset,
-                1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
-                expiry, optionType, strike);
+        return new RegisterInstrumentCommand(
+                instrumentId, baseAsset, quoteAsset, settleAsset, 1, 1, type.isInverse() ? 1_000 : 1,
+                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                0, 0, expiry, optionType, strike);
     }
 
     /**

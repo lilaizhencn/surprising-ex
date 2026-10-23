@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.AmendOrderBatchCommand;
@@ -1019,11 +1021,13 @@ class CoreOrderedOrderBatchTest {
     void perpetualBatchAdmissionIncludesEarlierItemsAndConservesReservedFunds() {
         try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             // 本测试注册的现货或 U 本位永续品种配置
-            RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                    1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0,
-                    10_000_000, 1_500, 0, 1_500,
-                    List.of(new CoreRiskLimitBracket(1, 0, 1_500,
-                            10_000_000, 100_000, 50_000)));
+            RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
+                    "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                    new CoreInstrumentRiskLimits(
+                            100_000, 10_000_000, 1_500, 0, 1_500,
+                            List.of(new CoreRiskLimitBracket(1, 0, 1_500,
+                            10_000_000, 100_000, 50_000))),
+                    0, 0, 0, -1, 0);
             assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.REGISTER_INSTRUMENT,
                     UUID.randomUUID(), 1, TradingCommandCodec.encodeRegisterInstrument(instrument))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
@@ -2593,8 +2597,8 @@ class CoreOrderedOrderBatchTest {
      */
     private static void applySpotInstrument(TradingCoreRuntime state) {
         // 本测试注册的现货或 U 本位永续品种配置
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
-                100_000, 50_000, 0, 0, 0, -1, 0);
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
         assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(
                 CoreMessageType.REGISTER_INSTRUMENT, UUID.randomUUID(), ProductLine.SPOT,
                 CommandSource.OPERATIONS, 9, 1, 0, 1_000, 1),
@@ -2608,11 +2612,13 @@ class CoreOrderedOrderBatchTest {
      */
     private static void applyLinearPerpetualInstrument(TradingCoreRuntime state) {
         // 本测试注册的现货或 U 本位永续品种配置
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
-                100_000, 50_000, 0, 0, 0, -1, 0,
-                10_000_000, 1_500, 0, 1_500,
-                List.of(new CoreRiskLimitBracket(1, 0, 1_500,
-                        10_000_000, 100_000, 50_000)));
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, 10_000_000, 1_500, 0, 1_500,
+                        List.of(new CoreRiskLimitBracket(1, 0, 1_500,
+                        10_000_000, 100_000, 50_000))),
+                0, 0, 0, -1, 0);
         assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.OPERATIONS,
                 9, 1, 0, 1_000, 1), TradingCommandCodec.encodeRegisterInstrument(instrument))).status())

@@ -90,8 +90,12 @@ class LaneReplacementResponseTest {
 
     /** 本组 Lane 结果测试共用的 U 本位永续品种配置。 */
     private static final CoreInstrument INSTRUMENT = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-            new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                    1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+            new RegisterInstrumentCommand(
+                    "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                    new CoreInstrumentRiskLimits(
+                            100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                            java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                    0, 0, 0, -1, 0));
 
     /**
      * 构造指定编号及取消标记的测试订单，其他账户和品种身份固定。

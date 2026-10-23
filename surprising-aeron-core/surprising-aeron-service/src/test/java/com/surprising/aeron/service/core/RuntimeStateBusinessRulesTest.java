@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreCancelAllAfterKey;
@@ -877,10 +879,12 @@ class RuntimeStateBusinessRulesTest {
                                                        long openInterestRate, long bracketCap,
                                                        long bracketMaxLeverage) {
         // 使用指定固定限额、比例限额和唯一风险档位的注册命令
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
-                0, -1, 0, 10_000_000L, maxPosition, openInterestRate, openInterestFloor,
-                List.of(new CoreRiskLimitBracket(1, 0, bracketCap, bracketMaxLeverage, 100_000, 50_000)));
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, 10_000_000L, maxPosition, openInterestRate, openInterestFloor,
+                        List.of(new CoreRiskLimitBracket(1, 0, bracketCap, bracketMaxLeverage, 100_000, 50_000))),
+                0, 0, 0, -1, 0);
         return reducer.applyMarkPrice(
                 reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument),
                 new ApplyMarkPriceCommand("1", 10, 1, 1));
@@ -891,11 +895,13 @@ class RuntimeStateBusinessRulesTest {
      */
     private TradingCoreState derivativeWithBrackets() {
         // 包含两档初始保证金率的正向永续注册命令
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
-                0, -1, 0, 10_000_000L, 1_000, 10_000_000L, 1_000,
-                List.of(new CoreRiskLimitBracket(1, 0, 200, 10_000_000L, 100_000, 50_000),
-                        new CoreRiskLimitBracket(2, 200, 1_000, 10_000_000L, 200_000, 100_000)));
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, 10_000_000L, 1_000, 10_000_000L, 1_000,
+                        List.of(new CoreRiskLimitBracket(1, 0, 200, 10_000_000L, 100_000, 50_000),
+                        new CoreRiskLimitBracket(2, 200, 1_000, 10_000_000L, 200_000, 100_000))),
+                0, 0, 0, -1, 0);
         return reducer.applyMarkPrice(
                 reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument),
                 new ApplyMarkPriceCommand("1", 10, 1, 1));

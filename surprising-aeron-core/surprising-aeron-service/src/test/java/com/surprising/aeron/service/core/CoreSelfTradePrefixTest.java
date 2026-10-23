@@ -61,9 +61,13 @@ class CoreSelfTradePrefixTest {
                 // 标的一选 BTC、标的二选 ETH 的基础资产
                 String base = symbol.equals("1") ? "BTC" : "ETH";
                 applied(core, message(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
-                                base, "USDT", type.isInverse() ? base : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
-                                100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                                symbol, base, "USDT", type.isInverse() ? base : "USDT", 1, 1,
+                                type.isInverse() ? 1000 : 1,
+                                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
                 if (line != ProductLine.SPOT || marketTaker) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
@@ -136,10 +140,13 @@ class CoreSelfTradePrefixTest {
             // 按产品线选出的合约类型
             var type = ContractType.valueOf(line.contractTypeCode());
             applied(core, message(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            "BTC", "USDT", type.isInverse() ? "BTC" : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
-                            100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
-                            type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", type.isInverse() ? "BTC" : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
+                            (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                            0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0, type.isOption() ? 0 : -1,
+                            type.isOption() ? 100 : 0))));
             if (line != ProductLine.SPOT) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                             ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)

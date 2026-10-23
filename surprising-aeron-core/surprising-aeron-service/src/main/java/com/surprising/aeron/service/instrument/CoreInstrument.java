@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.instrument;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.protocol.CoreInstrumentMaintenance;
@@ -46,34 +48,23 @@ public final class CoreInstrument {
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
      * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
-     * @param initialMarginRatePpm 初始保证金率，按百万分之一保存
-     * @param maintenanceMarginRatePpm 维持保证金率，按百万分之一保存
+     * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
      * @param takerFeeRatePpm 吃单成交费率，按百万分之一保存，负数表示返佣
      * @param expiryEpochMillis 到期毫秒时间戳，交割和期权必须为正
      * @param optionType 期权看涨或看跌类型，非期权必须为空
      * @param strikePriceTicks 期权行权价格，按价格 tick 保存，非期权必须为零
-     * @param maxLeveragePpm 最大杠杆，按一百万倍缩放，一百万表示一倍
-     * @param maxPositionNotionalUnits 该标的允许的用户持仓名义金额固定上限
-     * @param userOpenInterestLimitRatePpm 按市场未平仓规模计算用户上限的比例，按百万分之一保存，零表示不使用该比例
-     * @param userOpenInterestLimitFloorUnits 按未平仓规模计算用户上限时采用的最低名义金额
-     * @param riskLimitBrackets 从第一档开始连续覆盖的风险限额档位，构造时复制为只读列表
      * @param maintenance 独立保存的维护状态，包含任务 ID、运行模式和固定清仓价格
      */
-    public CoreInstrument(String instrumentId, ContractType contractType, String baseAsset,
-            String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
-            long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
-            long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
-            long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
-            long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
-            List<CoreRiskLimitBracket> riskLimitBrackets,
-            CoreInstrumentMaintenance maintenance) {
-        this(instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
-                priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
-                makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks,
-                maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
-                userOpenInterestLimitFloorUnits, riskLimitBrackets, maintenance, InstrumentStatus.TRADING,
-                true, true, true, 0b11, 0b1111);
+    public CoreInstrument(
+            String instrumentId, ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
+            long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
+            CoreInstrumentRiskLimits riskLimits, long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis,
+            OptionType optionType, long strikePriceTicks, CoreInstrumentMaintenance maintenance) {
+        this(
+                instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits,
+                settleScaleUnits, riskLimits, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType,
+                strikePriceTicks, maintenance, InstrumentStatus.TRADING, true, true, true, 0b11, 0b1111);
     }
 
     /**
@@ -86,18 +77,12 @@ public final class CoreInstrument {
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
      * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
-     * @param initialMarginRatePpm 初始保证金率，按百万分之一保存
-     * @param maintenanceMarginRatePpm 维持保证金率，按百万分之一保存
+     * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
      * @param takerFeeRatePpm 吃单成交费率，按百万分之一保存，负数表示返佣
      * @param expiryEpochMillis 到期毫秒时间戳，交割和期权必须为正
      * @param optionType 期权看涨或看跌类型，非期权必须为空
      * @param strikePriceTicks 期权行权价格，按价格 tick 保存，非期权必须为零
-     * @param maxLeveragePpm 最大杠杆，按一百万倍缩放，一百万表示一倍
-     * @param maxPositionNotionalUnits 该标的允许的用户持仓名义金额固定上限
-     * @param userOpenInterestLimitRatePpm 按市场未平仓规模计算用户上限的比例，按百万分之一保存，零表示不使用该比例
-     * @param userOpenInterestLimitFloorUnits 按未平仓规模计算用户上限时采用的最低名义金额
-     * @param riskLimitBrackets 从第一档开始连续覆盖的风险限额档位，构造时复制为只读列表
      * @param maintenance 独立保存的维护状态，包含任务 ID、运行模式和固定清仓价格
      * @param instrumentStatus 标的业务状态，与维护任务模式分别判断
      * @param marketOrderEnabled 是否额外允许市价单，仍需通过订单类型掩码检查
@@ -106,22 +91,18 @@ public final class CoreInstrument {
      * @param supportedOrderTypeMask 允许的订单类型位集，第 wireCode 减一位表示该类型
      * @param supportedTimeInForceMask 允许的有效期位集，第 wireCode 减一位表示该有效期
      */
-    public CoreInstrument(String instrumentId, ContractType contractType, String baseAsset,
-            String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
-            long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
-            long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
-            long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
-            long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
-            List<CoreRiskLimitBracket> riskLimitBrackets, CoreInstrumentMaintenance maintenance,
+    public CoreInstrument(
+            String instrumentId, ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
+            long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
+            CoreInstrumentRiskLimits riskLimits, long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis,
+            OptionType optionType, long strikePriceTicks, CoreInstrumentMaintenance maintenance,
             InstrumentStatus instrumentStatus, boolean marketOrderEnabled, boolean postOnlyEnabled,
             boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask) {
-        this(instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
-                priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
-                makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks,
-                maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
-                userOpenInterestLimitFloorUnits, riskLimitBrackets, maintenance, instrumentStatus,
-                marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled, supportedOrderTypeMask,
-                supportedTimeInForceMask, 1L);
+        this(
+                instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits,
+                settleScaleUnits, riskLimits, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType,
+                strikePriceTicks, maintenance, instrumentStatus, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled,
+                supportedOrderTypeMask, supportedTimeInForceMask, 1L);
     }
 
     /**
@@ -134,18 +115,12 @@ public final class CoreInstrument {
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
      * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
-     * @param initialMarginRatePpm 初始保证金率，按百万分之一保存
-     * @param maintenanceMarginRatePpm 维持保证金率，按百万分之一保存
+     * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
      * @param takerFeeRatePpm 吃单成交费率，按百万分之一保存，负数表示返佣
      * @param expiryEpochMillis 到期毫秒时间戳，交割和期权必须为正
      * @param optionType 期权看涨或看跌类型，非期权必须为空
      * @param strikePriceTicks 期权行权价格，按价格 tick 保存，非期权必须为零
-     * @param maxLeveragePpm 最大杠杆，按一百万倍缩放，一百万表示一倍
-     * @param maxPositionNotionalUnits 该标的允许的用户持仓名义金额固定上限
-     * @param userOpenInterestLimitRatePpm 按市场未平仓规模计算用户上限的比例，按百万分之一保存，零表示不使用该比例
-     * @param userOpenInterestLimitFloorUnits 按未平仓规模计算用户上限时采用的最低名义金额
-     * @param riskLimitBrackets 从第一档开始连续覆盖的风险限额档位，构造时复制为只读列表
      * @param maintenance 独立保存的维护状态，包含任务 ID、运行模式和固定清仓价格
      * @param instrumentStatus 标的业务状态，与维护任务模式分别判断
      * @param marketOrderEnabled 是否额外允许市价单，仍需通过订单类型掩码检查
@@ -155,17 +130,18 @@ public final class CoreInstrument {
      * @param supportedTimeInForceMask 允许的有效期位集，第 wireCode 减一位表示该有效期
      * @param quantityStepUnits 每个数量步对应的资产整数数量，必须为正
      */
-    public CoreInstrument(String instrumentId, ContractType contractType, String baseAsset,
-            String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
-            long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
-            long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
-            long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
-            long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
-            List<CoreRiskLimitBracket> riskLimitBrackets, CoreInstrumentMaintenance maintenance,
+    public CoreInstrument(
+            String instrumentId, ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
+            long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
+            CoreInstrumentRiskLimits riskLimits, long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis,
+            OptionType optionType, long strikePriceTicks, CoreInstrumentMaintenance maintenance,
             InstrumentStatus instrumentStatus, boolean marketOrderEnabled, boolean postOnlyEnabled,
-            boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask,
-            long quantityStepUnits) {
-        this(instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, maintenance, instrumentStatus, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, CoreOrderProtection.initial());
+            boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask, long quantityStepUnits) {
+        this(
+                instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits,
+                settleScaleUnits, riskLimits, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType,
+                strikePriceTicks, maintenance, instrumentStatus, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled,
+                supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, CoreOrderProtection.initial());
     }
 
     /**
@@ -178,18 +154,12 @@ public final class CoreInstrument {
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
      * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
-     * @param initialMarginRatePpm 初始保证金率，按百万分之一保存
-     * @param maintenanceMarginRatePpm 维持保证金率，按百万分之一保存
+     * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
      * @param takerFeeRatePpm 吃单成交费率，按百万分之一保存，负数表示返佣
      * @param expiryEpochMillis 到期毫秒时间戳，交割和期权必须为正
      * @param optionType 期权看涨或看跌类型，非期权必须为空
      * @param strikePriceTicks 期权行权价格，按价格 tick 保存，非期权必须为零
-     * @param maxLeveragePpm 最大杠杆，按一百万倍缩放，一百万表示一倍
-     * @param maxPositionNotionalUnits 该标的允许的用户持仓名义金额固定上限
-     * @param userOpenInterestLimitRatePpm 按市场未平仓规模计算用户上限的比例，按百万分之一保存，零表示不使用该比例
-     * @param userOpenInterestLimitFloorUnits 按未平仓规模计算用户上限时采用的最低名义金额
-     * @param riskLimitBrackets 从第一档开始连续覆盖的风险限额档位，构造时复制为只读列表
      * @param maintenance 独立保存的维护状态，包含任务 ID、运行模式和固定清仓价格
      * @param instrumentStatus 标的业务状态，与维护任务模式分别判断
      * @param marketOrderEnabled 是否额外允许市价单，仍需通过订单类型掩码检查
@@ -200,27 +170,23 @@ public final class CoreInstrument {
      * @param quantityStepUnits 每个数量步对应的资产整数数量，必须为正
      * @param orderProtection 订单价格和数量保护规则，必须非空
      */
-    public CoreInstrument(String instrumentId, ContractType contractType, String baseAsset,
-            String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
-            long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
-            long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
-            long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
-            long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
-            List<CoreRiskLimitBracket> riskLimitBrackets, CoreInstrumentMaintenance maintenance,
+    public CoreInstrument(
+            String instrumentId, ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
+            long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
+            CoreInstrumentRiskLimits riskLimits, long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis,
+            OptionType optionType, long strikePriceTicks, CoreInstrumentMaintenance maintenance,
             InstrumentStatus instrumentStatus, boolean marketOrderEnabled, boolean postOnlyEnabled,
-            boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask,
-            long quantityStepUnits, CoreOrderProtection orderProtection) {
+            boolean reduceOnlyEnabled, int supportedOrderTypeMask, int supportedTimeInForceMask, long quantityStepUnits,
+            CoreOrderProtection orderProtection) {
         this.instrumentIdValue = com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         this.instrumentId = instrumentId;
-        this.configuration = new Configuration(Objects.requireNonNull(contractType, "contractType"),
-                AssetBalance.normalizeAsset(baseAsset), AssetBalance.normalizeAsset(quoteAsset),
-                AssetBalance.normalizeAsset(settleAsset), notionalMultiplierUnits, priceTickUnits,
-                settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm,
-                takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks, maxLeveragePpm,
-                maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits,
-                List.copyOf(Objects.requireNonNull(riskLimitBrackets, "riskLimitBrackets")),
-                Objects.requireNonNull(instrumentStatus, "instrumentStatus"), marketOrderEnabled,
-                postOnlyEnabled, reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, orderProtection);
+        this.configuration = new Configuration(
+                Objects.requireNonNull(contractType, "contractType"), AssetBalance.normalizeAsset(baseAsset),
+                AssetBalance.normalizeAsset(quoteAsset), AssetBalance.normalizeAsset(settleAsset),
+                notionalMultiplierUnits, priceTickUnits, settleScaleUnits, riskLimits, makerFeeRatePpm, takerFeeRatePpm,
+                expiryEpochMillis, optionType, strikePriceTicks,
+                Objects.requireNonNull(instrumentStatus, "instrumentStatus"), marketOrderEnabled, postOnlyEnabled,
+                reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, orderProtection);
         this.maintenance = Objects.requireNonNull(maintenance, "maintenance");
         validate();
     }
@@ -235,39 +201,30 @@ public final class CoreInstrument {
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
      * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
-     * @param initialMarginRatePpm 初始保证金率，按百万分之一保存
-     * @param maintenanceMarginRatePpm 维持保证金率，按百万分之一保存
+     * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
      * @param takerFeeRatePpm 吃单成交费率，按百万分之一保存，负数表示返佣
      * @param expiryEpochMillis 到期毫秒时间戳，交割和期权必须为正
      * @param optionType 期权看涨或看跌类型，非期权必须为空
      * @param strikePriceTicks 期权行权价格，按价格 tick 保存，非期权必须为零
-     * @param maxLeveragePpm 最大杠杆，按一百万倍缩放，一百万表示一倍
-     * @param maxPositionNotionalUnits 该标的允许的用户持仓名义金额固定上限
-     * @param userOpenInterestLimitRatePpm 按市场未平仓规模计算用户上限的比例，按百万分之一保存，零表示不使用该比例
-     * @param userOpenInterestLimitFloorUnits 按未平仓规模计算用户上限时采用的最低名义金额
-     * @param riskLimitBrackets 从第一档开始连续覆盖的风险限额档位，构造时复制为只读列表
      */
-    public CoreInstrument(String instrumentId, ContractType contractType, String baseAsset,
-            String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
-            long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
-            long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
-            long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
-            long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
-            List<CoreRiskLimitBracket> riskLimitBrackets) {
-        this(instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
-                priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
-                makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks,
-                maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
-                userOpenInterestLimitFloorUnits, riskLimitBrackets,
-                CoreInstrumentMaintenance.TRADING);
+    public CoreInstrument(
+            String instrumentId, ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
+            long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
+            CoreInstrumentRiskLimits riskLimits, long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis,
+            OptionType optionType, long strikePriceTicks) {
+        this(
+                instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits,
+                settleScaleUnits, riskLimits, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType,
+                strikePriceTicks, CoreInstrumentMaintenance.TRADING);
     }
 
     /**
      * 创建查询专用外壳并固定当时读到的配置与维护引用，后续原对象替换引用不会改变这个外壳；固定动作仍依赖调用方的查询边界。
      */
     public CoreInstrument captureForQuery() {
-        return new CoreInstrument(instrumentId, configuration, maintenance);
+        return new CoreInstrument(
+                instrumentId, configuration, maintenance);
     }
 
     /**
@@ -332,14 +289,13 @@ public final class CoreInstrument {
      * 返回合约金额换算使用的结算精度比例。
      */
     public long settleScaleUnits() { return configuration.settleScaleUnits(); }
+    /** 衍生品的保证金和限额配置，现货返回空；配置更新时随同原不可变配置发布。 */
+    public CoreInstrumentRiskLimits riskLimits() { return configuration.riskLimits(); }
+
     /**
      * 返回百万分之一口径的默认初始保证金率，具体档位可有更高要求。
      */
-    public long initialMarginRatePpm() { return configuration.initialMarginRatePpm(); }
-    /**
-     * 返回百万分之一口径的默认维持保证金率。
-     */
-    public long maintenanceMarginRatePpm() { return configuration.maintenanceMarginRatePpm(); }
+    public long initialMarginRatePpm() { return configuration.riskLimits().initialMarginRatePpm(); }
     /**
      * 返回百万分之一口径的标的挂单成交费率。
      */
@@ -363,32 +319,32 @@ public final class CoreInstrument {
     /**
      * 返回一百万倍缩放的最大杠杆。
      */
-    public long maxLeveragePpm() { return configuration.maxLeveragePpm(); }
+    public long maxLeveragePpm() { return configuration.riskLimits().maxLeveragePpm(); }
     /**
      * 返回用户持仓名义金额的固定上限。
      */
-    public long maxPositionNotionalUnits() { return configuration.maxPositionNotionalUnits(); }
+    public long maxPositionNotionalUnits() { return configuration.riskLimits().maxPositionNotionalUnits(); }
     /**
      * 返回百万分之一口径的用户未平仓规模比例上限。
      */
-    public long userOpenInterestLimitRatePpm() { return configuration.userOpenInterestLimitRatePpm(); }
+    public long userOpenInterestLimitRatePpm() { return configuration.riskLimits().userOpenInterestLimitRatePpm(); }
     /**
      * 返回未平仓规模比例限额的最低名义金额。
      */
-    public long userOpenInterestLimitFloorUnits() { return configuration.userOpenInterestLimitFloorUnits(); }
+    public long userOpenInterestLimitFloorUnits() { return configuration.riskLimits().userOpenInterestLimitFloorUnits(); }
     /**
      * 只有衍生品启用了未平仓比例且其最低额度小于固定上限时，才需要市场未平仓总额参与用户额度计算。
      */
     public boolean usesOpenInterestForUserLimit() {
         // 本次读取固定下来的配置版本，防止同次计算混用前后配置
         Configuration current = configuration;
-        return current.contractType() != ContractType.SPOT && current.userOpenInterestLimitRatePpm() != 0
-                && current.userOpenInterestLimitFloorUnits() < current.maxPositionNotionalUnits();
+        return current.contractType() != ContractType.SPOT && current.riskLimits().userOpenInterestLimitRatePpm() != 0
+                && current.riskLimits().userOpenInterestLimitFloorUnits() < current.riskLimits().maxPositionNotionalUnits();
     }
     /**
      * 返回已经复制为只读列表的连续风险限额档位。
      */
-    public List<CoreRiskLimitBracket> riskLimitBrackets() { return configuration.riskLimitBrackets(); }
+    public List<CoreRiskLimitBracket> riskLimitBrackets() { return configuration.riskLimits().riskLimitBrackets(); }
     /**
      * 返回标的业务状态，维护模式另行保存。
      */
@@ -499,7 +455,7 @@ public final class CoreInstrument {
     }
 
     /**
-     * 检查资产不同、正数单位及限额、合法位集、连续且覆盖上限的风险档位，再核对交割或期权到期字段。此方法只覆盖源码列出的条件，不等于协议构造器的全部参数校验。
+     * 检查资产不同、正数单位及限额、合法位集、衍生品风险配置在构造时校验，再核对交割或期权到期字段。此方法只覆盖源码列出的条件，不等于协议构造器的全部参数校验。
      */
     private void validate() {
         // 本次构造完成待校验的配置版本
@@ -508,32 +464,13 @@ public final class CoreInstrument {
             throw new CoreStateRejectedException("INVALID_COMMAND", "base and quote assets must differ");
         }
         if (configuration.notionalMultiplierUnits() <= 0 || configuration.priceTickUnits() <= 0 || configuration.quantityStepUnits() <= 0
-                || configuration.settleScaleUnits() <= 0 || configuration.initialMarginRatePpm() <= 0
-                || configuration.maintenanceMarginRatePpm() <= 0
-                || configuration.maxLeveragePpm() < 1_000_000L || configuration.maxPositionNotionalUnits() <= 0
-                || configuration.userOpenInterestLimitRatePpm() < 0
-                || configuration.userOpenInterestLimitFloorUnits() <= 0
-                || configuration.riskLimitBrackets().isEmpty() || configuration.instrumentStatus() == null
+                || configuration.settleScaleUnits() <= 0
+                || configuration.instrumentStatus() == null
                 || configuration.supportedOrderTypeMask() <= 0
                 || (configuration.supportedOrderTypeMask() & ~0b11) != 0
                 || configuration.supportedTimeInForceMask() <= 0
                 || (configuration.supportedTimeInForceMask() & ~0b1111) != 0) {
             throw new IllegalArgumentException("invalid instrument");
-        }
-        // 上一档上界，下一档下界必须与它衔接，循环后作为覆盖总上限
-        long previousCap = 0;
-        // 下一档必须采用的连续档号，从一开始
-        int expectedBracketNo = 1;
-        for (CoreRiskLimitBracket /* 当前检查的风险档位 */ bracket : configuration.riskLimitBrackets()) {
-            if (bracket.bracketNo() != expectedBracketNo++
-                    || bracket.notionalFloorUnits() != previousCap
-                    || bracket.maxLeveragePpm() > configuration.maxLeveragePpm()) {
-                throw new IllegalArgumentException("risk limit brackets must be contiguous and bounded");
-            }
-            previousCap = bracket.notionalCapUnits();
-        }
-        if (previousCap < configuration.maxPositionNotionalUnits()) {
-            throw new IllegalArgumentException("risk limit brackets must cover max position notional");
         }
         if (configuration.contractType().isDelivery() && configuration.expiryEpochMillis() <= 0) {
             throw new IllegalArgumentException("delivery instrument requires expiry time");
@@ -598,17 +535,14 @@ public final class CoreInstrument {
         } else if (command.optionTypeCode() != -1) {
             throw new CoreStateRejectedException("INVALID_OPTION_TYPE", "non-option must not set option type");
         }
-        return new CoreInstrument(command.instrumentId(), contractType,
-                command.baseAsset(), command.quoteAsset(), command.settleAsset(),
+        return new CoreInstrument(
+                command.instrumentId(), contractType, command.baseAsset(), command.quoteAsset(), command.settleAsset(),
                 command.notionalMultiplierUnits(), command.priceTickUnits(), command.settleScaleUnits(),
-                command.initialMarginRatePpm(), command.maintenanceMarginRatePpm(),
-                command.makerFeeRatePpm(), command.takerFeeRatePpm(), command.expiryEpochMillis(),
-                optionType, command.strikePriceTicks(), command.maxLeveragePpm(),
-                command.maxPositionNotionalUnits(), command.userOpenInterestLimitRatePpm(),
-                command.userOpenInterestLimitFloorUnits(), command.riskLimitBrackets(),
-                CoreInstrumentMaintenance.TRADING, InstrumentStatus.values()[command.instrumentStatusCode()],
-                command.marketOrderEnabled(), command.postOnlyEnabled(), command.reduceOnlyEnabled(),
-                command.supportedOrderTypeMask(), command.supportedTimeInForceMask(), command.quantityStepUnits(), command.orderProtection());
+                command.riskLimits(), command.makerFeeRatePpm(), command.takerFeeRatePpm(), command.expiryEpochMillis(),
+                optionType, command.strikePriceTicks(), CoreInstrumentMaintenance.TRADING,
+                InstrumentStatus.values()[command.instrumentStatusCode()], command.marketOrderEnabled(),
+                command.postOnlyEnabled(), command.reduceOnlyEnabled(), command.supportedOrderTypeMask(),
+                command.supportedTimeInForceMask(), command.quantityStepUnits(), command.orderProtection());
     }
 
     /**
@@ -620,6 +554,7 @@ public final class CoreInstrument {
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
      * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
+     * @param riskLimits 衍生品风险配置；现货必须为空
      * @param initialMarginRatePpm 初始保证金率，按百万分之一保存
      * @param maintenanceMarginRatePpm 维持保证金率，按百万分之一保存
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
@@ -641,22 +576,21 @@ public final class CoreInstrument {
      * @param quantityStepUnits 每个数量步对应的资产整数数量，必须为正
      * @param orderProtection 订单价格和数量保护规则，必须非空
      */
-    public record Configuration(ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
-                                long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
-                                long initialMarginRatePpm, long maintenanceMarginRatePpm,
-                                long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis,
-                                OptionType optionType, long strikePriceTicks, long maxLeveragePpm,
-                                long maxPositionNotionalUnits, long userOpenInterestLimitRatePpm,
-                                long userOpenInterestLimitFloorUnits, List<CoreRiskLimitBracket> riskLimitBrackets,
-                                InstrumentStatus instrumentStatus, boolean marketOrderEnabled,
-                                boolean postOnlyEnabled, boolean reduceOnlyEnabled, int supportedOrderTypeMask,
-                                int supportedTimeInForceMask, long quantityStepUnits, CoreOrderProtection orderProtection) {
+    public record Configuration(
+            ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
+            long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
+            CoreInstrumentRiskLimits riskLimits, long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis,
+            OptionType optionType, long strikePriceTicks, InstrumentStatus instrumentStatus, boolean marketOrderEnabled,
+            boolean postOnlyEnabled, boolean reduceOnlyEnabled, int supportedOrderTypeMask,
+            int supportedTimeInForceMask, long quantityStepUnits, CoreOrderProtection orderProtection) {
         /**
-         * 要求保护规则和业务状态非空，并复制风险档位列表；完整业务参数约束由协议及 CoreInstrument 的构造校验负责。
+         * 要求保护规则和业务状态非空，并校验风险配置只属于衍生品；完整业务参数约束由协议及 CoreInstrument 的构造校验负责。
          */
         public Configuration {
             Objects.requireNonNull(orderProtection, "orderProtection");
-            riskLimitBrackets = List.copyOf(riskLimitBrackets);
+            Objects.requireNonNull(contractType, "contractType");
+            if ((contractType == ContractType.SPOT) != (riskLimits == null))
+                throw new IllegalArgumentException("risk limits are required only for derivative instruments");
             Objects.requireNonNull(instrumentStatus, "instrumentStatus");
         }
     }

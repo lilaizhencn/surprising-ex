@@ -107,10 +107,13 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
         service.onStart(cluster, null);
         service.onSessionOpen(session, TIME);
         send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                new RegisterInstrumentCommand("1", "BTC", "USDT", asset,
-                        1, 1, type.isInverse() ? 1000 : 1, 100000, 50000, 0, 0,
-                        type.isDelivery() || type.isOption() ? TIME + 100000 : 0,
-                        type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
+                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                100000, (1_000_000_000_000L / (100000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100000)), 100000, 50000)))),
+                        0, 0, type.isDelivery() || type.isOption() ? TIME + 100000 : 0, type.isOption() ? 0 : -1,
+                        type.isOption() ? 100 : 0)));
         drain();
         send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                 ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)

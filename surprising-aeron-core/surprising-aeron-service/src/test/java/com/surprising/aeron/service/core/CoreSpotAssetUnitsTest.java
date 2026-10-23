@@ -34,11 +34,9 @@ class CoreSpotAssetUnitsTest {
         TradingCoreRuntime runtime = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
-            var registration = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                    10_000, 10_000_000, 1, 1_000_000, 1_000_000, 200, 500, 0, -1, 0,
-                    1_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
-                    List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),
-                    1, true, true, false, 0b11, 0b1111, 100_000);
+            var registration = new RegisterInstrumentCommand(
+                    "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
+                    0b11, 0b1111, 100_000);
             apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
             // 非单位数量步长必须按当前布局完整保存，恢复值不得静默降为单位步长。
             byte[] encoded = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(runtime.tradingState());
@@ -110,11 +108,9 @@ class CoreSpotAssetUnitsTest {
         TradingCoreRuntime runtime = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
-            var registration = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                    10_000, 10_000_000, 1, 1_000_000, 1_000_000, 200, 500, 0, -1, 0,
-                    1_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
-                    List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),
-                    1, true, true, false, 0b11, 0b1111, 100_000);
+            var registration = new RegisterInstrumentCommand(
+                    "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
+                    0b11, 0b1111, 100_000);
             apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
             fund(runtime, 101, "USDT", 100_000_000_000L);
             fund(runtime, 202, "BTC", 1_000_000L);
@@ -170,11 +166,9 @@ class CoreSpotAssetUnitsTest {
         TradingCoreRuntime runtime = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
-            var registration = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                    10_000, 10_000_000, 1, 1_000_000, 1_000_000, 200, 500, 0, -1, 0,
-                    1_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
-                    List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),
-                    1, true, true, false, 0b11, 0b1111, 100_000);
+            var registration = new RegisterInstrumentCommand(
+                    "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
+                    0b11, 0b1111, 100_000);
             apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
             fund(runtime, 101, "USDT", 100_000_000_000L); fund(runtime, 202, "BTC", 1_000_000L);
             place(runtime, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);

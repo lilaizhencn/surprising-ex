@@ -196,8 +196,12 @@ class ParallelRiskScanTest {
         var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
-                new RegisterInstrumentCommand("2",
-                        "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        "2", "ETH", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
+                        0, 0, 0, -1, 0));
         // 需要加入第二币对持仓或替换一个用户的业务账户映射副本。
         var users = new TreeMap<>(source.users());
         for (var /* 当前遍历或替换的测试账户，保留其其他余额、冻结和持仓。 */ user : source.users().values()) {
@@ -252,8 +256,12 @@ class ParallelRiskScanTest {
         var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
-                new RegisterInstrumentCommand("2",
-                        "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        "2", "ETH", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
+                        0, 0, 0, -1, 0));
         // 需要加入第二币对持仓或替换一个用户的业务账户映射副本。
         var users = new TreeMap<>(source.users());
         for (var /* 当前遍历或替换的测试账户，保留其其他余额、冻结和持仓。 */ user : source.users().values()) {
@@ -366,8 +374,12 @@ class ParallelRiskScanTest {
         var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         // 逐步注册合约、充值并加入测试账户持仓的初始业务状态。
         var state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
-                new RegisterInstrumentCommand(SYMBOL,
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        SYMBOL, "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
+                        0, 0, 0, -1, 0));
         // 每条 Lane 已经加入的测试用户数量，达到 usersPerLane 后跳过该 Lane 的更多用户。
         int[] counts = new int[TOPOLOGY.accountLaneCount()];
         // 尚需加入的测试用户总数，每成功加入一个账户就减一，全部 Lane 凑齐后结束。

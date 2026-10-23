@@ -1,5 +1,9 @@
 package com.surprising.aeron.benchmarks.workload;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import lombok.extern.slf4j.Slf4j;
 
 import com.surprising.aeron.client.AeronLifecycleCoordinator;
@@ -443,11 +447,12 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         registerInstrumentViaProvider(instrumentId, type, optionCode, strike, expiry);
         command(CoreMessageType.REGISTER_INSTRUMENT, 0,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        instrumentId, BASE_ASSET,
-                        type.isInverse() ? "USD" : "USDT", settleAsset(),
+                        instrumentId, BASE_ASSET, type.isInverse() ? "USD" : "USDT", settleAsset(),
                         type.isInverse() ? 100 : 1, 1, type.isInverse() ? 100 : 1,
-                        100_000, 100_000, MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
-                        expiry, optionCode, strike)));
+                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000)))),
+                        MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM, expiry, optionCode, strike)));
     }
 
     private void registerInstrumentViaProvider(String instrumentId, ContractType type, int optionCode,

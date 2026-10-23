@@ -68,10 +68,13 @@ public class DerivativeRiskBoundaryBenchmark {
             };
             asset = type.isInverse() ? "BTC" : "USDT";
             for (String instrumentId : new String[]{"27", "28"}) {
-                var instrument = new RegisterInstrumentCommand(instrumentId, "BTC",
-                        type.isInverse() ? "USD" : "USDT", asset, type.isInverse() ? 100 : 1,
-                        1, type.isInverse() ? 100 : 1, 100_000, 50_000, 0, 0,
-                        2_000_000_000_000L, type.isOption() ? OptionType.CALL.ordinal() : -1,
+                var instrument = new RegisterInstrumentCommand(
+                        instrumentId, "BTC", type.isInverse() ? "USD" : "USDT", asset, type.isInverse() ? 100 : 1, 1,
+                        type.isInverse() ? 100 : 1,
+                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                        0, 0, 2_000_000_000_000L, type.isOption() ? OptionType.CALL.ordinal() : -1,
                         type.isOption() ? 100 : 0);
                 harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS,
                         0, TradingCommandCodec.encodeRegisterInstrument(instrument)));

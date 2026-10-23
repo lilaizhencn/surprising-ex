@@ -101,12 +101,18 @@ public class InProcessTradingAllocationBenchmark {
         for (int symbol = 0; symbol < symbols; symbol++) {
             String instrumentId = Integer.toString(symbol + 1);
             var instrument = oiLimitMode.equals("FIXED")
-                    ? new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", "USDT",
-                            1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)
-                    : new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", "USDT",
-                            1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0, 10_000_000,
-                            Long.MAX_VALUE, 1_000_000, Long.MAX_VALUE / 2,
-                            java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
+                    ? new RegisterInstrumentCommand(
+                            instrumentId, "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0)
+                    : new RegisterInstrumentCommand(
+                            instrumentId, "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, 10_000_000, Long.MAX_VALUE, 1_000_000, Long.MAX_VALUE / 2,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000))),
+                            0, 0, 0, -1, 0);
             control(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument));
             control(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME)));

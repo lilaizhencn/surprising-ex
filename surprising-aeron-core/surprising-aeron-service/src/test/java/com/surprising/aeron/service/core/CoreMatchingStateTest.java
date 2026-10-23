@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.AmendOrderCommand;
@@ -1331,10 +1335,12 @@ class CoreMatchingStateTest {
         // 交割和期权测试币对的未来到期时刻，永续及现货为零。
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
         // 带本样例资产、风险和费率配置的注册币对命令。
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                "BTC", "USDT", settleAsset(productLine), 1, 1, type.isInverse() ? 1_000 : 1,
-                100_000, 50_000, makerFeeRatePpm, takerFeeRatePpm, expiry,
-                type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", settleAsset(productLine), 1, 1, type.isInverse() ? 1_000 : 1,
+                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                makerFeeRatePpm, takerFeeRatePpm, expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
         // 当前辅助器构造的完整协议命令帧。
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), productLine, CommandSource.OPERATIONS, 88, 1, 1,

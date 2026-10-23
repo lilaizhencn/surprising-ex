@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.treasury;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
@@ -197,7 +201,12 @@ class SystemLedgerControlTest {
             TreasuryRuntime original = runtime.treasury();
             // 构造资金费前值进度使用的规范 U 本位永续币对。
             var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                    new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                    new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0));
             // 操作前保留的资金费分页进度引用，回滚后应恢复同一记录。
             var progress = new TreasuryRuntime.FundingProgressRuntime(3, instrument, 1000, 1, 100, 1);
             original.setFee(asset, 9); original.setFundingSettlement(symbol, 2); original.setFundingProgress(symbol, progress);

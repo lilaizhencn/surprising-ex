@@ -696,9 +696,8 @@ class DeterministicExchangeCoreAdapterTest {
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
                 Map.of(instrumentId, CoreInstrument.from(ProductLine.SPOT,
-                        new RegisterInstrumentCommand(instrumentId,
-                                "BTC", "USDT", "USDT", 1, 1, 1,
-                                100_000, 50_000, 0, 0, 0, -1, 0))),
+                        new RegisterInstrumentCommand(
+                                instrumentId, "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0))),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
     }
 

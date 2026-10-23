@@ -25,8 +25,12 @@ class CoreMatcherLedgerTest {
     void collectedOrderDeletionWinsBeforeOldActiveRouteIsRetired() throws Exception {
         try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0)));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             applied(state, CoreMessageType.ADJUST_BALANCE, 1001,
@@ -60,8 +64,12 @@ class CoreMatcherLedgerTest {
     void matchingAndBatchFeesUseOriginalLedgerAndAccountFactsRemainConserved() throws Exception {
         try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 10_000, 10_000, 0, -1, 0)));
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            10_000, 10_000, 0, -1, 0)));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             for (long /* 本轮测试用户，用于注入余额或最终核对其预留已清空。 */ user : new long[]{1001, 1002}) applied(state, CoreMessageType.ADJUST_BALANCE, user,
@@ -97,8 +105,12 @@ class CoreMatcherLedgerTest {
     void laneAdmissionCancelsOwnCrossingOrderWithoutOwnerBusinessReads() throws Exception {
         try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0)));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             applied(state, CoreMessageType.ADJUST_BALANCE, 1001,

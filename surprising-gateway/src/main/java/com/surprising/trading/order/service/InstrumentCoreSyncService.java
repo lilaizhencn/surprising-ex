@@ -1,5 +1,7 @@
 package com.surprising.trading.order.service;
 
+import com.surprising.instrument.api.model.ContractType;
+
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
@@ -102,14 +104,7 @@ public class InstrumentCoreSyncService {
     }
 
     private static RegisterInstrumentCommand command(InstrumentResponse value,long settleScale, CoreOrderProtection protection) {
-        // Core's shared instrument protocol requires a bounded bracket even for spot
-        // orders. Derive it from the instrument; spot administrators never configure derivative tiers.
-        var brackets=value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
-                ? java.util.List.of(new CoreRiskLimitBracket(1, 0, value.maxPositionNotionalUnits(),
-                        value.maxLeveragePpm(), value.initialMarginRatePpm(), value.maintenanceMarginRatePpm()))
-                : value.riskLimitBrackets().stream().map(b->new CoreRiskLimitBracket(b.bracketNo(),
-                        b.notionalFloorUnits(),b.notionalCapUnits(),b.maxLeveragePpm(),b.initialMarginRatePpm(),
-                        b.maintenanceMarginRatePpm(),b.optionMarginFactorPpm())).toList();
+        // 现货没有衍生品风险档；只在衍生品风险配置中转换真实档位。
         long strike=value.strikePriceUnits()==null?0:value.strikePriceUnits()/value.priceTickUnits();
         if (value.strikePriceUnits()!=null && value.strikePriceUnits()%value.priceTickUnits()!=0)
             throw new IllegalArgumentException("strike price does not align with tick size");
@@ -130,15 +125,22 @@ public class InstrumentCoreSyncService {
                 }
             }
         }
-        return new RegisterInstrumentCommand(Integer.toString(value.instrumentId()),
-                value.baseAsset(),value.quoteAsset(),value.settleAsset(),value.notionalMultiplierUnits(),value.priceTickUnits(),
-                settleScale,value.initialMarginRatePpm(),value.maintenanceMarginRatePpm(),
-                value.makerFeeRatePpm(),value.takerFeeRatePpm(),value.expiryTime()==null?0:value.expiryTime().toEpochMilli(),
-                value.optionType()==null?-1:value.optionType().ordinal(),strike,value.maxLeveragePpm(),value.maxPositionNotionalUnits(),
-                value.userOpenInterestLimitRatePpm(),value.userOpenInterestLimitFloorUnits(),brackets,
-                value.status().ordinal(),value.marketOrderEnabled(),value.postOnlyEnabled(),value.reduceOnlyEnabled(),
-                supportedOrderTypes,supportedTimeInForce,
-                value.contractType() == com.surprising.instrument.api.model.ContractType.SPOT ? value.quantityStepUnits() : 1L, protection);
+        CoreInstrumentRiskLimits riskLimits = value.contractType() == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        value.initialMarginRatePpm(), value.maxLeveragePpm(), value.maxPositionNotionalUnits(),
+                        value.userOpenInterestLimitRatePpm(), value.userOpenInterestLimitFloorUnits(),
+                        value.riskLimitBrackets().stream()
+                                .map(b -> new CoreRiskLimitBracket(b.bracketNo(), b.notionalFloorUnits(),
+                                        b.notionalCapUnits(), b.maxLeveragePpm(), b.initialMarginRatePpm(),
+                                        b.maintenanceMarginRatePpm(), b.optionMarginFactorPpm())).toList());
+        return new RegisterInstrumentCommand(
+                Integer.toString(value.instrumentId()), value.baseAsset(), value.quoteAsset(), value.settleAsset(),
+                value.notionalMultiplierUnits(), value.priceTickUnits(), settleScale, riskLimits,
+                value.makerFeeRatePpm(), value.takerFeeRatePpm(),
+                value.expiryTime()==null?0:value.expiryTime().toEpochMilli(),
+                value.optionType()==null?-1:value.optionType().ordinal(), strike, value.status().ordinal(),
+                value.marketOrderEnabled(), value.postOnlyEnabled(), value.reduceOnlyEnabled(), supportedOrderTypes,
+                supportedTimeInForce, value.contractType() == ContractType.SPOT ? value.quantityStepUnits() : 1L,
+                protection);
     }
 
     private static String error(RuntimeException failure) {

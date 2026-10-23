@@ -60,8 +60,12 @@ public class HotCommandSlotAllocationBenchmark {
                 .type(SymbolType.CURRENCY_EXCHANGE_PAIR).baseCurrency(1).quoteCurrency(2)
                 .baseScaleK(1).quoteScaleK(1).makerFee(0).takerFee(0).build());
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
         decision = new com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.Context(
                 instrument, 0, new com.surprising.aeron.service.market.MarkPriceRuntime(0, instrument, 100, 1, 1),
                 FeePolicyBook.from(java.util.Map.of(1L, new com.surprising.aeron.model.CoreFeePolicyState(

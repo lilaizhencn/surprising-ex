@@ -119,8 +119,12 @@ class CoreAccountLaneQueryTest {
     @Test
     void orderIdOnlyQueryFindsRetainedTerminalOrderOnItsActualLane() throws Exception {
         // 终态订单所需的永续合约 1 配置。
-        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand("1",
-                "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                0, 0, 0, -1, 0));
         // 用户 7 保留的已撤卖单 991，没有活跃订单路由但仍应能查询。
         var order = new CoreOrderState(991, LINE, 7, "1", CoreOrderSide.SELL, 100, 1, 0, 1,
                 true, CoreOrderStatus.CANCELED, 2);
@@ -337,8 +341,12 @@ class CoreAccountLaneQueryTest {
         var core = new TradingCoreRuntime(LINE);
         try {
             command(core, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                    new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                            1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
+                    new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0)));
             command(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             for (long /* 本轮需要入金的测试用户，依次为 1 和 7。 */ user : new long[]{1, 7}) command(core, CoreMessageType.ADJUST_BALANCE, user,

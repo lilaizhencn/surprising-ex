@@ -107,9 +107,12 @@ class CommittedDeliveryReplayTest {
         // 该合约结算资产，币本位 BTC，其余 USDT
         var asset = type.isInverse() ? "BTC" : "USDT";
         send(replay, line, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
-                        100_000, 50_000, 0, 0, TIME + 10_000, -1, 0)));
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
+                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                        0, 0, TIME + 10_000, -1, 0)));
         send(replay, line, CoreMessageType.APPLY_MARK_PRICE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
         for (/* 当前初始化的卖方一或买方二 */ long user = 1; user <= 2; user++) {

@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
@@ -46,8 +50,12 @@ public class OrderAdmissionAllocationBenchmark {
 
     @Setup public void setup() {
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1",
-                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0));
         reservation = new ReservationRuntime(11, 7, 0, ReservationKind.DERIVATIVE_MARGIN,
                 0, 100, 0, 0, 1);
         var intent = new PlaceOrderCommand(11, "1", CoreOrderSide.BUY, 100, 1,
@@ -76,8 +84,12 @@ public class OrderAdmissionAllocationBenchmark {
 
         @Setup public void setup() {
             var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                    new RegisterInstrumentCommand("1",
-                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                    new RegisterInstrumentCommand(
+                            "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0));
             lane = new AccountLaneState(0, 256);
             long quantity = Math.max(1, liveOrders);
             lane.storePosition(1, new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
@@ -112,8 +124,12 @@ public class OrderAdmissionAllocationBenchmark {
             for (int user = 1; user <= users; user++) lane.registerUser(4L * user);
             var instruments = new CoreInstrument[symbols];
             for (int symbol = 0; symbol < symbols; symbol++) instruments[symbol] = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                    new RegisterInstrumentCommand(Integer.toString(symbol + 1),
-                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                    new RegisterInstrumentCommand(
+                            Integer.toString(symbol + 1), "BTC", "USDT", "USDT", 1, 1, 1,
+                            new CoreInstrumentRiskLimits(
+                                    100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                            0, 0, 0, -1, 0));
             for (int item = 0; item < orders.length; item++) orders[item] = new OrderRuntime(1_000_000L + item,
                     4L * (item % users + 1), item % symbols, instruments[item % symbols], CoreOrderSide.BUY, 100,
                     false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,

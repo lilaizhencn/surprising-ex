@@ -388,20 +388,7 @@ class CommittedTradeExportIntegrationTest {
                         1),
                 TradingCommandCodec.encodeRegisterInstrument(
                         new RegisterInstrumentCommand(
-                                "1",
-                                "BTC",
-                                "USDT",
-                                "USDT",
-                                1,
-                                1,
-                                1,
-                                100000,
-                                50000,
-                                0,
-                                0,
-                                0,
-                                -1,
-                                0)));
+                                "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
     }
 
     private static CoreMessage command(CoreMessageType type, long seq, long user, byte[] body) {

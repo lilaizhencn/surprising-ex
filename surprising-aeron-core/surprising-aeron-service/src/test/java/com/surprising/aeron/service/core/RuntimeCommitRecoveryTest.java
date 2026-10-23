@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 
 import com.surprising.aeron.config.LaneTopology;
@@ -422,9 +426,12 @@ class RuntimeCommitRecoveryTest {
             ReplayResult setup = replayClustered(uninterrupted, List.of(
                     operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                             TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                                    "1",
-                                    "BTC", "USDT", "USDT", 1, 1, 1,
-                                    100_000, 50_000, 0, 0, 0, -1, 0))),
+                                    "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                                    new CoreInstrumentRiskLimits(
+                                            100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0,
+                                            Long.MAX_VALUE,
+                                            java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                                    0, 0, 0, -1, 0))),
                     kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(
                                     new ApplyMarkPriceCommand("1", 100, 1, 1_000))),
@@ -688,8 +695,11 @@ class RuntimeCommitRecoveryTest {
         TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        "1", "BTC", "USDT", "USDT",
-                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0))));
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0))));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand("1", 100, 1, 1_000))));
@@ -708,8 +718,11 @@ class RuntimeCommitRecoveryTest {
         TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        "1", "BTC", "USDT", "USDT",
-                        1, 1, 1, 100_000, 50_000, 10_000, 20_000, 0, -1, 0))));
+                        "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        10_000, 20_000, 0, -1, 0))));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand("1", 100, 1, 1_000))));

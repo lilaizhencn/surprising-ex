@@ -420,8 +420,8 @@ class TriggerOrderIndexTest {
             long price, long expiry, String oco) {
         // 按本用例数字标的 ID 创建的真正现货配置外壳
         var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(ProductLine.SPOT,
-                new com.surprising.aeron.protocol.RegisterInstrumentCommand(instrumentId, "BTC", "USDT", "USDT",
-                        1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                new com.surprising.aeron.protocol.RegisterInstrumentCommand(
+                        instrumentId, "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0));
         return new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "indexed-" + id, oco, instrumentId,
                 instrument, CoreOrderSide.BUY, CoreTriggerOrderType.STOP_LOSS, condition, price, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS, CorePositionSide.NET,

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.AssetBalance;
@@ -352,10 +354,13 @@ class CoreRiskStateTest {
     @Test
     void markPriceBeyondHighestRiskBracketStillProducesLiquidationSnapshot() {
         // 最高档名义金额上限只有 100 的合约注册命令，用来制造行情变化后的持仓超档。
-        RegisterInstrumentCommand command = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
-                100_000, 50_000, 0, 0, 0, -1, 0, 10_000_000L, 100,
-                10_000_000L, 100, List.of(new CoreRiskLimitBracket(1, 0, 100,
-                        10_000_000L, 100_000, 50_000)));
+        RegisterInstrumentCommand command = new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, 10_000_000L, 100, 10_000_000L, 100,
+                        List.of(new CoreRiskLimitBracket(1, 0, 100,
+                        10_000_000L, 100_000, 50_000))),
+                0, 0, 0, -1, 0);
         // 已有持仓规模原本处于档位内的状态，后续新价格会让风险名义金额超出上限。
         TradingCoreState state = reducer.registerInstrument(
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), command);
@@ -650,8 +655,12 @@ class CoreRiskStateTest {
      * @param settleScale 测试结算资产的缩放精度，反向合约需要用它换算金额
      */
     private static RegisterInstrumentCommand instrument(ContractType type, long settleScale) {
-        return new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                1, 1, settleScale, 100_000, 100_000, 0, 0, 0, -1, 0);
+        return new RegisterInstrumentCommand(
+                "1", "BTC", "USDT", "USDT", 1, 1, settleScale,
+                (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000)))),
+                0, 0, 0, -1, 0);
     }
 
     /**
@@ -659,9 +668,12 @@ class CoreRiskStateTest {
      * @param instrumentId 需要创建的测试币对编号
      */
     private static RegisterInstrumentCommand instrument(String instrumentId) {
-        return new RegisterInstrumentCommand(instrumentId,
-                (instrumentId.equals("1") ? "BTC" : "ETH"), "USDT", "USDT", 1, 1, 1,
-                100_000, 100_000, 0, 0, 0, -1, 0);
+        return new RegisterInstrumentCommand(
+                instrumentId, (instrumentId.equals("1") ? "BTC" : "ETH"), "USDT", "USDT", 1, 1, 1,
+                new CoreInstrumentRiskLimits(
+                        100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
+                0, 0, 0, -1, 0);
     }
 
     /**

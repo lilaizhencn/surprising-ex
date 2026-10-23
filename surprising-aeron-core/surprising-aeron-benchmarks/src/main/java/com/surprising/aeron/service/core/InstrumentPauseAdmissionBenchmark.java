@@ -21,14 +21,18 @@ public class InstrumentPauseAdmissionBenchmark {
         @Setup(Level.Trial) public void initialize() {
             var type=ContractType.valueOf(productLine.contractTypeCode());
             try(var state=new TradingCoreRuntime(productLine)) {
-                var config=new RegisterInstrumentCommand("1","BTC","USDT",type.isInverse()?"BTC":"USDT",
-                        1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
-                        type.isOption()?0:-1,type.isOption()?100:0);
-                var paused=new RegisterInstrumentCommand(config.instrumentId(),config.baseAsset(),
-                        config.quoteAsset(),config.settleAsset(),config.notionalMultiplierUnits(),config.priceTickUnits(),config.settleScaleUnits(),
-                        config.initialMarginRatePpm(),config.maintenanceMarginRatePpm(),config.makerFeeRatePpm(),config.takerFeeRatePpm(),
-                        config.expiryEpochMillis(),config.optionTypeCode(),config.strikePriceTicks(),config.maxLeveragePpm(),config.maxPositionNotionalUnits(),
-                        config.userOpenInterestLimitRatePpm(),config.userOpenInterestLimitFloorUnits(),config.riskLimitBrackets());
+                var config=new RegisterInstrumentCommand(
+                        "1", "BTC", "USDT", type.isInverse()?"BTC":"USDT", 1, 1, type.isInverse()?1000:1,
+                        (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                        0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
+                        type.isOption()?100:0);
+                var paused=new RegisterInstrumentCommand(
+                        config.instrumentId(), config.baseAsset(), config.quoteAsset(), config.settleAsset(),
+                        config.notionalMultiplierUnits(), config.priceTickUnits(), config.settleScaleUnits(),
+                        config.riskLimits(), config.makerFeeRatePpm(), config.takerFeeRatePpm(),
+                        config.expiryEpochMillis(), config.optionTypeCode(), config.strikePriceTicks());
                 requireApplied(state.apply(message(productLine,1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(paused))));
                 if (productLine.isDerivative()) requireApplied(state.apply(message(productLine,2,CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()

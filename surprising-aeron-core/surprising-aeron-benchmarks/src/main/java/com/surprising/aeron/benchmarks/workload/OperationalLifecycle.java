@@ -35,8 +35,12 @@ final class OperationalLifecycle implements AutoCloseable {
     }
     public void setup() {
         for(String instrumentId:List.of(ACTIVE,RISK))endpoint.command(CoreMessageType.REGISTER_INSTRUMENT,0,
-                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,"OPS","USDT","USDT",1,1,1,
-                        100_000,50_000,0,0,0,-1,0)));
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
+                        instrumentId, "OPS", "USDT", "USDT", 1, 1, 1,
+                        new CoreInstrumentRiskLimits(
+                                100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
+                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        0, 0, 0, -1, 0)));
         for(long account:new long[]{maker,user,riskMaker})deposit(account,ClusterMixedCapacityMain.BALANCE);
         price(ACTIVE,100);price(RISK,100);
     }

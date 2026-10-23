@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
@@ -152,15 +154,12 @@ class CoreProductLineArchitectureContractTest {
         // 当前合约是否有到期时间，即交割或期权
         boolean lifecycle = contractType.isDelivery() || contractType.isOption();
         return new RegisterInstrumentCommand(
-                "1", "BTC",
-                inverse ? "USD" : "USDT", inverse ? "BTC" : "USDT",
-                inverse ? 100 : 1, 1, inverse ? 100 : 1,
-                100_000, 50_000, 100_000, 200_000,
-                lifecycle ? 2_000_000_000_000L : 0,
-                contractType.isOption() ? 0 : -1,
-                contractType.isOption() ? 100 : 0,
-                100_000_000, 25_000_000_000_000L, 0, 1,
-                List.of(new CoreRiskLimitBracket(1, 0, 25_000_000_000_000L,
-                        100_000_000, 100_000, 50_000)));
+                "1", "BTC", inverse ? "USD" : "USDT", inverse ? "BTC" : "USDT", inverse ? 100 : 1, 1, inverse ? 100 : 1,
+                (contractType == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
+                        100_000, 100_000_000, 25_000_000_000_000L, 0, 1,
+                        List.of(new CoreRiskLimitBracket(1, 0, 25_000_000_000_000L,
+                        100_000_000, 100_000, 50_000)))),
+                100_000, 200_000, lifecycle ? 2_000_000_000_000L : 0, contractType.isOption() ? 0 : -1,
+                contractType.isOption() ? 100 : 0);
     }
 }
