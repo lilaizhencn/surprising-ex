@@ -184,7 +184,6 @@ public final class SectionedCoreSnapshotWriter {
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .put((byte) ProductLineWireCode.encode(image.productLine()))
                 .putInt(matcherSnapshot.matchingEngineCount())
-                .putInt(matcherSnapshot.riskEngineCount())
                 .putInt(matcherSnapshot.matcherShardMask())
                 .putInt(matcherSnapshot.accountLaneCount())
                 .putLong(matcherSnapshot.accountLaneSeed())
@@ -223,7 +222,7 @@ public final class SectionedCoreSnapshotWriter {
     }
 
     /**
-     * 按来源 Map 当前迭代顺序写条目数、来源码、零保留位、来源实例和消费水位；本方法不额外排序，条目固定二十四字节。
+     * 按来源 Map 当前迭代顺序写条目数、来源码、来源实例和消费水位；本方法不额外排序，条目固定二十字节。
      * @param sourceSequences 按来源类型及来源实例记录的消费水位表
      */
     private static byte[] sources(Map<TradingCoreRuntime.SourceKey, Long> sourceSequences) {
@@ -236,7 +235,6 @@ public final class SectionedCoreSnapshotWriter {
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN).putInt(count);
         sourceSequences.forEach((/* 当前来源类型与来源实例号组成的键。 */ sourceKey, /* 该来源已经消费的命令序号。 */ sequence) -> {
             buffer.putInt(sourceKey.source().wireCode());
-            buffer.putInt(0);
             buffer.putLong(sourceKey.sourceId());
             buffer.putLong(sequence);
         });

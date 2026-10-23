@@ -328,7 +328,7 @@ class CoreLifecycleStateTest {
         long deliveryBefore = total(delivery, "USDT");
         // 按固定价格交割并释放持仓保证金后的状态。
         TradingCoreState delivered = reducer.settleInstrument(delivery,
-                new SettleInstrumentCommand(71, "1", 120, 0));
+                new SettleInstrumentCommand(71, "1", 120));
 
         assertThat(total(delivered, "USDT")).isEqualTo(deliveryBefore);
         assertThat(delivered.users().values()).allSatisfy(/* 当前断言或合计余额、持仓的用户业务值。 */ user -> {
@@ -343,7 +343,7 @@ class CoreLifecycleStateTest {
         long optionBefore = total(option, "USDT");
         // 期权到期结算后的用户及财库状态。
         TradingCoreState exercised = reducer.settleInstrument(option,
-                new SettleInstrumentCommand(72, "1", 120, 25));
+                new SettleInstrumentCommand(72, "1", 120));
 
         assertThat(total(exercised, "USDT")).isEqualTo(optionBefore);
         assertThat(exercised.user(1).totalUnits("USDT")).isEqualTo(1_040);
@@ -365,7 +365,7 @@ class CoreLifecycleStateTest {
 
         // 已经完成一轮到期结算的状态。
         TradingCoreState settled = reducer.settleInstrument(state,
-                new SettleInstrumentCommand(74, "1", 120, 0));
+                new SettleInstrumentCommand(74, "1", 120));
 
         assertThat(settled.instruments().get("1")).isSameAs(instrument);
         assertThat(settled.users().values()).allSatisfy(/* 当前断言或合计余额、持仓的用户业务值。 */ user ->
@@ -382,11 +382,11 @@ class CoreLifecycleStateTest {
                 ContractType.LINEAR_DELIVERY, 100, 10, 100);
         // 已经完成一轮到期结算的状态。
         TradingCoreState settled = reducer.settleInstrument(state,
-                new SettleInstrumentCommand(73, "1", 120, 999));
+                new SettleInstrumentCommand(73, "1", 120));
 
         // 相同结算编号再次请求返回的状态，用来与首次结算结果比较。
         TradingCoreState duplicate = reducer.settleInstrument(settled,
-                new SettleInstrumentCommand(73, "1", 1, 1));
+                new SettleInstrumentCommand(73, "1", 1));
 
         assertThat(duplicate).isEqualTo(settled);
         assertThat(duplicate.treasuryState().lifecycleSettlements()).containsEntry("1", 73L);
@@ -405,7 +405,7 @@ class CoreLifecycleStateTest {
         TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_DELIVERY,
                 ContractType.LINEAR_DELIVERY, 100, 10, 100);
         // 当前资金费或到期结算首个用户页命令，用户游标为零且每页一人。
-        SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(96, "1", 120, 0, 0, 1);
+        SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(96, "1", 120, 0, 1);
 
         // 第一页处理后的状态、进度和相应业务事实。
         RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
@@ -421,7 +421,7 @@ class CoreLifecycleStateTest {
 
         // 使用第一页面游标处理后续页的结果。
         RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
-                new SettleInstrumentCommand(96, "1", 120, 0, 1, 1), List.of(1L, 2L),
+                new SettleInstrumentCommand(96, "1", 120, 1, 1), List.of(1L, 2L),
                 UUID.fromString("00000000-0000-0000-0000-000000000097"));
 
         assertThat(second.progress().complete()).isTrue();
@@ -446,7 +446,7 @@ class CoreLifecycleStateTest {
 
         // 第一页处理后的状态、进度和相应业务事实。
         RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
-                new SettleInstrumentCommand(97, "1", 120, 0, 0, 256, 0, 1),
+                new SettleInstrumentCommand(97, "1", 120, 0, 256, 0, 1),
                 List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000097"));
 
         assertThat(first.progress().complete()).isFalse();
@@ -457,7 +457,7 @@ class CoreLifecycleStateTest {
 
         // 使用第一页面游标处理后续页的结果。
         RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(first.state(),
-                new SettleInstrumentCommand(97, "1", 120, 0, 0, 256, 102, 1),
+                new SettleInstrumentCommand(97, "1", 120, 0, 256, 102, 1),
                 List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000098"));
 
         assertThat(second.progress().complete()).isTrue();

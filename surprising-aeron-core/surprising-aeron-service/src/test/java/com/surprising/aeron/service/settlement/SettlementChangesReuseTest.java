@@ -124,8 +124,7 @@ class SettlementChangesReuseTest {
      */
     @Test void pooledChangesMoveBetweenLanesWithoutRetainingPreviousOrdersOrPendingCounts() {
         // 池化缓冲跨 Lane 轮转用例使用的四账户 Lane 拓扑。
-        var topology = new LaneTopology(1,0,0,4,
-                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,16,16,16);
+        var topology = new LaneTopology(1, 0, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingAccountRuntime(topology)) {
             for (/* 当前借还变化缓冲的轮次。 */ int turn = 0; turn < 100; turn++) {
                 // 本用例持有的账户 Lane，或池轮转用例当前 Lane 数组下标。

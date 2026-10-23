@@ -300,13 +300,13 @@ class CoreResultLedgerTest {
     }
 
     /**
-     * 构造 VERIFY_STATE_HASH 类型的唯一探针；载荷借用余额调整编码产生可变指纹内容，不在此执行余额入账。
+     * 构造 ADJUST_BALANCE 类型的唯一探针；载荷借用余额调整编码产生可变指纹内容，不在此执行余额入账。
      * @param commandId 探针本身或结果查询目标的命令 UUID
      * @param sourceSequence 探针使用的原来源序号
      * @param delta 仅用于构造探针载荷差异的余额调整编码数值
      */
     private static CoreMessage checkpoint(UUID commandId, long sourceSequence, long delta) {
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.VERIFY_STATE_HASH, commandId,
+        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE, commandId,
                 ProductLine.SPOT, CommandSource.GATEWAY, 7, sourceSequence, 1001,
                 1_000 + sourceSequence, sourceSequence), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", delta)));
     }
@@ -329,7 +329,7 @@ class CoreResultLedgerTest {
             long retentionSequence) {
         // 辅助指纹探针至少为一的来源序号
         long sourceSequence = Math.max(1, appliedCommandCount);
-        // 仅为独立结果生成稳定指纹的 VERIFY_STATE_HASH 探针
+        // 仅为独立结果生成稳定指纹的 ADJUST_BALANCE 探针
         CoreMessage command = checkpoint(new UUID(appliedCommandCount, resultIdentity), sourceSequence, 1);
         return new CommandResultLedger.StoredResult(
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), status, resultCode,

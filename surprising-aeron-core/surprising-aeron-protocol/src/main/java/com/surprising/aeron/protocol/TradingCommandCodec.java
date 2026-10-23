@@ -198,10 +198,9 @@ public final class TradingCommandCodec {
 
     public static byte[] encodeAdjustPositionMargin(AdjustPositionMarginCommand command) {
         byte[] instrumentId = text(command.instrumentId());
-        return ByteBuffer.allocate(Short.BYTES + instrumentId.length + Integer.BYTES * 2 + Long.BYTES)
+        return ByteBuffer.allocate(Short.BYTES + instrumentId.length + Integer.BYTES + Long.BYTES)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) instrumentId.length).put(instrumentId)
-                .putInt(command.marginMode().wireCode())
                 .putInt(command.positionSide().wireCode())
                 .putLong(command.amountUnits()).array();
     }
@@ -209,10 +208,9 @@ public final class TradingCommandCodec {
     public static AdjustPositionMarginCommand decodeAdjustPositionMargin(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String instrumentId = readText(buffer);
-        requireRemaining(buffer, Integer.BYTES * 2 + Long.BYTES);
+        requireRemaining(buffer, Integer.BYTES + Long.BYTES);
         AdjustPositionMarginCommand command = new AdjustPositionMarginCommand(instrumentId,
-                CoreMarginMode.fromWireCode(buffer.getInt()), CorePositionSide.fromWireCode(buffer.getInt()),
-                buffer.getLong());
+                CorePositionSide.fromWireCode(buffer.getInt()), buffer.getLong());
         requireConsumed(buffer);
         return command;
     }
@@ -735,10 +733,10 @@ public final class TradingCommandCodec {
 
     public static byte[] encodeSettleInstrument(SettleInstrumentCommand command) {
         byte[] instrumentId = text(command.instrumentId());
-        return ByteBuffer.allocate(Short.BYTES + instrumentId.length + Long.BYTES * 5 + Integer.BYTES * 2)
+        return ByteBuffer.allocate(Short.BYTES + instrumentId.length + Long.BYTES * 4 + Integer.BYTES * 2)
                 .order(ByteOrder.LITTLE_ENDIAN).putShort((short) instrumentId.length).put(instrumentId)
                 .putLong(command.settlementId())
-                .putLong(command.settlementPriceTicks()).putLong(command.optionCashUnitsPerContract())
+                .putLong(command.settlementPriceTicks())
                 .putLong(command.cursorUserId()).putInt(command.maxUsers())
                 .putLong(command.cursorOrderId()).putInt(command.maxOrders()).array();
     }
@@ -746,12 +744,11 @@ public final class TradingCommandCodec {
     public static SettleInstrumentCommand decodeSettleInstrument(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String instrumentId = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 5 + Integer.BYTES * 2);
+        requireRemaining(buffer, Long.BYTES * 4 + Integer.BYTES * 2);
         SettleInstrumentCommand command;
         try {
-            command = new SettleInstrumentCommand(buffer.getLong(), instrumentId,
-                    buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getInt(),
-                    buffer.getLong(), buffer.getInt());
+            command = new SettleInstrumentCommand(buffer.getLong(), instrumentId, buffer.getLong(), buffer.getLong(),
+                    buffer.getInt(), buffer.getLong(), buffer.getInt());
         } catch (IllegalArgumentException exception) {
             throw new ProtocolException(exception.getMessage());
         }

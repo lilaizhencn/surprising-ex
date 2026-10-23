@@ -238,9 +238,8 @@ class RuntimeTreasuryDeltaTest {
                 Map.of(),
                 Map.of("1", 7L),
                 Map.of("2", 3L),
-                Map.of("1", new CoreTreasuryState.FundingProgress(7, 10_000, 0, 11, fundingCommandId, 60_000, 1)),
-                Map.of("2", new CoreTreasuryState.LifecycleProgress(3, 60_000,
-                        0, true, 0, 12, lifecycleCommandId)));
+                Map.of("1", new CoreTreasuryState.FundingProgress(7, 10_000, 11, 60_000, 1)),
+                Map.of("2", new CoreTreasuryState.LifecycleProgress(3, 60_000, true, 0, 12, 0)));
         // 本次手工运行时变化之前的核心冷状态。
         TradingCoreState before = state(beforeTreasury, 1);
 

@@ -40,7 +40,7 @@ public class AeronAlgoOrderStore {
                 ? StableOrderIdentity.algoCommandId(record.productLine(), record.userId(), record.clientAlgoOrderId())
                 : UUID.nameUUIDFromBytes(("ALGO:" + record.algoOrderId() + ':' + revision)
                         .getBytes(StandardCharsets.UTF_8));
-        aeron.command(CoreMessageType.UPSERT_ALGO_ORDER, commandId, record.userId(), CoreAlgoOrderCodec.encode(view));
+        aeron.command(CoreMessageType.UPSERT_ALGO_ORDER, commandId, record.userId(), CoreAlgoOrderCodec.encodeCommand(view));
         CoreAlgoOrderView persisted = aeron.algoOrder(record.userId(), record.algoOrderId());
         if (persisted == null) throw new IllegalStateException("algo order missing after Aeron upsert");
         return record(persisted);
@@ -49,7 +49,7 @@ public class AeronAlgoOrderStore {
     public CoreAlgoOrderView tryClaim(CoreAlgoOrderView current, AlgoOrderRecord claimed) {
         CoreAlgoOrderView next = view(claimed, current.childOrderIds(), current.revision() + 1, 0, 0, 0);
         boolean applied = aeron.tryCommand(CoreMessageType.UPSERT_ALGO_ORDER, UUID.randomUUID(), claimed.userId(),
-                CoreAlgoOrderCodec.encode(next));
+                CoreAlgoOrderCodec.encodeCommand(next));
         return applied ? aeron.algoOrder(claimed.userId(), claimed.algoOrderId()) : null;
     }
 

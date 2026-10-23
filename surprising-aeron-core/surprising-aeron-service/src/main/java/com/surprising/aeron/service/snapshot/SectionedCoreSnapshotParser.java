@@ -134,7 +134,7 @@ public final class SectionedCoreSnapshotParser {
     }
 
     /**
-     * 读取有上限的来源数并要求段长度精确匹配，逐项检查来源码、零保留位、非负水位与重复键，按输入顺序保存。
+     * 读取有上限的来源数并要求段长度精确匹配，逐项检查来源码、非负水位与重复键，按输入顺序保存。
      * @param payload 当前正在读取的某一段负载字节
      */
     private static Map<TradingCoreRuntime.SourceKey, Long> parseSources(byte[] payload) {
@@ -150,7 +150,6 @@ public final class SectionedCoreSnapshotParser {
         for (/* 当前账户段、用户条目或来源/结果条目的零基下标。 */ int index = 0; index < sourceCount; index++) {
             // 当前条目的来源类型，使用固定 wireCode 解码。
             CommandSource source = CommandSource.fromWireCode(sources.getInt());
-            if (sources.getInt() != 0) throw new ProtocolException("invalid snapshot source reserved field");
             // 当前来源实例编号，与来源类型共同组成键。
             long sourceId = sources.getLong();
             // 当前来源已经消费的非负命令水位。

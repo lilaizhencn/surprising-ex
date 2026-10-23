@@ -8,34 +8,44 @@ import java.util.List;
 
 public final class CoreCancelAllAfterCodec {
     private static final int VERSION = 1;
+    private static final int COMMAND_VERSION = 2;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreCancelAllAfterCodec() {
     }
 
     public static byte[] encodeCommand(CoreCancelAllAfterCommand command) {
-        int length = Integer.BYTES * 4 + Long.BYTES * 5 + textLength(command.symbolScope());
-        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(VERSION)
-                .putInt(command.action().wireCode())
-                .putLong(command.userId());
+        int actionBytes = switch (command.action()) {
+            case SET, COMPLETE -> Long.BYTES * 2;
+            case CLAIM, RETRY -> Long.BYTES;
+        };
+        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 2 + Long.BYTES * 2
+                + textLength(command.symbolScope()) + actionBytes).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(COMMAND_VERSION).putInt(command.action().wireCode()).putLong(command.userId());
         CoreStateQueryCodec.putText(buffer, command.symbolScope(), true, MAX_TEXT_BYTES);
-        buffer.putLong(command.countdownMillis())
-                .putLong(command.triggerAtEpochMillis())
-                .putLong(command.expectedRevision())
-                .putInt(command.canceledOrders())
-                .putInt(command.canceledTriggerOrders())
-                .putLong(command.updatedAtEpochMillis());
+        buffer.putLong(command.updatedAtEpochMillis());
+        switch (command.action()) {
+            case SET -> buffer.putLong(command.countdownMillis()).putLong(command.triggerAtEpochMillis());
+            case CLAIM, RETRY -> buffer.putLong(command.expectedRevision());
+            case COMPLETE -> buffer.putLong(command.expectedRevision())
+                    .putInt(command.canceledOrders()).putInt(command.canceledTriggerOrders());
+        }
         return buffer.array();
     }
 
     public static CoreCancelAllAfterCommand decodeCommand(byte[] payload) {
         Reader reader = new Reader(payload);
-        reader.version();
-        CoreCancelAllAfterCommand command = new CoreCancelAllAfterCommand(
-                CoreCancelAllAfterAction.fromWireCode(reader.intValue()), reader.longValue(), reader.text(),
-                reader.longValue(), reader.longValue(), reader.longValue(), reader.intValue(), reader.intValue(),
-                reader.longValue());
+        if (reader.intValue() != COMMAND_VERSION) throw new ProtocolException("unsupported cancel-all-after command version");
+        CoreCancelAllAfterAction action = CoreCancelAllAfterAction.fromWireCode(reader.intValue());
+        long userId = reader.longValue();
+        String scope = reader.text();
+        long now = reader.longValue();
+        CoreCancelAllAfterCommand command = switch (action) {
+            case SET -> CoreCancelAllAfterCommand.set(userId, scope, reader.longValue(), reader.longValue(), now);
+            case CLAIM -> CoreCancelAllAfterCommand.claim(userId, scope, reader.longValue(), now);
+            case RETRY -> CoreCancelAllAfterCommand.retry(userId, scope, reader.longValue(), now);
+            case COMPLETE -> CoreCancelAllAfterCommand.complete(userId, scope, reader.longValue(), reader.intValue(), reader.intValue(), now);
+        };
         reader.consumed();
         return command;
     }

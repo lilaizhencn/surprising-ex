@@ -48,14 +48,16 @@ class CommittedOptionExerciseReplayTest {
                     assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.APPLIED);
                 }
                 now=TIME+20_000;
-                apply(replay,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now,"1",underlying,cashPerContract,0,1,0,10)));
+                apply(replay,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now,
+                        "1", underlying, 0, 1, 0, 10)));
                 if(cashPerContract==0) assertThat(replay.deliveryPage()).isNull();
                 else assertThat(replay.deliveryPage().cashFlows()).containsExactly(new CommittedTradeReplay.DeliveryCashFlow(1,"USDT",-2*cashPerContract,100_020-2*cashPerContract));
                 snapshot=replay.snapshot();
             }
             try(/* 本轮新建或恢复的期权已提交日志回放资源 */ var replay=new CommittedTradeReplay(ProductLine.OPTION,snapshot)) {
                 // 本次买方结算原消息，或 apply 构造并同时交两边的原消息
-                var command=apply(replay,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now,"1",underlying,cashPerContract,1,1,0,10)));
+                var command=apply(replay,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now,
+                        "1", underlying, 1, 1, 0, 10)));
                 try(/* 从买方结算后的回放快照恢复的结果核对运行时 */ var probe=TradingCoreRuntime.fromSnapshot(ProductLine.OPTION,replay.snapshot())) {
                     // 买方本次结算在幂等结果表中的已提交响应
                     var result=probe.resultLedger.get(command.header().commandId());

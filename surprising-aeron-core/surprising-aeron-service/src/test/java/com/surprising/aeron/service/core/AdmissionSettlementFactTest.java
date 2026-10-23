@@ -65,8 +65,7 @@ class AdmissionSettlementFactTest {
             runtime.startAccountLanes();
             try (/* 直接绑定本运行时 Treasury 的独立账本工作资源，用例结束关闭 */ var ledger = new SystemLedgerLane(runtime.treasury(), 256, /* 账本异步故障通知或门闩中断；前者本测试不处理，由健康检查发现，后者转测试失败 */ failure -> { })) {
                 // 用于把标的设为资金费处理中状态的原进度值
-                var funding = new TreasuryRuntime.FundingProgressRuntime(1, instrument, 100,
-                        0, 7, new UUID(1, 1), 100, 1);
+                var funding = new TreasuryRuntime.FundingProgressRuntime(1, instrument, 100, 7, 100, 1);
                 if (transition.equals("FUNDING_TO_CLEAR")) run(ledger, /* 账本回调给出的权威 Treasury，仅在账本工作中修改 */ actual -> {
                     actual.setFundingProgress(symbol, funding); actual.clearChangedKeys();
                 });

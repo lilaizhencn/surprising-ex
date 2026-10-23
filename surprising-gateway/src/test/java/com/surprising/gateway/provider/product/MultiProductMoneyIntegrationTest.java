@@ -121,7 +121,7 @@ class MultiProductMoneyIntegrationTest {
             CoreResponse response = state.apply(message);
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while (state.directCommand.active()) {
-                response = state.directCommand.poll(state);
+                response = state.directCommand.poll();
                 if (System.nanoTime() >= deadline) throw new AssertionError("funds command timeout");
                 if (response == null) Thread.onSpinWait();
             }

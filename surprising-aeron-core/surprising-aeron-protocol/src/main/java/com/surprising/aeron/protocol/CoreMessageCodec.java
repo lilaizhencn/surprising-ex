@@ -70,13 +70,10 @@ public final class CoreMessageCodec {
         int cursor = 0;
         CoreProtocol.putInt(destination, cursor, CoreProtocol.MAGIC); cursor += Integer.BYTES;
         CoreProtocol.putShort(destination, cursor, header.schemaVersion()); cursor += Short.BYTES;
-        destination[cursor++] = (byte) header.kind().wireCode();
         destination[cursor++] = (byte) ProductLineWireCode.encode(header.productLine());
         CoreProtocol.putShort(destination, cursor, header.messageType().wireCode()); cursor += Short.BYTES;
         destination[cursor++] = (byte) header.source().wireCode();
-        destination[cursor++] = (byte) header.route().shardCode();
         CoreProtocol.putShort(destination, cursor, CoreProtocol.HEADER_LENGTH); cursor += Short.BYTES;
-        CoreProtocol.putShort(destination, cursor, header.route().version()); cursor += Short.BYTES;
         CoreProtocol.putLong(destination, cursor, header.commandIdMsb()); cursor += Long.BYTES;
         CoreProtocol.putLong(destination, cursor, header.commandIdLsb()); cursor += Long.BYTES;
         CoreProtocol.putLong(destination, cursor, header.sourceId()); cursor += Long.BYTES;
@@ -100,17 +97,13 @@ public final class CoreMessageCodec {
         if (schemaVersion != CoreProtocol.SCHEMA_VERSION) {
             throw new ProtocolException("unsupported schema version: " + schemaVersion);
         }
-        WireMessageKind kind = WireMessageKind.fromWireCode(Byte.toUnsignedInt(buffer.get()));
         var productLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.get()));
         CoreMessageType messageType = CoreMessageType.fromWireCode(Short.toUnsignedInt(buffer.getShort()));
         CommandSource source = CommandSource.fromWireCode(Byte.toUnsignedInt(buffer.get()));
-        int shardCode = Byte.toUnsignedInt(buffer.get());
         int headerLength = Short.toUnsignedInt(buffer.getShort());
-        int routeVersion = Short.toUnsignedInt(buffer.getShort());
         if (headerLength != CoreProtocol.HEADER_LENGTH) {
             throw new ProtocolException("invalid header length: " + headerLength);
         }
-        CoreRoute route = CoreRoute.fromWireCodes(shardCode, routeVersion);
         long commandIdMsb = buffer.getLong();
         long commandIdLsb = buffer.getLong();
         long sourceId = buffer.getLong();
@@ -127,9 +120,8 @@ public final class CoreMessageCodec {
         if (payloadLength > 0) {
             buffer.get(payload);
         }
-        CoreMessageHeader header = new CoreMessageHeader(schemaVersion, kind, messageType,
-                commandIdMsb, commandIdLsb, productLine, route, source, sourceId, sourceSequence,
-                userId, submittedAtEpochMillis, correlationId);
+        CoreMessageHeader header = new CoreMessageHeader(schemaVersion, messageType, commandIdMsb, commandIdLsb, productLine,
+                source, sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
         return CoreMessage.owned(header, payload);
     }
 }

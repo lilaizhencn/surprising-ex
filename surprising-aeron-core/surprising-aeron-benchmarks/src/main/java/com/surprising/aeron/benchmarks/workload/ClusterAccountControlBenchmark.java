@@ -81,8 +81,7 @@ public class ClusterAccountControlBenchmark {
                 send(CoreMessageType.UPDATE_LEVERAGE, USER, TradingCommandCodec.encodeUpdateLeverage(
                         new UpdateLeverageCommand(SYMBOL, CoreMarginMode.CROSS, leverage)));
             for (long delta : new long[]{10, -10}) send(CoreMessageType.ADJUST_POSITION_MARGIN, POSITION_USER,
-                    TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand(
-                            SYMBOL, CoreMarginMode.ISOLATED, CorePositionSide.NET, delta)));
+                    TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand(SYMBOL, CorePositionSide.NET, delta)));
         }
         return operations - before;
     }

@@ -17,7 +17,6 @@ import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
@@ -28,37 +27,29 @@ public final class RuntimeLifecycleSettlementContinuation {
 
     /**
      * 校验并新建当前结算页的续步对象，不在此等待账户结算完成。
-     * @param command 本页结算编号、固定价格、期权参数及双游标
+     * @param command 本页结算编号、固定价格及双游标
      * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
-     * @param chunkCommandId 非空的本页命令 UUID
      * @param activeOrderIndex 币对活动订单路由索引
      * @param runtime 保持原身份的权威运行时，元数据由 Owner 推进
      * @param identities 币对与资产内部编号映射
      */
-    public static SettlementWork prepare(SettleInstrumentCommand command,
-                                              Iterable<Long> indexedUserIds, UUID chunkCommandId,
-                                              ActiveOrderIndex activeOrderIndex,
-                                              TradingAccountRuntime runtime,
-                                              RuntimeIdentityRegistry identities) {
-        return prepare(null, command, indexedUserIds, chunkCommandId, activeOrderIndex, runtime, identities);
+    public static SettlementWork prepare(SettleInstrumentCommand command, Iterable<Long> indexedUserIds,
+            ActiveOrderIndex activeOrderIndex, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+        return prepare(null, command, indexedUserIds, activeOrderIndex, runtime, identities);
     }
 
     /**
      * 校验结算编号、产品规则和已有游标，选取当前订单页；同一编号已经完整结算时返回完成对象，否则优先重用已经可回收的工作对象及其分组容量。此处只准备任务，账户写入随后由 poll 派发。
      * @param reuse 原命令槽持有的工作对象，仅 reusable 为真时重置使用，否则新建
-     * @param command 本页结算编号、固定价格、期权参数及双游标
+     * @param command 本页结算编号、固定价格及双游标
      * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
-     * @param chunkCommandId 非空的本页命令 UUID
      * @param activeOrderIndex 币对活动订单路由索引
      * @param runtime 保持原身份的权威运行时，元数据由 Owner 推进
      * @param identities 币对与资产内部编号映射
      */
-    public static SettlementWork prepare(SettlementWork reuse, SettleInstrumentCommand command,
-                                              Iterable<Long> indexedUserIds, UUID chunkCommandId,
-                                              ActiveOrderIndex activeOrderIndex,
-                                              TradingAccountRuntime runtime,
-                                              RuntimeIdentityRegistry identities) {
-        if (command == null || indexedUserIds == null || chunkCommandId == null
+    public static SettlementWork prepare(SettlementWork reuse, SettleInstrumentCommand command, Iterable<Long> indexedUserIds,
+            ActiveOrderIndex activeOrderIndex, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+        if (command == null || indexedUserIds == null
                 || activeOrderIndex == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid asynchronous runtime settlement");
         }
@@ -86,28 +77,23 @@ public final class RuntimeLifecycleSettlementContinuation {
         RuntimeLifecycleSettlement.validateProgress(previousProgress, command, true);
         // 此前是否已经完成全部账户侧撤单。
         boolean ordersComplete = previousProgress != null && previousProgress.ordersComplete();
-        // 已有进度中的位置字段，当前全局分页仍固定返回零。
-        int accountLaneId = previousProgress == null ? 0 : previousProgress.accountLaneId();
         // 本次选出的账户侧撤单路由。
         List<CancellationOrder> selectedOrders = List.of();
         // 订单页之后是否仍有后续记录。
         boolean moreOrders = false;
         if (!ordersComplete) {
             // 本次从活动订单或用户索引读取的页面。
-            RuntimeLifecycleSettlement.OrderPage page = RuntimeLifecycleSettlement.selectOrders(runtime, identities, activeOrderIndex, instrument.instrumentId(),
-                    accountLaneId, command.cursorOrderId(), command.maxOrders());
+            RuntimeLifecycleSettlement.OrderPage page = RuntimeLifecycleSettlement.selectOrders(activeOrderIndex, instrument.instrumentId(), command.cursorOrderId(), command.maxOrders());
             selectedOrders = page.orders();
             moreOrders = !page.complete();
         }
         // 币对结算资产的内部编号。
         int assetId = identities.assetId(instrument.settleAsset());
         if (reuse == null || !reuse.reusable()) {
-            return new SettlementWork(command, chunkCommandId, runtime,
-                    instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
-                    moreOrders, indexedUserIds);
+            return new SettlementWork(command, runtime, instrument, kernel, symbolId, assetId, previousProgress, selectedOrders, moreOrders, indexedUserIds);
         }
-        return reuse.reset(command, chunkCommandId, runtime, instrument, kernel, symbolId, assetId,
-                previousProgress, selectedOrders, moreOrders, indexedUserIds);
+        return reuse.reset(command, runtime, instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
+                moreOrders, indexedUserIds);
     }
 
     /**
@@ -147,10 +133,6 @@ public final class RuntimeLifecycleSettlementContinuation {
 
         /** 当前页固定结算命令，Owner 初始化后供账户和账本阶段读取。 */
         private SettleInstrumentCommand command;
-        /** 本页命令 UUID，保存结算进度时一并记录。 */
-        private UUID chunkCommandId;
-        /** 原权威运行时，Owner、账户 Lane 与账本按各自作用域访问。 */
-        private TradingAccountRuntime runtime;
         /** 本次结算使用的币对配置。 */
         private CoreInstrument instrument;
         /** 该币对产品的固定价格结算计算规则。 */
@@ -213,8 +195,7 @@ public final class RuntimeLifecycleSettlementContinuation {
 
         /**
          * 按当前账户 Lane 数创建用户分组及订单分组入口，再初始化本页命令状态。
-         * @param command 本页结算编号、固定价格、期权参数及双游标
-         * @param chunkCommandId 非空的本页命令 UUID
+         * @param command 本页结算编号、固定价格及双游标
          * @param runtime 保持原身份的权威运行时，元数据由 Owner 推进
          * @param instrument 已验证的结算币对配置
          * @param kernel 本产品结算计算规则
@@ -225,7 +206,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param moreOrders 订单索引是否还有后续页
          * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
          */
-        private SettlementWork(SettleInstrumentCommand command, UUID chunkCommandId,
+        private SettlementWork(SettleInstrumentCommand command,
                 TradingAccountRuntime runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
@@ -235,8 +216,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.usersByLane = new LongArrayList[laneCount];
             for (/* 当前分组数组的 Lane 下标。 */ int lane = 0; lane < laneCount; lane++) usersByLane[lane] = new LongArrayList();
             this.ordersByLane = newLaneOrderGroups(laneCount);
-            reset(command, chunkCommandId, runtime, instrument, kernel, symbolId, assetId,
-                    previousProgress, selectedOrders, moreOrders, indexedUserIds);
+            reset(command, runtime, instrument, kernel, symbolId, assetId, previousProgress, selectedOrders, moreOrders, indexedUserIds);
         }
 
         /**
@@ -247,8 +227,8 @@ public final class RuntimeLifecycleSettlementContinuation {
         @SuppressWarnings("unchecked")
         private SettlementWork(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
             initializeLedgerCommand(runtime);
-            this.command = null; this.chunkCommandId = null;
-            this.runtime = runtime; this.instrument = null; this.kernel = null;
+            this.command = null;
+            this.instrument = null; this.kernel = null;
             this.symbolId = this.assetId = 0; this.previousProgress = null; this.selectedOrders = List.of();
             this.moreOrders = false; this.selectedUserIds = List.of();
             this.usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
@@ -270,8 +250,7 @@ public final class RuntimeLifecycleSettlementContinuation {
 
         /**
          * 重新装入当前页，保留并清空原分组容量、账户回执及财库差额；尚有账本选页任务时拒绝重置，Lane 数改变也拒绝。账本未激活时直接选用户，否则延后交给账本线程选页。
-         * @param command 本页结算编号、固定价格、期权参数及双游标
-         * @param chunkCommandId 非空的本页命令 UUID
+         * @param command 本页结算编号、固定价格及双游标
          * @param runtime 保持原身份的权威运行时，元数据由 Owner 推进
          * @param instrument 已验证的结算币对配置
          * @param kernel 本产品结算计算规则
@@ -282,17 +261,16 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param moreOrders 订单索引是否还有后续页
          * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
          */
-        private SettlementWork reset(SettleInstrumentCommand command, UUID chunkCommandId,
-                TradingAccountRuntime runtime, CoreInstrument instrument,
-                ProductTradingRules kernel, int symbolId, int assetId,
-                TreasuryRuntime.LifecycleProgressRuntime previousProgress,
-                List<CancellationOrder> selectedOrders, boolean moreOrders, Iterable<Long> indexedUserIds) {
+        private SettlementWork reset(SettleInstrumentCommand command, TradingAccountRuntime runtime,
+                CoreInstrument instrument, ProductTradingRules kernel, int symbolId, int assetId,
+                TreasuryRuntime.LifecycleProgressRuntime previousProgress, List<CancellationOrder> selectedOrders,
+                boolean moreOrders, Iterable<Long> indexedUserIds) {
             if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns settlement routes");
             initializeLedgerCommand(runtime);
             if (usersByLane.length != runtime.topology().accountLaneCount()) {
                 throw new IllegalStateException("settlement continuation lane topology changed");
             }
-            this.command = command; this.chunkCommandId = chunkCommandId; this.runtime = runtime;
+            this.command = command;
             this.instrument = instrument; this.kernel = kernel; this.symbolId = symbolId; this.assetId = assetId;
             this.previousProgress = previousProgress; this.selectedOrders = selectedOrders;
             this.moreOrders = moreOrders; this.selectedUserIds = List.of();
@@ -334,8 +312,8 @@ public final class RuntimeLifecycleSettlementContinuation {
         private void selectAccountUsers() {
             // 本次从活动订单或用户索引读取的页面。
             RuntimeLifecycleSettlement.UserPage page = moreOrders
-                    ? new RuntimeLifecycleSettlement.UserPage(List.of(), 0, 0, true)
-                    : RuntimeLifecycleSettlement.selectUsers(indexedUserIds, runtime, 0, command.cursorUserId(), command.maxUsers());
+                    ? new RuntimeLifecycleSettlement.UserPage(List.of(), 0, true)
+                    : RuntimeLifecycleSettlement.selectUsers(indexedUserIds, command.cursorUserId(), command.maxUsers());
             selectedUserIds = page.userIds(); usersComplete = page.complete();
             for (long /* 本次账本选页得到的用户编号。 */ user : selectedUserIds) usersByLane[runtime.topology().accountLaneId(user)].add(user);
             userLaneMask = RuntimeLifecycleSettlement.laneMask(usersByLane);
@@ -362,7 +340,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         private SettlementWork resetCompleted(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
             if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns settlement routes");
             initializeLedgerCommand(runtime);
-            this.command = null; this.chunkCommandId = null; this.runtime = runtime;
+            this.command = null;
             this.instrument = null; this.kernel = null; this.symbolId = this.assetId = 0;
             this.previousProgress = null; this.selectedOrders = List.of(); this.selectedUserIds = List.of();
             this.moreOrders = false; this.usersComplete = true; this.orderLaneMask = this.userLaneMask = 0;
@@ -382,7 +360,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         public void clearReferences() {
             if (usersQueued && !usersReady) return;
             indexedUserIds = null;
-            command = null; chunkCommandId = null; instrument = null; kernel = null;
+            command = null;  instrument = null; kernel = null;
             previousProgress = null; selectedOrders = List.of(); selectedUserIds = List.of();
             result = null; phase = Phase.DONE;
             dispatchedPhase = null;
@@ -539,9 +517,8 @@ public final class RuntimeLifecycleSettlementContinuation {
          */
         @Override protected void applyLedger(TreasuryRuntime ledger) {
             if (financialPhase == FinancialPhase.ORDER_PROGRESS) {
-                ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
-                        command.settlementId(), instrument, command.settlementPriceTicks(), command.optionCashUnitsPerContract(),
-                        false, previousProgress == null ? 0 : previousProgress.accountLaneId(), nextOrderCursor, 0, chunkCommandId));
+                ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
+                        instrument, command.settlementPriceTicks(), false, nextOrderCursor, 0, 0));
                 return;
             }
             if (financialPhase == FinancialPhase.INSURANCE) {
@@ -558,9 +535,8 @@ public final class RuntimeLifecycleSettlementContinuation {
                 if (!budgetSufficient) {
                     // 保险不足时原样保留的用户游标，不跳过尚未应用的用户页。
                     long cursor = command.cursorUserId();
-                    ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
-                            command.settlementId(), instrument, command.settlementPriceTicks(), command.optionCashUnitsPerContract(),
-                            true, 0, 0, cursor, chunkCommandId, requiredInsurance));
+                    ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
+                            instrument, command.settlementPriceTicks(), true, 0, cursor, requiredInsurance));
                 } else if (requiredInsurance != 0) {
                     ledger.setInsurance(assetId, Math.subtractExact(ledger.insurance(assetId), requiredInsurance),
                             ledger.insuranceDeficit(assetId));
@@ -573,9 +549,8 @@ public final class RuntimeLifecycleSettlementContinuation {
             // 本用户页已读到索引末尾或为空，从而可登记整个结算完成。
             boolean complete = usersComplete || selectedUserIds.isEmpty();
             if (complete) ledger.setLifecycleSettlement(symbolId, command.settlementId());
-            else ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
-                    command.settlementId(), instrument, command.settlementPriceTicks(), command.optionCashUnitsPerContract(), true,
-                    previousProgress == null ? 0 : previousProgress.accountLaneId(), 0, selectedUserIds.getLast(), chunkCommandId));
+            else ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
+                    instrument, command.settlementPriceTicks(), true, 0, selectedUserIds.getLast(), 0));
         }
 
         /**

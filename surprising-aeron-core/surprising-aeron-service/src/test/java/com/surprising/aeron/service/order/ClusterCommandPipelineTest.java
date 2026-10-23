@@ -129,7 +129,7 @@ class ClusterCommandPipelineTest {
                     100, 0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 4,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                     0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
-            live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+            live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(trigger)));
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 100,
                             product == ProductLine.OPTION ? 100 : 0, 2, TIME))));
@@ -199,14 +199,14 @@ class ClusterCommandPipelineTest {
                 var sl = pairLeg(product, user, 9014874673242113703L, "pair-sl", CoreTriggerOrderType.STOP_LOSS,
                         takeProfitWins ? 80 : 100);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, user,
-                        CoreTriggerOrderCodec.encodeList(List.of(tp,
+                        CoreTriggerOrderCodec.encodePlacementList(List.of(tp,
                                 pairLeg(product, user, 9014874673242113703L, " ", CoreTriggerOrderType.STOP_LOSS, sl.triggerPriceTicks())))));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                 assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 6174311206148487272L)).isNull();
                 assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9014874673242113703L)).isNull();
                 // 同时携带两条 OCO 条件单的原命令
                 var pair = live.message(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, user,
-                        CoreTriggerOrderCodec.encodeList(List.of(tp, sl)));
+                        CoreTriggerOrderCodec.encodePlacementList(List.of(tp, sl)));
                 live.apply(pair);
                 // 首次原子写入 OCO 对得到的 Core 响应
                 var placed = live.responses.getLast();
@@ -744,8 +744,7 @@ class ClusterCommandPipelineTest {
             for (long /* 本轮逐仓保证金调整量，含可恢复小额和拒绝极值 */ units : new long[]{10, -10, Long.MAX_VALUE, -Long.MAX_VALUE}) {
                 // 本轮保证金或杠杆设置的原命令
                 var change = live.message(CoreMessageType.ADJUST_POSITION_MARGIN, 11,
-                        TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand(
-                                "1", CoreMarginMode.ISOLATED, CorePositionSide.NET, units)));
+                        TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand("1", CorePositionSide.NET, units)));
                 live.apply(change); serial.apply(change);
                 assertThat(live.responses.getLast().commandStatus())
                         .isEqualTo(Math.abs(units) == 10 ? ResponseStatus.APPLIED : ResponseStatus.REJECTED);
@@ -1244,14 +1243,14 @@ class ClusterCommandPipelineTest {
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
-                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(trigger)));
                 // 源触发单同组、预期会被取消的另一条条件单视图
                 var sibling = new CoreTriggerOrderStateView(9002, product, user, "trigger-9002", "oco-9001", "1",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
-                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(sibling)));
                 live.responses.clear();
                 // 账户交接代数的反射字段，用来证明交易工作留在固定 Lane
                 // 执行触发命令之前记录的账户交接代数
@@ -1331,14 +1330,14 @@ class ClusterCommandPipelineTest {
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTX, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
-                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(trigger)));
                 // 源触发单同组、预期会被取消的另一条条件单视图
                 var sibling = new CoreTriggerOrderStateView(9002, product, user, "trigger-9002", "oco-9001", "1",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
-                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(sibling)));
                 live.responses.clear();
                 // 账户交接代数的反射字段，用来证明交易工作留在固定 Lane
                 // 执行触发命令之前记录的账户交接代数
@@ -1409,7 +1408,7 @@ class ClusterCommandPipelineTest {
                         overflow && id == 9101 ? Long.MAX_VALUE : 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
-                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(trigger)));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
             // 当前 Core 中所属账户及风险扫描的权威运行时
@@ -2843,7 +2842,7 @@ class ClusterCommandPipelineTest {
                         CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", expired ? TIME + 500 : 0, 0, 0, 0, 1, 0, 0);
-                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(trigger)));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
             // 当前 Core 中所属账户及风险扫描的权威运行时
@@ -2970,7 +2969,7 @@ class ClusterCommandPipelineTest {
                         CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 0, 0,
                         1, 0, 0, sources[i]);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
-                        CoreTriggerOrderCodec.encodeState(trigger)));
+                        CoreTriggerOrderCodec.encodePlacement(trigger)));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
             applyPriceAndFinishTriggerScan(live, new ApplyMarkPriceCommand("1", 100, 80,

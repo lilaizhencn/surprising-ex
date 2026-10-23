@@ -14,8 +14,7 @@ class MatchingNotificationProbeTest {
     @Test
     void concurrentLaneSettlementsCannotBeLostWhileOwnerClearsReadyBits() throws Exception {
         // 本场景明确的 Matcher 与账户拓扑，队列容量足以容纳逐项确认窗口
-        var topology = new LaneTopology(1, 0, 0, 2,
-                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        var topology = new LaneTopology(1, 0, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
             // 每条 Lane 应发布的完成序号数量，固定两千
             int rounds = 2000;
@@ -69,8 +68,7 @@ class MatchingNotificationProbeTest {
     @Test
     void batchAdmissionWakeBitsAreShardScopedAndCoalesce() {
         // 本场景明确的 Matcher 与账户拓扑，队列容量足以容纳逐项确认窗口
-        var topology = new LaneTopology(2, 0, 1, 2,
-                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        var topology = new LaneTopology(2, 1, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
             runtime.publishAccountAdmissionReadyShard(1);
             runtime.publishAccountAdmissionReadyShard(0);
@@ -106,8 +104,7 @@ class MatchingNotificationProbeTest {
     @Test
     void cursorProbeDoesNotConsumeTheLastLaneSettlementNotification() throws Exception {
         // 本场景明确的 Matcher 与账户拓扑，队列容量足以容纳逐项确认窗口
-        var topology = new LaneTopology(1, 0, 0, 2,
-                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        var topology = new LaneTopology(1, 0, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (/* 仅用于通知协议的账户运行时，资源退出时关闭 */ var runtime = new TradingAccountRuntime(topology)) {
             assertThat(runtime.hasMatchingNotifications()).isFalse();
             runtime.expectMatcherSettlement(3);

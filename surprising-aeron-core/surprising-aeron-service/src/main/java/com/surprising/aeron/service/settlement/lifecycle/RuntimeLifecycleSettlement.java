@@ -32,7 +32,7 @@ public final class RuntimeLifecycleSettlement {
 
     /**
      * 从旧状态补齐缺省的用户集合与活动订单索引后执行同步结算。这里只检查必要对象非空，不另核对 before 与 runtime 的产品线或修订号；用户输入顺序仍由调用方保证。
-     * @param before 旧状态；apply 用于补齐缺省索引，advanceCancellation 还用来核对产品线和修订号
+     * @param before 旧状态；用于补齐缺省用户索引
      * @param command 固定结算价、结算编号及订单和用户分页参数
      * @param indexedUserIds 按全局用户编号递增提供的索引，apply 允许空时使用旧状态用户集合
      * @param chunkCommandId 本页命令 UUID；同步主入口为空表示不分页
@@ -104,11 +104,8 @@ public final class RuntimeLifecycleSettlement {
             cancelOrders(runtime, selectedOrders);
             ordersComplete = true;
         } else if (!ordersComplete) {
-            // 既有进度中的位置字段；当前选页实现使用全局游标而不按此字段路由。
-            int accountLaneId = previousProgress == null ? 0 : previousProgress.accountLaneId();
-            // 索引选出的当前页及续页位置。
-            OrderPage page = selectOrders(runtime, identities, activeOrderIndex, instrument.instrumentId(),
-                    accountLaneId, command.cursorOrderId(), command.maxOrders());
+                // 索引选出的当前页及续页位置。
+            OrderPage page = selectOrders(activeOrderIndex, instrument.instrumentId(), command.cursorOrderId(), command.maxOrders());
             selectedOrders = page.orders();
             moreOrders = !page.complete();
             cancelOrders(runtime, selectedOrders);
@@ -116,10 +113,8 @@ public final class RuntimeLifecycleSettlement {
                 // 本次撤单之后保存的下一订单游标。
                 long nextCursor = page.nextCursorOrderId();
                 runtime.treasury().setLifecycleProgress(symbolId,
-                        new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                instrument, command.settlementPriceTicks(),
-                                command.optionCashUnitsPerContract(), false, page.accountLaneId(),
-                                nextCursor, 0, chunkCommandId));
+                        new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), instrument,
+                                command.settlementPriceTicks(), false, nextCursor, 0, 0));
                 runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
                         selectedOrders.isEmpty() ? 1 : 2));
                 return new CoreSettlementProgressView(command.settlementId(), false, false, nextCursor, 0,
@@ -128,11 +123,8 @@ public final class RuntimeLifecycleSettlement {
             ordersComplete = true;
         }
         // 既有进度中的位置字段；当前选页实现使用全局游标而不按此字段路由。
-        int accountLaneId = previousProgress == null || !previousProgress.ordersComplete()
-                ? 0 : previousProgress.accountLaneId();
         // 按全局用户顺序选出的待结算页。
-        UserPage userPage = selectUsers(indexedUserIds, runtime, accountLaneId,
-                command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
+        UserPage userPage = selectUsers(indexedUserIds, command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
         // 本页选中的用户，不等于每个用户都存在有效持仓。
         List<Long> selectedUserIds = userPage.userIds();
         // 分页结算是否仍有后续用户。
@@ -160,12 +152,8 @@ public final class RuntimeLifecycleSettlement {
                 requiredInsurance = Math.addExact(requiredInsurance, plan.insurance());
         }
         if (requiredInsurance > runtime.treasury().insurance(assetId)) {
-            // 保险不足时保存的页标识；非分页入口以结算编号构造固定 UUID。
-            UUID progressId = chunkCommandId == null ? new UUID(0, command.settlementId()) : chunkCommandId;
-            runtime.treasury().setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
-                    command.settlementId(), instrument, command.settlementPriceTicks(),
-                    command.optionCashUnitsPerContract(), true, 0, 0, command.cursorUserId(),
-                    progressId, requiredInsurance));
+            runtime.treasury().setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
+                    instrument, command.settlementPriceTicks(), true, 0, command.cursorUserId(), requiredInsurance));
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             return new CoreSettlementProgressView(command.settlementId(), false, true, 0,
                     command.cursorUserId(), selectedOrders.size(), 0, requiredInsurance);
@@ -190,73 +178,13 @@ public final class RuntimeLifecycleSettlement {
             runtime.treasury().setLifecycleSettlement(symbolId, command.settlementId());
         } else {
             runtime.treasury().setLifecycleProgress(symbolId,
-                    new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                            instrument, command.settlementPriceTicks(),
-                            command.optionCashUnitsPerContract(), true, userPage.accountLaneId(),
-                            0, nextCursorUserId, chunkCommandId));
+                    new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), instrument,
+                            command.settlementPriceTicks(), true, 0, nextCursorUserId, 0));
         }
         runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
                 selectedOrders.isEmpty() ? 1 : 2));
         return new CoreSettlementProgressView(command.settlementId(), complete, ordersComplete, 0,
                 nextCursorUserId, selectedOrders.size(), selectedUserIds.size());
-    }
-
-    /**
-     * 核对旧状态和运行时的产品线、修订号一致，再应用已选撤单页并保存后续游标；这里只处理账户侧撤单与进度，Matcher 的订单簿处理由调用链负责。
-     * @param before 旧状态；apply 用于补齐缺省索引，advanceCancellation 还用来核对产品线和修订号
-     * @param command 固定结算价、结算编号及订单和用户分页参数
-     * @param orders 本次要在账户侧取消的订单路由集合
-     * @param nextCursorOrderId 仍有后续撤单页时保存的正数订单游标
-     * @param chunkCommandId 本页命令 UUID；同步主入口为空表示不分页
-     * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
-     * @param identities 把币对和资产名称转换为内部编号的身份表
-     */
-    public static void advanceCancellation(TradingCoreState before, SettleInstrumentCommand command,
-                                           Collection<CancellationOrder> orders, long nextCursorOrderId,
-                                           UUID chunkCommandId, TradingAccountRuntime runtime,
-                                           RuntimeIdentityRegistry identities) {
-        if (nextCursorOrderId <= 0 || chunkCommandId == null) {
-            throw new IllegalArgumentException("settlement cursor must advance");
-        }
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid runtime settlement cancellation");
-        }
-        advanceCancellationRuntime(command, orders, nextCursorOrderId, chunkCommandId, runtime, identities);
-    }
-
-    /**
-     * 校验币对结算规则和续页参数，在所属 Lane 撤销这页订单的预留，再保存撤单未完成进度及修订号。本入口不另检查 System Ledger 是否激活，线程所有权由调用方遵守。
-     * @param command 固定结算价、结算编号及订单和用户分页参数
-     * @param orders 本次要在账户侧取消的订单路由集合
-     * @param nextCursorOrderId 仍有后续撤单页时保存的正数订单游标
-     * @param chunkCommandId 本页命令 UUID；同步主入口为空表示不分页
-     * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
-     * @param identities 把币对和资产名称转换为内部编号的身份表
-     */
-    public static void advanceCancellationRuntime(SettleInstrumentCommand command,
-                                                  Collection<CancellationOrder> orders, long nextCursorOrderId,
-                                                  UUID chunkCommandId, TradingAccountRuntime runtime,
-                                                  RuntimeIdentityRegistry identities) {
-        if (nextCursorOrderId <= 0 || chunkCommandId == null || runtime == null || identities == null) {
-            throw new IllegalArgumentException("settlement cursor must advance");
-        }
-        // 已确认存在的本次结算币对配置。
-        CoreInstrument instrument = requireInstrument(runtime, command);
-        ProductTradingRulesRegistry.forInstrument(instrument)
-                .validateLifecycleSettlement(instrument, command);
-        // 本币对内部身份编号。
-        int symbolId = identities.symbolId(instrument.instrumentIdValue());
-        // 续接撤单前读到的原结算进度。
-        TreasuryRuntime.LifecycleProgressRuntime progress = runtime.treasury().lifecycleProgress(symbolId);
-        validateProgress(progress, command, true);
-        cancelOrders(runtime, orders);
-        runtime.treasury().setLifecycleProgress(symbolId,
-                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), instrument,
-                        command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
-                        progress == null ? 0 : progress.accountLaneId(), nextCursorOrderId, 0, chunkCommandId));
-        runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
-                orders == null || orders.isEmpty() ? 1 : 2));
     }
 
     /**
@@ -373,35 +301,16 @@ public final class RuntimeLifecycleSettlement {
         return delta;
     }
 
-    /**
-     * 复用资金费的全局用户分页规则。runtime 与 startLaneId 当前不参与选页，返回的 Lane 编号固定为零；选出的用户随后再按实际账户 Lane 分组。
-     * @param indexedUserIds 按全局用户编号递增提供的索引，apply 允许空时使用旧状态用户集合
-     * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
-     * @param startLaneId 保留的 Lane 起点参数，当前全局分页实现不读取
-     * @param startCursorUserId 用户页的排他下界，只选择更大编号
-     * @param limit 本页最多选取的记录数
-     */
-    static UserPage selectUsers(Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
-                                int startLaneId, long startCursorUserId, int limit) {
+    /** 按全局用户索引选择一页，返回真实用户游标与完成标记。 */
+    static UserPage selectUsers(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {
         // 命令游标按全局用户编号推进，与 Core 使用同一顺序；不按账户 Lane 单独分页。
         // 索引选出的当前页及续页位置。
         var page = UserIndexPage.select(indexedUserIds, startCursorUserId, limit);
-        return new UserPage(page.userIds(), 0, page.nextCursorUserId(), page.complete());
+        return new UserPage(page.userIds(), page.nextCursorUserId(), page.complete());
     }
 
-    /**
-     * 从活动订单索引取一页订单路由，再按订单编号找到用户及币对；缺失路由视为索引不一致。当前使用全局索引和零 Lane 编号，runtime、identities、startLaneId 不参与选页。
-     * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
-     * @param identities 把币对和资产名称转换为内部编号的身份表
-     * @param index 活动订单路由索引
-     * @param instrumentId 需要结算并清空订单的币对名称
-     * @param startLaneId 保留的 Lane 起点参数，当前全局分页实现不读取
-     * @param startCursorOrderId 传给活动订单索引的订单续页游标
-     * @param limit 本页最多选取的记录数
-     */
-    static OrderPage selectOrders(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                  ActiveOrderIndex index, String instrumentId, int startLaneId,
-                                  long startCursorOrderId, int limit) {
+    /** 按币对的全局活动订单索引选页，校验每条订单路由并返回后续游标。 */
+    static OrderPage selectOrders(ActiveOrderIndex index, String instrumentId, long startCursorOrderId, int limit) {
         // 索引选出的当前页及续页位置。
         var page = index.page(0, instrumentId, startCursorOrderId, limit);
         // 本页由活动订单路由转换出的撤单记录。
@@ -414,7 +323,7 @@ public final class RuntimeLifecycleSettlement {
             }
             selected.add(new CancellationOrder(orderId, order.userId(), order.instrumentId()));
         }
-        return new OrderPage(selected, 0, page.nextCursorOrderId(), page.nextCursorOrderId() == 0);
+        return new OrderPage(selected, page.nextCursorOrderId(), page.nextCursorOrderId() == 0);
     }
 
     /**
@@ -548,7 +457,7 @@ public final class RuntimeLifecycleSettlement {
     }
 
     /**
-     * 首次分页必须从双零游标开始；已有进度时，结算编号、价格、期权参数、撤单阶段与两个游标必须完全匹配，否则拒绝续页。这里不另比较命令 UUID 或币对对象身份。
+     * 首次分页必须从双零游标开始；已有进度时，结算编号、价格、撤单阶段与两个游标必须完全匹配，否则拒绝续页。这里不另比较命令 UUID 或币对对象身份。
      * @param progress 该币对已保存的结算进度，尚未开始时为空
      * @param command 固定结算价、结算编号及订单和用户分页参数
      * @param chunked 本次是否启用命令分页
@@ -560,7 +469,6 @@ public final class RuntimeLifecycleSettlement {
         }
         if (progress != null && (progress.settlementId() != command.settlementId()
                 || progress.settlementPriceTicks() != command.settlementPriceTicks()
-                || progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
                 || progress.ordersComplete() != (command.cursorOrderId() == 0)
                 || progress.nextCursorOrderId() != command.cursorOrderId()
                 || progress.nextCursorUserId() != command.cursorUserId())) {
@@ -569,24 +477,22 @@ public final class RuntimeLifecycleSettlement {
     }
 
     /**
-     * 全局用户页的内容与结束标记，Lane 字段仅保留进度结构形状。
+     * 全局用户页的内容与后续位置。
      * @param userIds 本页按全局索引顺序选出的用户列表
-     * @param accountLaneId 保留的分页位置字段，当前全局分页固定返回零
      * @param nextCursorUserId 未读完时为本页最后用户编号，读完为零
      * @param complete 本次分页是否已经读完后续记录
      */
-    record UserPage(List<Long> userIds, int accountLaneId,
+    record UserPage(List<Long> userIds,
                     long nextCursorUserId, boolean complete) {
     }
 
     /**
      * 活动订单页的路由与后续游标，不代表这些订单已经从 Matcher 撤销。
      * @param orders 本页选出的活动订单路由列表
-     * @param accountLaneId 保留的分页位置字段，当前全局分页固定返回零
      * @param nextCursorOrderId 下一订单页游标，零表示已读完
      * @param complete 本次分页是否已经读完后续记录
      */
-    record OrderPage(List<CancellationOrder> orders, int accountLaneId,
+    record OrderPage(List<CancellationOrder> orders,
                      long nextCursorOrderId, boolean complete) {
     }
 }

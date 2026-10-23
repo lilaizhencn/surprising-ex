@@ -34,9 +34,9 @@ public final class CommandReplicationService implements ClusteredService {
             DirectBuffer buffer, int offset, int length, Header header) {
         if (length < CoreProtocol.HEADER_LENGTH
                 || buffer.getInt(offset, ByteOrder.LITTLE_ENDIAN) != CoreProtocol.MAGIC
-                || buffer.getInt(offset + 72, ByteOrder.LITTLE_ENDIAN) != length - CoreProtocol.HEADER_LENGTH)
+                || buffer.getInt(offset + 68, ByteOrder.LITTLE_ENDIAN) != length - CoreProtocol.HEADER_LENGTH)
             throw new IllegalStateException("invalid diagnostic command");
-        long next = buffer.getLong(offset + 40, ByteOrder.LITTLE_ENDIAN);
+        long next = buffer.getLong(offset + 36, ByteOrder.LITTLE_ENDIAN);
         if (next != sequence + 1) throw new IllegalStateException("command sequence gap");
         sequence = next;
         bytes += length;

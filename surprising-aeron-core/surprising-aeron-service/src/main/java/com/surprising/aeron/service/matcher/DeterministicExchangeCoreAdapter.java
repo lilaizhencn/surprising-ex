@@ -1978,7 +1978,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .build())
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
                         .matchingEnginesNum(1)
-                        .riskEnginesNum(topology.riskEngineCount())
+                        .riskEnginesNum(0)
                         .directMatchingOnlyPipeline(true)
                         .msgsInGroupLimit(startupConfiguration.matcherGroupSize())
                         .maxGroupDurationNs(startupConfiguration.matcherGroupNanos())

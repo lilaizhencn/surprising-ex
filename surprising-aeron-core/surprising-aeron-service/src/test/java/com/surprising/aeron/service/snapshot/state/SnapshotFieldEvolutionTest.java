@@ -83,7 +83,7 @@ class SnapshotFieldEvolutionTest {
                 empty.instruments(), risk, empty.treasuryState());
         // 当前编码器生成的带版本头快照字节。
         byte[] encoded = TradingStateSnapshotCodec.encode(state);
-        // 依次进入根风险、标记价表、映射条目、条目值，最终移除标记价最近成交价字段七。
+        // 依次进入根风险、标记价表、正文条目，最终移除标记价最近成交价字段七。
         // 局部字段结构改变后的记录或带头快照字节。
         byte[] changed = replace(Arrays.copyOfRange(encoded, 4, encoded.length), 6,
                 /* 根风险字段的内容记录，下一层要进入标记价表。 */ r -> replace(r, 1, /* 标记价 Map 记录，下一层要进入条目列表字段。 */ marks -> replace(marks, 1, /* 当前仅含一个标记价映射条目的列表字节，前面带条目长度。 */ entries -> {
@@ -92,10 +92,10 @@ class SnapshotFieldEvolutionTest {
                     // 当前测试条目声明的字节长度，或截断循环保留的字节数。
                     int length = input.getInt();
                     assertThat(input.remaining()).isEqualTo(length);
-                    // 复制出的单个标记价 Map 条目记录，内含键和值字段。
+                    // 复制出的单个标记价正文记录。
                     byte[] entry = new byte[length]; input.get(entry);
                     // 移除标记价最近成交价字段后重建的 Map 条目字节。
-                    byte[] updated = replace(entry, 2, /* 单条标记价业务记录内容，本次只移除字段七。 */ m -> replace(m, 7, /* 被移除的最近成交价字段旧内容，回调不读取而直接返回 null。 */ ignored -> null));
+                    byte[] updated = replace(entry, 7, /* 移除正文中的最近成交价字段。 */ ignored -> null);
                     return ByteBuffer.allocate(4 + updated.length).order(ByteOrder.LITTLE_ENDIAN)
                             .putInt(updated.length).put(updated).array();
                 })));
@@ -174,12 +174,12 @@ class SnapshotFieldEvolutionTest {
         return fields;
     }
     /**
-     * 按列表当前顺序拼接完整字段，并加固定版本三十七头；只供当前格式测试使用，不自动推导或升级版本。
+     * 按列表当前顺序拼接完整字段，并加固定版本三十八头；只供当前格式测试使用，不自动推导或升级版本。
      * @param fields 需要按当前顺序拼回快照的完整单字段字节列表
      */
     private static byte[] joinWithVersion(List<byte[]> fields) {
         // 拆分记录或拼接新版本头时使用的小端字节缓冲。
         var buffer = ByteBuffer.allocate(4 + fields.stream().mapToInt(/* 参与计算拼接总长度的一段完整字段字节。 */ a -> a.length).sum()).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(37); fields.forEach(buffer::put); return buffer.array();
+        buffer.putInt(38); fields.forEach(buffer::put); return buffer.array();
     }
 }

@@ -6,7 +6,6 @@ import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
-import com.surprising.aeron.protocol.CoreRoute;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.WireMessageKind;
@@ -204,8 +203,6 @@ public final class CoreMessageFlyweightDecoder {
         long commandIdMsb = reader.commandIdMsb();
         // 从当前帧读取的命令 UUID 低位
         long commandIdLsb = reader.commandIdLsb();
-        // 由当前头部分片和版本构造的已校验路由
-        CoreRoute route = CoreRoute.fromWireCodes(reader.shardCode(), reader.routeVersion());
         // 当前实际有效载荷长度，不包括缓存容量尾部
         int payloadLen = reader.payloadLength();
         // 要保存当前有效字节的缓存或独立数组
@@ -214,17 +211,11 @@ public final class CoreMessageFlyweightDecoder {
         if (payloadLen > 0) {
             buffer.getBytes(reader.payloadOffset(), payload, 0, payloadLen);
         }
-        if (slot == null) return CoreMessage.owned(new CoreMessageHeader(
-                reader.schemaVersion(), reader.kind(), reader.messageType(),
-                commandIdMsb, commandIdLsb,
-                reader.productLine(), route, reader.source(), reader.sourceId(),
-                reader.sourceSequence(), reader.userId(), reader.submittedAtEpochMillis(),
-                reader.correlationId()), payload);
-        slot.decoderHeader(
-                reader.schemaVersion(), reader.kind(), reader.messageType(),
-                commandIdMsb, commandIdLsb,
-                reader.productLine(), route, reader.source(), reader.sourceId(),
-                reader.sourceSequence(), reader.userId(), reader.submittedAtEpochMillis(),
+        if (slot == null) return CoreMessage.owned(new CoreMessageHeader(reader.schemaVersion(), reader.messageType(),
+                commandIdMsb, commandIdLsb, reader.productLine(), reader.source(), reader.sourceId(), reader.sourceSequence(),
+                reader.userId(), reader.submittedAtEpochMillis(), reader.correlationId()), payload);
+        slot.decoderHeader(reader.schemaVersion(), reader.messageType(), commandIdMsb, commandIdLsb, reader.productLine(),
+                reader.source(), reader.sourceId(), reader.sourceSequence(), reader.userId(), reader.submittedAtEpochMillis(),
                 reader.correlationId());
         return slot;
     }
@@ -257,10 +248,6 @@ public final class CoreMessageFlyweightDecoder {
         @Accessors(fluent = true, chain = false)
         @Getter
         private int schemaVersion;
-        /**  帧头消息种类，例如命令或查询。 读取当前消息种类。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter
-        private WireMessageKind kind;
         /**  帧头产品线，经 wire code 解码。 读取已解码产品线。 */
         @Accessors(fluent = true, chain = false)
         @Getter
@@ -273,14 +260,6 @@ public final class CoreMessageFlyweightDecoder {
         @Accessors(fluent = true, chain = false)
         @Getter
         private CommandSource source;
-        /**  帧头路由分片代码，路由合法性由后续 CoreRoute 构造继续检查。 读取路由分片代码。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter
-        private int shardCode;
-        /**  帧头路由版本，后续构造 CoreRoute 使用。 读取路由版本。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter
-        private int routeVersion;
         /**  命令 UUID 的高六十四位。 读取命令 UUID 高位。 */
         @Accessors(fluent = true, chain = false)
         @Getter
@@ -310,6 +289,8 @@ public final class CoreMessageFlyweightDecoder {
         @Getter
         private long correlationId;
 
+        public WireMessageKind kind() { return messageType.kind(); }
+
         /**
          * 先检查缓冲范围、魔数、版本和头长度，再按小端读取头字段及载荷长度；要求整帧长度精确匹配，只保存解码字段及载荷偏移。不在此校验业务载荷或执行交易。
          * @param buffer 包含当前完整 Core 帧的原输入缓冲
@@ -332,8 +313,6 @@ public final class CoreMessageFlyweightDecoder {
                 throw new ProtocolException("unsupported schema version: " + schemaVersion);
             }
             cursor += Short.BYTES;
-            this.kind = WireMessageKind.fromWireCode(buffer.getByte(cursor));
-            cursor += Byte.BYTES;
             this.productLine = ProductLineWireCode.decode(buffer.getByte(cursor));
             cursor += Byte.BYTES;
             this.messageType = CoreMessageType.fromWireCode(
@@ -341,11 +320,7 @@ public final class CoreMessageFlyweightDecoder {
             cursor += Short.BYTES;
             this.source = CommandSource.fromWireCode(buffer.getByte(cursor));
             cursor += Byte.BYTES;
-            this.shardCode = buffer.getByte(cursor);
-            cursor += Byte.BYTES;
             this.headerLength = Short.toUnsignedInt(buffer.getShort(cursor, ByteOrder.LITTLE_ENDIAN));
-            cursor += Short.BYTES;
-            this.routeVersion = Short.toUnsignedInt(buffer.getShort(cursor, ByteOrder.LITTLE_ENDIAN));
             cursor += Short.BYTES;
 
             if (headerLength != CoreProtocol.HEADER_LENGTH) {

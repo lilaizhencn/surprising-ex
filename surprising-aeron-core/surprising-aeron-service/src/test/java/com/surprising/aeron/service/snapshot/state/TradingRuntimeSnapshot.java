@@ -500,59 +500,21 @@ public record TradingRuntimeSnapshot(
                                    long roundingResidualUnits, long clearingPnlUnits) {
     }
 
-    /**
-     * 测试保存的资金费固定输入、用户游标和页命令身份。
-     * @param settlementId 资金费或到期结算轮次编号
-     * @param fundingRatePpm 本轮资金费率，百万分比
-     * @param accountLaneId 账户 Lane 的分页位置
-     * @param nextCursorUserId 资金费或到期结算下一页用户游标
-     * @param commandId 原业务命令 UUID
-     * @param markPriceTicks 标记价格
-     * @param priceSequence 参考价格序号
-     */
-    public record FundingProgressSnapshot(long settlementId, long fundingRatePpm,
-                                          int accountLaneId, long nextCursorUserId, UUID commandId,
-                                          long markPriceTicks, long priceSequence) {
-        /**
-         * 检查正结算编号、费率绝对值最多一百万、零到六十三的 Lane、非负用户游标、非空 UUID 和正固定标记价/序号；费率绝对值溢出原样抛出。
-         */
+    /** 与生产续页状态一致的测试快照值。 */
+    public record FundingProgressSnapshot(long settlementId, long fundingRatePpm, long nextCursorUserId, long markPriceTicks,
+            long priceSequence) {
         public FundingProgressSnapshot {
-            if (settlementId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
-                    || accountLaneId < 0 || accountLaneId >= Long.SIZE
-                    || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
-                throw new IllegalArgumentException("invalid snapshot funding progress");
-            }
+            if (settlementId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000 || nextCursorUserId < 0 || markPriceTicks <= 0 || priceSequence <= 0)
+                throw new IllegalArgumentException("invalid snapshot progress");
         }
     }
 
-    /**
-     * 测试保存的到期或固定价格结算双游标、撤单阶段与保险需求。
-     * @param settlementId 资金费或到期结算轮次编号
-     * @param settlementPriceTicks 固定到期或维护结算价格
-     * @param optionCashUnitsPerContract 命令保存的每份期权结算金额参数
-     * @param ordersComplete 本轮到期结算是否已完成全部撤单
-     * @param accountLaneId 账户 Lane 的分页位置
-     * @param nextCursorOrderId 到期结算下一页订单游标
-     * @param nextCursorUserId 资金费或到期结算下一页用户游标
-     * @param commandId 原业务命令 UUID
-     * @param requiredInsuranceUnits 本页到期结算需要补足的保险金额
-     */
-    public record LifecycleProgressSnapshot(long settlementId,
-                                            long settlementPriceTicks, long optionCashUnitsPerContract,
-                                            boolean ordersComplete, int accountLaneId, long nextCursorOrderId,
-                                            long nextCursorUserId, UUID commandId, long requiredInsuranceUnits) {
-        /**
-         * 检查正结算编号、非负结算参数/游标/保险和有效 Lane/UUID；撤单未完成时用户游标必须零，已完成时订单游标必须零，有保险需求也必须先完成撤单。
-         */
+    /** 与生产续页状态一致的测试快照值。 */
+    public record LifecycleProgressSnapshot(long settlementId, long settlementPriceTicks, boolean ordersComplete,
+            long nextCursorOrderId, long nextCursorUserId, long requiredInsuranceUnits) {
         public LifecycleProgressSnapshot {
-            if (settlementId <= 0 || settlementPriceTicks < 0
-                    || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
-                    || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
-                    || nextCursorOrderId < 0 || nextCursorUserId < 0
-                    || (!ordersComplete && nextCursorUserId != 0)
-                    || (ordersComplete && nextCursorOrderId != 0) || commandId == null) {
-                throw new IllegalArgumentException("invalid snapshot lifecycle progress");
-            }
+            if (settlementId <= 0 || settlementPriceTicks < 0 || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete || nextCursorOrderId < 0 || nextCursorUserId < 0 || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0))
+                throw new IllegalArgumentException("invalid snapshot progress");
         }
     }
 }

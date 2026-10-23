@@ -153,12 +153,12 @@ class CoreMaintenanceTest {
             // 使用不同于固定清仓价的结算请求应被拒绝，不能据此清除持仓。
             // 把固定清仓价一百二十改成一百二十一的结算请求响应，预期拒绝
             var repriced = apply(state,command(line,0,CoreMessageType.SETTLE_INSTRUMENT,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"1",121,0))));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801, "1", 121))));
             assertThat(repriced.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             // 操作用户不自动成为结算参与者；首段和恢复续步都使用非零操作者，避免引入无关账户 Lane。
             // 由非参与者用户一发起的首段固定价清仓成功响应
             var first = applied(state,command(line,1,CoreMessageType.SETTLE_INSTRUMENT,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"1",120,0,0,1,0,1))));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801, "1", 120, 0, 1, 0, 1))));
             // 本次成功响应解出的清仓续步游标和完成标记
             var progress = CoreSettlementProgressCodec.decode(first.data());
             try (/* 从维护或清仓中间快照恢复的运行时，离开作用域关闭 */ var restored = TradingCoreRuntime.fromSnapshot(line,state.snapshot(700))) {
@@ -168,7 +168,7 @@ class CoreMaintenanceTest {
                     assertThat(++steps).isLessThan(20);
                     // 按上段用户与订单游标生成的当前清仓续步命令，同一对象再次提交验证 UUID 去重
                     var message = command(line,1,CoreMessageType.SETTLE_INSTRUMENT,TradingCommandCodec.encodeSettleInstrument(
-                            new SettleInstrumentCommand(801,"1",120,0,progress.nextCursorUserId(),1,progress.nextCursorOrderId(),1)));
+                            new SettleInstrumentCommand(801, "1", 120, progress.nextCursorUserId(), 1, progress.nextCursorOrderId(), 1)));
                     // 本次执行或撮合补齐得到的响应，辅助方法继续检查其状态
                     var response = applied(restored,message);
                     progress = CoreSettlementProgressCodec.decode(response.data());

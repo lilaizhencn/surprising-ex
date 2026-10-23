@@ -42,9 +42,8 @@ public class CommandFingerprintBenchmark {
         if (!slot.acquireDecoderSlot()) throw new IllegalStateException("previous input still leased");
         try {
             var h = message.header();
-            slot.decoderHeader(h.schemaVersion(), h.kind(), h.messageType(), h.commandId(), h.productLine(),
-                    h.route(), h.source(), h.sourceId(), h.sourceSequence(), h.userId(),
-                    h.submittedAtEpochMillis(), h.correlationId());
+            slot.decoderHeader(h.schemaVersion(), h.messageType(), h.commandId(), h.productLine(), h.source(), h.sourceId(),
+                    h.sourceSequence(), h.userId(), h.submittedAtEpochMillis(), h.correlationId());
             message.copyPayloadTo(slot.decoderPayloadBuffer(message.payloadLength()), 0);
             return calculator.ofBorrowed(slot).byteAt(0);
         } finally {

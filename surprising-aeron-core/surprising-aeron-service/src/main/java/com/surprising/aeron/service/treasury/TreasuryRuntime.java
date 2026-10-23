@@ -4,7 +4,6 @@ import com.surprising.aeron.service.core.change.RuntimeChangeBuffer;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.settlement.FundsPosting;
 import java.util.Arrays;
-import java.util.UUID;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
@@ -818,94 +817,28 @@ public final class TreasuryRuntime {
      */
     record LifecycleState(long settlementId, LifecycleProgressRuntime progress) { }
 
-    /**
-     * 资金费分页续步的只读业务输入，保存同一结算的合约、费率、Lane、游标及价格证据。
-     * @param settlementId 当前资金费或生命周期结算编号，完成入口要求正数
-     * @param instrument 本进度关联的规范合约输入
-     * @param fundingRatePpm 本次资金费百万分比费率，绝对值不超过一百万
-     * @param accountLaneId 分页当前负责的账户 Lane 编号，记录校验范围为零到六十三
-     * @param nextCursorUserId 下一页继续处理的用户游标，非负，撤单未结束阶段须为零
-     * @param commandId 本次结算或分页命令 UUID
-     * @param markPriceTicks 资金费计算采用的正标记价刻度
-     * @param priceSequence 对应正价格版本序号
-     */
+    /** 资金费续页的固定费率、用户游标和价格证据。 */
     public record FundingProgressRuntime(long settlementId, CoreInstrument instrument, long fundingRatePpm,
-                                         int accountLaneId, long nextCursorUserId, UUID commandId,
-                                         long markPriceTicks, long priceSequence) {
-        /**
-         * 检查正结算编号、有效合约、正负百万分比费率上限、六十四以内 Lane、非负用户游标、非空命令及正标记价和价格序号。
-         */
+            long nextCursorUserId, long markPriceTicks, long priceSequence) {
         public FundingProgressRuntime {
             if (settlementId <= 0 || instrument == null || Math.absExact(fundingRatePpm) > 1_000_000
-                    || accountLaneId < 0 || accountLaneId >= Long.SIZE
-                    || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
-                throw new IllegalArgumentException("invalid runtime funding progress");
+                    || nextCursorUserId < 0 || markPriceTicks <= 0 || priceSequence <= 0) {
+                throw new IllegalArgumentException("invalid funding progress");
             }
         }
     }
 
-    /**
-     * 交割或期权到期分页续步的只读输入，撤单与账户处理阶段使用不同游标，保险需求随当前页保留。
-     * @param settlementId 当前资金费或生命周期结算编号，完成入口要求正数
-     * @param instrument 本进度关联的规范合约输入
-     * @param settlementPriceTicks 生命周期采用的非负结算价，具体产品另行约束
-     * @param optionCashUnitsPerContract 期权每合约非负现金结算额
-     * @param ordersComplete 撤单阶段是否已结束，决定后续使用订单还是用户游标
-     * @param accountLaneId 分页当前负责的账户 Lane 编号，记录校验范围为零到六十三
-     * @param nextCursorOrderId 下一页订单游标，非负，撤单完成阶段须为零
-     * @param nextCursorUserId 下一页继续处理的用户游标，非负，撤单未结束阶段须为零
-     * @param commandId 本次结算或分页命令 UUID
-     * @param requiredInsuranceUnits 本页仍需处理的非负保险资金，只在撤单结束后允许非零
-     */
+    /** 到期结算的固定价格、撤单/用户游标及本页保险需求。 */
     public record LifecycleProgressRuntime(long settlementId, CoreInstrument instrument, long settlementPriceTicks,
-                                           long optionCashUnitsPerContract, boolean ordersComplete,
-                                           int accountLaneId, long nextCursorOrderId,
-                                           long nextCursorUserId, UUID commandId, long requiredInsuranceUnits) {
-        /**
-         * 按显式 Lane 及撤单、用户游标构造进度，默认本页所需保险金额为零。
-         * @param settlementId 当前资金费或生命周期结算编号，完成入口要求正数
-         * @param instrument 本进度关联的规范合约输入
-         * @param settlementPriceTicks 生命周期采用的非负结算价，具体产品另行约束
-         * @param optionCashUnitsPerContract 期权每合约非负现金结算额
-         * @param ordersComplete 撤单阶段是否已结束，决定后续使用订单还是用户游标
-         * @param accountLaneId 分页当前负责的账户 Lane 编号，记录校验范围为零到六十三
-         * @param nextCursorOrderId 下一页订单游标，非负，撤单完成阶段须为零
-         * @param nextCursorUserId 下一页继续处理的用户游标，非负，撤单未结束阶段须为零
-         * @param commandId 本次结算或分页命令 UUID
-         */
-        public LifecycleProgressRuntime(long settlementId, CoreInstrument instrument, long settlementPriceTicks,
-                                        long optionCashUnitsPerContract, boolean ordersComplete, int accountLaneId,
-                                        long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrument, settlementPriceTicks, optionCashUnitsPerContract, ordersComplete,
-                    accountLaneId, nextCursorOrderId, nextCursorUserId, commandId, 0);
-        }
-        /**
-         * 检查非负价格、权利金及保险额、有效 Lane 和游标；撤单未结束不能保留用户游标或保险额，撤单结束后订单游标必须归零。
-         */
+            boolean ordersComplete, long nextCursorOrderId, long nextCursorUserId,
+            long requiredInsuranceUnits) {
         public LifecycleProgressRuntime {
             if (settlementId <= 0 || instrument == null || settlementPriceTicks < 0
                     || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
-                    || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorOrderId < 0 || nextCursorUserId < 0
-                    || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)
-                    || commandId == null) throw new IllegalArgumentException("invalid lifecycle progress");
-        }
-        /**
-         * 使用账户 Lane 零及默认零保险额构造进度，委托完整构造校验。
-         * @param settlementId 当前资金费或生命周期结算编号，完成入口要求正数
-         * @param instrument 本进度关联的规范合约输入
-         * @param settlementPriceTicks 生命周期采用的非负结算价，具体产品另行约束
-         * @param optionCashUnitsPerContract 期权每合约非负现金结算额
-         * @param ordersComplete 撤单阶段是否已结束，决定后续使用订单还是用户游标
-         * @param nextCursorOrderId 下一页订单游标，非负，撤单完成阶段须为零
-         * @param nextCursorUserId 下一页继续处理的用户游标，非负，撤单未结束阶段须为零
-         * @param commandId 本次结算或分页命令 UUID
-         */
-        public LifecycleProgressRuntime(long settlementId, CoreInstrument instrument, long settlementPriceTicks,
-                                        long optionCashUnitsPerContract, boolean ordersComplete,
-                                        long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrument, settlementPriceTicks, optionCashUnitsPerContract,
-                    ordersComplete, 0, nextCursorOrderId, nextCursorUserId, commandId);
+                    || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)) {
+                throw new IllegalArgumentException("invalid lifecycle progress");
+            }
         }
     }
 

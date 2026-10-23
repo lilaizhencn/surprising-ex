@@ -16,7 +16,6 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
-import com.surprising.aeron.protocol.CoreRoute;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -134,11 +133,8 @@ class CoreLifecycleWorkTest {
                 Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4);
         // 保存预设资金费用户游标和到期撤单游标的财库状态。
         CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of("1", new CoreTreasuryState.FundingProgress(11, 100, 0, 41,
-                        UUID.fromString("00000000-0000-0000-0000-000000000011"), 60_000, 9)),
-                Map.of("1", new CoreTreasuryState.LifecycleProgress(12, 60_000,
-                        0, false, 91, 0,
-                        UUID.fromString("00000000-0000-0000-0000-000000000012"))));
+                Map.of("1", new CoreTreasuryState.FundingProgress(11, 100, 41, 60_000, 9)),
+                Map.of("1", new CoreTreasuryState.LifecycleProgress(12, 60_000, false, 91, 0, 0)));
         // 用上述币对、风险及财库组装的旧交易状态，供恢复入口投影。
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(), Map.of(), Map.of("1", instrument), risk, treasury);
@@ -166,8 +162,7 @@ class CoreLifecycleWorkTest {
      * @param payload 已编码查询参数
      */
     private static CoreMessage query(CoreMessageType type, byte[] payload) {
-        return new CoreMessage(new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION,
-                com.surprising.aeron.protocol.WireMessageKind.QUERY, type, UUID.randomUUID(),
-                ProductLine.LINEAR_PERPETUAL, CoreRoute.DEFAULT, CommandSource.GATEWAY, 1, 0, 0, 1, 1), payload);
+        return new CoreMessage(new CoreMessageHeader(CoreProtocol.SCHEMA_VERSION, type, UUID.randomUUID(),
+                ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 1, 0, 0, 1, 1), payload);
     }
 }

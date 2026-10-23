@@ -36,7 +36,7 @@ class LifecycleGuardTest {
                             type.ordinal(), "BTC", inverse ? "USD" : "USDT", inverse ? "BTC" : "USDT",
                             1, 1, 1, 100_000, 50_000, 0, 0, 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
             var early = h.state().apply(h.command(CoreMessageType.SETTLE_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "42", 100, 0))));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "42", 100))));
             assertThat(early.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(h.state().tradingState().treasuryState().lifecycleSettlements()).isEmpty();
             h.advanceClockTo(2_000_000_000_000L);
@@ -48,7 +48,7 @@ class LifecycleGuardTest {
             assertThat(expired.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(h.state().tradingState().orders()).isEmpty();
             h.execute(h.command(CoreMessageType.SETTLE_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "42", 100, 0))));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "42", 100))));
             assertThat(h.state().tradingState().treasuryState().lifecycleSettlements()).containsEntry("42", 10L);
         }
     }

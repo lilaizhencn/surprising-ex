@@ -78,7 +78,7 @@ public class SettlementSolvencyBenchmark {
     private CoreSettlementProgressView page(long cursor) {
         return CoreSettlementProgressCodec.decode(harness.execute(harness.command(CoreMessageType.SETTLE_INSTRUMENT,
                 CommandSource.OPERATIONS, 0, TradingCommandCodec.encodeSettleInstrument(
-                        new SettleInstrumentCommand(11, "41", 1000, 0, cursor, 16, 0, 16)))).data());
+                        new SettleInstrumentCommand(11, "41", 1000, cursor, 16, 0, 16)))).data());
     }
 
     @Benchmark

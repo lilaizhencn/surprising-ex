@@ -28,9 +28,9 @@ class CommandReplicationTest {
         service.onSessionMessage(null, 0, buffer, 0, bytes.length, null);
         assertThatThrownBy(() -> service.onSessionMessage(null, 0, buffer, 0, bytes.length, null))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("sequence gap");
-        buffer.putLong(40, 2, ByteOrder.LITTLE_ENDIAN);
+        buffer.putLong(36, 2, ByteOrder.LITTLE_ENDIAN);
         service.onSessionMessage(null, 0, buffer, 0, bytes.length, null);
-        buffer.putInt(72, 0, ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(68, 0, ByteOrder.LITTLE_ENDIAN);
         assertThatThrownBy(() -> service.onSessionMessage(null, 0, buffer, 0, bytes.length, null))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("invalid diagnostic command");
     }

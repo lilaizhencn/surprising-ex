@@ -163,8 +163,7 @@ class SharedProductLineSnapshotContractTest {
         long settlementId = 91_000L + productLine.ordinal();
         // 到期结算推进到终态后的响应。
         CoreResponse settlement = applyTerminal(state, operations(productLine, 2, CoreMessageType.SETTLE_INSTRUMENT,
-                TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                        settlementId, SYMBOL, 100, productLine.isOptionProduct() ? 10 : 0))));
+                TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(settlementId, SYMBOL, 100))));
         assertApplied(settlement);
         assertThat(state.tradingState().treasuryState().lifecycleSettlements()).containsEntry(SYMBOL, settlementId);
         // 品种已结算后再次挂单的响应，要求 INSTRUMENT_SETTLED。

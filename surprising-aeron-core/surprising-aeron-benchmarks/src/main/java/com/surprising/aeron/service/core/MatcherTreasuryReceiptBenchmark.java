@@ -33,8 +33,7 @@ public class MatcherTreasuryReceiptBenchmark {
     private final UUID commandId = new UUID(1, 2);
 
     @Setup public void setup() {
-        runtime = new TradingAccountRuntime(new LaneTopology(1, 0, 0,
-                laneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256));
+        runtime = new TradingAccountRuntime(new LaneTopology(1, 0, laneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256));
         identities = new RuntimeIdentityRegistry();
         runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,

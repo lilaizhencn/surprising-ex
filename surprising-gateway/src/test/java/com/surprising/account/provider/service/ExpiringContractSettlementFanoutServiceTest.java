@@ -51,7 +51,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         verify(aeron).command(eq(CoreMessageType.SETTLE_INSTRUMENT), org.mockito.ArgumentMatchers.any(),
                 eq(0L), payload.capture());
         assertThat(TradingCommandCodec.decodeSettleInstrument(payload.getValue())).isEqualTo(
-                new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(), "51", 100, 0));
+                new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(), "51", 100));
     }
 
     @Test
@@ -68,8 +68,7 @@ class ExpiringContractSettlementFanoutServiceTest {
         verify(aeron).command(eq(CoreMessageType.SETTLE_INSTRUMENT), org.mockito.ArgumentMatchers.any(),
                 eq(0L), payload.capture());
         assertThat(TradingCommandCodec.decodeSettleInstrument(payload.getValue())).isEqualTo(
-                new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(),
-                        "45", 71_000, 1_000));
+                new SettleInstrumentCommand(SETTLEMENT_TIME.toEpochMilli(), "45", 71_000));
     }
 
     @Test

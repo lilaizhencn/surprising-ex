@@ -114,8 +114,7 @@ public class LifecyclePaginationBenchmark {
         do {
             var result = harness.execute(harness.command(CoreMessageType.SETTLE_INSTRUMENT,
                     CommandSource.OPERATIONS, 0, TradingCommandCodec.encodeSettleInstrument(
-                            new SettleInstrumentCommand(10, "43", 120, 0,
-                                    userCursor, 16, orderCursor, 16))));
+                            new SettleInstrumentCommand(10, "43", 120, userCursor, 16, orderCursor, 16))));
             var progress = CoreSettlementProgressCodec.decode(result.data());
             orderCursor = progress.nextCursorOrderId();
             userCursor = progress.nextCursorUserId();

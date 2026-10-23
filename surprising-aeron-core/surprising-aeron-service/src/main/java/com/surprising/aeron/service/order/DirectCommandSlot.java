@@ -135,8 +135,6 @@ public final class DirectCommandSlot {
     private RuntimeLiquidationResolution.ResolutionWork reusableResolutionWork;
     /** 首次绑定当前运行时后只重置预算的风险扫描器。 */
     private RiskScanCoordinator reusableRiskCoordinator;
-    /** 跨命令保留的可空保险基金调整工作。 */
-    private RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment;
 
     /** @param owner 本槽及其所有续步共同服务的交易运行时 */
     public DirectCommandSlot(TradingCoreRuntime owner) {
@@ -337,13 +335,6 @@ public final class DirectCommandSlot {
             reusableRiskCoordinator.resetForCommand(maxUsers);
         }
         return reusableRiskCoordinator;
-    }
-
-    /**
-     * 返回已记住的保险基金调整工作，初次可能为空。
-     */
-    public com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment() {
-        return reusableInsuranceAdjustment;
     }
 
     /**

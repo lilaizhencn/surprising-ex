@@ -99,9 +99,7 @@ public final class ClusterApiAcceptanceMain {
                             19_000_000_000L + seed, instrumentId, 10_000)));
         } else if (isExpiring()) {
             applied(1, CoreMessageType.SETTLE_INSTRUMENT,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                            19_100_000_000L + seed, instrumentId, 120,
-                            productLine == ProductLine.OPTION ? 25 : 0)));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(19_100_000_000L + seed, instrumentId, 120)));
         }
     }
 

@@ -131,8 +131,7 @@ class CoreProductLineArchitectureContractTest {
             CoreInstrument own = reducer.registerInstrument(TradingCoreState.empty(line), instrument(line))
                     .instruments().values().iterator().next();
             // 为当前本线合约构造的到期结算请求
-            SettleInstrumentCommand command = new SettleInstrumentCommand(
-                    7, own.instrumentId(), 100, 0);
+            SettleInstrumentCommand command = new SettleInstrumentCommand(7, own.instrumentId(), 100);
 
             if (line.isDeliveryProduct()) {
                 rules.validateLifecycleSettlement(own, command);

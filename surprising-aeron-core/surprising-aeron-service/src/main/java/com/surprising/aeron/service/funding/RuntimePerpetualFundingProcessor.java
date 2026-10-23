@@ -161,10 +161,6 @@ public final class RuntimePerpetualFundingProcessor {
     public static final class FundingWork extends SystemLedgerCommand {
         /** 本页资金费编号、费率和用户分页输入。 */
         private ApplyFundingCommand command;
-        /** 本页命令 UUID，非空表示启用分页，续页进度同时保存此标识。 */
-        private UUID chunkCommandId;
-        /** 原权威运行时；Owner 写元数据，各账户 Lane 与账本在所属作用域写状态。 */
-        private TradingAccountRuntime runtime;
         /** 本轮固定的永续币对配置，续页校验要求与进度保存对象相同。 */
         private CoreInstrument instrument;
         /**
@@ -247,7 +243,7 @@ public final class RuntimePerpetualFundingProcessor {
                 int settleAssetId, long fundingMark, long fundingPriceSequence, Iterable<Long> indexedUserIds) {
             if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns funding routes");
             initializeLedgerCommand(runtime);
-            this.command = command; this.chunkCommandId = chunkCommandId; this.runtime = runtime;
+            this.command = command;
             this.instrument = instrument; this.symbolId = symbolId; this.settleAssetId = settleAssetId;
             this.fundingMark = fundingMark; this.fundingPriceSequence = fundingPriceSequence;
             this.indexedUserIds = indexedUserIds; userPage = null; selectedUserIds = null;
@@ -369,9 +365,8 @@ public final class RuntimePerpetualFundingProcessor {
             }
             treasuryDelta.apply(ledger);
             if (!chunked || userPage.complete()) ledger.setFundingSettlement(symbolId, command.settlementId());
-            else ledger.setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
-                    command.settlementId(), instrument, command.fundingRatePpm(),
-                    userPage.accountLaneId(), userPage.nextCursorUserId(), chunkCommandId, fundingMark, fundingPriceSequence));
+            else ledger.setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(command.settlementId(),
+                    instrument, command.fundingRatePpm(), userPage.nextCursorUserId(), fundingMark, fundingPriceSequence));
             payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));
         }
 

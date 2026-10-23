@@ -6,9 +6,9 @@ import java.nio.ByteOrder;
 public final class CoreProtocol {
 
     public static final int MAGIC = 0x53584558;
-    public static final int SCHEMA_VERSION = 8;
-    public static final int HEADER_LENGTH = 76;
-    public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 36;
+    public static final int SCHEMA_VERSION = 9;
+    public static final int HEADER_LENGTH = 72;
+    public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 32;
     public static final int CLUSTER_MAX_MESSAGE_LENGTH = 2 * 1024 * 1024;
 
     private CoreProtocol() {
@@ -37,7 +37,6 @@ public final class CoreProtocol {
         putInt(destination, cursor, response.status().wireCode()); cursor += Integer.BYTES;
         putInt(destination, cursor, response.commandStatus().wireCode()); cursor += Integer.BYTES;
         putInt(destination, cursor, response.resultCode().wireCode()); cursor += Integer.BYTES;
-        putInt(destination, cursor, response.routeVersion()); cursor += Integer.BYTES;
         putLong(destination, cursor, committedCoreSequence); cursor += Long.BYTES;
         putLong(destination, cursor, response.appliedCommandCount()); cursor += Long.BYTES;
         putInt(destination, cursor, response.dataLength()); cursor += Integer.BYTES;
@@ -70,7 +69,6 @@ public final class CoreProtocol {
         ResponseStatus status = ResponseStatus.fromWireCode(buffer.getInt());
         ResponseStatus commandStatus = ResponseStatus.fromWireCode(buffer.getInt());
         CoreResultCode resultCode = CoreResultCode.fromWireCode(buffer.getInt());
-        int routeVersion = buffer.getInt();
         long committedCoreSequence = buffer.getLong();
         long appliedCommandCount = buffer.getLong();
         int dataLength = buffer.getInt();
@@ -81,7 +79,6 @@ public final class CoreProtocol {
         if (dataLength > 0) {
             buffer.get(data);
         }
-        return CoreResponse.decoded(status, commandStatus, resultCode, routeVersion, committedCoreSequence,
-                appliedCommandCount, data);
+        return CoreResponse.decoded(status, commandStatus, resultCode, committedCoreSequence, appliedCommandCount, data);
     }
 }

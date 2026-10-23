@@ -136,8 +136,7 @@ public final class ClusterProductLineGateMain {
         }
         long optionCash = productLine == ProductLine.OPTION ? 20 : 0;
         applied(1, CoreMessageType.SETTLE_INSTRUMENT,
-                TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                        9_100_000_000L + seed, SYMBOL, 120, optionCash)));
+                TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(9_100_000_000L + seed, SYMBOL, 120)));
     }
 
     private void executeLiquidation(String settleAsset) {

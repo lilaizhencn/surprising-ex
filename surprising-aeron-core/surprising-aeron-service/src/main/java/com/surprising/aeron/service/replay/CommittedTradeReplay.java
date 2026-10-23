@@ -400,7 +400,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
         if (command.header().messageType() == CoreMessageType.UPSERT_ALGO_ORDER
                 && commandResult != null && commandResult.status() == ResponseStatus.APPLIED) {
             // 成功算法更新载荷中的父单元数据
-            var submitted = CoreAlgoOrderCodec.decode(command.payloadUnsafe());
+            var submitted = CoreAlgoOrderCodec.decodeCommand(command.payloadUnsafe());
             dirty.put(submitted.algoOrderId(), submitted.userId());
         }
         // 首子单可能尚未挂父路由就已成交，因此复用已解析的下单收据身份，避免每条普通订单帧都重复解析客户身份。

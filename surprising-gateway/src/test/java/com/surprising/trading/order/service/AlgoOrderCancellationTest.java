@@ -128,9 +128,9 @@ class AlgoOrderCancellationTest {
             when(gateway.algoOrders(anyLong(), anyString(), anyLong(), anyInt()))
                     .thenAnswer(call -> List.of(state.get()));
             when(gateway.tryCommand(eq(CoreMessageType.UPSERT_ALGO_ORDER), any(), eq(7L), any()))
-                    .thenAnswer(call -> { state.set(CoreAlgoOrderCodec.decode(call.getArgument(3))); return true; });
+                    .thenAnswer(call -> { state.set(CoreAlgoOrderCodec.decodeCommand(call.getArgument(3))); return true; });
             when(gateway.command(eq(CoreMessageType.UPSERT_ALGO_ORDER), any(), eq(7L), any()))
-                    .thenAnswer(call -> { state.set(CoreAlgoOrderCodec.decode(call.getArgument(3))); return null; });
+                    .thenAnswer(call -> { state.set(CoreAlgoOrderCodec.decodeCommand(call.getArgument(3))); return null; });
             store = new AeronAlgoOrderStore(gateway, properties);
             service = new AlgoOrderService(properties, orders, store, mock(AlgoOrderProjectionRepository.class), mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class));
             completeCancellation();

@@ -8,9 +8,8 @@ import static org.assertj.core.api.Assertions.*;
 class BorrowedResponseSlotTest {
     private static void initialize(CoreMessage slot, long id) {
         slot.decoderPayloadBuffer(0);
-        slot.decoderHeader(CoreProtocol.SCHEMA_VERSION, WireMessageKind.COMMAND, CoreMessageType.ADJUST_BALANCE,
-                new UUID(1, id), ProductLine.SPOT, CoreRoute.DEFAULT, CommandSource.GATEWAY,
-                1, id, 7, 1, id);
+        slot.decoderHeader(CoreProtocol.SCHEMA_VERSION, CoreMessageType.ADJUST_BALANCE, new UUID(1, id), ProductLine.SPOT,
+                CommandSource.GATEWAY, 1, id, 7, 1, id);
     }
 
     @Test void terminalResponseAndHeaderRemainLeasedThroughTheLastTransportReader() {

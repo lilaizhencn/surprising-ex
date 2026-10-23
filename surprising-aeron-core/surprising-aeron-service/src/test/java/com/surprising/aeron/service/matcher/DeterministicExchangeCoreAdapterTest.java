@@ -495,7 +495,7 @@ class DeterministicExchangeCoreAdapterTest {
         assertThat(decoded.symbols()).containsExactlyEntriesOf(snapshot.symbols());
         assertThat(decoded.users()).containsExactlyElementsOf(snapshot.users());
         assertThat(decoded.modules()).hasSize(
-                decoded.matchingEngineCount() + decoded.riskEngineCount());
+                decoded.matchingEngineCount());
         assertThat(decoded.modules().stream()
                 .filter(/* 当前用来筛选和检查类型、实例编号的原生模块。 */ module -> module.type().name().equals("MATCHING_ENGINE_ROUTER"))
                 .map(/* 当前用来筛选和检查类型、实例编号的原生模块。 */ module -> module.instanceId()).sorted().toList())

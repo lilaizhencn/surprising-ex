@@ -57,21 +57,21 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
     }
     public CoreTriggerOrderStateView place(UUID id, long userId, CoreTriggerOrderStateView view) {
         CoreResponse response = command(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,
-                CoreTriggerOrderCodec.encodeState(view));
+                CoreTriggerOrderCodec.encodePlacement(view));
         return CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("Aeron trigger placement returned no state"));
     }
     public CompletionStage<CoreTriggerOrderStateView> placeAsync(
             UUID id, long userId, CoreTriggerOrderStateView view) {
         return commandAsync(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,
-                        CoreTriggerOrderCodec.encodeState(view))
+                        CoreTriggerOrderCodec.encodePlacement(view))
                 .thenApply(response -> CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst()
                         .orElseThrow(() -> new IllegalStateException(
                                 "Aeron trigger placement returned no state")));
     }
     public List<CoreTriggerOrderStateView> placeOcoPair(UUID id, long userId, List<CoreTriggerOrderStateView> legs) {
         return CoreTriggerOrderCodec.decodeList(command(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, id,
-                userId, CoreTriggerOrderCodec.encodeList(legs)).data());
+                userId, CoreTriggerOrderCodec.encodePlacementList(legs)).data());
     }
 
     public List<CoreTriggerOrderStateView> openOrders(long userId, String instrumentId, long before, int limit) {

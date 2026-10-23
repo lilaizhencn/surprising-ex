@@ -18,7 +18,6 @@ class LaneTopologyTest {
         LaneTopology topology = LaneTopology.productionDefault();
 
         assertThat(topology.matchingEngineCount()).isEqualTo(1);
-        assertThat(topology.riskEngineCount()).isZero();
         assertThat(topology.matcherShardMask()).isZero();
         assertThat(topology.accountLaneCount()).isEqualTo(2);
     }
@@ -62,14 +61,11 @@ class LaneTopologyTest {
      */
     @Test
     void rejectsInvalidShardMaskOrNonPowerOfTwoCounts() {
-        assertThatThrownBy(() -> new LaneTopology(4, 1, 2, 4,
-                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
+        assertThatThrownBy(() -> new LaneTopology(4, 2, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LaneTopology(3, 1, 2, 4,
-                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
+        assertThatThrownBy(() -> new LaneTopology(3, 2, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LaneTopology(4, 1, 3, 3,
-                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
+        assertThatThrownBy(() -> new LaneTopology(4, 3, 3, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

@@ -9,10 +9,10 @@ import static org.assertj.core.api.Assertions.*;
 
 class CommandFingerprintLeaseTest {
     @Test void canonicalDigestMatchesThePublishedWireFieldVector() {
-        // Canonical-v1: schema8, ADJUST_BALANCE10, SPOT1, shard0/route3, gateway1, user7,
+        // Canonical-v2: schema9, ADJUST_BALANCE10, SPOT1, gateway1, user7,
         // payloadLength14 then LE text-length4, ASCII USDT, LE delta1. SHA-256 computed independently from the little-endian wire fields.
         var expected = java.util.HexFormat.of().parseHex(
-                "821956c4fba0c4d4111e9c3212ae02bd7bddfc346638835de7e0adc6c5cc4686");
+                "e22dac5f78363d1f3f25a948cd94f3ac37021584c139ad9a4f29ae40f159c829");
         var calculator = new CommandFingerprint.Calculator();
         var message = probe(ProductLine.SPOT, 1);
         assertThat(calculator.of(message).bytes()).containsExactly(expected);
@@ -101,8 +101,8 @@ class CommandFingerprintLeaseTest {
     private static void load(CoreMessage target, CoreMessage source) {
         assertThat(target.acquireDecoderSlot()).isTrue();
         var h = source.header();
-        target.decoderHeader(h.schemaVersion(), h.kind(), h.messageType(), h.commandId(), h.productLine(), h.route(),
-                h.source(), h.sourceId(), h.sourceSequence(), h.userId(), h.submittedAtEpochMillis(), h.correlationId());
+        target.decoderHeader(h.schemaVersion(), h.messageType(), h.commandId(), h.productLine(), h.source(), h.sourceId(),
+                h.sourceSequence(), h.userId(), h.submittedAtEpochMillis(), h.correlationId());
         source.copyPayloadTo(target.decoderPayloadBuffer(source.payloadLength()), 0);
     }
 }

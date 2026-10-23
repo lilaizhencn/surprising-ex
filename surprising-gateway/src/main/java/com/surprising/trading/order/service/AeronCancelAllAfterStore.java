@@ -1,6 +1,5 @@
 package com.surprising.trading.order.service;
 
-import com.surprising.aeron.protocol.CoreCancelAllAfterAction;
 import com.surprising.aeron.protocol.CoreCancelAllAfterCodec;
 import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
 import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
@@ -24,8 +23,8 @@ public class AeronCancelAllAfterStore {
 
     public CancelAllAfterTimer set(long userId, String symbolScope, long countdownMillis,
                                    Instant triggerAt, Instant now) {
-        command(CoreCancelAllAfterAction.SET, userId, symbolScope, countdownMillis,
-                triggerAt == null ? 0 : triggerAt.toEpochMilli(), 0, 0, 0, now);
+        command(CoreCancelAllAfterCommand.set(userId, symbolScope, countdownMillis,
+                triggerAt == null ? 0 : triggerAt.toEpochMilli(), now.toEpochMilli()));
         return exact(userId, symbolScope).orElseThrow(() -> new IllegalStateException("Aeron timer write not visible"));
     }
 
@@ -34,43 +33,31 @@ public class AeronCancelAllAfterStore {
     }
 
     public Optional<CancelAllAfterTimer> claim(CancelAllAfterTimer timer, Instant now) {
-        boolean applied = tryCommand(CoreCancelAllAfterAction.CLAIM, timer.userId(), timer.symbolScope(),
-                timer.countdownMs(), epochMillis(timer.triggerAt()), timerRevision(timer),
-                timer.canceledOrders(), timer.canceledTriggerOrders(), now);
+        boolean applied = aeron.tryCommand(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, UUID.randomUUID(), timer.userId(),
+                CoreCancelAllAfterCodec.encodeCommand(CoreCancelAllAfterCommand.claim(
+                        timer.userId(), timer.symbolScope(), timerRevision(timer), now.toEpochMilli())));
         return applied ? exact(timer.userId(), timer.symbolScope()) : Optional.empty();
     }
 
     public void complete(CancelAllAfterTimer timer, int canceledOrders, int canceledTriggerOrders, Instant now) {
-        command(CoreCancelAllAfterAction.COMPLETE, timer.userId(), timer.symbolScope(), timer.countdownMs(),
-                epochMillis(timer.triggerAt()), timerRevision(timer), canceledOrders, canceledTriggerOrders, now);
+        command(CoreCancelAllAfterCommand.complete(timer.userId(), timer.symbolScope(), timerRevision(timer),
+                canceledOrders, canceledTriggerOrders, now.toEpochMilli()));
     }
 
     public void retry(CancelAllAfterTimer timer, Instant now) {
-        command(CoreCancelAllAfterAction.RETRY, timer.userId(), timer.symbolScope(), timer.countdownMs(),
-                epochMillis(timer.triggerAt()), timerRevision(timer), timer.canceledOrders(),
-                timer.canceledTriggerOrders(), now);
+        command(CoreCancelAllAfterCommand.retry(timer.userId(), timer.symbolScope(), timerRevision(timer), now.toEpochMilli()));
     }
 
     public Optional<CancelAllAfterTimer> exact(long userId, String symbolScope) {
         return aeron.cancelAllAfterTimers(userId, symbolScope, 0, 1).stream().findFirst().map(this::timer);
     }
 
-    private void command(CoreCancelAllAfterAction action, long userId, String symbolScope, long countdownMillis,
-                         long triggerAt, long revision, int canceledOrders, int canceledTriggerOrders, Instant now) {
-        CoreCancelAllAfterCommand command = new CoreCancelAllAfterCommand(action, userId, symbolScope,
-                countdownMillis, triggerAt, revision, canceledOrders, canceledTriggerOrders, now.toEpochMilli());
-        aeron.command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, commandId(command), userId,
+    private void command(CoreCancelAllAfterCommand command) {
+        aeron.command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, commandId(command), command.userId(),
                 CoreCancelAllAfterCodec.encodeCommand(command));
     }
 
-    private boolean tryCommand(CoreCancelAllAfterAction action, long userId, String symbolScope, long countdownMillis,
-                               long triggerAt, long revision, int canceledOrders, int canceledTriggerOrders,
-                               Instant now) {
-        CoreCancelAllAfterCommand command = new CoreCancelAllAfterCommand(action, userId, symbolScope,
-                countdownMillis, triggerAt, revision, canceledOrders, canceledTriggerOrders, now.toEpochMilli());
-        return aeron.tryCommand(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, UUID.randomUUID(), userId,
-                CoreCancelAllAfterCodec.encodeCommand(command));
-    }
+
 
     private UUID commandId(CoreCancelAllAfterCommand command) {
         String key = "CANCEL_AFTER:" + command.action() + ':' + command.userId() + ':' + command.symbolScope()
@@ -90,6 +77,5 @@ public class AeronCancelAllAfterStore {
         return view.revision();
     }
 
-    private static long epochMillis(Instant value) { return value == null ? 0 : value.toEpochMilli(); }
     private static Instant instant(long epochMillis) { return epochMillis == 0 ? null : Instant.ofEpochMilli(epochMillis); }
 }

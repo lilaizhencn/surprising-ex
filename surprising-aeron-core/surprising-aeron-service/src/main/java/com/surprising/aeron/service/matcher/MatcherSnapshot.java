@@ -86,8 +86,6 @@ public record MatcherSnapshot(
         }
         // 按撮合引擎实例编号保存的模块存在标记。
         boolean[] matching = new boolean[topology.matchingEngineCount()];
-        // 按风险引擎实例编号保存的模块存在标记。
-        boolean[] risk = new boolean[topology.riskEngineCount()];
         // 当前所有模块序号中的最大值，结束时必须等于清单 Matcher 水位。
         long maximumModuleSequence = Long.MIN_VALUE;
         for (SerializedModule /* 当前需要核对快照编号、实例类型和序号边界的原生模块。 */ module : modules) {
@@ -101,11 +99,7 @@ public record MatcherSnapshot(
                     throw new IllegalArgumentException("duplicate or out-of-range matching module");
                 }
                 matching[module.instanceId()] = true;
-            } else if (module.type() == SerializedModuleType.RISK_ENGINE) {
-                if (module.instanceId() >= risk.length || risk[module.instanceId()]) {
-                    throw new IllegalArgumentException("duplicate or out-of-range risk module");
-                }
-                risk[module.instanceId()] = true;
+
             } else {
                 throw new IllegalArgumentException("unsupported matcher module");
             }
@@ -113,11 +107,8 @@ public record MatcherSnapshot(
         // 所有撮合引擎实例是否都存在。
         boolean completeMatching = true;
         for (boolean /* 该分片或引擎实例是否已经在清单中出现。 */ present : matching) completeMatching &= present;
-        // 所有风险引擎实例是否都存在。
-        boolean completeRisk = true;
-        for (boolean /* 该分片或引擎实例是否已经在清单中出现。 */ present : risk) completeRisk &= present;
-        if (!completeMatching || !completeRisk
-                || modules.size() != topology.matchingEngineCount() + topology.riskEngineCount()
+        if (!completeMatching
+                || modules.size() != topology.matchingEngineCount()
                 || maximumModuleSequence != matcherSequence) {
             throw new IllegalArgumentException("incomplete matcher snapshot modules");
         }
@@ -127,10 +118,6 @@ public record MatcherSnapshot(
      * 从清单拓扑返回撮合引擎数量。
      */
     public int matchingEngineCount() { return topology.matchingEngineCount(); }
-    /**
-     * 从清单拓扑返回风险引擎数量。
-     */
-    public int riskEngineCount() { return topology.riskEngineCount(); }
     /**
      * 返回清单拓扑的撮合分片路由掩码。
      */

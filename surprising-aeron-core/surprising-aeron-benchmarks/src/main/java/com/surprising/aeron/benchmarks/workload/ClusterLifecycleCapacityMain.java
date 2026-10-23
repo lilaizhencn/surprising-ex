@@ -170,8 +170,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private void lifecycleBatch() {
         long started = System.nanoTime();
         applied(CoreMessageType.SETTLE_INSTRUMENT, 1,
-                TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                        9_500_000_000L + seed, instrumentId, 120, productLine == ProductLine.OPTION ? 25 : 0)),
+                TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(9_500_000_000L + seed, instrumentId, 120)),
                 "settle");
         long elapsed = System.nanoTime() - started;
         verifyFundsAndPositions(false);

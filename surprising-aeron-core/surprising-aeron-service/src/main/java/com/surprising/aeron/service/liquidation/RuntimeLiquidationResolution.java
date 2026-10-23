@@ -139,8 +139,6 @@ public final class RuntimeLiquidationResolution {
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
         /** 账本处理本决议时复用的保险余额和亏空变化缓冲，每次准备命令先清空。 */
         private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-        /** 本续步操作的运行时，Owner 通过它派发账户和账本工作。 */
-        private TradingAccountRuntime runtime;
         /** 当前保险补亏或完成命令，成功结束时释放引用。 */
         private ResolveLiquidationCommand command;
         /** liquidation：源账户 Lane 捕获的待处理强平记录，账本根据它判断剩余亏空与阶段；nextLiquidation：账本根据实际覆盖额生成的新强平记录，随后交回源账户 Lane 写入。 */
@@ -178,7 +176,7 @@ public final class RuntimeLiquidationResolution {
                 LiquidationRuntime liquidation, int assetId, InsuranceAllocationPolicy.ResolutionInputs allocation) {
             initializeLedgerCommand(runtime);
             runtime.requireRevisionCapacity();
-            this.runtime = runtime; this.command = command; this.liquidation = liquidation;
+            this.command = command; this.liquidation = liquidation;
             this.assetId = assetId; this.allocation = allocation;
             laneMask = runtime.topology().accountLaneMask(liquidation == null ? sourceUserId : liquidation.userId());
             nextLiquidation = null;

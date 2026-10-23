@@ -25,8 +25,7 @@ class AccountAeronGatewayTest {
         UUID commandId = UUID.randomUUID();
         when(clients.command(eq(CoreMessageType.SETTLE_INSTRUMENT), eq(commandId), eq(0L), any(byte[].class)))
                 .thenThrow(new ResultUnknownException(commandId, "unknown"));
-        CoreResponse committed = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED,
-                CoreResultCode.NONE, com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 8, 9, new byte[0]);
+        CoreResponse committed = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE, 8, 9, new byte[0]);
         when(clients.commandResult(commandId, 0L)).thenReturn(committed);
         AccountAeronGateway gateway = new AccountAeronGateway(clients);
 

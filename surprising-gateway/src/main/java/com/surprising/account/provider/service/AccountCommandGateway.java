@@ -118,10 +118,13 @@ public class AccountCommandGateway {
     }
 
     public PositionMarginAdjustmentResponse adjustPositionMargin(PositionMarginAdjustmentRequest request) {
+        if (request.marginMode() != MarginMode.ISOLATED) {
+            throw new com.surprising.account.provider.exception.AccountCommandRejectedException(
+                    "POSITION_MARGIN_ADJUSTMENT_INVALID", "Aeron command rejected: POSITION_MARGIN_ADJUSTMENT_INVALID");
+        }
         UUID commandId = commandId("position-margin", request.userId(), request.referenceId());
         aeron.command(CoreMessageType.ADJUST_POSITION_MARGIN, commandId, request.userId(),
-                TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand(
-                        request.instrumentId(), CoreMarginMode.valueOf(request.marginMode().name()),
+                TradingCommandCodec.encodeAdjustPositionMargin(new AdjustPositionMarginCommand(request.instrumentId(),
                         CorePositionSide.valueOf(request.positionSide().name()), request.amountUnits())));
         CoreUserStateView state = requireUserState(request.userId());
         var position = state.positions().stream()

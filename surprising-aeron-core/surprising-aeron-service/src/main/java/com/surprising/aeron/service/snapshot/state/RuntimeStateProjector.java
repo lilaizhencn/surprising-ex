@@ -110,17 +110,15 @@ public final class RuntimeStateProjector {
                 runtime.treasury().setFundingProgress(identities.symbolId(instrumentId),
                         new TreasuryRuntime.FundingProgressRuntime(progress.settlementId(),
                                 requireInstrument(source, instrumentId), progress.fundingRatePpm(),
-                                progress.accountLaneId(), progress.nextCursorUserId(), progress.commandId(),
-                                progress.markPriceTicks(), progress.priceSequence())));
+                                progress.nextCursorUserId(), progress.markPriceTicks(), progress.priceSequence())));
         source.treasuryState().lifecycleSettlements().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 该币对已经完整完成的资金费或生命周期结算编号。 */ settlementId) ->
                 runtime.treasury().setLifecycleSettlement(identities.symbolId(instrumentId), settlementId));
         source.treasuryState().lifecycleProgress().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 当前币对尚未完成的分页进度，连同固定计算参数及命令 UUID 恢复。 */ progress) ->
                 runtime.treasury().setLifecycleProgress(identities.symbolId(instrumentId),
                         new TreasuryRuntime.LifecycleProgressRuntime(progress.settlementId(),
                                 requireInstrument(source, instrumentId), progress.settlementPriceTicks(),
-                                progress.optionCashUnitsPerContract(), progress.ordersComplete(),
-                                progress.accountLaneId(), progress.nextCursorOrderId(),
-                                progress.nextCursorUserId(), progress.commandId(), progress.requiredInsuranceUnits())));
+                                progress.ordersComplete(), progress.nextCursorOrderId(), progress.nextCursorUserId(),
+                                progress.requiredInsuranceUnits())));
         source.riskState().liquidations().forEach((/* 当前强平业务记录的编号。 */ liquidationId, /* 需要恢复状态、亏空、费用及撤单游标的强平记录。 */ liquidation) ->
                 runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
                         identities.symbolId(liquidation.instrumentId()), liquidation.marginMode(),

@@ -34,18 +34,18 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * 交易状态的独立持久化格式。新快照外层版本三十七，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。三十五、三十六版由冻结读取器恢复，三十七版另以根字段十二声明最低业务读取修订，未知合法字段可按长度保留而不参与当前恢复。
- * 构造约定：工具类不创建实例；当前写版本三十七，历史固定布局只经独立读取器恢复。
+ * 交易状态的独立持久化格式。新快照外层版本三十八，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，三十八版另以根字段十二声明最低业务读取修订，未知合法字段按长度跳过而不参与当前恢复。
+ * 构造约定：工具类不创建实例；当前写版本三十八，历史布局不再接受。
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
-    /** 本编码器新写入的外层快照布局版本三十七。 */
-    private static final int VERSION = 37;
+    /** 本编码器新写入的外层快照布局版本三十八。 */
+    private static final int VERSION = 38;
     /** 当前支持的最高业务读取修订四，与外层布局版本分开管理。 */
     private static final int READER_REVISION = 4;
 
     /**
-     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本三十七头。根字段十二是最低业务读取修订：数量步长需二、非默认订单保护需三，算法退休量或待关联子单需四；不把 Java 类名或当前接口 DTO 当作磁盘结构。
+     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本三十八头。根字段十二是最低业务读取修订：数量步长需二、非默认订单保护需三，算法退休量或待关联子单需四；不把 Java 类名或当前接口 DTO 当作磁盘结构。
      * @param value 本方法要持久化的对应业务值，字段和顺序由固定编号定义
      */
     public static byte[] encode(TradingCoreState value) {
@@ -53,13 +53,13 @@ public final class TradingStateSnapshotCodec {
         byte[] fields = new SnapshotFields.Writer()
                 .number(1, SnapshotEnumCodes.encode(value.productLine()))
                 .number(2, value.revision())
-                .bytes(3, writeMap(value.users(), /* 当前业务表条目的键，由对应回调编码为独立键记录。 */ key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreUserState))
-                .bytes(4, writeMap(value.orders(), /* 当前业务表条目的键，由对应回调编码为独立键记录。 */ key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreOrderState))
-                .bytes(5, writeMap(value.instruments(), /* 当前业务表条目的键，由对应回调编码为独立键记录。 */ key -> new SnapshotFields.Writer().text(1, key).encode(), TradingStateSnapshotCodec::writeCoreInstrument))
+                .bytes(3, writeValues(value.users(), TradingStateSnapshotCodec::writeCoreUserState))
+                .bytes(4, writeValues(value.orders(), TradingStateSnapshotCodec::writeCoreOrderState))
+                .bytes(5, writeValues(value.instruments(), TradingStateSnapshotCodec::writeCoreInstrument))
                 .bytes(6, writeCoreRiskState(value.riskState()))
                 .bytes(7, writeCoreTreasuryState(value.treasuryState()))
                 .bytes(8, writeMap(value.leverages(), TradingStateSnapshotCodec::writeCoreLeverageKey, /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> new SnapshotFields.Writer().number(1, item).encode()))
-                .bytes(9, writeMap(value.algoOrders(), /* 当前业务表条目的键，由对应回调编码为独立键记录。 */ key -> new SnapshotFields.Writer().number(1, key).encode(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
+                .bytes(9, writeValues(value.algoOrders(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
                 .list(10, value.cancelAllAfterTimers().values(), TradingStateSnapshotCodec::writeCoreCancelAllAfterState)
                 .list(11, value.triggerOrders().values(), /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> writeCoreTriggerOrderStateView(item.view()))
                 .number(12, value.algoOrders().values().stream().anyMatch(/* 当前算法父单，检查是否存在需要读取修订四才能理解的退休量或待关联子单。 */ v -> v.retiredExecutedQuantitySteps() != 0 || v.pendingClosedChildId() != 0)
@@ -86,7 +86,7 @@ public final class TradingStateSnapshotCodec {
     }
 
     /**
-     * 先识别外层版本，三十五/三十六交给冻结读取器；三十七检查最低读取修订及产品线，再恢复用户、订单、币对、风险、财库等。触发单必须引用已恢复币对；三十七版解析中的协议错误原样抛出，其他运行时构造或算术错误包装为带原因的 ProtocolException。
+     * 先拒绝非当前外层版本，再检查最低读取修订及产品线，再恢复用户、订单、币对、风险、财库等。触发单必须引用已恢复币对；三十八版解析中的协议错误原样抛出，其他运行时构造或算术错误包装为带原因的 ProtocolException。
      * @param encoded 本方法所读的独立字段记录；decode 入口还包含外层版本头
      * @param expectedProductLine 调用方当前实例所属产品线，必须与快照一致
      */
@@ -94,7 +94,6 @@ public final class TradingStateSnapshotCodec {
         if (encoded == null || encoded.length < 4) throw new ProtocolException("truncated trading snapshot");
         // 快照最外层布局版本，区别于根字段十二的最低业务读取修订。
         int version = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt();
-        if (version == 35 || version == 36) return TradingSnapshotV36Reader.decode(encoded, expectedProductLine);
         if (version != VERSION) throw new ProtocolException("unsupported trading snapshot version: " + version);
         try {
             // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
@@ -107,11 +106,11 @@ public final class TradingStateSnapshotCodec {
             ProductLine product = SnapshotEnumCodes.readProductLine(r.integer(1));
             if (product != expectedProductLine) throw new ProtocolException("trading snapshot product line mismatch");
             // 按用户编号恢复的账户状态表。
-            Map<Long, CoreUserState> users = readMap(r.bytes(3), /* 当前独立键记录的字节，按字段一读出编号或业务名称。 */ key -> new SnapshotFields.Reader(key).number(1), TradingStateSnapshotCodec::readCoreUserState);
+            Map<Long, CoreUserState> users = readValues(r.bytes(3), TradingStateSnapshotCodec::readCoreUserState, CoreUserState::userId);
             // 按订单编号恢复的订单状态表。
-            Map<Long, CoreOrderState> orders = readMap(r.bytes(4), /* 当前独立键记录的字节，按字段一读出编号或业务名称。 */ key -> new SnapshotFields.Reader(key).number(1), TradingStateSnapshotCodec::readCoreOrderState);
+            Map<Long, CoreOrderState> orders = readValues(r.bytes(4), TradingStateSnapshotCodec::readCoreOrderState, CoreOrderState::orderId);
             // 按币对业务编号恢复的注册配置表，触发单随后引用其中配置。
-            Map<String, CoreInstrument> instruments = readMap(r.bytes(5), /* 当前独立键记录的字节，按字段一读出编号或业务名称。 */ key -> new SnapshotFields.Reader(key).text(1), TradingStateSnapshotCodec::readCoreInstrument);
+            Map<String, CoreInstrument> instruments = readValues(r.bytes(5), TradingStateSnapshotCodec::readCoreInstrument, CoreInstrument::instrumentId);
             // 按用户和币对范围恢复的倒计时撤单表。
             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = new TreeMap<>();
             for (var /* 当前解码并需要按业务键查重的倒计时撤单记录。 */ timer : r.list(10, TradingStateSnapshotCodec::readCoreCancelAllAfterState)) putUnique(timers, timer.key(), timer);
@@ -126,9 +125,22 @@ public final class TradingStateSnapshotCodec {
             return new TradingCoreState(product, r.number(2), users, orders, instruments,
                     readCoreRiskState(r.bytes(6)), readCoreTreasuryState(r.bytes(7)),
                     readMap(r.bytes(8), TradingStateSnapshotCodec::readCoreLeverageKey, /* 当前杠杆值字段记录字节，字段一保存杠杆数值。 */ item -> new SnapshotFields.Reader(item).number(1)),
-                    readMap(r.bytes(9), /* 当前独立键记录的字节，按字段一读出编号或业务名称。 */ key -> new SnapshotFields.Reader(key).number(1), TradingStateSnapshotCodec::readCoreAlgoOrderState), timers, triggers);
+                    readValues(r.bytes(9), TradingStateSnapshotCodec::readCoreAlgoOrderState, CoreAlgoOrderState::algoOrderId), timers, triggers);
         } catch (/* 协议异常直接抛出，其他运行时异常在外层转换时作为原原因保留。 */ ProtocolException invalid) { throw invalid; }
         catch (/* 协议异常直接抛出，其他运行时异常在外层转换时作为原原因保留。 */ RuntimeException invalid) { throw new ProtocolException("invalid trading snapshot: " + invalid.getMessage(), invalid); }
+    }
+
+    /** 正文已携带身份的表只保存值，恢复时重建原索引并拒绝重复身份。 */
+    private static <K, V> byte[] writeValues(Map<K, V> values, Function<V, byte[]> encode) {
+        return new SnapshotFields.Writer().list(1, values.values(), encode).encode();
+    }
+
+    private static <K, V> Map<K, V> readValues(byte[] encoded, Function<byte[], V> decode,
+                                              Function<V, K> key) {
+        Map<K, V> values = new TreeMap<>();
+        for (V value : new SnapshotFields.Reader(encoded).list(1, decode))
+            putUnique(values, key.apply(value), value);
+        return values;
     }
 
     /**
@@ -880,9 +892,7 @@ public final class TradingStateSnapshotCodec {
         return new SnapshotFields.Writer()
                 .number(1, value.settlementId()) // 1：资金费或到期结算轮次编号
                 .number(2, value.fundingRatePpm()) // 2：本轮资金费率，百万分比
-                .number(3, value.accountLaneId()) // 3：账户 Lane 的分页位置
                 .number(4, value.nextCursorUserId()) // 4：资金费或到期结算下一页用户游标
-                .uuid(5, value.commandId()) // 5：原业务命令 UUID
                 .number(6, value.markPriceTicks()) // 6：标记价格
                 .number(7, value.priceSequence()) // 7：参考价格序号
                 .encode();
@@ -894,12 +904,9 @@ public final class TradingStateSnapshotCodec {
     private static FundingProgress readFundingProgress(byte[] encoded) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
-        return new FundingProgress(
-                r.number(1), // 1：资金费或到期结算轮次编号
-                r.number(2), // 2：本轮资金费率，百万分比
-                r.integer(3), // 3：账户 Lane 的分页位置
-                r.number(4), // 4：资金费或到期结算下一页用户游标
-                r.uuid(5), // 5：原业务命令 UUID
+        return new FundingProgress(r.number(1), // 1：资金费或到期结算轮次编号
+                r.number(2), // 3：账户 Lane 的分页位置
+                r.number(4), // 5：原业务命令 UUID
                 r.number(6), // 6：标记价格
                 r.number(7)); // 7：参考价格序号
     }
@@ -912,12 +919,9 @@ public final class TradingStateSnapshotCodec {
         return new SnapshotFields.Writer()
                 .number(1, value.settlementId()) // 1：资金费或到期结算轮次编号
                 .number(2, value.settlementPriceTicks()) // 2：固定到期或维护结算价格
-                .number(3, value.optionCashUnitsPerContract()) // 3：命令保存的每份期权结算金额参数
                 .bool(4, value.ordersComplete()) // 4：本轮到期结算是否已完成全部撤单
-                .number(5, value.accountLaneId()) // 5：账户 Lane 的分页位置
                 .number(6, value.nextCursorOrderId()) // 6：到期结算下一页订单游标
                 .number(7, value.nextCursorUserId()) // 7：资金费或到期结算下一页用户游标
-                .uuid(8, value.commandId()) // 8：原业务命令 UUID
                 .number(9, value.requiredInsuranceUnits()) // 9：本页到期结算需要补足的保险金额
                 .encode();
     }
@@ -928,15 +932,11 @@ public final class TradingStateSnapshotCodec {
     private static LifecycleProgress readLifecycleProgress(byte[] encoded) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
-        return new LifecycleProgress(
-                r.number(1), // 1：资金费或到期结算轮次编号
-                r.number(2), // 2：固定到期或维护结算价格
-                r.number(3), // 3：命令保存的每份期权结算金额参数
-                r.bool(4), // 4：本轮到期结算是否已完成全部撤单
-                r.integer(5), // 5：账户 Lane 的分页位置
+        return new LifecycleProgress(r.number(1), // 1：资金费或到期结算轮次编号
+                r.number(2), // 3：命令保存的每份期权结算金额参数
+                r.bool(4), // 5：账户 Lane 的分页位置
                 r.number(6), // 6：到期结算下一页订单游标
-                r.number(7), // 7：资金费或到期结算下一页用户游标
-                r.uuid(8), // 8：原业务命令 UUID
+                r.number(7), // 8：原业务命令 UUID
                 r.number(9)); // 9：本页到期结算需要补足的保险金额
     }
 
@@ -949,9 +949,9 @@ public final class TradingStateSnapshotCodec {
                 .number(1, SnapshotEnumCodes.encode(value.productLine())) // 1：独立产品线
                 .number(2, value.userId()) // 2：所属用户编号
                 .number(3, value.revision()) // 3：当前业务记录修订号
-                .bytes(4, writeMap(value.balances(), /* 当前嵌套业务表的原始键，使用该表明确的数值或文本编码。 */ key -> new SnapshotFields.Writer().text(1, key).encode(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeAssetBalance(item))) // 4：按资产保存的用户余额
-                .bytes(5, writeMap(value.reservations(), /* 当前嵌套业务表的原始键，使用该表明确的数值或文本编码。 */ key -> new SnapshotFields.Writer().number(1, key).encode(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeOrderReservation(item))) // 5：按订单编号保存的资金预留
-                .bytes(6, writeMap(value.positions(), /* 当前嵌套业务表的原始键，使用该表明确的数值或文本编码。 */ key -> new SnapshotFields.Writer().text(1, key).encode(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCorePositionState(item))) // 6：按业务键保存的用户持仓
+                .bytes(4, writeValues(value.balances(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeAssetBalance(item))) // 4：按资产保存的用户余额
+                .bytes(5, writeValues(value.reservations(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeOrderReservation(item))) // 5：按订单编号保存的资金预留
+                .bytes(6, writeValues(value.positions(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCorePositionState(item))) // 6：按业务键保存的用户持仓
                 .number(7, SnapshotEnumCodes.encode(value.positionMode())) // 7：单向或双向持仓模式
                 .encode();
     }
@@ -966,9 +966,9 @@ public final class TradingStateSnapshotCodec {
                 SnapshotEnumCodes.readProductLine(r.integer(1)), // 1：独立产品线
                 r.number(2), // 2：所属用户编号
                 r.number(3), // 3：当前业务记录修订号
-                readMap(r.bytes(4), /* 当前嵌套 Map 键记录字节，按字段一解析其数值或文本。 */ key -> new SnapshotFields.Reader(key).text(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readAssetBalance(item)), // 4：按资产保存的用户余额
-                readMap(r.bytes(5), /* 当前嵌套 Map 键记录字节，按字段一解析其数值或文本。 */ key -> new SnapshotFields.Reader(key).number(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readOrderReservation(item)), // 5：按订单编号保存的资金预留
-                readMap(r.bytes(6), /* 当前嵌套 Map 键记录字节，按字段一解析其数值或文本。 */ key -> new SnapshotFields.Reader(key).text(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCorePositionState(item)), // 6：按业务键保存的用户持仓
+                readValues(r.bytes(4), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readAssetBalance(item), AssetBalance::asset), // 4：按资产保存的用户余额
+                readValues(r.bytes(5), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readOrderReservation(item), OrderReservation::orderId), // 5：按订单编号保存的资金预留
+                readValues(r.bytes(6), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCorePositionState(item), CorePositionState::key), // 6：按业务键保存的用户持仓
                 SnapshotEnumCodes.readCorePositionMode(r.integer(7))); // 7：单向或双向持仓模式
     }
 
@@ -1059,10 +1059,10 @@ public final class TradingStateSnapshotCodec {
      */
     private static byte[] writeCoreRiskState(CoreRiskState value) {
         return new SnapshotFields.Writer()
-                .bytes(1, writeMap(value.markPrices(), /* 当前嵌套业务表的原始键，使用该表明确的数值或文本编码。 */ key -> new SnapshotFields.Writer().text(1, key).encode(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreMarkPriceState(item))) // 1：按币对保存的标记价与参考价
-                .bytes(2, writeMap(value.snapshots(), /* 当前嵌套业务表的原始键，使用该表明确的数值或文本编码。 */ key -> new SnapshotFields.Writer().text(1, key).encode(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreRiskSnapshot(item))) // 2：按用户币对方向保存的风险估值快照
-                .bytes(3, writeMap(value.liquidations(), /* 当前嵌套业务表的原始键，使用该表明确的数值或文本编码。 */ key -> new SnapshotFields.Writer().number(1, key).encode(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreLiquidationState(item))) // 3：按强平编号保存的计划与处理记录
-                .bytes(4, writeMap(value.scans(), /* 当前嵌套业务表的原始键，使用该表明确的数值或文本编码。 */ key -> new SnapshotFields.Writer().text(1, key).encode(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeRiskScan(item))) // 4：各币对未完成的风险和触发扫描记录
+                .bytes(1, writeValues(value.markPrices(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreMarkPriceState(item))) // 1：按币对保存的标记价与参考价
+                .bytes(2, writeValues(value.snapshots(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreRiskSnapshot(item))) // 2：按用户币对方向保存的风险估值快照
+                .bytes(3, writeValues(value.liquidations(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreLiquidationState(item))) // 3：按强平编号保存的计划与处理记录
+                .bytes(4, writeValues(value.scans(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeRiskScan(item))) // 4：各币对未完成的风险和触发扫描记录
                 .number(5, value.nextLiquidationId()) // 5：后续分配的下一个强平编号
                 .bytes(6, writeCoreRiskScanControlView(value.scanControl())) // 6：风险扫描开关、间隔及批量配置
                 .number(7, value.marketRevision()) // 7：最近行情输入修订号
@@ -1076,10 +1076,10 @@ public final class TradingStateSnapshotCodec {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
         return new CoreRiskState(
-                readMap(r.bytes(1), /* 当前嵌套 Map 键记录字节，按字段一解析其数值或文本。 */ key -> new SnapshotFields.Reader(key).text(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreMarkPriceState(item)), // 1：按币对保存的标记价与参考价
-                readMap(r.bytes(2), /* 当前嵌套 Map 键记录字节，按字段一解析其数值或文本。 */ key -> new SnapshotFields.Reader(key).text(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreRiskSnapshot(item)), // 2：按用户币对方向保存的风险估值快照
-                readMap(r.bytes(3), /* 当前嵌套 Map 键记录字节，按字段一解析其数值或文本。 */ key -> new SnapshotFields.Reader(key).number(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreLiquidationState(item)), // 3：按强平编号保存的计划与处理记录
-                readMap(r.bytes(4), /* 当前嵌套 Map 键记录字节，按字段一解析其数值或文本。 */ key -> new SnapshotFields.Reader(key).text(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readRiskScan(item)), // 4：各币对未完成的风险和触发扫描记录
+                readValues(r.bytes(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreMarkPriceState(item), CoreMarkPriceState::instrumentId), // 1：按币对保存的标记价与参考价
+                readValues(r.bytes(2), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreRiskSnapshot(item), CoreRiskSnapshot::key), // 2：按用户币对方向保存的风险估值快照
+                readValues(r.bytes(3), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreLiquidationState(item), CoreLiquidationState::liquidationId), // 3：按强平编号保存的计划与处理记录
+                readValues(r.bytes(4), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readRiskScan(item), RiskScan::instrumentId), // 4：各币对未完成的风险和触发扫描记录
                 r.number(5), // 5：后续分配的下一个强平编号
                 readCoreRiskScanControlView(r.bytes(6)), // 6：风险扫描开关、间隔及批量配置
                 r.number(7)); // 7：最近行情输入修订号

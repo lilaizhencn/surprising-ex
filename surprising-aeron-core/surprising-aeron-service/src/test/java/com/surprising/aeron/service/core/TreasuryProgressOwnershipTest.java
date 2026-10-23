@@ -113,7 +113,6 @@ class TreasuryProgressOwnershipTest {
                         var value = ledger.fundingProgress(symbol);
                         if (value != null) {
                             assertThat(value.instrument()).isSameAs(INSTRUMENT);
-                            assertThat(value.commandId()).isSameAs(COMMAND_ID);
                             assertThat(value.settlementId()).isPositive();
                         }
                         ledger.lifecycleProgress(symbol);
@@ -234,8 +233,7 @@ class TreasuryProgressOwnershipTest {
      * @param settlementId 该测试进度记录对应的结算号
      */
     private static TreasuryRuntime.FundingProgressRuntime funding(long settlementId) {
-        return new TreasuryRuntime.FundingProgressRuntime(settlementId, INSTRUMENT, 100,
-                0, 7, COMMAND_ID, 100, 1);
+        return new TreasuryRuntime.FundingProgressRuntime(settlementId, INSTRUMENT, 100, 7, 100, 1);
     }
 
     /**
@@ -243,7 +241,6 @@ class TreasuryProgressOwnershipTest {
      * @param settlementId 该测试进度记录对应的结算号
      */
     private static TreasuryRuntime.LifecycleProgressRuntime lifecycle(long settlementId) {
-        return new TreasuryRuntime.LifecycleProgressRuntime(settlementId, INSTRUMENT, 100,
-                0, true, 0, 0, 7, COMMAND_ID);
+        return new TreasuryRuntime.LifecycleProgressRuntime(settlementId, INSTRUMENT, 100, true, 0, 7, 0);
     }
 }

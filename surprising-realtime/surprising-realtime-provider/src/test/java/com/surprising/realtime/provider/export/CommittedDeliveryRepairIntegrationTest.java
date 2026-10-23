@@ -63,8 +63,10 @@ class CommittedDeliveryRepairIntegrationTest {
                             user==1?CoreOrderSide.SELL:CoreOrderSide.BUY,100,10,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                             CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"delivery-"+user)));
                 }
-                long first=offer(pub,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(900,"1",110,0,0,1,0,16)));
-                long last=offer(pub,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(900,"1",110,0,1,1,0,16)));
+                long first=offer(pub,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(900,
+                        "1", 110, 0, 1, 0, 16)));
+                long last=offer(pub,CoreMessageType.SETTLE_INSTRUMENT,0,TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(900,
+                        "1", 110, 1, 1, 0, 16)));
                 while(aeron.countersReader().getCounterValue(counter)<last){check(deadline);Thread.sleep(1);}
                 commit.set(before);exporter.repairDelivery(before);
                 byte[] seed=Files.readAllBytes(checkpoint);

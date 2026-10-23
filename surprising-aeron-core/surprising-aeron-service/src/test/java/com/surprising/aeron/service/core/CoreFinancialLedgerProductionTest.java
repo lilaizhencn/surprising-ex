@@ -169,7 +169,7 @@ class CoreFinancialLedgerProductionTest {
                             : new ApplyMarkPriceCommand("1", 100, 1, TIME)), TIME);
             trade(core, line, 2, line == ProductLine.OPTION ? 10 : 100);
             // 对固定标的1按价格120执行的结算命令
-            var settlement = new SettleInstrumentCommand(901, "1", 120, 0);
+            var settlement = new SettleInstrumentCommand(901, "1", 120);
             // 结算前实际状态，作为冷转换输入
             var opening = core.tradingState();
             // 使用相同底层转换得到的冷对照状态，不是独立公式模型

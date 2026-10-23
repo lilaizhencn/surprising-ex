@@ -873,7 +873,7 @@ class TradingCoreOwnerTest {
                         false, false, CoreTimeInForce.IOC, 0, 0, "",
                         1, 1, 0, 1, revision, revision, List.of(), 0, 0, 0);
                 onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER,
-                        revision, 1001, com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(algo)));
+                        revision, 1001, com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(algo)));
                 finishCommands(service);
                 assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(revision);
                 assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).userId()).isEqualTo(1001);
@@ -888,7 +888,7 @@ class TradingCoreOwnerTest {
                     false, false, CoreTimeInForce.IOC, 0, 0, "",
                     1, 1, 0, 1, 4, 4, List.of(), 0, 0, 0);
             // 按本轮批下、批撤或批改编码的原载荷
-            byte[] payload = com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(next);
+            byte[] payload = com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(next);
             onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER, 4, 1001, payload));
             finishCommands(service);
             assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getLast()).payloadUnsafe()).status())
@@ -926,7 +926,7 @@ class TradingCoreOwnerTest {
                     command(CoreMessageType.ADJUST_BALANCE, 1, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 3))));
             finishCommands(service);
             onSessionMessage(service, responses,
-                    command(CoreMessageType.VERIFY_STATE_HASH, 2, 1001, new byte[0]));
+                    command(CoreMessageType.CONTINUE_RISK_SCAN, 2, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1))));
             finishCommands(service);
             // 原用户标的一延时全撤 SET 命令
             var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(

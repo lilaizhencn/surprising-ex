@@ -5,7 +5,6 @@ import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.snapshot.state.StateMapSupport;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.UUID;
 
 /**
  * 快照与恢复使用的系统账本值。保存七类有符号资产余额，以及资金费和生命周期完成编号、分页进度；在线修改由 TreasuryRuntime 单写者执行。普通 Map 会规范化并冻结，既有冻结状态 Map 沿 StateMapSupport 的可信边界复用，不在每次构造全表重新校验。
@@ -285,106 +284,28 @@ public record CoreTreasuryState(
         }
     }
 
-    /**
-     * 快照及冷状态资金费分页进度，保留同一结算的费率、Lane、用户游标及价格证据。
-     * @param settlementId 本次资金费或生命周期结算编号，完成记录入口要求严格递增
-     * @param fundingRatePpm 资金费百万分比费率，绝对值不超过一百万
-     * @param accountLaneId 分页当前账户 Lane，record 校验范围零至六十三
-     * @param nextCursorUserId 后续账户处理的非负用户游标，撤单未完成阶段须为零
-     * @param commandId 当前结算或分页命令 UUID
-     * @param markPriceTicks 资金费计算采用的正标记价
-     * @param priceSequence 对应正价格版本序号
-     */
+    /** 资金费续页的固定费率、用户游标和价格证据。 */
     public record FundingProgress(long settlementId, long fundingRatePpm,
-                                 int accountLaneId, long nextCursorUserId, UUID commandId,
-                                 long markPriceTicks, long priceSequence) {
-        /**
-         * 校验正结算编号、费率绝对值上限、零至六十三 Lane、非负用户游标、非空命令及正标记价和价格序号。
-         */
+            long nextCursorUserId, long markPriceTicks, long priceSequence) {
         public FundingProgress {
             if (settlementId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
-                    || accountLaneId < 0 || accountLaneId >= Long.SIZE
-                    || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
+                    || nextCursorUserId < 0 || markPriceTicks <= 0 || priceSequence <= 0) {
                 throw new IllegalArgumentException("invalid funding progress");
             }
         }
     }
 
-    /**
-     * 快照及冷状态交割或期权到期分页进度，保存撤单与账户处理阶段、游标及当前页保险需求。
-     * @param settlementId 本次资金费或生命周期结算编号，完成记录入口要求严格递增
-     * @param settlementPriceTicks 生命周期采用的非负结算价
-     * @param optionCashUnitsPerContract 期权每合约非负现金结算额
-     * @param ordersComplete 撤单阶段是否已结束，决定合法游标及保险需求范围
-     * @param accountLaneId 分页当前账户 Lane，record 校验范围零至六十三
-     * @param nextCursorOrderId 后续撤单的非负订单游标，撤单完成后须为零
-     * @param nextCursorUserId 后续账户处理的非负用户游标，撤单未完成阶段须为零
-     * @param commandId 当前结算或分页命令 UUID
-     * @param requiredInsuranceUnits 本页非负保险需求，撤单结束后才允许非零
-     */
+    /** 到期结算的固定价格、撤单/用户游标及本页保险需求。 */
     public record LifecycleProgress(long settlementId, long settlementPriceTicks,
-                                   long optionCashUnitsPerContract, boolean ordersComplete,
-                                   int accountLaneId, long nextCursorOrderId,
-                                   long nextCursorUserId, UUID commandId, long requiredInsuranceUnits) {
-        /**
-         * 使用显式账户 Lane 和阶段游标构造生命周期进度，默认保险需求为零。
-         * @param settlementId 本次资金费或生命周期结算编号，完成记录入口要求严格递增
-         * @param settlementPriceTicks 生命周期采用的非负结算价
-         * @param optionCashUnitsPerContract 期权每合约非负现金结算额
-         * @param ordersComplete 撤单阶段是否已结束，决定合法游标及保险需求范围
-         * @param accountLaneId 分页当前账户 Lane，record 校验范围零至六十三
-         * @param nextCursorOrderId 后续撤单的非负订单游标，撤单完成后须为零
-         * @param nextCursorUserId 后续账户处理的非负用户游标，撤单未完成阶段须为零
-         * @param commandId 当前结算或分页命令 UUID
-         */
-        public LifecycleProgress(long settlementId, long settlementPriceTicks,
-                                 long optionCashUnitsPerContract, boolean ordersComplete, int accountLaneId,
-                                 long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
-            this(settlementId, settlementPriceTicks, optionCashUnitsPerContract, ordersComplete,
-                    accountLaneId, nextCursorOrderId, nextCursorUserId, commandId, 0);
-        }
-        /**
-         * 构造已完成撤单、账户 Lane 零的用户分页进度，订单游标及保险需求默认零。
-         * @param settlementId 本次资金费或生命周期结算编号，完成记录入口要求严格递增
-         * @param settlementPriceTicks 生命周期采用的非负结算价
-         * @param optionCashUnitsPerContract 期权每合约非负现金结算额
-         * @param nextCursorUserId 后续账户处理的非负用户游标，撤单未完成阶段须为零
-         * @param commandId 当前结算或分页命令 UUID
-         */
-        public LifecycleProgress(long settlementId, long settlementPriceTicks,
-                                 long optionCashUnitsPerContract, long nextCursorUserId, UUID commandId) {
-            this(settlementId, settlementPriceTicks, optionCashUnitsPerContract,
-                    true, 0, 0, nextCursorUserId, commandId);
-        }
-
-        /**
-         * 校验非负价格、权利金及保险额、有效 Lane 与非负游标；撤单未结束时用户游标及保险额为零，撤单结束时订单游标为零。
-         */
+            boolean ordersComplete, long nextCursorOrderId, long nextCursorUserId,
+            long requiredInsuranceUnits) {
         public LifecycleProgress {
             if (settlementId <= 0 || settlementPriceTicks < 0
                     || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
-                    || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorOrderId < 0 || nextCursorUserId < 0
-                    || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)
-                    || commandId == null) {
+                    || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)) {
                 throw new IllegalArgumentException("invalid lifecycle progress");
             }
-        }
-        /**
-         * 省略账户 Lane 时采用零，委托带阶段和游标的构造入口。
-         * @param settlementId 本次资金费或生命周期结算编号，完成记录入口要求严格递增
-         * @param settlementPriceTicks 生命周期采用的非负结算价
-         * @param optionCashUnitsPerContract 期权每合约非负现金结算额
-         * @param ordersComplete 撤单阶段是否已结束，决定合法游标及保险需求范围
-         * @param nextCursorOrderId 后续撤单的非负订单游标，撤单完成后须为零
-         * @param nextCursorUserId 后续账户处理的非负用户游标，撤单未完成阶段须为零
-         * @param commandId 当前结算或分页命令 UUID
-         */
-        public LifecycleProgress(long settlementId, long settlementPriceTicks,
-                                 long optionCashUnitsPerContract, boolean ordersComplete,
-                                 long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
-            this(settlementId, settlementPriceTicks, optionCashUnitsPerContract,
-                    ordersComplete, 0, nextCursorOrderId, nextCursorUserId, commandId);
         }
     }
 }

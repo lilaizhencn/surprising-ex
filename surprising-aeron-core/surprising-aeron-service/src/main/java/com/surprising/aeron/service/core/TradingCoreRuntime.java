@@ -1294,7 +1294,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 直接控制入口：建立命令事实、回滚检查点及发布作用域，执行业务处理并映射已列明的业务异常；有异步续步时返回空，否则继续完成终态。VERIFY_STATE_HASH 当前仅返回受理成功。
+     * 直接控制入口：建立命令事实、回滚检查点及发布作用域，执行业务处理并映射已列明的业务异常；有异步续步时返回空，否则继续完成终态。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
      * @param clusterTimestamp 本命令原复制日志业务时间
      * @param clusterPosition 本命令原复制日志位置
@@ -1324,7 +1324,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 status = ResponseStatus.APPLIED;
             } else {
                 switch (message.header().messageType()) {
-                    case VERIFY_STATE_HASH -> status = ResponseStatus.APPLIED;
                     case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER,
                             PLACE_ORDER_BATCH, CANCEL_ORDER_BATCH, AMEND_ORDER_BATCH,
                             EXECUTE_LIQUIDATION, SETTLE_INSTRUMENT ->

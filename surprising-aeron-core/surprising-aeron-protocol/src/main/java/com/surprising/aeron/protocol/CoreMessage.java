@@ -76,23 +76,21 @@ public final class CoreMessage {
         return payload;
     }
 
-    public void decoderHeader(int schemaVersion, WireMessageKind kind, CoreMessageType messageType,
-            long commandIdMsb, long commandIdLsb, com.surprising.product.api.ProductLine productLine, CoreRoute route,
-            CommandSource source, long sourceId, long sourceSequence, long userId, long submittedAtEpochMillis,
-            long correlationId) {
+    public void decoderHeader(int schemaVersion, CoreMessageType messageType, long commandIdMsb, long commandIdLsb,
+            com.surprising.product.api.ProductLine productLine, CommandSource source, long sourceId, long sourceSequence,
+            long userId, long submittedAtEpochMillis, long correlationId) {
         if (!decoderSlot || !decoderLeased) throw new IllegalStateException("decoder slot is not owned");
-        decoderHeader.assign(schemaVersion, kind, messageType, commandIdMsb, commandIdLsb, productLine, route, source,
-                sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
+        decoderHeader.assign(schemaVersion, messageType, commandIdMsb, commandIdLsb, productLine, source, sourceId,
+                sourceSequence, userId, submittedAtEpochMillis, correlationId);
         header = decoderHeader;
     }
 
-    public void decoderHeader(int schemaVersion, WireMessageKind kind, CoreMessageType messageType,
-            java.util.UUID commandId, com.surprising.product.api.ProductLine productLine, CoreRoute route,
-            CommandSource source, long sourceId, long sourceSequence, long userId, long submittedAtEpochMillis,
-            long correlationId) {
+    public void decoderHeader(int schemaVersion, CoreMessageType messageType, java.util.UUID commandId,
+            com.surprising.product.api.ProductLine productLine, CommandSource source, long sourceId, long sourceSequence,
+            long userId, long submittedAtEpochMillis, long correlationId) {
         if (!decoderSlot || !decoderLeased) throw new IllegalStateException("decoder slot is not owned");
-        decoderHeader.assign(schemaVersion, kind, messageType, commandId, productLine, route, source,
-                sourceId, sourceSequence, userId, submittedAtEpochMillis, correlationId);
+        decoderHeader.assign(schemaVersion, messageType, commandId, productLine, source, sourceId, sourceSequence, userId,
+                submittedAtEpochMillis, correlationId);
         header = decoderHeader;
     }
 
@@ -135,9 +133,9 @@ public final class CoreMessage {
                 throw new IllegalStateException("response header type changed within one command");
             return decoderResponseHeader;
         }
-        decoderResponseHeader.assign(header.schemaVersion(), WireMessageKind.RESPONSE, responseType,
-                header.commandIdMsb(), header.commandIdLsb(), header.productLine(), header.route(), header.source(), header.sourceId(),
-                header.sourceSequence(), header.userId(), header.submittedAtEpochMillis(), header.correlationId());
+        decoderResponseHeader.assign(header.schemaVersion(), responseType, header.commandIdMsb(), header.commandIdLsb(),
+                header.productLine(), header.source(), header.sourceId(), header.sourceSequence(), header.userId(),
+                header.submittedAtEpochMillis(), header.correlationId());
         return decoderResponseHeader;
     }
 

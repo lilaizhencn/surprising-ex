@@ -345,10 +345,10 @@ class SectionedCoreSnapshotCodecTest {
         }
         // 只执行验证命令以取得幂等结果与消费水位的辅助运行时。
         TradingCoreRuntime source = new TradingCoreRuntime(ProductLine.SPOT);
-        // 推进已应用 Core 数量的一条 VERIFY_STATE_HASH 命令。
-        CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.VERIFY_STATE_HASH,
+        // 推进已应用 Core 数量的一条 CONTINUE_RISK_SCAN 命令。
+        CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
                 UUID.fromString("00000000-0000-0000-0000-000000000043"), ProductLine.SPOT,
-                CommandSource.GATEWAY, 43, 1, 7, 1_000, 43), CoreMessage.EMPTY_PAYLOAD);
+                CommandSource.GATEWAY, 43, 1, 7, 1_000, 43), com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1)));
         assertThat(source.apply(increment).status()).isEqualTo(ResponseStatus.APPLIED);
         // 准备配对并待编码的原始运行时。
         TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1,
@@ -459,10 +459,10 @@ class SectionedCoreSnapshotCodecTest {
         try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT,
                 (/* 捕获接口传入的快照编号；本固定结果桩未读取它。 */ snapshotId, /* 捕获接口传入的 Core 水位；本固定结果桩未读取它。 */ coreSequence, /* 捕获接口传入的业务哈希；本固定结果桩未读取它。 */ businessStateHash, /* 捕获接口传入的冻结状态；本固定结果桩未读取它。 */ tradingState, /* 捕获接口传入的活动订单；本固定结果桩未读取它。 */ activeOrders) ->
                         java.util.concurrent.CompletableFuture.completedFuture(matcherSnapshot))) {
-            // 推进已应用 Core 数量的一条 VERIFY_STATE_HASH 命令。
-            CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.VERIFY_STATE_HASH,
+            // 推进已应用 Core 数量的一条 CONTINUE_RISK_SCAN 命令。
+            CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
                     UUID.fromString("00000000-0000-0000-0000-000000000073"), ProductLine.SPOT,
-                    CommandSource.GATEWAY, 73, 1, 7, 1_000, 73), CoreMessage.EMPTY_PAYLOAD);
+                    CommandSource.GATEWAY, 73, 1, 7, 1_000, 73), com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1)));
             assertThat(state.apply(increment).status()).isEqualTo(ResponseStatus.APPLIED);
             state.snapshots.beginSnapshot(73, Long.MAX_VALUE);
             // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
@@ -498,9 +498,9 @@ class SectionedCoreSnapshotCodecTest {
         // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
         byte[] snapshot;
         try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
-            assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.VERIFY_STATE_HASH,
+            assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
                     UUID.fromString("00000000-0000-0000-0000-000000000074"), ProductLine.SPOT,
-                    CommandSource.GATEWAY, 74, 1, 7, 1_000, 74), CoreMessage.EMPTY_PAYLOAD)).status())
+                    CommandSource.GATEWAY, 74, 1, 7, 1_000, 74), com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1)))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             snapshot = state.snapshot(74);
         }
@@ -508,14 +508,14 @@ class SectionedCoreSnapshotCodecTest {
         // 九类预期错误名称到各自 CRC 已重算输入的有序表。
         Map<String, byte[]> mismatches = new LinkedHashMap<>();
         mismatches.put("product line", mutateHeaderProductLine(snapshot));
-        mismatches.put("topology", mutateHeaderLong(snapshot, 17));
-        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 37));
-        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 45));
-        mismatches.put("core sequence", mutateHeaderLong(snapshot, 53));
-        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 61));
-        mismatches.put("business state hash", mutateHeaderLong(snapshot, 101));
-        mismatches.put("funds hash", mutateHeaderLong(snapshot, 109));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 117));
+        mismatches.put("topology", mutateHeaderLong(snapshot, 13));
+        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 33));
+        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 41));
+        mismatches.put("core sequence", mutateHeaderLong(snapshot, 49));
+        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 57));
+        mismatches.put("business state hash", mutateHeaderLong(snapshot, 97));
+        mismatches.put("funds hash", mutateHeaderLong(snapshot, 105));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 113));
 
         mismatches.forEach((/* 本变体预期出现于异常中的字段名称。 */ field, /* 为当前独立错误变体克隆并修改的完整快照字节。 */ mutated) -> {
             // 解码本变体捕获到的异常，要求是协议错误并含指定字段名。
@@ -571,10 +571,10 @@ class SectionedCoreSnapshotCodecTest {
         }
 
         assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 85), ProductLine.SPOT))
+                mutateHeaderLongWithoutChecksum(snapshot, 81), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
         assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 93), ProductLine.SPOT))
+                mutateHeaderLongWithoutChecksum(snapshot, 89), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
     }
 

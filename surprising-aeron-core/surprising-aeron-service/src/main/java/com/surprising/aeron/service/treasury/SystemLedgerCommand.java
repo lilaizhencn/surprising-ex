@@ -13,7 +13,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
     /** 本命令独占并复用的关闭任务，保留原前值及持仓索引撤销边界。 */
     private final ScopeClose close = new ScopeClose();
     /** 当前代所属运行时，提供账本投递、账户资金和完成通知。 */
-    private TradingAccountRuntime runtime;
+    protected TradingAccountRuntime runtime;
     /** 当前账本执行阶段的 volatile 完成位，初始无任务时为 true。 */
     private volatile boolean completed = true;
     /** 账本阶段捕获的业务、算术或参数拒绝，Owner 观察完成后读取。 */

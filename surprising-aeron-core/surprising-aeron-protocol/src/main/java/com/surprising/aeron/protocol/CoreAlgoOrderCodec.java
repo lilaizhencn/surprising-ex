@@ -8,11 +8,29 @@ import java.util.List;
 
 public final class CoreAlgoOrderCodec {
     private static final int VERSION = 1;
+    private static final int COMMAND_VERSION = 2;
     private static final int MAX_TEXT_BYTES = 256;
     private static final int FIXED_ITEM_BYTES =
             Long.BYTES * 16 + Integer.BYTES * 8 + Byte.BYTES * 2;
 
     private CoreAlgoOrderCodec() { }
+
+    /** 命令只携带父单输入；成交和活动子单统计由账户状态提供。 */
+    public static byte[] encodeCommand(CoreAlgoOrderView value) {
+        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES + encodedItemLength(value)
+                - Long.BYTES * 2 - Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(COMMAND_VERSION);
+        writeFields(buffer, value);
+        return buffer.array();
+    }
+
+    public static CoreAlgoOrderView decodeCommand(byte[] payload) {
+        Reader reader = new Reader(payload);
+        if (reader.intValue() != COMMAND_VERSION) throw new ProtocolException("unsupported algo command version");
+        CoreAlgoOrderView value = read(reader, false);
+        reader.consumed();
+        return value;
+    }
 
     public static byte[] encode(CoreAlgoOrderView value) {
         if (value == null) throw new IllegalArgumentException("algo order is required");
@@ -46,7 +64,7 @@ public final class CoreAlgoOrderCodec {
     public static List<CoreAlgoOrderView> decodeList(byte[] payload) {
         Reader reader = new Reader(payload); reader.version();
         int count = reader.count(); List<CoreAlgoOrderView> values = new ArrayList<>(count);
-        for (int index = 0; index < count; index++) values.add(read(reader));
+        for (int index = 0; index < count; index++) values.add(read(reader, true));
         reader.consumed(); return List.copyOf(values);
     }
 
@@ -82,6 +100,12 @@ public final class CoreAlgoOrderCodec {
     }
 
     private static void write(ByteBuffer buffer, CoreAlgoOrderView value) {
+        writeFields(buffer, value);
+        buffer.putLong(value.executedQuantitySteps()).putLong(value.activeQuantitySteps())
+                .putInt(value.activeChildOrderCount());
+    }
+
+    private static void writeFields(ByteBuffer buffer, CoreAlgoOrderView value) {
         buffer.putLong(value.algoOrderId()).putLong(value.userId());
         CoreStateQueryCodec.putText(buffer, value.clientAlgoOrderId(), true, MAX_TEXT_BYTES);
         CoreStateQueryCodec.putText(buffer, value.instrumentId(), true, MAX_TEXT_BYTES);
@@ -100,11 +124,11 @@ public final class CoreAlgoOrderCodec {
         for (Long childOrderId : value.childOrderIds()) {
             buffer.putLong(childOrderId);
         }
-        buffer.putLong(value.executedQuantitySteps()).putLong(value.activeQuantitySteps())
-                .putInt(value.activeChildOrderCount());
     }
 
-    private static CoreAlgoOrderView read(Reader reader) {
+
+
+    private static CoreAlgoOrderView read(Reader reader, boolean statistics) {
         long id = reader.longValue(), userId = reader.longValue(); String clientId = reader.text(), instrumentId = reader.text();
         int type = reader.intValue(); CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
         long price = reader.longValue(), quantity = reader.longValue(), childQuantity = reader.longValue();
@@ -119,7 +143,8 @@ public final class CoreAlgoOrderCodec {
         for (int index = 0; index < childCount; index++) children.add(reader.longValue());
         return new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
                 interval, duration, margin, position, reduce, post, tif, status, current, reason,
-                start, next, completed, created, updated, revision, children, reader.longValue(), reader.longValue(), reader.intValue());
+                start, next, completed, created, updated, revision, children, statistics ? reader.longValue() : 0,
+                statistics ? reader.longValue() : 0, statistics ? reader.intValue() : 0);
     }
 
     public record Query(long userId, long algoOrderId, String instrumentId, long dueAtEpochMillis, int limit) {

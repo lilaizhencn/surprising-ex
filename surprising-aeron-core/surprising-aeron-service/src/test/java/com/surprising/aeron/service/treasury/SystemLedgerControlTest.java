@@ -36,7 +36,7 @@ class SystemLedgerControlTest {
             assertThatThrownBy(() -> original.insurance(asset)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> original.adjustInsurance(asset, 1)).isInstanceOf(IllegalStateException.class);
             // 当前需要等待账本执行及范围关闭的控制任务。
-            var work = RuntimeInsuranceFundStateTransitions.prepare(null, runtime, identities, new AdjustInsuranceFundCommand("USDT", 50));
+            var work = RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 50));
             LedgerControlTestSupport.await(runtime, work);
             assertThat(work.getAsBoolean()).isTrue();
             assertThat(work.reusable()).isFalse();
@@ -49,7 +49,7 @@ class SystemLedgerControlTest {
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 75L);
             assertThat(work.reusable()).isTrue();
             // 同一个保险调整任务完全关闭后再次准备的新代次引用。
-            var next = RuntimeInsuranceFundStateTransitions.prepare(work, runtime, identities, new AdjustInsuranceFundCommand("USDT", -20));
+            var next = RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", -20));
             assertThat(next).isSameAs(work);
             LedgerControlTestSupport.await(runtime, next);
             LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
@@ -84,7 +84,7 @@ class SystemLedgerControlTest {
                 @Override public void apply(TreasuryRuntime ignored) { }
             })).isTrue();
             // 当前需要等待账本执行及范围关闭的控制任务。
-            var work = RuntimeInsuranceFundStateTransitions.prepare(null, runtime, identities, new AdjustInsuranceFundCommand("USDT", 7));
+            var work = RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 7));
             try {
                 while (ledger.offer(/* 占位任务或故意拒绝的控制回调收到的入参，本测试不读取其业务内容。 */ ignored -> { })) { }
                 assertThat(runtime.dispatchLedgerCommand(work)).isFalse();
@@ -111,22 +111,23 @@ class SystemLedgerControlTest {
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 // 试图在长整数最大保险余额上增加一的溢出控制任务。
-                var overflow = RuntimeInsuranceFundStateTransitions.prepare(null, runtime, identities, new AdjustInsuranceFundCommand("USDT", 1));
+                var overflow = RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 1));
                 assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, overflow)).isInstanceOf(ArithmeticException.class);
                 LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(0, 1));
                 assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", Long.MAX_VALUE);
                 // 消耗全部剩余保险余额的下一代合法控制任务。
-                var spend = RuntimeInsuranceFundStateTransitions.prepare(overflow, runtime, identities, new AdjustInsuranceFundCommand("USDT", -Long.MAX_VALUE));
+                var spend = RuntimeInsuranceFundStateTransitions.prepare(runtime, identities,
+                        new AdjustInsuranceFundCommand("USDT", -Long.MAX_VALUE));
                 LedgerControlTestSupport.await(runtime, spend);
                 LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
                 assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).isEmpty();
                 // 零保险余额下尝试再扣一的业务拒绝任务。
-                var rejected = RuntimeInsuranceFundStateTransitions.prepare(spend, runtime, identities, new AdjustInsuranceFundCommand("USDT", -1));
+                var rejected = RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", -1));
                 assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, rejected)).isInstanceOf(CoreStateRejectedException.class);
                 LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(1, 2));
                 assertThat(runtime.revision()).isEqualTo(1);
                 // 拒绝及回滚后重新合法增加七单位保险的任务。
-                var credit = RuntimeInsuranceFundStateTransitions.prepare(rejected, runtime, identities, new AdjustInsuranceFundCommand("USDT", 7));
+                var credit = RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 7));
                 LedgerControlTestSupport.await(runtime, credit);
                 LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
                 assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 7L);
@@ -201,7 +202,7 @@ class SystemLedgerControlTest {
             var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                     new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             // 操作前保留的资金费分页进度引用，回滚后应恢复同一记录。
-            var progress = new TreasuryRuntime.FundingProgressRuntime(3, instrument, 1000, 0, 1, new UUID(1, 1), 100, 1);
+            var progress = new TreasuryRuntime.FundingProgressRuntime(3, instrument, 1000, 1, 100, 1);
             original.setFee(asset, 9); original.setFundingSettlement(symbol, 2); original.setFundingProgress(symbol, progress);
             runtime.clearChangedKeys(); runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {

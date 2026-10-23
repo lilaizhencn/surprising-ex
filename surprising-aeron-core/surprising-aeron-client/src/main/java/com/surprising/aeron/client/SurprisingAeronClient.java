@@ -7,7 +7,6 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
-import com.surprising.aeron.protocol.CoreRoute;
 import com.surprising.aeron.protocol.ProductLineClusterLayout;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
@@ -374,31 +373,24 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             if (schemaVersion != CoreProtocol.SCHEMA_VERSION) {
                 throw new ProtocolException("unsupported schema version: " + schemaVersion);
             }
-            WireMessageKind kind = WireMessageKind.fromWireCode(Byte.toUnsignedInt(buffer.getByte(offset + 6)));
-            ProductLine messageProductLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.getByte(offset + 7)));
+            ProductLine messageProductLine = ProductLineWireCode.decode(Byte.toUnsignedInt(buffer.getByte(offset + 6)));
             CoreMessageType messageType = CoreMessageType.fromWireCode(
-                    Short.toUnsignedInt(buffer.getShort(offset + 8, ByteOrder.LITTLE_ENDIAN)));
-            if (messageType.kind() != kind) {
-                throw new IllegalArgumentException("messageType does not belong to kind: " + messageType);
-            }
-            CommandSource.fromWireCode(Byte.toUnsignedInt(buffer.getByte(offset + 10)));
-            int shardCode = Byte.toUnsignedInt(buffer.getByte(offset + 11));
-            int headerLength = Short.toUnsignedInt(buffer.getShort(offset + 12, ByteOrder.LITTLE_ENDIAN));
-            int headerRouteVersion = Short.toUnsignedInt(buffer.getShort(offset + 14, ByteOrder.LITTLE_ENDIAN));
+                    Short.toUnsignedInt(buffer.getShort(offset + 7, ByteOrder.LITTLE_ENDIAN)));
+            CommandSource.fromWireCode(Byte.toUnsignedInt(buffer.getByte(offset + 9)));
+            int headerLength = Short.toUnsignedInt(buffer.getShort(offset + 10, ByteOrder.LITTLE_ENDIAN));
             if (headerLength != CoreProtocol.HEADER_LENGTH) {
                 throw new ProtocolException("invalid header length: " + headerLength);
             }
-            CoreRoute.fromWireCodes(shardCode, headerRouteVersion);
-            long sourceSequence = buffer.getLong(offset + 40, ByteOrder.LITTLE_ENDIAN);
+            long sourceSequence = buffer.getLong(offset + 36, ByteOrder.LITTLE_ENDIAN);
             if (sourceSequence < 0) {
                 throw new IllegalArgumentException("sourceSequence must not be negative");
             }
-            long submittedAtEpochMillis = buffer.getLong(offset + 56, ByteOrder.LITTLE_ENDIAN);
+            long submittedAtEpochMillis = buffer.getLong(offset + 52, ByteOrder.LITTLE_ENDIAN);
             if (submittedAtEpochMillis < 0) {
                 throw new IllegalArgumentException("submittedAtEpochMillis must not be negative");
             }
-            long correlationId = buffer.getLong(offset + 64, ByteOrder.LITTLE_ENDIAN);
-            int payloadLength = buffer.getInt(offset + 72, ByteOrder.LITTLE_ENDIAN);
+            long correlationId = buffer.getLong(offset + 60, ByteOrder.LITTLE_ENDIAN);
+            int payloadLength = buffer.getInt(offset + 68, ByteOrder.LITTLE_ENDIAN);
             if (payloadLength < 0 || payloadLength > CoreMessageCodec.MAX_PAYLOAD_LENGTH
                     || headerLength + payloadLength != length) {
                 throw new ProtocolException("invalid payload length: " + payloadLength);
@@ -420,10 +412,9 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
                     buffer.getInt(payloadOffset + 4, ByteOrder.LITTLE_ENDIAN));
             CoreResultCode resultCode = CoreResultCode.fromWireCode(
                     buffer.getInt(payloadOffset + 8, ByteOrder.LITTLE_ENDIAN));
-            int routeVersion = buffer.getInt(payloadOffset + 12, ByteOrder.LITTLE_ENDIAN);
-            long committedCoreSequence = buffer.getLong(payloadOffset + 16, ByteOrder.LITTLE_ENDIAN);
-            long appliedCommandCount = buffer.getLong(payloadOffset + 24, ByteOrder.LITTLE_ENDIAN);
-            int dataLength = buffer.getInt(payloadOffset + 32, ByteOrder.LITTLE_ENDIAN);
+            long committedCoreSequence = buffer.getLong(payloadOffset + 12, ByteOrder.LITTLE_ENDIAN);
+            long appliedCommandCount = buffer.getLong(payloadOffset + 20, ByteOrder.LITTLE_ENDIAN);
+            int dataLength = buffer.getInt(payloadOffset + 28, ByteOrder.LITTLE_ENDIAN);
             if (dataLength < 0 || dataLength != payloadLength - CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH) {
                 throw new ProtocolException("invalid response data length: " + dataLength);
             }
@@ -431,8 +422,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             if (dataLength > 0) {
                 buffer.getBytes(payloadOffset + CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH, data);
             }
-            responses.put(correlationId, CoreResponse.decoded(status, commandStatus, resultCode,
-                    routeVersion, committedCoreSequence, appliedCommandCount, data));
+            responses.put(correlationId, CoreResponse.decoded(status, commandStatus, resultCode, committedCoreSequence, appliedCommandCount, data));
         } catch (RuntimeException exception) {
             sessionFailure = new IllegalStateException("failed to decode Aeron Cluster egress response", exception);
         }

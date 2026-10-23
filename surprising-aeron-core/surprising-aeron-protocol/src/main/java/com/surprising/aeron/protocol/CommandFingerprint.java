@@ -9,8 +9,8 @@ import java.util.Objects;
 public final class CommandFingerprint {
 
     public static final int LENGTH = 32;
-    private static final int CANONICAL_VERSION = 1;
-    private static final int HEADER_LENGTH = Integer.BYTES * 8 + Long.BYTES;
+    private static final int CANONICAL_VERSION = 2;
+    private static final int HEADER_LENGTH = Integer.BYTES * 6 + Long.BYTES;
     private final byte[] value;
     private final boolean slotValue;
     private boolean initialized;
@@ -102,14 +102,12 @@ public final class CommandFingerprint {
             offset = putInt(this.header, offset, msgHeader.schemaVersion());
             offset = putInt(this.header, offset, msgHeader.messageType().wireCode());
             offset = putInt(this.header, offset, ProductLineWireCode.encode(msgHeader.productLine()));
-            offset = putInt(this.header, offset, msgHeader.route().shardCode());
-            offset = putInt(this.header, offset, msgHeader.route().version());
             offset = putInt(this.header, offset, msgHeader.source().wireCode());
             offset = putLong(this.header, offset, msgHeader.userId());
             offset = putInt(this.header, offset, payloadLength);
             if (offset != HEADER_LENGTH) throw new IllegalStateException("invalid fingerprint header length");
 
-            // Canonical-v1 is SHA-256 over these exact header and payload bytes. Snapshots and
+            // Canonical-v2 is SHA-256 over these exact header and payload bytes. Snapshots and
             // committed receipts retain this identity; changing only the hash breaks retry safety.
             digest.reset();
             digest.update(this.header, 0, HEADER_LENGTH);

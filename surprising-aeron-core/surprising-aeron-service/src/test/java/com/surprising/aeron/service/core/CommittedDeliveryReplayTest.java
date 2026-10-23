@@ -47,7 +47,7 @@ class CommittedDeliveryReplayTest {
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "delivery-resting")));
             now = TIME + 20_000;
             send(replay, line, CoreMessageType.SETTLE_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now, "1", 110, 0, 0, 1, 0, 10)));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now, "1", 110, 0, 1, 0, 10)));
             // 从已提交响应中解码的本次结算进度，仅作现金页诊断上下文
             var progress = assertApplied(replay, line);
             // 本次卖方结算后导出的现金变化页
@@ -60,7 +60,7 @@ class CommittedDeliveryReplayTest {
         try (/* 当前新建或从首分页快照恢复的回放资源 */ var replay = new CommittedTradeReplay(line, snapshot)) {
             // 恢复后用于买方下一页及重复提交的同一原消息
             var message = message(line, CoreMessageType.SETTLE_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now, "1", 110, 0, 1, 1, 0, 10)));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now, "1", 110, 1, 1, 0, 10)));
             // 该原买方结算消息的固定字节，重复使用以核对幂等
             byte[] encoded = CoreMessageCodec.encode(message);
             replay.apply(encoded, now, sequence * 4096);
@@ -88,7 +88,7 @@ class CommittedDeliveryReplayTest {
         try (/* 当前新建或从首分页快照恢复的回放资源 */ var replay = opened(line)) {
             now = TIME + 20_000;
             send(replay, line, CoreMessageType.SETTLE_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now, "1", 100, 0, 0, 2, 0, 10)));
+                    TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(now, "1", 100, 0, 2, 0, 10)));
             assertThat(assertApplied(replay, line).complete()).isTrue();
             assertThat(replay.deliveryPage()).isNull();
         }

@@ -735,7 +735,7 @@ public class ClusteredBatchTradingBenchmark {
             runtime.setMetadata(productLine, Long.MAX_VALUE);
             try {
                 send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000,
-                        com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(next)));
+                        com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(next)));
                 drain();
                 if (terminal != terminalBefore + 1 || !before.equals(runtime.algoOrder(9_000_000)))
                     throw new IllegalStateException("failed algo update was not restored");
@@ -759,7 +759,7 @@ public class ClusteredBatchTradingBenchmark {
                             CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
                             0, 0, "", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
                     send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000 + i,
-                            com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(algo)));
+                            com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(algo)));
                 }
                 drain();
                 if (terminal - before != 64) throw new IllegalStateException("algo updates unfinished");
@@ -815,7 +815,7 @@ public class ClusteredBatchTradingBenchmark {
                                     CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
                                     0, 0, 1, 1, 1);
                             wave[user] = command(CoreMessageType.PLACE_TRIGGER_ORDER, 1_000 + user,
-                                    CoreTriggerOrderCodec.encodeState(trigger.view()));
+                                    CoreTriggerOrderCodec.encodePlacement(trigger.view()));
                         } else if (phase == 3) {
                             wave[user] = command(CoreMessageType.CANCEL_TRIGGER_ORDER, 1_000 + user,
                                     CoreTriggerOrderCodec.encodeId(firstOrders[user]));

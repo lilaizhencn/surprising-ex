@@ -13,12 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String CURRENT_GOLDEN = "58455853080001020a0001004c000300"
-            + "7766554433221100ffeeddccbbaa9988"
-            + "0800000000000000"
-            + "2a00000000000000e903000000000000"
-            + "15cd5b07000000006300000000000000"
-            + "0e0000000400555344540700000000000000";
+    private static final String CURRENT_GOLDEN = "584558530900020a000148007766554433221100ffeeddccbbaa998808000000000000002a00000000000000e90300000000000015cd5b070000000063000000000000000e0000000400555344540700000000000000";
 
     @Test
     void matchesCurrentSchemaGoldenMessage() {
@@ -35,7 +30,7 @@ class CoreMessageCodecTest {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
 
         assertThat(CommandFingerprint.of(message).toString())
-                .isEqualTo("e42f81cb4e824f001609e0b39dc2eaf88bb70ea5437daa5272d6567309fb52a4");
+                .isEqualTo("e20efc0cbf44de9558f87d9780097f707f2eb458dd95896ae758b2f2c86b66b6");
     }
 
     @Test
@@ -48,7 +43,7 @@ class CoreMessageCodecTest {
         assertThat(producerB.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(first)).isEqualTo(retained);
-        assertThat(retained.toString()).isEqualTo("e42f81cb4e824f001609e0b39dc2eaf88bb70ea5437daa5272d6567309fb52a4");
+        assertThat(retained.toString()).isEqualTo("e20efc0cbf44de9558f87d9780097f707f2eb458dd95896ae758b2f2c86b66b6");
     }
 
     @Test
@@ -68,8 +63,7 @@ class CoreMessageCodecTest {
     void encodesCommittedResponseDirectlyIntoReusableDestination() {
         CoreMessageHeader header = command(UUID.randomUUID(), 42, 99, 7).header()
                 .response(CoreMessageType.COMMAND_RESULT);
-        CoreResponse response = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED,
-                CoreResultCode.NONE, CoreRoute.DEFAULT.version(), 11, 12,
+        CoreResponse response = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE, 11, 12,
                 new byte[]{3, 5, 8, 13});
         byte[] destination = new byte[CoreMessageCodec.encodedResponseLength(response) + 1];
         destination[destination.length - 1] = 0x5a;
@@ -86,20 +80,18 @@ class CoreMessageCodecTest {
     }
 
     @Test
-    void roundTripsExplicitDefaultRoute() {
+    void derivesMessageKindFromType() {
         CoreMessage command = command(UUID.randomUUID(), 42, 99, 7);
         CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.STATE_HASH_QUERY,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY,
                 8, 43, 1001, 123_456_790, 100), new byte[0]);
-
-        CoreMessage restoredCommand = CoreMessageCodec.decode(CoreMessageCodec.encode(command));
-        CoreMessage restoredQuery = CoreMessageCodec.decode(CoreMessageCodec.encode(query));
-
-        assertThat(restoredCommand.header().route()).isEqualTo(CoreRoute.DEFAULT);
-        assertThat(restoredQuery.header().route()).isEqualTo(CoreRoute.DEFAULT);
-        assertThat(restoredCommand.header().response(CoreMessageType.COMMAND_RESULT).route())
-                .isEqualTo(CoreRoute.DEFAULT);
-        assertThat(CoreProtocol.HEADER_LENGTH).isEqualTo(76);
+        assertThat(CoreMessageCodec.decode(CoreMessageCodec.encode(command)).header().kind())
+                .isEqualTo(WireMessageKind.COMMAND);
+        assertThat(CoreMessageCodec.decode(CoreMessageCodec.encode(query)).header().kind())
+                .isEqualTo(WireMessageKind.QUERY);
+        assertThat(command.header().response(CoreMessageType.COMMAND_RESULT).kind())
+                .isEqualTo(WireMessageKind.RESPONSE);
+        assertThat(CoreProtocol.HEADER_LENGTH).isEqualTo(72);
     }
 
     @Test
@@ -107,8 +99,8 @@ class CoreMessageCodecTest {
         byte[] encoded = CoreMessageCodec.encode(command(UUID.randomUUID(), 1, 2, 3));
         byte[] extended = new byte[encoded.length + 4];
         System.arraycopy(encoded, 0, extended, 0, CoreProtocol.HEADER_LENGTH);
-        extended[12] = (byte) (CoreProtocol.HEADER_LENGTH + 4);
-        extended[13] = 0;
+        extended[10] = (byte) (CoreProtocol.HEADER_LENGTH + 4);
+        extended[11] = 0;
         extended[CoreProtocol.HEADER_LENGTH] = 9;
         extended[CoreProtocol.HEADER_LENGTH + 1] = 8;
         extended[CoreProtocol.HEADER_LENGTH + 2] = 7;
@@ -131,34 +123,7 @@ class CoreMessageCodecTest {
                 .hasMessageContaining("unsupported schema");
     }
 
-    @Test
-    void rejectsImplicitOrUnknownRoute() {
-        byte[] valid = CoreMessageCodec.encode(command(UUID.randomUUID(), 1, 2, 3));
-        byte[] implicitRoute = valid.clone();
-        implicitRoute[14] = 0;
-        assertThatThrownBy(() -> CoreMessageCodec.decode(implicitRoute))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("route version");
 
-        byte[] unknownShard = valid.clone();
-        unknownShard[11] = 1;
-        assertThatThrownBy(() -> CoreMessageCodec.decode(unknownShard))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("shard");
-
-        byte[] unknownRoute = valid.clone();
-        unknownRoute[14] = 4;
-        assertThatThrownBy(() -> CoreMessageCodec.decode(unknownRoute))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("route version");
-
-        byte[] unsignedRoute = valid.clone();
-        unsignedRoute[14] = 0;
-        unsignedRoute[15] = 1;
-        assertThatThrownBy(() -> CoreMessageCodec.decode(unsignedRoute))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("256");
-    }
 
     @Test
     void rejectsMalformedTruncatedTrailingAndOversizedFrames() {
@@ -176,7 +141,7 @@ class CoreMessageCodecTest {
 
         byte[] oversized = valid.clone();
         ByteBuffer.wrap(oversized).order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(72, CoreMessageCodec.MAX_PAYLOAD_LENGTH + 1);
+                .putInt(68, CoreMessageCodec.MAX_PAYLOAD_LENGTH + 1);
         assertThatThrownBy(() -> CoreMessageCodec.decode(oversized))
                 .isInstanceOf(ProtocolException.class)
                 .hasMessageContaining("payload length");

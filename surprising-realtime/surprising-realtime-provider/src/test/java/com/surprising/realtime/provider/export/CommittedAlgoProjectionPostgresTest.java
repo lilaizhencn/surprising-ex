@@ -54,7 +54,7 @@ class CommittedAlgoProjectionPostgresTest {
             apply(replay,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(register),1);
             var parent=new CoreAlgoOrderView(701,7,"client-701","604",0,CoreOrderSide.BUY,100,4,2,5,20,
                     CoreMarginMode.CROSS,CorePositionSide.NET,false,false,CoreTimeInForce.GTC,0,0,"",1000,6000,0,1000,1000,1,List.of(),0,0,0);
-            apply(replay,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encode(parent),2);
+            apply(replay,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(parent),2);
             jdbc.execute("ALTER TABLE core_algo_order_projection ADD CONSTRAINT reject_bootstrap CHECK(user_id<>7)");
             assertThatThrownBy(()->projection.initialize(ProductLine.SPOT,replay,2)).isInstanceOf(org.springframework.dao.DataAccessException.class);
             assertThat(jdbc.queryForObject("SELECT count(*) FROM core_algo_projection_initialization",Integer.class)).isZero();

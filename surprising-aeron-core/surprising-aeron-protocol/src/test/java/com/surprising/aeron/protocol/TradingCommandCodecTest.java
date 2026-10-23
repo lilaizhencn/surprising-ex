@@ -182,7 +182,7 @@ class TradingCommandCodecTest {
         ApplyFundingCommand funding = new ApplyFundingCommand(11, "1", 100, 0, 128);
         ApplyFundingCommand chunkedFunding = new ApplyFundingCommand(12, "1", -100,
                 42, 128);
-        SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "1", 61_000, 0, 0, 128);
+        SettleInstrumentCommand settlement = new SettleInstrumentCommand(12, "1", 61_000, 0, 128);
         ExecuteLiquidationCommand liquidation = new ExecuteLiquidationCommand(13, 9, 59_000, 25_000);
         ExecuteLiquidationCommand chunkedLiquidation = new ExecuteLiquidationCommand(
                 14, 10, 58_000, 30_000, 91, 512);
@@ -192,8 +192,7 @@ class TradingCommandCodecTest {
                 ResolveLiquidationCommand.Resolution.INSURANCE, 7);
         ContinueRiskScanCommand continuation = new ContinueRiskScanCommand(256);
         UpdatePositionModeCommand mode = new UpdatePositionModeCommand(CorePositionMode.HEDGE);
-        AdjustPositionMarginCommand margin = new AdjustPositionMarginCommand("1",
-                CoreMarginMode.ISOLATED, CorePositionSide.LONG, 500);
+        AdjustPositionMarginCommand margin = new AdjustPositionMarginCommand("1", CorePositionSide.LONG, 500);
         AdjustInsuranceFundCommand insuranceFund = new AdjustInsuranceFundCommand("USDT", 500);
         UpdateLeverageCommand leverage = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 5_000_000L);
         UpsertFeePolicyCommand feePolicy = new UpsertFeePolicyCommand(31, 7, 1001, "1",
@@ -254,7 +253,7 @@ class TradingCommandCodecTest {
         byte[] liquidation = TradingCommandCodec.encodeExecuteLiquidation(
                 new ExecuteLiquidationCommand(13, 9, 59_000, 25_000));
         byte[] settlement = TradingCommandCodec.encodeSettleInstrument(
-                new SettleInstrumentCommand(12, "1", 61_000, 0));
+                new SettleInstrumentCommand(12, "1", 61_000));
 
         for (int invalid : new int[] {0, 1_025}) {
             ByteBuffer.wrap(liquidation).order(ByteOrder.LITTLE_ENDIAN)
@@ -330,7 +329,6 @@ class TradingCommandCodecTest {
         assertThat(restored.status()).isEqualTo(response.status());
         assertThat(restored.commandStatus()).isEqualTo(response.commandStatus());
         assertThat(restored.resultCode()).isEqualTo(response.resultCode());
-        assertThat(restored.routeVersion()).isEqualTo(CoreRoute.DEFAULT.version());
         assertThat(restored.committedCoreSequence()).isEqualTo(response.appliedCommandCount());
         assertThat(restored.appliedCommandCount()).isEqualTo(response.appliedCommandCount());
         assertThat(restored.data()).containsExactly(response.data());

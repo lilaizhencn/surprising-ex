@@ -58,9 +58,9 @@ class InstrumentCoreSyncServiceTest {
             service.reconcile(); assertThat(sequence.get()).isEqualTo(1);
             var startupInstrument=state.tradingState().instruments().get("1");
             var sealSequence=sequence.incrementAndGet();
-            state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.VERIFY_STATE_HASH,
+            state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
                     java.util.UUID.randomUUID(),line,CommandSource.OPERATIONS,993,sealSequence,0,
-                    1_700_000_000_000L+sealSequence,sealSequence),CoreMessage.EMPTY_PAYLOAD));
+                    1_700_000_000_000L+sealSequence,sealSequence), com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1))));
             var pause=row(line,2,InstrumentStatus.HALT);
             cache.apply(new InstrumentEvent(1, "1",2,InstrumentStatus.TRADING,InstrumentEventType.UPSERTED,Instant.now(),pause,line,2));
             service.reconcile();

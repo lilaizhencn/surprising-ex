@@ -44,7 +44,7 @@ class CoreSpotAssetUnitsTest {
             byte[] encoded = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(runtime.tradingState());
             // 以小端读取快照字段的 ByteBuffer 游标
             var fields = java.nio.ByteBuffer.wrap(encoded).order(java.nio.ByteOrder.LITTLE_ENDIAN);
-            assertThat(fields.getInt()).isEqualTo(37);
+            assertThat(fields.getInt()).isEqualTo(38);
             // 快照字段十二记录的最低读者能力值，非单位资产计账场景应为二
             long minimumReader = 0;
             while (fields.hasRemaining()) {

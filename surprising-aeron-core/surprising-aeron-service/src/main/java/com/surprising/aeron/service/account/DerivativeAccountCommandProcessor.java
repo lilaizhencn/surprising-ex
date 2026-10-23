@@ -284,7 +284,7 @@ public final class DerivativeAccountCommandProcessor {
         if (runtime == null || identities == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid runtime position margin adjustment");
         runtime.assertOwner();
-        if (command.marginMode() != com.surprising.aeron.protocol.CoreMarginMode.ISOLATED || command.amountUnits() == 0)
+        if (command.amountUnits() == 0)
             throw new CoreStateRejectedException("POSITION_MARGIN_ADJUSTMENT_INVALID", "only isolated position margin can be adjusted");
         // 经过规则校验的业务合约编号文本。
         String instrumentId = OrderReservation.requireInstrumentId(command.instrumentId());
@@ -306,7 +306,7 @@ public final class DerivativeAccountCommandProcessor {
         // 当前 Lane 权威持仓，最终写回循环中则为已计算的新持仓键值项。
         PositionRuntime position = runtime.position(positionKey);
         if (position == null || position.signedQuantitySteps() == 0
-                || position.marginMode() != command.marginMode() || position.positionSide() != command.positionSide())
+                || position.marginMode() != com.surprising.aeron.protocol.CoreMarginMode.ISOLATED || position.positionSide() != command.positionSide())
             throw new CoreStateRejectedException("POSITION_NOT_FOUND", "isolated position does not exist");
         // 目标结算资产的权威可用与冻结余额。
         BalanceRuntime balance = runtime.balance(userId, position.assetId());

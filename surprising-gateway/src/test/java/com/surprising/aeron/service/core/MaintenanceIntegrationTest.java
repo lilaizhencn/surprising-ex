@@ -43,7 +43,7 @@ class MaintenanceIntegrationTest {
                     CoreTriggerOrderType.STOP_LOSS,CoreTriggerCondition.GREATER_OR_EQUAL,200,0,0,0,0,0,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,90,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,
                     0,0,0,"",0,0,0,0,1,0,0);
-            submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,CoreTriggerOrderCodec.encodeState(trigger));
+            submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,CoreTriggerOrderCodec.encodePlacement(trigger));
             var request = new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.CANCEL,0,"upgrade test");
             var task = fixture.service.create("1",request);
             assertThat(fixture.service.create("1",request).id()).isEqualTo(task.id());
@@ -382,7 +382,7 @@ class MaintenanceIntegrationTest {
             CoreResponse response = state.applyDecodedCommand(message, timestamp, position,
                     window.decodedIfPresent(message), independent);
             while (state.directCommand.active()) {
-                response = state.directCommand.poll(state);
+                response = state.directCommand.poll();
                 if (System.nanoTime() >= deadline) throw new AssertionError("direct command timeout");
                 Thread.onSpinWait();
             }

@@ -367,8 +367,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
      */
     private static final class BatchFinancialWork extends SystemLedgerCommand
             implements java.util.function.BooleanSupplier {
-        /** 本次步骤或续步所绑定的交易运行时。 */
-        private final TradingAccountRuntime runtime;
         /** 本批各请求的账户执行步骤，所属 Lane 完成后 Owner 读取其用户与修订信息。 */
         private final BatchExecutionStage[] stages;
         /** 本批账户资金回执数组，Owner 收集完成后由账本按原请求顺序应用。 */
@@ -391,7 +389,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private BatchFinancialWork(TradingAccountRuntime runtime, BatchExecutionStage[] stages,
                                    RuntimeTreasuryDelta[] results) {
             initializeLedgerCommand(runtime);
-            this.runtime = runtime; this.stages = stages; this.results = results;
+            this.stages = stages; this.results = results;
         }
 
         /**
@@ -681,8 +679,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
         /** 单笔命令复用的账户执行步骤，Lane 准备后由 Owner 等待其结果。 */
         private BatchExecutionStage stage;
-        /** 本次步骤或续步所绑定的交易运行时。 */
-        private TradingAccountRuntime runtime;
         /** 本笔强平命令，提供执行价格、费率和撤单游标等固定输入。 */
         private ExecuteLiquidationCommand command;
         /** 本次从 Matcher 收到的撤单回执，命令槽回收时释放集合引用。 */
@@ -720,7 +716,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             // 从强平路由或同步强平记录得到的源用户编号，没有记录时为 0。
             long userId = route == null ? runtime.liquidation(command.liquidationId()).userId() : route.userId();
             laneId = runtime.topology().accountLaneId(userId);
-            this.runtime = runtime;
+
             this.done = accountsCollected = ledgerDispatched = false;
             treasuryDelta = null;
         }
@@ -783,7 +779,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
          */
         public void clearReferences() {
             if (stage != null) stage.clearReferences();
-            runtime = null;
             command = null;
             canceledOrders = null;
             identities = null;

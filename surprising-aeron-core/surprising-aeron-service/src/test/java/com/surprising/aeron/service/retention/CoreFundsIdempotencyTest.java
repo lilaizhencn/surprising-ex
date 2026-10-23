@@ -62,8 +62,7 @@ class CoreFundsIdempotencyTest {
             assertThat(apply(state, command(CoreMessageType.ADJUST_BALANCE, adjustmentId, 1, payload)).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             for (/* 淘汰近期结果时使用的新来源序号 */ long sequence = 2; sequence <= TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 2L; sequence++) {
-                assertThat(apply(state, command(CoreMessageType.VERIFY_STATE_HASH, UUID.randomUUID(), sequence,
-                        CoreMessage.EMPTY_PAYLOAD)).status()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(apply(state, command(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(), sequence, com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1)))).status()).isEqualTo(ResponseStatus.APPLIED);
             }
 
             // 与原转账或入账同 UUID、等价载荷的重试

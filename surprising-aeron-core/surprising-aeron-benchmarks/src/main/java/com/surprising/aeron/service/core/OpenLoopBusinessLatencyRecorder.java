@@ -89,7 +89,7 @@ public final class OpenLoopBusinessLatencyRecorder {
                 case EXECUTE_ADL -> ADL;
                 case SETTLE_INSTRUMENT -> SETTLEMENT;
                 case UPDATE_INSTRUMENT_MAINTENANCE -> MAINTENANCE;
-                case VERIFY_STATE_HASH, ADJUST_BALANCE, REGISTER_INSTRUMENT,
+                case ADJUST_BALANCE, REGISTER_INSTRUMENT,
                         UPDATE_POSITION_MODE, ADJUST_POSITION_MARGIN,
                         ADJUST_INSURANCE_FUND, UPDATE_LEVERAGE, UPSERT_ALGO_ORDER,
                         UPDATE_CANCEL_ALL_AFTER, UPSERT_FEE_POLICY, TRANSFER_OUT, TRANSFER_IN,

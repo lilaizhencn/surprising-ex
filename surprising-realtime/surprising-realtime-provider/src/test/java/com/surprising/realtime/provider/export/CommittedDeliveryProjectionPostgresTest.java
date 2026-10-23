@@ -96,6 +96,6 @@ class CommittedDeliveryProjectionPostgresTest {
 
     private CommittedDeliveryPage page(ProductLine line, List<DeliveryCashFlow> flows) {
         return new CommittedDeliveryPage(line, 4096, 1_700_000_000_100L,
-                new SettleInstrumentCommand(1_700_000_000_000L, "73", 110, 0, 0, 16, 0, 16), flows);
+                new SettleInstrumentCommand(1_700_000_000_000L, "73", 110, 0, 16, 0, 16), flows);
     }
 }

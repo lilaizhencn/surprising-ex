@@ -98,7 +98,7 @@ public final class InstrumentSettlementCommands {
             RuntimeLifecycleSettlementContinuation.SettlementWork reuse,
             com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
         return RuntimeLifecycleSettlementContinuation.prepare(reuse, command,
-                owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()), commandId,
+                owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()),
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
     }
 

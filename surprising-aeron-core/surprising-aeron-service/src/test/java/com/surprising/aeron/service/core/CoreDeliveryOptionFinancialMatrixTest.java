@@ -131,8 +131,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         opening = addPosition(opening, USER_ID, QUANTITY, variant);
         opening = addPosition(opening, SECOND_MAKER_ID, -QUANTITY, variant);
         // 同标的结算七百零一命令，附带不可信单份期权现金九千九百九十九，实际金额由核心推导
-        SettleInstrumentCommand command = new SettleInstrumentCommand(
-                701, variant.instrumentId(), variant.settlementPriceTicks(), 9_999);
+        SettleInstrumentCommand command = new SettleInstrumentCommand(701, variant.instrumentId(), variant.settlementPriceTicks());
         // 冷转换直接结算相同对向持仓后的完整预期状态
         TradingCoreState expected = reducer.settleInstrument(opening, command);
         // 本次投影、业务辅助和物化共用的独立整数身份表
@@ -160,7 +159,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         opening = addPosition(opening, USER_ID, QUANTITY, variant);
         opening = addPosition(opening, SECOND_MAKER_ID, -QUANTITY, variant);
         // 交给原账本续步的结算七百零一命令，采用本组合结算价格
-        var command = new SettleInstrumentCommand(701, variant.instrumentId(), variant.settlementPriceTicks(), 9_999);
+        var command = new SettleInstrumentCommand(701, variant.instrumentId(), variant.settlementPriceTicks());
         // 冷转换完成同一结算后的完整预期状态，供异步账本提交结果比较
         TradingCoreState expected = reducer.settleInstrument(opening, command);
         // 本次投影、业务辅助和物化共用的独立整数身份表
@@ -170,7 +169,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             try {
                 // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
                 var work = RuntimeLifecycleSettlementContinuation.prepare(command, List.of(USER_ID, SECOND_MAKER_ID),
-                        new UUID(1, 701), new ActiveOrderIndex(opening), runtime, identities);
+                        new ActiveOrderIndex(opening), runtime, identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(work.result().complete()).isTrue();
                 assertThat(work.poll()).isTrue();
@@ -192,7 +191,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState opening = fundedState(variant, USER_ID, 200);
         opening = addPosition(opening, USER_ID, variant.instrumentId(), 1, 160, 20, variant);
         // 逐仓交割结算七百零二命令，固定价格一百二十，保险不足后重试同一业务身份
-        var command = new SettleInstrumentCommand(702, variant.instrumentId(), 120, 9_999);
+        var command = new SettleInstrumentCommand(702, variant.instrumentId(), 120);
         // 本次投影、业务辅助和物化共用的独立整数身份表
         var identities = new RuntimeIdentityRegistry();
         // 只给冷对照运行时使用的独立身份表
@@ -204,7 +203,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
-                var work = RuntimeLifecycleSettlementContinuation.prepare(command, List.of(USER_ID), new UUID(1, 702), index, runtime, identities);
+                var work = RuntimeLifecycleSettlementContinuation.prepare(command, List.of(USER_ID), index, runtime, identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(work.result().requiredInsuranceUnits()).isEqualTo(20);
                 assertThat(work.result().nextCursorUserId()).isZero();
@@ -214,10 +213,10 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 cold.clearChangedKeys();
                 // 给缺口对应结算资产保险基金增加二十的补款命令
                 var topUp = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), 20);
-                LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(null, runtime, identities, topUp));
+                LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, topUp));
                 RuntimeInsuranceFundStateTransitions.adjust(cold, coldIdentities, topUp);
                 LedgerControlTestSupport.commit(runtime, identities, true); cold.clearChangedKeys();
-                work = RuntimeLifecycleSettlementContinuation.prepare(work, command, List.of(USER_ID), new UUID(1, 703), index, runtime, identities);
+                work = RuntimeLifecycleSettlementContinuation.prepare(work, command, List.of(USER_ID), index, runtime, identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(work.result().complete()).isTrue();
                 RuntimeLifecycleSettlement.applyRuntime(command, List.of(USER_ID), new UUID(1, 703), index, cold, coldIdentities);
@@ -300,21 +299,21 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState matched = matchedOption(option);
         // 本次到期结算完成后的冷状态，供持仓释放和资金守恒断言
         TradingCoreState settled = reducer.settleInstrument(matched,
-                new SettleInstrumentCommand(401, option.instrumentId(), option.settlementPriceTicks(), 9_999));
+                new SettleInstrumentCommand(401, option.instrumentId(), option.settlementPriceTicks()));
 
         assertThat(settled.user(USER_ID).totalUnits(option.settleAsset())).isEqualTo(WALLET - 20 + 40);
         assertThat(settled.user(MAKER_ID).totalUnits(option.settleAsset())).isEqualTo(WALLET + 20 - 40);
         assertThat(settled.treasuryState().feeBalances()).doesNotContainKey(option.settleAsset());
         assertThat(settled.treasuryState().lifecycleSettlements()).containsEntry(option.instrumentId(), 401L);
         assertThat(reducer.settleInstrument(settled,
-                new SettleInstrumentCommand(401, option.instrumentId(), 1, 1))).isEqualTo(settled);
+                new SettleInstrumentCommand(401, option.instrumentId(), 1))).isEqualTo(settled);
 
         // 本场景选定的正向或反向交割组合
         Variant delivery = VARIANTS.get(2);
         // 双方对向持仓、尚未开始分段交割的冷状态
         TradingCoreState cursorState = oppositePositions(delivery, WALLET, WALLET);
         // 从用户游标零开始、最多处理一个用户的首段结算命令
-        SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(402, delivery.instrumentId(), delivery.settlementPriceTicks(), 77, 0, 1);
+        SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(402, delivery.instrumentId(), delivery.settlementPriceTicks(), 0, 1);
         // 首段返回的状态与结算进度，正常分段场景尚未整体完成
         RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(cursorState,
                 firstCommand, List.of(USER_ID, MAKER_ID), UUID.fromString("00000000-0000-0000-0000-000000000402"));
@@ -348,7 +347,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
             // 当前恢复续步场景的固定结算业务 ID，两段保持同一身份
             long settlementId = variant.type().isOption() ? 403 : 404;
             // 从用户游标零开始、最多处理一个用户的首段结算命令
-            SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(settlementId, variant.instrumentId(), variant.settlementPriceTicks(), 9_999, 0, 1);
+            SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(settlementId, variant.instrumentId(),
+                    variant.settlementPriceTicks(), 0, 1);
 
             // 首段返回的状态与结算进度，正常分段场景尚未整体完成
             RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
@@ -364,7 +364,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
             // 从保存用户游标继续处理下一用户的结算结果，应整体完成
             RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
-                    new SettleInstrumentCommand(settlementId, variant.instrumentId(), variant.settlementPriceTicks(), 9_999, USER_ID, 1),
+                    new SettleInstrumentCommand(settlementId, variant.instrumentId(), variant.settlementPriceTicks(), USER_ID, 1),
                     List.of(USER_ID, MAKER_ID),
                     UUID.fromString("00000000-0000-0000-0000-000000000404"));
 
@@ -385,7 +385,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
             // 当前恢复续步场景的固定结算业务 ID，两段保持同一身份
             long settlementId = variant.type() == ContractType.LINEAR_DELIVERY ? 405 : 406;
             // 从用户游标零开始、最多处理一个用户的首段结算命令
-            SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(settlementId, variant.instrumentId(), variant.settlementPriceTicks(), 9_999, 0, 1);
+            SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(settlementId, variant.instrumentId(),
+                    variant.settlementPriceTicks(), 0, 1);
 
             // 首段返回的状态与结算进度，正常分段场景尚未整体完成
             RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
@@ -401,7 +402,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
             // 从保存用户游标继续处理下一用户的结算结果，应整体完成
             RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
-                    new SettleInstrumentCommand(settlementId, variant.instrumentId(), variant.settlementPriceTicks(), 9_999, USER_ID, 1),
+                    new SettleInstrumentCommand(settlementId, variant.instrumentId(), variant.settlementPriceTicks(), USER_ID, 1),
                     List.of(USER_ID, MAKER_ID),
                     UUID.fromString("00000000-0000-0000-0000-000000000406"));
 
@@ -457,7 +458,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         long beforeTotal = total(state, "USDT");
 
         // 只结逐仓标的九、价格一百的结算四百零七命令
-        var command = new SettleInstrumentCommand(407, isolatedSymbol, 100, 9_999);
+        var command = new SettleInstrumentCommand(407, isolatedSymbol, 100);
         // 保险不足时结束本段但保持目标用户未结算的状态
         TradingCoreState paused = reducer.settleInstrument(state, command);
         assertThat(paused.user(USER_ID).balances()).isEqualTo(beforeUser.balances());
@@ -511,7 +512,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             state = new TradingCoreState(state.productLine(), 3, Map.of(USER_ID, user), Map.of(),
                     state.instruments(), state.riskState(), state.treasuryState());
             // 本次到期结算完成后的冷状态，供持仓释放和资金守恒断言
-            var settled = reducer.settleInstrument(state, new SettleInstrumentCommand(900, instrumentId, 200, 0));
+            var settled = reducer.settleInstrument(state, new SettleInstrumentCommand(900, instrumentId, 200));
             assertThat(settled.user(USER_ID).totalUnits("USDT")).isEqualTo(20);
             assertThat(settled.user(USER_ID).balances().get("USDT").lockedUnits()).isZero();
             assertThat(settled.treasuryState().lifecycleSettlement(instrumentId)).isEqualTo(900);
@@ -536,7 +537,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
         // 本次到期结算完成后的冷状态，供持仓释放和资金守恒断言
         TradingCoreState settled = reducer.settleInstrument(state,
-                new SettleInstrumentCommand(411, delivery.instrumentId(), delivery.settlementPriceTicks(), 9_999));
+                new SettleInstrumentCommand(411, delivery.instrumentId(), delivery.settlementPriceTicks()));
 
         // 到期撤单后的预留，原总量不变、剩余零、全部记为已释放
         OrderReservation afterReservation = settled.user(USER_ID).reservations().get(702L);
@@ -574,7 +575,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
         // 本次到期结算完成后的冷状态，供持仓释放和资金守恒断言
         TradingCoreState settled = reducer.settleInstrument(state,
-                new SettleInstrumentCommand(501, option.instrumentId(), option.settlementPriceTicks(), 9_999));
+                new SettleInstrumentCommand(501, option.instrumentId(), option.settlementPriceTicks()));
 
         assertThat(settled.order(501).status()).isEqualTo(CoreOrderStatus.CANCELED);
         assertThat(settled.user(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isZero();
@@ -898,7 +899,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(expected).as(variant.key() + " independent delivery expectation").isNotNull();
         // 本行结算完成且持仓保证金已释放的冷状态
         TradingCoreState ending = reducer.settleInstrument(opening,
-                new SettleInstrumentCommand(100 + variant.marginMode().ordinal(), variant.instrumentId(), variant.settlementPriceTicks(), 9_999));
+                new SettleInstrumentCommand(100 + variant.marginMode().ordinal(), variant.instrumentId(), variant.settlementPriceTicks()));
         assertFlatAndReleased(ending, variant);
         assertThat(userValue(ending, variant) - userValue(opening, variant))
                 .as(variant.key() + " signed long payout")
@@ -939,8 +940,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 本行结算完成且持仓保证金已释放的冷状态
         TradingCoreState ending = reducer.settleInstrument(matched,
                 new SettleInstrumentCommand(200 + variant.optionType().ordinal() * 10
-                        + (variant.moneyness().equals("ITM") ? 1 : variant.moneyness().equals("ATM") ? 2 : 3),
-                        variant.instrumentId(), variant.settlementPriceTicks(), 9_999));
+                        + (variant.moneyness().equals("ITM") ? 1 : variant.moneyness().equals("ATM") ? 2 : 3), variant.instrumentId(), variant.settlementPriceTicks()));
         assertFlatAndReleased(ending, variant);
         return new Row(rowKey(variant), variant, opening, ending,
                 funds(WALLET, WALLET, 0, 0,

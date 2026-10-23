@@ -650,7 +650,7 @@ public final class MatchingCommandAdmission {
         }
         if (progress != null && (progress.settlementId() != command.settlementId()
                 || progress.settlementPriceTicks() != command.settlementPriceTicks()
-                || progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
+
                 || progress.ordersComplete() != (command.cursorOrderId() == 0)
                 || progress.nextCursorOrderId() != command.cursorOrderId()
                 || progress.nextCursorUserId() != command.cursorUserId())) {

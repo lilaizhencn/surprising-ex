@@ -67,7 +67,7 @@ class CoreConfigurationTest {
             assertThat(runtimeConfiguration.executionMode()).isEqualTo(TradingExecutionMode.FUSED);
             assertThat(runtimeConfiguration.matcherGroupSize()).isEqualTo(17);
             assertThat(runtimeConfiguration.laneInitialEntities()).isEqualTo(32);
-            assertThat(topology).isEqualTo(new LaneTopology(2, 0, 1, 8, 42, 32, 64, 128));
+            assertThat(topology).isEqualTo(new LaneTopology(2, 1, 8, 42, 32, 64, 128));
             // 用最小 Cluster 元数据启动真实 Owner 线程，并捕获它实际使用的拓扑。
             var cluster = cluster();
             var egress = context.getBean(ClusterServiceEgress.class);
@@ -107,7 +107,7 @@ class CoreConfigurationTest {
                 "--surprising.aeron.product-line=SPOT", "--surprising.aeron.hostnames=localhost",
                 "--surprising.aeron.account-lanes=16")) {
             assertThat(context.getBean(LaneTopology.class))
-                    .isEqualTo(new LaneTopology(4, 0, 3, 16, 99, 32, 64, 128));
+                    .isEqualTo(new LaneTopology(4, 3, 16, 99, 32, 64, 128));
         }
     }
 
@@ -131,7 +131,7 @@ class CoreConfigurationTest {
     @EnumSource(ProductLine.class)
     void snapshotTopologyWinsOverCurrentNodeProperties(ProductLine product) {
         // 显式传入的旧节点拓扑，账户与 Matcher 应同时使用它。
-        var topology = new LaneTopology(2, 0, 1, 4, 42, 32, 64, 128);
+        var topology = new LaneTopology(2, 1, 4, 42, 32, 64, 128);
         // 暂存节点当前属性，确保测试结束后恢复，不影响其他产品线。
         String previous = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "3");
@@ -159,7 +159,6 @@ class CoreConfigurationTest {
                 surprising:
                   aeron:
                     matching-engines: 2
-                    risk-engines: 0
                     account-lanes: 4
                     account-lane-seed: 42
                     matcher-window-size: 32

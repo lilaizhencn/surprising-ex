@@ -24,26 +24,24 @@ public final class RuntimeInsuranceFundStateTransitions {
         }
         runtime.assertOwner();
         if (runtime.systemLedgerStarted()) throw new IllegalStateException("active insurance adjustment requires its asynchronous continuation");
-        // 本轮复用或新建并已初始化的保险调整续步。
-        AdjustmentWork work = prepare(null, runtime, identities, command);
+        // 本轮新建并已初始化的保险调整续步。
+        AdjustmentWork work = prepare(runtime, identities, command);
         work.applyLedger(runtime.treasury());
         runtime.incrementCommandRevision();
     }
 
     /**
-     * Owner 解析资产、金额及下一产品修订，复用已经完全关闭的旧任务，否则创建新任务，并初始化本轮派发及完成标记。
-     * @param reuse 可选复用任务，只有父类确认旧财务范围已关闭才重用
+     * Owner 解析资产、金额及下一产品修订，创建本次调整任务并初始化派发及完成标记。
      * @param runtime 本次保险调整所属运行时
      * @param identities 解析保险资产编号的运行时字典
      * @param command 包含保险资产和有符号调整金额的复制命令
      */
-    public static AdjustmentWork prepare(AdjustmentWork reuse, TradingAccountRuntime runtime,
+    public static AdjustmentWork prepare(TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities, AdjustInsuranceFundCommand command) {
         runtime.assertOwner();
-        // 本轮复用或新建并已初始化的保险调整续步。
-        AdjustmentWork work = reuse == null || !reuse.reusable() ? new AdjustmentWork() : reuse;
+        // 本轮新建并已初始化的保险调整续步。
+        AdjustmentWork work = new AdjustmentWork();
         work.initializeLedgerCommand(runtime);
-        work.runtime = runtime;
         work.assetId = identities.assetId(command.asset());
         work.deltaUnits = command.deltaUnits();
         work.nextRevision = Math.incrementExact(runtime.revision());
@@ -55,8 +53,6 @@ public final class RuntimeInsuranceFundStateTransitions {
      * 同一控制命令持有的保险调整输入及异步完成续步，复用父类财务作用域和回滚前值，不增加资金镜像。
      */
     public static final class AdjustmentWork extends SystemLedgerCommand implements java.util.function.BooleanSupplier {
-        /** 本轮任务所属运行时，Owner 用它投递及发布产品修订。 */
-        private TradingAccountRuntime runtime;
         /** 本次保险增减的资产稠密编号。 */
         private int assetId;
         /**

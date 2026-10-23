@@ -35,8 +35,8 @@ final class SectionedCoreSnapshotValidation {
         // 从快照各分片参数构造的路由拓扑。
         LaneTopology topology;
         try {
-            topology = new LaneTopology(header.getInt(), header.getInt(), header.getInt(),
-                    header.getInt(), header.getLong(), header.getInt(), header.getInt(), header.getInt());
+            topology = new LaneTopology(header.getInt(), header.getInt(), header.getInt(), header.getLong(), header.getInt(),
+                    header.getInt(), header.getInt());
         } catch (/* 拓扑字段不合法的异常，转为带消息的协议异常。 */ IllegalArgumentException exception) {
             throw new ProtocolException("snapshot route mismatch: " + exception.getMessage());
         }

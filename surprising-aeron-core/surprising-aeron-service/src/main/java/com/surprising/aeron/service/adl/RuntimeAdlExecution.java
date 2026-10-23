@@ -175,8 +175,6 @@ public final class RuntimeAdlExecution {
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
         /** 当前 ADL 命令，保存目标持仓预期、减仓量和覆盖额，完成后释放引用。 */
         private ExecuteAdlCommand command;
-        /** 该续步操作的交易运行时，用于派发账户工作并等待账本。 */
-        private TradingAccountRuntime runtime;
         /** 源账户 Lane 捕获的强平记录，校验通过后供目标账户计算使用。 */
         private LiquidationRuntime liquidation;
         /** 本次 ADL 固定采用的合约配置引用，完成后释放。 */
@@ -222,7 +220,7 @@ public final class RuntimeAdlExecution {
                 long positionKey, int settleAssetId, int targetLane) {
             initializeLedgerCommand(runtime);
             this.command = command;
-            this.runtime = runtime;
+
             this.liquidation = liquidation;
             this.instrument = instrument;
             this.mark = mark;

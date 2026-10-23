@@ -96,7 +96,6 @@ YAML、标准环境变量、JVM `-D` 和 Spring 命令行服从 Spring 优先级
 | `surprising.aeron.cpu-affinity.*` | `CoreConfiguration`，见 [`application.yml`](surprising-aeron-service/src/main/resources/application.yml) | 默认关闭；开启需配置四个不同 CPU；macOS 跳过绑定 |
 | `surprising.aeron.execution-mode` | `CoreRuntimeConfiguration`，Spring 统一绑定 | `FUSED`；另可选 `PIPELINED`，由 Binder 转换枚举 |
 | `surprising.aeron.matching-engines` / `account-lanes` | `CoreConfiguration.laneTopology()`，Spring YAML、环境变量、JVM 属性或命令行 | `1` / `2`，须为允许范围内的 2 次幂；恢复使用快照拓扑 |
-| `surprising.aeron.risk-engines` | 同上 | `0`；不代表另启同数量风险线程，账户风控经账户 Lane 执行 |
 | `surprising.aeron.account-lane-seed` | 同上 | `7640891576956012809`；随快照保存，不按新配置重新路由已有账户 |
 | `surprising.aeron.matcher-window-size` / `matching-completion-capacity` / `account-lane-queue-capacity` | 同上 | 均为 `4096`，须为允许范围内的 2 次幂 |
 | `surprising.aeron.core.threading-mode` | `CoreTransportConfiguration`，Spring 统一绑定 | CPU ≥ 12 时 `DEDICATED`，否则 `SHARED_NETWORK` |

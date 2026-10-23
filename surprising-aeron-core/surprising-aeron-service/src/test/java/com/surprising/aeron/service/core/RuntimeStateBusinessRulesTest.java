@@ -537,12 +537,10 @@ class RuntimeStateBusinessRulesTest {
 
         // 追加逐仓保证金五百后的预期冷状态
         TradingCoreState added = reducer.adjustPositionMargin(withPosition, 101,
-                new AdjustPositionMarginCommand("1", CoreMarginMode.ISOLATED,
-                        CorePositionSide.NET, 500));
+                new AdjustPositionMarginCommand("1", CorePositionSide.NET, 500));
         // 再减少逐仓保证金三百后的预期冷状态，可用八千八百、锁定一千二百
         TradingCoreState removed = reducer.adjustPositionMargin(added, 101,
-                new AdjustPositionMarginCommand("1", CoreMarginMode.ISOLATED,
-                        CorePositionSide.NET, -300));
+                new AdjustPositionMarginCommand("1", CorePositionSide.NET, -300));
 
         assertThat(added.user(101).totalUnits(asset)).isEqualTo(10_000);
         assertThat(added.user(101).positions().get("1").positionMarginUnits()).isEqualTo(1_500);
@@ -556,7 +554,7 @@ class RuntimeStateBusinessRulesTest {
         try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(withPosition, identities)) {
             for (long /* 超过可用、超过持仓保证金或取 long 极小负数的故意非法调整金额 */ rejected : new long[] {9_001, -1_001, Long.MIN_VALUE}) {
                 assertThatThrownBy(() -> DerivativeAccountCommandProcessor.adjustPositionMargin(runtime, identities, 101,
-                        new AdjustPositionMarginCommand("1", CoreMarginMode.ISOLATED, CorePositionSide.NET, rejected)))
+                        new AdjustPositionMarginCommand("1", CorePositionSide.NET, rejected)))
                         .isInstanceOf(RuntimeException.class);
                 assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(withPosition);
             }
@@ -564,7 +562,7 @@ class RuntimeStateBusinessRulesTest {
             for (long /* 账户 Lane 依次执行的合法逐仓保证金调整额，先加五百后减三百 */ amount : new long[] {500, -300}) {
                 // 本次逐仓保证金调整的可轮询账户控制任务
                 var work = new AccountControlTask().preparePositionMarginAdjustment(runtime, identities, 101,
-                        new AdjustPositionMarginCommand("1", CoreMarginMode.ISOLATED, CorePositionSide.NET, amount));
+                        new AdjustPositionMarginCommand("1", CorePositionSide.NET, amount));
                 // 本次控制任务轮询的单调时钟五秒期限
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
                 // 账户控制任务是否完成，退出轮询后必须为真

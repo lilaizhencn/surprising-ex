@@ -25,14 +25,14 @@ import java.util.zip.CRC32C;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/** 原生 Matcher 快照清单版本八的二进制格式。使用 DataInput/DataOutput 的大端整数顺序，逐模块和整条正文分别校验 CRC32C，保存拓扑、配对水位/哈希、注册表及原生模块；与交易状态快照三十七的小端字段格式不同，不能混用读取器。 构造约定：工具类不创建实例。 */
+/** 原生 Matcher 快照清单版本九的二进制格式。使用 DataInput/DataOutput 的大端整数顺序，逐模块和整条正文分别校验 CRC32C，保存拓扑、配对水位/哈希、注册表及原生模块；与交易状态快照三十八的小端字段格式不同，不能混用读取器。 构造约定：工具类不创建实例。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class MatcherSnapshotCodec {
 
     /** 此原生 Matcher 清单的固定格式识别数。 */
     private static final int MAGIC = 0x4d534e50;
-    /** 本 Codec 唯一写入和接受的清单版本八。 */
-    private static final int VERSION = 8;
+    /** 本 Codec 唯一写入和接受的清单版本九。 */
+    private static final int VERSION = 9;
     /** 沿用分段 Core 快照规定的最大区段字节数，包含末尾八字节校验值。 */
     private static final int HARD_MAX_SNAPSHOT_BYTES = SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES;
     /** 解码每类注册表、进度或模块区段允许的通用百万条目粗上限。 */
@@ -41,7 +41,7 @@ public final class MatcherSnapshotCodec {
     private static final int MAX_MODULE_BYTES = HARD_MAX_SNAPSHOT_BYTES - 128;
 
     /**
-     * 用限长正文缓冲写版本八清单，按清单现有迭代顺序保存注册表、进度及模块，最后追加八字节无符号 CRC32C 值。模块类型沿当前实现写 ordinal，单模块与总字节限长在这里检查；不额外执行 decode 的百万条目数上限。
+     * 用限长正文缓冲写版本九清单，按清单现有迭代顺序保存注册表、进度及模块，最后追加八字节无符号 CRC32C 值。模块类型沿当前实现写 ordinal，单模块与总字节限长在这里检查；不额外执行 decode 的百万条目数上限。
      * @param snapshot 已经完成清单构造校验、输入引用在编码期间稳定的 MatcherSnapshot
      */
     public static byte[] encode(MatcherSnapshot snapshot) {
@@ -64,7 +64,6 @@ public final class MatcherSnapshotCodec {
                 output.writeInt(VERSION);
                 output.writeInt(ProductLineWireCode.encode(snapshot.productLine()));
                 output.writeInt(snapshot.topology().matchingEngineCount());
-                output.writeInt(snapshot.topology().riskEngineCount());
                 output.writeInt(snapshot.topology().matcherShardMask());
                 output.writeInt(snapshot.topology().accountLaneCount());
                 output.writeLong(snapshot.topology().accountLaneSeed());
@@ -121,7 +120,7 @@ public final class MatcherSnapshotCodec {
     }
 
     /**
-     * 先检查总长度与正文 CRC32C，再按版本八读取拓扑和清单，检查注册表重复/数量、模块字节长度及各模块 CRC32C，最终要求没有尾部字节并构造 MatcherSnapshot 核对清单不变量。截断和其他 IO/参数异常按原代码转为协议异常，转换时保留消息而不附原 cause，已有协议异常原样抛出。
+     * 先检查总长度与正文 CRC32C，再按版本九读取拓扑和清单，检查注册表重复/数量、模块字节长度及各模块 CRC32C，最终要求没有尾部字节并构造 MatcherSnapshot 核对清单不变量。截断和其他 IO/参数异常按原代码转为协议异常，转换时保留消息而不附原 cause，已有协议异常原样抛出。
      * @param encoded 包含正文及末尾八字节 CRC32C 的完整快照字节
      */
     public static MatcherSnapshot decode(byte[] encoded) {
@@ -141,14 +140,14 @@ public final class MatcherSnapshotCodec {
         try (/* 仅覆盖正文部分的大端读取流，不把校验尾部当作业务字节。 */ DataInputStream input = new DataInputStream(
                 new ByteArrayInputStream(encoded, 0, encoded.length - Long.BYTES))) {
             if (input.readInt() != MAGIC) throw new ProtocolException("invalid matcher snapshot magic");
-            // 魔数之后保存的清单版本，当前只接受八。
+            // 魔数之后保存的清单版本，当前只接受九。
             int version = input.readInt();
             if (version != VERSION) throw new ProtocolException("unsupported matcher snapshot version: " + version);
             // 从固定产品线编码恢复的独立产品线。
             ProductLine productLine = ProductLineWireCode.decode(input.readInt());
             // 从清单保存的引擎、账户路由和队列容量重建的拓扑。
-            LaneTopology topology = new LaneTopology(input.readInt(), input.readInt(), input.readInt(),
-                    input.readInt(), input.readLong(), input.readInt(), input.readInt(), input.readInt());
+            LaneTopology topology = new LaneTopology(input.readInt(), input.readInt(), input.readInt(), input.readLong(),
+                    input.readInt(), input.readInt(), input.readInt());
             // 所有模块必须共同归属的快照编号。
             long snapshotId = input.readLong();
             // 与 Core 状态配对的命令水位。
@@ -195,7 +194,7 @@ public final class MatcherSnapshotCodec {
             }
             // 保存的原生模块数量，必须等于撮合和风险引擎数之和。
             int moduleCount = readCount(input, "module");
-            if (moduleCount != topology.matchingEngineCount() + topology.riskEngineCount()) {
+            if (moduleCount != topology.matchingEngineCount()) {
                 throw new ProtocolException("invalid matcher module count");
             }
             // 当前已校验 CRC 并恢复出的模块列表。

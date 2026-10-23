@@ -158,9 +158,9 @@ public class MaintenanceService {
                 if (progress.settlementId() == task.taskId() && progress.complete()) { repository.phase(task,"VERIFY"); return; }
                 if (progress.settlementId() != 0 && progress.settlementId() != task.taskId() && !progress.complete()) throw new IllegalStateException("another settlement is in progress");
                 var page = core.maintenance(instrumentId,0,1);
-                var command = new SettleInstrumentCommand(task.taskId(),instrumentId,task.priceTicks(),0,
-                        progress.settlementId() == task.taskId() ? progress.nextCursorUserId() : 0,16,
-                        progress.settlementId() == task.taskId() ? progress.nextCursorOrderId() : 0,20);
+                var command = new SettleInstrumentCommand(task.taskId(), instrumentId, task.priceTicks(),
+                        progress.settlementId() == task.taskId() ? progress.nextCursorUserId() : 0, 16,
+                        progress.settlementId() == task.taskId() ? progress.nextCursorOrderId() : 0, 20);
                 plan(task,"settle:"+task.step(),new MaintenanceActionPlan("SETTLE",0,0,TradingCommandCodec.encodeSettleInstrument(command)));
             }
             case "VERIFY" -> verify(task);

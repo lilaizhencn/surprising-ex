@@ -934,7 +934,7 @@ public final class TriggerOrderCommands {
      */
     public void executeUpsertAlgoOrder(CoreMessage message, long clusterTimestamp) {
         // 按当前命令业务时间物化的算法单创建或更新视图
-        var algo = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decode(message.payloadUnsafe())
+        var algo = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeCommand(message.payloadUnsafe())
                 .materializeCreation(clusterTimestamp);
         if (owner.runtimeState().algoRoute(algo.algoOrderId()) == null
                 && owner.terminalAlgoRetained(algo.algoOrderId(), message.header().userId(),
@@ -1020,7 +1020,7 @@ public final class TriggerOrderCommands {
      */
     public void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {
         // 按本次业务时间物化的触发单创建或更新视图
-        var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payloadUnsafe())
+        var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodePlacement(message.payloadUnsafe())
                 .materializeCreation(clusterTimestamp);
         // 触发单所属的已注册标的，存在时先检查当前交易状态及订单开关
         var maintenanceInstrument = owner.runtimeState().instrument(trigger.instrumentId());

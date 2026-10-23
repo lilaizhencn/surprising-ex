@@ -1,5 +1,5 @@
 {
-  "status": "in_progress",
+  "status": "confirmed_findings_resolved_candidates_remain",
   "date": "2026-10-23",
   "objective": "逐业务操作检查 command 产生到 Cluster 日志、执行、账户/账本落地、快照恢复及下游导出的字段和约束，去除无用持久化数据。",
   "implementation_completed": {
@@ -1000,7 +1000,7 @@
   "findings": [
     {
       "id": "A01",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "算法单复制命令包含不参与状态转换的查询统计",
       "operations": [
         "UPSERT_ALGO_ORDER"
@@ -1016,11 +1016,16 @@
         "CoreAlgoOrderState.from 不读取三字段",
         "CoreAlgoOrderView 构造器仍对其作非负校验"
       ],
-      "next": "收敛命令输入与查询响应编解码，查询统计继续保留在响应；先核对历史复制日志的解码版本。"
+      "next": "收敛命令输入与查询响应编解码，查询统计继续保留在响应；先核对历史复制日志的解码版本。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "新增 encodeCommand/decodeCommand，命令不写三个统计字段及单元素计数；完整查询和数据库状态编码不变。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A02",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "触发单创建输入费率被权威标的费率覆盖",
       "operations": [
         "PLACE_TRIGGER_ORDER",
@@ -1036,11 +1041,16 @@
         "CoreTriggerOrderCodec.writeState 编码两项费率",
         "RuntimeTriggerOrderStateTransitions.preparePlacement 先 from(view,instrument) 再 withExecutionSnapshot(instrument 的费率)"
       ],
-      "next": "移除创建命令中的费率及其输入约束，保留落地状态中真正用于子单执行和查询的费率快照。"
+      "next": "移除创建命令中的费率及其输入约束，保留落地状态中真正用于子单执行和查询的费率快照。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "新增触发单创建及 OCO 创建编码，不接受 Maker/Taker 费率；状态查询和子单执行继续使用 Core 固定的实际费率。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A03",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "固定 CoreRoute 被每条消息重复编码和校验",
       "operations": "all",
       "fields": [
@@ -1053,11 +1063,16 @@
         "CoreMessageCodec.encodeHeader 在 byte11 和 byte14..15 编码路由",
         "服务端仅解码并校验固定路由；业务路由按用户和币对及 LaneTopology 决定"
       ],
-      "next": "与协议 schemaVersion 一起收敛，检查所有客户端、解码器、指纹及历史日志格式；不另加路由兼容层。"
+      "next": "与协议 schemaVersion 一起收敛，检查所有客户端、解码器、指纹及历史日志格式；不另加路由兼容层。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除 CoreRoute；消息头、响应载荷、MatcherTransition 和指纹都不再复制固定路由版本。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A04",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "message kind 与 messageType.kind 一一对应",
       "operations": "all",
       "fields": [
@@ -1068,11 +1083,16 @@
         "CoreMessageHeader.assign 强制 messageType.kind()==kind",
         "CoreMessageCodec.encodeHeader 同时写 kind 和 messageType"
       ],
-      "next": "评估从 messageType 推导 kind，清理对应重复字段及约束；需统一协议升级。"
+      "next": "评估从 messageType 推导 kind，清理对应重复字段及约束；需统一协议升级。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "消息头和输入读取器不再保存或传输 kind，从 messageType 推导；command/query/response 工厂保留正确类别检查。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A05",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "VERIFY_STATE_HASH 没有状态哈希验证行为",
       "operations": [
         "VERIFY_STATE_HASH"
@@ -1081,7 +1101,12 @@
         "TradingCoreRuntime.applyDirectCommand 对此类型直接设置 APPLIED",
         "未发现外部生产业务发送方；测试使用其推进序号和结果窗口"
       ],
-      "next": "删除无实际业务职责的命令及生产分支，测试使用真实业务夹具；不要新增测试专用生产入口。"
+      "next": "删除无实际业务职责的命令及生产分支，测试使用真实业务夹具；不要新增测试专用生产入口。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除 VERIFY_STATE_HASH 枚举及无行为分支；已有夹具改用真实风险续扫或余额命令，不增加生产探针。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A06",
@@ -1127,7 +1152,7 @@
     },
     {
       "id": "A09",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "保险基金复用缓存从未回填",
       "fields": [
         "DirectCommandSlot.reusableInsuranceAdjustment"
@@ -1137,11 +1162,16 @@
         "InsuranceFundCommands.prepare 使用缓存但没有保存返回工作",
         "因此此字段始终为 null，复用分支对在线入口无效"
       ],
-      "next": "移除假缓存及无效参数分支，或在原槽内建立真实且遵守 scopeClosed 的复用；不增加新的工作注册表。"
+      "next": "移除假缓存及无效参数分支，或在原槽内建立真实且遵守 scopeClosed 的复用；不增加新的工作注册表。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除永远为空的保险调整缓存、getter 和未实际使用的复用参数分支。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A10",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "账本工作子类与基类重复持有同一运行时",
       "fields": [
         "SystemLedgerCommand.runtime",
@@ -1151,7 +1181,12 @@
         "fresh classfiles 显示 FundingWork、AdlWork、ResolutionWork、ExecutionWork、BatchFinancialWork、SettlementWork、AdjustmentWork 各声明 runtime",
         "基类 initializeLedgerCommand 已绑定同一运行时"
       ],
-      "next": "逐个核对构造到首次 initialize 的可见性和清理边界，复用基类唯一引用；不能把不同阶段完成位合并。"
+      "next": "逐个核对构造到首次 initialize 的可见性和清理边界，复用基类唯一引用；不能把不同阶段完成位合并。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "七个账本工作复用基类唯一 runtime；初始化和 ScopeClose 生命周期保持原边界，子类清理不提前清除该引用。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A11",
@@ -1166,7 +1201,7 @@
     },
     {
       "id": "A12",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "延时全撤命令包含当前动作不读取的参数和约束",
       "operations": [
         "UPDATE_CANCEL_ALL_AFTER"
@@ -1198,11 +1233,16 @@
           "anchor": "switch (command.action())"
         }
       ],
-      "next": "按动作收窄输入和校验；保留归属、版本、到期及已认领状态检查，不改变业务时间来源。"
+      "next": "按动作收窄输入和校验；保留归属、版本、到期及已认领状态检查，不改变业务时间来源。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "按 SET/CLAIM/COMPLETE/RETRY 写必要参数，四个工厂收窄生产输入；不校验未参与本动作的字段，保留归属、版本、到期与状态规则。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A13",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "逐仓保证金调整命令的模式恒定为 ISOLATED",
       "operations": [
         "ADJUST_POSITION_MARGIN"
@@ -1227,11 +1267,16 @@
           "anchor": "public static byte[] encodeAdjustPositionMargin"
         }
       ],
-      "next": "内部命令省去固定模式，持仓检查使用 ISOLATED；外部 API 若保留此参数，继续在边界拒绝非逐仓值。"
+      "next": "内部命令省去固定模式，持仓检查使用 ISOLATED；外部 API 若保留此参数，继续在边界拒绝非逐仓值。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "逐仓保证金命令省去固定模式；网关继续以原错误码拒绝非逐仓请求，账户仍检查真实持仓为 ISOLATED。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A14",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "快照 Map 独立键与正文中可重建的身份重复落地",
       "operations": [],
       "fields": [
@@ -1256,11 +1301,16 @@
           "anchor": "source.riskState().snapshots().forEach"
         }
       ],
-      "next": "按具体类型保存正文列表，恢复时派生键并检查唯一性；保留运行时索引，不机械改所有 Map。"
+      "next": "按具体类型保存正文列表，恢复时派生键并检查唯一性；保留运行时索引，不机械改所有 Map。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "11 类可由正文重建键的快照表只写正文，恢复时派生原索引并拒绝重复身份；财库标量与杠杆键保留。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A15",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "原生风险引擎只能为零，仍保留可配置数量及持久化元数据",
       "operations": [],
       "fields": [
@@ -1292,11 +1342,16 @@
         "line": 53,
         "requirement": "matchingEnginesNum == 1 && riskEnginesNum == 0"
       },
-      "next": "调用原生引擎时固定零值，移除无效公开配置及快照字段/分支，保留服务自身的真实风控。"
+      "next": "调用原生引擎时固定零值，移除无效公开配置及快照字段/分支，保留服务自身的真实风控。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除原生风险引擎数量配置及快照字段、无效模块分支；同步引擎固定 riskEnginesNum(0)，真实账户风控保留。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A16",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "来源水位快照条目保存恒零保留位并仅验证其为零",
       "operations": [],
       "fields": [
@@ -1319,11 +1374,16 @@
           "anchor": "invalid snapshot source reserved field"
         }
       ],
-      "next": "修改快照布局时删除恒零字段，保留真实来源身份和已消费水位。"
+      "next": "修改快照布局时删除恒零字段，保留真实来源身份和已消费水位。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "来源水位条目由 24 字节减至 20 字节，删除恒零保留位。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A17",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "资金费和到期结算全局分页保留无用 Lane 进度",
       "operations": [
         "APPLY_FUNDING",
@@ -1369,11 +1429,16 @@
           "anchor": "private static byte[] writeLifecycleProgress"
         }
       ],
-      "next": "沿页对象、运行时/冷状态进度、物化、恢复、哈希和快照统一删除；保留真实用户及订单续页游标。"
+      "next": "沿页对象、运行时/冷状态进度、物化、恢复、哈希和快照统一删除；保留真实用户及订单续页游标。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除三个页对象与四个进度值中的 Lane 字段、未使用选页参数，以及对应物化/恢复/快照字段；真实账户 Lane 路由不变。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A18",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "期权到期现金输入只被保存和比较，不参与实际结算",
       "operations": [
         "SETTLE_INSTRUMENT"
@@ -1417,11 +1482,16 @@
           "anchor": ".number(3, value.optionCashUnitsPerContract())"
         }
       ],
-      "next": "删除 Core 命令、续页状态中的副本及额外比较；保留权威公式和精度。原事件现金字段对其他消费者的用途另核对，不扩大删除范围。"
+      "next": "删除 Core 命令、续页状态中的副本及额外比较；保留权威公式和精度。原事件现金字段对其他消费者的用途另核对，不扩大删除范围。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除 Core 结算命令和续页进度的 optionCashUnitsPerContract、哈希字段及两个无实际作用的相等检查；权威期权公式继续按合约和结算价计算。"
+      },
+      "analysis_status": "confirmed"
     },
     {
       "id": "A19",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "资金费与生命周期续页进度保存业务不读取的命令 UUID",
       "operations": [
         "APPLY_FUNDING",
@@ -1464,7 +1534,12 @@
           "anchor": ".uuid(8, value.commandId())"
         }
       ],
-      "next": "删除进度 UUID 及非空约束，统一物化/恢复/哈希；工作对象原命令 UUID 的响应和完成职责另按消费者保留。"
+      "next": "删除进度 UUID 及非空约束，统一物化/恢复/哈希；工作对象原命令 UUID 的响应和完成职责另按消费者保留。",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除四个进度值和两个工作对象的重复 UUID，清除异步到期准备的无用 UUID 参数/非空约束；命令头、结果账本及永久资金指纹保留。 同时删除无外部调用的两层 advanceCancellation 转发入口，消除其遗留 UUID 传递和非空检查。"
+      },
+      "analysis_status": "confirmed"
     }
   ],
   "preserve_verified_purposes": [
@@ -1478,10 +1553,8 @@
     "强平批次 action.userId/instrumentId 参与准入范围、Lane 路由和有序提交，不能仅根据某个准备函数不读取便删除。"
   ],
   "next_steps": [
-    "删除前确定旧日志/快照版本处理和生产者升级边界。",
-    "继续核对普通/批量订单、触发全状态输入、风险进度及下游投影剩余字段；入口盘点不等于全部完成。",
-    "A06/A07/A08/A11 仍为候选。",
-    "按用户要求只编译真正受影响模块，不运行测试、服务或压测。"
+    "A06/A07/A08/A11 仍需核对恢复或一致性语义，不因字段数量直接删除。",
+    "继续核对其余业务字段及下游消费者，不将本轮 15 项清理视为所有 Cluster 数据已审计完毕。"
   ],
   "rejected_false_positives": [
     {
@@ -1556,7 +1629,191 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "verification_this_analysis": {
+  "analysis_round_status": "completed_findings_recorded; overall_audit_in_progress",
+  "temporary_resources": {
+    "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
+    "status": "removed_after_results_archived",
+    "new_temporary_services_or_files": false
+  },
+  "evidence_basis_commit": "8a73a4ead",
+  "cleanup_round": {
+    "authorized_scope": [
+      "A01",
+      "A02",
+      "A03",
+      "A04",
+      "A05",
+      "A09",
+      "A10",
+      "A12",
+      "A13",
+      "A14",
+      "A15",
+      "A16",
+      "A17",
+      "A18",
+      "A19"
+    ],
+    "candidate_findings_unchanged": [
+      "A06",
+      "A07",
+      "A08",
+      "A11"
+    ],
+    "old_format_policy": "用户确认尚未使用，无需读取旧格式；本轮改变的线格式及快照不增加历史读取层。",
+    "versions": {
+      "core_schema": 9,
+      "message_header_bytes": 72,
+      "response_fixed_payload_bytes": 32,
+      "fingerprint_canonical": 2,
+      "trading_state_snapshot": 38,
+      "matcher_snapshot": 9,
+      "sectioned_snapshot": 28,
+      "sectioned_header_bytes": 121,
+      "source_sequence_entry_bytes": 20,
+      "algo_command": 2,
+      "cancel_all_after_command": 2,
+      "trigger_placement": 4
+    },
+    "api_surface": "HTTP/WebSocket 字段保持原契约；调整的是内部复制命令和快照，真实查询/数据库投影统计继续保留。",
+    "verification": {
+      "status": "passed",
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+      "tests_executed": false,
+      "services_started": false,
+      "performance_run": false,
+      "result": "BUILD SUCCESS",
+      "exit_code": 0,
+      "reactor_modules": 17,
+      "jdk": "Amazon Corretto HotSpot 27+33-FR",
+      "maven": "3.9.16",
+      "commands": [
+        {
+          "phase": "clean_test_compile",
+          "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+          "exit_code": 0,
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-aeron-service",
+            "surprising-aeron-tools",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-maker",
+            "surprising-realtime-api",
+            "surprising-price-provider",
+            "surprising-aeron-benchmarks",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-realtime-provider",
+            "surprising-gateway"
+          ],
+          "result": "BUILD SUCCESS",
+          "duration": "59.437 s",
+          "finished_at": "2026-10-23T21:00:32+08:00"
+        },
+        {
+          "phase": "final_test_compile",
+          "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests test-compile",
+          "exit_code": 0,
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-aeron-service",
+            "surprising-aeron-tools",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-maker",
+            "surprising-realtime-api",
+            "surprising-price-provider",
+            "surprising-aeron-benchmarks",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-realtime-provider",
+            "surprising-gateway"
+          ],
+          "result": "BUILD SUCCESS",
+          "duration": "46.582 s",
+          "finished_at": "2026-10-23T21:05:10+08:00"
+        }
+      ],
+      "warnings": "现有 deprecated/unchecked 编译提示；未执行测试。"
+    },
+    "limits": [
+      "按用户要求只编译，不执行资金、撮合、恢复、历史回放或数据库集成测试。",
+      "39 项命令的全部字段消费者核查仍未完成；本轮只处理已确认的 15 项。"
+    ],
+    "validation_notes": [
+      "首次扩大编译发现测试快照仍搬运旧进度字段，以及网关两处旧 poll(owner) 调用，已同步现有夹具。",
+      "字段删除统一贯穿命令生产者、原生客户端、服务、冷状态、快照、回放及相关测试/基准源码。"
+    ],
+    "static_checks": {
+      "snapshot_pairs_compared": 24,
+      "write_only_field_ids": [],
+      "funding_progress_field_ids": [
+        1,
+        2,
+        4,
+        6,
+        7
+      ],
+      "lifecycle_progress_field_ids": [
+        1,
+        2,
+        4,
+        6,
+        7,
+        9
+      ],
+      "ledger_runtime_ownership": "7 subclasses initialize the base runtime; no subclass resets it; ExecutionWork.clearReferences leaves it available to ScopeClose.",
+      "removed_identifiers": "CoreRoute / VERIFY_STATE_HASH / optionCashUnitsPerContract absent from affected production Java sources.",
+      "compiled_runtime_fields": {
+        "classes": [
+          "com.surprising.aeron.service.treasury.SystemLedgerCommand",
+          "com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor$FundingWork",
+          "com.surprising.aeron.service.adl.RuntimeAdlExecution$AdlWork",
+          "com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution$ResolutionWork",
+          "com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor$ExecutionWork",
+          "com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor$BatchFinancialWork",
+          "com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation$SettlementWork",
+          "com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions$AdjustmentWork"
+        ],
+        "runtime_field_counts": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "temporary_resources": {
+      "paths": [
+        "/tmp/aeron_simplify_20261023.py",
+        "/tmp/aeron-command-cleanup-20261023-main.log",
+        "/tmp/aeron-command-cleanup-20261023-build.log",
+        "/tmp/aeron-command-cleanup-20261023-final.log"
+      ],
+      "status": "removed_after_results_archived",
+      "removed": [
+        "/tmp/aeron_simplify_20261023.py",
+        "/tmp/aeron-command-cleanup-20261023-main.log",
+        "/tmp/aeron-command-cleanup-20261023-build.log",
+        "/tmp/aeron-command-cleanup-20261023-final.log",
+        "/tmp/__pycache__/aeron_simplify_20261023.cpython-311.pyc"
+      ]
+    }
+  },
+  "initial_analysis_verification": {
     "business_code_changed": false,
     "compilation_run": false,
     "tests_run": false,
@@ -1580,11 +1837,5 @@
       "snapshot_pairs": 23,
       "write_only_field_ids": {}
     }
-  },
-  "analysis_round_status": "completed_findings_recorded; overall_audit_in_progress",
-  "temporary_resources": {
-    "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
-    "status": "removed_after_results_archived",
-    "new_temporary_services_or_files": false
   }
 }

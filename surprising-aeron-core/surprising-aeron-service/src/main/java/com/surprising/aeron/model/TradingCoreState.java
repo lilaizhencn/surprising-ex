@@ -465,8 +465,6 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, progress.markPriceTicks());
             hash = CoreStateHash.mix(hash, progress.priceSequence());
             hash = CoreStateHash.mix(hash, progress.nextCursorUserId());
-            hash = CoreStateHash.mix(hash, progress.commandId().getMostSignificantBits());
-            hash = CoreStateHash.mix(hash, progress.commandId().getLeastSignificantBits());
         }
         hash = CoreStateHash.mix(hash, "treasuryLifecycleSettlement");
         for (Map.Entry<String, Long> /* 当前杠杆或财库分类表中的业务键值对，按该表字段顺序混合 */ entry : treasuryState.lifecycleSettlements().entrySet()) {
@@ -482,12 +480,9 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, progress.settlementId());
             hash = CoreStateHash.mix(hash, progress.settlementPriceTicks());
-            hash = CoreStateHash.mix(hash, progress.optionCashUnitsPerContract());
             hash = CoreStateHash.mix(hash, progress.ordersComplete());
             hash = CoreStateHash.mix(hash, progress.nextCursorOrderId());
             hash = CoreStateHash.mix(hash, progress.nextCursorUserId());
-            hash = CoreStateHash.mix(hash, progress.commandId().getMostSignificantBits());
-            hash = CoreStateHash.mix(hash, progress.commandId().getLeastSignificantBits());
         }
         return hash;
     }

@@ -133,21 +133,17 @@ public final class RuntimeSnapshotBuilder {
         // 按品种保存的资金费分批执行进度投影。
         Map<Integer, TradingRuntimeSnapshot.FundingProgressSnapshot> fundingProgress = new TreeMap<>();
         state.treasury().fundingProgresses().forEachKeyValue((/* 当前行情、风控或生命周期进度对应的品种编号。 */ symbolId, /* 当前资金费或到期结算的运行进度，按对应集合逐字段投影。 */ progress) -> fundingProgress.put(symbolId,
-                new TradingRuntimeSnapshot.FundingProgressSnapshot(progress.settlementId(),
-                        progress.fundingRatePpm(), progress.accountLaneId(),
-                        progress.nextCursorUserId(),
-                        progress.commandId(), progress.markPriceTicks(), progress.priceSequence())));
+                new TradingRuntimeSnapshot.FundingProgressSnapshot(progress.settlementId(), progress.fundingRatePpm(),
+                        progress.nextCursorUserId(), progress.markPriceTicks(), progress.priceSequence())));
         // 按品种保存的已完成到期/行权批次标记。
         Map<Integer, Long> lifecycleSettlements = new TreeMap<>();
         state.treasury().lifecycleSettlements().forEachKeyValue(lifecycleSettlements::put);
         // 按品种保存的到期结算分批执行进度投影。
         Map<Integer, TradingRuntimeSnapshot.LifecycleProgressSnapshot> lifecycleProgress = new TreeMap<>();
         state.treasury().lifecycleProgresses().forEachKeyValue((/* 当前行情、风控或生命周期进度对应的品种编号。 */ symbolId, /* 当前资金费或到期结算的运行进度，按对应集合逐字段投影。 */ progress) -> lifecycleProgress.put(symbolId,
-                new TradingRuntimeSnapshot.LifecycleProgressSnapshot(progress.settlementId(),
-                        progress.settlementPriceTicks(),
-                        progress.optionCashUnitsPerContract(), progress.ordersComplete(),
-                        progress.accountLaneId(), progress.nextCursorOrderId(),
-                        progress.nextCursorUserId(), progress.commandId(), progress.requiredInsuranceUnits())));
+                new TradingRuntimeSnapshot.LifecycleProgressSnapshot(progress.settlementId(), progress.settlementPriceTicks(),
+                        progress.ordersComplete(), progress.nextCursorOrderId(), progress.nextCursorUserId(),
+                        progress.requiredInsuranceUnits())));
         return new TradingRuntimeSnapshot(revision, users, balances, orders, reservations, clientOrderIndex,
                 positions, liquidations, markPrices, riskSnapshots, riskScans, state.nextLiquidationId(), state.marketRevision(),
                 new TreeMap<>(state.instrumentsForRuntime()), new TreeMap<>(state.leveragesForRuntime()),

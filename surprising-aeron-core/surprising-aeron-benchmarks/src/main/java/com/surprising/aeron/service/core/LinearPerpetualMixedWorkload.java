@@ -780,7 +780,7 @@ public final class LinearPerpetualMixedWorkload {
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                 0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
         harness.execute(harness.command(CoreMessageType.PLACE_TRIGGER_ORDER, CommandSource.GATEWAY, taker,
-                CoreTriggerOrderCodec.encodeState(trigger)));
+                CoreTriggerOrderCodec.encodePlacement(trigger)));
         harness.execute(harness.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, CommandSource.OPERATIONS, 0,
                 CoreTriggerOrderCodec.encodeExecute(triggerId, mark.priceSequence(),
                         mark.markPriceTicks(), harness.nextCommandTimestamp())));

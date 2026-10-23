@@ -20,16 +20,16 @@ public final class SectionedCoreSnapshotCodec {
 
     /** 外层小端魔数，标识 Surprising 核心分段快照。 */
     public static final int MAGIC = 0x5358534E;
-    /** 当前外层格式版本二十七，不代表内嵌负载版本。 */
-    public static final int VERSION = 27;
+    /** 当前外层格式版本二十八，不代表内嵌负载版本。 */
+    public static final int VERSION = 28;
     /** 封套十二字节：魔数、版本、保留位与总段数。 */
     public static final int ENVELOPE_LENGTH = 12;
     /** 每个段头八字节：顺序段编号和负载长度。 */
     public static final int SECTION_HEADER_LENGTH = 8;
     /** 第一段固定元数据负载长度一百二十五字节。 */
-    public static final int HEADER_LENGTH = 125;
+    public static final int HEADER_LENGTH = 121;
     /** 一个来源水位条目二十四字节，包含来源码、保留位、实例号与序号。 */
-    public static final int SOURCE_SEQUENCE_LENGTH = 24;
+    public static final int SOURCE_SEQUENCE_LENGTH = 20;
     /** 一个命令结果负载的固定部分七十六字节，不含前置条目长度和变长响应数据。 */
     public static final int RESULT_FIXED_LENGTH = 76;
     /** CRC32C 数值用八字节 long 保存的页尾负载长度。 */

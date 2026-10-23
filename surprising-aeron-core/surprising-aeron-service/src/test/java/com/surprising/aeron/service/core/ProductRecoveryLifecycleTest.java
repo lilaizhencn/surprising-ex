@@ -71,7 +71,7 @@ class ProductRecoveryLifecycleTest {
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                     0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
             apply(live, command(product, 6, 22, CoreMessageType.PLACE_TRIGGER_ORDER,
-                    CoreTriggerOrderCodec.encodeState(trigger)));
+                    CoreTriggerOrderCodec.encodePlacement(trigger)));
             // 含部分成交及待触发单的内存快照字节。
             byte[] checkpoint = live.snapshot(100);
             try (/* 从首份快照恢复并继续接收相同命令的实例。 */ TradingCoreRuntime recovered = TradingCoreRuntime.fromSnapshot(product, checkpoint)) {
@@ -130,12 +130,12 @@ class ProductRecoveryLifecycleTest {
                 var stopLoss = ocoStopLoss(product, "recovery-stop-loss");
                 // 止损腿客户编号为空白的非法 OCO 配对请求。
                 var invalidPair = command(product, 12, 22, CoreMessageType.PLACE_TRIGGER_OCO_PAIR,
-                        CoreTriggerOrderCodec.encodeList(List.of(takeProfit, ocoStopLoss(product, " "))));
+                        CoreTriggerOrderCodec.encodePlacementList(List.of(takeProfit, ocoStopLoss(product, " "))));
                 assertThat(applyDirect(live, invalidPair).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                 assertThat(live.tradingState().triggerOrders()).doesNotContainKeys(502L, 503L);
                 // 在两个实例上应用并检查重复返回的合法 OCO 配对命令。
                 CoreMessage placeTrigger = command(product, 13, 22, CoreMessageType.PLACE_TRIGGER_OCO_PAIR,
-                        CoreTriggerOrderCodec.encodeList(List.of(takeProfit, stopLoss)));
+                        CoreTriggerOrderCodec.encodePlacementList(List.of(takeProfit, stopLoss)));
                 // 恢复实例也应用同一条被拒命令，保持源序号与状态边界一致。
                 assertThat(applyDirect(recovered, invalidPair).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                 // 基准实例首次放置 OCO 对的响应，用来核对两条记录及幂等字节。

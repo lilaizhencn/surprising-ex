@@ -28,11 +28,6 @@ public class CoreConfiguration {
      */
     @Setter
     private int matchingEngines = LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT;
-    /** 原生风险引擎数量，不表示启动同数量的账户风控线程。
-     * 返回原生风险引擎数量。
-     */
-    @Setter
-    private int riskEngines = LaneTopology.DEFAULT_RISK_ENGINE_COUNT;
     /** 首次启动时按用户划分的账户 Lane 数量。
      * 返回首次启动的账户 Lane 数量。
      */
@@ -66,8 +61,7 @@ public class CoreConfiguration {
 
     /** 将绑定值转换成已校验的不可变拓扑，不依赖 Spring Bean 生命周期。 */
     public LaneTopology toLaneTopology() {
-        return new LaneTopology(matchingEngines, riskEngines, matchingEngines - 1,
-                accountLanes, accountLaneSeed, matcherWindowSize,
+        return new LaneTopology(matchingEngines, matchingEngines - 1, accountLanes, accountLaneSeed, matcherWindowSize,
                 matchingCompletionCapacity, accountLaneQueueCapacity);
     }
 
