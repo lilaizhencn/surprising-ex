@@ -303,7 +303,7 @@ class MatcherTreasurySettlementTest {
      */
     private static CoreOrderState order(long orderId, long userId, CoreOrderSide side) {
         return new CoreOrderState(orderId, ProductLine.LINEAR_PERPETUAL, userId, "1", side,
-                100, 1, 0, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                100, 1, 0, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", new UUID(0, orderId),
                 10_000, 10_000, CoreOrderStatus.OPEN, 1);
     }

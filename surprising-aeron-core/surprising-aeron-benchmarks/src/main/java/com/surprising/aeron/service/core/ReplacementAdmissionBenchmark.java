@@ -64,7 +64,7 @@ public class ReplacementAdmissionBenchmark {
                     Map.of(original, OrderReservation.create(original, "1", product == ProductLine.SPOT ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
                             "USDT", 100, 1)), Map.of()));
             orders.put(original, new CoreOrderState(original, product, user, "1",
-                    CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    CoreOrderSide.BUY, 100, 1, 0, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "original", new UUID(1, user),
                     0, 0, CoreOrderStatus.OPEN, 1));
             commands[i] = new AmendOrderCommand(original, 2_000 + user, "replacement", 101L, 1L,

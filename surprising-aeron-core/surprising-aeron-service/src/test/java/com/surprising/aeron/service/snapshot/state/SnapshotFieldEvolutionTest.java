@@ -172,6 +172,46 @@ class SnapshotFieldEvolutionTest {
         }
     }
 
+    @Test
+    void orderSnapshotStoresOnlyTotalAndExecutedQuantityForEveryProduct() {
+        for (ProductLine line : ProductLine.values()) {
+            boolean inverse = line == ProductLine.INVERSE_PERPETUAL || line == ProductLine.INVERSE_DELIVERY;
+            String quote = inverse ? "USD" : "USDT";
+            String settle = inverse ? "BTC" : "USDT";
+            var transitions = new com.surprising.aeron.service.order.state.RuntimeTestStateTransitions();
+            var empty = transitions.adjustBalance(transitions.registerInstrument(TradingCoreState.empty(line),
+                    com.surprising.aeron.service.core.CoreStateTestFixtures.instrument(line, "1", "BTC", quote, settle)),
+                    7, new com.surprising.aeron.protocol.BalanceAdjustmentCommand(settle, 50_000));
+            var order = new com.surprising.aeron.model.CoreOrderState(11, line, 7, "1",
+                    com.surprising.aeron.protocol.CoreOrderSide.BUY, 100, 10, 3, false,
+                    com.surprising.aeron.model.CoreOrderStatus.CANCELED, 1);
+            var state = new TradingCoreState(line, 1, empty.users(), Map.of(11L, order),
+                    empty.instruments(), empty.riskState(), empty.treasuryState());
+            byte[] encoded = TradingStateSnapshotCodec.encode(state);
+            byte[] rootBytes = Arrays.copyOfRange(encoded, 4, encoded.length);
+            var root = new SnapshotFields.Reader(rootBytes);
+            var orders = new SnapshotFields.Reader(root.bytes(4)).list(1, bytes -> bytes);
+            assertThat(orders).hasSize(1);
+            assertThat(split(orders.getFirst()).stream().map(SnapshotFieldEvolutionTest::id).toList())
+                    .contains(8, 9).doesNotContain(10);
+            var restored = TradingStateSnapshotCodec.decode(encoded, line);
+            assertThat(restored).isEqualTo(state);
+            assertThat(restored.orders().get(11L).remainingQuantitySteps()).isEqualTo(7);
+            assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
+
+            byte[] invalidOrder = replace(orders.getFirst(), 9,
+                    ignored -> ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(11).array());
+            byte[] invalidOrders = new SnapshotFields.Writer().list(1, List.of(invalidOrder), bytes -> bytes).encode();
+            byte[] invalidRoot = replace(rootBytes, 4, ignored -> invalidOrders);
+            assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(encoded, split(invalidRoot)), line))
+                    .isInstanceOf(ProtocolException.class);
+            byte[] previousVersion = encoded.clone();
+            ByteBuffer.wrap(previousVersion).order(ByteOrder.LITTLE_ENDIAN).putInt(0, 46);
+            assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(previousVersion, line))
+                    .isInstanceOf(ProtocolException.class).hasMessageContaining("unsupported trading snapshot version");
+        }
+    }
+
     /**
      * 在一条字段记录里查找指定编号，对内容执行测试变换；返回空则移除该字段，否则重新写头和内容，最后断言目标确实存在。
      * @param record 待修改的一条字段记录，不含外层版本头

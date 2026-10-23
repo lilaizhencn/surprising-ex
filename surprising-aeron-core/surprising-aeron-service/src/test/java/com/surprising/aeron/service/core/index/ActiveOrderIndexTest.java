@@ -37,7 +37,7 @@ class ActiveOrderIndexTest {
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         // 用户七标的一的常驻 OPEN 订单，用作桶复用隔离对照
         var held = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY,
-                90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+                90, 10, 0, false, CoreOrderStatus.OPEN, 1);
         index.apply(1, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(held, identities, instrument("1")), identities);
         // 临时用户订单共用的标的二现货合约
         var otherInstrument = instrument("2");
@@ -46,7 +46,7 @@ class ActiveOrderIndexTest {
             long user = id + 1;
             // 当前构造、转为运行时或更新的测试订单
             var order = new CoreOrderState(id, ProductLine.SPOT, user, "2", CoreOrderSide.SELL,
-                    100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+                    100, 1, 0, false, CoreOrderStatus.OPEN, 1);
             index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(order, identities, otherInstrument), identities);
             assertThat(index.sortedIds(user, "2")).containsExactly(id);
             index.apply(id, null, identities);
@@ -73,7 +73,7 @@ class ActiveOrderIndexTest {
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1; id <= 4_097; id++) {
             // 当前构造、转为运行时或更新的测试订单
             var order = new CoreOrderState(id, ProductLine.SPOT, id, "1", CoreOrderSide.BUY,
-                    90, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+                    90, 1, 0, false, CoreOrderStatus.OPEN, 1);
             index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(order, identities, instrument), identities);
         }
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1; id <= 4_097; id++) index.apply(id, null, identities);
@@ -114,7 +114,7 @@ class ActiveOrderIndexTest {
             var orders = new com.surprising.aeron.service.order.state.OrderRuntime[3];
             for (/* 当前构造三份对照订单的数组下标 */ int i = 0; i < orders.length; i++) {
                 // 当前构造、转为运行时或更新的测试订单
-                var order = new CoreOrderState(i + 1, ProductLine.SPOT, i < 2 ? 7 : 8, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+                var order = new CoreOrderState(i + 1, ProductLine.SPOT, i < 2 ? 7 : 8, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
                 orders[i] = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
                         order, identities, instrument(order.instrumentId()));
                 index.apply(i + 1, orders[i], identities);
@@ -158,7 +158,7 @@ class ActiveOrderIndexTest {
         valuesField.setAccessible(true);
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1; id <= 32; id++) {
             // 当前构造、转为运行时或更新的测试订单
-            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
             index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
                     order, identities, instrument(order.instrumentId())), identities);
         }
@@ -167,7 +167,7 @@ class ActiveOrderIndexTest {
         for (/* 当前构造、删除或遍历的订单号 */ long id = 33; id <= 4096; id++) {
             index.apply(id - 32, null, identities);
             // 当前构造、转为运行时或更新的测试订单
-            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
             index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
                     order, identities, instrument(order.instrumentId())), identities);
         }
@@ -199,7 +199,7 @@ class ActiveOrderIndexTest {
         // 本用例 Owner 活跃订单路由索引
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         // 尚未部分成交的原始 OPEN 冷订单
-        var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+        var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
         // 当前构造、转为运行时或更新的测试订单
         var order = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(initial, identities, instrument("1"));
         index.apply(1, order, identities);
@@ -227,9 +227,9 @@ class ActiveOrderIndexTest {
         // 本用例 Owner 活跃订单路由索引
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
         // 首次原订单、第一份交集游标或第一页结果，按各用例对应角色使用
-        var first = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+        var first = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
         // 替换用冷订单、另一对照订单或第二页结果
-        var second = new CoreOrderState(1, ProductLine.SPOT, 8, "2", CoreOrderSide.SELL, 110, 10, 0, 10, false, CoreOrderStatus.OPEN, 2);
+        var second = new CoreOrderState(1, ProductLine.SPOT, 8, "2", CoreOrderSide.SELL, 110, 10, 0, false, CoreOrderStatus.OPEN, 2);
         index.apply(1, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
                 first, identities, instrument(first.instrumentId())), identities);
         // 同订单号不同用户及标的的替代运行时状态，仅验证索引迁移
@@ -256,7 +256,7 @@ class ActiveOrderIndexTest {
             long user = id <= 9 ? 11 : 12;
             // 当前分组、合约构造或交集查询使用的永久数字标的文本
             String instrumentId = id % 3 == 0 ? "2" : "1";
-            orders.put(id, new CoreOrderState(id, ProductLine.SPOT, user, instrumentId, CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1));
+            orders.put(id, new CoreOrderState(id, ProductLine.SPOT, user, instrumentId, CoreOrderSide.BUY, 100, 1, 0, false, CoreOrderStatus.OPEN, 1));
         }
         // 包含本用例用户、合约和订单的冷状态
         var state = new TradingCoreState(ProductLine.SPOT, 1,
@@ -294,10 +294,10 @@ class ActiveOrderIndexTest {
     @Test
     void maintainsRiskAggregatesAcrossOrderUpdates() {
         // 用户十一跨仓买入的开仓订单，初始待成交五
-        CoreOrderState opening = new CoreOrderState(7, ProductLine.LINEAR_PERPETUAL, 11, "1", CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+        CoreOrderState opening = new CoreOrderState(7, ProductLine.LINEAR_PERPETUAL, 11, "1", CoreOrderSide.BUY, 100, 5, 0, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreOrderStatus.OPEN, 1);
         // 同用户逐仓卖出的只减仓订单，初始待成交三
-        CoreOrderState reducing = new CoreOrderState(8, ProductLine.LINEAR_PERPETUAL, 11, "1", CoreOrderSide.SELL, 100, 3, 0, 3, true, CoreMarginMode.ISOLATED, CorePositionSide.NET,
+        CoreOrderState reducing = new CoreOrderState(8, ProductLine.LINEAR_PERPETUAL, 11, "1", CoreOrderSide.SELL, 100, 3, 0, true, CoreMarginMode.ISOLATED, CorePositionSide.NET,
                 CoreOrderStatus.OPEN, 1);
         // 用来投影账户准入索引的原 U 本位永续冷状态
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
@@ -334,7 +334,7 @@ class ActiveOrderIndexTest {
     @Test
     void rebuildUsesOpenOrderLifecycle() {
         // 当前构造、转为运行时或更新的测试订单
-        CoreOrderState order = new CoreOrderState(7, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState order = new CoreOrderState(7, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 100, 5, 0, false, CoreOrderStatus.OPEN, 1);
         // 包含本用例用户、合约和订单的冷状态
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11)), Map.of(7L, order),
@@ -354,7 +354,7 @@ class ActiveOrderIndexTest {
         // 本用例订单集合，终态测试为运行时数组，冷重建测试为按订单号映射
         Map<Long, CoreOrderState> orders = new HashMap<>();
         for (/* 构造连续分页订单的当前业务号 */ long orderId = 1; orderId <= 2_049; orderId++) {
-            orders.put(orderId, new CoreOrderState(orderId, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1));
+            orders.put(orderId, new CoreOrderState(orderId, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 100, 1, 0, false, CoreOrderStatus.OPEN, 1));
         }
         // 包含本用例用户、合约和订单的冷状态
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
@@ -384,11 +384,11 @@ class ActiveOrderIndexTest {
     @Test
     void primitiveSortedCursorAvoidsBoxedCompatibilityView() {
         // 首次原订单、第一份交集游标或第一页结果，按各用例对应角色使用
-        CoreOrderState first = new CoreOrderState(7, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState first = new CoreOrderState(7, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 100, 1, 0, false, CoreOrderStatus.OPEN, 1);
         // 替换用冷订单、另一对照订单或第二页结果
-        CoreOrderState second = new CoreOrderState(9, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 101, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState second = new CoreOrderState(9, ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, 101, 1, 0, false, CoreOrderStatus.OPEN, 1);
         // 第三份对照冷订单或末页结果
-        CoreOrderState third = new CoreOrderState(8, ProductLine.SPOT, 12, "1", CoreOrderSide.BUY, 102, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState third = new CoreOrderState(8, ProductLine.SPOT, 12, "1", CoreOrderSide.BUY, 102, 1, 0, false, CoreOrderStatus.OPEN, 1);
         // 包含本用例用户、合约和订单的冷状态
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11),

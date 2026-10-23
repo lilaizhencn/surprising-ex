@@ -126,7 +126,7 @@ class CoreAccountLaneQueryTest {
                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                 0, 0, 0, -1, 0));
         // 用户 7 保留的已撤卖单 991，没有活跃订单路由但仍应能查询。
-        var order = new CoreOrderState(991, LINE, 7, "1", CoreOrderSide.SELL, 100, 1, 0, 1,
+        var order = new CoreOrderState(991, LINE, 7, "1", CoreOrderSide.SELL, 100, 1, 0,
                 true, CoreOrderStatus.CANCELED, 2);
         // 包含已撤订单、对应用户和币对的最小业务状态。
         var state = new TradingCoreState(LINE, 0, Map.of(7L, CoreUserState.empty(LINE, 7)),

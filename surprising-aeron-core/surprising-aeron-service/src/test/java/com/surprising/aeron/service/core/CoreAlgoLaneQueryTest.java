@@ -201,10 +201,10 @@ class CoreAlgoLaneQueryTest {
         // 主测试币对 1 的永续合约配置，币对 2 另在返回状态中创建。
         var instrument1 = instrument("1");
         // 保留的普通子订单，包含成交终态、撤单终态和仍活动的部分成交单。
-        var orders = Map.of(102L, order(102, 1, 4, 4, 0, CoreOrderStatus.FILLED),
-                103L, order(103, 1, 5, 2, 3, CoreOrderStatus.OPEN),
-                104L, order(104, 1, 2, 1, 1, CoreOrderStatus.CANCELED),
-                201L, order(201, 7, 10, 4, 6, CoreOrderStatus.OPEN));
+        var orders = Map.of(102L, order(102, 1, 4, 4, CoreOrderStatus.FILLED),
+                103L, order(103, 1, 5, 2, CoreOrderStatus.OPEN),
+                104L, order(104, 1, 2, 1, CoreOrderStatus.CANCELED),
+                201L, order(201, 7, 10, 4, CoreOrderStatus.OPEN));
         // 用户 1 的账户，保留订单 103 的十单位保证金冻结。
         var first = new CoreUserState(LINE, 1, 0, Map.of("USDT", new AssetBalance("USDT", 990, 10)),
                 Map.of(103L, OrderReservation.create(103, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 10, 5)), Map.of());
@@ -237,16 +237,15 @@ class CoreAlgoLaneQueryTest {
     }
 
     /**
-     * 创建买入方向、固定价格的普通子订单，由调用方指定总量、成交量、剩余量和终态。
+     * 创建买入方向、固定价格的普通子订单，由调用方指定总量、成交量和终态。
      * @param id 普通子订单的 Core 编号
      * @param user 子订单所属用户编号
      * @param quantity 子订单原始数量步数
      * @param executed 子订单已成交数量步数
-     * @param remaining 子订单剩余数量步数
      * @param status 子订单的活动、已成交或已撤状态
      */
-    private static CoreOrderState order(long id, long user, long quantity, long executed, long remaining, CoreOrderStatus status) {
-        return new CoreOrderState(id, LINE, user, "1", CoreOrderSide.BUY, 100, quantity, executed, remaining, false, status, 1);
+    private static CoreOrderState order(long id, long user, long quantity, long executed, CoreOrderStatus status) {
+        return new CoreOrderState(id, LINE, user, "1", CoreOrderSide.BUY, 100, quantity, executed, false, status, 1);
     }
 
     /**

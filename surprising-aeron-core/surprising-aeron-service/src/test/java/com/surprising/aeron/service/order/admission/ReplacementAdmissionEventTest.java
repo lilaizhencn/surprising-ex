@@ -58,7 +58,7 @@ class ReplacementAdmissionEventTest {
                         0, 0, 0, -1, 0));
         // 用户 7 原有的 OPEN 限价买单 11，作为改单和替换对象。
         var order = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7, "1", CoreOrderSide.BUY,
-                100, 1, 0, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                100, 1, 0, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "original", new UUID(1, 1), 0, 0, CoreOrderStatus.OPEN, 1);
         // 原用户 7 的账户前值，含 800 可用、100 冻结及原订单保证金预留。
         var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,

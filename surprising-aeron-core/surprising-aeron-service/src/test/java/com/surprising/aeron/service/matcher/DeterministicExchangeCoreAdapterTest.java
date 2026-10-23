@@ -628,7 +628,7 @@ class DeterministicExchangeCoreAdapterTest {
      */
     private static CoreOrderState order(long orderId) {
         return new CoreOrderState(orderId, ProductLine.SPOT, 7, "1",
-                CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+                CoreOrderSide.BUY, 100, 1, 0, false, CoreOrderStatus.OPEN, 1);
     }
 
     /**
@@ -695,7 +695,7 @@ class DeterministicExchangeCoreAdapterTest {
     private static TradingCoreState stateWithOpenBid(long priceTicks, String instrumentId) {
         // 本次待提交或用于前置 Core 元数据的订单。
         CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, instrumentId,
-                CoreOrderSide.BUY, priceTicks, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
+                CoreOrderSide.BUY, priceTicks, 2, 0, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
                 Map.of(instrumentId, CoreInstrument.from(ProductLine.SPOT,

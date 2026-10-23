@@ -46,7 +46,7 @@ public class ActiveOrderIndexBenchmark {
         for (int i = 0; i < open.length; i++) {
             var instrument = instruments[i % symbols];
             var order = new CoreOrderState(i + 1, ProductLine.LINEAR_PERPETUAL, i % users + 1, instrument.instrumentId(),
-                    CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+                    CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
             open[i] = RuntimeStateProjector.toRuntimeOrder(order, identities, instrument);
             terminal[i] = open[i].withStatus(CoreOrderStatus.CANCELED, 2);
         }

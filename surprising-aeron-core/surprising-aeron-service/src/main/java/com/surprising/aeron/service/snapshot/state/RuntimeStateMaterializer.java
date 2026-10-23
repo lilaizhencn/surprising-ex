@@ -112,7 +112,7 @@ public final class RuntimeStateMaterializer {
                 new CoreOrderState(orderId, order.productLine(), order.userId(), identities.instrumentId(order.symbolId()),
                         order.side(), order.priceTicks(), order.matchingPriceTicks(),
                         order.quantitySteps(),
-                        order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
+                        order.executedQuantitySteps(), order.reduceOnly(),
                         order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                         order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
                         order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.executedValueHigh(), order.executedValueLow(), order.createdAtEpochMillis(),

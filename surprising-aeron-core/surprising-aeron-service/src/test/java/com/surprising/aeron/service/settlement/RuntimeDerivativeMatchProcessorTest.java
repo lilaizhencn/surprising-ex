@@ -390,7 +390,7 @@ class RuntimeDerivativeMatchProcessorTest {
     private static CoreOrderState order(long orderId, long userId, CoreOrderSide side, long quantity,
                                         boolean reduceOnly, CoreOrderType orderType, CoreTimeInForce timeInForce) {
         return new CoreOrderState(orderId, ProductLine.LINEAR_PERPETUAL, userId, "1",
-                side, orderType == CoreOrderType.MARKET ? 0 : 100, quantity, 0, quantity, reduceOnly,
+                side, orderType == CoreOrderType.MARKET ? 0 : 100, quantity, 0, reduceOnly,
                 CoreMarginMode.CROSS, CorePositionSide.NET, orderType, timeInForce, false, "", new UUID(0, orderId),
                 10_000, 10_000, CoreOrderStatus.OPEN, 1);
     }

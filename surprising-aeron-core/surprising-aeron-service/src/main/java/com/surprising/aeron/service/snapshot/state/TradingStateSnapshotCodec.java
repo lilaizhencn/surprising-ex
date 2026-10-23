@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 46;
+    private static final int VERSION = 47;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -267,7 +267,6 @@ public final class TradingStateSnapshotCodec {
                 .number(7, value.matchingPriceTicks()) // 7：订单提交给 Matcher 的实际撮合保护价格
                 .number(8, value.quantitySteps()) // 8：订单原请求数量
                 .number(9, value.executedQuantitySteps()) // 9：订单累计已成交数量
-                .number(10, value.remainingQuantitySteps()) // 10：订单剩余未成交数量
                 .bool(11, value.reduceOnly()) // 11：是否只允许减少已有持仓
                 .number(12, SnapshotEnumCodes.encode(value.marginMode())) // 12：全仓或逐仓保证金模式
                 .number(13, SnapshotEnumCodes.encode(value.positionSide())) // 13：净持仓、多仓或空仓方向
@@ -305,7 +304,6 @@ public final class TradingStateSnapshotCodec {
                 r.number(7), // 7：订单提交给 Matcher 的实际撮合保护价格
                 r.number(8), // 8：订单原请求数量
                 r.number(9), // 9：订单累计已成交数量
-                r.number(10), // 10：订单剩余未成交数量
                 r.bool(11), // 11：是否只允许减少已有持仓
                 SnapshotEnumCodes.readCoreMarginMode(r.integer(12)), // 12：全仓或逐仓保证金模式
                 SnapshotEnumCodes.readCorePositionSide(r.integer(13)), // 13：净持仓、多仓或空仓方向

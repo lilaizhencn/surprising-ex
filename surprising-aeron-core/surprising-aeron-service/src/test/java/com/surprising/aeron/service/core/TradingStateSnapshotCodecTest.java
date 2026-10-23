@@ -42,7 +42,7 @@ class TradingStateSnapshotCodecTest {
                 .withExecutionValue(1, -1).snapshot().withCommitMetadata(100, 200);
         // 人工构造的不可变订单，含指定成交金额高低位。
         var order = new com.surprising.aeron.model.CoreOrderState(11, ProductLine.SPOT, 7,
-                "1", CoreOrderSide.BUY, 5, 5, 10, 3, 7, false,
+                "1", CoreOrderSide.BUY, 5, 5, 10, 3, false,
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", new java.util.UUID(0, 11),
                 0, 0, 4, runtimeOrder.executedValueHigh(), runtimeOrder.executedValueLow(),

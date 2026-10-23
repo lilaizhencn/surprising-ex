@@ -582,7 +582,7 @@ class SectionedCoreSnapshotCodecTest {
     private static TradingCoreState stateWithOpenBid() {
         // 合成的一号 OPEN 买单元数据，不包含真实账户冻结。
         CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "1",
-                CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
+                CoreOrderSide.BUY, 100, 2, 0, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
                 Map.of("1", CoreInstrument.from(ProductLine.SPOT,
