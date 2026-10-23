@@ -4,7 +4,7 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import java.util.Locale;
 
 /**
- * 一名用户某种资产的可用金额和冻结金额。每次加钱、扣钱或冻结都返回一份新记录，不在原记录上改值；所有加减都检查整数溢出。
+ * 一名用户某种资产的可用金额和冻结金额，用于冷状态导出、恢复与核对；冻结操作返回新记录并检查整数溢出。
  * @param asset 资产代码，去掉两端空格并统一为大写字母和数字
  * @param availableUnits 当前可以继续使用的金额，单位为该资产最小整数单位
  * @param lockedUnits 已冻结、暂时不能再次使用的金额，单位为该资产最小整数单位
@@ -29,19 +29,6 @@ public record AssetBalance(String asset, long availableUnits, long lockedUnits) 
     }
 
     /**
-     * 按带正负号的差额调整可用余额；扣完变负时返回余额不足的业务拒绝，不动冻结金额。
-     * @param delta 可用余额变化额，正数增加、负数扣减，单位为资产最小整数单位
-     */
-    public AssetBalance adjustAvailable(long delta) {
-        // 调整后的可用余额，返回新记录前还要检查是否小于 0。
-        long nextAvailable = Math.addExact(availableUnits, delta);
-        if (nextAvailable < 0) {
-            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "available balance is insufficient");
-        }
-        return new AssetBalance(asset, nextAvailable, lockedUnits);
-    }
-
-    /**
      * 把指定金额从可用余额转入冻结余额，用于订单等需要预占资金的业务，总额保持不变。
      * @param units 本次操作的正数金额，单位为资产最小整数单位
      */
@@ -51,39 +38,6 @@ public record AssetBalance(String asset, long availableUnits, long lockedUnits) 
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "available balance is insufficient");
         }
         return new AssetBalance(asset, Math.subtractExact(availableUnits, units), Math.addExact(lockedUnits, units));
-    }
-
-    /**
-     * 把指定冻结金额还回可用余额；冻结不足说明释放数量与已有状态不一致，直接报错。
-     * @param units 本次操作的正数金额，单位为资产最小整数单位
-     */
-    public AssetBalance release(long units) {
-        requirePositive(units);
-        if (lockedUnits < units) {
-            throw new IllegalStateException("locked balance is lower than reservation release");
-        }
-        return new AssetBalance(asset, Math.addExact(availableUnits, units), Math.subtractExact(lockedUnits, units));
-    }
-
-    /**
-     * 从冻结余额扣除实际已使用的金额，不退回可用余额；冻结不足时返回业务拒绝。
-     * @param units 本次操作的正数金额，单位为资产最小整数单位
-     */
-    public AssetBalance consumeLocked(long units) {
-        requirePositive(units);
-        if (lockedUnits < units) {
-            throw new CoreStateRejectedException("INSUFFICIENT_LOCKED_BALANCE", "locked balance is insufficient");
-        }
-        return new AssetBalance(asset, availableUnits, Math.subtractExact(lockedUnits, units));
-    }
-
-    /**
-     * 把一笔正数金额计入可用余额，冻结金额不变。
-     * @param units 本次操作的正数金额，单位为资产最小整数单位
-     */
-    public AssetBalance credit(long units) {
-        requirePositive(units);
-        return new AssetBalance(asset, Math.addExact(availableUnits, units), lockedUnits);
     }
 
     /**

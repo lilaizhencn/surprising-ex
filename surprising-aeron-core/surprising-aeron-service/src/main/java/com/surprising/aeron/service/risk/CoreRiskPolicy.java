@@ -8,8 +8,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class CoreRiskPolicy {
 
-    /** 这套风险等级规则的版本编号，便于与币对风险参数版本分开识别。 */
-    static final int VERSION = 1;
     /** 维持保证金占权益达到 80% 时进入预警，按百万分之一保存。 */
     static final long WARNING_MARGIN_RATIO_PPM = 800_000L;
     /** 维持保证金占权益达到 100% 时进入强平等级，按百万分之一保存。 */
