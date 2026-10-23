@@ -136,7 +136,7 @@ public final class RuntimeStateProjector {
                 identities.positionKey(risk.userId(), positionKey(risk.instrumentId(), risk.positionSide())),
                 new RiskSnapshotRuntime(risk.userId(), identities.symbolId(risk.instrumentId()), risk.positionSide(),
                         risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
-                        risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status())));
+                        risk.maintenanceMarginUnits(), risk.marginRatioPpm())));
         source.riskState().scans().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 需要恢复风险及触发扫描阶段、游标和已累计中间值的记录。 */ scan) -> runtime.putRiskScan(new RiskScanRuntime(
                 identities.symbolId(instrumentId), scan.accountLaneId(), scan.priceSequence(),
                 scan.scanStartPriceSequence(), scan.lastUserId(),

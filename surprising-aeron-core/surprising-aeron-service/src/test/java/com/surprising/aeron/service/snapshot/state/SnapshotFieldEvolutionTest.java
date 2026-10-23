@@ -206,9 +206,59 @@ class SnapshotFieldEvolutionTest {
             assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(encoded, split(invalidRoot)), line))
                     .isInstanceOf(ProtocolException.class);
             byte[] previousVersion = encoded.clone();
-            ByteBuffer.wrap(previousVersion).order(ByteOrder.LITTLE_ENDIAN).putInt(0, 46);
+            ByteBuffer.wrap(previousVersion).order(ByteOrder.LITTLE_ENDIAN).putInt(0, 47);
             assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(previousVersion, line))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("unsupported trading snapshot version");
+        }
+    }
+
+    @Test
+    void riskSnapshotStoresRatioAndDerivesStatusAfterRestore() {
+        long[] ratios = {0, 799_999, 800_000, 999_999, 1_000_000, Long.MAX_VALUE};
+        for (ProductLine line : ProductLine.values()) {
+            if (!line.isDerivative()) continue;
+            String quote = line == ProductLine.INVERSE_PERPETUAL || line == ProductLine.INVERSE_DELIVERY
+                    ? "USD" : "USDT";
+            var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(line,
+                    com.surprising.aeron.service.core.CoreStateTestFixtures.instrument(line, "1", "BTC", quote,
+                            com.surprising.aeron.service.core.CoreStateTestFixtures.settleAsset(line)));
+            var user = new com.surprising.aeron.service.account.CoreUserState(
+                    line, 7, 0, Map.of(), Map.of(), Map.of());
+            var empty = TradingCoreState.empty(line);
+            for (long ratio : ratios) {
+                var risk = new com.surprising.aeron.model.CoreRiskSnapshot(7, "1",
+                        com.surprising.aeron.protocol.CorePositionSide.NET, 9, 1_000, 20, 100, ratio);
+                var riskState = new com.surprising.aeron.model.CoreRiskState(Map.of(), Map.of(risk.key(), risk),
+                        Map.of(), Map.of(), 1, empty.riskState().scanControl());
+                var state = new TradingCoreState(line, 0, Map.of(7L, user), Map.of(), Map.of("1", instrument),
+                        riskState, empty.treasuryState());
+                byte[] encoded = TradingStateSnapshotCodec.encode(state);
+                byte[] rootBytes = Arrays.copyOfRange(encoded, 4, encoded.length);
+                var root = new SnapshotFields.Reader(rootBytes);
+                var riskRoot = new SnapshotFields.Reader(root.bytes(6));
+                var risks = new SnapshotFields.Reader(riskRoot.bytes(2)).list(1, bytes -> bytes);
+                assertThat(risks).hasSize(1);
+                assertThat(split(risks.getFirst()).stream().map(SnapshotFieldEvolutionTest::id).toList())
+                        .containsExactly(1, 2, 3, 4, 5, 6, 7, 8);
+                var restored = TradingStateSnapshotCodec.decode(encoded, line);
+                assertThat(restored).isEqualTo(state);
+                assertThat(restored.riskState().snapshots().get(risk.key()).status()).isEqualTo(risk.status());
+                assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
+
+                for (boolean missing : List.of(false, true)) {
+                    byte[] invalid = replace(risks.getFirst(), 8, ignored -> missing ? null
+                            : ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(-1).array());
+                    byte[] invalidRows = new SnapshotFields.Writer().list(1, List.of(invalid), bytes -> bytes).encode();
+                    byte[] invalidRisk = replace(root.bytes(6), 2, ignored -> invalidRows);
+                    byte[] invalidRoot = replace(rootBytes, 6, ignored -> invalidRisk);
+                    assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(encoded, split(invalidRoot)), line))
+                            .isInstanceOf(ProtocolException.class);
+                }
+                byte[] previousVersion = encoded.clone();
+                ByteBuffer.wrap(previousVersion).order(ByteOrder.LITTLE_ENDIAN).putInt(0, 47);
+                assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(previousVersion, line))
+                        .isInstanceOf(ProtocolException.class).hasMessageContaining("unsupported trading snapshot version");
+            }
         }
     }
 

@@ -34,13 +34,13 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * 交易状态的独立持久化格式。新快照外层版本四十二，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
- * 构造约定：工具类不创建实例；当前写版本四十二，历史布局不再接受。
+ * 交易状态的独立持久化格式。新快照外层版本四十八，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
+ * 构造约定：工具类不创建实例；当前写版本四十八，历史布局不再接受。
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 47;
+    private static final int VERSION = 48;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -338,11 +338,10 @@ public final class TradingStateSnapshotCodec {
                 .number(6, value.unrealizedPnlUnits()) // 6：尚未实现的持仓盈亏
                 .number(7, value.maintenanceMarginUnits()) // 7：估值要求的维持保证金金额
                 .number(8, value.marginRatioPpm()) // 8：风险保证金比率，百万分比
-                .number(9, SnapshotEnumCodes.encode(value.status())) // 9：当前业务记录状态
                 .encode();
     }
     /**
-     * 按固定字段编号读取并构造账户风险快照，恢复权益、未实现盈亏、维持保证金、比率和风险状态；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
+     * 按固定字段编号读取并构造账户风险快照，恢复权益、未实现盈亏、维持保证金及比率，等级按固定阈值读取；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前账户风险快照的独立字段记录字节
      */
     private static CoreRiskSnapshot readCoreRiskSnapshot(byte[] encoded) {
@@ -356,8 +355,7 @@ public final class TradingStateSnapshotCodec {
                 r.number(5), // 5：账户风险估值权益
                 r.number(6), // 6：尚未实现的持仓盈亏
                 r.number(7), // 7：估值要求的维持保证金金额
-                r.number(8), // 8：风险保证金比率，百万分比
-                SnapshotEnumCodes.readCoreRiskStatus(r.integer(9))); // 9：当前业务记录状态
+                r.number(8)); // 8：风险保证金比率，百万分比；等级由原固定阈值推导
     }
 
     /**

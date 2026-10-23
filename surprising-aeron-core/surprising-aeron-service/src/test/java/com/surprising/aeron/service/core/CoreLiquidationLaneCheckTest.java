@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
@@ -107,11 +106,11 @@ class CoreLiquidationLaneCheckTest {
             // 用户 1 净持仓的整数键，所属 Lane 会在这个位置把风险状态改为正常。
             long key = core.identities.findPositionKeyValue(1, instrument, CorePositionSide.NET);
             core.runtimeState.dispatchControlLanes(core.runtimeState.topology().accountLaneMask(1), /* 当前被派发的账户 Lane，回调内只按已准备的持仓键修改该用户风险。 */ ignored -> {
-                // 所属 Lane 读取的原风险记录，复制全部事实，仅把结论改为 NORMAL。
+                // 所属 Lane 读取的原风险记录，保留身份和价格序号，把捕获的风险比例改为正常范围。
                 var risk = core.runtimeState.riskSnapshot(key);
                 core.runtimeState.putRiskSnapshot(key, new RiskSnapshotRuntime(risk.userId(), risk.symbolId(),
                         risk.positionSide(), risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
-                        risk.maintenanceMarginUnits(), risk.marginRatioPpm(), CoreRiskStatus.NORMAL));
+                        risk.maintenanceMarginUnits(), 0));
                 return null;
             });
             // 等待测试风险修改回调完成的单调时钟截止值，最多等五秒。

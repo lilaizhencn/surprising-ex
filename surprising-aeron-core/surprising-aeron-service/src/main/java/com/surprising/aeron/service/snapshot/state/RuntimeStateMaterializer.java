@@ -135,7 +135,7 @@ public final class RuntimeStateMaterializer {
             // 由运行时风险条目构造的只读业务风险值。
             CoreRiskSnapshot snapshot = new CoreRiskSnapshot(risk.userId(), identities.instrumentId(risk.symbolId()),
                     risk.positionSide(), risk.priceSequence(), risk.equityUnits(), risk.unrealizedPnlUnits(),
-                    risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status());
+                    risk.maintenanceMarginUnits(), risk.marginRatioPpm());
             riskSnapshots.put(snapshot.key(), snapshot);
         });
         // 按强平编号排序的强平业务记录导出表。

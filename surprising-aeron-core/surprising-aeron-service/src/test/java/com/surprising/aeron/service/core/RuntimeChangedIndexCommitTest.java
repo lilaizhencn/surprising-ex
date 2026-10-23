@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -150,7 +149,7 @@ class RuntimeChangedIndexCommitTest {
         IndexSet indexes = indexes(initial, identities);
         // 当前写入并随后删除的 NORMAL 风险快照
         RiskSnapshotRuntime risk = new RiskSnapshotRuntime(userId, symbolId, CorePositionSide.NET,
-                9, 1_000, 20, 100, 100_000, CoreRiskStatus.NORMAL);
+                9, 1_000, 20, 100, 100_000);
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
             runtime.putRiskSnapshot(positionKey, risk);
             return null;

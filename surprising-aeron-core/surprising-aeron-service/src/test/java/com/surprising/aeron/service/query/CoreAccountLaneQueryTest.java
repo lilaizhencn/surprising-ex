@@ -5,7 +5,6 @@ import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
-import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.AccountLaneState;
@@ -276,7 +275,7 @@ class CoreAccountLaneQueryTest {
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("owning Lane thread");
                 core.runtimeState().dispatchControlLanes(mask, /* 控制任务传入的 Lane 参数，实际通过运行时入口写入再移除风险快照，留下待收集变化。 */ ignored -> {
                     core.runtimeState().putRiskSnapshot(key, new com.surprising.aeron.service.risk.RiskSnapshotRuntime(
-                            1, symbolId, CorePositionSide.NET, 1, 100, 0, 1, 1, CoreRiskStatus.NORMAL));
+                            1, symbolId, CorePositionSide.NET, 1, 100, 0, 1, 1));
                     core.runtimeState().removeRiskSnapshot(key);
                     return null;
                 });

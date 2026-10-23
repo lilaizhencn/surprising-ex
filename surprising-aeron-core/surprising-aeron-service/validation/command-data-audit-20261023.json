@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第十五轮：A81–A83清理并通过17模块干净编译；累计82项解决，A84一项确认，A11一项候选。Core16/registerV10/snapshot47，全量审查继续。",
+    "checkpoint": "第十六轮：A84–A86清理并通过17模块干净编译；累计85项解决，A87一项确认，A11一项候选。Core16/registerV10/snapshot48，全量审查继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -5565,8 +5565,8 @@
     },
     {
       "id": "A84",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "风险冷/热结果及快照重复保存由固定风险比例阈值确定的风险等级",
       "fields": [
         "CoreRiskSnapshot.status",
@@ -5591,14 +5591,75 @@
           "purpose": "同一风险记录已保存字段8比例，字段9等级没有额外信息；恢复构造及projector仅转传。"
         }
       ],
-      "business_code_changed": false,
+      "business_code_changed": true,
       "proposed_cleanup": "去掉冷/热record的status组件和构造实参，并用既有CoreRiskPolicy提供同名派生getter；快照删字段9并提升独立交易快照版本。对外查询/实时/数据库等级字段继续按原规则提供。",
       "preserve_and_implementation_requirements": [
         "风险比例本身必须保留：全仓比例使用同资产维持保证金总额，但每条记录只保存单仓保证金，不能用本记录金额重算比例。",
         "仅从已固定的marginRatioPpm推导等级，不读取当前钱包、行情、可变标的配置或重新计算金额；期权多头可否强平仍由原canLiquidate规则单独决定。",
         "核对所有构造、快照、回滚、结算、实时及测试夹具；不能忽略旧夹具中可能手工指定的不一致等级。",
         "旧格式不需读取，不能为此保留旧status字段或兼容入口。规则变化应按项目现有版本/恢复规范处理，不新增每记录策略版本或注册表。"
-      ]
+      ],
+      "resolved_in_round": "sixteenth_cleanup_round",
+      "implementation": "冷/热风险结果各删status组件和构造实参，保留同名getter复用CoreRiskPolicy.status(marginRatioPpm)。快照v48删风险字段9，不读旧布局；外部查询/实时字段和业务哈希等级编码不变。比例与所有金额继续保存，原价格/资金计算及强平例外不变。"
+    },
+    {
+      "id": "A85",
+      "status": "resolved",
+      "analysis_status": "resolved",
+      "topic": "风险等级不落盘后留下无调用快照枚举解码入口",
+      "fields": [
+        "SnapshotEnumCodes.readCoreRiskStatus"
+      ],
+      "evidence_basis_commit": "38bbacfdd967309c5ce2566d748380e06ef3f5ed",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/SnapshotEnumCodes.java",
+          "anchor": "static CoreRiskStatus readCoreRiskStatus(int value)",
+          "purpose": "CodeGraph原唯一caller是风险快照读函数，删字段9后无调用；编译所有相关模块确认无残留引用。"
+        }
+      ],
+      "implementation": "删除唯一旧读入口；保留encode(CoreRiskStatus)，它仍用于完整业务状态哈希。",
+      "resolved_in_round": "sixteenth_cleanup_round",
+      "business_code_changed": true
+    },
+    {
+      "id": "A86",
+      "status": "resolved",
+      "analysis_status": "resolved",
+      "topic": "冷风险结果默认NET构造在原业务和测试中均无创建用途",
+      "fields": [
+        "CoreRiskSnapshot原8参默认NET便利构造"
+      ],
+      "evidence_basis_commit": "38bbacfdd967309c5ce2566d748380e06ef3f5ed",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskSnapshot.java",
+          "anchor": "public CoreRiskSnapshot(long userId, String instrumentId, long priceSequence",
+          "purpose": "原14处声明/创建清单中的11处实际new均不使用该便利构造，恢复、快照及物化原来使用完整入口。"
+        }
+      ],
+      "implementation": "删除默认持仓腿构造，保留显式positionSide的8参完整记录入口。新增源码验证也使用完整构造。",
+      "resolved_in_round": "sixteenth_cleanup_round",
+      "business_code_changed": true
+    },
+    {
+      "id": "A87",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "风险规则保留无人消费的版本常量",
+      "fields": [
+        "CoreRiskPolicy.VERSION"
+      ],
+      "evidence_basis_commit": "38bbacfdd967309c5ce2566d748380e06ef3f5ed",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/CoreRiskPolicy.java",
+          "anchor": "static final int VERSION = 1;",
+          "purpose": "该常量只有包可见性。检查同包全部10个Java生产/测试源文件，VERSION标识符仅此声明；仓库无\"VERSION\"反射/配置字符串引用。常量会内联，不能只依赖classfile无引用判断。"
+        }
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "删除无人读取的版本标记及注释；保留真正判级阈值、当前状态计算和canLiquidate期权多头规则，不新增替代版本层。"
     }
   ],
   "preserve_verified_purposes": [
@@ -5616,8 +5677,8 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "清理A84：冷/热风险结果及快照不重复保存固定比例阈值决定的等级，对外等级字段保留。",
-    "风险比例不是本记录金额的派生值，尤其全仓不能删除；固定历史费率、金额、行情及扫描进度继续逐业务核对。",
+    "清理A87：删除CoreRiskPolicy无消费版本标记，保留真实阈值及期权多头强平例外。",
+    "继续逐业务检查剩余字段/条件，真实金额、捕获比例及历史费率等不能按表面关系误删。",
     "保持A11一致性边界；仅编译相关模块，不运行测试、服务和性能。"
   ],
   "rejected_false_positives": [
@@ -5915,25 +5976,25 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "18117154a7c58f73ce56ab5b2c154d743d3815ae",
+    "source_basis_commit": "38bbacfdd967309c5ce2566d748380e06ef3f5ed",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A81",
-      "A82",
-      "A83"
+      "A84",
+      "A85",
+      "A86"
     ],
     "new_confirmed_ids": [
-      "A84"
+      "A87"
     ],
     "candidate_ids": [
       "A11"
     ],
     "counts": {
-      "resolved": 82,
+      "resolved": 85,
       "candidate": 1,
       "confirmed": 1
     },
-    "evidence": "fifteenth_cleanup_round",
+    "evidence": "sixteenth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -16509,6 +16570,356 @@
         "/tmp/aeron-liquidation-api-20261024-risk-impact.json": "e0a01de4d7faee318a0e5cb64bde6b9fa2716a7f8b9910e41f00b9a6f991a214",
         "/tmp/aeron-liquidation-api-20261024-static.json": "7a90d0eb94db06e586974e1e74b3233dc33e9c41e2043156bc395568a82a6aef",
         "/tmp/aeron-liquidation-api-20261024-static.py": "6350f295034890ace829163bf60b7ac54c25c961c3d9e195f8a1df76983f80d4"
+      },
+      "errors": [],
+      "no_task_services_started": true
+    }
+  },
+  "sixteenth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "38bbacfdd967309c5ce2566d748380e06ef3f5ed",
+    "resolved_ids": [
+      "A84",
+      "A85",
+      "A86"
+    ],
+    "new_confirmed_ids": [
+      "A87"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 85,
+      "candidate": 1,
+      "confirmed": 1
+    },
+    "flow": "APPLY_MARK_PRICE/风险续扫经原账户Lane估值并捕获ratio；等级始终按同一固定阈值读取。物化/恢复只传真实金额和ratio；快照v48不再落字段9。查询、实时、强平和业务哈希仍使用原status读取与编码。",
+    "implementation": {
+      "cold_risk_components_before": 9,
+      "cold_risk_components_after": 8,
+      "runtime_risk_components_before": 9,
+      "runtime_risk_components_after": 8,
+      "removed_snapshot_risk_field": 9,
+      "snapshot_bytes_removed_per_risk_record": 16,
+      "removed_unused_decoder_methods": 1,
+      "removed_unused_constructor_overloads": 1,
+      "new_types_interfaces_registries": 0,
+      "external_query_command_contract_changed": false,
+      "old_snapshot_formats_read": false
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 48,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4
+    },
+    "verification": {
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "disk_available_before_build": "187GiB",
+      "clean": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "01:06 min",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-aeron-tools",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-maker",
+          "surprising-realtime-api",
+          "surprising-price-provider",
+          "surprising-aeron-benchmarks",
+          "surprising-derivatives-lifecycle-api",
+          "surprising-realtime-provider",
+          "surprising-gateway"
+        ],
+        "log_sha256": "2612b021f8ef0fea7cd59d1baa3850a28ccfc7171c1c5b975a3ac24a3725ebbd"
+      },
+      "earlier_compile_failure": {
+        "exit_code": 1,
+        "duration": "26.763 s",
+        "reason": "CodeGraph导入列表不包含一处完整类名创建的测试风险记录，初次迁移遗漏该实参。补齐CoreAccountLaneQueryTest，并对HEAD全部Java源补充声明/new的词法实参清单后重新干净编译。",
+        "log_sha256": "762c3dc2d28bbc00f0e2d6f970124affcc840c2af25d8bb00c6c3d768d996296"
+      },
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "test_source_updates": [
+        "所有持仓腿的0、799999、800000、999999、1000000及Long.MAX_VALUE捕获比例等级，以及负比例拒绝。",
+        "五条衍生品线快照只保存风险字段1–8，往返相等与业务哈希一致，缺少/负比例和旧v47拒绝。",
+        "强平风险失效测试夹具改为正常比例0，保留不提前撤掉有效Matcher挂单和拒绝失效计划的验证目的。"
+      ],
+      "unverified": [
+        "测试实际执行",
+        "真实交易正常/拒绝/异常路径",
+        "做市/资金/持仓/终态和资金守恒运行核对",
+        "Cluster日志/快照恢复运行",
+        "真实查询、数据库和前端交互",
+        "性能"
+      ]
+    },
+    "static_verification": {
+      "status": "passed",
+      "source_basis_commit": "38bbacfdd967309c5ce2566d748380e06ef3f5ed",
+      "original_declarations_constructions": 14,
+      "original_construction_sites_verified": 11,
+      "construction_mappings": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskLaneProcessor.java",
+          "old_line": 288,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "old_line": 136,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java",
+          "old_line": 137,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "old_line": 351,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLaneMetricsBoundaryTest.java",
+          "old_line": 61,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLiquidationLaneCheckTest.java",
+          "old_line": 112,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": true
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/OwnerPositionRetirementTest.java",
+          "old_line": 110,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeChangedIndexCommitTest.java",
+          "old_line": 152,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeRiskQueryServiceTest.java",
+          "old_line": 46,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeRiskQueryServiceTest.java",
+          "old_line": 154,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreAccountLaneQueryTest.java",
+          "old_line": 278,
+          "old_arity": 9,
+          "new_arity": 8,
+          "fixture_changed": false
+        }
+      ],
+      "cold_and_runtime_components_after": 8,
+      "removed_unused_cold_constructor_overloads": 1,
+      "removed_snapshot_risk_field": 9,
+      "new_snapshot_version": 48,
+      "snapshot_bytes_removed_per_risk_record": 16,
+      "removed_unused_snapshot_decoder": true,
+      "business_hash_enum_encoder_preserved": true,
+      "unchanged_business_sources": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/CoreRiskPolicy.java",
+          "sha256": "748918a8d84ea9225aa91bd9c26a8d79f499abe1f39f5fd5384d729dfa9667c1"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+          "sha256": "d52f7bd8e8da25ab78f28e27d8b321d3da184b5cd0f2506f1f8e1a2aa63ca833"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java",
+          "sha256": "f929e2c3e287998462b16b0c31854bf029a56d4a8a1b65394050d2235cfbdd43"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.java",
+          "sha256": "ced1c22e2f028c603dd28b0d707caa3a0d5967b571810e7ce827cba5b0ac1f87"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.java",
+          "sha256": "42675c6d658aebf0bd54ed537bfab7deddb415c9a95c439fae7e1e0588351c3b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/realtime/state/RealtimeStateCapture.java",
+          "sha256": "bff2a7968aac1d0ce7ef93b12c75fda407ee50a7331d41a1b7bf233132cfb385"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/RuntimeAccountRollback.java",
+          "sha256": "24e758124f2ccc8123738bd479951fc69858133832289e4ffa8bc6c83aec7d12"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreRiskSnapshotView.java",
+          "sha256": "cf21fd99bfb9dbf10355f6e79d0d2e7551fa973987c1365f9dd9ed7f59d31393"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "sha256": "2e51c631aa62353a5564ad44ebbd17cbce3ebdc612e708a919c3ed83bcbabf23"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreProtocol.java",
+          "sha256": "3742412429af89edd83cf406828118edf86d2041e779bc7932d7ac8992395dd0"
+        }
+      ],
+      "java_business_execution": false
+    },
+    "binary_post_verification": {
+      "status": "passed",
+      "fresh_class_counts": {
+        "classes": 3004,
+        "test-classes": 860
+      },
+      "model_verification": [
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskSnapshot",
+          "fields": [
+            "userId",
+            "instrumentId",
+            "positionSide",
+            "priceSequence",
+            "equityUnits",
+            "unrealizedPnlUnits",
+            "maintenanceMarginUnits",
+            "marginRatioPpm"
+          ],
+          "constructor_arities": [
+            8
+          ],
+          "derived_status_getter_retained": true
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RiskSnapshotRuntime",
+          "fields": [
+            "userId",
+            "symbolId",
+            "positionSide",
+            "priceSequence",
+            "equityUnits",
+            "unrealizedPnlUnits",
+            "maintenanceMarginUnits",
+            "marginRatioPpm"
+          ],
+          "constructor_arities": [
+            8
+          ],
+          "derived_status_getter_retained": true
+        }
+      ],
+      "removed_status_backing_field_refs": 0,
+      "removed_decoder_refs": 0,
+      "business_hash_encoder_consumers": [
+        "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class"
+      ],
+      "java_business_execution": false
+    },
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskSnapshot.java": "a98679dd2b57eae6b213c42f92c2a52a9308334bbe090b7810dff893c0d82f02",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskLaneProcessor.java": "b4dcf76030694b10ba94f482c09b407aaea09f74c68e6e4c89ade8bfde00c2ce",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskSnapshotRuntime.java": "44c2d0415bfe9379bd9f0cfb03911dcb7a2ecce1724f1d875ea81fd4b908613d",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java": "85a3705b1d1957f97f56139fbe9dc95cd005fc258f365d59f8387686f97a2361",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java": "421171cd30f8d70c6ee5656652df42c1352b41c2c96eff73625b2d420ac46a9f",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/SnapshotEnumCodes.java": "1dd5c9a2e34280c65b1145bc6d7673017696302993038ba75c7d22e2ac4420f1",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "65ea1aa2d73da6182537acefb7779388712fee258f45b69e6b5597539a7fab9a",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLaneMetricsBoundaryTest.java": "6581253fb42c77b8979878c0c6013e7b84781589755655c7942ceef6d5fac147",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLiquidationLaneCheckTest.java": "5b230bd0455e52befc48dff0cc8b6c342390a2afd747a85ef5ccb8c9ddbcb64b",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/OwnerPositionRetirementTest.java": "196d196a63a09a55fd3ef69cf040765e078b888ec9bac2408e7ba83cd00d0952",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeChangedIndexCommitTest.java": "a3553e1749bb4fbed8ac9913e3dfd301770801f48989baa8135fe05796b6c4ac",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeRiskQueryServiceTest.java": "74ff9c02cb093415aba24f51f76e07e1be683bd7238873af6f14721e539452a4",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreAccountLaneQueryTest.java": "8d157714cc57ec596d9c3166661bb834fa17288379205af8c80dbdfbeeebacd7",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/snapshot/state/SnapshotFieldEvolutionTest.java": "1bb8135bbf4519875b2d5795af8309dc198df6073ea2ceb884fe2b86b7351839"
+    },
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-protocol/README.md": "885a5f79c467b77b7a0b5ede01f34b7c30f0c6b55a0b850df14c3371f9f41da9",
+      "surprising-aeron-core/surprising-aeron-service/README.md": "cab6e8e041ef72de15cd2863e5615929890448dcf484acf7fda1ba42084d1194"
+    },
+    "graph_verification": {
+      "command": "codegraph sync -q",
+      "exit_code": 0,
+      "status": "up_to_date",
+      "files": 2241,
+      "nodes": 52666,
+      "edges": 151666,
+      "mcp_tools_available": false,
+      "access": "CLI plus read-only node:sqlite; constructor/FQ gaps supplemented by current source arguments and fresh classfile exact descriptors"
+    },
+    "followup_analysis": {
+      "package_private_version_consumer_check": "passed",
+      "risk_package_java_files": 10,
+      "version_identifiers": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/CoreRiskPolicy.java",
+          "line": 12,
+          "source": "static final int VERSION = 1;"
+        }
+      ],
+      "risk_policy_source_unchanged_this_round": true,
+      "note": "Java package access excludes other packages; archive includes production and test sources, comments/strings excluded. No field reference can be observed from bytecode for inlined constants, so source scope was checked."
+    },
+    "remaining_scope": [
+      "A87无用版本标记待下一批清理；真正快照/协议版本继续保留。",
+      "A11仍依赖原提交顺序、读屏障和分页会话，不能直接绕过。",
+      "全量字段与业务约束审查仍未完成；没有以编译替代资金、交易和恢复运行验证。"
+    ],
+    "temporary_resources": {
+      "status": "removed_after_archival",
+      "owned_files_removed": {
+        "/tmp/aeron-risk-status-20261024-all-sites.json": "5bcd18e1d09ba09a34dced3126435478916929cd0f9e503609e9c22a7bc09b22",
+        "/tmp/aeron-risk-status-20261024-archive.py": "78ecf4cdfe6a201b0424e51b708c511d6adc7c61166495b7f3ae4f727797144c",
+        "/tmp/aeron-risk-status-20261024-binary.json": "236f41592dcd7a10a08d608f734bb7804ce5c54b289cf34dc42ddf49250712d2",
+        "/tmp/aeron-risk-status-20261024-binary.py": "5c688bbf5cbd1d0402e13039f733149294ce21f5a178624b4ccab83e00058408",
+        "/tmp/aeron-risk-status-20261024-build-failed.log": "762c3dc2d28bbc00f0e2d6f970124affcc840c2af25d8bb00c6c3d768d996296",
+        "/tmp/aeron-risk-status-20261024-build.log": "2612b021f8ef0fea7cd59d1baa3850a28ccfc7171c1c5b975a3ac24a3725ebbd",
+        "/tmp/aeron-risk-status-20261024-edit.py": "13ab2ad6d72fd270795a1496deefe4d2b2c67b2379a9e5d83c2c6d0c1899e246",
+        "/tmp/aeron-risk-status-20261024-followup.json": "8af588e4bf6c35aa37e031d152f7d9824c2fb95dce3527f5ba404611c561e404",
+        "/tmp/aeron-risk-status-20261024-full-inventory.py": "5aa60614d19bfeed3a372ddb0492c73eccf1494824e56e8ee548e248e4b7ea5e",
+        "/tmp/aeron-risk-status-20261024-graph-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/aeron-risk-status-20261024-graph.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/aeron-risk-status-20261024-helper.py": "15130a6f39181ece506c6cf067f254c0eab29685cde22abebc4e44c14b65173a",
+        "/tmp/aeron-risk-status-20261024-importers.json": "5f4ba89e05e69d9c0cb8bcec5acc02f9cb4b1174c097456c11205eda3e37c64f",
+        "/tmp/aeron-risk-status-20261024-sites.json": "0497a251643529bdf3dfcbf9eafa4de4198ff63f1b765fd41dc2fa26497b0da3",
+        "/tmp/aeron-risk-status-20261024-static.json": "27515ea2f436ffa46886eb03011675eb3e315220b27d8b1015b6dc6f88aec090",
+        "/tmp/aeron-risk-status-20261024-static.py": "7863760152be447c838d3979ec9eeb0c2ba8cd4a181fd93c8481e73667eb720b",
+        "/tmp/aeron-risk-status-20261024-version-nodes.json": "b3fb37ba0f919b7fb819ff0099be9fa5a5b74e9b85e52bc95edfa279bd354696",
+        "/tmp/__pycache__/aeron-risk-status-20261024-helper.cpython-311.pyc": "bb60d9168d8ab255a16e78967e2f6e7bf1dd87e77c42cd0998d67d81747f0e46"
       },
       "errors": [],
       "no_task_services_started": true

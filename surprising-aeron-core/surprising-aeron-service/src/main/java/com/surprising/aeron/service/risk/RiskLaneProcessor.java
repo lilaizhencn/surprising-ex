@@ -283,10 +283,9 @@ public final class RiskLaneProcessor {
                 || previousSnapshot.unrealizedPnlUnits() != unrealized
                 || previousSnapshot.maintenanceMarginUnits() != maintenance
                 || previousSnapshot.marginRatioPpm() != ratio
-                || previousSnapshot.status() != status
                 || previousSnapshot.positionSide() != position.positionSide()) {
             runtime.putRiskSnapshot(riskKey, new RiskSnapshotRuntime(userId, symbolId, position.positionSide(),
-                    priceSequence, equity, unrealized, maintenance, ratio, status));
+                    priceSequence, equity, unrealized, maintenance, ratio));
         }
         // 到期结算流程按已批准价格处理剩余持仓。这里仍保留风险估值，
         // 但结算分批期间不再为同一持仓创建竞争的强平流程。

@@ -213,18 +213,6 @@ public final class SnapshotEnumCodes {
         };
     }
     /**
-     * 把固定编号恢复为账户风险状态：NORMAL=0、WARNING=1、LIQUIDATION=2；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的账户风险状态固定编号
-     */
-    static CoreRiskStatus readCoreRiskStatus(int value) {
-        return switch (value) {
-            case 0 -> CoreRiskStatus.NORMAL;
-            case 1 -> CoreRiskStatus.WARNING;
-            case 2 -> CoreRiskStatus.LIQUIDATION;
-            default -> throw new ProtocolException("unknown persisted CoreRiskStatus code: " + value);
-        };
-    }
-    /**
      * 把强平业务状态写成固定持久化编号：PLANNED=0、ORDERED=1、COMPLETED=2、INSURANCE_REQUIRED=3、ADL_REQUIRED=4、CANCELED=5。不使用 Java 枚举声明顺序。
      * @param value 本次要持久化的强平业务状态枚举值
      */

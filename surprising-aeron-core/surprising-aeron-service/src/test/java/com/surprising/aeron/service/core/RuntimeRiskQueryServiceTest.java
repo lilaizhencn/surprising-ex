@@ -1,10 +1,11 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.model.CoreRiskStatus;
+import com.surprising.aeron.model.CoreRiskSnapshot;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
-import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -32,6 +33,30 @@ class RuntimeRiskQueryServiceTest {
     /** 本测试直接准备账户、持仓、行情和风险缓存的运行时。 */
     private final TradingAccountRuntime runtime = new TradingAccountRuntime();
 
+    @Test
+    void storedRiskUsesCapturedRatioAtInclusiveThresholds() {
+        long[] ratios = {0, 799_999, 800_000, 999_999, 1_000_000, Long.MAX_VALUE};
+        CoreRiskStatus[] expected = {CoreRiskStatus.NORMAL, CoreRiskStatus.NORMAL, CoreRiskStatus.WARNING,
+                CoreRiskStatus.WARNING, CoreRiskStatus.LIQUIDATION, CoreRiskStatus.LIQUIDATION};
+        for (CorePositionSide side : CorePositionSide.values()) {
+            for (int i = 0; i < ratios.length; i++) {
+                // 全仓比例并不等于单行维持保证金/权益，读取等级不能重新估值这两个金额。
+                var hot = new RiskSnapshotRuntime(7, 1, side, 9, 1_000, 20, 100, ratios[i]);
+                var cold = new CoreRiskSnapshot(7, "1", side, 9, 1_000, 20, 100, ratios[i]);
+                assertThat(hot.status()).isEqualTo(expected[i]);
+                assertThat(cold.status()).isEqualTo(expected[i]);
+                assertThat(hot.marginRatioPpm()).isEqualTo(ratios[i]);
+                assertThat(cold.marginRatioPpm()).isEqualTo(ratios[i]);
+            }
+        }
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new RiskSnapshotRuntime(7, 1, CorePositionSide.NET, 9, 1_000, 20, 100, -1))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                new CoreRiskSnapshot(7, "1", CorePositionSide.NET, 9, 1_000, 20, 100, -1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     /**
      * 在线性和反向永续、交割中放入一份故意过期的风险缓存，再按最新行情查询价格、盈亏、权益、维持保证金和等级；原缓存对象和运行时修订号应保持原值。
      * @param product 本轮要检查的产品线，决定合约类型、结算资产和盈亏公式
@@ -44,7 +69,7 @@ class RuntimeRiskQueryServiceTest {
         long key = position(product, "1", 10, CoreMarginMode.CROSS, 100, 80);
         // 故意不对应当前价格的旧风险记录，查询应重新算结果，但不能回写覆盖它。
         var old = new RiskSnapshotRuntime(7, ids.symbolId("1"), CorePositionSide.NET,
-                1, 900, 999, 888, 1_000_000, CoreRiskStatus.LIQUIDATION);
+                1, 900, 999, 888, 1_000_000);
         runtime.putRiskSnapshot(key, old);
         // 查询前的运行时修订号，即时只读查询后必须保持相同。
         long revision = runtime.revision();
@@ -152,7 +177,7 @@ class RuntimeRiskQueryServiceTest {
                 instrument, 182, 835866, 152127612, 1_688_800_000L, 152_130_614_718L));
         runtime.putMarkPrice(new MarkPriceRuntime(symbol, instrument, 860931, 437900, 2000));
         runtime.putRiskSnapshot(key, new RiskSnapshotRuntime(7, symbol, CorePositionSide.NET, 437798,
-                10_475_817_151_583L, 479_915_800_000L, 78_463_385_000L, 7489, CoreRiskStatus.NORMAL));
+                10_475_817_151_583L, 479_915_800_000L, 78_463_385_000L, 7489));
         // 当前行情下即时重算的单条风险查询结果，与后台扫描缓存分开检查。
         var risk = RuntimeRiskQueryService.snapshots(runtime, ids, 7).getFirst();
         assertThat(risk.unrealizedPnlUnits()).isEqualTo(456_183_000_000L);

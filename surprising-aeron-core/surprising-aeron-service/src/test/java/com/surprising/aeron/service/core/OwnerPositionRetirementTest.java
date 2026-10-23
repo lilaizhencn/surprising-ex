@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreRiskState;
-import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.CoreUserState;
@@ -108,7 +107,7 @@ class OwnerPositionRetirementTest {
                     instrument, 2, 100, 200, 0, 0);
             runtime.putPosition(key, position);
             runtime.putRiskSnapshot(key, new RiskSnapshotRuntime(7, symbol, CorePositionSide.NET,
-                    9, 1_000, 20, 100, 100_000, CoreRiskStatus.NORMAL));
+                    9, 1_000, 20, 100, 100_000));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
         }

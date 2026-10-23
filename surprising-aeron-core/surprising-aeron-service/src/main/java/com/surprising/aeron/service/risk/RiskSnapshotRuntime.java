@@ -13,18 +13,22 @@ import com.surprising.aeron.protocol.CorePositionSide;
  * @param unrealizedPnlUnits 按当前风险价格计算的未实现盈亏，单位为结算资产最小单位
  * @param maintenanceMarginUnits 维持持仓所要求的保证金金额，单位为结算资产最小单位
  * @param marginRatioPpm 维持保证金相对权益的风险占比，按一百万倍保存，越大越接近强平
- * @param status 这次估值的正常、预警或强平结论
  */
 public record RiskSnapshotRuntime(long userId, int symbolId, CorePositionSide positionSide,
                                   long priceSequence, long equityUnits, long unrealizedPnlUnits,
-                                  long maintenanceMarginUnits, long marginRatioPpm, CoreRiskStatus status) {
+                                  long maintenanceMarginUnits, long marginRatioPpm) {
     /**
-     * 检查用户、币对整数编号、持仓腿和价格序号有效，维持保证金与风险占比非负，风险结论不能为空。
+     * 检查用户、币对整数编号、持仓腿和价格序号有效，维持保证金与风险占比非负。
      */
     public RiskSnapshotRuntime {
         if (userId <= 0 || symbolId < 0 || positionSide == null || priceSequence <= 0
-                || maintenanceMarginUnits < 0 || marginRatioPpm < 0 || status == null) {
+                || maintenanceMarginUnits < 0 || marginRatioPpm < 0) {
             throw new IllegalArgumentException("invalid runtime risk snapshot");
         }
+    }
+
+    /** 按捕获的风险比例读取等级，保持原固定阈值规则。 */
+    public CoreRiskStatus status() {
+        return CoreRiskPolicy.status(marginRatioPpm);
     }
 }
