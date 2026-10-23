@@ -1,5 +1,5 @@
 {
-  "status": "confirmed_cleanup_completed_overall_audit_in_progress",
+  "status": "additional_redundancy_findings_recorded",
   "date": "2026-10-23",
   "objective": "逐业务操作检查 command 产生到 Cluster 日志、执行、账户/账本落地、快照恢复及下游导出的字段和约束，去除无用持久化数据。",
   "implementation_completed": {
@@ -14,11 +14,11 @@
   "coverage": {
     "command_types_inventoried": 38,
     "full_field_and_constraint_audit_complete": false,
-    "note": "枚举、外部生产引用与路由已建表；以下并不表示全部字段已证实有用。CodeGraph CLI sync 显示 up to date，但部分新类未入索引，需用当前源码及编译产物补足。",
+    "note": "CodeGraph全量重建后补足旧索引缺口；同名/重载依赖结合3135个生产及894个测试classfile的精确描述符核对。编解码或哈希有读取不等于字段具有业务用途。",
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "累计27项确认发现已清理并完成相关模块干净编译；38类业务命令，A11/A25/A26仍待核实，全量字段/约束消费者审查尚未完成。",
+    "checkpoint": "以01bdca24f继续静态分析，新增16组确认项，涉及50个建议删除/合并/迁入测试的方法；累计27项已解决、16项确认待清理、3项候选，完整审查尚未完成。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -2089,7 +2089,8 @@
         }
       ],
       "next": "先统一格式版本策略；若每次不兼容变更都提升外层版本，可去掉字段及两次能力扫描；若保留同版本演进则需保留。",
-      "evidence_basis_commit": "8a7fd3217f91dc004e7f73f58def263ca4427924"
+      "evidence_basis_commit": "8a7fd3217f91dc004e7f73f58def263ca4427924",
+      "current_review_note": "01bdca24f外层现为39，仍严格只读当前版并保留根字段12的最低读取能力；本轮不更改其候选结论。"
     },
     {
       "id": "A26",
@@ -2368,6 +2369,1120 @@
           }
         ]
       }
+    },
+    {
+      "id": "A31",
+      "status": "confirmed",
+      "topic": "结算续步仍持有从不读取的旧进度引用",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "SettlementWork.previousProgress 的类字节码只有4个写入方法、没有GETFIELD读取。",
+        "构造、reset及完成/清理路径持续传递或清空此引用；真正的游标与一致性检查已在外层prepare使用局部previousProgress完成。"
+      ],
+      "next": "删除工作对象字段以及仅为它服务的构造/reset参数和赋值；外层读取及校验原结算进度继续保留。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java",
+          "line": 146,
+          "anchor": "private TreasuryRuntime.LifecycleProgressRuntime previousProgress;"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java",
+          "line": 77,
+          "anchor": "RuntimeLifecycleSettlement.validateProgress(previousProgress, command, true);"
+        }
+      ],
+      "operations": [
+        "SETTLE_INSTRUMENT"
+      ],
+      "fields": [
+        "SettlementWork.previousProgress",
+        "SettlementWork构造/reset的previousProgress参数"
+      ]
+    },
+    {
+      "id": "A32",
+      "status": "confirmed",
+      "topic": "近期墓碑仍是四类实体、覆盖和复制的通用容器，线上只追加普通订单",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "当前唯一业务写入口accept固定传EntityType.ORDER；另一写入口readTombstones仅恢复该编码器自己的输出。",
+        "ALGO/TRIGGER/LIQUIDATION没有业务登记路径，相关创建前墓碑检查对合法当前快照恒不命中。",
+        "copy只由墓碑单元测试调用；可覆盖的put只由copy和同一单测调用，putIfAbsent永远以existing=-1进入putAt。",
+        "算法/触发终态正文仍保留在Lane和身份索引中，真实去重使用当前状态及客户标识；不能删掉这些实际状态。"
+      ],
+      "next": "收窄为追加普通订单身份的FIFO，删除实体类型数组/类型码、非订单墓碑检查、覆盖和复制入口及其恒定分支；新格式拒绝旧布局，保留订单客户索引、FIFO及永久资金指纹。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/retention/TerminalStateRetention.java",
+          "line": 54,
+          "anchor": "tombstones.putIfAbsent(EntityType.ORDER.code"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/retention/TerminalStateRetention.java",
+          "line": 447,
+          "anchor": "ORDER(0)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/retention/TerminalTombstoneStore.java",
+          "line": 328,
+          "anchor": "TerminalTombstoneStore copy()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeAlgoOrderStateTransitions.java",
+          "line": 123,
+          "anchor": "if (current != null) throw new CoreStateRejectedException(\"INVALID_ALGO_ORDER_CREATE\""
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions.java",
+          "line": 143,
+          "anchor": "if (runtime.hasTriggerClient(userId, view.clientTriggerOrderId()))"
+        }
+      ],
+      "operations": [
+        "PLACE_ORDER",
+        "UPSERT_ALGO_ORDER",
+        "PLACE_TRIGGER_ORDER",
+        "PLACE_TRIGGER_OCO_PAIR"
+      ],
+      "fields": [
+        "TerminalTombstoneStore.types",
+        "maximumIndexedIds的四类通用布局",
+        "每条墓碑的实体类型字节",
+        "containsAlgo/containsTrigger及Core转发"
+      ],
+      "preserve_or_limits": [
+        "只删没有写入方的墓碑扩展；算法/触发历史、原订单身份保留和投影初始化仍有真实消费者。"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/retention/TerminalTombstoneStore",
+          "method": "put",
+          "descriptor": "(IJJLjava/lang/String;)V",
+          "production_class_callers": [
+            "com/surprising/aeron/service/retention/TerminalTombstoneStore"
+          ],
+          "test_class_callers": [
+            "com/surprising/aeron/service/retention/TerminalTombstoneStoreTest"
+          ],
+          "disposition": "remove_unreachable_generality_keep_real_terminal_identities"
+        },
+        {
+          "owner": "com/surprising/aeron/service/retention/TerminalTombstoneStore",
+          "method": "copy",
+          "descriptor": "()Lcom/surprising/aeron/service/retention/TerminalTombstoneStore;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/retention/TerminalTombstoneStoreTest"
+          ],
+          "disposition": "remove_unreachable_generality_keep_real_terminal_identities"
+        },
+        {
+          "owner": "com/surprising/aeron/service/retention/TerminalStateRetention",
+          "method": "containsAlgo",
+          "descriptor": "(JJLjava/lang/String;)Z",
+          "production_class_callers": [
+            "com/surprising/aeron/service/core/TradingCoreRuntime"
+          ],
+          "test_class_callers": [
+            "com/surprising/aeron/service/retention/TerminalStateRetentionTest"
+          ],
+          "disposition": "remove_unreachable_generality_keep_real_terminal_identities"
+        },
+        {
+          "owner": "com/surprising/aeron/service/retention/TerminalStateRetention",
+          "method": "containsTrigger",
+          "descriptor": "(JJLjava/lang/String;)Z",
+          "production_class_callers": [
+            "com/surprising/aeron/service/core/TradingCoreRuntime",
+            "com/surprising/aeron/service/order/ClusteredBatchTradingBenchmark$Workload"
+          ],
+          "test_class_callers": [],
+          "disposition": "remove_unreachable_generality_keep_real_terminal_identities"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+          "method": "terminalAlgoRetained",
+          "descriptor": "(JJLjava/lang/String;)Z",
+          "production_class_callers": [
+            "com/surprising/aeron/service/trigger/command/TriggerOrderCommands"
+          ],
+          "test_class_callers": [],
+          "disposition": "remove_unreachable_generality_keep_real_terminal_identities"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+          "method": "terminalTriggerRetained",
+          "descriptor": "(JJLjava/lang/String;)Z",
+          "production_class_callers": [
+            "com/surprising/aeron/service/trigger/command/TriggerOrderCommands"
+          ],
+          "test_class_callers": [],
+          "disposition": "remove_unreachable_generality_keep_real_terminal_identities"
+        }
+      ]
+    },
+    {
+      "id": "A33",
+      "status": "confirmed",
+      "topic": "CoreInputEvent及专用Codec是一套没有接入入口的额外协议",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "3135个生产类文件中没有CoreInputEventCodec.encode/decode调用；只有对应的协议往返测试调用。",
+        "CoreInputEvent仅由自身Codec构造；全仓源码/资源检查未见配置、反射或服务加载入口。",
+        "真实Cluster和回放输入使用CoreMessage/CoreMessageCodec，额外20字节封套、版本和payload克隆未参与真实链路。"
+      ],
+      "next": "删除CoreInputEvent、CoreInputEventCodec和仅测试这套空协议的专用用例；保留真实CoreMessage租约、指纹、Cluster输入和回放。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreInputEvent.java",
+          "line": 5,
+          "anchor": "public record CoreInputEvent("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreInputEventCodec.java",
+          "line": 9,
+          "anchor": "private static final int FIXED_LENGTH = 20;"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessageCodec.java",
+          "line": 69,
+          "anchor": "private static void encodeHeader("
+        }
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/protocol/CoreInputEventCodec",
+          "method": "encode",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CoreInputEvent;)[B",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/protocol/CoreInputEventCodecTest"
+          ],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/protocol/CoreInputEventCodec",
+          "method": "decode",
+          "descriptor": "([B)Lcom/surprising/aeron/protocol/CoreInputEvent;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/protocol/CoreInputEventCodecTest"
+          ],
+          "disposition": "remove_dead_code"
+        }
+      ]
+    },
+    {
+      "id": "A34",
+      "status": "confirmed",
+      "topic": "消息种类不再落线，枚举仍维护数字码、查找表和重复码校验",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "WireMessageKind.wireCode/fromWireCode没有生产调用，仅WireCodeLookupTest使用。",
+        "当前消息头kind来自messageType.kind，编码器写messageType.wireCode而没有单独写消息种类。",
+        "枚举仍有wireCode字段、BY_WIRE_CODE数组、构造器和静态初始化完整性校验。"
+      ],
+      "next": "保留COMMAND/QUERY/RESPONSE三枚举语义，删除不再序列化的数字码、表和转换入口；不再重复计算上一轮已减少的线上字节。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/WireMessageKind.java",
+          "line": 8,
+          "anchor": "private static final WireMessageKind[] BY_WIRE_CODE;"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/WireMessageKind.java",
+          "line": 23,
+          "anchor": "private final int wireCode;"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessageCodec.java",
+          "line": 74,
+          "anchor": "header.messageType().wireCode()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessageHeader.java",
+          "line": 94,
+          "anchor": "public WireMessageKind kind()"
+        }
+      ],
+      "fields": [
+        "WireMessageKind.wireCode",
+        "WireMessageKind.BY_WIRE_CODE"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/protocol/WireMessageKind",
+          "method": "wireCode",
+          "descriptor": "()I",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/protocol/WireCodeLookupTest"
+          ],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/protocol/WireMessageKind",
+          "method": "fromWireCode",
+          "descriptor": "(I)Lcom/surprising/aeron/protocol/WireMessageKind;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/protocol/WireCodeLookupTest"
+          ],
+          "disposition": "remove_dead_code"
+        }
+      ]
+    },
+    {
+      "id": "A35",
+      "status": "confirmed",
+      "topic": "快照物化器留有8个完全无调用的转换入口",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "fundingProgress/lifecycleProgress/reservation/position/riskSnapshot/liquidation/riskScan及orderSnapshot的身份表重载，在生产和测试类文件中都无调用。",
+        "materialize/materializeTreasury已直接构造这些冷业务值；orderSnapshot(OrderRuntime,String)仍由真实导出使用。",
+        "旧入口保留另一份字段复制、空值或身份校验路径，后续模型变化需多处维护。"
+      ],
+      "next": "删除这8个不再接入物化流程的入口及仅供其使用的导入，保留真实materialize路径和使用String标的的orderSnapshot。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "line": 249,
+          "anchor": "static CoreTreasuryState.FundingProgress fundingProgress("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "line": 259,
+          "anchor": "static CoreTreasuryState.LifecycleProgress lifecycleProgress("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "line": 282,
+          "anchor": "static CorePositionState position("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "line": 312,
+          "anchor": "public static CoreOrderState orderSnapshot(OrderRuntime value, String instrumentId)"
+        }
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "fundingProgress",
+          "descriptor": "(Lcom/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime;)Lcom/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "lifecycleProgress",
+          "descriptor": "(Lcom/surprising/aeron/service/treasury/TreasuryRuntime$LifecycleProgressRuntime;)Lcom/surprising/aeron/service/treasury/CoreTreasuryState$LifecycleProgress;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "reservation",
+          "descriptor": "(Lcom/surprising/aeron/service/order/state/ReservationRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/order/state/OrderReservation;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "position",
+          "descriptor": "(JLcom/surprising/aeron/service/position/PositionRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/model/CorePositionState;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "orderSnapshot",
+          "descriptor": "(Lcom/surprising/aeron/service/order/state/OrderRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/model/CoreOrderState;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "riskSnapshot",
+          "descriptor": "(Lcom/surprising/aeron/service/risk/RiskSnapshotRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/model/CoreRiskSnapshot;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "liquidation",
+          "descriptor": "(Lcom/surprising/aeron/service/risk/LiquidationRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/model/CoreLiquidationState;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "riskScan",
+          "descriptor": "(Lcom/surprising/aeron/service/risk/RiskScanRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        }
+      ]
+    },
+    {
+      "id": "A36",
+      "status": "confirmed",
+      "topic": "实现收敛后残留10个无生产或测试调用的便利方法和转换工厂",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "TradingAccountRuntime的4个putOrRemove重载、available、locked及removeAlgoOrder均无调用。",
+        "boxedOrderIds(MatcherSettlementPlan)、CoreAlgoOrderState.from、RuntimePositionIndexValue.from亦无调用；已有真实路径直接构造或读取同一事实。",
+        "已按所属类、方法名和完整JVM描述符区分重载；boxedOrderIds(List<CancellationOrder>)仍有真实业务调用。"
+      ],
+      "next": "删除这10个入口和可证明仅由它们维持的下游空接口；保留真实列表转换、账户写入、持仓索引记录和算法退休进度。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 1836,
+          "anchor": "static <V> void putOrRemove(Long2ObjectHashMap<V> values"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 7265,
+          "anchor": "static long available(BalanceState value)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 4931,
+          "anchor": "public void removeAlgoOrder(long algoOrderId)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+          "line": 2655,
+          "anchor": "com.surprising.aeron.service.settlement.MatcherSettlementPlan plan)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreAlgoOrderState.java",
+          "line": 136,
+          "anchor": "public static CoreAlgoOrderState from("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/position/RuntimePositionIndexValue.java",
+          "line": 22,
+          "anchor": "public static RuntimePositionIndexValue from("
+        }
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "method": "putOrRemove",
+          "descriptor": "(Lorg/agrona/collections/Long2ObjectHashMap;JLjava/lang/Object;)V",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "method": "putOrRemove",
+          "descriptor": "(Lorg/eclipse/collections/impl/map/mutable/primitive/LongObjectHashMap;JLjava/lang/Object;)V",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "method": "putOrRemove",
+          "descriptor": "(Ljava/util/Map;Ljava/lang/Object;Ljava/lang/Object;)V",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "method": "putOrRemove",
+          "descriptor": "(Lorg/eclipse/collections/impl/map/mutable/primitive/IntObjectHashMap;ILjava/lang/Object;)V",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "method": "removeAlgoOrder",
+          "descriptor": "(J)V",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "method": "available",
+          "descriptor": "(Lcom/surprising/aeron/service/account/BalanceState;)J",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "method": "locked",
+          "descriptor": "(Lcom/surprising/aeron/service/account/BalanceState;)J",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+          "method": "boxedOrderIds",
+          "descriptor": "(Lcom/surprising/aeron/service/settlement/MatcherSettlementPlan;)Ljava/util/List;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreAlgoOrderState",
+          "method": "from",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CoreAlgoOrderView;)Lcom/surprising/aeron/model/CoreAlgoOrderState;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/position/RuntimePositionIndexValue",
+          "method": "from",
+          "descriptor": "(JLcom/surprising/aeron/model/CorePositionState;)Lcom/surprising/aeron/service/position/RuntimePositionIndexValue;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        }
+      ]
+    },
+    {
+      "id": "A37",
+      "status": "confirmed",
+      "topic": "协议内部仍有3个完全无调用的私有方法",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "TradingCommandCodec.readTimeInForce、TradingOrderBatchCodec.readable(byte[])和LittleEndianWriter.put(byte[])在生产及测试中无方法引用。",
+        "实际读取均使用有界范围、直接字段读取或带offset/length重载。"
+      ],
+      "next": "删除三个私有死方法，保留现用长度、边界、枚举及借用缓冲校验。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 997,
+          "anchor": "private static CoreTimeInForce readTimeInForce("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingOrderBatchCodec.java",
+          "line": 562,
+          "anchor": "private static ByteBuffer readable(byte[] encoded)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingOrderBatchCodec.java",
+          "line": 514,
+          "anchor": "private LittleEndianWriter put(byte[] value)"
+        }
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/protocol/TradingCommandCodec",
+          "method": "readTimeInForce",
+          "descriptor": "(Ljava/nio/ByteBuffer;)Lcom/surprising/aeron/protocol/CoreTimeInForce;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/protocol/TradingOrderBatchCodec",
+          "method": "readable",
+          "descriptor": "([B)Ljava/nio/ByteBuffer;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/protocol/TradingOrderBatchCodec$LittleEndianWriter",
+          "method": "put",
+          "descriptor": "([B)Lcom/surprising/aeron/protocol/TradingOrderBatchCodec$LittleEndianWriter;",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        }
+      ]
+    },
+    {
+      "id": "A38",
+      "status": "confirmed",
+      "topic": "用户状态保留第二套只由测试调用的ByteBuffer写入器",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "writeUserState(ByteBuffer,CoreUserStateView)没有生产调用，只有CoreStateQueryCodecTest调用。",
+        "生产encodeUserState已经用Writer逐项写相同余额、预留、持仓和杠杆字段，形成两份必须同步的序列化实现。"
+      ],
+      "next": "删除生产源集中的第二套写入器；直接缓冲解码用例可将正式encodeUserState的字节放入直接缓冲，继续验证真实协议。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreStateQueryCodec.java",
+          "line": 295,
+          "anchor": "static void writeUserState("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreStateQueryCodec.java",
+          "line": 113,
+          "anchor": "public static byte[] encodeUserState("
+        }
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/protocol/CoreStateQueryCodec",
+          "method": "writeUserState",
+          "descriptor": "(Ljava/nio/ByteBuffer;Lcom/surprising/aeron/protocol/CoreUserStateView;)V",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/protocol/CoreStateQueryCodecTest"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        }
+      ]
+    },
+    {
+      "id": "A39",
+      "status": "confirmed",
+      "topic": "现货、期货、期权各留一套无调用的冷状态冻结计算",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "三份reservationUnitsForState在全部生产/测试编译产物均无调用，当前源码只有声明。",
+        "这些实现仍扫描或读取冷状态、用户预留及杠杆，且包含未使用的统一参数。",
+        "旧现货/期权入口按整单计算手续费；现用reservationUnits通过fragmentationSafeFeeDebit覆盖分笔成交舍入，二者不能为减少代码而互换。"
+      ],
+      "next": "删除三份未接入的冷公式及其专用辅助代码/导入，保留各产品线上reservationUnits及资金舍入规则。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/spot/SpotOrderAdmission.java",
+          "line": 52,
+          "anchor": "public static long reservationUnitsForState("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/derivative/FuturesOrderAdmission.java",
+          "line": 93,
+          "anchor": "public static long reservationUnitsForState("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionOrderAdmission.java",
+          "line": 91,
+          "anchor": "public static long reservationUnitsForState("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/spot/SpotOrderAdmission.java",
+          "line": 37,
+          "anchor": "fragmentationSafeFeeDebit(instrument, order)"
+        }
+      ],
+      "operations": [
+        "PLACE_ORDER",
+        "AMEND_ORDER",
+        "REPLACE_ORDER"
+      ],
+      "preserve_or_limits": [
+        "不能删除三个产品的实际冻结公式，也不能用旧整单费用公式替换在线分笔舍入保护。"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/product/spot/SpotOrderAdmission",
+          "method": "reservationUnitsForState",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/account/CoreUserState;Lcom/surprising/aeron/service/order/admission/ResolvedPlaceOrder;Lcom/surprising/aeron/service/core/index/ActiveOrderIndex;)J",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/product/derivative/FuturesOrderAdmission",
+          "method": "reservationUnitsForState",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/account/CoreUserState;Lcom/surprising/aeron/service/order/admission/ResolvedPlaceOrder;Lcom/surprising/aeron/service/core/index/ActiveOrderIndex;)J",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        },
+        {
+          "owner": "com/surprising/aeron/service/product/option/OptionOrderAdmission",
+          "method": "reservationUnitsForState",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/account/CoreUserState;Lcom/surprising/aeron/service/order/admission/ResolvedPlaceOrder;Lcom/surprising/aeron/service/core/index/ActiveOrderIndex;)J",
+          "production_class_callers": [],
+          "test_class_callers": [],
+          "disposition": "remove_dead_code"
+        }
+      ]
+    },
+    {
+      "id": "A40",
+      "status": "confirmed",
+      "topic": "8个处理器的10个冷状态适配入口仅服务测试",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "10个带TradingCoreState before的apply/applyExecution/applyCancellationAdvance/applyMarkPrice/applyContinuation入口，生产引用为零，测试仍使用。",
+        "它们额外要求调用方同时提供before与runtime并核对产品线/修订，或从before补用户/强平候选；真实指令直接使用applyRuntime/prepare/异步续步。",
+        "现货适配入口还传递根本不读取的baseAsset/quoteAsset。"
+      ],
+      "next": "把before核对和测试候选选择移入既有RuntimeTestStateTransitions或测试Fixture；保留生产同步运行时、真实异步、回放和恢复路径，保留测试覆盖。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java",
+          "line": 40,
+          "anchor": "public static void apply(TradingCoreState before"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java",
+          "line": 29,
+          "anchor": "public static void applyMarkPrice(TradingCoreState before"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+          "line": 41,
+          "anchor": "public static FundingResult apply(TradingCoreState before"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java",
+          "line": 33,
+          "anchor": "public static TradingAccountRuntime apply(TradingCoreState before"
+        }
+      ],
+      "operations": [
+        "PLACE_ORDER",
+        "APPLY_MARK_PRICE",
+        "CONTINUE_RISK_SCAN",
+        "APPLY_FUNDING",
+        "SETTLE_INSTRUMENT",
+        "EXECUTE_LIQUIDATION",
+        "RESOLVE_LIQUIDATION",
+        "EXECUTE_ADL"
+      ],
+      "fields": [
+        "before重复状态参数",
+        "现货测试适配入口baseAsset/quoteAsset"
+      ],
+      "preserve_or_limits": [
+        "这是测试适配迁移，不是删除真实日志回放或冷启动时使用的生产运行时入口。"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "method": "apply",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;JLjava/lang/String;Ljava/lang/String;Ljava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+          "method": "apply",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions",
+            "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement",
+          "method": "apply",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/protocol/SettleInstrumentCommand;Ljava/lang/Iterable;Ljava/util/UUID;Lcom/surprising/aeron/service/core/index/ActiveOrderIndex;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/protocol/CoreSettlementProgressView;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CoreFinancialLedgerProductionTest",
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+          "method": "apply",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/protocol/ResolveLiquidationCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor",
+          "method": "applyExecution",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/protocol/ExecuteLiquidationCommand;Ljava/util/Collection;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor",
+          "method": "applyCancellationAdvance",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/protocol/ExecuteLiquidationCommand;Ljava/util/Collection;JLcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "method": "apply",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/protocol/ExecuteAdlCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor",
+          "method": "applyMarkPrice",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/protocol/ApplyMarkPriceCommand;Ljava/lang/Iterable;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CoreRiskStateTest",
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor",
+          "method": "applyContinuation",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;ILjava/lang/Iterable;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CoreRiskStateTest",
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor",
+          "method": "apply",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/protocol/ApplyFundingCommand;Ljava/lang/Iterable;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingResult;",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CoreLifecycleStateTest",
+            "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        }
+      ]
+    },
+    {
+      "id": "A41",
+      "status": "confirmed",
+      "topic": "保险分配留有4个测试专用便利入口及冷计算支线",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "expectedCoverage/isNext各有运行时和冷状态重载，4个入口均无生产调用，测试仍依赖。",
+        "真实补亏使用prepareResolution/resolve返回的Resolution统一读取顺序与额度；两条运行时便利入口只是重新包装resolve。",
+        "冷重载还维护独立的同资产筛选、排序和份额计算支线。"
+      ],
+      "next": "运行时测试改用既有resolve的结果；冷对照若继续需要，移入测试夹具，保留生产prepareResolution、分配顺序和资金额度检查。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.java",
+          "line": 147,
+          "anchor": "public static long expectedCoverage(TradingAccountRuntime runtime"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.java",
+          "line": 161,
+          "anchor": "public static boolean isNext(TradingAccountRuntime runtime"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.java",
+          "line": 318,
+          "anchor": "public static long expectedCoverage(TradingCoreState state"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.java",
+          "line": 351,
+          "anchor": "public static boolean isNext(TradingCoreState state"
+        }
+      ],
+      "operations": [
+        "RESOLVE_LIQUIDATION"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/treasury/InsuranceAllocationPolicy",
+          "method": "expectedCoverage",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Ljava/lang/Iterable;J)J",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CoreLifecycleStateTest"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/treasury/InsuranceAllocationPolicy",
+          "method": "isNext",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Ljava/lang/Iterable;J)Z",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CoreLifecycleStateTest"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/treasury/InsuranceAllocationPolicy",
+          "method": "expectedCoverage",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;J)J",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/CoreLifecycleStateTest",
+            "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+            "com/surprising/aeron/service/core/RuntimeCommitRecoveryTest"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        },
+        {
+          "owner": "com/surprising/aeron/service/treasury/InsuranceAllocationPolicy",
+          "method": "isNext",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;J)Z",
+          "production_class_callers": [],
+          "test_class_callers": [
+            "com/surprising/aeron/service/core/RuntimeCommitRecoveryTest"
+          ],
+          "disposition": "remove_production_adapter_preserve_tests"
+        }
+      ]
+    },
+    {
+      "id": "A42",
+      "status": "confirmed",
+      "topic": "标的注册与触发查询/状态解码仍保留没有当前生产者的旧布局",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "标的编码器只写ORDER_V5标记，解码器仍接收RISK_V3/UNITS_V4，默认补quantityStepUnits=1及初始订单保护。",
+        "触发查询编码器只写v3，读取端仍接收v1/v2并补status/expiry；状态写入为v3，读取仍接收v2并补MARK价格源。",
+        "用户已明确未使用、无需读取旧格式；这些历史分支不是当前业务规则。"
+      ],
+      "next": "严格读取当前注册标记、查询和状态版本，删掉旧标记、默认填充和相应旧格式成功断言；真实单位、保护参数、价格源及当前字段校验保留。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 588,
+          "anchor": ".putInt(INSTRUMENT_ORDER_V5_MARKER)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 659,
+          "anchor": "long quantityStepUnits = 1L;"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreTriggerOrderCodec.java",
+          "line": 213,
+          "anchor": "version == 1 ? null : reader.status()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreTriggerOrderCodec.java",
+          "line": 169,
+          "anchor": "version < 3 ? CoreTriggerPriceSource.MARK"
+        }
+      ],
+      "operations": [
+        "REGISTER_INSTRUMENT",
+        "TRIGGER_ORDER_QUERY",
+        "USER_OPEN_TRIGGER_ORDERS_QUERY"
+      ]
+    },
+    {
+      "id": "A43",
+      "status": "confirmed",
+      "topic": "算法查询状态仍保留已经退出创建链路的模板豁免",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "CoreAlgoOrderView构造器仍用creationTemplate允许revision=1时创建/更新时间均为0。",
+        "现用创建命令已是CoreAlgoOrderCommand.Create，Core以Cluster时间创建权威状态；查询视图来自正时间的CoreAlgoOrderState或完整状态解码。",
+        "原materializeCreation已删除，DTO现在没有创建模板的生产用途。"
+      ],
+      "next": "删除creationTemplate分支，按真实查询状态统一校验时间；创建意图继续允许未指定开始时间并由Core初始化，不能混用两个模型。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreAlgoOrderView.java",
+          "line": 19,
+          "anchor": "boolean creationTemplate ="
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreAlgoOrderCommand.java",
+          "line": 7,
+          "anchor": "record Create("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeAlgoOrderStateTransitions.java",
+          "line": 133,
+          "anchor": "long start = Math.max(create.startAtEpochMillis(), clusterTimestamp);"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeOperationalQueryService.java",
+          "line": 198,
+          "anchor": "result.add(new CoreAlgoOrderView(state.algoOrderId()"
+        }
+      ],
+      "operations": [
+        "UPSERT_ALGO_ORDER"
+      ],
+      "fields": [
+        "CoreAlgoOrderView.creationTemplate局部分支"
+      ]
+    },
+    {
+      "id": "A44",
+      "status": "confirmed",
+      "topic": "延时全撤SET命令重复携带可推导的触发时间",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "唯一生产业务入口对active计时器固定计算triggerAt=now.plusMillis(countdownMs)，禁用时为null。",
+        "Store把countdown、triggerAt和now再次一起编码；Core再检查triggerAt晚于updatedAt。",
+        "请求没有独立的触发时间意图；保留同一个updatedAt输入即可用精确加法得到完全相同deadline，无需改用Cluster时间。"
+      ],
+      "next": "仅删除SET命令的triggerAt输入/成员和由重复输入引入的一致性约束，从原updatedAt+countdown推导；保留溢出检查、120秒边界、版本和执行状态。状态/查询中的原触发时间仍有用，CLAIM后updatedAt已变化，不能全局删除。",
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/CancelAllAfterService.java",
+          "line": 57,
+          "anchor": "Instant triggerAt = active ? now.plusMillis(request.countdownMs()) : null;"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java",
+          "line": 27,
+          "anchor": "triggerAt == null ? 0 : triggerAt.toEpochMilli()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.java",
+          "line": 28,
+          "anchor": "case SET -> buffer.putLong(command.countdownMillis()).putLong(command.triggerAtEpochMillis())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java",
+          "line": 39,
+          "anchor": "command.triggerAtEpochMillis() <= command.updatedAtEpochMillis()"
+        }
+      ],
+      "operations": [
+        "UPDATE_CANCEL_ALL_AFTER"
+      ],
+      "fields": [
+        "CoreCancelAllAfterCommand.triggerAtEpochMillis（SET输入）"
+      ],
+      "preserve_or_limits": [
+        "不更换时间来源，不删除持久化计时器deadline或CLAIM/COMPLETE/RETRY的真实状态约束。"
+      ]
+    },
+    {
+      "id": "A45",
+      "status": "confirmed",
+      "topic": "注册命令和单产品线快照逐标的重复携带可由产品线确定的合约类型",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "当前ContractType的6个值与6条ProductLine一一对应，OPTION唯一对应VANILLA_OPTION，看涨/看跌由独立optionType表达。",
+        "CoreInstrument.from只接受contractType.productLine等于运行时产品线，说明命令中的contractTypeCode不是可独立变化的业务输入。",
+        "交易快照已保存根产品线，仍对每个CoreInstrument写字段2=contractType。"
+      ],
+      "next": "命令类型取权威产品线；产品快照读取时由已校验根产品线构造合约类型并保留隔离验证。独立CoreInstrument、共享公式及外部配置/查询DTO的合约类型仍有实际职责，不能全局删除。",
+      "source_references": [
+        {
+          "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/model/ContractType.java",
+          "line": 33,
+          "anchor": "public ProductLine productLine()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/CoreInstrument.java",
+          "line": 596,
+          "anchor": "if (contractType.productLine() != productLine)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 579,
+          "anchor": ".putInt(command.contractTypeCode())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 982,
+          "anchor": ".number(2, SnapshotEnumCodes.encode(value.contractType()))"
+        }
+      ],
+      "operations": [
+        "REGISTER_INSTRUMENT"
+      ],
+      "fields": [
+        "RegisterInstrumentCommand.contractTypeCode",
+        "交易快照CoreInstrument记录字段2"
+      ],
+      "preserve_or_limits": [
+        "无需修改六产品的合约数学口径或独立外部配置契约；快照根隔离是恢复前提。"
+      ]
+    },
+    {
+      "id": "A46",
+      "status": "confirmed",
+      "topic": "活跃路径仍向具体公式和续扫转接透传6个未读取参数",
+      "evidence_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "evidence": [
+        "SpotOrderAdmission.reservationUnits不读position/leverage/pendingQuantitySteps；期货公式不读pendingQuantitySteps，期权公式不读leverage。",
+        "具体公式只由对应产品规则适配；统一ProductTradingRules接口中的杠杆和期权在途量在其他产品仍有实际用途。",
+        "RuntimeDerivativeRiskProcessor.continueScan只转调RiskScanCoordinator.runSlice，不读priceSequence，还从instrument重复取得上层已知的内部symbolId；价格序号已在调用前检查。"
+      ],
+      "next": "收窄三个具体静态公式的实际参数，不机械删除统一产品接口的真实输入；将续扫纯转接合回现有调用点，保留价格一致性检查、预算和实际扫描流程。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/spot/SpotOrderAdmission.java",
+          "line": 30,
+          "anchor": "public static long reservationUnits(CoreInstrument instrument, PositionRuntime position,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/derivative/FuturesOrderAdmission.java",
+          "line": 33,
+          "anchor": "public static long reservationUnits(CoreInstrument instrument, PositionRuntime position,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionOrderAdmission.java",
+          "line": 34,
+          "anchor": "public static long reservationUnits(CoreInstrument instrument, PositionRuntime position,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java",
+          "line": 267,
+          "anchor": "private static int continueScan("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java",
+          "line": 162,
+          "anchor": "mark.priceSequence() != sourceScan.priceSequence()"
+        }
+      ],
+      "operations": [
+        "PLACE_ORDER",
+        "CONTINUE_RISK_SCAN"
+      ],
+      "fields": [
+        "三个具体公式的5个无用参数",
+        "continueScan.priceSequence"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor",
+          "method": "continueScan",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/instrument/CoreInstrument;JILcom/surprising/aeron/service/core/index/PositionUserIndex;Ljava/lang/Iterable;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)I",
+          "production_class_callers": [
+            "com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor"
+          ],
+          "test_class_callers": [],
+          "disposition": "inline_live_forwarder_keep_scan_validation"
+        }
+      ]
     }
   ],
   "preserve_verified_purposes": [
@@ -2385,8 +3500,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "继续核对 A11 的读一致性、A25 的版本策略、A26 的现货下游消费者；证据不足不删除。",
-    "继续逐业务操作核对输入、约束、日志、快照、查询及下游投影的真实消费者；全量审查仍未完成。"
+    "按四个批次处理新增16组确认项；当前仅分析，尚未实施。",
+    "A11查询一致性、A25读取能力策略、A26现货风险参数继续保留候选。",
+    "继续核对38类命令的真实字段/约束消费者，不把序列化、哈希或测试自循环当作业务必要性。"
   ],
   "rejected_false_positives": [
     {
@@ -2461,7 +3577,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "confirmed_findings_resolved; overall_field_and_constraint_audit_in_progress",
+  "analysis_round_status": "round_completed_findings_recorded; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -2682,135 +3798,152 @@
     }
   ],
   "latest_analysis_round": {
-    "source_basis_commit": "8a7fd3217f91dc004e7f73f58def263ca4427924",
+    "source_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
     "date": "2026-10-23",
     "status": "findings_recorded",
     "new_confirmed_ids": [
-      "A20",
-      "A21",
-      "A22",
-      "A23",
-      "A24",
-      "A27",
-      "A28",
-      "A29",
-      "A30"
+      "A31",
+      "A32",
+      "A33",
+      "A34",
+      "A35",
+      "A36",
+      "A37",
+      "A38",
+      "A39",
+      "A40",
+      "A41",
+      "A42",
+      "A43",
+      "A44",
+      "A45",
+      "A46"
     ],
-    "reclassified_confirmed_ids": [
-      "A06",
-      "A07",
-      "A08"
-    ],
-    "new_candidate_ids": [
-      "A25",
-      "A26"
-    ],
-    "all_pending_candidate_ids": [
+    "candidate_findings_unchanged": [
       "A11",
       "A25",
       "A26"
     ],
     "counts": {
-      "resolved": 15,
-      "confirmed": 12,
-      "candidate": 3
+      "resolved": 27,
+      "candidate": 3,
+      "confirmed": 16
     },
     "business_code_changed": false,
     "compilation_run": false,
     "tests_run": false,
     "services_started": false,
     "binary_inspection": {
-      "production_classfiles": 3133,
-      "origin": "上轮相关模块编译产物，当前生产源码无未提交差异；只解析常量池，不运行类。",
-      "funding_external_callers": [
-        "PerpetualFundingCommands.prepare",
-        "PerpetualFundingCommands.applyRuntime"
-      ],
-      "funding_internal_callers": [
-        "RuntimePerpetualFundingProcessor.applyRuntime/prepare"
-      ],
-      "capacity_getter_consumer_roles": [
-        "运行时环/队列构造",
-        "Account Lane 生命周期装配",
-        "快照编码"
-      ]
+      "production_classfiles": 3135,
+      "test_classfiles": 894,
+      "origin": "上轮01bdca24f对应编译产物；受影响Java源码SHA256与已归档编译记录逐项一致，本轮未新编译或运行任何Java类。",
+      "method_identity": "所属类+方法名+完整JVM描述符；计入lambda/MethodHandle引用，分别检查生产和测试引用。",
+      "static_method_prefilter_candidates": 103,
+      "prefilter_note": "仅用于筛选，不把103个候选整体判为死代码；排除工具main、反射/框架边界及实际测试职责。",
+      "reviewed_method_inventory": 50,
+      "unread_mutable_private_fields": 91,
+      "padding_fields_preserved": 90,
+      "actual_write_only_field": {
+        "owner": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork",
+        "access": 2,
+        "name": "previousProgress",
+        "desc": "Lcom/surprising/aeron/service/treasury/TreasuryRuntime$LifecycleProgressRuntime;",
+        "annotations": "",
+        "writers": [
+          "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::<init>(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/protocol/CoreSettlementProgressView;)V",
+          "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::clearReferences()V",
+          "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::reset(Lcom/surprising/aeron/protocol/SettleInstrumentCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/product/ProductTradingRules;IILcom/surprising/aeron/service/treasury/TreasuryRuntime$LifecycleProgressRuntime;Ljava/util/List;ZLjava/lang/Iterable;)Lcom/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork;",
+          "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::resetCompleted(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/protocol/CoreSettlementProgressView;)Lcom/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork;"
+        ]
+      }
     },
-    "estimate_note": "拓扑容量、外层重复和派生掩码的字节估计有重叠，不应直接相加。",
+    "graph_inspection": {
+      "cli": "codegraph context/callers/files/status",
+      "mcp_tools_available": false,
+      "initial_issue": "旧索引仍指向上一轮已删除的调用和旧行号，sync错误报告up to date。",
+      "repair": "codegraph index --force -q 完成后行号已更新，文件2241、节点52787。",
+      "limits": "同名/重载会混入其他类的调用关系；按当前源码体及编译产物完整描述符区分，不把泛化同名边当精确调用证据。"
+    },
     "checks": [
-      "JSON 语法校验",
-      "新发现及候选复核的文件/行号/锚点校验",
-      "当前命令枚举与 38 项盘点对照",
+      "全部16组当前源码锚点校验",
+      "50个方法按完整描述符核对生产/测试引用和实际职责",
+      "90个缓存行填充字段从无读取筛选中排除",
+      "上一轮受影响Java源码哈希与编译记录一致",
+      "注册/延时全撤/触发/算法创建生产输入与解码、状态约束逐项对照",
+      "JSON语法校验",
       "git diff --check"
     ],
-    "limits": [
-      "未运行编译、测试、交易、恢复或下游数据库集成。",
-      "A11/A25/A26 保留候选；全量字段消费者审查尚未完成。"
-    ],
-    "core_finding": "创建和生命周期更新复用完整查询状态，导致固定初值、不可变意图及旧列表被反复复制并产生额外一致性约束。",
     "checks_result": {
       "status": "passed",
-      "new_or_reclassified_source_references_verified": 56,
-      "command_inventory": 38,
-      "findings": 30,
-      "counts": {
-        "resolved": 15,
-        "confirmed": 12,
-        "candidate": 3
-      },
-      "current_record_contracts_refreshed": 19,
-      "trigger_fixed_initial_fields_bytes": 88
+      "source_references_verified": 62,
+      "method_inventory": 50,
+      "new_confirmed": 16,
+      "business_code_modified": false
     },
-    "implementation_followup": {
-      "record": "additional_cleanup_round",
-      "current_counts": {
-        "resolved": 27,
-        "confirmed": 0,
-        "candidate": 3
-      }
+    "limits": [
+      "本轮只做静态分析和文档归档，未运行编译、测试、服务、数据库、真实交易或恢复。",
+      "50个方法包含纯死代码、可合并转接、可移到测试的适配器及无有效来源分支，不代表全部方法当前连测试调用都没有。",
+      "字节码无引用不单独构成删除结论；已结合当前入口、所有权、配置/反射和恢复职责筛选。",
+      "全量字段/约束消费者审查尚未完成，尤其A11/A25/A26仍是候选。"
+    ],
+    "core_finding": "主要残留已转向旧执行入口、并行冷公式、测试专用生产适配器、占位协议及可由业务上下文确定的重复输入。",
+    "temporary_resources": {
+      "status": "removed_after_results_archived",
+      "removed_files": [
+        "aeron-deep-audit-20261023.py",
+        "aeron-deep-audit-20261023-binary.json",
+        "aeron-deep-audit-20261023-testrefs.py",
+        "aeron-deep-audit-20261023-testrefs.json",
+        "aeron-deep-audit-20261023-record.py",
+        "aeron-deep-audit-20261023-codegraph.log"
+      ],
+      "removed_bytes": 34465517,
+      "persistent_codegraph_index": "保留已更新的项目索引；索引重建进程已完成退出。",
+      "services_started": false,
+      "java_code_executed": false,
+      "background_processes_remaining": false
     }
   },
   "proposed_cleanup_batches": [
     {
       "order": 1,
       "ids": [
-        "A08",
-        "A20",
-        "A21"
+        "A31",
+        "A35",
+        "A36",
+        "A37",
+        "A38"
       ],
-      "scope": "终态保留区：删除历史候选、无消费序号及重复客户成员标记，保留身份与永久资金指纹。"
+      "scope": "先移除确定无调用字段、转换方法及重复写入器；保留真实导出/有界codec路径。"
     },
     {
       "order": 2,
       "ids": [
-        "A06",
-        "A07",
-        "A28"
+        "A39",
+        "A40",
+        "A41",
+        "A46"
       ],
-      "scope": "恢复只保存一份真实路由，容量留部署配置，掩码从数量推导。"
+      "scope": "收敛冷公式和测试适配入口，活跃业务只保留原资金公式与续步；测试夹具承担测试状态转换。"
     },
     {
       "order": 3,
       "ids": [
-        "A22",
-        "A23",
-        "A29",
-        "A30"
+        "A32",
+        "A33",
+        "A34"
       ],
-      "scope": "写命令使用必要意图/本次变化，归属和快照产品线从权威上下文恢复；独立查询、事件及数据库状态保留真实业务字段。"
+      "scope": "删掉未接入协议、数字kind残留和订单墓碑的无来源通用扩展；保留实际终态身份/历史/投影。"
     },
     {
       "order": 4,
       "ids": [
-        "A24"
+        "A42",
+        "A43",
+        "A44",
+        "A45"
       ],
-      "scope": "删除不再需要的划转历史协议、隐式用户哈希和 Matcher 哈希迁移链。"
-    },
-    {
-      "order": 5,
-      "ids": [
-        "A27"
-      ],
-      "scope": "资金费使用单一分页规则，移除 UUID 空值模式。"
+      "scope": "删除旧格式分支和已失去用途的模板豁免，收窄可派生输入；有意图/状态区别的独立DTO不全局删字段。"
     }
   ],
   "initial_record_contract_inventory": {
@@ -3340,5 +4473,117 @@
       "running_build_processes": false,
       "logs_archived_as_summaries": true
     }
-  }
+  },
+  "analysis_round_history": [
+    {
+      "source_basis_commit": "8a7fd3217f91dc004e7f73f58def263ca4427924",
+      "date": "2026-10-23",
+      "status": "findings_recorded",
+      "new_confirmed_ids": [
+        "A20",
+        "A21",
+        "A22",
+        "A23",
+        "A24",
+        "A27",
+        "A28",
+        "A29",
+        "A30"
+      ],
+      "reclassified_confirmed_ids": [
+        "A06",
+        "A07",
+        "A08"
+      ],
+      "new_candidate_ids": [
+        "A25",
+        "A26"
+      ],
+      "all_pending_candidate_ids": [
+        "A11",
+        "A25",
+        "A26"
+      ],
+      "counts": {
+        "resolved": 15,
+        "confirmed": 12,
+        "candidate": 3
+      },
+      "business_code_changed": false,
+      "compilation_run": false,
+      "tests_run": false,
+      "services_started": false,
+      "binary_inspection": {
+        "production_classfiles": 3133,
+        "origin": "上轮相关模块编译产物，当前生产源码无未提交差异；只解析常量池，不运行类。",
+        "funding_external_callers": [
+          "PerpetualFundingCommands.prepare",
+          "PerpetualFundingCommands.applyRuntime"
+        ],
+        "funding_internal_callers": [
+          "RuntimePerpetualFundingProcessor.applyRuntime/prepare"
+        ],
+        "capacity_getter_consumer_roles": [
+          "运行时环/队列构造",
+          "Account Lane 生命周期装配",
+          "快照编码"
+        ]
+      },
+      "estimate_note": "拓扑容量、外层重复和派生掩码的字节估计有重叠，不应直接相加。",
+      "checks": [
+        "JSON 语法校验",
+        "新发现及候选复核的文件/行号/锚点校验",
+        "当前命令枚举与 38 项盘点对照",
+        "git diff --check"
+      ],
+      "limits": [
+        "未运行编译、测试、交易、恢复或下游数据库集成。",
+        "A11/A25/A26 保留候选；全量字段消费者审查尚未完成。"
+      ],
+      "core_finding": "创建和生命周期更新复用完整查询状态，导致固定初值、不可变意图及旧列表被反复复制并产生额外一致性约束。",
+      "checks_result": {
+        "status": "passed",
+        "new_or_reclassified_source_references_verified": 56,
+        "command_inventory": 38,
+        "findings": 30,
+        "counts": {
+          "resolved": 15,
+          "confirmed": 12,
+          "candidate": 3
+        },
+        "current_record_contracts_refreshed": 19,
+        "trigger_fixed_initial_fields_bytes": 88
+      },
+      "implementation_followup": {
+        "record": "additional_cleanup_round",
+        "current_counts": {
+          "resolved": 27,
+          "confirmed": 0,
+          "candidate": 3
+        }
+      }
+    }
+  ],
+  "further_rejected_false_positives": [
+    {
+      "topic": "没有普通读取的缓存行填充字段",
+      "reason": "扫描命中90个p00等填充long；它们用于对象布局，不按字段读引用删，未作性能验证或改动。"
+    },
+    {
+      "topic": "算法和触发终态正文",
+      "reason": "实际用于实体/客户身份去重、查询和投影快照初始化；无来源墓碑扩展不等于这些正文无用。"
+    },
+    {
+      "topic": "同名有调用或零调用就判死代码",
+      "reason": "CodeGraph部分同名边存在归属歧义；本轮按class+name+descriptor核对，工具main、框架回调、实际测试边界另审。"
+    },
+    {
+      "topic": "共享产品接口的杠杆与在途数量",
+      "reason": "期货实际用杠杆、期权实际用在途卖单数量；A46只收窄具体辅助公式参数，不机械删共享接口业务输入。"
+    },
+    {
+      "topic": "所有boxedOrderIds/orderSnapshot重载都删除",
+      "reason": "列表撤单身份转换与String标的快照重载有生产调用，只删已列出的无用重载。"
+    }
+  ]
 }
