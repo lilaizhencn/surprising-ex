@@ -19,11 +19,10 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
     /** 账本阶段捕获的业务、算术或参数拒绝，Owner 观察完成后读取。 */
     private RuntimeException rejection;
     /**
-     * submitted：本轮调用过阶段提交的记录；本类完成判断实际使用 completed 及关闭标记。
      * closeQueued：本轮关闭任务是否已经成功登记到原账本队列。
      * previousScopeOpen：提交当前阶段前是否已有未关闭财务范围，入队未接纳时据此恢复关闭标记。
      */
-    private boolean submitted, closeQueued, previousScopeOpen;
+    private boolean closeQueued, previousScopeOpen;
     /** 子类是否确认财务计算已经结束，允许验证或风险输入继续。 */
     private boolean scopeCompleted = true;
 
@@ -33,7 +32,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
     public final boolean reusable() { return completed && close.completed; }
 
     /**
-     * 要求旧代可复用且旧资金收据已消费，再保存所属运行时并初始化本轮提交、拒绝及关闭请求标记；不在这里执行业务记账。
+     * 要求旧代可复用且旧资金收据已消费，再保存所属运行时并初始化本轮拒绝、阶段完成及关闭请求标记；不在这里执行业务记账。
      * @param runtime 本控制命令所属的交易运行时
      */
     protected final void initializeLedgerCommand(TradingAccountRuntime runtime) {
@@ -41,7 +40,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds receipt was not consumed");
         this.runtime = runtime;
         funds.clear();
-        submitted = closeQueued = false;
+        closeQueued = false;
         rejection = null;
         completed = scopeCompleted = true;
         close.requested = close.rollback = close.validationRequested = close.validated = false;
@@ -63,7 +62,6 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         rejection = null;
         previousScopeOpen = !close.completed;
         completed = false;
-        submitted = true;
         close.completed = false;
     }
 

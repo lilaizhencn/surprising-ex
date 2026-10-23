@@ -1210,8 +1210,6 @@ public final class TriggerOrderCommands {
         private long triggerId, triggerSequence, price, triggeredAt, childSequence, childOrderId;
         /** 本扫描合成或原执行请求传入的命令 UUID，供子单身份和撮合上下文使用。 */
         private UUID commandId;
-        /** 本次账户执行是否同时遍历同组兄弟撤销；自动扫描已处理同组时为假。 */
-        private boolean cancelOco;
         /** 账户解析后的子单准入输入，包含原交易规则确定的预留和费率。 */
         private com.surprising.aeron.service.order.admission.ResolvedPlaceOrder order;
         /** 解析子单遇到的业务拒绝代码，非空则认领后完成为失败。 */
@@ -1261,7 +1259,6 @@ public final class TriggerOrderCommands {
             trigger = null; order = null; failureReason = "";
             this.triggerId = triggerId; this.triggerSequence = triggerSequence;
             this.price = price; this.triggeredAt = triggeredAt; this.commandId = commandId;
-            this.cancelOco = cancelOco;
             preparedClientKey = 0;
             decision = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.context(
                     owner.runtimeState(), owner.identities(), route.userId(), route.instrumentId(), owner.currentClusterTimestamp());

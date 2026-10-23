@@ -2004,7 +2004,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
                         ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(first, responseSlot.writer())
                         : com.surprising.aeron.protocol.CoreCommandResultCodec.encodeInto(
                                 responseOrders, java.util.List.of(), responseSlot.storage(), 0);
-                responseSlot.length(encodedLength);
                 responseLength = encodedLength;
                 response = responseSlot.storage();
                 prepared = true;

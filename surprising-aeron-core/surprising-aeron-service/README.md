@@ -27,10 +27,13 @@ HTTP 接入、价格生产、生命周期调度和外部查询投影由其他服
 避免自动暴露所有字段或引入额外的 `equals` / `hashCode` / `toString` 行为。
 
 账户运行时已移除未使用的 Lane 计时、控制任务数组，Core 不再创建闲置的财库差额累加器。
-命令窗口只维护实际使用的路由信息；结算计划通过 `admittedTaker` 保存获准订单引用。
+命令窗口通过候选路由和依赖索引决定准入，条目不再复制用户、Lane 位及 Matcher 分片；
+结算计划通过 `admittedTaker` 保存获准订单引用。
 `MatcherSettlementEvent` 仍校验准入回执的预留编号、账户版本及冻结金额，只保存后续消费的接受标记、
 结果码和完成发布位，不再保留无读取方的准入 Lane、预留、版本及金额副本。
-本次字段清理仅执行 `mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dmaven.test.skip=true compile`，
+批量提交不再保存无读取方的账户及持仓身份检查点；资金索引任务只保留 UUID 两段数值。
+账本阶段继续使用完成及作用域关闭标记，触发续步通过原参数直接选择 OCO 兄弟集合，响应描述符不再保存闲置长度。
+两轮字段清理均仅执行 `mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dmaven.test.skip=true compile`，
 相关模块编译通过；未执行测试、交易流程、快照恢复或性能验证。
 
 先读本文的启动和业务步骤，再进入对应源码。更完整的模块架构、配置表、启动命令、

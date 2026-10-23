@@ -197,8 +197,6 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
         private TerminalStateRetention retention;
         /** 已排队任务要通知的运行时，完成发布前先捕获为局部引用。 */
         private TradingAccountRuntime completionRuntime;
-        /** 准备时可空的原 UUID 引用，实际 I/O 使用两段数值。 */
-        private UUID commandId;
         /** 本次资金 UUID 高位。 */
         private long commandIdMsb;
         /** 本次资金 UUID 低位。 */
@@ -224,17 +222,17 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
          * @param lsb 资金命令 UUID 低位
          */
         public void prepareLookup(TerminalStateRetention retention, long msb, long lsb) {
-            prepare(retention, null, msb, lsb, null, false);
+            prepare(retention, msb, lsb, null, false);
         }
 
         /**
-         * 校验非空 UUID，保存原引用和两段数值后准备查找。
+         * 校验非空 UUID，取出两段数值后准备查找。
          * @param retention 实际拥有资金索引的非空保留器
          * @param commandId 本次资金命令 UUID，具体入口按规定处理空值
          */
         public void prepareLookup(TerminalStateRetention retention, UUID commandId) {
             java.util.Objects.requireNonNull(commandId, "commandId");
-            prepare(retention, commandId, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), null, false);
+            prepare(retention, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), null, false);
         }
 
         /**
@@ -245,7 +243,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
          * @param fingerprint 本次写入借用的非空命令指纹
          */
         public void prepareWrite(TerminalStateRetention retention, long msb, long lsb, CommandFingerprint fingerprint) {
-            prepare(retention, null, msb, lsb, java.util.Objects.requireNonNull(fingerprint), true);
+            prepare(retention, msb, lsb, java.util.Objects.requireNonNull(fingerprint), true);
         }
 
         /**
@@ -256,23 +254,21 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
          */
         public void prepareWrite(TerminalStateRetention retention, UUID commandId, CommandFingerprint fingerprint) {
             java.util.Objects.requireNonNull(commandId, "commandId");
-            prepare(retention, commandId, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), java.util.Objects.requireNonNull(fingerprint), true);
+            prepare(retention, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), java.util.Objects.requireNonNull(fingerprint), true);
         }
 
         /**
          * 上一次准备尚未 clear 就拒绝复用；接入保留器及请求字段，清旧结果并把完成位改为未完成，不在此执行 I/O。
          * @param retention 实际拥有资金索引的非空保留器
-         * @param commandId 本次资金命令 UUID，具体入口按规定处理空值
          * @param msb 资金命令 UUID 高位
          * @param lsb 资金命令 UUID 低位
          * @param fingerprint 本次写入借用的非空命令指纹
          * @param write 是否准备写任务，假为查任务
          */
-        private void prepare(TerminalStateRetention retention, UUID commandId, long msb, long lsb,
+        private void prepare(TerminalStateRetention retention, long msb, long lsb,
                              CommandFingerprint fingerprint, boolean write) {
             if (prepared) throw new IllegalStateException("funds index request is still retained");
             this.retention = java.util.Objects.requireNonNull(retention);
-            this.commandId = commandId;
             this.commandIdMsb = msb;
             this.commandIdLsb = lsb;
             this.fingerprint = fingerprint;
@@ -328,7 +324,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
          * 正常完成后或 Ledger 已停止的关闭阶段清任务引用及标记，恢复空闲完成状态；不在执行线程仍可能访问时提前调用。
          */
         public void clear() {
-            retention = null; completionRuntime = null; commandId = null;
+            retention = null; completionRuntime = null;
             commandIdMsb = commandIdLsb = 0;
             fingerprint = retained = null;
             write = prepared = queued = false;

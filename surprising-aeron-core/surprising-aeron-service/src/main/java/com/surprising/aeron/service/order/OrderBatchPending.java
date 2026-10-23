@@ -366,10 +366,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     final ArrayList<OrderBatchItem> items;
     /** 跨批保留的固定项对象数组，所有借用结束后才允许复用。 */
     private final OrderBatchItem[] itemSlots;
-    /** 开始本批变更前的账户回滚检查点。 */
-    long runtimeCheckpoint;
-    /** 本批新增持仓身份的回滚起点。 */
-    long positionIdentityCheckpoint;
     /** 整批原命令固定的 Cluster 业务时间。 */
     long clusterTimestamp;
     /** 整批原命令固定的复制日志位置。 */
@@ -709,8 +705,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         for (OrderBatchItem /* 当前被捕获、检查、编码或清理的批内项 */ item : items) item.clear();
         items.clear();
         decodedCommand = null;
-        runtimeCheckpoint = 0;
-        positionIdentityCheckpoint = 0;
         changedUserIds.clear();
         runtimeChangedOrderIds.clear();
         java.util.Arrays.fill(preparedClientIds, 0, preparedClientKeyCount, null);

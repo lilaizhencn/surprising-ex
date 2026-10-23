@@ -291,9 +291,6 @@ public final class ClusterCommandWindow {
         entry.request = request;
         entry.timestamp = timestamp;
         entry.position = position;
-        entry.routeUserId = candidateUser;
-        entry.routeMatcherShard = candidateMatcherShard;
-        entry.routeUserLaneBit = candidateUserLaneBit;
         // 新尾条目对应的环形数组物理下标。
         int physical = (head + size - 1) & indexMask;
         userLastAbsSeq.put(candidateUser, absSeq);
@@ -409,8 +406,6 @@ public final class ClusterCommandWindow {
             entry.request = null;
             entry.response = null;
             entry.sequence = entry.timestamp = entry.position = entry.absSeq = 0;
-            entry.routeUserId = entry.routeUserLaneBit = 0;
-            entry.routeMatcherShard = -1;
             entry.physicalSlot = -1;
         }
         head = (head + count) & indexMask;
@@ -426,19 +421,13 @@ public final class ClusterCommandWindow {
     }
 
     /**
-     * 固定响应窗口条目，保存该请求的路由、会话、序号和解码租约，退休后原位清理并复用，不是永久命令历史。
+     * 固定响应窗口条目，保存该请求的会话、序号、日志元数据和解码租约，退休后原位清理并复用，不是永久命令历史。
      */
     public static final class Entry {
         /** 当前条目拥有的解码槽，退休时清理，下一次准入可与候选交换。 */
         private DecodedMatchingCommand decodedSlot = DecodedMatchingCommand.commandSlot();
         /** 该条目此次准入的窗口绝对位置。 */
         private long absSeq;
-        /** 条目准入时保存的提交用户号。 */
-        public long routeUserId;
-        /** 条目准入时保存的提交用户 Lane 位。 */
-        public long routeUserLaneBit;
-        /** 条目静态 Matcher 分片，清理后负一。 */
-        public int routeMatcherShard = -1;
         /** 响应要发回的 Cluster 会话编号，清理后为无会话标记。 */
         public long sessionId = NO_SESSION_ID;
         /** 条目对应的完整入口请求引用。 */

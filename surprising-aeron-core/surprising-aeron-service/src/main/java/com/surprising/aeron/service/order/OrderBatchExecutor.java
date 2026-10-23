@@ -1211,7 +1211,7 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 开启原命令事实及批次变更作用域，一次绑定本命令资金累加器，保存账户和持仓身份检查点，再取得整批提交权并开始发布积累。
+     * 开启原命令事实及批次变更作用域，一次绑定本命令资金累加器，再取得整批提交权并开始发布积累。
      * @param batch 本条批量命令的复用上下文
      * @param pending 本批仍占用的命令槽
      */
@@ -1222,8 +1222,6 @@ public final class OrderBatchExecutor {
         // 顺序子项和多轮 Owner 挂起期间累积的账本回执必须一直保留到最终收尾。
         owner.setCommandFunds(pending.fundsAccumulator());
         owner.runtimeState().beginOrderBatchMutationScope();
-        batch.runtimeCheckpoint = owner.runtimeState().commandRevisionCheckpoint();
-        batch.positionIdentityCheckpoint = owner.identities().positionCheckpoint();
         batch.beginCommit();
         owner.commits.publication.begin();
     }
