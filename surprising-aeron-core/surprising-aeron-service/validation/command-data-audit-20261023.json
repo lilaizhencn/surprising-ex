@@ -1,5 +1,5 @@
 {
-  "status": "cleanup_implemented_deeper_audit_continues",
+  "status": "deeper_analysis_findings_recorded_pending_cleanup",
   "date": "2026-10-23",
   "objective": "逐业务操作检查 command 产生到 Cluster 日志、执行、账户/账本落地、快照恢复及下游导出的字段和约束，去除无用持久化数据。",
   "implementation_completed": {
@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "A26/A53完成：现货不再生成/保存衍生品风险字段，标的级全局维持保证金率删除。累计52项解决、A11一项候选；其他产品条件字段及全链路业务消费者审查仍未完成。",
+    "checkpoint": "2026-10-24新增A54–A64：10项确认、1项候选；累计52项已解决、10项待清理、A11/A63两项候选。业务代码未改，全量字段及业务约束审查仍未完成。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -3928,6 +3928,979 @@
         "round": "sixth_cleanup_round",
         "change": "删除Core标的级维持保证金率和约束及全局getter、命令/快照副本；公式直接使用实际已选风险档，保留旧不支持SPOT保证金的结果及原始舍入/溢出公式。"
       }
+    },
+    {
+      "id": "A54",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "现货、永续和交割的注册载荷仍携带不适用的到期或期权要素",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "REGISTER_INSTRUMENT"
+      ],
+      "fields": [
+        "RegisterInstrumentCommand.expiryEpochMillis/optionTypeCode/strikePriceTicks",
+        "CoreInstrument.Configuration对应字段",
+        "标的快照13/14/15"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/instrument/provider/service/InstrumentValidator.java",
+          "line": 157,
+          "anchor": "private void validateNonExpiringRules"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/instrument/provider/service/InstrumentValidator.java",
+          "line": 101,
+          "anchor": "delivery instruments must not define option metadata"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java",
+          "line": 139,
+          "anchor": "value.expiryTime()==null?0:value.expiryTime().toEpochMilli()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 584,
+          "anchor": ".putLong(command.takerFeeRatePpm()).putLong(command.expiryEpochMillis())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/CoreInstrument.java",
+          "line": 536,
+          "anchor": "non-option must not set option type"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 958,
+          "anchor": ".number(12, value.takerFeeRatePpm()).number(13, value.expiryEpochMillis())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+          "line": 73,
+          "anchor": "instrument.expiryEpochMillis() > 0"
+        }
+      ],
+      "proposed_cleanup": "现货和永续省去三个字段，交割只保留到期时间，期权保留全部；按已校验产品线上下文编码/解码和保存快照，不新增每产品策略类或presence字段。",
+      "preserve_and_implementation_requirements": [
+        "共享模型的这三个字段有真实交割/期权用途，不可整体删去。",
+        "Core当前仍接受非到期产品的正到期时间，通用准入会读取它；不能直接宣称零消费者。实施时必须依据入口禁止此配置的产品定义，明确规范化或拒绝非法输入的行为，消除恢复前后差异。",
+        "保留交割/期权到期拒单及行政结算边界；非期权类型/行权价约束随相应载荷退出而收窄。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A55",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "五条衍生品的数量步长只保存固定1并约束身份，不参与Core金额计算",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "REGISTER_INSTRUMENT"
+      ],
+      "fields": [
+        "RegisterInstrumentCommand.quantityStepUnits（衍生品）",
+        "CoreInstrument.Configuration.quantityStepUnits（衍生品）",
+        "标的快照28（衍生品）"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java",
+          "line": 142,
+          "anchor": "value.contractType() == ContractType.SPOT ? value.quantityStepUnits() : 1L"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java",
+          "line": 270,
+          "anchor": "return Math.multiplyExact(quantitySteps, instrument.quantityStepUnits());"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.java",
+          "line": 74,
+          "anchor": "before.quantityStepUnits() == after.quantityStepUnits()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 964,
+          "anchor": ".number(28, value.quantityStepUnits())"
+        }
+      ],
+      "proposed_cleanup": "只给现货传输和保存数量步长；衍生品按已确定的合约份数解释数量，省去恒定字段和不适用的身份比较/正数约束。",
+      "preserve_and_implementation_requirements": [
+        "现货的基础资产冻结、转移和释放确实读取quantityStepUnits，必须保留。",
+        "现货报价资产还依赖notionalMultiplierUnits，不能连带删除该乘数。",
+        "衍生品共享模型需明确固定单位语义，不能让恢复丢弃可观察配置而不处理构造路径。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A56",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "只有反向合约使用结算精度比例，其他四种产品仍重复传输和保存恒1",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "REGISTER_INSTRUMENT"
+      ],
+      "fields": [
+        "RegisterInstrumentCommand.settleScaleUnits（非反向产品）",
+        "CoreInstrument.Configuration.settleScaleUnits（非反向产品）",
+        "标的快照8（非反向产品）"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java",
+          "line": 100,
+          "anchor": "long settleScale=value.contractType().isInverse()"
+        },
+        {
+          "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+          "line": 26,
+          "anchor": "if (contractType.isInverse()) {"
+        },
+        {
+          "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+          "line": 63,
+          "anchor": "return Math.multiplyExact(markPriceTicks, notionalMultiplierUnits);"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/OptionContractMath.java",
+          "line": 59,
+          "anchor": "public static long optionPremiumUnits("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 957,
+          "anchor": ".number(8, value.settleScaleUnits())"
+        }
+      ],
+      "proposed_cleanup": "只为反向永续和反向交割编码/持久化真实结算精度；其他产品移除这项Core输入及无效身份限制。",
+      "preserve_and_implementation_requirements": [
+        "反向公式的结算精度、价格tick、舍入和大整数溢出路径都保留。",
+        "线性共享数学入口当前仍验证此参数为正，实施时收窄产品数据后应清理无效约束或提供明确固定值，不能无意改变错误路径。",
+        "priceTickUnits还有跨产品价格换算和保护用途，不因线性金额公式不乘它而删除。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A57",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "期权不支持用户杠杆，却仍携带两级杠杆上限并读取缓存、校验和计算后丢弃",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "REGISTER_INSTRUMENT",
+        "PLACE_ORDER",
+        "REPLACE_ORDER",
+        "AMEND_ORDER",
+        "MATCH_SETTLEMENT",
+        "UPDATE_LEVERAGE"
+      ],
+      "fields": [
+        "CoreInstrumentRiskLimits.maxLeveragePpm（期权）",
+        "CoreRiskLimitBracket.maxLeveragePpm（期权）",
+        "OptionFillCalculator.priceTicks/leveragePpm/leverageRate",
+        "FillCursor.leveragePpm及成交杠杆缓存的期权路径"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.java",
+          "line": 104,
+          "anchor": "OPTION_LEVERAGE_UNSUPPORTED"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java",
+          "line": 465,
+          "anchor": "if (!instrument.contractType().isOption() && (leverage > bracket.maxLeveragePpm()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionTradingRules.java",
+          "line": 92,
+          "anchor": "return OptionOrderAdmission.reservationUnits(instrument, position, order, pendingQuantitySteps);"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionFillCalculator.java",
+          "line": 45,
+          "anchor": "long leverageRate = CoreContractMath.initialMarginRateFromLeverage(leveragePpm);"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionFillCalculator.java",
+          "line": 47,
+          "anchor": "long effectiveRate = bracketRate;"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java",
+          "line": 502,
+          "anchor": "Long configuredLeverage = runtime.leverage"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeFillCalculator.java",
+          "line": 273,
+          "anchor": "order.symbolId() < 0 || leverage <= 0"
+        }
+      ],
+      "proposed_cleanup": "期权注册和快照省去标的/档位最大杠杆；期权准入和成交跳过杠杆表、轮内缓存及无用换算，缩短期权专有计算签名。公共游标服务期货的杠杆字段仍有用，不机械拆出新框架。",
+      "preserve_and_implementation_requirements": [
+        "期权标的级initialMarginRatePpm作为卖方虚值调整后的风险下限，确实参与公式，不能删除。",
+        "期货真实杠杆设置、限额、档位检查、全仓重定价、向上取整继续保留。",
+        "期权多个共享入口目前仍有leverage>0检查，必须一并收窄，不能仅把期权杠杆默认改为0后留旧校验。",
+        "期权成交的实际成交价参与权利金/费用；只删除卖方保证金专有方法中完全不读取的priceTicks形参。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A58",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "四条期货的风险档仍保存只用于期权公式的保证金因子及范围约束",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "REGISTER_INSTRUMENT"
+      ],
+      "fields": [
+        "CoreRiskLimitBracket.optionMarginFactorPpm（四条期货）",
+        "风险档快照字段7（四条期货）"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreRiskLimitBracket.java",
+          "line": 17,
+          "anchor": "|| optionMarginFactorPpm > 10_000_000L"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/derivative/FuturesFillCalculator.java",
+          "line": 51,
+          "anchor": "bracket.optionMarginFactorPpm());"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java",
+          "line": 112,
+          "anchor": "return PerpetualContractMath.initialMarginUnits("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/OptionContractMath.java",
+          "line": 161,
+          "anchor": "long riskTicks = scalePpmSquaredCeiling(indexPriceTicks, riskRatePpm, optionMarginFactorPpm);"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 531,
+          "anchor": ".number(7, value.optionMarginFactorPpm())"
+        }
+      ],
+      "proposed_cleanup": "期货风险档编码和快照不再写期权因子；清理沿期货专有公式透传该值、指数价和远期价的无意义链路，期权保留真实因子。",
+      "preserve_and_implementation_requirements": [
+        "不能把期权的风险因子、风险档初始/维持保证金率删除或固定为1倍。",
+        "这些参数可能出现在统一产品规则接口中，接口有实际多产品职责；优先收敛专有公式，不能为消除形参机械增设策略/接口。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A59",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "风险档编号恒等于列表下标加1，只用于搬运、落地和自洽校验",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "REGISTER_INSTRUMENT"
+      ],
+      "fields": [
+        "CoreRiskLimitBracket.bracketNo",
+        "风险档快照1",
+        "CoreInstrumentRiskLimits中的bracketNo==index+1约束"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.java",
+          "line": 23,
+          "anchor": "if (bracket.bracketNo() != index + 1"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 592,
+          "anchor": "buffer.putInt(bracket.bracketNo()).putLong(bracket.notionalFloorUnits())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 525,
+          "anchor": ".number(1, value.bracketNo())"
+        }
+      ],
+      "proposed_cleanup": "删除Core风险档中的编号和序列化/快照副本；需要显示编号时由有序列表位置产生。",
+      "preserve_and_implementation_requirements": [
+        "边界外管理模型/数据库的风险档编号可能仍有管理和主键用途，本结论只针对Core内部，不直接删除HTTP或数据库字段。",
+        "保留风险档顺序和有效参数校验，禁止把列表转换为无序集合。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A60",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "风险档下界由前一档上界唯一决定，仍与通用搜索和连续性约束一并保留",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "REGISTER_INSTRUMENT"
+      ],
+      "fields": [
+        "CoreRiskLimitBracket.notionalFloorUnits",
+        "风险档快照2",
+        "bracketForNotional的最高下界搜索",
+        "CoreInstrumentRiskLimits.previousCap重复一致性约束"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.java",
+          "line": 23,
+          "anchor": "bracket.notionalFloorUnits() != previousCap"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.java",
+          "line": 27,
+          "anchor": "previousCap = bracket.notionalCapUnits();"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java",
+          "line": 175,
+          "anchor": "private static CoreRiskLimitBracket bracketForNotional"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java",
+          "line": 182,
+          "anchor": "candidate.notionalFloorUnits() <= notionalUnits"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 526,
+          "anchor": ".number(2, value.notionalFloorUnits())"
+        }
+      ],
+      "proposed_cleanup": "Core档位只保存递增上界和真实风险参数，下界隐含为0或前档上界；在现有选档函数内按已验证顺序定位，删除可派生下界和不必要的通用最高下界搜索。",
+      "preserve_and_implementation_requirements": [
+        "此字段现在确有选档读取，不属于零引用字段；可删除的依据是构造器强制有序连续、下界唯一可推导。",
+        "必须保留边界归档：恰好等于非最后档上界时进入下一档；不能简单改成第一个cap>=notional。",
+        "维持保证金对超过最后上界的旧仓继续使用最后档；新委托riskBracket仍拒绝越界。",
+        "首档0、正且严格递增上界、覆盖最大持仓限额的资金约束继续保留；实施后需核对编译和边界测试源码，当前未执行运行验证。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A61",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "准入与结算存在已由前置条件决定的重复分支",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "PLACE_ORDER",
+        "REPLACE_ORDER",
+        "AMEND_ORDER",
+        "SETTLE_INSTRUMENT"
+      ],
+      "fields": [
+        "RuntimeOrderAdmission.validateRiskLimits中的二次notionalCap判断",
+        "MatchingCommandAdmission.validatePendingSettlement的重复orderPhase分支"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java",
+          "line": 154,
+          "anchor": "if (notionalUnits > bracket.notionalCapUnits())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java",
+          "line": 461,
+          "anchor": "var bracket = CoreContractMath.riskBracket(instrument, projectedNotional);"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java",
+          "line": 663,
+          "anchor": "if (orderPhase && !orderChunk.more()) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java",
+          "line": 666,
+          "anchor": "} else if (orderPhase) {"
+        }
+      ],
+      "proposed_cleanup": "删除riskBracket返回后不可能触发的同一档位上限拒绝；将两个完全相同的撤单阶段分支合成一个orderPhase判断。",
+      "preserve_and_implementation_requirements": [
+        "保留riskBracket自身新委托上限拒绝。",
+        "保留结算阶段、分页游标和已完成订单阶段语义。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A62",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "41个内部方法仍透传44个完全不读取的形参，其中22个命令入口时间参数",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "DIRECT_COMMANDS",
+        "MATCH_ADMISSION",
+        "MATCH_SETTLEMENT",
+        "REALTIME_EXPORT",
+        "IDEMPOTENT_RESULT"
+      ],
+      "fields": [
+        "22个命令入口的clusterTimestamp",
+        "19个内部方法中的22个message/header/runtime/identity/position/asset/UUID等形参"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/command/InstrumentConfigurationCommands.java",
+          "line": 26,
+          "anchor": "public void executeRegisterInstrument(CoreMessage message, long clusterTimestamp)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java",
+          "line": 1079,
+          "anchor": "public void advanceMatchingProgress(long clusterTimestamp, long clusterPosition, long throughSequence)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/realtime/TradingRealtimeBoundary.java",
+          "line": 116,
+          "anchor": "public void beginCapture(TradingCoreRuntime state, long position, long timestamp, CoreMessageHeader header)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands.java",
+          "line": 87,
+          "anchor": "com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId)"
+        }
+      ],
+      "proposed_cleanup": "在现有方法和调用方直接删掉这些内部形参及纯转发，不引入通用Context或新的调用框架。",
+      "preserve_and_implementation_requirements": [
+        "44个是方法签名中的形参位置数量，不等于44个实例字段，也不包含全部108个初筛候选。",
+        "回调、接口履约、框架注入、统一产品规则中的未使用形参不能直接按本清单删除。",
+        "Cluster时间、日志位置和命令UUID在实际幂等、订单时效、行情鲜度、提交和恢复路径仍有作用；只删列明方法未读的参数，不删头字段或权威输入。"
+      ],
+      "business_code_changed": false,
+      "verified_internal_parameter_inventory": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/command/BalanceTransferCommands.java",
+          "line": 31,
+          "end_line": 34,
+          "method": "executeAdjustBalance",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeAdjustBalance(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/command/BalanceTransferCommands.java",
+          "line": 55,
+          "end_line": 65,
+          "method": "executeTransferOut",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeTransferOut(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/command/BalanceTransferCommands.java",
+          "line": 79,
+          "end_line": 90,
+          "method": "executeTransferIn",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeTransferIn(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/command/BalanceTransferCommands.java",
+          "line": 97,
+          "end_line": 106,
+          "method": "executeCompleteTransfer",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeCompleteTransfer(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/command/AdlCommands.java",
+          "line": 28,
+          "end_line": 42,
+          "method": "executeExecuteAdl",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeExecuteAdl(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/fee/command/FeePolicyCommands.java",
+          "line": 29,
+          "end_line": 42,
+          "method": "executeUpsertFeePolicy",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeUpsertFeePolicy(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/command/PerpetualFundingCommands.java",
+          "line": 40,
+          "end_line": 57,
+          "method": "executeApplyFunding",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeApplyFunding(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/command/InstrumentConfigurationCommands.java",
+          "line": 26,
+          "end_line": 32,
+          "method": "executeRegisterInstrument",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeRegisterInstrument(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/command/InstrumentConfigurationCommands.java",
+          "line": 39,
+          "end_line": 43,
+          "method": "executeUpdateInstrumentMaintenance",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeUpdateInstrumentMaintenance(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/insurance/command/InsuranceFundCommands.java",
+          "line": 28,
+          "end_line": 38,
+          "method": "executeAdjustInsuranceFund",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeAdjustInsuranceFund(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/command/LiquidationCommands.java",
+          "line": 32,
+          "end_line": 45,
+          "method": "executeResolveLiquidation",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeResolveLiquidation(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/position/command/LeverageCommands.java",
+          "line": 28,
+          "end_line": 42,
+          "method": "executeUpdateLeverage",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeUpdateLeverage(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/command/RiskCommands.java",
+          "line": 32,
+          "end_line": 44,
+          "method": "executeApplyMarkPrice",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeApplyMarkPrice(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/command/RiskCommands.java",
+          "line": 51,
+          "end_line": 103,
+          "method": "executeContinueRiskScan",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeContinueRiskScan(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 959,
+          "end_line": 963,
+          "method": "executeUpdateCancelAllAfter",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeUpdateCancelAllAfter(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 1045,
+          "end_line": 1054,
+          "method": "executeCancelTriggerOrder",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeCancelTriggerOrder(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 1061,
+          "end_line": 1070,
+          "method": "executeClaimTriggerOrder",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeClaimTriggerOrder(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 1077,
+          "end_line": 1086,
+          "method": "executeCompleteTriggerOrder",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeCompleteTriggerOrder(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 1093,
+          "end_line": 1102,
+          "method": "executeUpdateTriggerTrailing",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeUpdateTriggerTrailing(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 1109,
+          "end_line": 1118,
+          "method": "executeExpireTriggerOrder",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeExpireTriggerOrder(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 1125,
+          "end_line": 1134,
+          "method": "executeRetryTriggerOrder",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeRetryTriggerOrder(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 1141,
+          "end_line": 1155,
+          "method": "executeExecuteTriggerOrder",
+          "signature": "void (CoreMessage message, long clusterTimestamp)",
+          "parameters": [
+            "clusterTimestamp"
+          ],
+          "anchor": "public void executeExecuteTriggerOrder(CoreMessage message, long clusterTimestamp) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 1016,
+          "end_line": 1020,
+          "method": "requireRange",
+          "signature": "void (byte[] payload, int offset, int length, int limit)",
+          "parameters": [
+            "payload"
+          ],
+          "anchor": "private static void requireRange(byte[] payload, int offset, int length, int limit) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 6679,
+          "end_line": 6683,
+          "method": "markBalanceChanged",
+          "signature": "void (long userId, int assetId)",
+          "parameters": [
+            "assetId"
+          ],
+          "anchor": "public void markBalanceChanged(long userId, int assetId) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+          "line": 1376,
+          "end_line": 1387,
+          "method": "fundsReplayResponse",
+          "signature": "CoreResponse (CoreMessage message, CommandFingerprint fingerprint, CommandFingerprint retained)",
+          "parameters": [
+            "message"
+          ],
+          "anchor": "public CoreResponse fundsReplayResponse(CoreMessage message, CommandFingerprint fingerprint, CommandFingerprint retained) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherEvidenceLedger.java",
+          "line": 186,
+          "end_line": 207,
+          "method": "publishNative",
+          "signature": "exchange.core2.core.common.MatcherResult (\n            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,\n            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,\n            exchange.core2.core.common.MatcherResult result,\n            com.surprising.aeron.service.settlement.MatcherSettlementEvent target)",
+          "parameters": [
+            "aeronTimestamp"
+          ],
+          "anchor": "exchange.core2.core.common.MatcherResult publishNative("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherEvidenceLedger.java",
+          "line": 247,
+          "end_line": 267,
+          "method": "publishReplacement",
+          "signature": "exchange.core2.core.common.MatcherResult (\n            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,\n            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,\n            exchange.core2.core.common.MatcherResult cancellation,\n            exchange.core2.core.common.MatcherResult result,\n            com.surprising.aeron.service.settlement.MatcherSettlementEvent target)",
+          "parameters": [
+            "aeronTimestamp"
+          ],
+          "anchor": "exchange.core2.core.common.MatcherResult publishReplacement("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherEvidenceLedger.java",
+          "line": 306,
+          "end_line": 325,
+          "method": "publishBatchItem",
+          "signature": "exchange.core2.core.common.MatcherResult (\n            long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,\n            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,\n            exchange.core2.core.common.MatcherResult result, int index,\n            com.surprising.aeron.service.settlement.MatcherSettlementEvent target)",
+          "parameters": [
+            "aeronTimestamp"
+          ],
+          "anchor": "exchange.core2.core.common.MatcherResult publishBatchItem("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java",
+          "line": 538,
+          "end_line": 544,
+          "method": "preMatchingCloseCapacityCancellations",
+          "signature": "List<Long> (CommandSlot.Operation operation,\n            CoreMessage message, DecodedMatchingCommand decodedCommand,\n            com.surprising.aeron.service.order.admission.PlaceAdmissionEvent placeAdmission)",
+          "parameters": [
+            "message",
+            "decodedCommand"
+          ],
+          "anchor": "List<Long> preMatchingCloseCapacityCancellations(CommandSlot.Operation operation,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java",
+          "line": 882,
+          "end_line": 922,
+          "method": "matchingSymbol",
+          "signature": "String (CoreMessage message, CommandSlot.Operation operation,\n                                  DecodedMatchingCommand decodedCommand)",
+          "parameters": [
+            "message"
+          ],
+          "anchor": "String matchingSymbol(CoreMessage message, CommandSlot.Operation operation,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+          "line": 154,
+          "end_line": 165,
+          "method": "context",
+          "signature": "Context (TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,\n                                  long userId, int instrumentId, long clusterTimestamp)",
+          "parameters": [
+            "userId"
+          ],
+          "anchor": "public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java",
+          "line": 237,
+          "end_line": 294,
+          "method": "requiredReservation",
+          "signature": "long (\n            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,\n            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,\n            long clientKey, int symbolId, long positionKey,\n            boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument)",
+          "parameters": [
+            "symbolId"
+          ],
+          "anchor": "private static long requiredReservation("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java",
+          "line": 418,
+          "end_line": 469,
+          "method": "validateRiskLimits",
+          "signature": "void (\n            TradingAccountRuntime runtime, CoreInstrument instrument, PositionRuntime position,\n            ResolvedPlaceOrder order, AdmissionSummary admissionSummary, long userId, long openInterestSteps,\n            OrderRuntime excluded, long leverage)",
+          "parameters": [
+            "runtime"
+          ],
+          "anchor": "private static void validateRiskLimits("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java",
+          "line": 1079,
+          "end_line": 1092,
+          "method": "advanceMatchingProgress",
+          "signature": "void (long clusterTimestamp, long clusterPosition, long throughSequence)",
+          "parameters": [
+            "clusterTimestamp",
+            "clusterPosition"
+          ],
+          "anchor": "public void advanceMatchingProgress(long clusterTimestamp, long clusterPosition, long throughSequence) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/realtime/TradingRealtimeBoundary.java",
+          "line": 116,
+          "end_line": 123,
+          "method": "beginCapture",
+          "signature": "void (TradingCoreRuntime state, long position, long timestamp, CoreMessageHeader header)",
+          "parameters": [
+            "header"
+          ],
+          "anchor": "public void beginCapture(TradingCoreRuntime state, long position, long timestamp, CoreMessageHeader header) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLedger.java",
+          "line": 121,
+          "end_line": 133,
+          "method": "duplicateResponse",
+          "signature": "CoreResponse (StoredResult duplicate, com.surprising.aeron.protocol.CoreMessage message,\n                                   CommandFingerprint fingerprint,\n                                   long appliedCommandCount)",
+          "parameters": [
+            "message"
+          ],
+          "anchor": "public CoreResponse duplicateResponse(StoredResult duplicate, com.surprising.aeron.protocol.CoreMessage message,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementChanges.java",
+          "line": 174,
+          "end_line": 239,
+          "method": "prepareLaneTerminal",
+          "signature": "void (int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingAccountRuntime runtime, long sequence)",
+          "parameters": [
+            "runtime"
+          ],
+          "anchor": "public void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingAccountRuntime runtime, long sequence) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementChanges.java",
+          "line": 246,
+          "end_line": 248,
+          "method": "prepareAdmissionLane",
+          "signature": "void (int laneId, TradingAccountRuntime runtime)",
+          "parameters": [
+            "runtime"
+          ],
+          "anchor": "public void prepareAdmissionLane(int laneId, TradingAccountRuntime runtime) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+          "line": 178,
+          "end_line": 227,
+          "method": "buildDirect",
+          "signature": "void (long sequence, long orderId, long userId,\n                             com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,\n                             CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker,\n                             CoreInstrument instrument, MatchingResult result,\n                             TradingAccountRuntime runtime)",
+          "parameters": [
+            "instrument"
+          ],
+          "anchor": "private void buildDirect(long sequence, long orderId, long userId,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands.java",
+          "line": 97,
+          "end_line": 103,
+          "method": "beginAsyncSettlement",
+          "signature": "RuntimeLifecycleSettlementContinuation.SettlementWork (\n            RuntimeLifecycleSettlementContinuation.SettlementWork reuse,\n            com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId)",
+          "parameters": [
+            "commandId"
+          ],
+          "anchor": "public RuntimeLifecycleSettlementContinuation.SettlementWork beginAsyncSettlement("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java",
+          "line": 311,
+          "end_line": 326,
+          "method": "openOrders",
+          "signature": "List<CancellationOrder> (TradingAccountRuntime runtime,\n                                                   RuntimeIdentityRegistry identities,\n                                                   ActiveOrderIndex index, String instrumentId)",
+          "parameters": [
+            "runtime",
+            "identities"
+          ],
+          "anchor": "private static List<CancellationOrder> openOrders(TradingAccountRuntime runtime,"
+        }
+      ]
+    },
+    {
+      "id": "A63",
+      "status": "candidate",
+      "analysis_status": "candidate",
+      "topic": "非期权行情远期价格由生产者固定0，仍进入通用运行态与快照",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "APPLY_MARK_PRICE",
+        "CONTINUE_RISK_SCAN",
+        "TRIGGER_SCAN"
+      ],
+      "fields": [
+        "ApplyMarkPriceCommand.forwardPriceTicks（非期权）",
+        "MarkPriceRuntime.forwardPriceTicks（非期权）",
+        "CoreMarkPriceState.forwardPriceTicks（非期权）"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/mark/service/MarkPriceCorePublisher.java",
+          "line": 149,
+          "anchor": "if (event.productLine() != com.surprising.product.api.ProductLine.OPTION) {"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 674,
+          "anchor": ".putLong(command.indexPriceTicks()).putLong(command.forwardPriceTicks())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java",
+          "line": 41,
+          "anchor": "command.indexPriceTicks(), command.forwardPriceTicks(), command.priceSequence()"
+        }
+      ],
+      "proposed_cleanup": "继续核对行情消费者后决定是否按产品线省去命令和快照中的固定远期价；不更改真实期权风险价。",
+      "preserve_and_implementation_requirements": [
+        "当前只确认生产者固定0和期货财务公式不使用；尚未逐个完成风险查询捕获、实时导出、状态相等/哈希和恢复的字段追踪，因此保留候选。",
+        "indexPriceTicks供指数条件单触发，lastPriceTicks供最新价触发，不能一并删除。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A64",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "行情解码仍为缺失最新成交价补0，当前编码器固定写完整字段",
+      "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+      "operations": [
+        "APPLY_MARK_PRICE"
+      ],
+      "fields": [
+        "TradingCommandCodec.decodeApplyMarkPrice的5-long旧载荷入口"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 671,
+          "anchor": "Short.BYTES + instrumentId.length + Long.BYTES * 6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 685,
+          "anchor": "long last = buffer.remaining() == Long.BYTES ? buffer.getLong() : 0;"
+        }
+      ],
+      "proposed_cleanup": "要求完整当前行情布局，直接读取必写lastPriceTicks并拒绝缺失/多余字节，去除没有历史读取需求的兼容分支。",
+      "preserve_and_implementation_requirements": [
+        "当前完整载荷中的lastPriceTicks值0有未提供最新价的真实含义，保留值0，只删除缺字段的旧布局读取。",
+        "用户已确认无需读旧Cluster日志和快照；不能新增替代fallback。"
+      ],
+      "business_code_changed": false
     }
   ],
   "preserve_verified_purposes": [
@@ -3945,9 +4918,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "继续逐产品核对剩余注册字段：现货/永续的到期与期权参数、现货合约换算参数，以及期权/期货风险档各自使用的字段；不能因共享模型而默认保留。",
-    "继续实例入口、字段和业务约束审查，普通静态调用清单为空不等于模型最简。",
-    "A11继续保留一致性/读栅栏/分页会话语义，不能直接绕开Cluster路由。"
+    "按产品上下文收窄注册、风险档和快照，只保留对应产品的真实业务字段；现有格式无旧读需求。",
+    "清理A62列明的41个内部方法中的44个未读取形参及A61重复分支，不删真实提交/时效/幂等输入。",
+    "继续追踪A63行情最终消费者；A11保留查询一致性、读栅栏和分页会话语义。"
   ],
   "rejected_false_positives": [
     {
@@ -4243,111 +5216,835 @@
     }
   ],
   "latest_analysis_round": {
-    "source_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
-    "date": "2026-10-23",
-    "status": "findings_recorded",
+    "date": "2026-10-24",
+    "source_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
+    "status": "findings_recorded_analysis_only",
     "new_confirmed_ids": [
-      "A31",
-      "A32",
-      "A33",
-      "A34",
-      "A35",
-      "A36",
-      "A37",
-      "A38",
-      "A39",
-      "A40",
-      "A41",
-      "A42",
-      "A43",
-      "A44",
-      "A45",
-      "A46"
+      "A54",
+      "A55",
+      "A56",
+      "A57",
+      "A58",
+      "A59",
+      "A60",
+      "A61",
+      "A62",
+      "A64"
+    ],
+    "new_candidate_ids": [
+      "A63"
     ],
     "candidate_findings_unchanged": [
-      "A11",
-      "A25",
-      "A26"
+      "A11"
     ],
     "counts": {
-      "resolved": 27,
-      "candidate": 3,
-      "confirmed": 16
+      "resolved": 52,
+      "candidate": 2,
+      "confirmed": 10
     },
     "business_code_changed": false,
     "compilation_run": false,
     "tests_run": false,
     "services_started": false,
+    "performance_executed": false,
+    "scope": "继续深入分析注册/配置、下单/成交、风险档、结算及行情布局；本轮只记录发现，未实施生产代码修改。",
+    "structural_evidence": {
+      "provider": "CodeGraph CLI及其只读AST索引",
+      "mcp_tools_available": false,
+      "indexed_files": 2239,
+      "indexed_nodes": 52655,
+      "indexed_edges": 151828,
+      "methods_in_aeron_modules": 6699,
+      "method_prefilter_candidates": 108,
+      "confirmed_unread_parameter_methods": 41,
+      "confirmed_unread_parameter_slots": 44,
+      "candidate_limit": "108是词法预筛，不能整体判为死代码；按实际方法来源排除接口、框架及回调。"
+    },
     "binary_inspection": {
-      "production_classfiles": 3135,
-      "test_classfiles": 894,
-      "origin": "上轮01bdca24f对应编译产物；受影响Java源码SHA256与已归档编译记录逐项一致，本轮未新编译或运行任何Java类。",
-      "method_identity": "所属类+方法名+完整JVM描述符；计入lambda/MethodHandle引用，分别检查生产和测试引用。",
-      "static_method_prefilter_candidates": 103,
-      "prefilter_note": "仅用于筛选，不把103个候选整体判为死代码；排除工具main、反射/框架边界及实际测试职责。",
-      "reviewed_method_inventory": 50,
-      "unread_mutable_private_fields": 91,
-      "padding_fields_preserved": 90,
-      "actual_write_only_field": {
-        "owner": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork",
-        "access": 2,
-        "name": "previousProgress",
-        "desc": "Lcom/surprising/aeron/service/treasury/TreasuryRuntime$LifecycleProgressRuntime;",
-        "annotations": "",
-        "writers": [
-          "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::<init>(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/protocol/CoreSettlementProgressView;)V",
-          "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::clearReferences()V",
-          "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::reset(Lcom/surprising/aeron/protocol/SettleInstrumentCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/product/ProductTradingRules;IILcom/surprising/aeron/service/treasury/TreasuryRuntime$LifecycleProgressRuntime;Ljava/util/List;ZLjava/lang/Iterable;)Lcom/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork;",
-          "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::resetCompleted(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/protocol/CoreSettlementProgressView;)Lcom/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork;"
+      "classfiles_read": 3133,
+      "java_classes_executed": false,
+      "origin": "上轮相关模块target/classes产物；本轮未重新编译。当前Git无生产Java修改，前轮归档126项源文件哈希全部相符。",
+      "previous_compile_source_hashes_checked": 126,
+      "previous_source_hash_mismatch": [],
+      "typed_method_references": {
+        "com/surprising/aeron/protocol/CoreRiskLimitBracket": {
+          "<init>(IJJJJJ)V": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterBatchResponseBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterDirectSettlementBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterApiAcceptanceMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterProductLineGateMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterAccountControlBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterLifecycleCapacityMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterDerivativeSmokeMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/OperationalLifecycle.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/SmallControlReproMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/W4LifecycleQaMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterMixedCapacityMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/order/ClusteredBatchTradingBenchmark$Workload.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/order/AccountLaneCommitBenchmark$CommitState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/HotCommandSlotAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/CommittedReplayAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark$CloseCapacityState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/AccountQueryProjectionBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LifecyclePaginationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/MatcherTreasuryReceiptBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualBenchmarkSupport.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark$AdmissionIndexState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/DerivativeRiskBoundaryBenchmark$BoundaryState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/CorePerpetualEndToEndBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/InstrumentPauseAdmissionBenchmark$Fixture.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/InProcessTradingAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/ContinuousOwnerBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/CoreAcceptFreezeBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/ReplacementAdmissionBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualMixedWorkload.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/DerivativeMixedWorkload.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/SettlementSolvencyBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/change/OwnerPublicationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/index/ActiveOrderIndexBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/index/PositionIndexAllocationBenchmark.class"
+          ],
+          "initialMarginRatePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/OptionContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/FuturesOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/FuturesFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/option/OptionFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ],
+          "optionMarginFactorPpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/OptionContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/FuturesOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/FuturesFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/option/OptionFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ],
+          "maintenanceMarginRatePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ],
+          "notionalCapUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.class"
+          ],
+          "notionalFloorUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.class"
+          ],
+          "maxLeveragePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.class"
+          ],
+          "bracketNo()I": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.class"
+          ],
+          "<init>(IJJJJJJ)V": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class",
+            "surprising-gateway/target/classes/com/surprising/trading/order/service/InstrumentCoreSyncService.class"
+          ]
+        },
+        "com/surprising/aeron/protocol/CoreInstrumentRiskLimits": {
+          "<init>(JJJJJLjava/util/List;)V": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterBatchResponseBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterDirectSettlementBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterApiAcceptanceMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterProductLineGateMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterAccountControlBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterLifecycleCapacityMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterDerivativeSmokeMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/OperationalLifecycle.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/SmallControlReproMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/W4LifecycleQaMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/benchmarks/workload/ClusterMixedCapacityMain.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/order/ClusteredBatchTradingBenchmark$Workload.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/order/AccountLaneCommitBenchmark$CommitState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/HotCommandSlotAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/CommittedReplayAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark$CloseCapacityState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/AccountQueryProjectionBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LifecyclePaginationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/MatcherTreasuryReceiptBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualBenchmarkSupport.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark$AdmissionIndexState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/DerivativeRiskBoundaryBenchmark$BoundaryState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/CorePerpetualEndToEndBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/InstrumentPauseAdmissionBenchmark$Fixture.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/InProcessTradingAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/ContinuousOwnerBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/CoreAcceptFreezeBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/ReplacementAdmissionBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualMixedWorkload.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/DerivativeMixedWorkload.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/SettlementSolvencyBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/change/OwnerPublicationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/index/ActiveOrderIndexBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/index/PositionIndexAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class",
+            "surprising-gateway/target/classes/com/surprising/trading/order/service/InstrumentCoreSyncService.class"
+          ],
+          "initialMarginRatePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/CoreInstrument.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/RegisterInstrumentCommand.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ],
+          "maxLeveragePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/CoreInstrument.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ],
+          "maxPositionNotionalUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/CoreInstrument.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ],
+          "userOpenInterestLimitRatePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/CoreInstrument.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ],
+          "userOpenInterestLimitFloorUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/CoreInstrument.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ],
+          "riskLimitBrackets()Ljava/util/List;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/CoreInstrument.class",
+            "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/TradingCommandCodec.class"
+          ]
+        },
+        "com/surprising/aeron/service/instrument/CoreInstrument": {
+          "from(Lcom/surprising/product/api/ProductLine;Lcom/surprising/aeron/protocol/RegisterInstrumentCommand;)Lcom/surprising/aeron/service/instrument/CoreInstrument;": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/order/AccountLaneCommitBenchmark$CommitState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/HotCommandSlotAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark$CloseCapacityState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/AccountQueryProjectionBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/MatcherTreasuryReceiptBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark$AdmissionIndexState.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/TriggerCommitBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/ReplacementAdmissionBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/change/OwnerPublicationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/index/ActiveOrderIndexBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/index/PositionIndexAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.class"
+          ],
+          "maintenance()Lcom/surprising/aeron/protocol/CoreInstrumentMaintenance;": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/InstrumentPauseAdmissionBenchmark$Fixture.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingCoreRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/ProductTradingRules.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "instrumentId()Ljava/lang/String;": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/index/ActiveOrderIndexBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreTriggerOrderState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/OrderBatchExecutor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/MatchingCommandAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/ReplacementAdmissionEvent.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/ResolvedPlaceOrder.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/BatchPlaceReservation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$TriggerExecutionContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime$2.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor$DerivativeSettlementAccumulator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/position/PositionRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/CoreQueryService$LiquidationWorkQuery.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskScanCoordinator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "contractType()Lcom/surprising/instrument/api/model/ContractType;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/OptionContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/ReplacementAdmissionEvent.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/PlaceAdmissionEvent.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/BatchPlaceReservation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/MatcherSettlementEvent.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/ProductTradingRules.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/ProductTradingRulesRegistry.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/option/OptionRiskRules.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/replay/CommittedPortfolioSnapshot.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/CoreQueryService$LiquidationWorkQuery.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "notionalMultiplierUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/OptionContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "priceTickUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "settleScaleUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "riskLimitBrackets()Ljava/util/List;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class"
+          ],
+          "quantityStepUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/CoreContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "initialMarginRatePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/OptionContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/FuturesOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/FuturesFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class"
+          ],
+          "optionType()Lcom/surprising/instrument/api/model/OptionType;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/OptionContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "strikePriceTicks()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/support/math/OptionContractMath.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "usesOpenInterestForUserLimit()Z": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/OrderBatchExecutor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/ReplacementAdmissionEvent.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/PlaceAdmissionEvent.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/BatchPlaceReservation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$TriggerExecutionContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingCoreRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/CoreQueryService$PreflightQuery.class"
+          ],
+          "baseAsset()Ljava/lang/String;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/OrderBatchExecutor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$TriggerExecutionContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingCoreRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.class"
+          ],
+          "quoteAsset()Ljava/lang/String;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/OrderBatchExecutor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$TriggerExecutionContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingCoreRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.class"
+          ],
+          "settleAsset()Ljava/lang/String;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/OrderBatchExecutor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$TriggerExecutionContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingCoreRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/replay/CommittedTradeReplay.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/CoreQueryService$LiquidationWorkQuery.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService$MarketInputs.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskScanCoordinator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "administrativeSettlement(Lcom/surprising/aeron/protocol/SettleInstrumentCommand;)Z": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/MatchingCommandAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/ProductTradingRules.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/PerpetualTradingRules.class"
+          ],
+          "expiryEpochMillis()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/MatchingCommandAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "instrumentIdValue()I": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/CommandSlot.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/index/TriggerOrderIndex$TriggerRoute.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/index/TriggerOrderIndex.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "requireOrderEnabled(Lcom/surprising/aeron/protocol/PlaceOrderCommand;)V": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class"
+          ],
+          "captureForQuery()Lcom/surprising/aeron/service/instrument/CoreInstrument;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService$MarketInputs.class"
+          ],
+          "orderProtection()Lcom/surprising/aeron/protocol/CoreOrderProtection;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "makerFeeRatePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "takerFeeRatePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "maxPositionNotionalUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class"
+          ],
+          "userOpenInterestLimitFloorUnits()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class"
+          ],
+          "userOpenInterestLimitRatePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class"
+          ],
+          "maxLeveragePpm()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor$DerivativeSettlementAccumulator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class"
+          ],
+          "instrumentStatus()Lcom/surprising/instrument/api/model/InstrumentStatus;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "marketOrderEnabled()Z": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "postOnlyEnabled()Z": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "reduceOnlyEnabled()Z": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "supportedOrderTypeMask()I": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "supportedTimeInForceMask()I": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "riskLimits()Lcom/surprising/aeron/protocol/CoreInstrumentRiskLimits;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "<init>(Ljava/lang/String;Lcom/surprising/instrument/api/model/ContractType;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JJJLcom/surprising/aeron/protocol/CoreInstrumentRiskLimits;JJJLcom/surprising/instrument/api/model/OptionType;JLcom/surprising/aeron/protocol/CoreInstrumentMaintenance;Lcom/surprising/instrument/api/model/InstrumentStatus;ZZZIIJLcom/surprising/aeron/protocol/CoreOrderProtection;)V": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+          ],
+          "requireOrderEnabled(Lcom/surprising/aeron/protocol/CoreOrderType;Lcom/surprising/aeron/protocol/CoreTimeInForce;ZZ)V": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.class"
+          ],
+          "updateConfiguration(Lcom/surprising/aeron/service/instrument/CoreInstrument;)V": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime.class"
+          ],
+          "updateMaintenance(Lcom/surprising/aeron/protocol/CoreInstrumentMaintenance;)V": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime.class"
+          ],
+          "configuration()Lcom/surprising/aeron/service/instrument/CoreInstrument$Configuration;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.class"
+          ]
+        },
+        "com/surprising/aeron/service/market/MarkPriceRuntime": {
+          "<init>(ILcom/surprising/aeron/service/instrument/CoreInstrument;JJJ)V": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/HotCommandSlotAllocationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/ReplacementAdmissionBenchmark.class"
+          ],
+          "markPriceTicks()J": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualSaturationWorkload$1.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualBenchmarkSupport$Harness.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualMixedWorkload.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/option/OptionFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/CoreQueryService$LiquidationWorkQuery.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "priceSequence()J": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualSaturationWorkload$1.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/DerivativeMixedWorkload$1.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualBenchmarkSupport$Harness.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualMixedWorkload.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$PendingTriggerScan.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/CoreQueryService$LiquidationWorkQuery.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskScanCoordinator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class"
+          ],
+          "generatedAtEpochMillis()J": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LinearPerpetualBenchmarkSupport$Harness.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class"
+          ],
+          "instrument()Lcom/surprising/aeron/service/instrument/CoreInstrument;": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class"
+          ],
+          "symbolId()I": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime.class"
+          ],
+          "indexPriceTicks()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$PendingTriggerScan.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/FuturesFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/option/OptionFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class"
+          ],
+          "forwardPriceTicks()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/derivative/FuturesFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/product/option/OptionFillCalculator.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RiskLaneProcessor.class"
+          ],
+          "lastPriceTicks()J": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$PendingTriggerScan.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.class"
+          ],
+          "<init>(ILcom/surprising/aeron/service/instrument/CoreInstrument;JJJJJJ)V": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.class"
+          ]
+        }
+      },
+      "limits": [
+        "以所属类、方法名和JVM描述符消除CodeGraph同名getter混合；常量池引用用于确认消费者，再读取消费者分支判断用途。",
+        "类字段GET/PUT初筛出现JMH生成类、JFR事件字段与继承字段/填充；不将它们当作无用字段，未据此建议删除队列序列或填充。"
+      ]
+    },
+    "field_usage_by_product": {
+      "SPOT": {
+        "keep": [
+          "quantityStepUnits",
+          "notionalMultiplierUnits",
+          "priceTickUnits"
+        ],
+        "omit_from_core_payload_and_snapshot": [
+          "expiryEpochMillis",
+          "optionTypeCode",
+          "strikePriceTicks",
+          "settleScaleUnits"
+        ]
+      },
+      "LINEAR_PERPETUAL": {
+        "omit_from_core_payload_and_snapshot": [
+          "expiryEpochMillis",
+          "optionTypeCode",
+          "strikePriceTicks",
+          "quantityStepUnits",
+          "settleScaleUnits",
+          "riskBracket.optionMarginFactorPpm"
+        ]
+      },
+      "INVERSE_PERPETUAL": {
+        "keep": [
+          "settleScaleUnits"
+        ],
+        "omit_from_core_payload_and_snapshot": [
+          "expiryEpochMillis",
+          "optionTypeCode",
+          "strikePriceTicks",
+          "quantityStepUnits",
+          "riskBracket.optionMarginFactorPpm"
+        ]
+      },
+      "LINEAR_DELIVERY": {
+        "keep": [
+          "expiryEpochMillis"
+        ],
+        "omit_from_core_payload_and_snapshot": [
+          "optionTypeCode",
+          "strikePriceTicks",
+          "quantityStepUnits",
+          "settleScaleUnits",
+          "riskBracket.optionMarginFactorPpm"
+        ]
+      },
+      "INVERSE_DELIVERY": {
+        "keep": [
+          "expiryEpochMillis",
+          "settleScaleUnits"
+        ],
+        "omit_from_core_payload_and_snapshot": [
+          "optionTypeCode",
+          "strikePriceTicks",
+          "quantityStepUnits",
+          "riskBracket.optionMarginFactorPpm"
+        ]
+      },
+      "OPTION": {
+        "keep": [
+          "expiryEpochMillis",
+          "optionTypeCode",
+          "strikePriceTicks",
+          "riskLimits.initialMarginRatePpm",
+          "riskBracket.optionMarginFactorPpm"
+        ],
+        "omit_from_core_payload_and_snapshot": [
+          "quantityStepUnits",
+          "settleScaleUnits",
+          "riskLimits.maxLeveragePpm",
+          "riskBracket.maxLeveragePpm"
+        ]
+      },
+      "ALL_DERIVATIVES": {
+        "derive_instead_of_storing": [
+          "riskBracket.bracketNo=list index+1",
+          "riskBracket.notionalFloorUnits=0 or previous cap"
         ]
       }
     },
-    "graph_inspection": {
-      "cli": "codegraph context/callers/files/status",
-      "mcp_tools_available": false,
-      "initial_issue": "旧索引仍指向上一轮已删除的调用和旧行号，sync错误报告up to date。",
-      "repair": "codegraph index --force -q 完成后行号已更新，文件2241、节点52787。",
-      "limits": "同名/重载会混入其他类的调用关系；按当前源码体及编译产物完整描述符区分，不把泛化同名边当精确调用证据。"
+    "estimated_register_payload_reduction_bytes": {
+      "basis": "只按当前int/long载荷计数，N为真实风险档数量；不含候选A63，不含快照TLV开销；不是实测或性能结论。",
+      "SPOT": "28",
+      "LINEAR_PERPETUAL": "36 + 20*N",
+      "INVERSE_PERPETUAL": "28 + 20*N",
+      "LINEAR_DELIVERY": "28 + 20*N",
+      "INVERSE_DELIVERY": "20 + 20*N",
+      "OPTION": "24 + 20*N"
     },
-    "checks": [
-      "全部16组当前源码锚点校验",
-      "50个方法按完整描述符核对生产/测试引用和实际职责",
-      "90个缓存行填充字段从无读取筛选中排除",
-      "上一轮受影响Java源码哈希与编译记录一致",
-      "注册/延时全撤/触发/算法创建生产输入与解码、状态约束逐项对照",
-      "JSON语法校验",
-      "git diff --check"
-    ],
-    "checks_result": {
-      "status": "passed",
-      "source_references_verified": 62,
-      "method_inventory": 50,
-      "new_confirmed": 16,
-      "business_code_modified": false
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.java": "2be0a1ba20c9d44046afa61671a1561dbf3e00f75bbbf27e71161712da620d0a",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreRiskLimitBracket.java": "c2ebcd83a2d104f7aed279a03b1e8c3e522f40f5cabfb89dd80591e2588d89d2",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java": "a9ed5c5d05c8a3b029a9460ea2e0caaea7317a9069cccce8f503ded9e423b9fe",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.java": "3cfcc8ff5c4f51506c2840b163dd69d7ba58de25063906e78cd1e00abe615b4e",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/command/BalanceTransferCommands.java": "55d562e08d61d881053423019fe943dc20a3a5117577cdc972c5b3b5e3fa767f",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/command/AdlCommands.java": "294bceeaff5c4201cc16bd6e1811aa5480ce01d62d661c5ecf314ef35d56b010",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java": "7851903fa479580ded4fcee218b1531a890fbb364e1e6646400988cb911a2939",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java": "cccb6768b5bd1ce386257f26f2f28a54755e5d5fa59d8c5d270fda49168183c9",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/fee/command/FeePolicyCommands.java": "8f283b8219b0fa33516ca821feb91052fa06a2e119a16d7dea457b12422e8e5e",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/command/PerpetualFundingCommands.java": "9356e763286f115327920f395b0f9f585df163bebd6425b39b407bc72fb48eba",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/CoreInstrument.java": "218f0f9f385ed9d9b20a0e335699fd374d9f8fc3fdeb433c6f9bdf71df4b4013",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions.java": "5b9668b5cec8335ca2ae5b42149027e006813a44a1507924704eaa5076c608dc",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/command/InstrumentConfigurationCommands.java": "3b661456e51c611c91e70d99c45f792ea6b3736395b67e8ae4415f138dbb1ccb",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/insurance/command/InsuranceFundCommands.java": "ac8cfedbb1ecdf9909d0c8522b9b31a86059f835f648d5e90582ff147784ac01",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/command/LiquidationCommands.java": "40e733fd90f4f9a42b656c4bb7dbc65ef818e73f38c85e8b4693eedc65284701",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherEvidenceLedger.java": "cd99d8e81866e26a8343d3d3200295eb8794e300da916b21dc00cb9161775f0a",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java": "1414f1839b62fdd59efb55efbe40e0c48ec92bec58380d3427f3b14776a48a5f",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java": "4adfa32ec73d038cb4d804639fc3c3a69c74ac0e3ca842f2b6c83faef91e4d39",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java": "4a3fa4bb624a774de86759a5a98bad669855661822639f77ea3205c1d665f5e8",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java": "fa50c46ca7a9d7656d9b6ef8892a46e2ba7a181f35d58bfb948928a3af88a961",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/position/command/LeverageCommands.java": "67cca1145daac1899ef7fbbe6c62b51dfe3dff4bd7117db6e9b1e619146c9b41",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/derivative/FuturesFillCalculator.java": "587f59acf53f37d6458224ffdf67b57bf04aa778c7e9d4625fe67d5bf85d54e9",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionFillCalculator.java": "c0e4f854e8c2fee3240d37bcd2a4f372656860a94489bf2a0352c770af2648a9",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionTradingRules.java": "762546ddec98c30effb2f3b389d37c5cd194451a6f323030541ec55fc1877d55",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/realtime/TradingRealtimeBoundary.java": "5d802fbfc0006dff4b5723eacdfe7545d933d60b03cfb25d686069fc441ff20a",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLedger.java": "6f540738a88bea27404716743d37a13d0b36cb293a0c215b0032d37b8078367e",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java": "ef4bbde5ec815769dd01d8765595bd0aecf43168efe76a071968ac1a4de75936",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/command/RiskCommands.java": "83bea30680d0d5f4246cacb1cc1fdac70486ed7fc959440fafc07b6610d9c1fa",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementChanges.java": "ac7e93e0061fab7a858ee12bfc35f3c3e7d67edfbcb364b43e055d124611e501",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java": "d8815d66ce9c0cb184dddb046c9beee80425eea712a57a98f87a95ed88d9ae84",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeFillCalculator.java": "45f81b594b0d9a943457ba1d8035f7e3c4a6fdb466690f02900e7bec27da5a73",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java": "daf40813576131efb760ced5f264957b8e8d274d285b83617df8df1ae0d5ba2c",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands.java": "a0ef556609c618e5bf0060dc554c5c0f513e160620c67a5430546a91a2cc84a8",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java": "bd59a802f67266233413449c3b4dd762c78a6c8cc82ed03c07a1355b97695e49",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "b895e3b26df08b8b026ad1dba0ae6ff62d055c212299ca894e44f88058a40d6e",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java": "2b022e01923665f39c1223eba7666dafb30703ec87012aedb4486d0676f3409b",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java": "535b7d1aecebefec45c605ef2c1d5a84603bc3c4948f371607ab59a07caf3afd",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/OptionContractMath.java": "a6b36e5d47df2c0f1e67384655b8d6e8a1cf6d66f2be86e05a2bb3a42595d364",
+      "surprising-gateway/src/main/java/com/surprising/instrument/provider/service/InstrumentValidator.java": "111e92fd79cc0d03865fd306f60f3c09c5640c75554d879f1e4fd784a43febd2",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java": "502c4dbd60eff4f3bf4b6cfac87c46745d95257a6bf9eb33b541829045ef12af",
+      "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java": "0b7a9e733170231c0b7afeaa7c9e1d32ce065e71cfb73b1fd26ec534860f210b",
+      "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/mark/service/MarkPriceCorePublisher.java": "ecf25c7a088ac08ad0cd332969615eadf4aee1c08f96275860393a4d1a7c6dc6"
     },
-    "limits": [
-      "本轮只做静态分析和文档归档，未运行编译、测试、服务、数据库、真实交易或恢复。",
-      "50个方法包含纯死代码、可合并转接、可移到测试的适配器及无有效来源分支，不代表全部方法当前连测试调用都没有。",
-      "字节码无引用不单独构成删除结论；已结合当前入口、所有权、配置/反射和恢复职责筛选。",
-      "全量字段/约束消费者审查尚未完成，尤其A11/A25/A26仍是候选。"
+    "preserved_actual_purposes": [
+      "期权全局初始保证金率是风险下限，真实使用。",
+      "现货名义乘数、数量步长是真实资产换算。",
+      "反向结算精度、价格单位、整数舍入和溢出路径是真实资金要求。",
+      "指数价/最新成交价参与条件单触发，不能按期货保证金公式不读取而删除。",
+      "队列序列、缓存行填充和JFR事件不按普通getter引用计数删除。",
+      "A11查询的Cluster一致性、读栅栏和分页会话语义仍待独立方案，未直接绕过复制入口。"
     ],
-    "core_finding": "主要残留已转向旧执行入口、并行冷公式、测试专用生产适配器、占位协议及可由业务上下文确定的重复输入。",
+    "verification": {
+      "status": "passed_document_and_source_evidence_checks",
+      "command": "python3 /tmp/aeron-audit-verify-20261024.py; git diff --check",
+      "exit_code": 0,
+      "source_anchors_checked": 90,
+      "source_hashes_checked": 42,
+      "previous_compile_source_hashes_checked": 126,
+      "unused_internal_methods_checked": 41,
+      "unused_parameter_slots_checked": 44,
+      "runtime_verification": "none",
+      "compilation_run": false,
+      "tests_executed": false,
+      "reason": "本轮只有README及分析JSON更新，未修改生产源码，不执行Maven、测试或服务。"
+    },
     "temporary_resources": {
-      "status": "removed_after_results_archived",
-      "removed_files": [
-        "aeron-deep-audit-20261023.py",
-        "aeron-deep-audit-20261023-binary.json",
-        "aeron-deep-audit-20261023-testrefs.py",
-        "aeron-deep-audit-20261023-testrefs.json",
-        "aeron-deep-audit-20261023-record.py",
-        "aeron-deep-audit-20261023-codegraph.log"
+      "status": "removed_after_evidence_archived",
+      "files": [
+        {
+          "path": "/tmp/aeron-expiry.py",
+          "bytes": 5000,
+          "sha256": "bd5437a383f4ff229f395d4d00171b714769e4143f8ad1bf3973954a09e1f16b"
+        },
+        {
+          "path": "/tmp/aeron-expiry-sites.json",
+          "bytes": 65127,
+          "sha256": "ccd6492307ca38228fe2b9a744b81e515754dcfad70bf353c2f6c49e6e512c26"
+        },
+        {
+          "path": "/tmp/aeron-expiry-unresolved.txt",
+          "bytes": 9740,
+          "sha256": "a24d043e7086e23e344b5d21fc9dde8ecc23dee6db01f49140c18a104518289f"
+        },
+        {
+          "path": "/tmp/aeron-expiry-graph-callers.log",
+          "bytes": 3812,
+          "sha256": "27d4721fd295b7ec99937d4cf4226d0989ca77470ca2308eb493de42a2ee6e49"
+        },
+        {
+          "path": "/tmp/aeron-audit-refscan-20261024.py",
+          "bytes": 1705,
+          "sha256": "d72e5ba3b4d97f56a990f84acea1e9df789726beb44493f4e101212b54790e5b"
+        },
+        {
+          "path": "/tmp/aeron-audit-refs-20261024.json",
+          "bytes": 63016,
+          "sha256": "ccb6874505823567cfa424cbdac323e952c5d4f48e242e79c3680717b657e976"
+        },
+        {
+          "path": "/tmp/aeron-audit-methods-20261024.json",
+          "bytes": 1913425,
+          "sha256": "5d905c7546512733630489f692903bbb698e6abf5847a5f3c8db823f039a4e86"
+        },
+        {
+          "path": "/tmp/aeron-audit-unused-20261024.py",
+          "bytes": 1538,
+          "sha256": "c7f86a703de6d394eeaae98d8e88a05d0bbda17f7298ceb74cb2017559af2785"
+        },
+        {
+          "path": "/tmp/aeron-audit-unused-20261024.json",
+          "bytes": 46831,
+          "sha256": "6557e118332a7f989abb812c318c21fbcdeb6596f0d1e0f8afc85ddd49332590"
+        },
+        {
+          "path": "/tmp/aeron-audit-fieldscan-20261024.py",
+          "bytes": 2659,
+          "sha256": "e1d2cbd85f8ae11283b712e3b3d66c4cf23a78b8aec9670c7181db330297285c"
+        },
+        {
+          "path": "/tmp/aeron-audit-fields-20261024.json",
+          "bytes": 18043808,
+          "sha256": "3d46d5ecfea3458ab6dd82b13ca6fa913cd31a0ccdc3bbb2cc8628fccf25b7f5"
+        },
+        {
+          "path": "/tmp/aeron-audit-report-20261024.py",
+          "bytes": 23136,
+          "sha256": "93893b1f270ee72af230a4b5f87469064e8d91714303538cb7bf1e3051470dcd"
+        }
       ],
-      "removed_bytes": 34465517,
-      "persistent_codegraph_index": "保留已更新的项目索引；索引重建进程已完成退出。",
-      "services_started": false,
-      "java_code_executed": false,
-      "background_processes_remaining": false
-    }
+      "verification_script": {
+        "path": "/tmp/aeron-audit-verify-20261024.py",
+        "sha256": "c72057e6ab1095a7c1365ca6ef21b21f4b3761f4a6e4dbc5e78f5283928dd88d",
+        "status": "removed_after_final_check"
+      },
+      "services_started": false
+    },
+    "remaining_scope": [
+      "A63行情的只读查询、实时导出和快照字段的最终消费者仍需继续核对。",
+      "其他命令和运行时类的全部字段/约束审查尚未完成，不能据本轮宣布全模块已最简。"
+    ]
   },
   "proposed_cleanup_batches": [
     {
@@ -5010,6 +6707,113 @@
           "confirmed": 0,
           "candidate": 3
         }
+      }
+    },
+    {
+      "source_basis_commit": "01bdca24fb06670e2437ba3af2a10db043ca22d2",
+      "date": "2026-10-23",
+      "status": "findings_recorded",
+      "new_confirmed_ids": [
+        "A31",
+        "A32",
+        "A33",
+        "A34",
+        "A35",
+        "A36",
+        "A37",
+        "A38",
+        "A39",
+        "A40",
+        "A41",
+        "A42",
+        "A43",
+        "A44",
+        "A45",
+        "A46"
+      ],
+      "candidate_findings_unchanged": [
+        "A11",
+        "A25",
+        "A26"
+      ],
+      "counts": {
+        "resolved": 27,
+        "candidate": 3,
+        "confirmed": 16
+      },
+      "business_code_changed": false,
+      "compilation_run": false,
+      "tests_run": false,
+      "services_started": false,
+      "binary_inspection": {
+        "production_classfiles": 3135,
+        "test_classfiles": 894,
+        "origin": "上轮01bdca24f对应编译产物；受影响Java源码SHA256与已归档编译记录逐项一致，本轮未新编译或运行任何Java类。",
+        "method_identity": "所属类+方法名+完整JVM描述符；计入lambda/MethodHandle引用，分别检查生产和测试引用。",
+        "static_method_prefilter_candidates": 103,
+        "prefilter_note": "仅用于筛选，不把103个候选整体判为死代码；排除工具main、反射/框架边界及实际测试职责。",
+        "reviewed_method_inventory": 50,
+        "unread_mutable_private_fields": 91,
+        "padding_fields_preserved": 90,
+        "actual_write_only_field": {
+          "owner": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork",
+          "access": 2,
+          "name": "previousProgress",
+          "desc": "Lcom/surprising/aeron/service/treasury/TreasuryRuntime$LifecycleProgressRuntime;",
+          "annotations": "",
+          "writers": [
+            "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::<init>(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/protocol/CoreSettlementProgressView;)V",
+            "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::clearReferences()V",
+            "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::reset(Lcom/surprising/aeron/protocol/SettleInstrumentCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/product/ProductTradingRules;IILcom/surprising/aeron/service/treasury/TreasuryRuntime$LifecycleProgressRuntime;Ljava/util/List;ZLjava/lang/Iterable;)Lcom/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork;",
+            "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork::resetCompleted(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/protocol/CoreSettlementProgressView;)Lcom/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork;"
+          ]
+        }
+      },
+      "graph_inspection": {
+        "cli": "codegraph context/callers/files/status",
+        "mcp_tools_available": false,
+        "initial_issue": "旧索引仍指向上一轮已删除的调用和旧行号，sync错误报告up to date。",
+        "repair": "codegraph index --force -q 完成后行号已更新，文件2241、节点52787。",
+        "limits": "同名/重载会混入其他类的调用关系；按当前源码体及编译产物完整描述符区分，不把泛化同名边当精确调用证据。"
+      },
+      "checks": [
+        "全部16组当前源码锚点校验",
+        "50个方法按完整描述符核对生产/测试引用和实际职责",
+        "90个缓存行填充字段从无读取筛选中排除",
+        "上一轮受影响Java源码哈希与编译记录一致",
+        "注册/延时全撤/触发/算法创建生产输入与解码、状态约束逐项对照",
+        "JSON语法校验",
+        "git diff --check"
+      ],
+      "checks_result": {
+        "status": "passed",
+        "source_references_verified": 62,
+        "method_inventory": 50,
+        "new_confirmed": 16,
+        "business_code_modified": false
+      },
+      "limits": [
+        "本轮只做静态分析和文档归档，未运行编译、测试、服务、数据库、真实交易或恢复。",
+        "50个方法包含纯死代码、可合并转接、可移到测试的适配器及无有效来源分支，不代表全部方法当前连测试调用都没有。",
+        "字节码无引用不单独构成删除结论；已结合当前入口、所有权、配置/反射和恢复职责筛选。",
+        "全量字段/约束消费者审查尚未完成，尤其A11/A25/A26仍是候选。"
+      ],
+      "core_finding": "主要残留已转向旧执行入口、并行冷公式、测试专用生产适配器、占位协议及可由业务上下文确定的重复输入。",
+      "temporary_resources": {
+        "status": "removed_after_results_archived",
+        "removed_files": [
+          "aeron-deep-audit-20261023.py",
+          "aeron-deep-audit-20261023-binary.json",
+          "aeron-deep-audit-20261023-testrefs.py",
+          "aeron-deep-audit-20261023-testrefs.json",
+          "aeron-deep-audit-20261023-record.py",
+          "aeron-deep-audit-20261023-codegraph.log"
+        ],
+        "removed_bytes": 34465517,
+        "persistent_codegraph_index": "保留已更新的项目索引；索引重建进程已完成退出。",
+        "services_started": false,
+        "java_code_executed": false,
+        "background_processes_remaining": false
       }
     }
   ],

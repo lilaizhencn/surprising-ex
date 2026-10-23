@@ -25,10 +25,13 @@ Lombok只处理直接样板，校验、复制和状态转换显式实现，可�
 查询、实时事件和数据库模型保留各自消费的完整业务字段。按用户确认，旧命令与快照格式不再读取。
 
 清理及逐字段证据见[命令与持久化数据审计](validation/command-data-audit-20261023.json)，
-当前累计52项已解决，A11查询一致性仍为候选，其他产品条件字段及业务约束审查继续进行。
+当前累计52项已解决。2026-10-24深入分析新增A54–A64，其中10项确认待清理，A63行情远期价仍待核实；
+A11查询一致性继续保留候选。新增确认项包括产品不适用的注册/风险字段、可派生的风险档编号和下界、
+期权无用杠杆链路、重复分支、行情旧布局读取，以及41个内部方法中44个未读取形参。
+这轮只更新分析证据，未修改业务代码，未运行编译、测试或服务；全量字段及业务约束审查仍在进行。
 历史字段、索引和运行时清理过程也保存在审计及[早期验证记录](validation/simplify-20261022.json)，不以无引用扫描代替业务用途判断。
 
-本轮使用HotSpot JDK27、Maven3.9.16执行：
+上一轮清理使用HotSpot JDK27、Maven3.9.16执行：
 
 ```bash
 mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider \
