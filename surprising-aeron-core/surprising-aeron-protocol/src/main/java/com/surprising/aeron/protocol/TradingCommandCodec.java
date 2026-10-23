@@ -10,7 +10,7 @@ import java.util.List;
 public final class TradingCommandCodec {
 
     private static final int PLACE_ORDER_VERSION = 4;
-    private static final int INSTRUMENT_MARKER = 0x49525637;
+    private static final int INSTRUMENT_MARKER = 0x49525638;
     private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
     private static final int TRANSFER_FUNDS_VERSION = 2;
 
@@ -571,7 +571,7 @@ public final class TradingCommandCodec {
         byte[] settle = text(command.settleAsset());
         CoreInstrumentRiskLimits risk = command.riskLimits();
         int riskBytes = risk == null ? 0 : Long.BYTES * 5 + Integer.BYTES
-                + risk.riskLimitBrackets().size() * (Integer.BYTES + Long.BYTES * 6);
+                + risk.riskLimitBrackets().size() * (Long.BYTES * 5);
         ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES * 4 + instrumentId.length + base.length + quote.length
                         + settle.length + Integer.BYTES * 5 + Long.BYTES * 12 + Byte.BYTES * 4 + riskBytes)
                 .order(ByteOrder.LITTLE_ENDIAN)
@@ -589,8 +589,7 @@ public final class TradingCommandCodec {
                     .putLong(risk.userOpenInterestLimitRatePpm()).putLong(risk.userOpenInterestLimitFloorUnits())
                     .putInt(risk.riskLimitBrackets().size());
             for (CoreRiskLimitBracket bracket : risk.riskLimitBrackets()) {
-                buffer.putInt(bracket.bracketNo()).putLong(bracket.notionalFloorUnits())
-                        .putLong(bracket.notionalCapUnits()).putLong(bracket.maxLeveragePpm())
+                buffer.putLong(bracket.notionalCapUnits()).putLong(bracket.maxLeveragePpm())
                         .putLong(bracket.initialMarginRatePpm()).putLong(bracket.maintenanceMarginRatePpm())
                         .putLong(bracket.optionMarginFactorPpm());
             }
@@ -638,10 +637,10 @@ public final class TradingCommandCodec {
             long openInterestFloor = buffer.getLong();
             int bracketCount = buffer.getInt();
             if (bracketCount <= 0 || bracketCount > 128) throw new ProtocolException("invalid risk bracket count");
-            requireRemaining(buffer, bracketCount * (Integer.BYTES + Long.BYTES * 6));
+            requireRemaining(buffer, bracketCount * (Long.BYTES * 5));
             List<CoreRiskLimitBracket> brackets = new ArrayList<>(bracketCount);
             for (int index = 0; index < bracketCount; index++) {
-                brackets.add(new CoreRiskLimitBracket(buffer.getInt(), buffer.getLong(), buffer.getLong(),
+                brackets.add(new CoreRiskLimitBracket(buffer.getLong(),
                         buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong()));
             }
             risk = new CoreInstrumentRiskLimits(

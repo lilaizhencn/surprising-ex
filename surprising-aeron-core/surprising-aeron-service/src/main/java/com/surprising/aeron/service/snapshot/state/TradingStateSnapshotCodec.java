@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本四十二。 */
-    private static final int VERSION = 42;
+    private static final int VERSION = 43;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十二头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -516,36 +516,21 @@ public final class TradingStateSnapshotCodec {
                 r.number(8)); // 8：记录最近更新时刻，毫秒
     }
 
-    /**
-     * 按固定字段编号写入风险档位，保存名义金额上下界、杠杆、保证金比例及期权保证金因子；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
-     * @param value 当前要写入的风险档位业务值
-     */
+    /** 风险档按列表顺序保存上界及金融参数；档位编号和由前档上界确定的下界不落盘。 */
     private static byte[] writeCoreRiskLimitBracket(CoreRiskLimitBracket value) {
         return new SnapshotFields.Writer()
-                .number(1, value.bracketNo()) // 1：风险档位编号
-                .number(2, value.notionalFloorUnits()) // 2：风险档位名义金额下界
-                .number(3, value.notionalCapUnits()) // 3：风险档位名义金额上界
-                .number(4, value.maxLeveragePpm()) // 4：最大杠杆，百万分比
-                .number(5, value.initialMarginRatePpm()) // 5：初始保证金比例，百万分比
-                .number(6, value.maintenanceMarginRatePpm()) // 6：维持保证金比例，百万分比
-                .number(7, value.optionMarginFactorPpm()) // 7：期权风险保证金因子，百万分比
+                .number(3, value.notionalCapUnits())
+                .number(4, value.maxLeveragePpm())
+                .number(5, value.initialMarginRatePpm())
+                .number(6, value.maintenanceMarginRatePpm())
+                .number(7, value.optionMarginFactorPpm())
                 .encode();
     }
-    /**
-     * 按固定字段编号读取并构造风险档位，恢复名义金额上下界、杠杆、保证金比例及期权保证金因子；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
-     * @param encoded 当前风险档位的独立字段记录字节
-     */
+
+    /** 列表顺序及递增上界由CoreInstrumentRiskLimits统一校验，字段1、2已退役。 */
     private static CoreRiskLimitBracket readCoreRiskLimitBracket(byte[] encoded) {
-        // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
-        return new CoreRiskLimitBracket(
-                r.integer(1), // 1：风险档位编号
-                r.number(2), // 2：风险档位名义金额下界
-                r.number(3), // 3：风险档位名义金额上界
-                r.number(4), // 4：最大杠杆，百万分比
-                r.number(5), // 5：初始保证金比例，百万分比
-                r.number(6), // 6：维持保证金比例，百万分比
-                r.number(7)); // 7：期权风险保证金因子，百万分比
+        return new CoreRiskLimitBracket(r.number(3), r.number(4), r.number(5), r.number(6), r.number(7));
     }
 
     /**

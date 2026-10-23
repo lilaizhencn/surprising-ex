@@ -111,7 +111,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
                         "1", "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
                         (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                 100000, (1_000_000_000_000L / (100000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100000)), 100000, 50000)))),
+                                java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100000)), 100000, 50000)))),
                         0, 0, type.isDelivery() || type.isOption() ? TIME + 100000 : 0, type.isOption() ? 0 : -1,
                         type.isOption() ? 100 : 0)));
         drain();

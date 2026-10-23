@@ -30,7 +30,7 @@ class CoreContractMathTest {
                         "6", "BTC", "USDT", "USDT", 2, 1, 1,
                         new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                                java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 2_000_000_000_000L, OptionType.CALL.ordinal(), 100));
 
         assertThat(CoreContractMath.openingMarginUnits(
@@ -49,8 +49,8 @@ class CoreContractMathTest {
                         new CoreInstrumentRiskLimits(
                                 100_000, 10_000_000, 10_000, 0, 1,
                                 List.of(
-                                new CoreRiskLimitBracket(1, 0, 1_000, 10_000_000, 100_000, 200_000),
-                                new CoreRiskLimitBracket(2, 1_000, 10_000, 5_000_000, 200_000, 500_000))),
+                                new CoreRiskLimitBracket(1_000, 10_000_000, 100_000, 200_000),
+                                new CoreRiskLimitBracket(10_000, 5_000_000, 200_000, 500_000))),
                         0, 0, 0, -1, 0));
 
         assertThat(CoreContractMath.maintenanceMarginUnits(instrument, 5, 100, 0, 0)).isEqualTo(100);
@@ -58,7 +58,17 @@ class CoreContractMathTest {
         assertThat(CoreContractMath.openingMarginUnits(instrument, CoreOrderSide.BUY, 100, 20, 0, 0))
                 .isEqualTo(400);
         assertThat(CoreContractMath.maintenanceMarginUnits(instrument, 200, 100, 0, 0)).isPositive();
-        assertThat(CoreContractMath.riskBracket(instrument, 10_000).bracketNo()).isEqualTo(2);
+        var first = instrument.riskLimitBrackets().getFirst();
+        var last = instrument.riskLimitBrackets().getLast();
+        assertThat(CoreContractMath.riskBracket(instrument, 0)).isSameAs(first);
+        assertThat(CoreContractMath.riskBracket(instrument, 999)).isSameAs(first);
+        assertThat(CoreContractMath.riskBracket(instrument, 1_000)).isSameAs(last);
+        assertThat(CoreContractMath.riskBracket(instrument, 9_999)).isSameAs(last);
+        assertThat(CoreContractMath.riskBracket(instrument, 10_000)).isSameAs(last);
+        assertThat(CoreContractMath.maintenanceRiskBracket(instrument, 10_001)).isSameAs(last);
+        assertThatThrownBy(() -> CoreContractMath.riskBracket(instrument, -1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("notional must not be negative");
         assertThatThrownBy(() -> CoreContractMath.riskBracket(instrument, 10_001))
                 .isInstanceOf(CoreStateRejectedException.class)
                 .hasMessageContaining("exceeds instrument risk brackets");
@@ -73,7 +83,7 @@ class CoreContractMathTest {
                         "6", "BTC", "USDT", "USDT", 1, 1, 1,
                         new CoreInstrumentRiskLimits(
                                 100_000, 10_000_000, 10_000, 0, 1,
-                                List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000,
+                                List.of(new CoreRiskLimitBracket(10_000, 10_000_000,
                                 200_000, 50_000, 1_200_000))),
                         0, 0, 2_000_000_000_000L, OptionType.CALL.ordinal(), 100));
 
@@ -95,7 +105,7 @@ class CoreContractMathTest {
                         "7", "BTC", "USDT", "USDT", 1, 1, 1,
                         new CoreInstrumentRiskLimits(
                                 100_000, 10_000_000, 10_000, 0, 1,
-                                List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000,
+                                List.of(new CoreRiskLimitBracket(10_000, 10_000_000,
                                 200_000, 50_000, 1_200_000))),
                         0, 0, 2_000_000_000_000L, OptionType.PUT.ordinal(), 100));
 

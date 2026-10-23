@@ -41,7 +41,7 @@ class CoreOrderDecisionResolverTest {
                 "1", "BTC", "USDT", "USDT", 1, 1, 1_000_000,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, Long.MAX_VALUE, 0, 1,
-                        List.of(new CoreRiskLimitBracket(1,0,Long.MAX_VALUE,10_000_000,100_000,50_000))),
+                        List.of(new CoreRiskLimitBracket(Long.MAX_VALUE,10_000_000,100_000,50_000))),
                 -10, 25, 0, -1, 0, 1, true, true, true, 3, 15, 1, policy);
         // 注册命令编码后再解码的结果，应完整保留所有自定义参数。
         var decoded = com.surprising.aeron.protocol.TradingCommandCodec.decodeRegisterInstrument(
@@ -308,7 +308,7 @@ class CoreOrderDecisionResolverTest {
                 "1", contractType, "BTC", "USDT", "USDT", 1, 1, 1_000_000,
                 (contractType == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, Long.MAX_VALUE, 0, 1,
-                        List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE,
+                        List.of(new CoreRiskLimitBracket(Long.MAX_VALUE,
                         10_000_000, 100_000, 50_000)))),
                 -10, 25, 0, null, 0);
     }

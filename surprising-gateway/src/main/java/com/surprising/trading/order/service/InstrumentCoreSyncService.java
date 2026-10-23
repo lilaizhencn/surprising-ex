@@ -129,7 +129,7 @@ public class InstrumentCoreSyncService {
                         value.initialMarginRatePpm(), value.maxLeveragePpm(), value.maxPositionNotionalUnits(),
                         value.userOpenInterestLimitRatePpm(), value.userOpenInterestLimitFloorUnits(),
                         value.riskLimitBrackets().stream()
-                                .map(b -> new CoreRiskLimitBracket(b.bracketNo(), b.notionalFloorUnits(),
+                                .map(b -> new CoreRiskLimitBracket(
                                         b.notionalCapUnits(), b.maxLeveragePpm(), b.initialMarginRatePpm(),
                                         b.maintenanceMarginRatePpm(), b.optionMarginFactorPpm())).toList());
         return new RegisterInstrumentCommand(

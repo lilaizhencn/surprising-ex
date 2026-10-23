@@ -200,7 +200,7 @@ class ParallelRiskScanTest {
                         "2", "ETH", "USDT", "USDT", 1, 1, 1,
                         new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
+                                java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
                         0, 0, 0, -1, 0));
         // 需要加入第二币对持仓或替换一个用户的业务账户映射副本。
         var users = new TreeMap<>(source.users());
@@ -260,7 +260,7 @@ class ParallelRiskScanTest {
                         "2", "ETH", "USDT", "USDT", 1, 1, 1,
                         new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
+                                java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
                         0, 0, 0, -1, 0));
         // 需要加入第二币对持仓或替换一个用户的业务账户映射副本。
         var users = new TreeMap<>(source.users());
@@ -378,7 +378,7 @@ class ParallelRiskScanTest {
                         SYMBOL, "BTC", "USDT", "USDT", 1, 1, 1,
                         new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
+                                java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000))),
                         0, 0, 0, -1, 0));
         // 每条 Lane 已经加入的测试用户数量，达到 usersPerLane 后跳过该 Lane 的更多用户。
         int[] counts = new int[TOPOLOGY.accountLaneCount()];

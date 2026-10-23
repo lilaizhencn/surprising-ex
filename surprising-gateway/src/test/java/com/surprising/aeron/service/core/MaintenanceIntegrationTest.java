@@ -313,7 +313,7 @@ class MaintenanceIntegrationTest {
                 "1", "BTC", "USDT", asset, 1, 1, type.isInverse()?1000:1,
                 (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                        java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                 0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
                 type.isOption()?100:0)));
         submit(1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()?new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_000L):new ApplyMarkPriceCommand("1",100,1,1_700_000_000_000L)));

@@ -66,7 +66,7 @@ class CoreSelfTradePrefixTest {
                                 type.isInverse() ? 1000 : 1,
                                 (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                        java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                                 0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
                 if (line != ProductLine.SPOT || marketTaker) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
@@ -144,7 +144,7 @@ class CoreSelfTradePrefixTest {
                             "1", "BTC", "USDT", type.isInverse() ? "BTC" : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
                             (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                    java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                             0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0, type.isOption() ? 0 : -1,
                             type.isOption() ? 100 : 0))));
             if (line != ProductLine.SPOT) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,

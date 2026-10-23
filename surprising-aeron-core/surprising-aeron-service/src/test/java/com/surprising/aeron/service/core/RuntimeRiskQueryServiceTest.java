@@ -143,7 +143,7 @@ class RuntimeRiskQueryServiceTest {
                 "604", "BTC", "USDT", "USDT", 100_000, 10_000_000, 100_000_000,
                 new CoreInstrumentRiskLimits(
                         10_000, (1_000_000_000_000L / (10_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (10_000)), 10_000, 5_000))),
+                        java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (10_000)), 10_000, 5_000))),
                 200, 500, 0, -1, 0));
         runtime.registerInstrument(instrument);
         // 用户 7 当前合约净持仓的整数键，用来关联该持仓的风险记录。

@@ -216,7 +216,7 @@ class CoreFinancialLedgerProductionTest {
                         "1", "BTC", "USDT", inverse ? "BTC" : "USDT", 1, 1, inverse ? 1_000 : 1,
                         (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                         0, 0, line.isDeliveryProduct() ? TIME + 1_000 : 0,
                         line.isOptionProduct() ? OptionType.CALL.ordinal() : -1, line.isOptionProduct() ? 100 : 0)), TIME);
     }

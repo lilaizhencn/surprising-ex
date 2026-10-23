@@ -112,8 +112,7 @@ class SnapshotFieldEvolutionTest {
         for (ProductLine line : new ProductLine[] {ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL}) {
             var risk = line.isDerivative() ? new CoreInstrumentRiskLimits(
                     100_000, 10_000_000, 1_000_000, 0, 1_000_000,
-                    List.of(new CoreRiskLimitBracket(
-                            1, 0, 1_000_000, 10_000_000, 100_000, 50_000))) : null;
+                    List.of(new CoreRiskLimitBracket(1_000_000, 10_000_000, 100_000, 50_000))) : null;
             var instrument = new com.surprising.aeron.service.instrument.CoreInstrument("1",
                     ContractType.valueOf(line.contractTypeCode()),
                     "BTC", "USDT", "USDT", 1, 1, 1, risk, 0, 0, 0, null, 0);
@@ -125,8 +124,16 @@ class SnapshotFieldEvolutionTest {
             var entries = new SnapshotFields.Reader(root.bytes(5)).list(1, bytes -> bytes);
             assertThat(entries).hasSize(1);
             var fields = split(entries.getFirst()).stream().map(SnapshotFieldEvolutionTest::id).toList();
-            if (line.isDerivative()) assertThat(fields).contains(9, 16, 17, 18, 19, 20).doesNotContain(10);
-            else assertThat(fields).doesNotContain(9, 10, 16, 17, 18, 19, 20);
+            if (line.isDerivative()) {
+                assertThat(fields).contains(9, 16, 17, 18, 19, 20).doesNotContain(10);
+                var brackets = new SnapshotFields.Reader(entries.getFirst()).list(20, bytes -> bytes);
+                for (byte[] bracket : brackets) {
+                    assertThat(split(bracket).stream().map(SnapshotFieldEvolutionTest::id).toList())
+                            .containsExactly(3, 4, 5, 6, 7);
+                }
+            } else {
+                assertThat(fields).doesNotContain(9, 10, 16, 17, 18, 19, 20);
+            }
             var restored = TradingStateSnapshotCodec.decode(encoded, line);
             assertThat(restored).isEqualTo(state);
             assertThat(restored.instruments().get("1").riskLimits()).isEqualTo(risk);

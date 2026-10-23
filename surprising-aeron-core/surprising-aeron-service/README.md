@@ -13,11 +13,13 @@ Owner借用同一组 `RuntimeFactIndexes`；固定路由只保存一份，恢复
 永续与交割分别使用现有产品规则，线性、反向和期权的资金公式及生命周期约束各自保留。
 Lombok只处理直接样板，校验、复制和状态转换显式实现，可变交易对象不用 `@Data`。
 
-当前Core schema为 **12**，注册命令V7、交易状态快照v42、分段快照v29、Matcher快照v10、终态保留v4。
+当前Core schema为 **13**，注册命令V8、交易状态快照v43、分段快照v29、Matcher快照v10、终态保留v4。
 注册命令和不可变标的配置共用 `CoreInstrumentRiskLimits` 金融参数值，现货不创建风险配置，
 也不在命令或快照中保存保证金、杠杆、持仓限额、OI或虚拟风险档。衍生品保留真实限额和档位，
 维持保证金直接取实际风险档费率，删除标的级副本；资产单位、费用、价格保护和交易开关保留。
-命令从27字段减为21字段，标的不可变配置同样从27字段减为21字段，衍生品风险值含6个字段，后续继续核对不同衍生品的实际字段消费。
+命令从27字段减为21字段，标的不可变配置同样从27字段减为21字段，衍生品风险值含6个字段。
+每档风险参数从7字段减为5字段：编号取列表位置，下界取零或前档上界，命令和快照不再保存这两个派生字段。
+档位上界必须严格递增并覆盖最大持仓；等于中间档上界时进入下一档，已有持仓超出最高上界仍按末档估值，新风险准入继续拒绝超限。
 
 算法命令v3区分创建意图和生命周期增量，更新只携带变化、预期版本及可选新增子单。
 触发创建v5从命令头、Cluster时间和标的配置初始化归属、时间、状态及执行费率；
@@ -25,7 +27,7 @@ Lombok只处理直接样板，校验、复制和状态转换显式实现，可�
 查询、实时事件和数据库模型保留各自消费的完整业务字段。按用户确认，旧命令与快照格式不再读取。
 
 清理及逐字段证据见[命令与持久化数据审计](validation/command-data-audit-20261023.json)，
-当前累计55项已解决，A54–A60七项产品条件字段及派生风险档结构待清理，A11查询一致性和A63行情远期价仍为候选。
+当前累计57项已解决，A54–A58五项产品条件字段及约束待清理，A11查询一致性和A63行情远期价仍为候选。
 内部入口及纯转发重载已删除55个方法中的59个无用形参；删除重复风险上限检查，结算撤单阶段使用单一分支。
 行情解码要求完整当前布局，缺字段或多余字节直接拒绝；值为0的可选最新成交价仍表示未提供。
 全量字段及业务约束审查仍在进行。
@@ -34,12 +36,14 @@ Lombok只处理直接样板，校验、复制和状态转换显式实现，可�
 最近一批清理使用HotSpot JDK27、Maven3.9.16执行：
 
 ```bash
-mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools \
+mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider \
     -am -DskipTests clean test-compile
+mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests test-compile
 ```
 
-14个相关模块及依赖干净编译通过，包含测试源码编译；170处签名和调用点的保留参数及顺序逐项对照未变。
-沿转发链继续删参后，相同模块再次以`-am -DskipTests test-compile`编译通过。
+17个相关模块及依赖干净编译通过；补快照字段断言后，服务及其依赖共5个模块再次编译通过，均包含测试源码编译。
+143处风险档构造的金融参数保持原值；4024个编译类中没有已删字段/getter的引用，风险档实例字段确认为5个。
+上一批内部删参的170处签名和调用点也已逐项核对，完整编译命令及范围见审计记录。
 未执行测试、服务、交易、做市、数据库、前端交互、日志/快照恢复或性能采样，
 因此没有宣称这些运行路径已验证通过。
 

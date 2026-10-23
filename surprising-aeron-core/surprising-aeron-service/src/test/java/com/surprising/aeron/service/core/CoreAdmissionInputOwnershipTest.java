@@ -187,7 +187,7 @@ class CoreAdmissionInputOwnershipTest {
                 "1", "BTC", "USDT", type.isInverse() ? "BTC" : "USDT", 1, 1, type.isInverse() ? 1_000 : 1,
                 (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, 1_000, mode.equals("RATE_ZERO") ? 0 : 100_000, floor,
-                        List.of(new CoreRiskLimitBracket(1, 0, 1_000, 10_000_000, 100_000, 50_000)))),
+                        List.of(new CoreRiskLimitBracket(1_000, 10_000_000, 100_000, 50_000)))),
                 0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0, type.isOption() ? 0 : -1,
                 type.isOption() ? 100 : 0);
     }

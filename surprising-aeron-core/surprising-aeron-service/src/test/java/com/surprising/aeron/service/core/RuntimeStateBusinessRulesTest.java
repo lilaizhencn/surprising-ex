@@ -883,7 +883,7 @@ class RuntimeStateBusinessRulesTest {
                 "1", "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000L, maxPosition, openInterestRate, openInterestFloor,
-                        List.of(new CoreRiskLimitBracket(1, 0, bracketCap, bracketMaxLeverage, 100_000, 50_000))),
+                        List.of(new CoreRiskLimitBracket(bracketCap, bracketMaxLeverage, 100_000, 50_000))),
                 0, 0, 0, -1, 0);
         return reducer.applyMarkPrice(
                 reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument),
@@ -899,8 +899,8 @@ class RuntimeStateBusinessRulesTest {
                 "1", "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000L, 1_000, 10_000_000L, 1_000,
-                        List.of(new CoreRiskLimitBracket(1, 0, 200, 10_000_000L, 100_000, 50_000),
-                        new CoreRiskLimitBracket(2, 200, 1_000, 10_000_000L, 200_000, 100_000))),
+                        List.of(new CoreRiskLimitBracket(200, 10_000_000L, 100_000, 50_000),
+                        new CoreRiskLimitBracket(1_000, 10_000_000L, 200_000, 100_000))),
                 0, 0, 0, -1, 0);
         return reducer.applyMarkPrice(
                 reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument),

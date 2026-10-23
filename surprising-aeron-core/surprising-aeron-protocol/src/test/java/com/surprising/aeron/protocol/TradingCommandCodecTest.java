@@ -13,6 +13,20 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
+    void riskBracketsRequireIncreasingCapsAndCoverThePositionLimit() {
+        var first = new CoreRiskLimitBracket(100, 10_000_000, 100_000, 50_000);
+        var second = new CoreRiskLimitBracket(200, 5_000_000, 200_000, 100_000);
+        assertThat(new CoreInstrumentRiskLimits(100_000, 10_000_000, 200, 0, 1,
+                List.of(first, second)).riskLimitBrackets()).containsExactly(first, second);
+        assertThatThrownBy(() -> new CoreInstrumentRiskLimits(100_000, 10_000_000, 200, 0, 1,
+                List.of(first, first))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CoreInstrumentRiskLimits(100_000, 10_000_000, 200, 0, 1,
+                List.of(second, first))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CoreInstrumentRiskLimits(100_000, 10_000_000, 201, 0, 1,
+                List.of(first, second))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void markPriceRequiresTheCompleteCurrentLayout() {
         var command = new ApplyMarkPriceCommand("1", 100, 99, 0, 1, 1_000, 0);
         byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(command);
@@ -191,7 +205,7 @@ class TradingCommandCodecTest {
                 "1", "BTC", "USDT", "USDT", 1, 1, 100_000_000,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE,
+                        java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE,
                         10_000_000, 100_000, 50_000, 1_250_000))),
                 -10, 20, 0, -1, 0);
         ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("1", 60_500,
@@ -311,7 +325,7 @@ class TradingCommandCodecTest {
                 "1", "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(
                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                        java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                 0, 0, 0, -1, 0);
         byte[] current = TradingCommandCodec.encodeRegisterInstrument(command);
         int appendedRiskPolicyBytes = Integer.BYTES * 3 + Long.BYTES * 9;
@@ -327,7 +341,7 @@ class TradingCommandCodecTest {
                 "1", "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, 1_000_000, 0, 1_000_000,
-                        java.util.List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000,
+                        java.util.List.of(new CoreRiskLimitBracket(1_000_000, 10_000_000,
                         100_000, 50_000, 1_000_000))),
                 0, 0, 0, -1, 0, 3, false, false, true, 0b01, 0b0011, 100_000L);
 
@@ -342,7 +356,7 @@ class TradingCommandCodecTest {
     @Test
     void spotRegistrationHasNoDerivativeRiskPayload() {
         var risk = new CoreInstrumentRiskLimits(100_000, 10_000_000, 1_000_000, 0, 1_000_000,
-                List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 50_000)));
+                List.of(new CoreRiskLimitBracket(1_000_000, 10_000_000, 100_000, 50_000)));
         var spot = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 null, 0, 0, 0, -1, 0);
         var derivative = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
@@ -352,7 +366,7 @@ class TradingCommandCodecTest {
         assertThat(TradingCommandCodec.decodeRegisterInstrument(spotBytes, ProductLine.SPOT)).isEqualTo(spot);
         assertThat(TradingCommandCodec.decodeRegisterInstrument(derivativeBytes, ProductLine.LINEAR_PERPETUAL))
                 .isEqualTo(derivative);
-        assertThat(derivativeBytes.length - spotBytes.length).isEqualTo(96);
+        assertThat(derivativeBytes.length - spotBytes.length).isEqualTo(84);
         assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(spotBytes, ProductLine.LINEAR_PERPETUAL))
                 .isInstanceOf(RuntimeException.class);
         assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(derivativeBytes, ProductLine.SPOT))

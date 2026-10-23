@@ -53,7 +53,7 @@ public class ReplacementAdmissionBenchmark {
                         "1", "BTC", "USDT", "USDT", 1, 1, 1,
                         (product.isDerivative() ? new CoreInstrumentRiskLimits(
                                 100_000, 10_000_000, 10_000, 0, 10_000,
-                                List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))) : null),
+                                List.of(new CoreRiskLimitBracket(10_000, 10_000_000, 100_000, 50_000))) : null),
                         0, 0, 0, -1, 0));
         var users = new HashMap<Long, CoreUserState>();
         var orders = new HashMap<Long, CoreOrderState>();

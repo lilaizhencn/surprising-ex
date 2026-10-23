@@ -168,7 +168,7 @@ public final class CoreContractMath {
     }
 
     /**
-     * 选出金额下界不高于当前规模、且下界最高的档位，不依赖配置列表恰好按大小排序；没有适用档位时拒绝。
+     * 按已校验的递增上界选档；到达非最后一档上界时进入下一档，超出最后上界的已有持仓继续用最后一档估值。
      * @param instrument 当前币对的合约类型、价格数量精度和结算资产配置
      * @param notionalUnits 用于选风险档位的非负名义金额，单位与该产品风险档位配置一致
      */
@@ -176,20 +176,11 @@ public final class CoreContractMath {
         if (notionalUnits < 0) {
             throw new IllegalArgumentException("notional must not be negative");
         }
-        // 遍历到目前为止最合适的档位，尚未找到时为 null。
-        CoreRiskLimitBracket selected = null;
-        for (CoreRiskLimitBracket /* 本轮检查的档位，只有金额下界适用且比原候选更高才会选中。 */ candidate : instrument.riskLimitBrackets()) {
-            if (candidate.notionalFloorUnits() <= notionalUnits
-                    && (selected == null
-                    || candidate.notionalFloorUnits() > selected.notionalFloorUnits())) {
-                selected = candidate;
-            }
+        var brackets = instrument.riskLimitBrackets();
+        for (CoreRiskLimitBracket bracket : brackets) {
+            if (notionalUnits < bracket.notionalCapUnits()) return bracket;
         }
-        if (selected == null) {
-            throw new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
-                    "position notional has no risk bracket");
-        }
-        return selected;
+        return brackets.getLast();
     }
 
     /**

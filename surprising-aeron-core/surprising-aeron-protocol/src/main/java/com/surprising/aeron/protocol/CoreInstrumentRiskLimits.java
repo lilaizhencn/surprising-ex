@@ -18,11 +18,10 @@ public record CoreInstrumentRiskLimits(
         }
         riskLimitBrackets = List.copyOf(riskLimitBrackets);
         long previousCap = 0;
-        for (int index = 0; index < riskLimitBrackets.size(); index++) {
-            CoreRiskLimitBracket bracket = riskLimitBrackets.get(index);
-            if (bracket.bracketNo() != index + 1 || bracket.notionalFloorUnits() != previousCap
+        for (CoreRiskLimitBracket bracket : riskLimitBrackets) {
+            if (bracket.notionalCapUnits() <= previousCap
                     || bracket.maxLeveragePpm() > maxLeveragePpm) {
-                throw new IllegalArgumentException("risk limit brackets must be contiguous and bounded");
+                throw new IllegalArgumentException("risk limit bracket caps must increase and leverage must be bounded");
             }
             previousCap = bracket.notionalCapUnits();
         }

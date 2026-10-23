@@ -586,8 +586,9 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState second = match(variant, first, 13, 14, CoreOrderSide.BUY,
                 CoreOrderSide.SELL, QUANTITY);
 
-        assertThat(CoreContractMath.riskBracket(second.instruments().get(SYMBOL), 1_900).bracketNo())
-                .isEqualTo(2);
+        var instrument = second.instruments().get(SYMBOL);
+        assertThat(CoreContractMath.riskBracket(instrument, 1_900))
+                .isSameAs(instrument.riskLimitBrackets().get(1));
         assertThat(second.user(USER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(380);
         assertThat(second.user(MAKER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(380);
         return row(variant, "TIER_CHANGE", opening, second, List.of(MAKER_ID), false, false,
@@ -1210,7 +1211,7 @@ class CorePerpetualFinancialMatrixTest {
                 variant.settleScaleUnits(),
                 (otherType == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, 1_000_000, 0, 1_000_000,
-                        List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000)))),
+                        List.of(new CoreRiskLimitBracket(1_000_000, 10_000_000, 100_000, 100_000)))),
                 0, 0, 0, -1, 0);
         // 拒绝或计算溢出前的业务哈希，失败后必须不变
         long hash = opening.businessStateHash();
@@ -1604,9 +1605,9 @@ class CorePerpetualFinancialMatrixTest {
                                                boolean tiered, long makerFeeRatePpm, long takerFeeRatePpm) {
         // 单档或双档连续风险限额列表，按本辅助的固定档位参数创建
         List<CoreRiskLimitBracket> brackets = tiered
-                ? List.of(new CoreRiskLimitBracket(1, 0, 1_000, 5_000_000, 100_000, 100_000),
-                new CoreRiskLimitBracket(2, 1_000, 2_500, 5_000_000, 200_000, 200_000))
-                : List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000));
+                ? List.of(new CoreRiskLimitBracket(1_000, 5_000_000, 100_000, 100_000),
+                new CoreRiskLimitBracket(2_500, 5_000_000, 200_000, 200_000))
+                : List.of(new CoreRiskLimitBracket(1_000_000, 10_000_000, 100_000, 100_000));
         // 单档允许十倍、双档允许五倍的标的杠杆上限
         long maxLeveragePpm = tiered ? 5_000_000 : 10_000_000;
         return new RegisterInstrumentCommand(

@@ -122,7 +122,7 @@ class CoreLifecycleWorkTest {
                 "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, 1_000_000, 0, 1,
-                        List.of(new CoreRiskLimitBracket(1, 0, 1_000_000,
+                        List.of(new CoreRiskLimitBracket(1_000_000,
                 10_000_000, 100_000, 50_000))),
                 0, 0, 0, null, 0);
         // 待执行强平记录，编号一。

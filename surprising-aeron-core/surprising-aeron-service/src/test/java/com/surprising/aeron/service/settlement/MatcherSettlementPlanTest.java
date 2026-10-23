@@ -68,7 +68,7 @@ class MatcherSettlementPlanTest {
             "1", ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1_000_000,
             new CoreInstrumentRiskLimits(
                     100_000, 10_000_000, Long.MAX_VALUE, 0, 1,
-                    List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000))),
+                    List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, 10_000_000, 100_000, 50_000))),
             -10, 25, 0, null, 0);
 
     /**

@@ -404,7 +404,7 @@ class RuntimeDerivativeMatchProcessorTest {
                         "1", "BTC", "USDT", "USDT", 1, 1, 1,
                         new CoreInstrumentRiskLimits(
                                 100_000, 10_000_000, 10_000, 0, 1,
-                                List.of(new CoreRiskLimitBracket(1, 0, 10_000,
+                                List.of(new CoreRiskLimitBracket(10_000,
                                 10_000_000, 100_000, 50_000))),
                         0, 0, 0, -1, 0));
     }
@@ -417,7 +417,7 @@ class RuntimeDerivativeMatchProcessorTest {
                 "1", "BTC", "USDT", "USDT", 10_000_000L, 10_000_000L, 100_000_000L,
                 new CoreInstrumentRiskLimits(
                         10_000L, 100_000_000L, 1_000_000_000_000_000L, 1_000_000L, 25_000_000_000_000L,
-                        List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L,
+                        List.of(new CoreRiskLimitBracket(1_000_000_000_000_000L,
                                 100_000_000L, 5_000L, 5_000L))),
                 0, 500L, 0, -1, 0);
     }

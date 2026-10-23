@@ -40,7 +40,7 @@ class RiskBatchBudgetTest {
                                 instrumentId, "BTC", "USDT", asset, 1, 1, type.isInverse()?1000:1,
                                 (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                        java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                                 0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
                                 type.isOption()?100:0))));
             }
@@ -119,7 +119,7 @@ class RiskBatchBudgetTest {
                                 type.isInverse()?1000:1,
                                 (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                        java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                                 0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
                                 type.isOption()?100:0))));
             }
@@ -170,7 +170,7 @@ class RiskBatchBudgetTest {
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                                    java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{7, 8}) {
@@ -229,7 +229,7 @@ class RiskBatchBudgetTest {
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                                    java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
@@ -295,7 +295,7 @@ class RiskBatchBudgetTest {
                             "1", "BTC", "USDT", "USDT", 1, 1, 1,
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
+                                    java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,

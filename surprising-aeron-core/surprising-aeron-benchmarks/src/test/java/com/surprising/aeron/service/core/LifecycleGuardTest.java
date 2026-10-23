@@ -35,7 +35,7 @@ class LifecycleGuardTest {
                             "42", "BTC", inverse ? "USD" : "USDT", inverse ? "BTC" : "USDT", 1, 1, 1,
                             (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                    java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
+                                    java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                             0, 0, 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
             var early = h.state().apply(h.command(CoreMessageType.SETTLE_INSTRUMENT, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "42", 100))));

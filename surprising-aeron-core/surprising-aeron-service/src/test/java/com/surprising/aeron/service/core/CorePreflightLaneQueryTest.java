@@ -224,7 +224,7 @@ class CorePreflightLaneQueryTest {
                 "1", "BTC", "USDT", type.isInverse() ? "BTC" : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
                 (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                         margin, (1_000_000_000_000L / (margin)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                        java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, (1_000_000_000_000L / (margin)), margin, 50_000)))),
+                        java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (margin)), margin, 50_000)))),
                 500, 1000, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0, type.isOption() ? 0 : -1,
                 type.isOption() ? 100 : 0);
     }

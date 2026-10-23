@@ -1025,7 +1025,7 @@ class CoreOrderedOrderBatchTest {
                     "1", "BTC", "USDT", "USDT", 1, 1, 1,
                     new CoreInstrumentRiskLimits(
                             100_000, 10_000_000, 1_500, 0, 1_500,
-                            List.of(new CoreRiskLimitBracket(1, 0, 1_500,
+                            List.of(new CoreRiskLimitBracket(1_500,
                             10_000_000, 100_000, 50_000))),
                     0, 0, 0, -1, 0);
             assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.REGISTER_INSTRUMENT,
@@ -2616,7 +2616,7 @@ class CoreOrderedOrderBatchTest {
                 "1", "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, 1_500, 0, 1_500,
-                        List.of(new CoreRiskLimitBracket(1, 0, 1_500,
+                        List.of(new CoreRiskLimitBracket(1_500,
                         10_000_000, 100_000, 50_000))),
                 0, 0, 0, -1, 0);
         assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,

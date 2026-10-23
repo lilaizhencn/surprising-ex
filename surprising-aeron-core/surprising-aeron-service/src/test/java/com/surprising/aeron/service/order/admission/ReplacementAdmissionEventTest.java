@@ -54,7 +54,7 @@ class ReplacementAdmissionEventTest {
                         "1", "BTC", "USDT", "USDT", 1, 1, 1,
                         new CoreInstrumentRiskLimits(
                                 100_000, 10_000_000, 10_000, 0, 10_000,
-                                List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))),
+                                List.of(new CoreRiskLimitBracket(10_000, 10_000_000, 100_000, 50_000))),
                         0, 0, 0, -1, 0));
         // 用户 7 原有的 OPEN 限价买单 11，作为改单和替换对象。
         var order = new CoreOrderState(11, ProductLine.LINEAR_PERPETUAL, 7, "1", CoreOrderSide.BUY,
