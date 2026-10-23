@@ -1314,10 +1314,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 是否所有撤单项都接受，空列表也没有失败。
         boolean accepted = failure == null;
         return new CoreMatchingResult(accepted, accepted ? "SUCCESS" : failure.resultCode(), cancellations,
-                successfulPrefix, !accepted && successfulPrefix != 0,
-                0, 0, 0, 0, 0, 0, 0, -1,
-                null, CoreMatchingResult.concatenateEvents(results),
-                new exchange.core2.core.common.MatcherResult.MarketData(List.of(), List.of(), 0, 0));
+                !accepted && successfulPrefix != 0, 0, 0, 0, 0, 0, 0, -1,
+                null, CoreMatchingResult.concatenateEvents(results));
     }
 
     /**
@@ -1774,67 +1772,20 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 校验深度 1 至 100 并规范品种字符串，未登记返回空列表；已登记则在调用线程读订单簿并包装 Future，转换结果排序为买卖侧再价格升序。
+     * 校验深度 1 至 100 并规范品种字符串，未登记返回空列表；已登记则在调用线程读订单簿，转换结果排序为买卖侧再价格升序。
      * @param requestedSymbol 待查询的品种字符串，会 trim 并按 ROOT 转为大写
      * @param depth 每侧期望读取的盘口深度，范围 1 至 100
      */
-    public CompletableFuture<List<CoreBookLevelView>> orderBookLevelsAsync(String requestedSymbol, int depth) {
+    public List<CoreBookLevelView> orderBookLevels(String requestedSymbol, int depth) {
         if (requestedSymbol == null || requestedSymbol.isBlank() || depth < 1 || depth > 100) {
-            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid single-instrumentId book query"));
+            throw new IllegalArgumentException("invalid single-instrumentId book query");
         }
         // 当前正在登记、规范化或查询的品种字符串。
         String instrumentId = requestedSymbol.trim().toUpperCase(java.util.Locale.ROOT);
         // 当前品种的永久原生编号。
         Integer symbolId = symbols.get(instrumentId);
-        if (symbolId == null) return CompletableFuture.completedFuture(List.of());
-        return CompletableFuture.completedFuture(bookLevels(instrumentId, engine(symbolId).orderBook(symbolId, depth)));
-    }
-
-    /**
-     * 当前线程先读取状态哈希，再按品种名排序读取各盘口并合并；这里的已完成 Future 和 allOf 不会自动建立跨线程屏障，调用方先保证分片读取边界。返回品种清单含无档位品种。
-     * @param depth 每侧期望读取的盘口深度，范围 1 至 100
-     */
-    public CompletableFuture<BookBootstrapSnapshot> orderBookBootstrapAsync(int depth) {
-        if (depth < 1 || depth > 100) {
-            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid bootstrap book depth"));
-        }
-        return currentStateHashesAsync().thenCompose(/* 当前同步哈希读取的完成值，此回调不读取它，不表示自动跨线程屏障。 */ barrierComplete -> {
-            // 当前需要读取盘口的路由条目副本，随后按品种字符串排序。
-            List<Map.Entry<String, Integer>> entries = new ArrayList<>(symbols.entrySet());
-            entries.sort(Map.Entry.comparingByKey());
-            // 需保留在启动视图中的有序品种清单，包括无档位的品种。
-            List<String> entrySymbols = new ArrayList<>(entries.size());
-            for (Map.Entry<String, Integer> /* 当前子模块哈希或品种路由条目，具体类型见循环声明。 */ entry : entries) {
-                entrySymbols.add(entry.getKey());
-            }
-            // 当前线程同步取值后包装的各品种盘口 Future。
-            List<CompletableFuture<BookResult>> requests = new ArrayList<>(entries.size());
-            for (Map.Entry<String, Integer> /* 当前子模块哈希或品种路由条目，具体类型见循环声明。 */ entry : entries) {
-                requests.add(CompletableFuture.completedFuture(
-                        new BookResult(entry.getKey(), engine(entry.getValue()).orderBook(entry.getValue(), depth))));
-            }
-            return CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new)).thenApply(/* 此回调不读取的上一步结果或按现有约定忽略的异常，具体含义见所在语句。 */ ignored -> {
-                // 精确加法累计的实际买卖档位总数，用于分配结果列表。
-                int expectedLevels = 0;
-                for (CompletableFuture<BookResult> /* 已同步读取完成的一个品种盘口 Future。 */ request : requests) {
-                    // 一个已经完成的品种盘口封装，用于累计档位或收集协议视图。
-                    BookResult result = request.getNow(null);
-                    expectedLevels = Math.addExact(expectedLevels,
-                            Math.addExact(result.book().askSize, result.book().bidSize));
-                }
-                // 本次转换出的协议盘口档位，返回前按既定规则排序。
-                List<CoreBookLevelView> levels = new ArrayList<>(expectedLevels);
-                for (CompletableFuture<BookResult> /* 已同步读取完成的一个品种盘口 Future。 */ request : requests) {
-                    // 一个已经完成的品种盘口封装，用于累计档位或收集协议视图。
-                    BookResult result = request.getNow(null);
-                    levels.addAll(bookLevels(result.instrumentId(), result.book()));
-                }
-                levels.sort(Comparator.comparing(CoreBookLevelView::instrumentId)
-                        .thenComparing(CoreBookLevelView::side)
-                        .thenComparingLong(CoreBookLevelView::priceTicks));
-                return new BookBootstrapSnapshot(entrySymbols, levels);
-            });
-        });
+        if (symbolId == null) return List.of();
+        return bookLevels(instrumentId, engine(symbolId).orderBook(symbolId, depth));
     }
 
     /**
@@ -1907,14 +1858,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         levels.sort(Comparator.comparing(CoreBookLevelView::side)
                 .thenComparingLong(CoreBookLevelView::priceTicks));
         return levels;
-    }
-
-    /**
-     * 把一次同步盘口读取与品种字符串配在一起的冷态临时值。
-     * @param instrumentId 外部永久数字品种字符串
-     * @param book 当前同步读取的原生盘口数据
-     */
-    private record BookResult(String instrumentId, L2MarketData book) {
     }
 
     /**

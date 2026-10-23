@@ -72,8 +72,4 @@ public interface MatchingResult {
      * 返回当前结果关联的原生成交、撤量或拒单事件序列；它是账户结算事实输入，不能据此再次撮合。
      */
     List<MatcherResult.MatcherEvent> matcherEvents();
-    /**
-     * 返回此结果携带的原生市场数据引用，空行情使用约定的空对象。
-     */
-    MatcherResult.MarketData marketData();
 }

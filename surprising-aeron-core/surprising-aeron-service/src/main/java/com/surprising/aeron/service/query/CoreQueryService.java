@@ -1037,7 +1037,7 @@ public final class CoreQueryService {
         long queryId = nextAsyncQueryId++;
         try {
             owner.matcherPipeline().readAtSubmissionFence(owner.matchingAdapter().matcherShardId(query.instrumentId()),
-                    () -> owner.matchingAdapter().orderBookLevelsAsync(query.instrumentId(), query.depth()).join())
+                    () -> owner.matchingAdapter().orderBookLevels(query.instrumentId(), query.depth()))
                     .whenComplete((/* Matcher 在对应提交栅栏后读取出的盘口层级，包装后交给 Owner 编码。 */ levels, /* Matcher 盘口读取或投递失败，登记内部失败标记，随后由 Owner 消费为拒绝响应。 */ failure) -> {
                         if (failure != null) failedQueries.put(queryId, true);
                         else completedBookQueries.put(queryId, CompletedBookQuery.single(levels));
@@ -1071,7 +1071,7 @@ public final class CoreQueryService {
             // 异步取得的初始化快照凭据；单 Matcher 读栅栏，多 Matcher 分别读取后合并。
             var snapshot = owner.matchingAdapter().topology().matchingEngineCount() == 1
                     ? owner.matcherPipeline().readAtSubmissionFence(0,
-                    () -> owner.matchingAdapter().orderBookBootstrapAsync(query.depth()).join())
+                    () -> owner.matchingAdapter().orderBookBootstrapShard(0, query.depth()))
                     : owner.matcherPipeline().readEachAsync(
                     /* 当前要读取初始化盘口的 Matcher 分片编号。 */ shardId -> owner.matchingAdapter().orderBookBootstrapShard(shardId, query.depth()))
                     .thenApply(owner.matchingAdapter()::mergeBookBootstrapShards);

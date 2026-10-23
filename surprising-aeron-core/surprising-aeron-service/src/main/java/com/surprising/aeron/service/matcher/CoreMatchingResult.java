@@ -12,13 +12,10 @@ import lombok.Getter;
 import lombok.experimental.Accessors;
 
 /**
- * 一条普通撮合回执，保留接受状态、撤单前缀、原生事件和命令证据。Matcher 在发布前可原位补齐身份，避免仅为绑定再分配结果；发布后按只读契约消费，事件和行情引用不深拷贝。它不负责修改余额、持仓或推进 Core 提交。
+ * 一条普通撮合回执，保留接受状态、撤单前缀、原生事件和命令证据。Matcher 在发布前可原位补齐身份，避免仅为绑定再分配结果；发布后按只读契约消费，事件引用不深拷贝。它不负责修改余额、持仓或推进 Core 提交。
  */
 public final class CoreMatchingResult implements MatchingResult {
 
-    /** 无行情回执共用的空盘口数据，买卖侧列表为空且数量为零。 */
-    private static final MatcherResult.MarketData EMPTY_MARKET_DATA =
-            new MatcherResult.MarketData(List.of(), List.of(), 0, 0);
     /**  构造时确定的接受标记，既可来自原生结果，也可由控制调用方提供。 返回引擎是否接受此结果；仍需结合 outcome 判断已知前缀或致命分歧。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -73,54 +70,18 @@ public final class CoreMatchingResult implements MatchingResult {
     @Accessors(fluent = true, chain = false)
     @Getter
     private final List<MatcherResult.MatcherEvent> matcherEvents;
-    /**  原生行情引用或共用空行情，不在此深拷贝。 返回此结果携带的原生市场数据引用，空行情使用约定的空对象。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private final MatcherResult.MarketData marketData;
 
-    /**
-     * 创建只有接受标记和结果码的回执，撤单前缀为空、显式状态变化标记为 false。
-     * @param accepted 引擎是否接受当前请求
-     * @param resultCode 非空撮合结果码文本
-     */
+    /** 仅保存接受状态和结果码，其余证据尚未绑定且没有撤单或成交事件。 */
     public CoreMatchingResult(boolean accepted, String resultCode) {
-        this(accepted, resultCode, List.of(), 0, false);
+        this(accepted, resultCode, List.of(), false,
+                0, 0, 0, 0, 0, 0, -1, null, List.of());
     }
 
     /**
-     * 保存撤单列表并校验成功前缀范围，分类时默认没有显式状态变化，其余身份尚未绑定。
+     * 检查结果码、列表及原生证据标量后保存并分类。撤单列表按 immutable 的现规则处理，事件直接保留引用。
      * @param accepted 引擎是否接受当前请求
      * @param resultCode 非空撮合结果码文本
      * @param cancellations 本次有序撤单结果列表
-     * @param successfulPrefixCount 首个失败之前成功的连续撤单数
-     */
-    public CoreMatchingResult(boolean accepted, String resultCode,
-                              List<CoreCancellationResult> cancellations, int successfulPrefixCount) {
-        this(accepted, resultCode, cancellations, successfulPrefixCount, false);
-    }
-
-    /**
-     * 创建带撤单前缀及显式状态变化的回执，其余原生身份默认零、未绑定分片默认负一，使用空事件和空行情。绑定后负一也用于控制分片。
-     * @param accepted 引擎是否接受当前请求
-     * @param resultCode 非空撮合结果码文本
-     * @param cancellations 本次有序撤单结果列表
-     * @param successfulPrefixCount 首个失败之前成功的连续撤单数
-     * @param matcherStateChanged 是否明确知道已有状态变化，例如撤单前缀已执行
-     */
-    public CoreMatchingResult(boolean accepted, String resultCode,
-                              List<CoreCancellationResult> cancellations, int successfulPrefixCount,
-                              boolean matcherStateChanged) {
-        this(accepted, resultCode, cancellations, successfulPrefixCount, matcherStateChanged,
-                0, 0, 0, 0, 0, 0, 0, -1, null,
-                List.of(), EMPTY_MARKET_DATA);
-    }
-
-    /**
-     * 检查结果码、列表、前缀范围及原生标量基本合法后保存并分类。撤单列表按 immutable 的现规则处理，事件和行情直接保留引用；这里不核验每条撤单是否与传入成功前缀一致。
-     * @param accepted 引擎是否接受当前请求
-     * @param resultCode 非空撮合结果码文本
-     * @param cancellations 本次有序撤单结果列表
-     * @param successfulPrefixCount 首个失败之前成功的连续撤单数
      * @param matcherStateChanged 是否明确知道已有状态变化，例如撤单前缀已执行
      * @param nativeCoreSequence 已绑定的 Core 序号，零可表示未绑定
      * @param nativeCommandIdMostSignificantBits 原命令 UUID 高六十四位
@@ -128,14 +89,12 @@ public final class CoreMatchingResult implements MatchingResult {
      * @param nativeOrderId 关联订单编号，未绑定或控制结果可为零
      * @param nativeSequence 原生 exchange-core 序号，零允许稍后从原生结果取得
      * @param nativeMatcherSequence 业务证据分片发布序号
-     * @param nativeAeronTimestamp 需校验为非负的 Cluster 业务时间戳，不保留副本
      * @param nativeMatcherShardId 业务证据分片编号，控制分片为负一
      * @param nativeMatcherResult 可空的原生结果引用
      * @param matcherEvents 后续账户处理使用的原生事件列表引用
-     * @param marketData 对应原生行情引用，不能为空
      */
     public CoreMatchingResult(boolean accepted, String resultCode,
-                              List<CoreCancellationResult> cancellations, int successfulPrefixCount,
+                              List<CoreCancellationResult> cancellations,
                               boolean matcherStateChanged,
                               long nativeCoreSequence,
                               long nativeCommandIdMostSignificantBits,
@@ -143,16 +102,13 @@ public final class CoreMatchingResult implements MatchingResult {
                               long nativeOrderId,
                               long nativeSequence,
                               long nativeMatcherSequence,
-                              long nativeAeronTimestamp,
                               int nativeMatcherShardId,
                               MatcherResult nativeMatcherResult,
-                              List<MatcherResult.MatcherEvent> matcherEvents,
-                              MatcherResult.MarketData marketData) {
+                              List<MatcherResult.MatcherEvent> matcherEvents) {
         if (resultCode == null || resultCode.isBlank() || cancellations == null
-                || successfulPrefixCount < 0 || successfulPrefixCount > cancellations.size()
                 || nativeCoreSequence < 0 || nativeOrderId < 0 || nativeSequence < 0
-                || nativeMatcherSequence < 0 || nativeAeronTimestamp < 0 || nativeMatcherShardId < -1
-                || matcherEvents == null || marketData == null) {
+                || nativeMatcherSequence < 0 || nativeMatcherShardId < -1
+                || matcherEvents == null) {
             throw new IllegalArgumentException("invalid matching result");
         }
         this.accepted = accepted;
@@ -168,7 +124,6 @@ public final class CoreMatchingResult implements MatchingResult {
         this.nativeMatcherShardId = nativeMatcherShardId;
         this.nativeMatcherResult = nativeMatcherResult;
         this.matcherEvents = matcherEvents;
-        this.marketData = marketData;
     }
 
     /**
@@ -180,7 +135,7 @@ public final class CoreMatchingResult implements MatchingResult {
     }
 
     /**
-     * 从非空原生结果创建尚未绑定身份的回执，只有 SUCCESS 或 ACCEPTED 算接受；直接保留原生事件和行情，按没有显式状态变化分类。
+     * 从非空原生结果创建尚未绑定身份的回执，只有 SUCCESS 或 ACCEPTED 算接受；直接保留原生事件，按没有显式状态变化分类。
      * @param result 非空 exchange-core 原生结果
      */
     private CoreMatchingResult(MatcherResult result) {
@@ -192,7 +147,6 @@ public final class CoreMatchingResult implements MatchingResult {
         outcome = classify(accepted, resultCode, false);
         nativeMatcherShardId = -1;
         matcherEvents = Objects.requireNonNull(result.events(), "matcher events");
-        marketData = Objects.requireNonNull(result.marketData(), "matcher market data");
     }
 
     /**

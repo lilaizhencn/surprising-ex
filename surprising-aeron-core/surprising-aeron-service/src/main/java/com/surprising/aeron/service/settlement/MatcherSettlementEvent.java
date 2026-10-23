@@ -159,10 +159,6 @@ public final class MatcherSettlementEvent implements
     private boolean directNativeStateChanged;
     /** 普通下单准入拒绝的合成业务码，非空时无原生成交或行情。 */
     private String directSyntheticResultCode;
-    /** 合成拒绝共用的空盘口和成交行情值。 */
-    private static final exchange.core2.core.common.MatcherResult.MarketData EMPTY_MARKET_DATA =
-            new exchange.core2.core.common.MatcherResult.MarketData(
-                    java.util.List.of(), java.util.List.of(), 0, 0);
     /** 原 Matcher 传输上下文的释放回调，先保存后在发布时移到局部并清除。 */
     private MatcherCompletionRoute matcherCompletionRoute;
     /** 交给传输释放回调的 Matcher 分片编号。 */
@@ -999,13 +995,6 @@ public final class MatcherSettlementEvent implements
     @Override public java.util.List<exchange.core2.core.common.MatcherResult.MatcherEvent> matcherEvents() {
         if (directSyntheticResultCode != null) return java.util.List.of();
         return directNativeResult.events();
-    }
-    /**
-     * 合成准入拒绝返回共用空行情，其余借用原生结果行情，不在结算事件里重建盘口。
-     */
-    @Override public exchange.core2.core.common.MatcherResult.MarketData marketData() {
-        if (directSyntheticResultCode != null) return EMPTY_MARKET_DATA;
-        return directNativeResult.marketData();
     }
     /**
      * 检查本事件是否持有原生结果或合成拒绝码，执行故障本身不算可推进证据的结果。

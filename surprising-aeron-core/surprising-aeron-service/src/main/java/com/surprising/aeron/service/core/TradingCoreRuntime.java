@@ -326,7 +326,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         realtimeBookTimestamp = timestamp;
         try {
             realtimeBook = matcherPipeline.readAtSubmissionFence(matchingAdapter.matcherShardId(instrumentId),
-                    () -> matchingAdapter.orderBookLevelsAsync(instrumentId, 50).join());
+                    () -> matchingAdapter.orderBookLevels(instrumentId, 50));
         } catch (/* 注册盘口读取时的故障，只记捕获失败 */ RuntimeException failure) {
             realtimeCapture.failed();
         }

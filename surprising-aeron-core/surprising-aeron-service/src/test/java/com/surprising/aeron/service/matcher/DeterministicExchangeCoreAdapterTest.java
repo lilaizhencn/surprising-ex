@@ -42,7 +42,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 1,
                     new java.util.UUID(7, 1), 1000, 7, bid(1, 90), null))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThat(adapter.orderBookLevelsAsync("1", 30).join()).isEmpty();
+            assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
         }
     }
 
@@ -69,7 +69,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.FATAL_DIVERGENCE);
             assertThat(target.nativeMatches(id)).isTrue();
             assertThat(target.nativeOrderId()).isEqualTo(3);
-            assertThat(adapter.orderBookLevelsAsync("1", 30).join()).isEmpty();
+            assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
         }
     }
 
@@ -84,8 +84,8 @@ class DeterministicExchangeCoreAdapterTest {
                         CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                         100_000 + level, 1)).accepted()).isTrue();
             }
-            assertThat(adapter.orderBookLevelsAsync("21", 50).join()).hasSize(50);
-            assertThat(adapter.orderBookLevelsAsync("21", 100).join()).hasSize(100);
+            assertThat(adapter.orderBookLevels("21", 50)).hasSize(50);
+            assertThat(adapter.orderBookLevels("21", 100)).hasSize(100);
             // 当前直接命令取得的撮合回执。
             var result = placeDirect(adapter, 22, new CoreMatchingOrder(2000, "21",
                     CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
@@ -97,7 +97,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(trades).hasSize(151);
             assertThat(trades.stream().mapToLong(MatcherResult.MatcherEvent::size).sum()).isEqualTo(151);
             assertThat(trades.getLast().price()).isEqualTo(100_150);
-            assertThat(adapter.orderBookLevelsAsync("21", 100).join()).isEmpty();
+            assertThat(adapter.orderBookLevels("21", 100)).isEmpty();
         }
     }
 
@@ -191,7 +191,7 @@ class DeterministicExchangeCoreAdapterTest {
             var target = preparePlace(adapter, 1, id, 1000, 7, order);
             assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 0, id,
                     1000, 7, order, target)).isInstanceOf(IllegalArgumentException.class);
-            assertThat(adapter.orderBookLevelsAsync("1", 30).join()).isEmpty();
+            assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
             adapter.placeDirect(adapter.matcherShardId("1"), 1, id, 1000, 7, order, target);
             assertThat(target.accepted()).isTrue();
             assertThat(target.nativeMatcherSequence()).isEqualTo(1);
@@ -355,7 +355,7 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     /**
-     * 一次下单与两 Maker 成交，核对 Maker 顺序、原生身份及事件/行情引用直接复用；此用例没有采样或计数每命令报告与对象分配。
+     * 一次下单与两 Maker 成交，核对 Maker 顺序、原生身份及事件引用直接复用；此用例没有采样或计数每命令报告与对象分配。
      */
     @Test
     void consumesImmutableMatcherResultWithoutPerCommandStateReports() {
@@ -372,7 +372,6 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(result.nativeOrderId()).isEqualTo(201);
             assertThat(result.nativeMatcherResult().sequence()).isPositive();
             assertThat(result.matcherEvents()).isSameAs(result.nativeMatcherResult().events());
-            assertThat(result.marketData()).isSameAs(result.nativeMatcherResult().marketData());
         }
     }
 
@@ -439,15 +438,19 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(placeDirect(adapter, 7, bid(1, 100)).accepted()).isTrue();
             assertThat(placeDirect(adapter, 8, bid(2, "2", 200)).accepted()).isTrue();
 
-            assertThat(adapter.orderBookLevelsAsync("1", 30).join())
+            assertThat(adapter.orderBookLevels("1", 30))
                     .extracting(/* 当前用于提取币对名称的盘口档位。 */ value -> value.instrumentId()).containsOnly("1");
             // 包含所有币对范围和档位的盘口启动快照。
-            BookBootstrapSnapshot bootstrap = adapter.orderBookBootstrapAsync(30).join();
+            var shards = new java.util.ArrayList<BookBootstrapSnapshot>();
+            for (int shardId = 0; shardId < adapter.topology().matchingEngineCount(); shardId++) {
+                shards.add(adapter.orderBookBootstrapShard(shardId, 30));
+            }
+            BookBootstrapSnapshot bootstrap = adapter.mergeBookBootstrapShards(shards);
             assertThat(bootstrap.symbols()).containsExactly("1", "2");
             assertThat(bootstrap.levels()).extracting(/* 当前用于提取币对名称的盘口档位。 */ value -> value.instrumentId())
                     .containsExactly("1", "2");
-            assertThatThrownBy(() -> adapter.orderBookLevelsAsync("", 30).join())
-                    .hasCauseInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> adapter.orderBookLevels("", 30))
+                    .isInstanceOf(IllegalArgumentException.class);
         }
     }
 
@@ -514,7 +517,7 @@ class DeterministicExchangeCoreAdapterTest {
             var afterRestore = placeDirect(restored, 2, new java.util.UUID(0, 101), 1001, 8,
                     bid(101, instrumentId, 90));
             assertThat(afterRestore.accepted()).isTrue();
-            assertThat(restored.orderBookLevelsAsync(instrumentId, 30).join()).hasSize(2);
+            assertThat(restored.orderBookLevels(instrumentId, 30)).hasSize(2);
             assertThat(afterRestore.nativeMatcherSequence()).isGreaterThan(
                     snapshot.progress(afterRestore.nativeMatcherShardId()).matcherSequence());
         }
