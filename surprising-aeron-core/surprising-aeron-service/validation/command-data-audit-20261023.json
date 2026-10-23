@@ -1,0 +1,1590 @@
+{
+  "status": "in_progress",
+  "date": "2026-10-23",
+  "objective": "逐业务操作检查 command 产生到 Cluster 日志、执行、账户/账本落地、快照恢复及下游导出的字段和约束，去除无用持久化数据。",
+  "implementation_completed": {
+    "commit": "cd246bc4b1a905df26067f79c2b26df542a7bfde",
+    "pushed_to": "origin/master",
+    "removed_instance_fields": 30,
+    "removed_static_fields": 1,
+    "verification": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools -am -DskipTests clean test-compile",
+    "result": "BUILD SUCCESS，14 个 reactor 模块",
+    "tests_executed": false
+  },
+  "coverage": {
+    "command_types_inventoried": 39,
+    "full_field_and_constraint_audit_complete": false,
+    "note": "枚举、外部生产引用与路由已建表；以下并不表示全部字段已证实有用。CodeGraph CLI sync 显示 up to date，但部分新类未入索引，需用当前源码及编译产物补足。",
+    "snapshot_record_write_read_pairs_compared": 23,
+    "write_only_field_ids_found": [],
+    "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
+    "checkpoint": "新增 A12–A19 是静态链路核查；39 项操作的逐字段、全部拒绝分支、所有下游消费者仍未全部核查完。",
+    "snapshot_pair_breakdown": {
+      "typed_business_records": 22,
+      "generic_map_container": 1
+    },
+    "snapshot_pairs_compared": [
+      "Map",
+      "AssetBalance",
+      "OrderReservation",
+      "CorePositionState",
+      "CoreOrderState",
+      "CoreRiskSnapshot",
+      "CoreMarkPriceState",
+      "CoreLiquidationState",
+      "RiskLaneProgress",
+      "CoreRiskScanControlView",
+      "CoreRiskLimitBracket",
+      "CoreInstrumentMaintenance",
+      "CoreAlgoOrderState",
+      "CoreCancelAllAfterState",
+      "CoreLeverageKey",
+      "CoreTriggerOrderStateView",
+      "RiskScan",
+      "FundingProgress",
+      "LifecycleProgress",
+      "CoreUserState",
+      "CoreInstrument",
+      "CoreRiskState",
+      "CoreTreasuryState"
+    ]
+  },
+  "command_inventory": [
+    {
+      "operation": "VERIFY_STATE_HASH",
+      "family": "探针",
+      "external_references": [],
+      "route": {
+        "target": "TradingCoreRuntime.applyDirectCommand: APPLIED"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "ADJUST_BALANCE",
+      "family": "余额与划转",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 52,
+          "code": "aeron.command(CoreMessageType.ADJUST_BALANCE, commandId, request.userId(),"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 63,
+          "code": "aeron.command(CoreMessageType.ADJUST_BALANCE, commandId, request.userId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 88,
+        "target": "balances.executeAdjustBalance"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "PLACE_ORDER",
+      "family": "普通与批量订单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 195,
+          "code": "CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER, commandId, request.userId(),"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 207,
+          "code": "return aeron.commandOutcomeAsync(CoreMessageType.PLACE_ORDER, commandId, request.userId(),"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/maintenance/service/MaintenanceService.java",
+          "line": 215,
+          "code": "var outcome = core.commandOutcome(CoreMessageType.PLACE_ORDER,stable(task,stored.key()),action.userId(),"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "CANCEL_ORDER",
+      "family": "普通与批量订单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 175,
+          "code": "CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.CANCEL_ORDER, commandId, userId,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 182,
+          "code": "return aeron.commandOutcomeAsync(CoreMessageType.CANCEL_ORDER, commandId, userId,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/maintenance/service/MaintenanceService.java",
+          "line": 200,
+          "code": "var response = core.command(CoreMessageType.CANCEL_ORDER,stable(task,stored.key()),action.userId(),action.commandPayload());"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "REPLACE_ORDER",
+      "family": "普通与批量订单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 81,
+          "code": "var response = aeron.commandOutcome(CoreMessageType.REPLACE_ORDER, commandId, replacement.userId(),"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "AMEND_ORDER",
+      "family": "普通与批量订单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 119,
+          "code": "CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.AMEND_ORDER, commandId, request.userId(),"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 136,
+          "code": "return aeron.commandOutcomeAsync(CoreMessageType.AMEND_ORDER, commandId, request.userId(),"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "REGISTER_INSTRUMENT",
+      "family": "标的与维护",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java",
+          "line": 60,
+          "code": "var outcome=gateway.commandOutcome(CoreMessageType.REGISTER_INSTRUMENT,id,0,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 92,
+        "target": "instruments.executeRegisterInstrument"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "APPLY_MARK_PRICE",
+      "family": "行情",
+      "external_references": [
+        {
+          "file": "surprising-price/surprising-price-provider/src/main/java/com/surprising/price/mark/service/MarkPriceCorePublisher.java",
+          "line": 137,
+          "code": "boolean queued = clients.commandOneWay(CoreMessageType.APPLY_MARK_PRICE, commandId, 0, payload,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 93,
+        "target": "risk.executeApplyMarkPrice"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "APPLY_FUNDING",
+      "family": "资金费",
+      "external_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/funding/provider/service/FundingService.java",
+          "line": 150,
+          "code": "CoreResponse response = aeron.commandWithResponse(CoreMessageType.APPLY_FUNDING, commandId,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 94,
+        "target": "funding.executeApplyFunding"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "SETTLE_INSTRUMENT",
+      "family": "到期结算",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/ExpiringContractSettlementFanoutService.java",
+          "line": 68,
+          "code": "CoreResponse response = aeron.command(CoreMessageType.SETTLE_INSTRUMENT, commandId, 0,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/maintenance/service/MaintenanceService.java",
+          "line": 226,
+          "code": "var response = core.command(CoreMessageType.SETTLE_INSTRUMENT,stable(task,stored.key()),0,action.commandPayload());"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "EXECUTE_LIQUIDATION",
+      "family": "强平",
+      "external_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationAeronGateway.java",
+          "line": 144,
+          "code": "return clients.commandAsync(CoreMessageType.EXECUTE_LIQUIDATION,"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationAeronGateway.java",
+          "line": 167,
+          "code": "return clients.command(CoreMessageType.EXECUTE_LIQUIDATION, commandId, action.userId(),"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "RESOLVE_LIQUIDATION",
+      "family": "强平",
+      "external_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/service/InsuranceService.java",
+          "line": 142,
+          "code": "aeron.command(CoreMessageType.RESOLVE_LIQUIDATION, commandId,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 96,
+        "target": "liquidations.executeResolveLiquidation"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "CONTINUE_RISK_SCAN",
+      "family": "风险扫描",
+      "external_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationAeronGateway.java",
+          "line": 81,
+          "code": "var response = clients.command(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(), 0,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 97,
+        "target": "risk.executeContinueRiskScan"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "UPDATE_POSITION_MODE",
+      "family": "持仓设置",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 112,
+          "code": "aeron.command(CoreMessageType.UPDATE_POSITION_MODE, commandId, request.userId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 101,
+        "target": "positions.executeUpdatePositionMode"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "ADJUST_POSITION_MARGIN",
+      "family": "持仓设置",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 122,
+          "code": "aeron.command(CoreMessageType.ADJUST_POSITION_MARGIN, commandId, request.userId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 102,
+        "target": "positions.executeAdjustPositionMargin"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "ADJUST_INSURANCE_FUND",
+      "family": "保险基金",
+      "external_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/service/InsuranceService.java",
+          "line": 92,
+          "code": "aeron.command(CoreMessageType.ADJUST_INSURANCE_FUND, commandId,"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/insurance/provider/service/InsuranceService.java",
+          "line": 108,
+          "code": "aeron.command(CoreMessageType.ADJUST_INSURANCE_FUND, commandId,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 103,
+        "target": "insurance.executeAdjustInsuranceFund"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "EXECUTE_ADL",
+      "family": "自动减仓",
+      "external_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/service/AdlAeronGateway.java",
+          "line": 48,
+          "code": "var response = clients.command(CoreMessageType.EXECUTE_ADL, commandId, 0, payload);"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 95,
+        "target": "adl.executeExecuteAdl"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "UPDATE_LEVERAGE",
+      "family": "持仓设置",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/LeverageService.java",
+          "line": 57,
+          "code": "aeron.command(CoreMessageType.UPDATE_LEVERAGE, commandId, request.userId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 104,
+        "target": "leverage.executeUpdateLeverage"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "UPSERT_ALGO_ORDER",
+      "family": "算法单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java",
+          "line": 43,
+          "code": "aeron.command(CoreMessageType.UPSERT_ALGO_ORDER, commandId, record.userId(), CoreAlgoOrderCodec.encode(view));"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java",
+          "line": 51,
+          "code": "boolean applied = aeron.tryCommand(CoreMessageType.UPSERT_ALGO_ORDER, UUID.randomUUID(), claimed.userId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 105,
+        "target": "triggers.executeUpsertAlgoOrder"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "UPDATE_CANCEL_ALL_AFTER",
+      "family": "延时全撤",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java",
+          "line": 62,
+          "code": "aeron.command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, commandId(command), userId,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java",
+          "line": 71,
+          "code": "return aeron.tryCommand(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, UUID.randomUUID(), userId,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 106,
+        "target": "triggers.executeUpdateCancelAllAfter"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "PLACE_TRIGGER_ORDER",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 59,
+          "code": "CoreResponse response = command(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 66,
+          "code": "return commandAsync(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 108,
+        "target": "triggers.executePlaceTriggerOrder"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "CANCEL_TRIGGER_ORDER",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 128,
+          "code": "public void cancel(long userId, long id) { command(CoreMessageType.CANCEL_TRIGGER_ORDER, cancellationCommandId(userId, id), userId, CoreTriggerOrderCodec.encodeId(id)); }"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 130,
+          "code": "return commandAsync(CoreMessageType.CANCEL_TRIGGER_ORDER, cancellationCommandId(userId, id),"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/maintenance/service/MaintenanceService.java",
+          "line": 208,
+          "code": "var response = core.command(CoreMessageType.CANCEL_TRIGGER_ORDER,stable(task,stored.key()),action.userId(),action.commandPayload());"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 109,
+        "target": "triggers.executeCancelTriggerOrder"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "CLAIM_TRIGGER_ORDER",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 133,
+          "code": "public void claim(long id, long sequence, long price, long at) { command(CoreMessageType.CLAIM_TRIGGER_ORDER, stable(\"TRIGGER_CLAIM:\" + id + ':' + sequence), 0, CoreTriggerOrderCodec.encodeClaim(id, sequence, price, at)); }"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 110,
+        "target": "triggers.executeClaimTriggerOrder"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "COMPLETE_TRIGGER_ORDER",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 135,
+          "code": "public void complete(long id, boolean success, long placedOrderId, String reason, long at) { command(CoreMessageType.COMPLETE_TRIGGER_ORDER, stable(\"TRIGGER_COMPLETE:\" + id + ':' + placedOrderId), 0, CoreTriggerOrderCodec.encodeComplete(id, success, placedOrderId, reason, at)); }"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 111,
+        "target": "triggers.executeCompleteTriggerOrder"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "UPDATE_TRIGGER_TRAILING",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 137,
+          "code": "command(CoreMessageType.UPDATE_TRIGGER_TRAILING, stable(\"TRIGGER_TRAILING:\" + id + ':' + highest + ':' + lowest),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 112,
+        "target": "triggers.executeUpdateTriggerTrailing"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "EXPIRE_TRIGGER_ORDER",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 141,
+          "code": "command(CoreMessageType.EXPIRE_TRIGGER_ORDER, stable(\"TRIGGER_EXPIRE:\" + id + ':' + expiredAt), 0,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 113,
+        "target": "triggers.executeExpireTriggerOrder"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "RETRY_TRIGGER_ORDER",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 145,
+          "code": "command(CoreMessageType.RETRY_TRIGGER_ORDER, stable(\"TRIGGER_RETRY:\" + id + ':' + retryAt), 0,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 114,
+        "target": "triggers.executeRetryTriggerOrder"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "EXECUTE_TRIGGER_ORDER",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 134,
+          "code": "public void execute(long id, long sequence, long price, long at) { command(CoreMessageType.EXECUTE_TRIGGER_ORDER, stable(\"TRIGGER_EXECUTE:\" + id + ':' + sequence), 0, CoreTriggerOrderCodec.encodeExecute(id, sequence, price, at)); }"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 115,
+        "target": "triggers.executeExecuteTriggerOrder"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "EXECUTE_LIQUIDATION_BATCH",
+      "family": "强平",
+      "external_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationAeronGateway.java",
+          "line": 64,
+          "code": "var response = clients.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, commandId, 0,"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "PLACE_ORDER_BATCH",
+      "family": "普通与批量订单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 228,
+          "code": "CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.PLACE_ORDER_BATCH, commandId, userId,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 251,
+          "code": "return aeron.commandOutcomeAsync(CoreMessageType.PLACE_ORDER_BATCH, commandId, userId, payload)"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "CANCEL_ORDER_BATCH",
+      "family": "普通与批量订单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 312,
+          "code": "CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.CANCEL_ORDER_BATCH, commandId, userId,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 330,
+          "code": "return aeron.commandOutcomeAsync(CoreMessageType.CANCEL_ORDER_BATCH, commandId, userId, payload)"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "AMEND_ORDER_BATCH",
+      "family": "普通与批量订单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 273,
+          "code": "CoreCommandOutcome outcome = aeron.commandOutcome(CoreMessageType.AMEND_ORDER_BATCH, commandId, userId,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java",
+          "line": 297,
+          "code": "return aeron.commandOutcomeAsync(CoreMessageType.AMEND_ORDER_BATCH, commandId, userId, payload)"
+        }
+      ],
+      "route": {
+        "target": "MatchingCommandAdmission / CoreMatchingFlow"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "UPDATE_RISK_SCAN_CONTROL",
+      "family": "风险扫描",
+      "external_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskAeronGateway.java",
+          "line": 65,
+          "code": "var response = clients.command(CoreMessageType.UPDATE_RISK_SCAN_CONTROL,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 98,
+        "target": "risk.executeUpdateRiskScanControl"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "UPSERT_FEE_POLICY",
+      "family": "手续费策略",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/FeePolicyCoreImporter.java",
+          "line": 35,
+          "code": "aeron.command(CoreMessageType.UPSERT_FEE_POLICY, commandId, policy.userId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 100,
+        "target": "fees.executeUpsertFeePolicy"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "TRANSFER_OUT",
+      "family": "余额与划转",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 77,
+          "code": "aeron.command(CoreMessageType.TRANSFER_OUT, transferCommandId(\"out\", request), request.userId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 89,
+        "target": "balances.executeTransferOut"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "TRANSFER_IN",
+      "family": "余额与划转",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 84,
+          "code": "aeron.command(CoreMessageType.TRANSFER_IN, transferCommandId(\"in\", request), request.recipientUserId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 90,
+        "target": "balances.executeTransferIn"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "COMPLETE_TRANSFER",
+      "family": "余额与划转",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 91,
+          "code": "aeron.command(CoreMessageType.COMPLETE_TRANSFER, transferCommandId(\"complete\", request), request.userId(),"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 91,
+        "target": "balances.executeCompleteTransfer"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "UPDATE_INSTRUMENT_MAINTENANCE",
+      "family": "标的与维护",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/maintenance/service/MaintenanceService.java",
+          "line": 256,
+          "code": "core.command(CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,stable(task,\"closed\"),0,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/maintenance/service/MaintenanceService.java",
+          "line": 268,
+          "code": "var outcome=core.commandOutcome(CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 99,
+        "target": "instruments.executeUpdateInstrumentMaintenance"
+      },
+      "review_status": "producer_and_route_mapped"
+    },
+    {
+      "operation": "PLACE_TRIGGER_OCO_PAIR",
+      "family": "条件单",
+      "external_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java",
+          "line": 73,
+          "code": "return CoreTriggerOrderCodec.decodeList(command(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, id,"
+        }
+      ],
+      "route": {
+        "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+        "line": 107,
+        "target": "triggers.executePlaceTriggerOcoPair"
+      },
+      "review_status": "producer_and_route_mapped"
+    }
+  ],
+  "record_contract_inventory": {
+    "ContinueRiskScanCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ContinueRiskScanCommand.java",
+      "fields": [
+        "maxUsers"
+      ]
+    },
+    "SettleInstrumentCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/SettleInstrumentCommand.java",
+      "fields": [
+        "settlementId",
+        "instrumentId",
+        "settlementPriceTicks",
+        "optionCashUnitsPerContract",
+        "cursorUserId",
+        "maxUsers",
+        "cursorOrderId",
+        "maxOrders"
+      ]
+    },
+    "AdjustPositionMarginCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/AdjustPositionMarginCommand.java",
+      "fields": [
+        "instrumentId",
+        "marginMode",
+        "positionSide",
+        "amountUnits"
+      ]
+    },
+    "CoreCancelAllAfterCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterCommand.java",
+      "fields": [
+        "action",
+        "userId",
+        "symbolScope",
+        "countdownMillis",
+        "triggerAtEpochMillis",
+        "expectedRevision",
+        "canceledOrders",
+        "canceledTriggerOrders",
+        "updatedAtEpochMillis"
+      ]
+    },
+    "ExecuteLiquidationBatchCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ExecuteLiquidationBatchCommand.java",
+      "fields": [
+        "actions",
+        "maxCancelOrders",
+        "liquidationFeeRatePpm",
+        "riskScanContinuation",
+        "maxRiskScanUsers"
+      ]
+    },
+    "ApplyMarkPriceCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ApplyMarkPriceCommand.java",
+      "fields": [
+        "instrumentId",
+        "markPriceTicks",
+        "indexPriceTicks",
+        "forwardPriceTicks",
+        "priceSequence",
+        "generatedAtEpochMillis",
+        "lastPriceTicks"
+      ]
+    },
+    "CompleteTransferCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CompleteTransferCommand.java",
+      "fields": [
+        "transferId"
+      ]
+    },
+    "TransferFundsCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TransferFundsCommand.java",
+      "fields": [
+        "transferId",
+        "sourceProductLine",
+        "targetProductLine",
+        "sourceAccountType",
+        "targetAccountType",
+        "asset",
+        "amountUnits",
+        "referenceId",
+        "reason",
+        "sourceUserId",
+        "targetUserId"
+      ]
+    },
+    "UpdateRiskScanControlCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/UpdateRiskScanControlCommand.java",
+      "fields": [
+        "expectedVersion",
+        "ruleName",
+        "enabled",
+        "scanDelayMs",
+        "scanBatchSize",
+        "adminUserId",
+        "reason"
+      ]
+    },
+    "UpdatePositionModeCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/UpdatePositionModeCommand.java",
+      "fields": [
+        "positionMode"
+      ]
+    },
+    "RegisterInstrumentCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/RegisterInstrumentCommand.java",
+      "fields": [
+        "instrumentId",
+        "contractTypeCode",
+        "baseAsset",
+        "quoteAsset",
+        "settleAsset",
+        "notionalMultiplierUnits",
+        "priceTickUnits",
+        "settleScaleUnits",
+        "initialMarginRatePpm",
+        "maintenanceMarginRatePpm",
+        "makerFeeRatePpm",
+        "takerFeeRatePpm",
+        "expiryEpochMillis",
+        "optionTypeCode",
+        "strikePriceTicks",
+        "maxLeveragePpm",
+        "maxPositionNotionalUnits",
+        "userOpenInterestLimitRatePpm",
+        "userOpenInterestLimitFloorUnits",
+        "riskLimitBrackets",
+        "instrumentStatusCode",
+        "marketOrderEnabled",
+        "postOnlyEnabled",
+        "reduceOnlyEnabled",
+        "supportedOrderTypeMask",
+        "supportedTimeInForceMask",
+        "quantityStepUnits",
+        "orderProtection"
+      ]
+    },
+    "ExecuteLiquidationCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ExecuteLiquidationCommand.java",
+      "fields": [
+        "liquidationId",
+        "triggerPriceSequence",
+        "executionPriceTicks",
+        "liquidationFeeRatePpm",
+        "cursorOrderId",
+        "maxOrders"
+      ]
+    },
+    "ApplyFundingCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ApplyFundingCommand.java",
+      "fields": [
+        "settlementId",
+        "instrumentId",
+        "fundingRatePpm",
+        "cursorUserId",
+        "maxUsers"
+      ]
+    },
+    "ResolveLiquidationCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ResolveLiquidationCommand.java",
+      "fields": [
+        "liquidationId",
+        "resolution",
+        "coveredUnits"
+      ]
+    },
+    "UpsertFeePolicyCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/UpsertFeePolicyCommand.java",
+      "fields": [
+        "policyId",
+        "policyRevision",
+        "userId",
+        "instrumentId",
+        "makerFeeRatePpm",
+        "takerFeeRatePpm",
+        "sourcePriority",
+        "active",
+        "effectiveFromEpochMillis",
+        "expireAtEpochMillis"
+      ]
+    },
+    "BalanceAdjustmentCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/BalanceAdjustmentCommand.java",
+      "fields": [
+        "asset",
+        "deltaUnits"
+      ]
+    },
+    "AdjustInsuranceFundCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/AdjustInsuranceFundCommand.java",
+      "fields": [
+        "asset",
+        "deltaUnits"
+      ]
+    },
+    "UpdateLeverageCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/UpdateLeverageCommand.java",
+      "fields": [
+        "instrumentId",
+        "marginMode",
+        "leveragePpm",
+        "repriceCrossMargin"
+      ]
+    },
+    "ExecuteAdlCommand": {
+      "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ExecuteAdlCommand.java",
+      "fields": [
+        "liquidationId",
+        "targetUserId",
+        "instrumentId",
+        "marginMode",
+        "positionSide",
+        "expectedSignedQuantitySteps",
+        "expectedEntryPriceTicks",
+        "markPriceSequence",
+        "closeQuantitySteps",
+        "coveredUnits"
+      ]
+    }
+  },
+  "findings": [
+    {
+      "id": "A01",
+      "status": "confirmed",
+      "topic": "算法单复制命令包含不参与状态转换的查询统计",
+      "operations": [
+        "UPSERT_ALGO_ORDER"
+      ],
+      "fields": [
+        "executedQuantitySteps",
+        "activeQuantitySteps",
+        "activeChildOrderCount"
+      ],
+      "wire_bytes_per_command": 20,
+      "evidence": [
+        "CoreAlgoOrderCodec.write 将三字段写入报文",
+        "CoreAlgoOrderState.from 不读取三字段",
+        "CoreAlgoOrderView 构造器仍对其作非负校验"
+      ],
+      "next": "收敛命令输入与查询响应编解码，查询统计继续保留在响应；先核对历史复制日志的解码版本。"
+    },
+    {
+      "id": "A02",
+      "status": "confirmed",
+      "topic": "触发单创建输入费率被权威标的费率覆盖",
+      "operations": [
+        "PLACE_TRIGGER_ORDER",
+        "PLACE_TRIGGER_OCO_PAIR"
+      ],
+      "fields": [
+        "makerFeeRatePpm",
+        "takerFeeRatePpm"
+      ],
+      "wire_bytes_per_leg": 16,
+      "evidence": [
+        "TriggerOrderService.prepareTriggerOrder 发送两项零值",
+        "CoreTriggerOrderCodec.writeState 编码两项费率",
+        "RuntimeTriggerOrderStateTransitions.preparePlacement 先 from(view,instrument) 再 withExecutionSnapshot(instrument 的费率)"
+      ],
+      "next": "移除创建命令中的费率及其输入约束，保留落地状态中真正用于子单执行和查询的费率快照。"
+    },
+    {
+      "id": "A03",
+      "status": "confirmed",
+      "topic": "固定 CoreRoute 被每条消息重复编码和校验",
+      "operations": "all",
+      "fields": [
+        "route.shardCode",
+        "route.version"
+      ],
+      "wire_bytes_per_message": 3,
+      "evidence": [
+        "CoreRoute 只有 DEFAULT(0,3)",
+        "CoreMessageCodec.encodeHeader 在 byte11 和 byte14..15 编码路由",
+        "服务端仅解码并校验固定路由；业务路由按用户和币对及 LaneTopology 决定"
+      ],
+      "next": "与协议 schemaVersion 一起收敛，检查所有客户端、解码器、指纹及历史日志格式；不另加路由兼容层。"
+    },
+    {
+      "id": "A04",
+      "status": "confirmed",
+      "topic": "message kind 与 messageType.kind 一一对应",
+      "operations": "all",
+      "fields": [
+        "kind"
+      ],
+      "wire_bytes_per_message": 1,
+      "evidence": [
+        "CoreMessageHeader.assign 强制 messageType.kind()==kind",
+        "CoreMessageCodec.encodeHeader 同时写 kind 和 messageType"
+      ],
+      "next": "评估从 messageType 推导 kind，清理对应重复字段及约束；需统一协议升级。"
+    },
+    {
+      "id": "A05",
+      "status": "confirmed",
+      "topic": "VERIFY_STATE_HASH 没有状态哈希验证行为",
+      "operations": [
+        "VERIFY_STATE_HASH"
+      ],
+      "evidence": [
+        "TradingCoreRuntime.applyDirectCommand 对此类型直接设置 APPLIED",
+        "未发现外部生产业务发送方；测试使用其推进序号和结果窗口"
+      ],
+      "next": "删除无实际业务职责的命令及生产分支，测试使用真实业务夹具；不要新增测试专用生产入口。"
+    },
+    {
+      "id": "A06",
+      "status": "candidate",
+      "topic": "部署容量被固化进恢复契约",
+      "fields": [
+        "matcherWindowSize",
+        "matchingCompletionCapacity",
+        "accountLaneQueueCapacity"
+      ],
+      "evidence": [
+        "SectionedCoreSnapshotWriter.header 和 MatcherSnapshotCodec.encode 均写入三项容量",
+        "TradingCoreRuntime 恢复使用 matcherSnapshot.topology()",
+        "CoreSnapshotLifecycle 在捕获前要求无未完成命令、Lane/Matcher 工作及补丁"
+      ],
+      "next": "核对快照恢复、回放和多节点配置一致性后，把纯队列容量留在部署配置；账户路由数量和种子继续属于恢复状态。"
+    },
+    {
+      "id": "A07",
+      "status": "candidate",
+      "topic": "快照外层与 Matcher 段重复保存完整拓扑",
+      "evidence": [
+        "SectionedCoreSnapshotWriter.header 写八项拓扑",
+        "MatcherSnapshotCodec.encode 再写相同八项",
+        "SectionedCoreSnapshotValidation.validatePairing 对两份 topology 作 equals 校验"
+      ],
+      "next": "检查 manifest、独立 Matcher 快照及恢复消费者，选择唯一拓扑来源；不能直接删除路由映射。"
+    },
+    {
+      "id": "A08",
+      "status": "candidate",
+      "topic": "候选终态表只从旧快照恢复并再次保存",
+      "fields": [
+        "TerminalStateRetention.candidates",
+        "TerminalStateRetention.candidateLookupKey"
+      ],
+      "evidence": [
+        "accept 和 acceptBatch 只写 tombstones",
+        "decode 恢复 candidates，encode 再写 candidates",
+        "orderIdInUse 仍读取恢复候选，不能当作无读取字段删除"
+      ],
+      "next": "明确历史候选如何退出保留；连同格式处理和旧订单身份约束一起分析，保留长期资金幂等索引。"
+    },
+    {
+      "id": "A09",
+      "status": "confirmed",
+      "topic": "保险基金复用缓存从未回填",
+      "fields": [
+        "DirectCommandSlot.reusableInsuranceAdjustment"
+      ],
+      "evidence": [
+        "字段只有声明与读取方法",
+        "InsuranceFundCommands.prepare 使用缓存但没有保存返回工作",
+        "因此此字段始终为 null，复用分支对在线入口无效"
+      ],
+      "next": "移除假缓存及无效参数分支，或在原槽内建立真实且遵守 scopeClosed 的复用；不增加新的工作注册表。"
+    },
+    {
+      "id": "A10",
+      "status": "confirmed",
+      "topic": "账本工作子类与基类重复持有同一运行时",
+      "fields": [
+        "SystemLedgerCommand.runtime",
+        "七个直接业务子类的 runtime"
+      ],
+      "evidence": [
+        "fresh classfiles 显示 FundingWork、AdlWork、ResolutionWork、ExecutionWork、BatchFinancialWork、SettlementWork、AdjustmentWork 各声明 runtime",
+        "基类 initializeLedgerCommand 已绑定同一运行时"
+      ],
+      "next": "逐个核对构造到首次 initialize 的可见性和清理边界，复用基类唯一引用；不能把不同阶段完成位合并。"
+    },
+    {
+      "id": "A11",
+      "status": "candidate",
+      "topic": "只读查询也经 Cluster offer 进入复制回调",
+      "evidence": [
+        "AeronClientPool.queryRequest 构造查询消息",
+        "SurprisingAeronClient.offerToCluster 对所有消息调用 cluster.offer",
+        "AeronTradingClusterService.onSessionMessage 接受 QUERY 并转交 Owner"
+      ],
+      "next": "按查询一致性要求区分读屏障与普通读，核对回放时查询工作；不是把查询字段直接删掉或跨线程读取账户。"
+    },
+    {
+      "id": "A12",
+      "status": "confirmed",
+      "topic": "延时全撤命令包含当前动作不读取的参数和约束",
+      "operations": [
+        "UPDATE_CANCEL_ALL_AFTER"
+      ],
+      "fields": [
+        "SET: expectedRevision/canceledOrders/canceledTriggerOrders",
+        "CLAIM/RETRY: countdownMillis/triggerAtEpochMillis/canceledOrders/canceledTriggerOrders",
+        "COMPLETE: countdownMillis/triggerAtEpochMillis"
+      ],
+      "evidence": [
+        "编码器对所有动作写全部字段，构造器对无关字段也做非负校验。",
+        "状态机 SET 不使用版本及撤单统计；CLAIM/RETRY 不使用命令倒计时、触发时间、撤单统计；COMPLETE 不使用命令倒计时和触发时间。"
+      ],
+      "wire_bytes_avoidable": {
+        "SET": 16,
+        "CLAIM": 24,
+        "RETRY": 24,
+        "COMPLETE": 16
+      },
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.java",
+          "line": 16,
+          "anchor": "public static byte[] encodeCommand"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java",
+          "line": 37,
+          "anchor": "switch (command.action())"
+        }
+      ],
+      "next": "按动作收窄输入和校验；保留归属、版本、到期及已认领状态检查，不改变业务时间来源。"
+    },
+    {
+      "id": "A13",
+      "status": "confirmed",
+      "topic": "逐仓保证金调整命令的模式恒定为 ISOLATED",
+      "operations": [
+        "ADJUST_POSITION_MARGIN"
+      ],
+      "fields": [
+        "AdjustPositionMarginCommand.marginMode"
+      ],
+      "wire_bytes_per_command": 4,
+      "evidence": [
+        "处理器拒绝一切非 ISOLATED 输入；成功命令只有一个合法模式值。",
+        "持仓模式仍用于核对真实逐仓持仓，不能删除业务限制。"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.java",
+          "line": 282,
+          "anchor": "static long positionMarginKey"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java",
+          "line": 199,
+          "anchor": "public static byte[] encodeAdjustPositionMargin"
+        }
+      ],
+      "next": "内部命令省去固定模式，持仓检查使用 ISOLATED；外部 API 若保留此参数，继续在边界拒绝非逐仓值。"
+    },
+    {
+      "id": "A14",
+      "status": "confirmed",
+      "topic": "快照 Map 独立键与正文中可重建的身份重复落地",
+      "operations": [],
+      "fields": [
+        "用户/订单/算法单主键与正文 ID",
+        "余额/预留/持仓的键与正文身份",
+        "风险估值的复合字符串键与正文身份"
+      ],
+      "evidence": [
+        "writeMap 为每项分别编码 key/value，而对应正文已保存同一身份。",
+        "风险估值恢复忽略映射键，从正文用户、合约、方向重建持仓身份。",
+        "财库资产到金额、杠杆复合键到标量等映射不能由正文重建键，不属于删除范围。"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 142,
+          "anchor": "private static <K, V> byte[] writeMap"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java",
+          "line": 137,
+          "anchor": "source.riskState().snapshots().forEach"
+        }
+      ],
+      "next": "按具体类型保存正文列表，恢复时派生键并检查唯一性；保留运行时索引，不机械改所有 Map。"
+    },
+    {
+      "id": "A15",
+      "status": "confirmed",
+      "topic": "原生风险引擎只能为零，仍保留可配置数量及持久化元数据",
+      "operations": [],
+      "fields": [
+        "CoreConfiguration.riskEngines",
+        "LaneTopology.riskEngineCount",
+        "MatcherSnapshot 原生 RISK_ENGINE 分支"
+      ],
+      "evidence": [
+        "每分片固定启动 MATCHING_ONLY SynchronousMatchingEngine。",
+        "当前依赖的原生构造器强制 matcher=1 且 risk engines=0，非零配置不能启动。",
+        "Account Lane 的实际风险扫描有业务用途，不属于此项删除范围。"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.java",
+          "line": 1966,
+          "anchor": "private void startShard"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/config/LaneTopology.java",
+          "line": 10,
+          "anchor": "riskEngineCount"
+        }
+      ],
+      "dependency_evidence": {
+        "artifact": "exchange.core2:exchange-core:0.5.18-emporia",
+        "source_jar": "~/.m2/repository/exchange/core2/exchange-core/0.5.18-emporia/exchange-core-0.5.18-emporia-sources.jar",
+        "file": "exchange/core2/core/SynchronousMatchingEngine.java",
+        "line": 53,
+        "requirement": "matchingEnginesNum == 1 && riskEnginesNum == 0"
+      },
+      "next": "调用原生引擎时固定零值，移除无效公开配置及快照字段/分支，保留服务自身的真实风控。"
+    },
+    {
+      "id": "A16",
+      "status": "confirmed",
+      "topic": "来源水位快照条目保存恒零保留位并仅验证其为零",
+      "operations": [],
+      "fields": [
+        "source sequence reserved int"
+      ],
+      "snapshot_bytes_per_entry": 4,
+      "evidence": [
+        "来源条目写 source code、reserved=0、sourceId、sequence。",
+        "读取方只检查 reserved==0，无其他业务消费。"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotWriter.java",
+          "line": 229,
+          "anchor": "private static byte[] sources"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotParser.java",
+          "line": 153,
+          "anchor": "invalid snapshot source reserved field"
+        }
+      ],
+      "next": "修改快照布局时删除恒零字段，保留真实来源身份和已消费水位。"
+    },
+    {
+      "id": "A17",
+      "status": "confirmed",
+      "topic": "资金费和到期结算全局分页保留无用 Lane 进度",
+      "operations": [
+        "APPLY_FUNDING",
+        "SETTLE_INSTRUMENT"
+      ],
+      "fields": [
+        "UserIndexPage.accountLaneId",
+        "RuntimeLifecycleSettlement.UserPage/OrderPage.accountLaneId",
+        "FundingProgressRuntime/FundingProgress.accountLaneId",
+        "LifecycleProgressRuntime/LifecycleProgress.accountLaneId",
+        "selectUsers/selectOrders 未使用的 runtime/identities/startLaneId 参数"
+      ],
+      "evidence": [
+        "UserIndexPage.select 所有分支固定 Lane=0。",
+        "生命周期用户和订单分别按全局用户索引、全局活动订单索引分页，不使用 startLaneId，两种 Page 均返回零 Lane。",
+        "续页进度仍搬运该值，快照保存为 Funding 字段 3 和 Lifecycle 字段 5，构造器还检查 0..63。",
+        "真实账户派发仍按 topology.accountLaneId(userId) 分组，该路由必须保留。"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/UserIndexPage.java",
+          "line": 21,
+          "anchor": "public static UserIndexPage select"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java",
+          "line": 384,
+          "anchor": "static UserPage selectUsers"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java",
+          "line": 402,
+          "anchor": "static OrderPage selectOrders"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 879,
+          "anchor": "private static byte[] writeFundingProgress"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 911,
+          "anchor": "private static byte[] writeLifecycleProgress"
+        }
+      ],
+      "next": "沿页对象、运行时/冷状态进度、物化、恢复、哈希和快照统一删除；保留真实用户及订单续页游标。"
+    },
+    {
+      "id": "A18",
+      "status": "confirmed",
+      "topic": "期权到期现金输入只被保存和比较，不参与实际结算",
+      "operations": [
+        "SETTLE_INSTRUMENT"
+      ],
+      "fields": [
+        "SettleInstrumentCommand.optionCashUnitsPerContract",
+        "LifecycleProgressRuntime.optionCashUnitsPerContract",
+        "CoreTreasuryState.LifecycleProgress.optionCashUnitsPerContract"
+      ],
+      "wire_bytes_per_command": 8,
+      "evidence": [
+        "网关将行权事件的现金额复制到每页命令。",
+        "实际清算调用 lifecycleSettlementCashDeltaUnits(instrument,quantity,entry,settlementPriceTicks)。",
+        "期权规则独立按合约与结算价计算 optionSettlementCashUnits，不读取命令现金额。",
+        "字段仍写入续页进度、快照、哈希，还在两个续页准入位置比较相等，形成只维持冗余输入的限制。"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/ExpiringContractSettlementFanoutService.java",
+          "line": 47,
+          "anchor": "event.cashSettlementUnitsPerContract()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java",
+          "line": 321,
+          "anchor": "long pnl = kernel.lifecycleSettlementCashDeltaUnits"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionTradingRules.java",
+          "line": 65,
+          "anchor": "return Math.multiplyExact(OptionContractMath.optionSettlementCashUnits"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java",
+          "line": 563,
+          "anchor": "progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 915,
+          "anchor": ".number(3, value.optionCashUnitsPerContract())"
+        }
+      ],
+      "next": "删除 Core 命令、续页状态中的副本及额外比较；保留权威公式和精度。原事件现金字段对其他消费者的用途另核对，不扩大删除范围。"
+    },
+    {
+      "id": "A19",
+      "status": "confirmed",
+      "topic": "资金费与生命周期续页进度保存业务不读取的命令 UUID",
+      "operations": [
+        "APPLY_FUNDING",
+        "SETTLE_INSTRUMENT"
+      ],
+      "fields": [
+        "FundingProgressRuntime/FundingProgress.commandId",
+        "LifecycleProgressRuntime/LifecycleProgress.commandId"
+      ],
+      "evidence": [
+        "续页按结算轮次、固定业务参数和游标校验，不读取进度中的 UUID。",
+        "查询响应不返回该 UUID；生命周期源码明确说明不比较命令 UUID。",
+        "直接读取仅用于物化/恢复、快照编码和状态哈希；未用于资金去重或续页归属。",
+        "原命令头 UUID、CommandResultLedger 指纹和永久资金幂等记录具有独立用途，不属于删除范围。"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+          "line": 144,
+          "anchor": "previousProgress.settlementId() != command.settlementId()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java",
+          "line": 556,
+          "anchor": "static void validateProgress"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeOperationalQueryService.java",
+          "line": 83,
+          "anchor": "public static CoreFundingProgressView fundingProgress"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 885,
+          "anchor": ".uuid(5, value.commandId())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 920,
+          "anchor": ".uuid(8, value.commandId())"
+        }
+      ],
+      "next": "删除进度 UUID 及非空约束，统一物化/恢复/哈希；工作对象原命令 UUID 的响应和完成职责另按消费者保留。"
+    }
+  ],
+  "preserve_verified_purposes": [
+    "TransferFundsCommand 的源/目标产品和用户还被 PortfolioCashFlowRepository 用于跨产品划转前缀对账；referenceId/reason 和账户类型还用于源侧 pending transfer 的恢复重投，不能仅从入账函数判断无用。",
+    "资金费与到期结算游标对照已保存进度，避免重复收付及漏结；ADL 的持仓量、入场价和行情序号用于拒绝过期候选。",
+    "submittedAtEpochMillis 仍用于触发单 retry 的更新时间及直接冷应用，不可把它直接当作无消费时间字段删除。",
+    "SystemLedgerCommand 的阶段完成与 ScopeClose 完成是不同生命周期，影响资金校验与回滚。",
+    "费率版本、优先级、生效和到期区间参与费率选择及旧版本拒绝，冻结到订单的费率用于实际成交。",
+    "repriceCrossMargin 参与追加全仓保证金；持仓模式切换检查开放订单及持仓以维持账户语义。",
+    "维护任务身份、固定清仓价、生命周期完成与未解决强平检查防止错误释放、改价或提前关闭。",
+    "强平批次 action.userId/instrumentId 参与准入范围、Lane 路由和有序提交，不能仅根据某个准备函数不读取便删除。"
+  ],
+  "next_steps": [
+    "删除前确定旧日志/快照版本处理和生产者升级边界。",
+    "继续核对普通/批量订单、触发全状态输入、风险进度及下游投影剩余字段；入口盘点不等于全部完成。",
+    "A06/A07/A08/A11 仍为候选。",
+    "按用户要求只编译真正受影响模块，不运行测试、服务或压测。"
+  ],
+  "rejected_false_positives": [
+    {
+      "item": "算法单快照字段 20",
+      "reason": "实际写入和读取均已跳过，只有注释过时。"
+    },
+    {
+      "item": "MarkPrice 字段 7、Instrument 字段 28..33",
+      "reason": "读取使用 numberOr 等可选入口，完整比对后没有写而不读的字段 ID。"
+    },
+    {
+      "item": "scanDelayMs",
+      "reason": "网关风险扫描调度使用该值设置下一次运行时间。"
+    },
+    {
+      "item": "风险扫描标量进度与 laneProgress",
+      "reason": "标量仍用于未分派时生成 Lane 起点和轮转；列表保存各 Lane 中断进度，不能机械删除。"
+    },
+    {
+      "item": "postOnly 与 GTX",
+      "reason": "原生撮合使用 timeInForce，而 postOnly 还参与开关准入；当前并非严格等价输入，应先统一边界语义。"
+    }
+  ],
+  "cleanup_batches": [
+    {
+      "order": 1,
+      "finding_ids": [
+        "A09",
+        "A10"
+      ],
+      "scope": "内部重复引用及假缓存，核对初始化/释放边界后清理。"
+    },
+    {
+      "order": 2,
+      "finding_ids": [
+        "A17",
+        "A18",
+        "A19"
+      ],
+      "scope": "资金费/到期的命令、状态、哈希、快照和恢复整链删除，保留权威结算数据及幂等。"
+    },
+    {
+      "order": 3,
+      "finding_ids": [
+        "A01",
+        "A02",
+        "A12",
+        "A13"
+      ],
+      "scope": "收窄业务命令，更新生产者及协议，保留查询和实际状态所需字段。"
+    },
+    {
+      "order": 4,
+      "finding_ids": [
+        "A03",
+        "A04",
+        "A14",
+        "A15",
+        "A16"
+      ],
+      "scope": "协议/快照布局同步调整，核对历史日志、恢复及部署配置。"
+    },
+    {
+      "order": 5,
+      "finding_ids": [
+        "A05",
+        "A06",
+        "A07",
+        "A08",
+        "A11"
+      ],
+      "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
+    }
+  ],
+  "verification_this_analysis": {
+    "business_code_changed": false,
+    "compilation_run": false,
+    "tests_run": false,
+    "services_started": false,
+    "performance_run": false,
+    "checks": [
+      "python3 -m json.tool validation/command-data-audit-20261023.json",
+      "审计引用的文件及行号校验",
+      "git diff --check"
+    ],
+    "limits": [
+      "未执行交易、恢复、历史复制日志回放和下游落库集成。",
+      "confirmed 表示静态业务消费者证据，不表示已删除或通过运行验证。"
+    ],
+    "static_results": {
+      "command_types": 39,
+      "findings": 19,
+      "confirmed": 15,
+      "candidates": 4,
+      "new_finding_source_references_verified": 25,
+      "snapshot_pairs": 23,
+      "write_only_field_ids": {}
+    }
+  },
+  "analysis_round_status": "completed_findings_recorded; overall_audit_in_progress",
+  "temporary_resources": {
+    "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
+    "status": "removed_after_results_archived",
+    "new_temporary_services_or_files": false
+  }
+}
