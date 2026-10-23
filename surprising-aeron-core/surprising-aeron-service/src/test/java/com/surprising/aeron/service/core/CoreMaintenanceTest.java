@@ -273,7 +273,7 @@ class CoreMaintenanceTest {
         // 直接控制槽轮询使用的单调时钟五秒期限，撮合补齐另走原同步辅助
         long directDeadline = System.nanoTime() + 5_000_000_000L;
         while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
-            response = state.directCommand.poll(state);
+            response = state.directCommand.poll();
             if (response == null) Thread.onSpinWait();
         }
         if (response == null && state.directCommand.active()) {

@@ -129,10 +129,6 @@ public final class MatcherSettlementEvent implements
     private long routedLaneMask;
     /** 本代命令 UUID，供结果证据校验。 */
     private java.util.UUID directCommandId;
-    /** 命令 UUID 的高六十四位，供原语证据比较。 */
-    private long directCommandIdMsb;
-    /** 命令 UUID 的低六十四位，供原语证据比较。 */
-    private long directCommandIdLsb;
     /**  本代命令固定的 Matcher 分片。 返回本代命令固定的 Matcher 分片编号。 */
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
@@ -351,8 +347,6 @@ public final class MatcherSettlementEvent implements
         this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
         commitTimestamp = timestamp; commitClusterPosition = position;
         directCommandId = commandId;
-        directCommandIdMsb = commandId == null ? 0 : commandId.getMostSignificantBits();
-        directCommandIdLsb = commandId == null ? 0 : commandId.getLeastSignificantBits();
         directShard = shard;
         authorizedCancellations = java.util.Objects.requireNonNull(cancellations);
         this.runtime = runtime; this.identities = identities; resultTarget = target;
@@ -977,12 +971,14 @@ public final class MatcherSettlementEvent implements
         return directShard;
     }
     /**
-     * 直接比较本代保存的命令 UUID 高低位，调用方须在有效事件代次内使用。
+     * 直接读取本代命令 UUID 的高低位进行比较，调用方须在有效事件代次内使用。
      * @param most 命令 UUID 高六十四位
      * @param least 命令 UUID 低六十四位
      */
     @Override public boolean nativeMatches(long most, long least) {
-        return directCommandIdMsb == most && directCommandIdLsb == least;
+        return directCommandId == null ? most == 0 && least == 0
+                : directCommandId.getMostSignificantBits() == most
+                && directCommandId.getLeastSignificantBits() == least;
     }
     /**
      * 非空 UUID 拆成高低位后核对本代命令身份。
@@ -1074,7 +1070,6 @@ public final class MatcherSettlementEvent implements
         admissionResultCode = CoreResultCode.NONE.wireCode();
         directCoreSequence = 0;
         directCommandId = null;
-        directCommandIdMsb = directCommandIdLsb = 0;
         authorizedCancellations = java.util.List.of();
         directNativeResult = null;
         directMatcherSequence = directLastMatcherSequence = directOrderId = 0;

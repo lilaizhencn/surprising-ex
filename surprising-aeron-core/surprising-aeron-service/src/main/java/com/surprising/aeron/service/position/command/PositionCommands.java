@@ -33,7 +33,7 @@ public final class PositionCommands {
         if (owner.asynchronousCommands()) {
             // 持仓模式变更前的业务修订，交给异步完成逻辑判断是否变化
             long beforeRevision = owner.runtimeState().revision();
-            owner.directCommand.deferPositionModeChange(owner, userId, command, beforeRevision);
+            owner.directCommand.deferPositionModeChange(userId, command, beforeRevision);
         } else if (DerivativeAccountCommandProcessor.updatePositionMode(owner.runtimeState(), userId, command)) {
             owner.requestCommitPublication();
         }
@@ -50,7 +50,7 @@ public final class PositionCommands {
         // 本次解出的标的、保证金模式、持仓方向及保证金增减数量
         var command = TradingCommandCodec.decodeAdjustPositionMargin(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            owner.directCommand.deferPositionMarginAdjustment(owner, userId, command);
+            owner.directCommand.deferPositionMarginAdjustment(userId, command);
         } else {
             DerivativeAccountCommandProcessor.adjustPositionMargin(
                     owner.runtimeState(), owner.identities(), userId, command);

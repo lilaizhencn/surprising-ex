@@ -610,7 +610,7 @@ class SectionedCoreSnapshotCodecTest {
             // 余额调整直接命令等待的五秒截止点。
             long directDeadline = System.nanoTime() + 5_000_000_000L;
             while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
-                response = state.directCommand.poll(state);
+                response = state.directCommand.poll();
                 if (response == null) Thread.onSpinWait();
             }
             if (response == null && state.directCommand.active()) {

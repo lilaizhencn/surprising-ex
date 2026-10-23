@@ -156,7 +156,7 @@ public final class OrderBatchExecutor {
         // 本批新占用的 Core 序号
         long sequence = owner.nextAppliedSequence();
         // 按原序号取得或随当前项更新的命令槽
-        CommandSlot pending = owner.admissions().newPendingMatching(sequence, batch.operation, message, fingerprint, decodedCommand);
+        CommandSlot pending = owner.admissions().newPendingMatching(sequence, batch.operation(), message, fingerprint, decodedCommand);
         batch.sequence = sequence;
         owner.matchingFlow.putPendingMatching(pending);
         owner.admissions().registerPendingLifecycle(pending);
@@ -265,7 +265,7 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 检查本批能否整批准入：必须 PLACE、全部同 Matcher 分片、没有只减仓项及需要逐项 OI 判断的产品，并校验订单身份；按品种准备共享配置。已知不适用或输入失败清预备身份和判断缓存，返回假。
+     * 检查本批能否整批准入：必须 PLACE、全部同 Matcher 分片、没有只减仓项及需要逐项 OI 判断的产品，并校验订单身份；按品种准备共享配置。已知不适用或输入失败清判断缓存，返回假。
      * @param batch 本条批量命令的复用上下文
      * @param pending 本批仍占用的命令槽
      */
@@ -302,7 +302,6 @@ public final class OrderBatchExecutor {
             return true;
         } catch (/* 当前输入、准入或应用错误，按所在阶段拒绝单项、放弃流水准备或报告恢复故障 */ CoreStateRejectedException | ArithmeticException | IllegalArgumentException
                  | TradingCoreRuntime.PipelinedBatchNotApplicable exception) {
-            batch.rollbackPreparedClientKeys(owner.identities());
             batch.currentPreMatchingCancellationOrderIds = List.of();
             batch.clearPreparedDecisionCache();
             return false;
@@ -540,7 +539,7 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 收集已经完成的账户预留，登记新客户身份分配数并绑定本项账户冻结副本；保存先撤列表及可退回身份键，再请求发布。
+     * 收集已经完成的账户预留，登记新客户身份分配数并绑定本项账户冻结副本；保存先撤列表，再请求发布。
      * @param batch 本条批量命令的复用上下文
      * @param userId 本批请求用户，账户按该用户路由
      */
@@ -557,8 +556,6 @@ public final class OrderBatchExecutor {
         // 所属账户已经准备好本项持有的固定副本，Owner 只绑定其引用。
         batch.items.get(batch.nextIndex).admittedOrder = admitted;
         batch.currentPreMatchingCancellationOrderIds = work.closeCapacityCancellations();
-        batch.retainPreparedClientKey(userId, work.clientOrderId(),
-                com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.clientKeyValue(key));
         owner.commits.publication.request();
     }
 
@@ -1304,7 +1301,7 @@ public final class OrderBatchExecutor {
             PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
             // 新借、查询或当前正在处理的批次上下文
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.PLACE, command.orders().size(),
-                    clusterTimestamp, clusterPosition, CommandSlot.Operation.PLACE);
+                    clusterTimestamp, clusterPosition);
             batch.decodedCommand = decodedCommand;
             for (PlaceOrderCommand /* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value : command.orders()) {
                 batch.addItem(value.orderId(), 0, 0, value);
@@ -1316,7 +1313,7 @@ public final class OrderBatchExecutor {
             CancelOrderBatchCommand command = decodedCommand.cancelOrderBatch();
             // 新借、查询或当前正在处理的批次上下文
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.CANCEL, command.orders().size(),
-                    clusterTimestamp, clusterPosition, CommandSlot.Operation.CANCEL);
+                    clusterTimestamp, clusterPosition);
             batch.decodedCommand = decodedCommand;
             for (CancelOrderCommand /* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value : command.orders()) {
                 batch.addItem(value.orderId(), 0, 0, value);
@@ -1328,7 +1325,7 @@ public final class OrderBatchExecutor {
             AmendOrderBatchCommand command = decodedCommand.amendOrderBatch();
             // 新借、查询或当前正在处理的批次上下文
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.AMEND, command.orders().size(),
-                    clusterTimestamp, clusterPosition, CommandSlot.Operation.AMEND);
+                    clusterTimestamp, clusterPosition);
             batch.decodedCommand = decodedCommand;
             for (AmendOrderCommand /* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value : command.orders()) {
                 batch.addItem(value.replacementOrderId(), value.originalOrderId(),
@@ -1345,11 +1342,9 @@ public final class OrderBatchExecutor {
      * @param itemCount 本批需要容纳的项数量
      * @param clusterTimestamp 整批固定使用的 Cluster 业务时间
      * @param clusterPosition 整批固定使用的复制日志位置
-     * @param operation 整批共用的撮合操作
      */
     OrderBatchPending acquireOrderBatchPending(
-            OrderBatchKind kind, int itemCount, long clusterTimestamp, long clusterPosition,
-            CommandSlot.Operation operation) {
+            OrderBatchKind kind, int itemCount, long clusterTimestamp, long clusterPosition) {
         // 本次从池中取出的可空批次上下文
         OrderBatchPending selected = null;
         // Owner 批次复用池迭代器，选中足够容量的对象后移出
@@ -1363,7 +1358,7 @@ public final class OrderBatchExecutor {
             break;
         }
         if (selected == null) selected = new OrderBatchPending(itemCount, owner.responseArena());
-        return selected.initialize(kind, clusterTimestamp, clusterPosition, operation);
+        return selected.initialize(kind, clusterTimestamp, clusterPosition);
     }
 
     /**

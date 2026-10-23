@@ -1289,7 +1289,7 @@ public final class LinearPerpetualBenchmarkSupport {
                 response = state.apply(command);
                 if (response == null && state.directCommand.active()) {
                     do {
-                        response = state.directCommand.poll(state);
+                        response = state.directCommand.poll();
                     } while (response == null);
                 }
             }

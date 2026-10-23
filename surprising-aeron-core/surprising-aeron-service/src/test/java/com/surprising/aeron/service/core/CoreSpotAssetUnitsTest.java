@@ -304,7 +304,7 @@ class CoreSpotAssetUnitsTest {
         // 本辅助轮询直接控制命令的五秒单调时钟截止值
         long directDeadline = System.nanoTime() + 5_000_000_000L;
         while (result == null && runtime.directCommand.active() && System.nanoTime() < directDeadline) {
-            result = runtime.directCommand.poll(runtime);
+            result = runtime.directCommand.poll();
             if (result == null) Thread.onSpinWait();
         }
         if (result == null && runtime.directCommand.active()) {

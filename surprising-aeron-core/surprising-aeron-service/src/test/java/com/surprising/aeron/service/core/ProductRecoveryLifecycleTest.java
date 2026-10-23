@@ -241,7 +241,7 @@ class ProductRecoveryLifecycleTest {
         // 当前辅助方法直接控制续步的五秒纳秒截止点。
         long directDeadline = System.nanoTime() + 5_000_000_000L;
         while (result == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
-            result = state.directCommand.poll(state);
+            result = state.directCommand.poll();
             if (result == null) Thread.onSpinWait();
         }
         if (result == null && state.directCommand.active()) {
@@ -271,7 +271,7 @@ class ProductRecoveryLifecycleTest {
         // 当前辅助方法直接控制续步的五秒纳秒截止点。
         long directDeadline = System.nanoTime() + 5_000_000_000L;
         while (result == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
-            result = state.directCommand.poll(state);
+            result = state.directCommand.poll();
             if (result == null) Thread.onSpinWait();
         }
         if (result == null && state.directCommand.active()) {

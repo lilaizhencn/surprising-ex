@@ -370,20 +370,18 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     long clusterTimestamp;
     /** 整批原命令固定的复制日志位置。 */
     long clusterPosition;
-    /** 本批共用的撮合操作类别。 */
-    CommandSlot.Operation operation;
+    /** 批次种类唯一确定撮合操作，不另存第二份类别。 */
+    CommandSlot.Operation operation() {
+        return switch (kind) {
+            case PLACE -> CommandSlot.Operation.PLACE;
+            case CANCEL -> CommandSlot.Operation.CANCEL;
+            case AMEND -> CommandSlot.Operation.AMEND;
+        };
+    }
     /** 本批已发现的变化用户原语去重缓冲。 */
     final PrimitiveLongChangeSet changedUserIds;
     /** 本批实际变化订单原语去重缓冲，最终提交统一盖戳。 */
     final PrimitiveLongChangeSet runtimeChangedOrderIds;
-    /** 每个预备客户身份对应的用户列，只读有效前缀。 */
-    final long[] preparedClientUsers;
-    /** 预备客户身份对应的客户端订单号引用列。 */
-    final String[] preparedClientIds;
-    /** 失败时需要退回的预备客户身份键列。 */
-    final long[] preparedClientKeys;
-    /** 预备客户身份三列中的有效前缀长度。 */
-    int preparedClientKeyCount;
     /** 跨子项累积的财库差额对象，清批时清内容并保留容量。 */
     com.surprising.aeron.service.treasury.RuntimeTreasuryDelta treasuryDelta;
     /**
@@ -634,9 +632,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         itemSlots = new OrderBatchItem[capacity];
         changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
-        preparedClientUsers = new long[capacity];
-        preparedClientIds = new String[capacity];
-        preparedClientKeys = new long[capacity];
         preparedOrders = new ResolvedPlaceOrder[capacity];
         resolvedOrderSlots = new ResolvedPlaceOrder[capacity];
         preparedDecisions = new com.surprising.aeron.service.order.admission.PlaceBatchIntentSource.Decision[capacity];
@@ -649,18 +644,16 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     }
 
     /**
-     * 绑定非空批次种类和操作及原日志时间位置；只初始化这四项，其他旧结果须由上一轮 clear 清掉。
+     * 绑定非空批次种类及原日志时间位置；其他旧结果须由上一轮 clear 清掉。
      * @param kind 本批业务种类
      * @param clusterTimestamp 固定业务时间
      * @param clusterPosition 固定复制日志位置
-     * @param operation 本批共用的撮合操作
      */
     OrderBatchPending initialize(OrderBatchKind kind, long clusterTimestamp,
-                                         long clusterPosition, CommandSlot.Operation operation) {
+                                         long clusterPosition) {
         this.kind = java.util.Objects.requireNonNull(kind, "batch kind");
         this.clusterTimestamp = clusterTimestamp;
         this.clusterPosition = clusterPosition;
-        this.operation = java.util.Objects.requireNonNull(operation, "batch operation");
         return this;
     }
 
@@ -707,9 +700,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         decodedCommand = null;
         changedUserIds.clear();
         runtimeChangedOrderIds.clear();
-        java.util.Arrays.fill(preparedClientIds, 0, preparedClientKeyCount, null);
-        java.util.Arrays.fill(preparedClientKeys, 0, preparedClientKeyCount, 0);
-        preparedClientKeyCount = 0;
         if (treasuryDelta != null) treasuryDelta.clear();
 
         nextIndex = 0;
@@ -753,7 +743,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         kind = null;
         clusterTimestamp = 0;
         clusterPosition = 0;
-        operation = null;
     }
 
     /**
@@ -768,40 +757,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
                     com.surprising.aeron.service.treasury.RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
         }
         treasuryDelta.merge(delta);
-    }
-
-    /**
-     * 只登记非零预备客户身份键，同时保存用户及客户端号供失败时逆序退回；容量耗尽直接抛错。
-     * @param userId 预备客户身份所属用户
-     * @param clientOrderId 预备客户身份对应的客户端订单号
-     * @param preparedKey 预备客户身份键值，零不登记
-     */
-    void retainPreparedClientKey(
-            long userId, String clientOrderId,
-            long preparedKey) {
-        if (preparedKey != 0) {
-            if (preparedClientKeyCount >= preparedClientKeys.length) {
-                throw new IllegalStateException("prepared client key capacity is exhausted");
-            }
-            preparedClientUsers[preparedClientKeyCount] = userId;
-            preparedClientIds[preparedClientKeyCount] = clientOrderId;
-            preparedClientKeys[preparedClientKeyCount++] = preparedKey;
-        }
-    }
-
-    /**
-     * 按登记的逆序退回客户身份预备键，成功走完后清引用及有效数量；本方法不回滚余额或订单。
-     * @param identities 负责退回预备客户身份的运行时字典
-     */
-    void rollbackPreparedClientKeys(
-            com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities) {
-        for (/* 当前项槽、预备身份或 Matcher 事实的遍历下标 */ int index = preparedClientKeyCount - 1; index >= 0; index--) {
-            identities.rollbackPreparedClientKey(preparedClientUsers[index], preparedClientIds[index],
-                    preparedClientKeys[index]);
-        }
-        java.util.Arrays.fill(preparedClientIds, 0, preparedClientKeyCount, null);
-        java.util.Arrays.fill(preparedClientKeys, 0, preparedClientKeyCount, 0);
-        preparedClientKeyCount = 0;
     }
 
     /**

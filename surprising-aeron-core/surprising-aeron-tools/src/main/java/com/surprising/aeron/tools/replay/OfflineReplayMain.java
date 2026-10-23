@@ -51,7 +51,7 @@ public final class OfflineReplayMain {
                 CoreResponse response = state.apply(message, message.header().submittedAtEpochMillis(), position);
                 long directDeadline = System.nanoTime() + 30_000_000_000L;
                 while (state.directCommand.active()) {
-                    response = state.directCommand.poll(state);
+                    response = state.directCommand.poll();
                     if (System.nanoTime() >= directDeadline || Thread.currentThread().isInterrupted())
                         throw new IllegalStateException("direct command replay did not complete");
                     if (response == null) java.util.concurrent.locks.LockSupport.parkNanos(1_000L);

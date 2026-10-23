@@ -82,7 +82,7 @@ public class InstrumentPauseAdmissionBenchmark {
         CoreResponse[] result = {core.apply(message)};
         if (result[0] == null && core.directCommand.active()) {
             do {
-                result[0] = core.directCommand.poll(core);
+                result[0] = core.directCommand.poll();
             } while (result[0] == null);
         }
         long requested = core.matchingSequence(message.header().commandId());

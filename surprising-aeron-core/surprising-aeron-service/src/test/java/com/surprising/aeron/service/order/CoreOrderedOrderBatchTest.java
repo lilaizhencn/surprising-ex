@@ -1040,7 +1040,7 @@ class CoreOrderedOrderBatchTest {
             // 余额控制命令完成响应，未齐时继续轮询原槽
             var adjustResponse = state.apply(adjust);
             while (adjustResponse == null && state.directCommand.active()) {
-                adjustResponse = state.directCommand.poll(state);
+                adjustResponse = state.directCommand.poll();
                 if (adjustResponse == null) Thread.onSpinWait();
             }
             assertThat(adjustResponse.status()).isEqualTo(ResponseStatus.APPLIED);
@@ -1784,7 +1784,7 @@ class CoreOrderedOrderBatchTest {
                 // 当前场景要推进的原批量消息
                 var batch = state.batches().acquireOrderBatchPending(
                         com.surprising.aeron.service.order.command.OrderBatchKind.AMEND,
-                        1, 2_000, 3, CommandSlot.Operation.AMEND);
+                        1, 2_000, 3);
                 batch.sequence = 1_000;
                 // 当前待测的批量改单消息或其单项输入
                 var amend = new AmendOrderCommand(13_201, 13_202, "lane-amend", 900L, 1L, CoreTimeInForce.GTC, false);
@@ -1811,7 +1811,7 @@ class CoreOrderedOrderBatchTest {
                 // 本场景预期被拒绝的输入、Core 响应或批次，具体角色见所在方法
                 var rejected = state.batches().acquireOrderBatchPending(
                         com.surprising.aeron.service.order.command.OrderBatchKind.AMEND,
-                        1, 2_001, 4, CommandSlot.Operation.AMEND);
+                        1, 2_001, 4);
                 rejected.sequence = 1_001;
                 rejected.addItem(13_203, 13_201, 13_203, new AmendOrderCommand(
                         13_201, 13_203, "unaffordable-lane", 1_100L, 1L, CoreTimeInForce.GTC, false));
@@ -1964,7 +1964,7 @@ class CoreOrderedOrderBatchTest {
                     // 只含自有订单的临时撤单批次
                     var own = state.batches().acquireOrderBatchPending(
                             com.surprising.aeron.service.order.command.OrderBatchKind.CANCEL,
-                            1, 2_000, 5, CommandSlot.Operation.CANCEL);
+                            1, 2_000, 5);
                     own.addItem(13_101, 0, 0, new CancelOrderCommand(13_101));
                     state.batches().validateOrderBatchIdentity(own, 1001);
                     state.batches().prepareOrderBatchItem(own, own.items.getFirst(), 1001, UUID.randomUUID());
@@ -1973,7 +1973,7 @@ class CoreOrderedOrderBatchTest {
                     // 混入其他用户订单的临时撤单批次
                     var foreign = state.batches().acquireOrderBatchPending(
                             com.surprising.aeron.service.order.command.OrderBatchKind.CANCEL,
-                            2, 2_000, 5, CommandSlot.Operation.CANCEL);
+                            2, 2_000, 5);
                     foreign.addItem(13_101, 0, 0, new CancelOrderCommand(13_101));
                     foreign.addItem(13_102, 0, 0, new CancelOrderCommand(13_102));
                     assertThatThrownBy(() -> state.batches().validateOrderBatchIdentity(foreign, 1001))
@@ -1984,7 +1984,7 @@ class CoreOrderedOrderBatchTest {
                     // 当前待测的批量改单消息或其单项输入
                     var amend = state.batches().acquireOrderBatchPending(
                             com.surprising.aeron.service.order.command.OrderBatchKind.AMEND,
-                            1, 2_000, 5, CommandSlot.Operation.AMEND);
+                            1, 2_000, 5);
                     amend.addItem(13_103, 13_102, 13_103, new Object());
                     assertThatThrownBy(() -> state.batches().validateOrderBatchIdentity(amend, 1001))
                             .isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
@@ -1994,7 +1994,7 @@ class CoreOrderedOrderBatchTest {
                     // 只含缺失订单的临时撤单批次
                     var missing = state.batches().acquireOrderBatchPending(
                             com.surprising.aeron.service.order.command.OrderBatchKind.CANCEL,
-                            1, 2_000, 5, CommandSlot.Operation.CANCEL);
+                            1, 2_000, 5);
                     missing.addItem(999_999, 0, 0, new CancelOrderCommand(999_999));
                     state.batches().validateOrderBatchIdentity(missing, 1001);
                     assertThatThrownBy(() -> state.batches().prepareOrderBatchItem(

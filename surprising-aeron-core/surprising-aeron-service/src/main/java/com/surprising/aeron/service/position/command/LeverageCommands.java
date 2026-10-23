@@ -34,7 +34,7 @@ public final class LeverageCommands {
         if (owner.asynchronousCommands()) {
             // 交接异步控制前的业务修订，用于完成时识别是否发生状态变化
             long beforeRevision = owner.runtimeState().revision();
-            owner.directCommand.deferLeverageChange(owner, userId, command, beforeRevision);
+            owner.directCommand.deferLeverageChange(userId, command, beforeRevision);
         } else if (DerivativeAccountCommandProcessor.updateLeverage(
                 owner.runtimeState(), owner.identities(), userId, command)) {
             owner.requestCommitPublication();

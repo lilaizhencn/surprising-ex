@@ -145,7 +145,6 @@ public final class MatchingPipelineProgress {
                         orderBatch.placeBatchAdmissionEvent = null;
                         owner.batches().unregisterPipelinedBatchSymbols(orderBatch);
                         orderBatch.clearPreparedDecisionCache();
-                        orderBatch.rollbackPreparedClientKeys(owner.identities());
                         orderBatch.pipelined = false;
                         orderBatch.sequentialAdmission = true;
                         // 只有一项时，Lane 已校验并回滚，无需重做部分批次准入；有序提交直接保留该已知拒绝。

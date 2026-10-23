@@ -26,7 +26,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.core.index.AlgoOrderIndex;
-import com.surprising.aeron.service.core.index.CancelAllAfterIndex;
 import com.surprising.aeron.service.core.index.LiquidationIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
@@ -124,45 +123,25 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 撮合结果的有序提交入口，等待账户和账本完成后交出终态。 */
     public final OrderedCommitCoordinator commits = new OrderedCommitCoordinator(this);
 
-    /** 余额与划转命令的业务入口。 */
-    final BalanceTransferCommands balances = new BalanceTransferCommands(this);
-
-    /** 标的注册、更新及状态命令的业务入口。 */
-    final InstrumentConfigurationCommands instruments =
-            new InstrumentConfigurationCommands(this);
-
     /**  永续资金费命令与进度入口，U 本位和币本位沿用各自结算规则。 借出资金费命令入口，沿用产品线、事实和结算边界。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     final PerpetualFundingCommands funding = new PerpetualFundingCommands(this);
-
-    /** 衍生品标记价、风险扫描及风控命令入口。 */
-    final RiskCommands risk = new RiskCommands(this);
-
-    /** 持仓模式和保证金命令入口；杠杆调整由 leverage 处理。 */
-    final PositionCommands positions = new PositionCommands(this);
-
-    /** 杠杆调整命令入口。 */
-    final LeverageCommands leverage = new LeverageCommands(this);
 
     /**  强平命令及后续工作入口。 借出强平命令处理对象，沿用当前事实和提交作用域。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     final LiquidationCommands liquidations = new LiquidationCommands(this);
 
-    /** 自动减仓命令入口，沿用对应产品线风险边界。 */
-    final AdlCommands adl = new AdlCommands(this);
-
-    /** 保险基金命令入口。 */
-    final InsuranceFundCommands insurance = new InsuranceFundCommands(this);
-
     /** 触发单、算法单、触发扫描及衍生子单的业务入口。 */
     final TriggerOrderCommands triggers = new TriggerOrderCommands(this);
 
     /** 直接控制命令的统一业务派发入口。 */
     final DirectCommandDispatcher directCommands = new DirectCommandDispatcher(
-            balances, instruments, funding, risk, liquidations, adl, insurance,
-            positions, leverage, new FeePolicyCommands(this),
+            new BalanceTransferCommands(this), new InstrumentConfigurationCommands(this),
+            funding, new RiskCommands(this), liquidations, new AdlCommands(this),
+            new InsuranceFundCommands(this), new PositionCommands(this),
+            new LeverageCommands(this), new FeePolicyCommands(this),
             triggers);
     /**  本次调用是否采用独立窗口准入，执行结束恢复外层值。 返回本次调用是否允许按独立撮合窗口接纳。 */
     @Accessors(fluent = true, chain = false)
@@ -501,7 +480,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 // 本查询分支从协议载荷解出的筛选条件
                 var query = com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeQuery(message.payloadUnsafe());
                 // 定时全撤索引按筛选条件返回的候选键
-                var keys = cancelAllAfterIndex.query(query.userId(), query.symbolScope(), query.dueAtEpochMillis(),
+                var keys = factIndexes.timers().query(query.userId(), query.symbolScope(), query.dueAtEpochMillis(),
                         query.limit(), runtimeState::cancelAllAfterTimer);
                 // 根据定时全撤候选键构造的查询结果列表
                 var values = com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.cancelAllAfter(
@@ -523,7 +502,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
                 }
                 // 强平索引中严格位于请求游标之后的活动身份视图，冷查询继续按条件筛选
-                java.util.NavigableSet<Long> candidates = liquidationIndex.activeIds()
+                java.util.NavigableSet<Long> candidates = factIndexes.liquidations().activeIds()
                         .tailSet(query.afterLiquidationId(), false);
                 if (runtimeState.systemLedgerStarted()) {
                     return bookQueries.beginLiquidationWorkQuery(message, query);
@@ -531,7 +510,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 // 冷阶段按查询条件组装的强平工作结果
                 var work = com.surprising.aeron.service.query.state.RuntimeLiquidationQueryService.work(
                         runtimeState, identities, productLine, query, candidates,
-                        liquidationIndex.activeIds());
+                        factIndexes.liquidations().activeIds());
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
                         com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
             } catch (/* 本分支明确捕获的业务或输入异常，按对应协议码处理 */ com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
@@ -632,35 +611,19 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final DeterministicExchangeCoreAdapter matchingAdapter;
 
     /**  持仓用户索引；活动阶段由账本维护，Owner 使用路由及查询描述。 借出持仓用户索引引用；活动阶段的可变内容仍由账本拥有。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final PositionUserIndex positionUserIndex;
+    public PositionUserIndex positionUserIndex() { return factIndexes.positionUsers(); }
     /**  持仓量索引；活动阶段的可变权威状态归账本。 借出持仓量索引引用，活动阶段由账本维护其权威变化。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final OpenInterestIndex openInterestIndex;
+    public OpenInterestIndex openInterestIndex() { return factIndexes.openInterest(); }
     /**  Owner 维护的活动触发单及扫描索引。 借出 Owner 维护的触发单索引，供触发扫描及命令编排使用。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final TriggerOrderIndex triggerOrderIndex;
+    public TriggerOrderIndex triggerOrderIndex() { return factIndexes.triggers(); }
     /**  Owner 维护的算法单索引。 借出 Owner 算法单索引。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final AlgoOrderIndex algoOrderIndex;
+    public AlgoOrderIndex algoOrderIndex() { return factIndexes.algos(); }
     /**  Owner 维护的强平身份及工作索引。 借出 Owner 强平索引，供既有业务编排使用。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final LiquidationIndex liquidationIndex;
-    /** Owner 维护的定时全撤状态索引。 */
-    final CancelAllAfterIndex cancelAllAfterIndex;
+    public LiquidationIndex liquidationIndex() { return factIndexes.liquidations(); }
     /**  Owner 维护的活动订单路由索引，避免路由判断扫描账户。 借出 Owner 的活动订单路由索引，查询路由不等于读取账户权威状态。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final ActiveOrderIndex activeOrderIndex;
+    public ActiveOrderIndex activeOrderIndex() { return factIndexes.activeOrders(); }
     /**  ADL 持仓索引；活动阶段按账本所有权读写。 借出 ADL 持仓索引引用，遵守账本的状态所有权。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final AdlPositionIndex adlPositionIndex;
+    public AdlPositionIndex adlPositionIndex() { return factIndexes.adlPositions(); }
 
     /**
      *  已经累计到终态统计中的 TRADE 事件条数。
@@ -751,7 +714,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 取得强平索引中的活动强平身份集合，供既有强平编排使用。
      */
-    public Iterable<Long> activeLiquidationIds() { return liquidationIndex.activeIds(); }
+    public Iterable<Long> activeLiquidationIds() { return factIndexes.liquidations().activeIds(); }
     /**
      * 把本命令涉及的触发扫描初始化交给触发单业务处理。
      * @param command 本次业务使用的已解码命令或命令槽，沿用当前命令生命周期
@@ -947,14 +910,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.runtimeState = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.project(
                 snapshotState, identities, topology, configuration);
         this.factIndexes = runtimeState.factIndexes();
-        this.positionUserIndex = factIndexes.positionUsers();
-        this.openInterestIndex = factIndexes.openInterest();
-        this.triggerOrderIndex = factIndexes.triggers();
-        this.algoOrderIndex = factIndexes.algos();
-        this.liquidationIndex = factIndexes.liquidations();
-        this.cancelAllAfterIndex = factIndexes.timers();
-        this.activeOrderIndex = factIndexes.activeOrders();
-        this.adlPositionIndex = factIndexes.adlPositions();
         this.matchingAdapter = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter(topology, false, configuration)
                 : new DeterministicExchangeCoreAdapter(snapshotState, snapshotState.orders().values().stream().filter(/* 从恢复状态筛出的订单，仅 OPEN 订单交给 Matcher 重建 */ order -> order.status() == com.surprising.aeron.model.CoreOrderStatus.OPEN).toList(),
@@ -1234,7 +1189,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     // 撤单载荷中的订单号，用 Owner 活动路由定位分片
                     long orderId = decoded.cancelOrder().orderId();
                     // Owner 索引提供的活动订单路由，还需核对用户及标的
-                    var route = activeOrderIndex.activeOrderRoute(orderId);
+                    var route = factIndexes.activeOrders().activeOrderRoute(orderId);
                     if (route == null || route.userId() != user || route.instrumentId() == null
                             || route.instrumentId().isBlank()) return rememberPipelineRoute(window, false);
                     window.route(matchingAdapter.matcherShardId(route.instrumentId()),
@@ -1264,7 +1219,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     int shard = -1;
                     for (var /* 本次检查的批量下单或撤单描述 */ order : decoded.cancelOrderBatch().orders()) {
                         // Owner 索引提供的活动订单路由，还需核对用户及标的
-                        var route = activeOrderIndex.activeOrderRoute(order.orderId());
+                        var route = factIndexes.activeOrders().activeOrderRoute(order.orderId());
                         if (route == null || route.userId() != user || route.instrumentId() == null
                                 || route.instrumentId().isBlank()) return rememberPipelineRoute(window, false);
                         // 当前批量成员计算出的 Matcher 分片，必须与已有分片一致
@@ -1597,7 +1552,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             ResponseStatus status, CoreResultCode resultCode, long nextAppliedCommandCount) {
         if (isFundsIdempotencyCommand(message.header().messageType())
                 && status == ResponseStatus.APPLIED) {
-            if (!directCommand.retainFundsOnLedger(this)) {
+            if (!directCommand.retainFundsOnLedger()) {
                 directCommand.result(status, resultCode);
                 return null;
             }
@@ -1642,7 +1597,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return true;
     }
     /** 唯一直接控制命令续步槽，与普通撮合序号槽分开管理。 */
-    public final DirectCommandSlot directCommand = new DirectCommandSlot();
+    public final DirectCommandSlot directCommand = new DirectCommandSlot(this);
 
     /**
      * 写入调用方已经判定的来源序号；本方法不另做递增校验。
@@ -2449,7 +2404,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 runtimeState, identities, userId, resolved);
         // 仅必要时读取的当前持仓量，减仓单不增加该依赖
         long openInterestSteps = resolved.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()
-                ? openInterestIndex.openInterestSteps(command.instrumentId()) : 0;
+                ? factIndexes.openInterest().openInterestSteps(command.instrumentId()) : 0;
         // 已完成下单解析的标的内部身份，这里已经取得确定值
         int symbolId = resolved.symbolId();
         // 本次下单需要预留的结算资产身份
@@ -2609,7 +2564,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param orderId 需要查询或检查占用的订单实体 ID
      */
     public boolean orderIdInUse(long orderId) {
-        return activeOrderIndex.activeOrderRoute(orderId) != null
+        return factIndexes.activeOrders().activeOrderRoute(orderId) != null
                 || runtimeState.changedOrderValue(orderId) != null || terminalRetention.orderIdInUse(orderId);
     }
 

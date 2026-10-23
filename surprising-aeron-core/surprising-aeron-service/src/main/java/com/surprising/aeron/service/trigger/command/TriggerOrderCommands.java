@@ -949,7 +949,7 @@ public final class TriggerOrderCommands {
                 throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
             // 本标的解析得到的内部整数身份，find 入口没找到时可为空
             int symbolId = owner.identities().symbolId(algo.instrumentId());
-            owner.directCommand.deferAlgoUpsertControl(owner, message.header().userId(), algo, symbolId);
+            owner.directCommand.deferAlgoUpsertControl(message.header().userId(), algo, symbolId);
             return;
         }
         RuntimeAlgoOrderStateTransitions.upsert(owner.runtimeState(), owner.identities(),
@@ -999,7 +999,7 @@ public final class TriggerOrderCommands {
         // 该标的财库是否已经登记生命周期结算，传给账户准入作为拒绝依据
         boolean settled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.directCommand.deferTriggerOcoPairControl(owner, message.header().userId(), first, second, symbolId, positionKey, settled);
+            owner.directCommand.deferTriggerOcoPairControl(message.header().userId(), first, second, symbolId, positionKey, settled);
             return;
         }
         owner.runtimeState().executeUserSettlement(message.header().userId(), () -> {
@@ -1040,7 +1040,7 @@ public final class TriggerOrderCommands {
         // 当前标的是否已结算，交给账户转换防止过期合约新建触发单
         boolean instrumentSettled = owner.runtimeState().treasury().lifecycleSettlement(symbolId) != 0;
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.directCommand.deferTriggerUpsertControl(owner, message.header().userId(), trigger, symbolId, positionKey,
+            owner.directCommand.deferTriggerUpsertControl(message.header().userId(), trigger, symbolId, positionKey,
                     instrumentSettled);
             return;
         }
@@ -1062,7 +1062,7 @@ public final class TriggerOrderCommands {
         // 本次协议解出或平仓关联遍历到的触发单 ID
         long triggerOrderId = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.directCommand.deferTriggerMutationControl(owner, message.header().userId(), Mutation.CANCEL,
+            owner.directCommand.deferTriggerMutationControl(message.header().userId(), Mutation.CANCEL,
                     triggerOrderId, 0, 0, 0, false, null);
             return;
         }
@@ -1078,7 +1078,7 @@ public final class TriggerOrderCommands {
         // 协议解出的认领数组，依次为 ID、行情序列、触发价格和时间
         long[] claim = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeClaim(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(claim[0]), Mutation.CLAIM,
+            owner.directCommand.deferTriggerMutationControl(requireTriggerOwner(claim[0]), Mutation.CLAIM,
                     claim[0], claim[1], claim[2], claim[3], false, null);
             return;
         }
@@ -1094,7 +1094,7 @@ public final class TriggerOrderCommands {
         // 协议解出的完成数组，依次为 ID、成功标记、关联子单 ID 和完成时间
         long[] complete = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeComplete(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(complete[0]), Mutation.COMPLETE,
+            owner.directCommand.deferTriggerMutationControl(requireTriggerOwner(complete[0]), Mutation.COMPLETE,
                     complete[0], complete[2], complete[3], 0, complete[1] == 1, "");
             return;
         }
@@ -1110,7 +1110,7 @@ public final class TriggerOrderCommands {
         // 协议解出的追踪数组，依次为 ID、最高价、最低价及激活时间
         long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(trailing[0]), Mutation.TRAILING,
+            owner.directCommand.deferTriggerMutationControl(requireTriggerOwner(trailing[0]), Mutation.TRAILING,
                     trailing[0], trailing[1], trailing[2], trailing[3], false, null);
             return;
         }
@@ -1126,7 +1126,7 @@ public final class TriggerOrderCommands {
         // 协议解出的触发单 ID 与过期检查时间或重试陈旧界限
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(lifecycle[0]), Mutation.EXPIRE,
+            owner.directCommand.deferTriggerMutationControl(requireTriggerOwner(lifecycle[0]), Mutation.EXPIRE,
                     lifecycle[0], lifecycle[1], 0, 0, false, null);
             return;
         }
@@ -1142,7 +1142,7 @@ public final class TriggerOrderCommands {
         // 协议解出的触发单 ID 与过期检查时间或重试陈旧界限
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
-            owner.directCommand.deferTriggerMutationControl(owner, requireTriggerOwner(lifecycle[0]), Mutation.RETRY,
+            owner.directCommand.deferTriggerMutationControl(requireTriggerOwner(lifecycle[0]), Mutation.RETRY,
                     lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis(), 0, false, null);
             return;
         }

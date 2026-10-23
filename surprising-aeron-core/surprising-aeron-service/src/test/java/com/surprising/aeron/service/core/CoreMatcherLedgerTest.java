@@ -34,7 +34,7 @@ class CoreMatcherLedgerTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
             applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.BUY, 99, 1)));
             try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {
-                assertThat(state.activeOrderIndex.activeOrderRoute(1).userId()).isEqualTo(1001);
+                assertThat(state.activeOrderIndex().activeOrderRoute(1).userId()).isEqualTo(1001);
                 assertThatThrownBy(() -> state.runtimeOrder(1)).isInstanceOf(IllegalStateException.class);
                 assertThatThrownBy(() -> state.runtimeOrder(999)).isInstanceOf(IllegalStateException.class);
                 // 模拟Lane删除回执已收集、Owner活跃路由尚未发布的提交窗口。
@@ -46,7 +46,7 @@ class CoreMatcherLedgerTest {
                 var put = changes.getClass().getDeclaredMethod("put", long.class, Object.class);
                 put.setAccessible(true);
                 put.invoke(changes, 1L, (Object) null);
-                assertThat(state.activeOrderIndex.activeOrderRoute(1)).isNotNull();
+                assertThat(state.activeOrderIndex().activeOrderRoute(1)).isNotNull();
                 assertThat(state.runtimeState.hasChangedOrder(1)).isTrue();
                 assertThat(state.runtimeOrder(1)).isNull();
                 assertThat(state.responseOrder(1)).isNull();

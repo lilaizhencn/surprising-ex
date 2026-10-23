@@ -139,7 +139,7 @@ class CoreFundsLedgerIndexTest {
             try {
                 assertThat(core.apply(request)).isNull();
                 assertThat(core.directCommand.active()).isTrue();
-                for (/* 邮箱仍满期间重复轮询的次数 */ int retry = 0; retry < 8; retry++) assertThat(core.directCommand.poll(core)).isNull();
+                for (/* 邮箱仍满期间重复轮询的次数 */ int retry = 0; retry < 8; retry++) assertThat(core.directCommand.poll()).isNull();
                 assertThat(core.appliedCommandCount()).isEqualTo(count);
                 assertThat(core.resultLedger().get(request.header().commandId())).isNull();
             } finally { gate.released = true; }
@@ -353,7 +353,7 @@ class CoreFundsLedgerIndexTest {
         // 当前整个通知场景或直接控制等待的纳秒截止时间
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (core.directCommand.active()) {
-            result = core.directCommand.poll(core);
+            result = core.directCommand.poll();
             if (System.nanoTime() >= deadline) throw new AssertionError("funds direct command timed out");
             Thread.onSpinWait();
         }

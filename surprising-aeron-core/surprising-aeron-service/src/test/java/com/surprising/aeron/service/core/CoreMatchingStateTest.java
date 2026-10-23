@@ -1381,7 +1381,7 @@ class CoreMatchingStateTest {
         // 当前辅助操作的纳秒截止点，准入十秒、账户结算及哈希等待五秒。
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
         while (state.directCommand.active()) {
-            response = state.directCommand.poll(state);
+            response = state.directCommand.poll();
             state.assertHealthy();
             if (System.nanoTime() >= deadline)
                 throw new AssertionError("command admission timed out: " + command.header().messageType());

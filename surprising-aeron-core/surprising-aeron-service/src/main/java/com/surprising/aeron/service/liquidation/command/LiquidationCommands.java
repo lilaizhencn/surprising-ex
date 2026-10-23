@@ -36,7 +36,7 @@ public final class LiquidationCommands {
             // 按原运行时及活跃强平集合准备的可续步结果确认任务，完成条件由控制槽继续轮询
             var work = RuntimeLiquidationResolution.begin(owner.directCommand.reusableLiquidationResolutionWork(), command,
                     owner.runtimeState(), owner.identities(), owner.activeLiquidationIds());
-            owner.directCommand.deferLiquidationResolutionControl(owner, work);
+            owner.directCommand.deferLiquidationResolutionControl(work);
         } else {
             RuntimeLiquidationResolution.applyRuntime(command, owner.runtimeState(),
                     owner.identities(), owner.activeLiquidationIds());

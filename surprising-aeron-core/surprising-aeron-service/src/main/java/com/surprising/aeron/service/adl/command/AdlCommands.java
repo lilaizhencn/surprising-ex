@@ -33,7 +33,7 @@ public final class AdlCommands {
             // 复用槽中准备好的 ADL 跨账户工作，真正完成由原控制任务继续轮询
             var work = RuntimeAdlExecution.begin(owner.directCommand.reusableAdlWork(),
                     command, owner.runtimeState(), owner.identities());
-            owner.directCommand.deferAdlControl(owner, work);
+            owner.directCommand.deferAdlControl(work);
         } else {
             RuntimeAdlExecution.applyRuntime(
                     command, owner.runtimeState(), owner.identities());

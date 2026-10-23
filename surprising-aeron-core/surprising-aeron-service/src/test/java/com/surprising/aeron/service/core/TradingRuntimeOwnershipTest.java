@@ -26,7 +26,6 @@ class TradingRuntimeOwnershipTest {
             assertThat(runtime.triggerOrderIndex()).isSameAs(indexes.triggers());
             assertThat(runtime.algoOrderIndex()).isSameAs(indexes.algos());
             assertThat(runtime.liquidationIndex()).isSameAs(indexes.liquidations());
-            assertThat(runtime.cancelAllAfterIndex).isSameAs(indexes.timers());
             assertThat(runtime.activeOrderIndex()).isSameAs(indexes.activeOrders());
             assertThat(runtime.adlPositionIndex()).isSameAs(indexes.adlPositions());
             runtime.activate();

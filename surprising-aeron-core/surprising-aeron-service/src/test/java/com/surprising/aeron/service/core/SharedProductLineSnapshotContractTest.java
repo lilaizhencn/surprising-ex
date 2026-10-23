@@ -266,7 +266,7 @@ class SharedProductLineSnapshotContractTest {
         // 直接命令轮询的五秒 nanoTime 截止点。
         long directDeadline = System.nanoTime() + 5_000_000_000L;
         while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
-            response = state.directCommand.poll(state);
+            response = state.directCommand.poll();
             if (response == null) Thread.onSpinWait();
         }
         if (response == null && state.directCommand.active()) {

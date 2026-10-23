@@ -81,8 +81,8 @@ class CoreAlgoLaneQueryTest {
             // 冷运行时按 502、501、503 顺序汇总的父单视图，用于核对在线编码结果。
             var expected = RuntimeOperationalQueryService.algoOrders(cold, List.of(502L, 501L, 503L));
             core.activate();
-            assertThat(core.activeOrderIndex.activeOrderRoute(102)).isNull();
-            assertThat(core.activeOrderIndex.activeOrderRoute(104)).isNull();
+            assertThat(core.activeOrderIndex().activeOrderRoute(102)).isNull();
+            assertThat(core.activeOrderIndex().activeOrderRoute(104)).isNull();
             // 查询前账户所有权交接计数，查询后不能因 Owner 读账户而增加。
             long handoff = core.runtimeState.laneHandoffEpoch();
             assertThat(java.util.Arrays.stream(TradingAccountRuntime.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))

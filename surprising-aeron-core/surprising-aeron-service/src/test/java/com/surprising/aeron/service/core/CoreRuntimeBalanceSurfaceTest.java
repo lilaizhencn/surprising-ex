@@ -128,7 +128,7 @@ class CoreRuntimeBalanceSurfaceTest {
         // 直接控制轮询共用的五秒单调纳秒截止时间
         long directDeadline = System.nanoTime() + 5_000_000_000L;
         while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
-            response = state.directCommand.poll(state);
+            response = state.directCommand.poll();
             if (response == null) Thread.onSpinWait();
         }
         if (response == null && state.directCommand.active()) {

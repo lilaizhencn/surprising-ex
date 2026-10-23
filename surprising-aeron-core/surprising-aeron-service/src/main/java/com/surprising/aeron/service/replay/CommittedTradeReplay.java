@@ -99,7 +99,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
             // 当前直接控制槽最多等待五秒的截止时间
             long directDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (response == null && state.directCommand.active() && System.nanoTime() < directDeadline) {
-                response = state.directCommand.poll(state);
+                response = state.directCommand.poll();
                 if (response == null) Thread.onSpinWait();
             }
             if (response == null && state.directCommand.active()) {

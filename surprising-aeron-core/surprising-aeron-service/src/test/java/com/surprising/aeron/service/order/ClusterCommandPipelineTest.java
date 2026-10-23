@@ -2873,7 +2873,7 @@ class ClusterCommandPipelineTest {
                         // 恢复 Core 上同一续扫命令的可空完成响应，控制工作未齐时继续轮询
                         var restoredResponse = restored.apply(command);
                         while (restoredResponse == null && restored.directCommand.active()) {
-                            restoredResponse = restored.directCommand.poll(restored);
+                            restoredResponse = restored.directCommand.poll();
                             if (restoredResponse == null) Thread.onSpinWait();
                         }
                         assertThat(restoredResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);

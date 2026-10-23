@@ -15,8 +15,6 @@ import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 public final class RiskCommands {
     /** 本产品线交易 Owner，扫描状态和交易结果沿用其原有边界。 */
     private final TradingCoreRuntime owner;
-    /** 恒返回已完成的共享无状态回调；当前本类入口没有读取它，不承载扫描进度。 */
-    private static final java.util.function.BooleanSupplier COMPLETE = () -> true;
 
     /**
      * 保存非空 Owner 引用，不创建扫描线程或独立状态。
@@ -83,9 +81,9 @@ public final class RiskCommands {
             RiskScanCoordinator risk = null;
             if (!activeScan.riskComplete() && riskBudget > 0) {
                 risk = owner.directCommand.reusableRiskScanCoordinator(
-                        riskBudget, owner.positionUserIndex(), owner.runtimeState(), owner.identities());
+                        riskBudget);
             }
-            owner.directCommand.deferRiskScanControl(owner, risk, activeScan.symbolId(), instrumentId, maxWork,
+            owner.directCommand.deferRiskScanControl(risk, activeScan.symbolId(), instrumentId, maxWork,
                     pendingBefore, startedAt, beforeRevision);
             return;
         }

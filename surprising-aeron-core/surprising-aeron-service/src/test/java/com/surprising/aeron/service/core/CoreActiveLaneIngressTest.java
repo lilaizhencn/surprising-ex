@@ -77,7 +77,7 @@ class CoreActiveLaneIngressTest {
                 var adjustment = message(core, CoreMessageType.ADJUST_BALANCE, 1,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 10_000)));
                 assertThat(core.apply(adjustment)).isNull();
-                assertThat(core.directCommand.poll(core)).isNull();
+                assertThat(core.directCommand.poll()).isNull();
                 assertThat(core.directCommand.active()).isTrue();
                 assertThat(release.getCount()).isOne();
                 release.countDown();
@@ -104,8 +104,8 @@ class CoreActiveLaneIngressTest {
             var taker = CoreTestCompletion.userState(core, 1);
             assertThat(maker.reservations()).isEmpty();
             assertThat(taker.reservations()).isEmpty();
-            assertThat(core.activeOrderIndex.activeOrderRoute(101)).isNull();
-            assertThat(core.activeOrderIndex.activeOrderRoute(102)).isNull();
+            assertThat(core.activeOrderIndex().activeOrderRoute(101)).isNull();
+            assertThat(core.activeOrderIndex().activeOrderRoute(102)).isNull();
             if (line == ProductLine.SPOT) {
                 assertThat(taker.balances()).anySatisfy(/* 成交后核对的现货目标资产余额 */ balance -> {
                     assertThat(balance.asset()).isEqualTo("BTC");
@@ -154,7 +154,7 @@ class CoreActiveLaneIngressTest {
         // 贯穿直接控制和撮合等待的同一个五秒截止时间
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (core.directCommand.active()) {
-            response = core.directCommand.poll(core);
+            response = core.directCommand.poll();
             if (System.nanoTime() >= deadline) throw new AssertionError("direct completion timeout");
             Thread.onSpinWait();
         }

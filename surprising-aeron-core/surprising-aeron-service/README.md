@@ -42,10 +42,23 @@ HTTP 接入、价格生产、生命周期调度和外部查询投影由其他服
 命令窗口仅计算依赖前缀，不再保存无人读取的冲突原因；解码读取器仅保存已解码字段，输入环也不再传递无人消费的入队观测时间。
 撮合结果保留撤单事实、前缀参数校验和 `outcome()` 分类，移除重复前缀计数、状态标记及时间戳字段和闲置读取接口。
 对应六个无调用私有方法及 OI 重复转换入口一并删除；基准夹具和测试源码同步调整，验证范围仍为编译，不据此宣称交易或恢复验证通过。
+
+进一步清理运行时和续步的重复持有：余额、标的配置、风险、持仓、杠杆、ADL 和保险基金七个处理器只由
+`DirectCommandDispatcher` 持有；Core 的七个公开索引访问方法直接委托现有 `RuntimeFactIndexes`，定时全撤也从同一容器读取。
+Core 不再保存八个索引别名，自身实例字段由 77 个降为 62 个。
+`DirectCommandSlot` 创建时固定所属 Owner，五个续步共用该引用；资金费、ADL 和强平确认收集器直接使用外层保留的工作，
+删除重复绑定、清理方法和 Owner 参数传递。包括内部续步在内共减少八个重复实例引用，原 Lane 派发、完成、发布及回滚阶段仍由原对象推进。
+批次的撮合操作由种类唯一确定，不再另存 `operation`；同时删除三个预备客户身份数组及其计数器。
+这组数组仅在逐项准入后登记，两个回退入口却只在整批准入路径调用；逐项路径在登记前固定 `sequentialAdmission`，
+无法再进入整批准备，整批 Lane 自身使用的 `preparedClientKeyValues` 及实际回滚继续保留。
+因此删除的是无有效消费的登记链及其清槽工作，批次实例字段由 55 个降为 50 个。
+结算事件直接读取已保存 UUID 的高低位，删除两份数值缓存，保留未准备及清理后的原比较语义；风险入口删除未读取的完成哨兵。
+本轮合计减少 30 个实例字段和一个静态字段，未新增类、状态容器、线程或执行阶段。
+
 本轮使用 HotSpot JDK 27 执行以下命令，14 个相关模块及必要依赖干净编译通过，包含测试源码编译：
 
 ```bash
-mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks \
+mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools \
     -am -DskipTests clean test-compile
 ```
 

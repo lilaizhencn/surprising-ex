@@ -90,30 +90,32 @@ class CommandSlotTest {
      */
     @Test
     void clearsControlResultAndWorkBeforeReusingTheSameSlot() {
-        // 本方法实际测试的直接命令槽。
-        DirectCommandSlot slot = new DirectCommandSlot();
-        // 首条直接命令，批次代际测试中则为当前代首个 Core 序号。
-        CoreMessage first = command(1000);
-        slot.initialize(first, CommandFingerprint.of(first), new TradingCoreRuntime.SourceKey(
-                CommandSource.OPERATIONS, 1), 10, 20, 1, 2, 3);
-        slot.deferControl(() -> true);
-        slot.result(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
-                com.surprising.aeron.protocol.CoreResultCode.INVALID_COMMAND);
-        slot.markFinalizationPrepared();
-        slot.clear();
+        try (var runtime = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            // 本方法实际测试的直接命令槽。
+            DirectCommandSlot slot = runtime.directCommand;
+            // 首条直接命令，批次代际测试中则为当前代首个 Core 序号。
+            CoreMessage first = command(1000);
+            slot.initialize(first, CommandFingerprint.of(first), new TradingCoreRuntime.SourceKey(
+                    CommandSource.OPERATIONS, 1), 10, 20, 1, 2, 3);
+            slot.deferControl(() -> true);
+            slot.result(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
+                    com.surprising.aeron.protocol.CoreResultCode.INVALID_COMMAND);
+            slot.markFinalizationPrepared();
+            slot.clear();
 
-        // 复用同一直接槽的新命令。
-        CoreMessage second = command(1001);
-        slot.initialize(second, CommandFingerprint.of(second), new TradingCoreRuntime.SourceKey(
-                CommandSource.OPERATIONS, 1), 30, 40, 4, 5, 6);
-        assertThat(slot.command()).isSameAs(second);
-        assertThat(slot.controlWork()).isNull();
-        assertThat(slot.status()).isNull();
-        assertThat(slot.resultCode()).isNull();
-        assertThat(slot.finalizationPrepared()).isFalse();
-        assertThat(slot.commitFenceTimestamp()).isEqualTo(30);
-        assertThat(slot.checkpoint()).isEqualTo(5);
-        slot.clear();
+            // 复用同一直接槽的新命令。
+            CoreMessage second = command(1001);
+            slot.initialize(second, CommandFingerprint.of(second), new TradingCoreRuntime.SourceKey(
+                    CommandSource.OPERATIONS, 1), 30, 40, 4, 5, 6);
+            assertThat(slot.command()).isSameAs(second);
+            assertThat(slot.controlWork()).isNull();
+            assertThat(slot.status()).isNull();
+            assertThat(slot.resultCode()).isNull();
+            assertThat(slot.finalizationPrepared()).isFalse();
+            assertThat(slot.commitFenceTimestamp()).isEqualTo(30);
+            assertThat(slot.checkpoint()).isEqualTo(5);
+            slot.clear();
+        }
     }
 
     /**

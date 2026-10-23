@@ -168,7 +168,7 @@ class AsyncFundingCommandTest {
             assertThatThrownBy(state::assertClusterCallbackComplete).hasMessageContaining("unfinished business");
             // 当前等待到的完整命令响应；未完成时为 null。
             CoreResponse response;
-            while ((response = state.directCommand.poll(state)) == null) {
+            while ((response = state.directCommand.poll()) == null) {
                 if (System.nanoTime() >= deadline) throw new AssertionError("funding timed out");
                 Thread.onSpinWait();
             }

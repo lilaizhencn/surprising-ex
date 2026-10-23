@@ -49,7 +49,7 @@ class CoreAdmissionInputOwnershipTest {
             applied(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
             // 市场 OI 索引内部字典的反射字段
-            var totals = core.openInterestIndex.getClass().getDeclaredField("totals");
+            var totals = core.openInterestIndex().getClass().getDeclaredField("totals");
             totals.setAccessible(true);
             // 带读取计数和禁止多余访问断言的 OI Map
             var guarded = /* 仅用于观察市场 OI 读取的 Map 守卫，初始 OI 为空，get 覆盖会计数并禁止不必要的访问 */ new HashMap<String, Object>() {
@@ -65,7 +65,7 @@ class CoreAdmissionInputOwnershipTest {
                     return super.get(key);
                 }
             };
-            totals.set(core.openInterestIndex, guarded);
+            totals.set(core.openInterestIndex(), guarded);
             try (/* 禁止 Owner 跨线程读取账户的保护器 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 // 订单预检查询命令
                 var request = message(core, CoreMessageType.ORDER_PREFLIGHT_QUERY, 7, TradingCommandCodec.encodePlaceOrder(place(900, 1)));

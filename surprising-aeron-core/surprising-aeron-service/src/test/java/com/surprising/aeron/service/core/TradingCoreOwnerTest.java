@@ -792,7 +792,7 @@ class TradingCoreOwnerTest {
                 // 最多五秒等原资金身份预检查接入实际账户续步的截止值
                 long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!owner.directCommand.hasControlWork()) {
-                    assertThat(owner.directCommand.poll(owner)).isNull();
+                    assertThat(owner.directCommand.poll()).isNull();
                     if (System.nanoTime() >= preparationDeadline)
                         throw new AssertionError("funds preflight did not reach Account Lane work");
                     Thread.onSpinWait();
@@ -828,7 +828,7 @@ class TradingCoreOwnerTest {
                 // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 do {
-                    result = owner.directCommand.poll(owner);
+                    result = owner.directCommand.poll();
                     if (System.nanoTime() > deadline) throw new AssertionError("finalization rollback timed out");
                 } while (result == null);
             } finally { runtime.exitAsynchronousCommandScope(); }
@@ -1959,7 +1959,7 @@ class TradingCoreOwnerTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         // 这里只完成准入，这些场景故意把原撮合留在尚未提交的状态。
         while (state.directCommand.active()) {
-            response = state.directCommand.poll(state);
+            response = state.directCommand.poll();
             state.assertHealthy();
             if (System.nanoTime() >= deadline) throw new AssertionError("place admission timeout");
             Thread.onSpinWait();

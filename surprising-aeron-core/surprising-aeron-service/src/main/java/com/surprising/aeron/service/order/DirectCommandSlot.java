@@ -36,6 +36,8 @@ import lombok.experimental.Accessors;
  * 直接控制命令的单个可复用槽。余额、划转、风控、资金费、触发单等命令不走订单簿完成队列，但可能需要等待账户 Lane、账本或回滚。这里保存当前命令和续步，业务状态、发布和回滚仍由运行时负责；当前命令结束后先 clear，再接下一条。
  */
 public final class DirectCommandSlot {
+    /** 创建槽时绑定的唯一所属 Owner，跨命令复用。 */
+    private final TradingCoreRuntime owner;
     /**  本轮原始直接命令，清槽后为空。 借用当前原始直接命令，未占用或清理后为空。 */
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
@@ -114,14 +116,8 @@ public final class DirectCommandSlot {
             new LiquidationResolutionControlContinuation();
     /** 余额、划转及持仓设置共用的账户控制任务。 */
     private final AccountControlTask accountControl = new AccountControlTask();
-    /** 固定账户轮询函数当前服务的 Owner，清槽时解除。 */
-    private TradingCoreRuntime ownerRef;
     /** 只轮询固定账户任务并在有状态变化时请求发布的函数。 */
-    private final BooleanSupplier accountControlWork = () -> {
-        if (!accountControl.poll()) return false;
-        if (accountControl.stateChanged()) ownerRef.requestCommitPublication();
-        return true;
-    };
+    private final BooleanSupplier accountControlWork;
     /** 触发单或算法单的固定账户操作和完成收集槽。 */
     private final TriggerControlContinuation triggerControl = new TriggerControlContinuation();
     /** 没有触发续扫时使用的已完成哨兵。 */
@@ -141,6 +137,16 @@ public final class DirectCommandSlot {
     private RiskScanCoordinator reusableRiskCoordinator;
     /** 跨命令保留的可空保险基金调整工作。 */
     private RuntimeInsuranceFundStateTransitions.AdjustmentWork reusableInsuranceAdjustment;
+
+    /** @param owner 本槽及其所有续步共同服务的交易运行时 */
+    public DirectCommandSlot(TradingCoreRuntime owner) {
+        this.owner = Objects.requireNonNull(owner);
+        accountControlWork = () -> {
+            if (!accountControl.poll()) return false;
+            if (accountControl.stateChanged()) this.owner.requestCommitPublication();
+            return true;
+        };
+    }
 
     /**
      * 拒绝覆盖仍占用的槽，保存非空命令、指纹及来源，再记下业务时间、日志位置与回滚检查点；其余旧标记由前一轮 clear 清理。
@@ -222,9 +228,8 @@ public final class DirectCommandSlot {
 
     /**
      * 第一次准备资金命令身份写入，之后只轮询账本工作；返回真表示此项写入完成，不在此再次修改余额。
-     * @param owner 当前交易 Owner 运行时
      */
-    public boolean retainFundsOnLedger(TradingCoreRuntime owner) {
+    public boolean retainFundsOnLedger() {
         if (!fundsRetainPrepared) {
             fundsIndexWork.prepareWrite(owner.terminalRetention(), command.header().commandIdMsb(),
                     command.header().commandIdLsb(), fingerprint);
@@ -235,9 +240,8 @@ public final class DirectCommandSlot {
 
     /**
      * 等资金身份查询完成，优先判断历史重放或指纹冲突，再检查来源序号；先保存当前输入并清槽，随后返回已有响应或用原输入真正执行业务。
-     * @param owner 当前交易 Owner 运行时
      */
-    private CoreResponse pollFundsCheck(TradingCoreRuntime owner) {
+    private CoreResponse pollFundsCheck() {
         if (!fundsIndexWork.poll(owner)) return null;
         // 资金身份查询或来源序号检查给出的可空既有响应
         CoreResponse replay = owner.fundsReplayResponse(command, fingerprint, fundsIndexWork.retained());
@@ -271,20 +275,16 @@ public final class DirectCommandSlot {
 
     /**
      * 要求没有旧续步，绑定资金费收集器并保留工作对象供后续命令复用。
-     * @param owner 当前交易 Owner 运行时
      * @param work 当前要保存、替换或轮询的业务续步
      */
-    public void deferFundingControl(TradingCoreRuntime owner,
-            RuntimePerpetualFundingProcessor.FundingWork work) {
+    public void deferFundingControl(RuntimePerpetualFundingProcessor.FundingWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        fundingControl.prepare(owner, work);
-        reusableFundingWork = work;
+        reusableFundingWork = Objects.requireNonNull(work);
         controlWork = fundingControl;
     }
 
     /**
      * 绑定风险扫描和后续触发扫描所需信息；同一槽不能并存第二条控制续步。
-     * @param owner 当前交易 Owner 运行时
      * @param risk 本轮可空风险扫描器
      * @param symbolId 已解析的永久品种编号
      * @param instrumentId 本轮扫描的品种名称
@@ -293,37 +293,31 @@ public final class DirectCommandSlot {
      * @param startedAt 本轮扫描开始的观测时间
      * @param beforeRevision 工作开始前的权威修订号
      */
-    public void deferRiskScanControl(TradingCoreRuntime owner, RiskScanCoordinator risk, int symbolId,
+    public void deferRiskScanControl(RiskScanCoordinator risk, int symbolId,
             String instrumentId, int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        riskScanControl.prepare(owner, risk, symbolId, instrumentId, maxUsers, pendingBefore, startedAt,
+        riskScanControl.prepare(risk, symbolId, instrumentId, maxUsers, pendingBefore, startedAt,
                 beforeRevision);
         controlWork = riskScanControl;
     }
 
     /**
      * 绑定自动减仓续步，并记住原工作对象供后续复用。
-     * @param owner 当前交易 Owner 运行时
      * @param work 当前要保存、替换或轮询的业务续步
      */
-    public void deferAdlControl(TradingCoreRuntime owner,
-            RuntimeAdlExecution.AdlWork work) {
+    public void deferAdlControl(RuntimeAdlExecution.AdlWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        adlControl.prepare(owner, work);
-        reusableAdlWork = work;
+        reusableAdlWork = Objects.requireNonNull(work);
         controlWork = adlControl;
     }
 
     /**
      * 绑定强平结果确认续步，并保留原工作对象供后续命令复用。
-     * @param owner 当前交易 Owner 运行时
      * @param work 当前要保存、替换或轮询的业务续步
      */
-    public void deferLiquidationResolutionControl(TradingCoreRuntime owner,
-            RuntimeLiquidationResolution.ResolutionWork work) {
+    public void deferLiquidationResolutionControl(RuntimeLiquidationResolution.ResolutionWork work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        liquidationResolutionControl.prepare(owner, work);
-        reusableResolutionWork = work;
+        reusableResolutionWork = Objects.requireNonNull(work);
         controlWork = liquidationResolutionControl;
     }
 
@@ -334,19 +328,11 @@ public final class DirectCommandSlot {
         return reusableResolutionWork;
     }
 
-    /**
-     * 首次用当前索引、运行时和身份表创建风险扫描器；之后只重置本条命令的用户预算，不重新绑定依赖，调用方须一直使用同一运行时。
-     * @param maxUsers 本轮风险与触发扫描共用的用户预算
-     * @param positionUserIndex 首次创建扫描器使用的持仓用户派生索引，复用时不重新绑定
-     * @param runtime 首次创建扫描器使用的权威运行时，复用时不重新绑定
-     * @param identities 首次创建扫描器使用的身份字典，复用时不重新绑定
-     */
-    public RiskScanCoordinator reusableRiskScanCoordinator(int maxUsers,
-            com.surprising.aeron.service.core.index.PositionUserIndex positionUserIndex,
-            com.surprising.aeron.service.core.TradingAccountRuntime runtime,
-            com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities) {
+    /** 首次用所属 Owner 的索引、运行时和身份表创建扫描器，之后重置本轮预算。 */
+    public RiskScanCoordinator reusableRiskScanCoordinator(int maxUsers) {
         if (reusableRiskCoordinator == null) {
-            reusableRiskCoordinator = new RiskScanCoordinator(maxUsers, positionUserIndex, runtime, identities);
+            reusableRiskCoordinator = new RiskScanCoordinator(
+                    maxUsers, owner.positionUserIndex(), owner.runtimeState(), owner.identities());
         } else {
             reusableRiskCoordinator.resetForCommand(maxUsers);
         }
@@ -362,90 +348,77 @@ public final class DirectCommandSlot {
 
     /**
      * 准备所属用户的余额调整账户任务，并安装固定轮询函数；账户确有变化才请求发布。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param command 本方法对应的原始或已解码业务命令，类型见声明
      */
-    public void deferBalanceAdjustment(TradingCoreRuntime owner, long userId, BalanceAdjustmentCommand command) {
+    public void deferBalanceAdjustment(long userId, BalanceAdjustmentCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        this.ownerRef = owner;
         accountControl.prepareBalanceAdjustment(owner.runtimeState(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
     /**
      * 准备所属用户的转出账户任务，完成和变化判断沿用账户任务自身回执。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param command 本方法对应的原始或已解码业务命令，类型见声明
      */
-    public void deferTransferOut(TradingCoreRuntime owner, long userId, TransferFundsCommand command) {
+    public void deferTransferOut(long userId, TransferFundsCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        this.ownerRef = owner;
         accountControl.prepareTransferOut(owner.runtimeState(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
     /**
      * 准备所属用户的划转完成任务，后续轮询成功且有变化时请求发布。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param transferId 当前要完成的划转编号
      */
-    public void deferTransferComplete(TradingCoreRuntime owner, long userId, long transferId) {
+    public void deferTransferComplete(long userId, long transferId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        this.ownerRef = owner;
         accountControl.prepareTransferCompletion(owner.runtimeState(), userId, transferId);
         controlWork = accountControlWork;
     }
 
     /**
      * 准备杠杆变更账户任务，保存变更前修订用于原业务检查。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param command 本方法对应的原始或已解码业务命令，类型见声明
      * @param beforeRevision 工作开始前的权威修订号
      */
-    public void deferLeverageChange(TradingCoreRuntime owner, long userId, UpdateLeverageCommand command,
+    public void deferLeverageChange(long userId, UpdateLeverageCommand command,
                              long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        this.ownerRef = owner;
         accountControl.prepareLeverageChange(owner.runtimeState(), owner.identities(), userId, command, beforeRevision);
         controlWork = accountControlWork;
     }
 
     /**
      * 准备持仓模式变更账户任务，保留变更前修订。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param command 本方法对应的原始或已解码业务命令，类型见声明
      * @param beforeRevision 工作开始前的权威修订号
      */
-    public void deferPositionModeChange(TradingCoreRuntime owner, long userId, UpdatePositionModeCommand command,
+    public void deferPositionModeChange(long userId, UpdatePositionModeCommand command,
                                  long beforeRevision) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        this.ownerRef = owner;
         accountControl.preparePositionModeChange(owner.runtimeState(), userId, command, beforeRevision);
         controlWork = accountControlWork;
     }
 
     /**
      * 准备逐仓保证金调整账户任务，不在 Owner 直接改 Lane 状态。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param command 本方法对应的原始或已解码业务命令，类型见声明
      */
-    public void deferPositionMarginAdjustment(TradingCoreRuntime owner, long userId,
+    public void deferPositionMarginAdjustment(long userId,
                                        AdjustPositionMarginCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        this.ownerRef = owner;
         accountControl.preparePositionMarginAdjustment(owner.runtimeState(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
     /**
      * 把触发单变更参数放入固定槽，只派发给该用户所属 Lane，后续由同一对象收集完成。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param mutation 触发单具体变更类别
      * @param triggerOrderId 待变更触发单编号
@@ -455,11 +428,11 @@ public final class DirectCommandSlot {
      * @param flag 完成操作是否成功
      * @param text 完成操作的拒绝原因，空引用按空串处理
      */
-    public void deferTriggerMutationControl(TradingCoreRuntime owner, long userId,
+    public void deferTriggerMutationControl(long userId,
             TriggerOrderCommands.Mutation mutation, long triggerOrderId, long arg1, long arg2,
             long arg3, boolean flag, String text) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareMutation(owner, userId, mutation, triggerOrderId, arg1, arg2, arg3,
+        triggerControl.prepareMutation(userId, mutation, triggerOrderId, arg1, arg2, arg3,
                 flag, text);
         owner.runtimeState().dispatchControlLanes(
                 1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
@@ -468,18 +441,17 @@ public final class DirectCommandSlot {
 
     /**
      * 准备触发单写入任务并派发给用户所属 Lane，保留合约和持仓身份。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param trigger 待写入的触发单视图
      * @param symbolId 已解析的永久品种编号
      * @param positionKey 触发单稳定持仓身份
      * @param instrumentSettled 当前合约是否已结束结算
      */
-    public void deferTriggerUpsertControl(TradingCoreRuntime owner, long userId,
+    public void deferTriggerUpsertControl(long userId,
             CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
             boolean instrumentSettled) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareTriggerUpsert(owner, userId, trigger, symbolId, positionKey,
+        triggerControl.prepareTriggerUpsert(userId, trigger, symbolId, positionKey,
                 instrumentSettled);
         owner.runtimeState().dispatchControlLanes(
                 1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
@@ -488,7 +460,6 @@ public final class DirectCommandSlot {
 
     /**
      * 准备互斥触发单对，共用一次所属账户 Lane 派发，第二条保存在同一续步内。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param first 互斥对第一条触发单视图
      * @param second 互斥对第二条触发单视图
@@ -496,11 +467,11 @@ public final class DirectCommandSlot {
      * @param positionKey 触发单稳定持仓身份
      * @param instrumentSettled 当前合约是否已结束结算
      */
-    public void deferTriggerOcoPairControl(TradingCoreRuntime owner, long userId,
+    public void deferTriggerOcoPairControl(long userId,
             CoreTriggerOrderStateView first, CoreTriggerOrderStateView second,
             int symbolId, long positionKey, boolean instrumentSettled) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareTriggerUpsert(owner, userId, first, symbolId, positionKey, instrumentSettled);
+        triggerControl.prepareTriggerUpsert(userId, first, symbolId, positionKey, instrumentSettled);
         triggerControl.secondTrigger = second;
         owner.runtimeState().dispatchControlLanes(
                 1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
@@ -509,15 +480,14 @@ public final class DirectCommandSlot {
 
     /**
      * 准备算法单写入任务并派发给用户所属 Lane。
-     * @param owner 当前交易 Owner 运行时
      * @param userId 操作所属账户用户
      * @param algo 待写入的算法单视图
      * @param symbolId 已解析的永久品种编号
      */
-    public void deferAlgoUpsertControl(TradingCoreRuntime owner, long userId, CoreAlgoOrderView algo,
+    public void deferAlgoUpsertControl(long userId, CoreAlgoOrderView algo,
             int symbolId) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareAlgoUpsert(owner, userId, algo, symbolId);
+        triggerControl.prepareAlgoUpsert(userId, algo, symbolId);
         owner.runtimeState().dispatchControlLanes(
                 1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
         controlWork = triggerControl;
@@ -525,12 +495,11 @@ public final class DirectCommandSlot {
 
     /**
      * 只允许 Owner 推进已占用槽。资金查重走独立前置路径；业务续步未完成就返回空，已知业务、算术和参数错误记成拒绝。若拒绝前已有变化，先分轮完成账户及持仓身份回滚，再交运行时收尾；其他异常继续传播。
-     * @param owner 当前交易 Owner 运行时
      */
-    public CoreResponse poll(TradingCoreRuntime owner) {
+    public CoreResponse poll() {
         owner.assertOwner();
         if (!active) throw new IllegalStateException("no pending direct command");
-        if (fundsPreflight) return pollFundsCheck(owner);
+        if (fundsPreflight) return pollFundsCheck();
         if (status == null) {
             try {
                 if (!controlWork.getAsBoolean()) return null;
@@ -570,12 +539,8 @@ public final class DirectCommandSlot {
      * 清除本条命令、各固定续步和提交标记，释放本轮引用；资金费、风险、自动减仓、强平确认及保险调整的可复用工作引用继续保留。
      */
     public void clear() {
-        fundingControl.clear();
         riskScanControl.clear();
-        adlControl.clear();
-        liquidationResolutionControl.clear();
         accountControl.clear();
-        ownerRef = null;
         triggerControl.clear();
         fundsIndexWork.clear();
         active = false;
@@ -597,29 +562,8 @@ public final class DirectCommandSlot {
      * 资金费工作完成后的 Owner 收集步骤，校验状态归属并整理进度和受影响用户。
      */
     private final class FundingControlContinuation implements BooleanSupplier {
-        /** 当前续步服务的交易运行时，完成或清理后解除。 */
-        private TradingCoreRuntime owner;
-        /** 当前续步所收集的对应业务工作。 */
-        private RuntimePerpetualFundingProcessor.FundingWork work;
-
-        /**
-         * 绑定非空运行时和本轮资金费工作。
-         * @param owner 当前交易 Owner 运行时
-         * @param work 当前要保存、替换或轮询的业务续步
-         */
-        void prepare(TradingCoreRuntime owner, RuntimePerpetualFundingProcessor.FundingWork work) {
-            this.owner = Objects.requireNonNull(owner);
-            this.work = Objects.requireNonNull(work);
-        }
-        /**
-         * 解除本轮运行时与资金费工作引用。
-         */
-        void clear() { owner = null; work = null; }
-
-        /**
-         * 等资金费工作完成并核对权威运行时没有被替换，再请求发布、填写进度和受影响用户，通知回放观察者。
-         */
         @Override public boolean getAsBoolean() {
+            var work = reusableFundingWork;
             if (!work.poll()) return false;
             // 当前业务工作完成结果或所属 Lane 回执，具体类型见声明
             var result = work.result();
@@ -638,8 +582,6 @@ public final class DirectCommandSlot {
      * 在同一条风险命令内衔接风险扫描和剩余预算内的触发扫描，不建立新业务队列。
      */
     private final class RiskScanControlContinuation implements BooleanSupplier {
-        /** 当前续步服务的交易运行时，完成或清理后解除。 */
-        private TradingCoreRuntime owner;
         /** 当前可空的风险扫描工作；为空时可直接接触发扫描。 */
         private RiskScanCoordinator risk;
         /** 当前品种的永久编号。 */
@@ -659,7 +601,6 @@ public final class DirectCommandSlot {
 
         /**
          * 保存风险续扫输入并清空上一轮触发扫描续步。
-         * @param owner 当前交易 Owner 运行时
          * @param risk 本轮可空风险扫描器
          * @param symbolId 已解析的永久品种编号
          * @param instrumentId 本轮扫描的品种名称
@@ -668,9 +609,8 @@ public final class DirectCommandSlot {
          * @param startedAt 本轮扫描开始的观测时间
          * @param beforeRevision 工作开始前的权威修订号
          */
-        void prepare(TradingCoreRuntime owner, RiskScanCoordinator risk, int symbolId, String instrumentId,
+        void prepare(RiskScanCoordinator risk, int symbolId, String instrumentId,
                 int maxUsers, int pendingBefore, long startedAt, long beforeRevision) {
-            this.owner = Objects.requireNonNull(owner);
             this.risk = risk;
             this.symbolId = symbolId;
             this.instrumentId = Objects.requireNonNull(instrumentId);
@@ -684,7 +624,7 @@ public final class DirectCommandSlot {
          * 清除当前风险及触发续步引用和统计输入，保留外层可复用扫描器。
          */
         void clear() {
-            owner = null; risk = null; instrumentId = null; triggers = null;
+            risk = null; instrumentId = null; triggers = null;
             symbolId = maxUsers = pendingBefore = 0; startedAt = beforeRevision = 0;
         }
 
@@ -713,26 +653,8 @@ public final class DirectCommandSlot {
      * 在 Owner 轮询自动减仓工作完成并请求发布的固定续步。
      */
     private final class AdlControlContinuation implements BooleanSupplier {
-        /** 当前续步服务的交易运行时，完成或清理后解除。 */
-        private TradingCoreRuntime owner;
-        /** 当前续步所收集的对应业务工作。 */
-        private RuntimeAdlExecution.AdlWork work;
-        /**
-         * 保存非空运行时和自动减仓工作。
-         * @param owner 当前交易 Owner 运行时
-         * @param work 当前要保存、替换或轮询的业务续步
-         */
-        void prepare(TradingCoreRuntime owner, RuntimeAdlExecution.AdlWork work) {
-            this.owner = Objects.requireNonNull(owner); this.work = Objects.requireNonNull(work);
-        }
-        /**
-         * 解除本轮自动减仓工作及运行时引用。
-         */
-        void clear() { owner = null; work = null; }
-        /**
-         * 自动减仓续步未完成返回假，完成后请求发布并返回真。
-         */
         @Override public boolean getAsBoolean() {
+            var work = reusableAdlWork;
             if (!work.getAsBoolean()) return false;
             owner.requestCommitPublication();
             return true;
@@ -743,26 +665,8 @@ public final class DirectCommandSlot {
      * 在 Owner 收集强平结果确认工作并请求发布的固定续步。
      */
     private final class LiquidationResolutionControlContinuation implements BooleanSupplier {
-        /** 当前续步服务的交易运行时，完成或清理后解除。 */
-        private TradingCoreRuntime owner;
-        /** 当前续步所收集的对应业务工作。 */
-        private RuntimeLiquidationResolution.ResolutionWork work;
-        /**
-         * 保存非空运行时及强平结果确认工作。
-         * @param owner 当前交易 Owner 运行时
-         * @param work 当前要保存、替换或轮询的业务续步
-         */
-        void prepare(TradingCoreRuntime owner, RuntimeLiquidationResolution.ResolutionWork work) {
-            this.owner = Objects.requireNonNull(owner); this.work = Objects.requireNonNull(work);
-        }
-        /**
-         * 解除本轮强平结果确认工作及运行时引用。
-         */
-        void clear() { owner = null; work = null; }
-        /**
-         * 等待强平结果确认工作完成，随后请求发布。
-         */
         @Override public boolean getAsBoolean() {
+            var work = reusableResolutionWork;
             if (!work.getAsBoolean()) return false;
             owner.requestCommitPublication();
             return true;
@@ -782,8 +686,6 @@ public final class DirectCommandSlot {
         private static final byte ALGO_UPSERT = 3;
         /** 当前固定槽使用的操作类别，零表示尚未准备。 */
         private byte kind;
-        /** 当前续步服务的交易运行时，完成或清理后解除。 */
-        private TradingCoreRuntime owner;
         /**
          * userId：账户归属用户，派发及回执均按其 Lane 路由。
          * triggerOrderId：当前变更的触发单编号。
@@ -813,8 +715,7 @@ public final class DirectCommandSlot {
         private boolean instrumentSettled;
 
         /**
-         * 清除旧参数，保存触发单变更种类与各原语输入；运行时和操作类别必须非空。
-         * @param owner 当前交易 Owner 运行时
+         * 清除旧参数，保存非空触发单变更种类与各原语输入。
          * @param userId 操作所属账户用户
          * @param mutation 触发单具体变更类别
          * @param triggerOrderId 待变更触发单编号
@@ -824,46 +725,44 @@ public final class DirectCommandSlot {
          * @param flag 完成操作是否成功
          * @param text 完成操作的拒绝原因，空引用按空串处理
          */
-        void prepareMutation(TradingCoreRuntime owner, long userId,
+        void prepareMutation(long userId,
                 TriggerOrderCommands.Mutation mutation, long triggerOrderId, long arg1, long arg2,
                 long arg3, boolean flag, String text) {
-            clear(); kind = MUTATION; this.owner = Objects.requireNonNull(owner); this.userId = userId;
+            clear(); kind = MUTATION; this.userId = userId;
             this.mutation = Objects.requireNonNull(mutation); this.triggerOrderId = triggerOrderId;
             this.arg1 = arg1; this.arg2 = arg2; this.arg3 = arg3; this.flag = flag; this.text = text;
         }
         /**
          * 清除旧参数并保存非空触发单及其账户、合约、持仓身份。
-         * @param owner 当前交易 Owner 运行时
          * @param userId 操作所属账户用户
          * @param trigger 待写入的触发单视图
          * @param symbolId 已解析的永久品种编号
          * @param positionKey 触发单稳定持仓身份
          * @param instrumentSettled 当前合约是否已结束结算
          */
-        void prepareTriggerUpsert(TradingCoreRuntime owner, long userId,
+        void prepareTriggerUpsert(long userId,
                 CoreTriggerOrderStateView trigger, int symbolId, long positionKey,
                 boolean instrumentSettled) {
-            clear(); kind = TRIGGER_UPSERT; this.owner = Objects.requireNonNull(owner);
+            clear(); kind = TRIGGER_UPSERT;
             this.userId = userId; this.trigger = Objects.requireNonNull(trigger); this.symbolId = symbolId;
             this.positionKey = positionKey; this.instrumentSettled = instrumentSettled;
         }
         /**
          * 清除旧参数并保存非空算法单及其账户、合约身份。
-         * @param owner 当前交易 Owner 运行时
          * @param userId 操作所属账户用户
          * @param algo 待写入的算法单视图
          * @param symbolId 已解析的永久品种编号
          */
-        void prepareAlgoUpsert(TradingCoreRuntime owner, long userId, CoreAlgoOrderView algo,
+        void prepareAlgoUpsert(long userId, CoreAlgoOrderView algo,
                 int symbolId) {
-            clear(); kind = ALGO_UPSERT; this.owner = Objects.requireNonNull(owner);
+            clear(); kind = ALGO_UPSERT;
             this.userId = userId; this.algo = Objects.requireNonNull(algo); this.symbolId = symbolId;
         }
         /**
          * 清除本轮操作类别、引用与原语参数，固定续步对象本身继续复用。
          */
         void clear() {
-            kind = 0; owner = null; mutation = null; trigger = null; secondTrigger = null; algo = null; text = null;
+            kind = 0; mutation = null; trigger = null; secondTrigger = null; algo = null; text = null;
             userId = triggerOrderId = arg1 = arg2 = arg3 = positionKey = 0;
             flag = instrumentSettled = false; symbolId = 0;
         }

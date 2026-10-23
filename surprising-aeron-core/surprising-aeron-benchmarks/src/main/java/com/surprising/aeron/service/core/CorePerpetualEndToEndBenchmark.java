@@ -176,7 +176,7 @@ public final class CorePerpetualEndToEndBenchmark {
         long deadline = System.nanoTime() + 30_000_000_000L;
         while (state.directCommand.active()) {
             state.assertHealthy();
-            response = state.directCommand.poll(state);
+            response = state.directCommand.poll();
             if (System.nanoTime() >= deadline)
                 throw new IllegalStateException("direct command timed out: " + type);
             if (response == null) Thread.onSpinWait();

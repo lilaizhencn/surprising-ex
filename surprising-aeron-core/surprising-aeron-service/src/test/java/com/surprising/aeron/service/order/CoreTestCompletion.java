@@ -162,7 +162,7 @@ public final class CoreTestCompletion {
             // 当前协议入口或续步返回的可空响应。
             CoreResponse response = owner.applyDecodedCommand(message, timestamp, position, window.decodedIfPresent(message), independent);
             while (owner.directCommand.active()) {
-                response = owner.directCommand.poll(owner);
+                response = owner.directCommand.poll();
                 if (System.nanoTime() >= deadline) throw new AssertionError("direct command timeout");
                 Thread.onSpinWait();
             }

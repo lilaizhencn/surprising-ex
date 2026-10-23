@@ -391,7 +391,7 @@ public final class TradingCoreOwner {
         // 控制输入保存的原请求
         var request = activeControl.command();
         if (state.directCommand.active()) {
-            commandPipeline.controlResponse(state.directCommand.poll(state));
+            commandPipeline.controlResponse(state.directCommand.poll());
             if (commandPipeline.controlResponse() == null) { checkProgressDeadline(); return false; }
         }
         state.commits.commitReadyMatching(OwnerCommandPipelineState.COMPLETION_BATCH_SIZE,

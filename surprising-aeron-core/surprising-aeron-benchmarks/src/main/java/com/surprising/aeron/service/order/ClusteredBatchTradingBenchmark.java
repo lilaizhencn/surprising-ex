@@ -691,7 +691,7 @@ public class ClusteredBatchTradingBenchmark {
                     throw new IllegalStateException("fault command did not enter continuation");
                 long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!owner.directCommand.hasControlWork()) {
-                    if (owner.directCommand.poll(owner) != null)
+                    if (owner.directCommand.poll() != null)
                         throw new AssertionError("funds preflight did not reach Account Lane work");
                     if (System.nanoTime() >= preparationDeadline)
                         throw new AssertionError("funds preflight did not reach Account Lane work");
@@ -707,7 +707,7 @@ public class ClusteredBatchTradingBenchmark {
                 });
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 do {
-                    result = owner.directCommand.poll(owner);
+                    result = owner.directCommand.poll();
                     if (System.nanoTime() > deadline) throw new IllegalStateException("fault rollback timeout");
                 } while (result == null);
             } finally { runtime.exitAsynchronousCommandScope(); }
@@ -1104,7 +1104,7 @@ public class ClusteredBatchTradingBenchmark {
             CoreResponse response = service.state().apply(command(type, user, payload));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while (service.state().directCommand.active()) {
-                response = service.state().directCommand.poll(service.state());
+                response = service.state().directCommand.poll();
                 if (System.nanoTime() >= deadline) throw new AssertionError("direct command timeout: " + type);
                 Thread.onSpinWait();
             }

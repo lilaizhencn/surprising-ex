@@ -40,7 +40,7 @@ public final class BalanceTransferCommands {
      */
     private void adjustBalance(long userId, BalanceAdjustmentCommand command) {
         if (owner.asynchronousCommands()) {
-            owner.directCommand.deferBalanceAdjustment(owner, userId, command);
+            owner.directCommand.deferBalanceAdjustment(userId, command);
         } else {
             RuntimeAccountStateTransitions.adjustBalance(owner.runtimeState(), owner.identities(), userId, command);
             owner.requestCommitPublication();
@@ -57,7 +57,7 @@ public final class BalanceTransferCommands {
         // 载荷解出的划转参数，后续沿用源/目标用户及产品线信息
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
         if (owner.asynchronousCommands()) {
-            owner.directCommand.deferTransferOut(owner, message.header().userId(), command);
+            owner.directCommand.deferTransferOut(message.header().userId(), command);
         } else {
             RuntimeAccountStateTransitions.transferOut(owner.runtimeState(), owner.identities(), message.header().userId(), command);
             completeTransferPublication();
@@ -98,7 +98,7 @@ public final class BalanceTransferCommands {
         // 本次需要完成的划转业务 ID
         long id = TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId();
         if (owner.asynchronousCommands()) {
-            owner.directCommand.deferTransferComplete(owner, message.header().userId(), id);
+            owner.directCommand.deferTransferComplete(message.header().userId(), id);
         } else {
             RuntimeAccountStateTransitions.completeTransfer(owner.runtimeState(), message.header().userId(), id);
             owner.requestCommitPublication();
