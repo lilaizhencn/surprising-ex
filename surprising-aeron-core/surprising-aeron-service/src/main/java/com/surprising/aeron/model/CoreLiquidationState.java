@@ -83,25 +83,6 @@ public record CoreLiquidationState(
     }
 
     /**
-     * 创建全仓强平记录，保留明确传入的持仓腿及带方向数量，执行价格和费用从 0 开始。
-     * @param liquidationId 这次强平流程的唯一编号
-     * @param userId 这份状态所属的用户编号，必须为正数
-     * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
-     * @param positionSide 净持仓、多头腿或空头腿；双向持仓时用于区分同一合约的两条腿
-     * @param triggerPriceSequence 触发这次强平判断时采用的行情序号
-     * @param signedQuantitySteps 带方向的持仓数量步数，正数为多头、负数为空头、0 为无持仓
-     * @param closeQuantitySteps 这次计划平掉的绝对数量步数，必须大于 0 且不能超过原持仓绝对量
-     * @param deficitUnits 这次强平尚未覆盖的亏空，单位为结算资产最小单位
-     * @param status 强平流程当前阶段，执行后有亏空时还要经过保险基金或 ADL 处理
-     */
-    public CoreLiquidationState(long liquidationId, long userId, String instrumentId, CorePositionSide positionSide,
-                                long triggerPriceSequence, long signedQuantitySteps,
-                                long closeQuantitySteps, long deficitUnits, Status status) {
-        this(liquidationId, userId, instrumentId, CoreMarginMode.CROSS, positionSide,
-                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, deficitUnits, 0, 0, 0, status, 0);
-    }
-
-    /**
      * 创建全仓净持仓强平记录，传入的平仓绝对数量同时作为原持仓的正向数量。
      * @param liquidationId 这次强平流程的唯一编号
      * @param userId 这份状态所属的用户编号，必须为正数
@@ -116,25 +97,6 @@ public record CoreLiquidationState(
                                 Status status) {
         this(liquidationId, userId, instrumentId, CoreMarginMode.CROSS, CorePositionSide.NET,
                 triggerPriceSequence, closeQuantitySteps, closeQuantitySteps, deficitUnits, 0, 0, 0, status, 0);
-    }
-
-    /**
-     * 按持仓腿创建全仓强平记录，空头腿使用负的原持仓数量，其他腿使用正数量。
-     * @param liquidationId 这次强平流程的唯一编号
-     * @param userId 这份状态所属的用户编号，必须为正数
-     * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
-     * @param positionSide 净持仓、多头腿或空头腿；双向持仓时用于区分同一合约的两条腿
-     * @param triggerPriceSequence 触发这次强平判断时采用的行情序号
-     * @param closeQuantitySteps 这次计划平掉的绝对数量步数，必须大于 0 且不能超过原持仓绝对量
-     * @param deficitUnits 这次强平尚未覆盖的亏空，单位为结算资产最小单位
-     * @param status 强平流程当前阶段，执行后有亏空时还要经过保险基金或 ADL 处理
-     */
-    public CoreLiquidationState(long liquidationId, long userId, String instrumentId, CorePositionSide positionSide,
-                                long triggerPriceSequence, long closeQuantitySteps,
-                                long deficitUnits, Status status) {
-        this(liquidationId, userId, instrumentId, CoreMarginMode.CROSS, positionSide, triggerPriceSequence,
-                positionSide == CorePositionSide.SHORT ? Math.negateExact(closeQuantitySteps) : closeQuantitySteps,
-                closeQuantitySteps, deficitUnits, 0, 0, 0, status, 0);
     }
 
     /**
@@ -156,45 +118,10 @@ public record CoreLiquidationState(
     }
 
     /**
-     * 只有已取消或已完成且亏空为 0 才是强平终态；待保险基金和 ADL 的记录仍需继续处理。
+     * 已取消或已完成是强平终态；构造器保证完成态亏空为 0，待保险基金和 ADL 的记录仍需继续处理。
      */
     public boolean terminal() {
-        return status == Status.CANCELED || status == Status.COMPLETED && deficitUnits == 0;
-    }
-
-    /**
-     * 复制为调用方指定的阶段；离开 ORDERED 时清掉撤单游标，其他字段仍由构造器校验。
-     * @param nextStatus 调用方决定的下一状态，这里只构造并校验新记录
-     */
-    public CoreLiquidationState withStatus(Status nextStatus) {
-        return new CoreLiquidationState(liquidationId, userId, instrumentId, marginMode, positionSide,
-                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, deficitUnits,
-                executionPriceTicks, liquidationFeeRatePpm, liquidationFeeUnits, nextStatus,
-                nextStatus == Status.ORDERED ? nextCancelOrderId : 0);
-    }
-
-    /**
-     * 仅刷新尚处于计划阶段的强平，按最新持仓重设全部平仓量并清零执行和亏空信息。
-     * @param nextMarginMode 重新评估强平计划时的最新全仓或逐仓模式
-     * @param nextPriceSequence 重新评估强平计划采用的新行情序号
-     * @param nextSignedQuantitySteps 重新评估后的带方向持仓步数，将据此重置计划平仓量
-     */
-    public CoreLiquidationState refreshed(CoreMarginMode nextMarginMode, long nextPriceSequence,
-                                          long nextSignedQuantitySteps) {
-        if (status != Status.PLANNED) throw new IllegalStateException("only planned liquidation can refresh");
-        return new CoreLiquidationState(liquidationId, userId, instrumentId, nextMarginMode, positionSide,
-                nextPriceSequence, nextSignedQuantitySteps,
-                Math.absExact(nextSignedQuantitySteps), 0, 0, 0, 0, Status.PLANNED);
-    }
-
-    /**
-     * 仅取消尚未执行的强平计划，清空亏空、执行费用和撤单游标，返回取消记录。
-     */
-    public CoreLiquidationState canceled() {
-        if (status != Status.PLANNED) throw new IllegalStateException("only planned liquidation can cancel");
-        return new CoreLiquidationState(liquidationId, userId, instrumentId, marginMode, positionSide,
-                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps,
-                0, 0, 0, 0, Status.CANCELED, 0);
+        return status == Status.CANCELED || status == Status.COMPLETED;
     }
 
     /**
@@ -209,32 +136,4 @@ public record CoreLiquidationState(
                 Status.ORDERED, nextOrderId);
     }
 
-    /**
-     * 保存强平执行价格和费用；仍有亏空则转待保险基金，否则转完成，并清掉撤单游标。
-     * @param uncoveredUnits 执行后仍未覆盖的亏空，0 表示可直接结束本次强平
-     * @param priceTicks 本次强平执行价格，单位为最小价格 tick
-     * @param feeRatePpm 本次强平执行采用的费用比例，单位为百万分之一
-     * @param feeUnits 本次强平记录的非负费用金额，单位为结算资产最小单位
-     */
-    public CoreLiquidationState executed(long uncoveredUnits, long priceTicks, long feeRatePpm, long feeUnits) {
-        return new CoreLiquidationState(liquidationId, userId, instrumentId, marginMode, positionSide,
-                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps, uncoveredUnits,
-                priceTicks, feeRatePpm, feeUnits,
-                uncoveredUnits > 0 ? Status.INSURANCE_REQUIRED : Status.COMPLETED, 0);
-    }
-
-    /**
-     * 从剩余亏空中扣掉本次实际覆盖金额，再使用调用方指定的下一阶段；覆盖量必须为正且不能超出亏空。
-     * @param coveredUnits 保险基金或 ADL 本次实际覆盖的亏空金额，必须为正且不能超过剩余亏空
-     * @param nextStatus 调用方决定的下一状态，这里只构造并校验新记录
-     */
-    public CoreLiquidationState covered(long coveredUnits, Status nextStatus) {
-        if (coveredUnits <= 0 || coveredUnits > deficitUnits) {
-            throw new IllegalArgumentException("invalid liquidation coverage");
-        }
-        return new CoreLiquidationState(liquidationId, userId, instrumentId, marginMode, positionSide,
-                triggerPriceSequence, signedQuantitySteps, closeQuantitySteps,
-                Math.subtractExact(deficitUnits, coveredUnits), executionPriceTicks,
-                liquidationFeeRatePpm, liquidationFeeUnits, nextStatus, 0);
-    }
 }
