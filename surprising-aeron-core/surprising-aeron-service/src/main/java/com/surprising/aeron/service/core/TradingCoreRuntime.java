@@ -76,7 +76,6 @@ import com.surprising.aeron.service.snapshot.CoreSnapshotLifecycle;
 import com.surprising.aeron.service.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotWriter;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.support.metrics.CoreLaneMetrics;
@@ -710,9 +709,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     @Getter
     FatalMatchingDivergenceException fatalFailure;
 
-    /** 跨 Lane 财库变化合并时复用的资金累加器。 */
-    final RuntimeTreasuryDelta mergedLaneTreasuryDelta =
-            new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
     /**
      *  当前命令保存的原复制日志位置。
      * 返回当前保存的复制日志位置。

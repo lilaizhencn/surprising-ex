@@ -294,7 +294,6 @@ public final class ClusterCommandWindow {
         entry.routeUserId = candidateUser;
         entry.routeMatcherShard = candidateMatcherShard;
         entry.routeUserLaneBit = candidateUserLaneBit;
-        entry.routePresent = true;
         // 新尾条目对应的环形数组物理下标。
         int physical = (head + size - 1) & indexMask;
         userLastAbsSeq.put(candidateUser, absSeq);
@@ -412,7 +411,6 @@ public final class ClusterCommandWindow {
             entry.sequence = entry.timestamp = entry.position = entry.absSeq = 0;
             entry.routeUserId = entry.routeUserLaneBit = 0;
             entry.routeMatcherShard = -1;
-            entry.routePresent = false;
             entry.physicalSlot = -1;
         }
         head = (head + count) & indexMask;
@@ -441,8 +439,6 @@ public final class ClusterCommandWindow {
         public long routeUserLaneBit;
         /** 条目静态 Matcher 分片，清理后负一。 */
         public int routeMatcherShard = -1;
-        /** 条目是否保有准入路由。 */
-        public boolean routePresent;
         /** 响应要发回的 Cluster 会话编号，清理后为无会话标记。 */
         public long sessionId = NO_SESSION_ID;
         /** 条目对应的完整入口请求引用。 */

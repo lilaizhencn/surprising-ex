@@ -203,8 +203,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final LaneSequenceQueue[] placeAdmissionReadyQueues;
     /** 各账户 Lane 到 Owner 的普通结算完成序号队列。 */
     final LaneSequenceQueue[] matcherSettlementReadyQueues;
-    /** 同步 Lane 修改观测时复用的开始时间数组，不进入业务时间计算。 */
-    final long[] laneMutationStartedNanosScratch;
     /** 同步执行按 Lane 写入的复用结果数组，下一次调用可能覆盖返回内容。 */
     final Object[] laneMutationResultsScratch;
     /** 上一次结果数组实际写过的 Lane 位，下一轮只清这些旧结果。 */
@@ -432,8 +430,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
     /** 当前不可变费用政策版本，活动写入归 Lane 0，读者保留所见版本。 */
     private volatile FeePolicyBook feePolicies = FeePolicyBook.EMPTY;
-    /** 按 Lane 复用的控制任务引用数组，由既有派发路径使用。 */
-    final Object[] laneMutationTasks;
 
     /** 结算编排复用的剩余数量映射，不另建权威订单状态。 */
     final LongLongHashMap matcherSettlementRemainingScratch = new LongLongHashMap();
@@ -589,10 +585,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         this.laneUserScratch = routedUsers;
         this.laneLifecycle = new AccountLaneLifecycle(accountLanes, topology, configuration,
                 this::assertOwner, this::signalOwnerCompletion);
-        this.laneMutationTasks = new Object[topology.accountLaneCount()];
         this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.matcherSettlementReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
-        this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
         this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
         this.publishedLaneCommittedSlots = new PaddedCommittedSequenceSlot[topology.accountLaneCount()];

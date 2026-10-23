@@ -181,22 +181,12 @@ public final class MatcherSettlementEvent implements
     private long admissionUserId;
     /** 普通下单准入的订单及预留编号。 */
     private long admissionOrderId;
-    /**  准入所属 Lane，未登记时为负一。 返回普通下单准入所属 Lane，未登记时为负一。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private int admissionLaneId = -1;
     /** 准入回执字段已复制完成的 volatile 发布标记。 */
     private volatile boolean admissionResolved;
     /** 从准入回执复制的接受标记。 */
     private boolean admissionAccepted;
     /** 从准入回执复制的业务结果编码。 */
     private int admissionResultCode;
-    /** 从准入回执复制并保留的预留编号，复制时要求与订单编号相同。 */
-    private long admissionReservationId;
-    /** 从准入回执复制并保留的账户版本。 */
-    private long admissionAccountVersion;
-    /** 从准入回执复制并保留的非负冻结金额。 */
-    private long admissionReservedAmount;
     /** 当前命令持有的订单最终值接收槽，事件完成前不允许归还，回收时解除引用。 */
     LaneOrderResultTarget resultTarget;
     /**
@@ -354,11 +344,9 @@ public final class MatcherSettlementEvent implements
         admissionRequired = false;
         admissionOrder = null;
         admissionUserId = admissionOrderId = 0;
-        admissionLaneId = -1;
         admissionResolved = false;
         admissionAccepted = false;
         admissionResultCode = CoreResultCode.NONE.wireCode();
-        admissionReservationId = admissionAccountVersion = admissionReservedAmount = 0;
         directCoreSequence = coreSequence;
         this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
         commitTimestamp = timestamp; commitClusterPosition = position;
@@ -484,7 +472,7 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * Matcher 把 Lane 固定收据槽的预留、版本、金额、接受及结果码复制进本事件，最后通过 volatile 标记发布回执；同代不允许重复复制。
+     * Matcher 校验 Lane 固定收据槽的预留、版本及金额，只保存接受标记和结果码，最后通过 volatile 标记发布回执；同代不允许重复发布。
      * @param reservationId 准入回执中的预留编号，必须等于本代准入订单编号
      * @param accountVersion 准入回执中的非负账户版本
      * @param reservedAmount 准入回执中的非负冻结金额
@@ -498,9 +486,6 @@ public final class MatcherSettlementEvent implements
                 || accountVersion < 0 || reservedAmount < 0 || resultCode < 0) {
             throw new IllegalStateException("invalid place admission receipt");
         }
-        admissionReservationId = reservationId;
-        admissionAccountVersion = accountVersion;
-        admissionReservedAmount = reservedAmount;
         admissionAccepted = accepted;
         admissionResultCode = resultCode;
         admissionResolved = true;
@@ -1053,7 +1038,7 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * 为活动事件登记一次普通下单准入 Lane，设置需要准入回执的边界。
+     * 校验普通下单准入 Lane，并为活动事件设置一次需要准入回执的边界。
      * @param laneId 当前操作的账户 Lane 编号
      */
     void admissionRoute(int laneId) {
@@ -1061,7 +1046,6 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("invalid place admission route");
         }
         admissionRequired = true;
-        admissionLaneId = laneId;
     }
 
     /**
@@ -1097,11 +1081,9 @@ public final class MatcherSettlementEvent implements
         admissionRequired = false;
         admissionOrder = null;
         admissionUserId = admissionOrderId = 0;
-        admissionLaneId = -1;
         admissionResolved = false;
         admissionAccepted = false;
         admissionResultCode = CoreResultCode.NONE.wireCode();
-        admissionReservationId = admissionAccountVersion = admissionReservedAmount = 0;
         directCoreSequence = 0;
         directCommandId = null;
         directCommandIdMsb = directCommandIdLsb = 0;

@@ -85,8 +85,6 @@ public final class MatcherSettlementPlan {
     private long[] initialOrderScratch;
     /** 没有前置撤单时共用的空原语数组。 */
     private static final long[] NO_ORDERS = new long[0];
-    /** 直达构建入口保存的 taker 引用，按本计划租约保留并在 clearReferences 释放。 */
-    private OrderRuntime directTaker;
     /**  构建时保留的准入订单值或命令槽引用，消费者遵守该代租约。 返回构建时保留的准入订单引用，借用期受计划租约限制，可能为空。 */
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
@@ -118,7 +116,7 @@ public final class MatcherSettlementPlan {
         matcherEvents = List.of(); completedTrigger = null; preCancellationOrderIds = NO_ORDERS;
         preCancellationSize = 0;
         rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
-        directTaker = null; admittedTaker = null; resolvedTaker = null; takerLaneId = -1;
+        admittedTaker = null; resolvedTaker = null; takerLaneId = -1;
         directTakerSide = null;
         directTakerSymbolId = 0;
         directTakerInstrument = null;
@@ -183,7 +181,7 @@ public final class MatcherSettlementPlan {
                              CoreInstrument instrument, MatchingResult result,
                              TradingAccountRuntime runtime) {
         clearReferences();
-        coreSequence = sequence; directTaker = taker; admittedTaker = taker;
+        coreSequence = sequence; admittedTaker = taker;
         directTakerSide = side;
         directTakerSymbolId = symbolId;
         directTakerInstrument = takerInstrument;
@@ -280,7 +278,7 @@ public final class MatcherSettlementPlan {
                                    CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker,
                                    exchange.core2.core.common.MatcherResult result, TradingAccountRuntime runtime) {
         clearReferences();
-        coreSequence = sequence; directTaker = taker; admittedTaker = taker;
+        coreSequence = sequence; admittedTaker = taker;
         directTakerSide = side; directTakerSymbolId = symbolId; directTakerInstrument = takerInstrument;
         takerOrderId = orderId; activeUserId = userId;
         takerLaneId = runtime.topology().accountLaneId(activeUserId);
@@ -858,7 +856,6 @@ public final class MatcherSettlementPlan {
         plan.coreSequence = coreSequence; plan.takerOrderId = takerOrderId; plan.activeUserId = activeUserId;
         plan.admittedTaker = taker;
         plan.resolvedTaker = resolvedTaker;
-        plan.directTaker = null;
         plan.directTakerSide = null;
         plan.directTakerSymbolId = 0;
         plan.directTakerInstrument = null;
