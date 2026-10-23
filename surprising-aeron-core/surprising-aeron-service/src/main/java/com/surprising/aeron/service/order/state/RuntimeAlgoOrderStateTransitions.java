@@ -2,7 +2,7 @@ package com.surprising.aeron.service.order.state;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreAlgoOrderState;
-import com.surprising.aeron.protocol.CoreAlgoOrderView;
+import com.surprising.aeron.protocol.CoreAlgoOrderCommand;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
@@ -93,109 +93,95 @@ public final class RuntimeAlgoOrderStateTransitions {
         changes.putAlgo(updated.algoOrderId(), updated);
     }
 
-    /**
-     * 校验基本输入并取得币对稠密身份，再进入已准备身份的父单更新入口。
-     * @param runtime 提供父单、子单和版本容量校验的所属运行时
-     * @param identities 当前产品身份表，用来准备或核对永久币对编号
-     * @param userId 算法父单和新子单共同所属用户编号
-     * @param view 外部复制命令携带的父单状态视图，不能覆盖账户维护的退休成交进度
-     */
+    /** 冷执行入口在当前账户范围读取权威父单，线上入口先按既有路由交给所属 Lane。 */
     public static void upsert(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                       long userId, CoreAlgoOrderView view) {
-        if (runtime == null || identities == null || view == null || userId <= 0) {
+                              long userId, CoreAlgoOrderCommand command, long clusterTimestamp) {
+        if (runtime == null || identities == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime algo order update");
         }
-        upsert(runtime, userId, view, identities.symbolId(view.instrumentId()));
+        var current = runtime.algoOrder(command.algoOrderId());
+        int symbolId = -1;
+        if (command instanceof CoreAlgoOrderCommand.Create create) symbolId = identities.symbolId(create.instrumentId());
+        else if (current != null) symbolId = identities.symbolId(current.instrumentId());
+        upsert(runtime, userId, command, symbolId, clusterTimestamp);
     }
 
-    /**
-     * 新父单要求客户标识唯一、子单列表空且版本为 1；已有父单保持原意图，版本只能加一并最多追加一个权威子单，取消中或终态不能恢复执行，退休进度沿用 Lane 原值。
-     * @param runtime 提供父单、子单和版本容量校验的所属运行时
-     * @param userId 算法父单和新子单共同所属用户编号
-     * @param view 外部复制命令携带的父单状态视图，不能覆盖账户维护的退休成交进度
-     * @param symbolId 本次父单绑定的币对稠密身份，追加子单时核对一致
-     */
-    public static void upsert(TradingAccountRuntime runtime, long userId,
-                       CoreAlgoOrderView view, int symbolId) {
-        if (runtime == null || view == null || userId <= 0 || symbolId < 0)
+    /** 新建只接收意图；更新从当前父单保留意图、历史子单和退休成交进度。 */
+    public static void upsert(TradingAccountRuntime runtime, long userId, CoreAlgoOrderCommand command,
+                              int symbolId, long clusterTimestamp) {
+        if (runtime == null || command == null || userId <= 0) {
             throw new IllegalArgumentException("invalid prepared algo update");
+        }
         runtime.assertOwner();
-        if (view.userId() != userId) {
+        CoreAlgoOrderState current = runtime.algoOrder(command.algoOrderId());
+        if (current != null && current.userId() != userId) {
             throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
         }
-        if (view.clientAlgoOrderId().isBlank()) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "clientAlgoOrderId is required");
-        }
-        // 请求视图转换的新父单状态，最终保留账户维护的退休成交量。
-        CoreAlgoOrderState next = CoreAlgoOrderState.from(view);
-        // 当前运行时的原父单，不存在时走新建规则。
-        CoreAlgoOrderState current = runtime.algoOrder(next.algoOrderId());
-        if (current == null) {
-            // 该用户原算法客户端标识是否已被其他父单占用。
-            boolean duplicateClient = runtime.hasAlgoClient(userId, next.clientAlgoOrderId());
-            if (duplicateClient) {
-                throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
-                        "clientAlgoOrderId already exists");
-            }
-            if (!next.childOrderIds().isEmpty() || next.revision() != 1) {
-                throw new CoreStateRejectedException("INVALID_ALGO_ORDER_CREATE", "new algo order must start empty");
-            }
-        } else {
-            requireSameIntent(current, next);
-            if (current.terminal() || current.statusCode() == 2 && next.statusCode() < 2) {
-                throw new CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION",
-                        "terminal or cancel-requested algo cannot resume execution");
-            }
-            if (next.revision() <= current.revision()) {
-                throw new CoreStateRejectedException("STALE_ALGO_ORDER_REVISION", "algo order revision is stale");
-            }
-            if (next.revision() != Math.incrementExact(current.revision())
-                    || next.childOrderIds().size() < current.childOrderIds().size()
-                    || !next.childOrderIds().subList(0, current.childOrderIds().size()).equals(current.childOrderIds())
-                    || next.childOrderIds().size() > current.childOrderIds().size() + 1) {
-                throw new CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION",
-                        "algo order revision is not monotonic");
-            }
-            if (next.childOrderIds().size() > current.childOrderIds().size()) {
-                // 新追加列表最后一项指向的普通子单，必须属于同用户、币对和精确算法片标识。
-                OrderRuntime child = runtime.order(next.childOrderIds().getLast());
-                if ((child == null && current.pendingClosedChildId() != next.childOrderIds().getLast())
-                        || (child != null && (child.userId() != userId || child.symbolId() != symbolId
-                        || !("algo-"+current.algoOrderId()+"-"+current.childOrderIds().size()).equals(child.clientOrderId())))) {
-                    throw new CoreStateRejectedException("INVALID_ALGO_CHILD",
-                            "algo child order is not authoritative");
+        CoreAlgoOrderState next;
+        switch (command) {
+            case CoreAlgoOrderCommand.Create create -> {
+                if (current != null) throw new CoreStateRejectedException("INVALID_ALGO_ORDER_CREATE",
+                        "algo order already exists");
+                if (symbolId < 0 || clusterTimestamp <= 0) throw new IllegalArgumentException("invalid algo creation context");
+                if (create.clientAlgoOrderId().isBlank()) {
+                    throw new CoreStateRejectedException("INVALID_COMMAND", "clientAlgoOrderId is required");
                 }
+                if (runtime.hasAlgoClient(userId, create.clientAlgoOrderId())) {
+                    throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
+                            "clientAlgoOrderId already exists");
+                }
+                long start = Math.max(create.startAtEpochMillis(), clusterTimestamp);
+                next = new CoreAlgoOrderState(create.algoOrderId(), userId, create.clientAlgoOrderId(),
+                        create.instrumentId(), create.algoTypeCode(), create.side(), create.priceTicks(),
+                        create.quantitySteps(), create.childQuantitySteps(), create.intervalSeconds(),
+                                create.durationSeconds(),
+                        create.marginMode(), create.positionSide(), create.reduceOnly(), create.postOnly(),
+                                create.timeInForce(),
+                        0, 0, "", start, start, 0, clusterTimestamp, clusterTimestamp, 1, java.util.List.of());
             }
-        }
-        if (current != null) {
-            // 原父单保留的已结束未补列表子单编号，成功补入列表后清零。
-            long pending = current.pendingClosedChildId();
-            if (next.childOrderIds().size() > current.childOrderIds().size()
-                    && next.childOrderIds().getLast() == pending) pending = 0;
-            next = next.withRetiredProgress(current.retiredExecutedQuantitySteps(), pending);
+            case CoreAlgoOrderCommand.Update update -> {
+                if (current == null) throw new CoreStateRejectedException("ENTITY_NOT_FOUND", "algo order is missing");
+                if (symbolId < 0) throw new IllegalArgumentException("invalid algo update symbol");
+                if (current.terminal() || current.statusCode() == 2 && update.statusCode() < 2) {
+                    throw new CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION",
+                            "terminal or cancel-requested algo cannot resume execution");
+                }
+                if (update.expectedRevision() < current.revision()) {
+                    throw new CoreStateRejectedException("STALE_ALGO_ORDER_REVISION", "algo order revision is stale");
+                }
+                if (update.expectedRevision() != current.revision()) {
+                    throw new CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION",
+                            "algo order revision is not monotonic");
+                }
+                java.util.List<Long> children = current.childOrderIds();
+                long pending = current.pendingClosedChildId();
+                long appended = update.appendedChildOrderId();
+                if (appended != 0) {
+                    var child = runtime.order(appended);
+                    if ((child == null && pending != appended)
+                            || (child != null && (child.userId() != userId || child.symbolId() != symbolId
+                            || !("algo-" + current.algoOrderId() + "-" + children.size()).equals(child.clientOrderId())))) {
+                        throw new CoreStateRejectedException("INVALID_ALGO_CHILD", "algo child order is not authoritative");
+                    }
+                    var appendedChildren = new java.util.ArrayList<>(children);
+                    appendedChildren.add(appended);
+                    children = appendedChildren;
+                    if (pending == appended) pending = 0;
+                }
+                next = new CoreAlgoOrderState(current.algoOrderId(), current.userId(), current.clientAlgoOrderId(),
+                        current.instrumentId(), current.algoTypeCode(), current.side(), current.priceTicks(),
+                        current.quantitySteps(), current.childQuantitySteps(), current.intervalSeconds(),
+                                current.durationSeconds(),
+                        current.marginMode(), current.positionSide(), current.reduceOnly(), current.postOnly(),
+                                current.timeInForce(),
+                        update.statusCode(), update.currentOrderId(), update.rejectReason(), current.startAtEpochMillis(),
+                        update.nextSliceAtEpochMillis(), update.completedAtEpochMillis(), current.createdAtEpochMillis(),
+                        update.updatedAtEpochMillis(), Math.incrementExact(current.revision()), children,
+                        current.retiredExecutedQuantitySteps(), pending);
+            }
         }
         runtime.requireRevisionCapacity();
         runtime.putAlgoOrder(next);
         runtime.incrementCommandRevision();
-    }
-
-    /**
-     * 核对父单用户、客户端标识、币对、方向、价格数量、拆单节奏、资金模式、有效期和起始时间等原始意图不可改变。
-     * @param left 账户中原父单状态
-     * @param right 请求更新的新父单状态，只允许推进生命周期与列表而不能改意图
-     */
-    private static void requireSameIntent(CoreAlgoOrderState left, CoreAlgoOrderState right) {
-        if (left.userId() != right.userId() || !left.clientAlgoOrderId().equals(right.clientAlgoOrderId())
-                || !left.instrumentId().equals(right.instrumentId()) || left.algoTypeCode() != right.algoTypeCode()
-                || left.side() != right.side() || left.priceTicks() != right.priceTicks()
-                || left.quantitySteps() != right.quantitySteps()
-                || left.childQuantitySteps() != right.childQuantitySteps()
-                || left.intervalSeconds() != right.intervalSeconds() || left.durationSeconds() != right.durationSeconds()
-                || left.marginMode() != right.marginMode() || left.positionSide() != right.positionSide()
-                || left.reduceOnly() != right.reduceOnly() || left.postOnly() != right.postOnly()
-                || left.timeInForce() != right.timeInForce() || left.startAtEpochMillis() != right.startAtEpochMillis()
-                || left.createdAtEpochMillis() != right.createdAtEpochMillis()) {
-            throw new CoreStateRejectedException("ALGO_ORDER_INTENT_MISMATCH", "algo order intent is immutable");
-        }
     }
 }

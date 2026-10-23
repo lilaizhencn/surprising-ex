@@ -860,7 +860,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 组装运行时；首次启动使用传入拓扑，恢复时只使用 Matcher 快照保存的拓扑。
+     * 组装运行时；首次启动使用传入拓扑；恢复边界将快照固定路由与当前部署容量组合后交入 Matcher 快照对象。
      * @param productLine 本运行时唯一处理的产品线
      * @param appliedCommandCount 初始或恢复的 Core 序号
      * @param commandResults 已恢复的近期命令结果
@@ -1392,7 +1392,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     public CoreResponse fundsReplayResponse(CoreMessage message, CommandFingerprint fingerprint, CommandFingerprint retained) {
         if (retained == null) return null;
-        if (!retained.matchesCommittedCommand(message, fingerprint)) {
+        if (!retained.equals(fingerprint)) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                     com.surprising.aeron.protocol.ResponseStatus.REJECTED,
                     CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount,

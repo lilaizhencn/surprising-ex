@@ -43,7 +43,14 @@ class MaintenanceIntegrationTest {
                     CoreTriggerOrderType.STOP_LOSS,CoreTriggerCondition.GREATER_OR_EQUAL,200,0,0,0,0,0,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,90,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,
                     0,0,0,"",0,0,0,0,1,0,0);
-            submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,CoreTriggerOrderCodec.encodePlacement(trigger));
+            submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,
+                    CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
+                        trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),
+                                trigger.instrumentId(), trigger.side(), trigger.triggerType(),
+                                trigger.triggerCondition(), trigger.triggerPriceTicks(), trigger.activationPriceTicks(),
+                                trigger.callbackRatePpm(), trigger.orderType(), trigger.timeInForce(),
+                                trigger.priceTicks(), trigger.quantitySteps(), trigger.marginMode(),
+                                trigger.positionSide(), trigger.expiresAtEpochMillis(), trigger.priceSource())));
             var request = new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.CANCEL,0,"upgrade test");
             var task = fixture.service.create("1",request);
             assertThat(fixture.service.create("1",request).id()).isEqualTo(task.id());

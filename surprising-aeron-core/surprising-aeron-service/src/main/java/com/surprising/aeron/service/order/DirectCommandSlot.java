@@ -4,7 +4,7 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandFingerprint;
-import com.surprising.aeron.protocol.CoreAlgoOrderView;
+import com.surprising.aeron.protocol.CoreAlgoOrderCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
@@ -472,13 +472,13 @@ public final class DirectCommandSlot {
     /**
      * 准备算法单写入任务并派发给用户所属 Lane。
      * @param userId 操作所属账户用户
-     * @param algo 待写入的算法单视图
+     * @param algo 算法单的新建意图或生命周期增量
      * @param symbolId 已解析的永久品种编号
      */
-    public void deferAlgoUpsertControl(long userId, CoreAlgoOrderView algo,
-            int symbolId) {
+    public void deferAlgoUpsertControl(long userId, CoreAlgoOrderCommand algo,
+            int symbolId, long clusterTimestamp) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        triggerControl.prepareAlgoUpsert(userId, algo, symbolId);
+        triggerControl.prepareAlgoUpsert(userId, algo, symbolId, clusterTimestamp);
         owner.runtimeState().dispatchControlLanes(
                 1L << owner.runtimeState().topology().accountLaneId(userId), triggerControl);
         controlWork = triggerControl;
@@ -697,7 +697,7 @@ public final class DirectCommandSlot {
          */
         private CoreTriggerOrderStateView trigger, secondTrigger;
         /** 当前待写入的算法单。 */
-        private CoreAlgoOrderView algo;
+        private CoreAlgoOrderCommand algo;
         /** 当前品种的永久编号。 */
         private int symbolId;
         /** 触发单对应的稳定持仓身份。 */
@@ -741,13 +741,13 @@ public final class DirectCommandSlot {
         /**
          * 清除旧参数并保存非空算法单及其账户、合约身份。
          * @param userId 操作所属账户用户
-         * @param algo 待写入的算法单视图
+         * @param algo 算法单的新建意图或生命周期增量
          * @param symbolId 已解析的永久品种编号
          */
-        void prepareAlgoUpsert(long userId, CoreAlgoOrderView algo,
-                int symbolId) {
+        void prepareAlgoUpsert(long userId, CoreAlgoOrderCommand algo,
+                int symbolId, long clusterTimestamp) {
             clear(); kind = ALGO_UPSERT;
-            this.userId = userId; this.algo = Objects.requireNonNull(algo); this.symbolId = symbolId;
+            this.userId = userId; this.algo = Objects.requireNonNull(algo); this.symbolId = symbolId; this.arg1 = clusterTimestamp;
         }
         /**
          * 清除本轮操作类别、引用与原语参数，固定续步对象本身继续复用。
@@ -786,7 +786,7 @@ public final class DirectCommandSlot {
                                     runtime.triggerOrder(secondTrigger.triggerOrderId()).view());
                 }
                 case ALGO_UPSERT -> {
-                    RuntimeAlgoOrderStateTransitions.upsert(runtime, userId, algo, symbolId);
+                    RuntimeAlgoOrderStateTransitions.upsert(runtime, userId, algo, symbolId, arg1);
                     yield runtime.algoOrder(algo.algoOrderId());
                 }
                 default -> throw new IllegalStateException("unknown trigger continuation");

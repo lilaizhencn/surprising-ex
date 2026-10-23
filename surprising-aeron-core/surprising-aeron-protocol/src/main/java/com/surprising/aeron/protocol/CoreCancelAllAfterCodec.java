@@ -8,7 +8,7 @@ import java.util.List;
 
 public final class CoreCancelAllAfterCodec {
     private static final int VERSION = 1;
-    private static final int COMMAND_VERSION = 2;
+    private static final int COMMAND_VERSION = 3;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreCancelAllAfterCodec() {
@@ -19,9 +19,9 @@ public final class CoreCancelAllAfterCodec {
             case SET, COMPLETE -> Long.BYTES * 2;
             case CLAIM, RETRY -> Long.BYTES;
         };
-        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 2 + Long.BYTES * 2
+        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 2 + Long.BYTES
                 + textLength(command.symbolScope()) + actionBytes).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(COMMAND_VERSION).putInt(command.action().wireCode()).putLong(command.userId());
+        buffer.putInt(COMMAND_VERSION).putInt(command.action().wireCode());
         CoreStateQueryCodec.putText(buffer, command.symbolScope(), true, MAX_TEXT_BYTES);
         buffer.putLong(command.updatedAtEpochMillis());
         switch (command.action()) {
@@ -37,14 +37,14 @@ public final class CoreCancelAllAfterCodec {
         Reader reader = new Reader(payload);
         if (reader.intValue() != COMMAND_VERSION) throw new ProtocolException("unsupported cancel-all-after command version");
         CoreCancelAllAfterAction action = CoreCancelAllAfterAction.fromWireCode(reader.intValue());
-        long userId = reader.longValue();
         String scope = reader.text();
         long now = reader.longValue();
         CoreCancelAllAfterCommand command = switch (action) {
-            case SET -> CoreCancelAllAfterCommand.set(userId, scope, reader.longValue(), reader.longValue(), now);
-            case CLAIM -> CoreCancelAllAfterCommand.claim(userId, scope, reader.longValue(), now);
-            case RETRY -> CoreCancelAllAfterCommand.retry(userId, scope, reader.longValue(), now);
-            case COMPLETE -> CoreCancelAllAfterCommand.complete(userId, scope, reader.longValue(), reader.intValue(), reader.intValue(), now);
+            case SET -> CoreCancelAllAfterCommand.set(scope, reader.longValue(), reader.longValue(), now);
+            case CLAIM -> CoreCancelAllAfterCommand.claim(scope, reader.longValue(), now);
+            case RETRY -> CoreCancelAllAfterCommand.retry(scope, reader.longValue(), now);
+            case COMPLETE -> CoreCancelAllAfterCommand.complete(scope, reader.longValue(), reader.intValue(),
+                    reader.intValue(), now);
         };
         reader.consumed();
         return command;

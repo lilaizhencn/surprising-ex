@@ -69,7 +69,14 @@ class CommittedTradeReplayTest {
                     CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 0, 0, 1);
             // 创建条件单返回的事实帧
-            var created = send(replay, line, CoreMessageType.PLACE_TRIGGER_ORDER, 8, CoreTriggerOrderCodec.encodePlacement(trigger));
+            var created = send(replay, line, CoreMessageType.PLACE_TRIGGER_ORDER, 8,
+                    CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
+                        trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),
+                                trigger.instrumentId(), trigger.side(), trigger.triggerType(),
+                                trigger.triggerCondition(), trigger.triggerPriceTicks(), trigger.activationPriceTicks(),
+                                trigger.callbackRatePpm(), trigger.orderType(), trigger.timeInForce(),
+                                trigger.priceTicks(), trigger.quantitySteps(), trigger.marginMode(),
+                                trigger.positionSide(), trigger.expiresAtEpochMillis(), trigger.priceSource())));
             assertThat(created).anySatisfy(/* 当前筛选或解码的已提交事实帧 */ f -> assertThat(f.kind()).isEqualTo(RealtimeFrame.Kind.TRIGGER));
             // 本次取消条件或普通订单返回的事实列表
             var canceled = send(replay, line, CoreMessageType.CANCEL_TRIGGER_ORDER, 8, CoreTriggerOrderCodec.encodeId(Long.MAX_VALUE));
@@ -140,7 +147,7 @@ class CommittedTradeReplayTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1000000)));
             send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 8,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 1000000)));
-            send(replay, ProductLine.SPOT, CoreMessageType.UPSERT_ALGO_ORDER, 7, CoreAlgoOrderCodec.encodeCommand(algo(0,1,List.of())));
+            send(replay, ProductLine.SPOT, CoreMessageType.UPSERT_ALGO_ORDER, 7, encodeAlgo(algo(0,1,List.of()), 0));
             assertThat(replay.algoChanges()).singleElement().satisfies(/* 当前算法父单视图，用来核对状态、修订、成交及活跃进度 */ v -> {
                 assertThat(v.algoOrderId()).isEqualTo(701); assertThat(v.activeQuantitySteps()).isZero();
             });
@@ -148,7 +155,7 @@ class CommittedTradeReplayTest {
                     new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
             assertThat(replay.algoChanges()).isEmpty();
-            send(replay, ProductLine.SPOT, CoreMessageType.UPSERT_ALGO_ORDER, 7, CoreAlgoOrderCodec.encodeCommand(algo(1,2,List.of(201L))));
+            send(replay, ProductLine.SPOT, CoreMessageType.UPSERT_ALGO_ORDER, 7, encodeAlgo(algo(1,2,List.of(201L)), 201));
             assertThat(replay.algoChanges()).singleElement().satisfies(/* 当前算法父单视图，用来核对状态、修订、成交及活跃进度 */ v -> {
                 assertThat(v.activeQuantitySteps()).isEqualTo(2);assertThat(v.executedQuantitySteps()).isZero();
             });
@@ -171,10 +178,10 @@ class CommittedTradeReplayTest {
                 assertThat(retained).singleElement().satisfies(/* 当前算法父单视图，用来核对状态、修订、成交及活跃进度 */ v -> assertThat(v.executedQuantitySteps()).isEqualTo(2));
                 assertThat(afterFill.businessHash()).isEqualTo(replay.businessHash());
             }
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(1,2,List.of(201L))));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(1,2,List.of(201L)), 201));
             assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(replay.algoChanges()).isEmpty();
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(3,3,List.of(201L))));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(3,3,List.of(201L)), 0));
             assertThat(replay.algoChanges()).singleElement().satisfies(/* 当前算法父单视图，用来核对状态、修订、成交及活跃进度 */ v -> assertThat(v.statusCode()).isEqualTo(3));
             place(replay,ProductLine.SPOT,8,203,CoreOrderSide.SELL);
             assertThat(replay.algoChanges()).isEmpty();
@@ -193,7 +200,7 @@ class CommittedTradeReplayTest {
             send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,7,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000)));
             send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,8,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC",1000000)));
             place(replay,ProductLine.SPOT,8,202,CoreOrderSide.SELL);
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(0,1,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(0,1,List.of()), 0));
             send(replay,ProductLine.SPOT,CoreMessageType.PLACE_ORDER,7,TradingCommandCodec.encodePlaceOrder(
                     new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
@@ -203,7 +210,7 @@ class CommittedTradeReplayTest {
             snapshot=replay.snapshot();
         }
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT,snapshot)) {
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(1,2,List.of(201L))));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(1,2,List.of(201L)), 201));
             assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(replay.algoChanges()).singleElement().satisfies(/* 当前算法父单视图，用来核对状态、修订、成交及活跃进度 */ v -> {
                 assertThat(v.childOrderIds()).containsExactly(201L);assertThat(v.executedQuantitySteps()).isEqualTo(2);
@@ -219,12 +226,12 @@ class CommittedTradeReplayTest {
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT,null)) {
             send(replay,ProductLine.SPOT,CoreMessageType.REGISTER_INSTRUMENT,0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("604",0,"BTC","USDT","USDT",1,1,1,100000,50000,0,0,0,-1,0)));
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(0,1,List.of())));
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(2,2,List.of())));
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(1,3,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(0,1,List.of()), 0));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(2,2,List.of()), 0));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(1,3,List.of()), 0));
             assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.INVALID_ALGO_ORDER_REVISION);
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(3,3,List.of())));
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(1,4,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(3,3,List.of()), 0));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(1,4,List.of()), 0));
             assertThat(replay.commandResult().code()).isEqualTo(CoreResultCode.INVALID_ALGO_ORDER_REVISION);
             // 重建查询得到的已保留父单或终态触发视图列表
             var retained = new ArrayList<CoreAlgoOrderView>();replay.forEachRetainedAlgo(retained::add);
@@ -242,8 +249,8 @@ class CommittedTradeReplayTest {
                             "BTC","USDT","USDT",1,1,1,100000,50000,0,0,0,-1,0)));
             send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000)));
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(0,1,List.of())));
-            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(algo(2,2,List.of())));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(0,1,List.of()), 0));
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(2,2,List.of()), 0));
             send(replay,ProductLine.SPOT,CoreMessageType.PLACE_ORDER,7,TradingCommandCodec.encodePlaceOrder(
                     new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
@@ -445,5 +452,19 @@ class CommittedTradeReplayTest {
     private static CoreOrderStateView order(RealtimeFrame frame) {
         assertThat(frame.kind()).isEqualTo(RealtimeFrame.Kind.ORDER);
         return CoreStateQueryCodec.decodeOrderState(frame.payload());
+    }
+
+    private static byte[] encodeAlgo(com.surprising.aeron.protocol.CoreAlgoOrderView value, long appendedChild) {
+        com.surprising.aeron.protocol.CoreAlgoOrderCommand command = value.revision() == 1
+                ? new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create(
+                value.algoOrderId(), value.clientAlgoOrderId(), value.instrumentId(), value.algoTypeCode(),
+                        value.side(), value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(),
+                        value.intervalSeconds(), value.durationSeconds(), value.marginMode(), value.positionSide(),
+                        value.reduceOnly(), value.postOnly(), value.timeInForce(), value.startAtEpochMillis())
+                : new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
+                value.algoOrderId(), value.revision() - 1, value.statusCode(), value.currentOrderId(),
+                        value.rejectReason(), value.nextSliceAtEpochMillis(), value.completedAtEpochMillis(),
+                        value.updatedAtEpochMillis(), appendedChild);
+        return com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(command);
     }
 }

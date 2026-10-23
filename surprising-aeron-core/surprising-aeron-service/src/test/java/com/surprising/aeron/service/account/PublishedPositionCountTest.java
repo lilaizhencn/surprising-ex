@@ -100,7 +100,7 @@ class PublishedPositionCountTest {
             assertThat(runtime.publishedPositionCount()).isZero();
             receipts[0].recordControlChanges(runtime, laneId);
             assertThat(runtime.publishedPositionCount()).isOne();
-            receipts[1].commitTerminalToOwner(runtime, laneId, null, 1, null, null);
+            receipts[1].commitTerminalToOwner(runtime, laneId, null, null, null);
             assertThat(runtime.publishedPositionCount()).isEqualTo(2);
             receipts[0].clear();
             receipts[0].recordControlChanges(runtime, laneId);

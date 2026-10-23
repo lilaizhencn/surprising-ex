@@ -225,19 +225,17 @@ public final class SmallControlReproMain {
         order(maker, instrumentId, 2001 + index * 10, CoreOrderSide.SELL, 10);
         order(user, instrumentId, 2002 + index * 10, CoreOrderSide.BUY, 10);
         if (rejectTrigger || (index & 1) == 1) order(maker, instrumentId, 2003 + index * 10, CoreOrderSide.BUY, 1);
-        var trigger = new CoreTriggerOrderStateView(triggerId, PRODUCT, user, "repro-trigger-" + triggerId,
-                "repro-oco-" + index, instrumentId, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
-                CoreTriggerCondition.GREATER_OR_EQUAL, 100, 0, 0, 0, 0, 0,
-                CoreOrderType.LIMIT, rejectTrigger ? CoreTimeInForce.GTX : CoreTimeInForce.IOC, rejectTrigger ? 100 : (index & 1) == 0 ? 110 : 100, 1,
-                CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+        var trigger = new PlaceTriggerOrderCommand(triggerId, "repro-trigger-" + triggerId, "repro-oco-" + index,
+                instrumentId, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
+                CoreTriggerCondition.GREATER_OR_EQUAL, 100, 0, 0, CoreOrderType.LIMIT,
+                rejectTrigger ? CoreTimeInForce.GTX : CoreTimeInForce.IOC,
+                rejectTrigger ? 100 : (index & 1) == 0 ? 110 : 100, 1, CoreMarginMode.CROSS, CorePositionSide.NET, 0,
+                com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK);
         command(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(trigger));
-        var sibling = new CoreTriggerOrderStateView(10001 + index, PRODUCT, user, "repro-sibling-" + index,
-                "repro-oco-" + index, instrumentId, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
-                CoreTriggerCondition.GREATER_OR_EQUAL, 200, 0, 0, 0, 0, 0,
-                CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
-                CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+        var sibling = new PlaceTriggerOrderCommand(10001 + index, "repro-sibling-" + index, "repro-oco-" + index,
+                instrumentId, CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
+                CoreTriggerCondition.GREATER_OR_EQUAL, 200, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
+                CoreMarginMode.CROSS, CorePositionSide.NET, 0, com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK);
         command(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(sibling));
         if (scan) {
             command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(

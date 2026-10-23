@@ -10,6 +10,7 @@ import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.CoreTriggerCondition;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.PlaceTriggerOrderCommand;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.product.api.ProductLine;
@@ -89,13 +90,13 @@ public class TriggerOrderService {
     public TriggerOrderResponse place(PlaceTriggerOrderRequest request) {
         PreparedTriggerOrder prepared = prepareTriggerOrder(request);
         CoreTriggerOrderStateView persisted = aeronGateway.place(
-                prepared.commandId(), prepared.view().userId(), prepared.view());
+                prepared.commandId(), prepared.userId(), prepared.view());
         return TriggerOrderAeronGateway.response(persisted);
     }
 
     public CompletionStage<TriggerOrderResponse> placeAsync(PlaceTriggerOrderRequest request) {
         PreparedTriggerOrder prepared = prepareTriggerOrder(request);
-        return aeronGateway.placeAsync(prepared.commandId(), prepared.view().userId(), prepared.view())
+        return aeronGateway.placeAsync(prepared.commandId(), prepared.userId(), prepared.view())
                 .thenApply(TriggerOrderAeronGateway::response);
     }
 
@@ -105,23 +106,26 @@ public class TriggerOrderService {
         long triggerOrderId = StableOrderIdentity.triggerOrderId(productLine, normalized.userId(),
                 normalized.clientTriggerOrderId());
         UUID commandId = submissionCommandId(normalized.userId(), normalized.clientTriggerOrderId());
-        CoreTriggerOrderStateView view = new CoreTriggerOrderStateView(
-                triggerOrderId, productLine, normalized.userId(), normalized.clientTriggerOrderId(),
-                emptyToNull(normalized.ocoGroupId()), normalized.instrumentId(),
+        PlaceTriggerOrderCommand view = new PlaceTriggerOrderCommand(
+                triggerOrderId,
+                normalized.clientTriggerOrderId(),
+                emptyToNull(normalized.ocoGroupId()),
+                normalized.instrumentId(),
                 CoreOrderSide.valueOf(normalized.side().name()),
                 CoreTriggerOrderType.valueOf(normalized.triggerType().name()),
                 CoreTriggerCondition.valueOf(triggerCondition(normalized.side(), normalized.triggerType()).name()),
-                normalized.triggerPriceTicks(), normalized.activationPriceTicks() == null ? 0 : normalized.activationPriceTicks(),
-                normalized.callbackRatePpm() == null ? 0 : normalized.callbackRatePpm(), 0, 0, 0,
+                normalized.triggerPriceTicks(),
+                normalized.activationPriceTicks() == null ? 0 : normalized.activationPriceTicks(),
+                normalized.callbackRatePpm() == null ? 0 : normalized.callbackRatePpm(),
                 CoreOrderType.valueOf(normalized.orderType().name()),
-                CoreTimeInForce.valueOf(normalized.timeInForce().name()), normalized.priceTicks(),
+                CoreTimeInForce.valueOf(normalized.timeInForce().name()),
+                normalized.priceTicks(),
                 normalized.quantitySteps(),
                 com.surprising.aeron.protocol.CoreMarginMode.valueOf(normalized.marginMode().name()),
                 com.surprising.aeron.protocol.CorePositionSide.valueOf(normalized.positionSide().name()),
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
-                normalized.expiresAt() == null ? 0 : normalized.expiresAt().toEpochMilli(), 0, 0, 0, 1,
-                0, 0, com.surprising.aeron.protocol.CoreTriggerPriceSource.valueOf(normalized.priceSource().name()));
-        return new PreparedTriggerOrder(commandId, view);
+                normalized.expiresAt() == null ? 0 : normalized.expiresAt().toEpochMilli(),
+                com.surprising.aeron.protocol.CoreTriggerPriceSource.valueOf(normalized.priceSource().name()));
+        return new PreparedTriggerOrder(commandId, normalized.userId(), view);
     }
 
     public TriggerOrderBatchResponse placeBatch(BatchPlaceTriggerOrderRequest request) {
@@ -169,15 +173,15 @@ public class TriggerOrderService {
         var b = stopLoss.view();
         if (a.triggerType() != CoreTriggerOrderType.TAKE_PROFIT || b.triggerType() != CoreTriggerOrderType.STOP_LOSS
                 || a.ocoGroupId().isBlank() || !a.ocoGroupId().equals(b.ocoGroupId())
-                || a.userId() != b.userId() || !a.instrumentId().equals(b.instrumentId())
+                || takeProfit.userId() != stopLoss.userId() || !a.instrumentId().equals(b.instrumentId())
                 || a.side() != b.side() || a.marginMode() != b.marginMode() || a.positionSide() != b.positionSide()
                 || a.quantitySteps() != b.quantitySteps() || a.triggerOrderId() == b.triggerOrderId()
                 || (a.side() == CoreOrderSide.SELL ? a.triggerPriceTicks() <= b.triggerPriceTicks()
                     : a.triggerPriceTicks() >= b.triggerPriceTicks())) {
             throw new IllegalArgumentException("invalid take-profit / stop-loss OCO pair");
         }
-        UUID id = ocoCommandId(a.userId(), a.clientTriggerOrderId(), b.clientTriggerOrderId());
-        var placed = aeronGateway.placeOcoPair(id, a.userId(), List.of(a, b));
+        UUID id = ocoCommandId(takeProfit.userId(), a.clientTriggerOrderId(), b.clientTriggerOrderId());
+        var placed = aeronGateway.placeOcoPair(id, takeProfit.userId(), List.of(a, b));
         var results = new ArrayList<TriggerOrderBatchItemResponse>();
         for (int i = 0; i < orders.size(); i++) {
             String clientId = orders.get(i).clientTriggerOrderId().trim();
@@ -276,7 +280,7 @@ public class TriggerOrderService {
         return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 
-    private record PreparedTriggerOrder(UUID commandId, CoreTriggerOrderStateView view) {
+    private record PreparedTriggerOrder(UUID commandId, long userId, PlaceTriggerOrderCommand view) {
     }
 
     public TriggerOrderBatchResponse cancelBatch(BatchCancelTriggerOrdersRequest request) {

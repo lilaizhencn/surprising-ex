@@ -873,7 +873,7 @@ class TradingCoreOwnerTest {
                         false, false, CoreTimeInForce.IOC, 0, 0, "",
                         1, 1, 0, 1, revision, revision, List.of(), 0, 0, 0);
                 onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER,
-                        revision, 1001, com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(algo)));
+                        revision, 1001, encodeAlgo(algo, 0)));
                 finishCommands(service);
                 assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(revision);
                 assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).userId()).isEqualTo(1001);
@@ -888,7 +888,7 @@ class TradingCoreOwnerTest {
                     false, false, CoreTimeInForce.IOC, 0, 0, "",
                     1, 1, 0, 1, 4, 4, List.of(), 0, 0, 0);
             // 按本轮批下、批撤或批改编码的原载荷
-            byte[] payload = com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(next);
+            byte[] payload = encodeAlgo(next, 0);
             onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER, 4, 1001, payload));
             finishCommands(service);
             assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getLast()).payloadUnsafe()).status())
@@ -929,9 +929,7 @@ class TradingCoreOwnerTest {
                     command(CoreMessageType.CONTINUE_RISK_SCAN, 2, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1))));
             finishCommands(service);
             // 原用户标的一延时全撤 SET 命令
-            var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
-                    com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, 1001, "1",
-                    1000, 2000, 0, 0, 0, 1000);
+            var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1000, 2000, 0, 0, 0, 1000);
             onSessionMessage(service, responses, command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 3, 1001,
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
             finishCommands(service);
@@ -2189,5 +2187,19 @@ class TradingCoreOwnerTest {
         // 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图
         var user = state.tradingState().user(userId);
         return user == null ? 0 : user.totalUnits("USDT");
+    }
+
+    private static byte[] encodeAlgo(com.surprising.aeron.protocol.CoreAlgoOrderView value, long appendedChild) {
+        com.surprising.aeron.protocol.CoreAlgoOrderCommand command = value.revision() == 1
+                ? new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create(
+                value.algoOrderId(), value.clientAlgoOrderId(), value.instrumentId(), value.algoTypeCode(),
+                        value.side(), value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(),
+                        value.intervalSeconds(), value.durationSeconds(), value.marginMode(), value.positionSide(),
+                        value.reduceOnly(), value.postOnly(), value.timeInForce(), value.startAtEpochMillis())
+                : new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
+                value.algoOrderId(), value.revision() - 1, value.statusCode(), value.currentOrderId(),
+                        value.rejectReason(), value.nextSliceAtEpochMillis(), value.completedAtEpochMillis(),
+                        value.updatedAtEpochMillis(), appendedChild);
+        return com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(command);
     }
 }

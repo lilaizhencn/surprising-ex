@@ -61,7 +61,7 @@ public class CoreConfiguration {
 
     /** 将绑定值转换成已校验的不可变拓扑，不依赖 Spring Bean 生命周期。 */
     public LaneTopology toLaneTopology() {
-        return new LaneTopology(matchingEngines, matchingEngines - 1, accountLanes, accountLaneSeed, matcherWindowSize,
+        return new LaneTopology(matchingEngines, accountLanes, accountLaneSeed, matcherWindowSize,
                 matchingCompletionCapacity, accountLaneQueueCapacity);
     }
 

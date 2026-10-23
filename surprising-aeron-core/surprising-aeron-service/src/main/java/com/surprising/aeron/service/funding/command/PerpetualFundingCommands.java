@@ -44,14 +44,14 @@ public final class PerpetualFundingCommands {
         Iterable<Long> indexedUserIds = owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId());
         if (owner.asynchronousCommands()) {
             // 命令槽持有的一页资金费工作，Owner 后续轮询收齐账户和账本回执。
-            var work = RuntimePerpetualFundingProcessor.prepare(owner.directCommand.reusableFundingWork(), command, indexedUserIds,
-                    message.header().commandId(), owner.runtimeState(), owner.identities());
+            var work = RuntimePerpetualFundingProcessor.prepare(owner.directCommand.reusableFundingWork(), command,
+                    indexedUserIds, owner.runtimeState(), owner.identities());
             owner.directCommand.deferFundingControl(work);
             return;
         }
         // 提交回放同步应用后得到的进度与实际收付明细。
-        var result = RuntimePerpetualFundingProcessor.applyRuntime(command, indexedUserIds,
-                message.header().commandId(), owner.runtimeState(), owner.identities());
+        var result = RuntimePerpetualFundingProcessor.applyRuntime(command, indexedUserIds, owner.runtimeState(),
+                owner.identities());
         complete(result);
         notifyReplayObserver(result);
     }

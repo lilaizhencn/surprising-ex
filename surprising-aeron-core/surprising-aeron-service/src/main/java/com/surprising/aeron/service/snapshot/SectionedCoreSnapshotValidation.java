@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.snapshot;
 
-import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
@@ -31,14 +30,6 @@ final class SectionedCoreSnapshotValidation {
         ProductLine productLine = ProductLineWireCode.decode(Byte.toUnsignedInt(header.get()));
         if (productLine != expectedProductLine) {
             throw new ProtocolException("snapshot product line mismatch: " + productLine);
-        }
-        // 从快照各分片参数构造的路由拓扑。
-        LaneTopology topology;
-        try {
-            topology = new LaneTopology(header.getInt(), header.getInt(), header.getInt(), header.getLong(), header.getInt(),
-                    header.getInt(), header.getInt());
-        } catch (/* 拓扑字段不合法的异常，转为带消息的协议异常。 */ IllegalArgumentException exception) {
-            throw new ProtocolException("snapshot route mismatch: " + exception.getMessage());
         }
         // 头部记录的 Core 已应用数量，稍后与 Core 水位配对。
         long appliedCommandCount = header.getLong();
@@ -71,21 +62,20 @@ final class SectionedCoreSnapshotValidation {
                 || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new ProtocolException("invalid snapshot sequence or position");
         }
-        return new HeaderManifest(productLine, topology, snapshotId, coreSequence,
+        return new HeaderManifest(productLine, snapshotId, coreSequence,
                 projectionSequence, accountLaneDigest,
                 clusterTimestamp, clusterPosition, appliedCommandCount,
                 businessStateHash, globalFundsHash, sourceSequenceDigest);
     }
 
     /**
-     * 把头部与解码后的 Core、Matcher、来源及费率/划转逐项配对：产品线/拓扑/快照号/序号一致，业务与资金哈希重算一致，来源摘要一致。划转标记为旧式隐含用户时按冻结的旧公式验证，不跳过校验。
+     * 把头部与解码后的 Core、Matcher、来源及费率/划转逐项配对：产品线/拓扑/快照号/序号一致，业务与资金哈希重算一致，来源摘要一致。
      * @param manifest 从第一段解码的头部清单
      * @param sourceSequences 按来源类型及来源实例记录的消费水位表
      * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
      * @param tradingState 冻结点物化的交易状态，包含订单、账户与资金数据
      * @param feePolicies 需要随快照保存的费率策略表
      * @param pendingTransfers 需要随快照保存的待完成划转表
-     * @param implicitTransferUsers 划转负载是否使用旧式隐含用户格式，决定其原业务哈希验证公式
      */
     static void validatePairing(
             HeaderManifest manifest,
@@ -93,52 +83,19 @@ final class SectionedCoreSnapshotValidation {
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> pendingTransfers,
-            boolean implicitTransferUsers) {
+            Map<Long, com.surprising.aeron.service.account.TransferRuntime> pendingTransfers) {
         requireMatch(manifest.productLine() == matcherSnapshot.productLine()
                 && manifest.productLine() == tradingState.productLine(), "product line");
-        requireMatch(manifest.topology().equals(matcherSnapshot.topology()), "topology");
         requireMatch(manifest.snapshotId() == matcherSnapshot.snapshotId(), "snapshot id");
         requireMatch(manifest.coreSequence() == matcherSnapshot.coreSequence(), "core sequence");
         requireMatch(manifest.appliedCommandCount() == manifest.coreSequence(), "applied sequence");
-        requireMatch(manifest.businessStateHash() == (implicitTransferUsers
-                ? implicitUserBusinessHash(tradingState.businessStateHash(), feePolicies, pendingTransfers)
-                : TradingCoreRuntime.canonicalBusinessStateHash(tradingState.businessStateHash(), feePolicies, pendingTransfers))
+        requireMatch(manifest.businessStateHash() == TradingCoreRuntime.canonicalBusinessStateHash(
+                tradingState.businessStateHash(), feePolicies, pendingTransfers)
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
         requireMatch(manifest.globalFundsHash()
                 == com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(tradingState), "funds hash");
         requireMatch(manifest.sourceSequenceDigest() == TradingCoreRuntime.sourceSequenceDigest(sourceSequences),
                 "source sequence digest");
-    }
-
-    /**
-     * 按划转 v1 的固定字段与顺序重算旧业务哈希：先合入费率，再按划转键排序，逐项混入发起用户和原命令字段。仅用于识别并校验已有旧负载，不改变现有划转事实。
-     * @param base 尚未合入费率和待完成划转的 Core 业务哈希
-     * @param policies 冻结点的费率策略表
-     * @param transfers 按划转标识索引的待完成划转表
-     */
-    private static long implicitUserBusinessHash(long base,
-            Map<Long, com.surprising.aeron.model.CoreFeePolicyState> policies,
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> transfers) {
-        base = TradingCoreRuntime.canonicalBusinessStateHash(base, policies, Map.of());
-        if (transfers.isEmpty()) return base;
-        // 按旧式划转字段累计的固定哈希。
-        long digest = TradingCoreRuntime.HASH_OFFSET_BASIS;
-        for (var /* 按划转键排序后当前正在折叠的待完成划转。 */ transfer : new java.util.TreeMap<>(transfers).values()) {
-            // 该划转保存的原始请求字段，用于重现旧格式哈希。
-            var command = transfer.command();
-            digest = TradingCoreRuntime.mix(digest, transfer.userId());
-            digest = TradingCoreRuntime.mix(digest, command.transferId());
-            digest = TradingCoreRuntime.mix(digest, com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(command.sourceProductLine()));
-            digest = TradingCoreRuntime.mix(digest, com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(command.targetProductLine()));
-            digest = TradingCoreRuntime.mixText(digest, command.sourceAccountType());
-            digest = TradingCoreRuntime.mixText(digest, command.targetAccountType());
-            digest = TradingCoreRuntime.mixText(digest, command.asset());
-            digest = TradingCoreRuntime.mix(digest, command.amountUnits());
-            digest = TradingCoreRuntime.mixText(digest, command.referenceId());
-            digest = TradingCoreRuntime.mixText(digest, command.reason());
-        }
-        return TradingCoreRuntime.mix(base, digest);
     }
 
     /**
@@ -191,7 +148,6 @@ final class SectionedCoreSnapshotValidation {
     /**
      * 从固定元数据段读取的内部清单，额外保留投影水位与 Lane 摘要供恢复核对；这是值载体，不在 record 构造时再次执行配对。
      * @param productLine 该快照唯一所属的产品线
-     * @param topology 快照保存的 Matcher 与账户 Lane 路由拓扑
      * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
      * @param coreSequence 快照覆盖的已应用 Core 命令水位
      * @param projectionSequence 冻结点已发布的实时投影水位，不要求等于 Core 命令数
@@ -204,7 +160,7 @@ final class SectionedCoreSnapshotValidation {
      * @param sourceSequenceDigest 各消息来源已消费序号的汇总摘要
      */
     record HeaderManifest(
-            ProductLine productLine, LaneTopology topology, long snapshotId, long coreSequence,
+            ProductLine productLine, long snapshotId, long coreSequence,
             long projectionSequence, long accountLaneDigest,
             long clusterTimestamp, long clusterPosition, long appliedCommandCount,
             long businessStateHash, long globalFundsHash,

@@ -34,18 +34,18 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * 交易状态的独立持久化格式。新快照外层版本三十八，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，三十八版另以根字段十二声明最低业务读取修订，未知合法字段按长度跳过而不参与当前恢复。
- * 构造约定：工具类不创建实例；当前写版本三十八，历史布局不再接受。
+ * 交易状态的独立持久化格式。新快照外层版本三十九，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，三十九版另以根字段十二声明最低业务读取修订，未知合法字段按长度跳过而不参与当前恢复。
+ * 构造约定：工具类不创建实例；当前写版本三十九，历史布局不再接受。
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
-    /** 本编码器新写入的外层快照布局版本三十八。 */
-    private static final int VERSION = 38;
+    /** 本编码器新写入的外层快照布局版本三十九。 */
+    private static final int VERSION = 39;
     /** 当前支持的最高业务读取修订四，与外层布局版本分开管理。 */
     private static final int READER_REVISION = 4;
 
     /**
-     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本三十八头。根字段十二是最低业务读取修订：数量步长需二、非默认订单保护需三，算法退休量或待关联子单需四；不把 Java 类名或当前接口 DTO 当作磁盘结构。
+     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本三十九头。根字段十二是最低业务读取修订：数量步长需二、非默认订单保护需三，算法退休量或待关联子单需四；不把 Java 类名或当前接口 DTO 当作磁盘结构。
      * @param value 本方法要持久化的对应业务值，字段和顺序由固定编号定义
      */
     public static byte[] encode(TradingCoreState value) {
@@ -86,7 +86,7 @@ public final class TradingStateSnapshotCodec {
     }
 
     /**
-     * 先拒绝非当前外层版本，再检查最低读取修订及产品线，再恢复用户、订单、币对、风险、财库等。触发单必须引用已恢复币对；三十八版解析中的协议错误原样抛出，其他运行时构造或算术错误包装为带原因的 ProtocolException。
+     * 先拒绝非当前外层版本，再检查最低读取修订及产品线，再恢复用户、订单、币对、风险、财库等。触发单必须引用已恢复币对；三十九版解析中的协议错误原样抛出，其他运行时构造或算术错误包装为带原因的 ProtocolException。
      * @param encoded 本方法所读的独立字段记录；decode 入口还包含外层版本头
      * @param expectedProductLine 调用方当前实例所属产品线，必须与快照一致
      */
@@ -106,9 +106,11 @@ public final class TradingStateSnapshotCodec {
             ProductLine product = SnapshotEnumCodes.readProductLine(r.integer(1));
             if (product != expectedProductLine) throw new ProtocolException("trading snapshot product line mismatch");
             // 按用户编号恢复的账户状态表。
-            Map<Long, CoreUserState> users = readValues(r.bytes(3), TradingStateSnapshotCodec::readCoreUserState, CoreUserState::userId);
+            Map<Long, CoreUserState> users = readValues(r.bytes(3), item -> readCoreUserState(item, product),
+                    CoreUserState::userId);
             // 按订单编号恢复的订单状态表。
-            Map<Long, CoreOrderState> orders = readValues(r.bytes(4), TradingStateSnapshotCodec::readCoreOrderState, CoreOrderState::orderId);
+            Map<Long, CoreOrderState> orders = readValues(r.bytes(4), item -> readCoreOrderState(item, product),
+                    CoreOrderState::orderId);
             // 按币对业务编号恢复的注册配置表，触发单随后引用其中配置。
             Map<String, CoreInstrument> instruments = readValues(r.bytes(5), TradingStateSnapshotCodec::readCoreInstrument, CoreInstrument::instrumentId);
             // 按用户和币对范围恢复的倒计时撤单表。
@@ -116,7 +118,8 @@ public final class TradingStateSnapshotCodec {
             for (var /* 当前解码并需要按业务键查重的倒计时撤单记录。 */ timer : r.list(10, TradingStateSnapshotCodec::readCoreCancelAllAfterState)) putUnique(timers, timer.key(), timer);
             // 按触发单编号恢复的触发单权威业务值表。
             Map<Long, CoreTriggerOrderState> triggers = new TreeMap<>();
-            for (var /* 当前触发单字段记录恢复的协议业务视图，随后绑定注册币对。 */ view : r.list(11, TradingStateSnapshotCodec::readCoreTriggerOrderStateView)) {
+            for (var /* 当前触发单字段记录恢复的协议业务视图，随后绑定注册币对。 */ view : r.list(11, item -> readCoreTriggerOrderStateView(item,
+                    product))) {
                 // 当前正在检查能力要求或按触发单引用取得的注册币对。
                 var instrument = instruments.get(view.instrumentId());
                 if (instrument == null) throw new ProtocolException("trigger instrument is missing");
@@ -283,7 +286,6 @@ public final class TradingStateSnapshotCodec {
     private static byte[] writeCoreOrderState(CoreOrderState value) {
         return new SnapshotFields.Writer()
                 .number(1, value.orderId()) // 1：普通订单业务编号
-                .number(2, SnapshotEnumCodes.encode(value.productLine())) // 2：独立产品线
                 .number(3, value.userId()) // 3：所属用户编号
                 .text(4, value.instrumentId()) // 4：币对或合约业务编号
                 .number(5, SnapshotEnumCodes.encode(value.side())) // 5：买入或卖出方向
@@ -316,12 +318,12 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号读取并构造普通订单，恢复原请求价、撮合保护价、累计数量与费用、一百二十八位成交值、时间和状态；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前普通订单的独立字段记录字节
      */
-    private static CoreOrderState readCoreOrderState(byte[] encoded) {
+    private static CoreOrderState readCoreOrderState(byte[] encoded, ProductLine productLine) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
         return new CoreOrderState(
                 r.number(1), // 1：普通订单业务编号
-                SnapshotEnumCodes.readProductLine(r.integer(2)), // 2：独立产品线
+                productLine, // 产品归属取自已校验的根字段
                 r.number(3), // 3：所属用户编号
                 r.text(4), // 4：币对或合约业务编号
                 SnapshotEnumCodes.readCoreOrderSide(r.integer(5)), // 5：买入或卖出方向
@@ -737,7 +739,6 @@ public final class TradingStateSnapshotCodec {
     private static byte[] writeCoreTriggerOrderStateView(CoreTriggerOrderStateView value) {
         return new SnapshotFields.Writer()
                 .number(1, value.triggerOrderId()) // 1：触发单业务编号
-                .number(2, SnapshotEnumCodes.encode(value.productLine())) // 2：独立产品线
                 .number(3, value.userId()) // 3：所属用户编号
                 .text(4, value.clientTriggerOrderId()) // 4：客户指定的触发单号
                 .text(5, value.ocoGroupId()) // 5：一腿触发后取消另一腿的 OCO 分组编号
@@ -776,12 +777,12 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号读取并构造触发单记录，恢复触发条件、追踪止损状态、子单参数、OCO、费用、价格来源及终态时间；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前触发单记录的独立字段记录字节
      */
-    private static CoreTriggerOrderStateView readCoreTriggerOrderStateView(byte[] encoded) {
+    private static CoreTriggerOrderStateView readCoreTriggerOrderStateView(byte[] encoded, ProductLine productLine) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
         return new CoreTriggerOrderStateView(
                 r.number(1), // 1：触发单业务编号
-                SnapshotEnumCodes.readProductLine(r.integer(2)), // 2：独立产品线
+                productLine, // 产品归属取自已校验的根字段
                 r.number(3), // 3：所属用户编号
                 r.text(4), // 4：客户指定的触发单号
                 r.text(5), // 5：一腿触发后取消另一腿的 OCO 分组编号
@@ -946,7 +947,6 @@ public final class TradingStateSnapshotCodec {
      */
     private static byte[] writeCoreUserState(CoreUserState value) {
         return new SnapshotFields.Writer()
-                .number(1, SnapshotEnumCodes.encode(value.productLine())) // 1：独立产品线
                 .number(2, value.userId()) // 2：所属用户编号
                 .number(3, value.revision()) // 3：当前业务记录修订号
                 .bytes(4, writeValues(value.balances(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeAssetBalance(item))) // 4：按资产保存的用户余额
@@ -959,11 +959,11 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号读取并构造用户账户业务状态，恢复产品线、用户修订、余额、预留、持仓和持仓模式；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前用户账户业务状态的独立字段记录字节
      */
-    private static CoreUserState readCoreUserState(byte[] encoded) {
+    private static CoreUserState readCoreUserState(byte[] encoded, ProductLine productLine) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
         return new CoreUserState(
-                SnapshotEnumCodes.readProductLine(r.integer(1)), // 1：独立产品线
+                productLine, // 产品归属取自已校验的根字段
                 r.number(2), // 2：所属用户编号
                 r.number(3), // 3：当前业务记录修订号
                 readValues(r.bytes(4), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readAssetBalance(item), AssetBalance::asset), // 4：按资产保存的用户余额

@@ -93,20 +93,4 @@ public record CoreTriggerOrderStateView(
             throw new IllegalArgumentException("invalid trigger order state");
         }
     }
-
-    public CoreTriggerOrderStateView materializeCreation(long clusterTimestamp) {
-        if (clusterTimestamp <= 0) {
-            throw new IllegalArgumentException("clusterTimestamp must be positive");
-        }
-        if (revision != 1 || createdAtEpochMillis != 0 || updatedAtEpochMillis != 0) {
-            return this;
-        }
-        return new CoreTriggerOrderStateView(triggerOrderId, productLine, userId, clientTriggerOrderId, ocoGroupId,
-                instrumentId, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks,
-                callbackRatePpm, highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType,
-                timeInForce, priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId,
-                triggerSequence, triggeredPriceTicks, rejectReason, expiresAtEpochMillis,
-                triggeredAtEpochMillis, clusterTimestamp, clusterTimestamp, revision,
-                makerFeeRatePpm, takerFeeRatePpm, priceSource);
-    }
 }

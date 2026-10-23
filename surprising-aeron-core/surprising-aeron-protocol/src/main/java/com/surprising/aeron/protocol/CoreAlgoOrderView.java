@@ -27,20 +27,4 @@ public record CoreAlgoOrderView(
             throw new IllegalArgumentException("invalid algo order view");
         }
     }
-
-    public CoreAlgoOrderView materializeCreation(long clusterTimestamp) {
-        if (clusterTimestamp <= 0) {
-            throw new IllegalArgumentException("clusterTimestamp must be positive");
-        }
-        if (revision != 1 || createdAtEpochMillis != 0 || updatedAtEpochMillis != 0) {
-            return this;
-        }
-        long effectiveStartAt = Math.max(startAtEpochMillis, clusterTimestamp);
-        return new CoreAlgoOrderView(algoOrderId, userId, clientAlgoOrderId, instrumentId, algoTypeCode, side,
-                priceTicks, quantitySteps, childQuantitySteps, intervalSeconds, durationSeconds, marginMode,
-                positionSide, reduceOnly, postOnly, timeInForce, statusCode, currentOrderId, rejectReason,
-                effectiveStartAt, effectiveStartAt, completedAtEpochMillis, clusterTimestamp,
-                clusterTimestamp, revision, childOrderIds, executedQuantitySteps, activeQuantitySteps,
-                activeChildOrderCount);
-    }
 }

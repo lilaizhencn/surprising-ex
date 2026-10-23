@@ -2,7 +2,6 @@ package com.surprising.aeron.protocol;
 
 public record CoreCancelAllAfterCommand(
         CoreCancelAllAfterAction action,
-        long userId,
         String symbolScope,
         long countdownMillis,
         long triggerAtEpochMillis,
@@ -11,25 +10,26 @@ public record CoreCancelAllAfterCommand(
         int canceledTriggerOrders,
         long updatedAtEpochMillis) {
 
-    public static CoreCancelAllAfterCommand set(long userId, String scope, long countdown, long triggerAt, long now) {
-        return new CoreCancelAllAfterCommand(CoreCancelAllAfterAction.SET, userId, scope, countdown, triggerAt, 0, 0, 0, now);
+    public static CoreCancelAllAfterCommand set(String scope, long countdown, long triggerAt, long now) {
+        return new CoreCancelAllAfterCommand(CoreCancelAllAfterAction.SET, scope, countdown, triggerAt, 0, 0, 0, now);
     }
 
-    public static CoreCancelAllAfterCommand claim(long userId, String scope, long revision, long now) {
-        return new CoreCancelAllAfterCommand(CoreCancelAllAfterAction.CLAIM, userId, scope, 0, 0, revision, 0, 0, now);
+    public static CoreCancelAllAfterCommand claim(String scope, long revision, long now) {
+        return new CoreCancelAllAfterCommand(CoreCancelAllAfterAction.CLAIM, scope, 0, 0, revision, 0, 0, now);
     }
 
-    public static CoreCancelAllAfterCommand complete(long userId, String scope, long revision,
+    public static CoreCancelAllAfterCommand complete(String scope, long revision,
                                                     int orders, int triggers, long now) {
-        return new CoreCancelAllAfterCommand(CoreCancelAllAfterAction.COMPLETE, userId, scope, 0, 0, revision, orders, triggers, now);
+        return new CoreCancelAllAfterCommand(CoreCancelAllAfterAction.COMPLETE, scope, 0, 0, revision, orders, triggers,
+                now);
     }
 
-    public static CoreCancelAllAfterCommand retry(long userId, String scope, long revision, long now) {
-        return new CoreCancelAllAfterCommand(CoreCancelAllAfterAction.RETRY, userId, scope, 0, 0, revision, 0, 0, now);
+    public static CoreCancelAllAfterCommand retry(String scope, long revision, long now) {
+        return new CoreCancelAllAfterCommand(CoreCancelAllAfterAction.RETRY, scope, 0, 0, revision, 0, 0, now);
     }
 
     public CoreCancelAllAfterCommand {
-        if (action == null || userId <= 0 || symbolScope == null || symbolScope.isBlank() || updatedAtEpochMillis <= 0)
+        if (action == null || symbolScope == null || symbolScope.isBlank() || updatedAtEpochMillis <= 0)
             throw new IllegalArgumentException("invalid cancel-all-after command");
         switch (action) {
             case SET -> {

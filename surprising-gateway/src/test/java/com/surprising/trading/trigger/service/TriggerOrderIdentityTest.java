@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.PlaceTriggerOrderCommand;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
@@ -85,9 +86,9 @@ class TriggerOrderIdentityTest {
     void placementSurvivesProviderReconstructionWithStableTemplate() {
         TriggerProperties properties = properties();
         TriggerOrderAeronGateway gateway = mock(TriggerOrderAeronGateway.class);
-        when(gateway.place(any(UUID.class), eq(1001L), any(CoreTriggerOrderStateView.class)))
-                .thenAnswer(invocation -> invocation.<CoreTriggerOrderStateView>getArgument(2)
-                        .materializeCreation(1_700_000_000_000L));
+        when(gateway.place(any(UUID.class), eq(1001L), any(PlaceTriggerOrderCommand.class)))
+                .thenAnswer(invocation -> invocation.<PlaceTriggerOrderCommand>getArgument(2)
+                        .materialize(ProductLine.LINEAR_PERPETUAL, 1001, 1_700_000_000_000L));
 
         var first = new TriggerOrderService(properties, gateway, null, null).place(request("trigger-client"));
         var reconstructed = new TriggerOrderService(properties, gateway, null, null).place(request("trigger-client"));
@@ -99,9 +100,9 @@ class TriggerOrderIdentityTest {
     @Test
     void selectedIndexSourceReachesCoreAndReturnsToClient() {
         var gateway = mock(TriggerOrderAeronGateway.class);
-        when(gateway.place(any(UUID.class), eq(1001L), any(CoreTriggerOrderStateView.class)))
-                .thenAnswer(call -> call.<CoreTriggerOrderStateView>getArgument(2)
-                        .materializeCreation(1_700_000_000_000L));
+        when(gateway.place(any(UUID.class), eq(1001L), any(PlaceTriggerOrderCommand.class)))
+                .thenAnswer(call -> call.<PlaceTriggerOrderCommand>getArgument(2)
+                        .materialize(ProductLine.LINEAR_PERPETUAL, 1001, 1_700_000_000_000L));
         var request = new PlaceTriggerOrderRequest(1001L, "index-source", null, "1",
                 OrderSide.SELL, TriggerOrderType.TAKE_PROFIT, 70_000L, null, null,
                 OrderType.MARKET, TimeInForce.IOC, 0L, 10L, MarginMode.CROSS,
@@ -127,8 +128,8 @@ class TriggerOrderIdentityTest {
     void atomicPairUsesOneCoreCommandAndPreservesRequestedLegOrder() {
         var gateway = mock(TriggerOrderAeronGateway.class);
         when(gateway.placeOcoPair(any(UUID.class), eq(1001L), any()))
-                .thenAnswer(call -> call.<java.util.List<CoreTriggerOrderStateView>>getArgument(2).stream()
-                        .map(view -> view.materializeCreation(1_700_000_000_000L)).toList());
+                .thenAnswer(call -> call.<java.util.List<PlaceTriggerOrderCommand>>getArgument(2).stream()
+                        .map(view -> view.materialize(ProductLine.LINEAR_PERPETUAL, 1001, 1_700_000_000_000L)).toList());
         var service = new TriggerOrderService(properties(), gateway, null, null);
         var result = service.placeBatch(new com.surprising.trading.api.model.BatchPlaceTriggerOrderRequest(
                 java.util.List.of(leg("sl", TriggerOrderType.STOP_LOSS, 50_000),

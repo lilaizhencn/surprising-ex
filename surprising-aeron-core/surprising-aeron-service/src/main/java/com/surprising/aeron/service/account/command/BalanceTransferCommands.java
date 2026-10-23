@@ -55,7 +55,7 @@ public final class BalanceTransferCommands {
     public void executeTransferOut(CoreMessage message, long clusterTimestamp) {
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         // 载荷解出的划转参数，后续沿用源/目标用户及产品线信息
-        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
+        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
             owner.directCommand.deferTransferOut(message.header().userId(), command);
         } else {
@@ -79,7 +79,7 @@ public final class BalanceTransferCommands {
     public void executeTransferIn(CoreMessage message, long clusterTimestamp) {
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         // 载荷解出的划转参数，后续沿用源/目标用户及产品线信息
-        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe(), message.header().userId());
+        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
         if (message.header().userId() != command.targetUserId())
             throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer recipient mismatch");
         if (owner.runtimeState().productLine() != command.targetProductLine())

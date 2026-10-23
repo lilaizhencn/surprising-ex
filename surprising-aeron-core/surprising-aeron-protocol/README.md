@@ -1,5 +1,15 @@
 # Aeron 实时协议边界
 
+## 复制命令与查询状态的边界（2026-10-23）
+
+Core schema 为 10。算法命令 v3 分为 `CoreAlgoOrderCommand.Create` 和 `Update`，更新仅携带预期版本、本次生命周期变化和可选新增子单。
+触发创建 v5 使用 `PlaceTriggerOrderCommand`，不传查询状态中的初始生命周期、时间、版本、费率或重复归属；Core 从命令头、Cluster 时间和配置初始化。
+延时全撤命令 v3 同样从命令头取得用户。完整查询、实时事件和数据库状态编码保留其实际业务字段。
+划转只读取当前显式收付款用户的 v2，资金指纹严格比较；用户确认无需旧日志/快照，旧格式直接拒绝。
+
+本轮随服务、网关、工具、基准和实时投影的 17 个相关模块执行 `-am -DskipTests clean test-compile`，干净编译通过；未执行测试、交易、数据库或恢复。
+详细版本、命令及静态复核见 [命令数据清理记录](../surprising-aeron-service/validation/command-data-audit-20261023.json)。
+
 ## 零金额账户初始化（2026-10-20）
 
 `BalanceAdjustmentCommand` 允许 `deltaUnits=0`，沿用现有 `ADJUST_BALANCE` 字节格式与资金幂等边界。首次命令建立真实 Core 用户/资产记录，已有账户金额保持不变。它用于 C2C 首次开放前准备不可登录的内部托管及手续费账户；不发行资金、不创建 SQL 钱包余额。重试保持原命令身份，查询继续由 realtime 提供。旧 Core 的参数校验会拒绝零值，须先升级 Core 再调用 Gateway 初始化入口。

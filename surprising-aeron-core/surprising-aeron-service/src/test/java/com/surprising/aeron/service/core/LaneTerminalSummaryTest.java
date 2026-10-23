@@ -32,16 +32,16 @@ class LaneTerminalSummaryTest {
         changes.preparePublication();
         // 本轮终态回调实际收到的订单 ID 列表
         var actual = new ArrayList<Long>();
-        changes.commitTerminalToOwner(state, 0,
-                (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId, /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId, /* 终态回调对应的提交序号，本用例不另作断言 */ sequence) -> actual.add(orderId), 9, null, null);
+        changes.commitTerminalToOwner(state, 0, (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId,
+                /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId) -> actual.add(orderId), null, null);
         assertThat(actual).containsExactlyElementsOf(expected);
         state.clearChangedKeys();
         changes.clear();
         changes.putOrder(41, CoreStateTestFixtures.order(41, 7, 5, 10));
         changes.preparePublication();
         actual.clear();
-        changes.commitTerminalToOwner(state, 0,
-                (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId, /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId, /* 终态回调对应的提交序号，本用例不另作断言 */ sequence) -> actual.add(orderId), 10, null, null);
+        changes.commitTerminalToOwner(state, 0, (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId,
+                /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId) -> actual.add(orderId), null, null);
         assertThat(actual).isEmpty();
     }
     /**
@@ -56,7 +56,8 @@ class LaneTerminalSummaryTest {
         var retained = new ArrayList<Long>();
         // 固定终态接收回调，只记录订单 ID
         TradingAccountRuntime.TerminalOrderSink sink =
-                (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId, /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId, /* 终态回调对应的提交序号，本用例不另作断言 */ sequence) -> retained.add(orderId);
+                (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId,
+                        /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId) -> retained.add(orderId);
         // 作为各状态派生来源的订单十一 OPEN 值
         var open = CoreStateTestFixtures.order(11, 7, 5, 10);
         for (var /* 本轮把同一订单改成的 OPEN 或终态状态 */ status : new CoreOrderStatus[]{CoreOrderStatus.OPEN, CoreOrderStatus.FILLED,
@@ -64,7 +65,7 @@ class LaneTerminalSummaryTest {
             changes.putOrder(11, open.withStatus(status, 2));
             changes.preparePublication();
             retained.clear();
-            changes.commitTerminalToOwner(state, 0, sink, 9, null, null);
+            changes.commitTerminalToOwner(state, 0, sink, null, null);
             if (status.terminal()) assertThat(retained).containsExactly(11L);
             else assertThat(retained).isEmpty();
             if (state.order(11) != null) {
@@ -76,7 +77,7 @@ class LaneTerminalSummaryTest {
         changes.putOrder(11, null);
         changes.preparePublication();
         retained.clear();
-        changes.commitTerminalToOwner(state, 0, sink, 10, null, null);
+        changes.commitTerminalToOwner(state, 0, sink, null, null);
         assertThat(retained).isEmpty();
         assertThat(state.order(11)).isNull();
     }
@@ -93,8 +94,8 @@ class LaneTerminalSummaryTest {
         changes.preparePublication();
         // 本轮终态回调记录的 ID 列表，每轮使用前清空
         var retained = new ArrayList<Long>();
-        changes.commitTerminalToOwner(state, 0,
-                (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId, /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId, /* 终态回调对应的提交序号，本用例不另作断言 */ sequence) -> retained.add(orderId), 9, null, null);
+        changes.commitTerminalToOwner(state, 0, (/* 终态回调提供的订单号，本用例只收集它 */ orderId, /* 终态回调提供的原用户，本用例不另作断言 */ userId,
+                /* 终态回调提供的原客户端单号，本用例不另作断言 */ clientOrderId) -> retained.add(orderId), null, null);
         assertThat(retained).containsExactly(11L);
         if (state.order(11) != null) {
             assertThat(state.order(11).status()).isEqualTo(CoreOrderStatus.CANCELED);

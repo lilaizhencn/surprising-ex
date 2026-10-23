@@ -132,13 +132,29 @@ public final class SectionedCoreSnapshotRecovery {
 
     public TradingCoreRuntime decode(ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-        return components(expectedProductLine, configuration).restore(expectedProductLine, configuration, true);
+        return decode(expectedProductLine, configuration,
+                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
+    }
+
+    public TradingCoreRuntime decode(ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
+            com.surprising.aeron.config.LaneTopology deploymentTopology) {
+        return components(expectedProductLine, configuration, deploymentTopology)
+                .restore(expectedProductLine, configuration, true);
     }
 
     /** 节点启动恢复只重建被动状态，外层 Owner 使用已绑定的 affinity 首次激活。 */
     public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-        return components(expectedProductLine, configuration).restore(expectedProductLine, configuration, false);
+        return decodePassive(expectedProductLine, configuration,
+                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
+    }
+
+    public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
+            com.surprising.aeron.config.LaneTopology deploymentTopology) {
+        return components(expectedProductLine, configuration, deploymentTopology)
+                .restore(expectedProductLine, configuration, false);
     }
 
     /**
@@ -148,7 +164,8 @@ public final class SectionedCoreSnapshotRecovery {
     public CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
         // 本次完整解析生成的组件，提取清单后关闭其终态索引。
         var components = components(expectedProductLine,
-                com.surprising.aeron.config.CoreRuntimeConfiguration.standalone());
+                com.surprising.aeron.config.CoreRuntimeConfiguration.standalone(),
+                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
         try { return components.manifest(expectedProductLine); }
         finally { components.retention().close(); }
     }
@@ -259,10 +276,12 @@ public final class SectionedCoreSnapshotRecovery {
      * @param expectedProductLine 调用方明确要求恢复或检查的产品线
      */
     private SectionedCoreSnapshotParser.Components components(ProductLine expectedProductLine,
-            com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
+            com.surprising.aeron.config.LaneTopology deploymentTopology) {
         ensureComplete();
         try {
-            return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine, configuration.fundsIndexDirectory());
+            return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine, configuration.fundsIndexDirectory(),
+                    deploymentTopology);
         } catch (/* 解析组件抛出的异常，协议异常保留，其他运行异常带 cause 包装。 */ ProtocolException exception) {
             throw exception;
         } catch (/* 解析组件抛出的异常，协议异常保留，其他运行异常带 cause 包装。 */ RuntimeException exception) {

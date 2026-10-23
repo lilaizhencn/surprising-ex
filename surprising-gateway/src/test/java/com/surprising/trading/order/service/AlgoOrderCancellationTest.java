@@ -128,12 +128,26 @@ class AlgoOrderCancellationTest {
             when(gateway.algoOrders(anyLong(), anyString(), anyLong(), anyInt()))
                     .thenAnswer(call -> List.of(state.get()));
             when(gateway.tryCommand(eq(CoreMessageType.UPSERT_ALGO_ORDER), any(), eq(7L), any()))
-                    .thenAnswer(call -> { state.set(CoreAlgoOrderCodec.decodeCommand(call.getArgument(3))); return true; });
+                    .thenAnswer(call -> { applyCommand(call.getArgument(3)); return true; });
             when(gateway.command(eq(CoreMessageType.UPSERT_ALGO_ORDER), any(), eq(7L), any()))
-                    .thenAnswer(call -> { state.set(CoreAlgoOrderCodec.decodeCommand(call.getArgument(3))); return null; });
+                    .thenAnswer(call -> { applyCommand(call.getArgument(3)); return null; });
             store = new AeronAlgoOrderStore(gateway, properties);
             service = new AlgoOrderService(properties, orders, store, mock(AlgoOrderProjectionRepository.class), mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class));
             completeCancellation();
+        }
+
+        void applyCommand(byte[] payload) {
+            var update = (com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update) CoreAlgoOrderCodec.decodeCommand(payload);
+            var v = state.get();
+            var children = new java.util.ArrayList<>(v.childOrderIds());
+            if (update.appendedChildOrderId() != 0) children.add(update.appendedChildOrderId());
+            state.set(new CoreAlgoOrderView(v.algoOrderId(), v.userId(), v.clientAlgoOrderId(), v.instrumentId(),
+                    v.algoTypeCode(), v.side(), v.priceTicks(), v.quantitySteps(), v.childQuantitySteps(),
+                    v.intervalSeconds(), v.durationSeconds(), v.marginMode(), v.positionSide(), v.reduceOnly(),
+                    v.postOnly(), v.timeInForce(), update.statusCode(), update.currentOrderId(), update.rejectReason(),
+                    v.startAtEpochMillis(), update.nextSliceAtEpochMillis(), update.completedAtEpochMillis(),
+                    v.createdAtEpochMillis(), update.updatedAtEpochMillis(), update.expectedRevision() + 1, children,
+                    v.executedQuantitySteps(), v.activeQuantitySteps(), v.activeChildOrderCount()));
         }
 
         void completeCancellation() {

@@ -806,7 +806,7 @@ public final class TradingCoreOwner {
                     (/* 当前快照片段所在的原输入缓冲 */ buffer, /* 片段在输入缓冲中的起始字节偏移 */ offset, /* 当前片段的有效字节数 */ length, /* 快照片段附带的 Aeron 头，恢复字节收集不读取该值 */ header) -> recovery.accept(buffer, offset, length), 10);
             idleStrategy.idle(fragments);
         }
-        replaceState(recovery.decodePassive(productLine, configuration));
+        replaceState(recovery.decodePassive(productLine, configuration, startupTopology));
     }
 
     /**
@@ -826,7 +826,7 @@ public final class TradingCoreOwner {
      * @param snapshot 完整快照的编码字节
      */
     void restoreSnapshot(byte[] snapshot) {
-        replaceState(SectionedCoreSnapshotCodec.decodePassive(snapshot, productLine, configuration));
+        replaceState(SectionedCoreSnapshotCodec.decodePassive(snapshot, productLine, configuration, startupTopology));
     }
 
     /**
@@ -835,7 +835,7 @@ public final class TradingCoreOwner {
      */
     public void restoreSnapshot(SectionedCoreSnapshotCodec.RecoveryBuffer recovery) {
         if (recovery == null) throw new IllegalArgumentException("snapshot recovery is null");
-        replaceState(recovery.decodePassive(productLine, configuration));
+        replaceState(recovery.decodePassive(productLine, configuration, startupTopology));
     }
 
     /**

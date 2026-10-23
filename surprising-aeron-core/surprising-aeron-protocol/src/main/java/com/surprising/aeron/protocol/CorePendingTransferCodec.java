@@ -62,7 +62,7 @@ public final class CorePendingTransferCodec {
                 throw new ProtocolException("invalid pending transfer command length");
             }
             TransferFundsCommand command =
-                    TradingCommandCodec.decodeTransferFunds(payload, buffer.position(), commandLength, userId);
+                    TradingCommandCodec.decodeTransferFunds(payload, buffer.position(), commandLength);
             buffer.position(buffer.position() + commandLength);
             transfers.add(new CorePendingTransferView(userId, command));
         }

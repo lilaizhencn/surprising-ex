@@ -11,20 +11,11 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.UUID;
 import lombok.AccessLevel;
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import lombok.experimental.Accessors;
 
-/**
- * 保存当前产品线的近期终态身份及长期资金命令指纹。终态订单从已提交 Lane 回执直接进入有界墓碑 FIFO，资金索引由 Ledger 执行 I/O；候选表只保留恢复输入中的实体身份，并参与订单编号占用检查，不负责候选发现或批量清理。
- * 构造约定：接管已恢复的候选、墓碑和资金索引引用，不复制，也不在此启动工作线程。
- * 参数 candidates：已恢复的有序候选表
- * 参数 tombstones：已恢复的近期墓碑 FIFO
- * 参数 fundsCommands：已重建的长期资金身份索引
- */
+/** 保存当前产品线近期终态身份和长期资金命令指纹；Owner 管理墓碑 FIFO，Ledger 执行资金索引 I/O。 */
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TerminalStateRetention implements TradingAccountRuntime.TerminalOrderSink, AutoCloseable {
 
@@ -32,28 +23,24 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
 
     /** 近期四类终态身份共用的六万五千五百三十六项保留上限。 */
     static final int MAX_TOMBSTONES = 65_536;
-    /** 终态保留段快照版本二。 */
-    private static final int VERSION = 2;
+    /** 终态保留段快照版本三。 */
+    private static final int VERSION = 3;
     /** 快照客户号的最大 UTF-8 字节数二百五十六。 */
     private static final int MAX_CLIENT_ID_BYTES = 256;
-    /** 从恢复输入接管的有序候选表，当前终态接收入口不向它新增。 */
-    private final LinkedHashMap<EntityKey, RetainedEntity> candidates;
     /** Owner 持有的近期终态身份 FIFO，客户号与实体索引引用同一槽。 */
     private final TerminalTombstoneStore tombstones;
     /** 长期资金命令身份索引，活动 I/O 由 Ledger 执行。 */
     private final FundsCommandIndex fundsCommands;
-    /** 只用于 Owner 查询的复用键，绝不作为稳定 Map 键保存。 */
-    private final EntityKey candidateLookupKey = new EntityKey(EntityType.ORDER, 1);
 
     /**
-     * 创建空候选表、终态 FIFO 和尚未开库的资金身份索引。
+     * 创建空终态 FIFO 和尚未开库的资金身份索引。
      */
     public TerminalStateRetention() {
         this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().fundsIndexDirectory());
     }
 
     public TerminalStateRetention(java.nio.file.Path fundsIndexDirectory) {
-        this(new LinkedHashMap<>(), new TerminalTombstoneStore(), new FundsCommandIndex(fundsIndexDirectory));
+        this(new TerminalTombstoneStore(), new FundsCommandIndex(fundsIndexDirectory));
     }
 
     /**
@@ -61,24 +48,22 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      * @param orderId 正普通订单 ID
      * @param userId 实体所属用户，客户号查询与它组合定位
      * @param clientOrderId 可空普通订单客户号
-     * @param coreSequence 这批终态事实对应的正提交序号
      */
     @Override
-    public void accept(long orderId, long userId, String clientOrderId, long coreSequence) {
+    public void accept(long orderId, long userId, String clientOrderId) {
         tombstones.putIfAbsent(EntityType.ORDER.code, orderId, userId,
-                normalizeClientId(clientOrderId), coreSequence);
+                normalizeClientId(clientOrderId));
     }
 
     /**
-     * 按 Lane 回执的终态槽顺序逐项接收订单身份，使用当前统一提交序号。
+     * 按 Lane 回执的终态槽顺序逐项接收订单身份。
      * @param delta 已经完成的 Lane 回执，读取其终态订单槽
-     * @param coreSequence 这批终态事实对应的正提交序号
      */
     @Override
-    public void acceptBatch(LaneCommitDelta delta, long coreSequence) {
+    public void acceptBatch(LaneCommitDelta delta) {
         for (/* 当前回执槽或快照记录的遍历下标 */ int index = 0; index < delta.terminalOrderCount(); index++) {
             accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
-                    delta.terminalOrderClient(index), coreSequence);
+                    delta.terminalOrderClient(index));
         }
     }
 
@@ -98,7 +83,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     }
 
     /**
-     * 按订单 ID 或同用户客户订单号查近期墓碑，不读取候选表或活动订单。
+     * 按订单 ID 或同用户客户订单号查近期墓碑，不读取活动订单。
      * @param orderId 正普通订单 ID
      * @param userId 实体所属用户，客户号查询与它组合定位
      * @param clientOrderId 可空普通订单客户号
@@ -108,13 +93,12 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     }
 
     /**
-     * 校验正订单 ID，复用临时查询键检查候选表，再查订单墓碑；查询键不作为 Map 存储键。
+     * 校验正订单 ID，查询近期订单墓碑。
      * @param orderId 正普通订单 ID
      */
     public boolean orderIdInUse(long orderId) {
         if (orderId <= 0) throw new IllegalArgumentException("invalid terminal order key");
-        candidateLookupKey.reset(EntityType.ORDER, orderId);
-        return candidates.containsKey(candidateLookupKey) || tombstones.contains(EntityType.ORDER.code, orderId);
+        return tombstones.contains(EntityType.ORDER.code, orderId);
     }
 
     /**
@@ -135,13 +119,6 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      */
     public boolean containsTrigger(long triggerOrderId, long userId, String clientTriggerOrderId) {
         return contains(EntityType.TRIGGER, triggerOrderId, userId, clientTriggerOrderId);
-    }
-
-    /**
-     * 返回当前恢复候选数量，不包括墓碑和活动订单。
-     */
-    public int candidateCount() {
-        return candidates.size();
     }
 
     /**
@@ -344,7 +321,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     public void close() { fundsCommands.close(); }
 
     /**
-     * 在既有快照阶段按版本、候选、墓碑和资金指纹顺序编码独立字节；本方法不额外取得并发状态屏障，输出 I/O 异常包装为编码故障。
+     * 在既有快照阶段按版本、墓碑和资金指纹顺序编码独立字节；本方法不额外取得并发状态屏障，输出 I/O 异常包装为编码故障。
      */
     public byte[] encode() {
         try {
@@ -353,7 +330,6 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
             // 写当前快照段的二进制流
             DataOutputStream output = new DataOutputStream(bytes);
             output.writeInt(VERSION);
-            write(output, candidates);
             tombstones.write(output);
             fundsCommands.write(output);
             output.flush();
@@ -364,7 +340,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     }
 
     /**
-     * 校验版本和各段边界，恢复有序候选及墓碑，再重建独立资金索引；拒绝资金条数与剩余字节不符、重复 UUID 或尾部字节。恢复失败时尝试关闭新索引，关闭异常仍可能覆盖原错误。
+     * 校验版本和各段边界，恢复有序墓碑，再重建独立资金索引；拒绝资金条数与剩余字节不符、重复 UUID 或尾部字节。恢复失败时尝试关闭新索引，关闭异常仍可能覆盖原错误。
      * @param encoded 完整终态保留快照段
      */
     public static TerminalStateRetention decode(byte[] encoded) {
@@ -377,14 +353,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
             // 读取本次独立快照字节的二进制流
             DataInputStream input = new DataInputStream(new ByteArrayInputStream(encoded));
             if (input.readInt() != VERSION) throw new IllegalArgumentException("unsupported terminal retention version");
-            // 从快照解码出的有序待清理候选
-            LinkedHashMap<EntityKey, RetainedEntity> candidates = read(input, Integer.MAX_VALUE);
-            // 先按相同实体格式解码的有序墓碑值
-            var decodedTombstones = read(input, MAX_TOMBSTONES);
-            // 重新建立索引的终态 FIFO
-            TerminalTombstoneStore tombstones = new TerminalTombstoneStore();
-            for (var /* 当前从快照读出或准备写出的实体元数据 */ value : decodedTombstones.values()) tombstones.put(value.key().type().code,
-                    value.key().id(), value.userId(), value.clientId(), value.exportSequence());
+            TerminalTombstoneStore tombstones = readTombstones(input);
             // 资金身份条数，必须精确匹配剩余字节
             int fundsCommandCount = input.readInt();
             if (fundsCommandCount < 0 || (long) fundsCommandCount * (16 + CommandFingerprint.LENGTH) != input.available()) {
@@ -405,7 +374,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
                     fundsCommands.put(commandId, CommandFingerprint.fromBytes(fingerprint));
                 }
                 if (input.available() != 0) throw new IllegalArgumentException("trailing terminal retention bytes");
-                return new TerminalStateRetention(candidates, tombstones, fundsCommands);
+                return new TerminalStateRetention(tombstones, fundsCommands);
             } catch (/* 恢复新资金索引时的运行或 I/O 故障，关闭后继续抛出 */ RuntimeException | IOException failure) {
                 fundsCommands.close();
                 throw failure;
@@ -431,61 +400,26 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
         return tombstones.containsClient(type.code, userId, normalized);
     }
 
-    /**
-     * 按候选迭代顺序编码类型、ID、用户、导出序号和 UTF-8 客户号，顺序由外层快照边界固定。
-     * @param output 当前快照输出流
-     * @param values 要按顺序编码的候选表
-     */
-    private static void write(DataOutputStream output, LinkedHashMap<EntityKey, RetainedEntity> values)
-            throws IOException {
-        output.writeInt(values.size());
-        for (RetainedEntity /* 当前从快照读出或准备写出的实体元数据 */ value : values.values()) {
-            output.writeByte(value.key().type().code);
-            output.writeLong(value.key().id());
-            output.writeLong(value.userId());
-            output.writeLong(value.exportSequence());
-            // 当前输出客户号的 UTF-8 字节
-            byte[] clientId = value.clientId().getBytes(StandardCharsets.UTF_8);
-            output.writeInt(clientId.length);
-            output.write(clientId);
-        }
-    }
-
-    /**
-     * 检查条数上限、实体类型、正身份与导出序号、客户号字节长度及重复实体，返回按输入顺序建立的候选 Map。
-     * @param input 当前快照输入流
-     * @param maximum 本段最多允许的非负实体条数
-     */
-    private static LinkedHashMap<EntityKey, RetainedEntity> read(DataInputStream input, int maximum)
-            throws IOException {
-        // 本快照段声称的实体条数
+    /** 直接按 FIFO 顺序恢复近期墓碑，拒绝越界条数、非法身份、重复实体及截断文本。 */
+    private static TerminalTombstoneStore readTombstones(DataInputStream input) throws IOException {
         int count = input.readInt();
-        if (count < 0 || count > maximum) throw new IllegalArgumentException("invalid terminal retention count");
-        // 按输入顺序建立的实体 Map
-        LinkedHashMap<EntityKey, RetainedEntity> values = new LinkedHashMap<>();
-        for (/* 当前回执槽或快照记录的遍历下标 */ int index = 0; index < count; index++) {
-            // 快照记录的无符号实体类别代码
-            int typeCode = input.readUnsignedByte();
-            // 当前构造、解码或比较的实体组合键
-            EntityKey key = new EntityKey(EntityType.fromCode(typeCode), input.readLong());
-            // 本实体快照中的正用户 ID
+        if (count < 0 || count > MAX_TOMBSTONES) throw new IllegalArgumentException("invalid terminal retention count");
+        TerminalTombstoneStore tombstones = new TerminalTombstoneStore();
+        for (int index = 0; index < count; index++) {
+            int type = EntityType.fromCode(input.readUnsignedByte()).code;
+            long id = input.readLong();
             long userId = input.readLong();
-            // 本实体快照中的正导出序号
-            long exportSequence = input.readLong();
-            // 当前客户号在快照中的 UTF-8 字节数
-            int textLength = input.readInt();
-            if (textLength < 0 || textLength > MAX_CLIENT_ID_BYTES) {
+            int length = input.readInt();
+            if (length < 0 || length > MAX_CLIENT_ID_BYTES) {
                 throw new IllegalArgumentException("invalid terminal client id length");
             }
-            // 实际读出的客户号字节，必须与长度完全一致
-            byte[] text = input.readNBytes(textLength);
-            if (text.length != textLength) throw new IllegalArgumentException("truncated terminal client id");
-            // 当前从快照读出或准备写出的实体元数据
-            RetainedEntity value = new RetainedEntity(key, userId,
-                    new String(text, StandardCharsets.UTF_8), exportSequence);
-            if (values.put(key, value) != null) throw new IllegalArgumentException("duplicate terminal entity");
+            byte[] text = input.readNBytes(length);
+            if (text.length != length) throw new IllegalArgumentException("truncated terminal client id");
+            if (!tombstones.putIfAbsent(type, id, userId, new String(text, StandardCharsets.UTF_8))) {
+                throw new IllegalArgumentException("duplicate terminal entity");
+            }
         }
-        return values;
+        return tombstones;
     }
 
     /**
@@ -526,83 +460,5 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
                 default -> throw new IllegalArgumentException("invalid entity type");
             };
         }
-    }
-
-    /**
-     * 类型与正 ID 的组合键。候选 Map 内的键保持稳定，单独的 candidateLookupKey 才允许重复 reset。
-     */
-    private static final class EntityKey {
-        /**  当前实体键的类型，存入 Map 后不得改写。 读取该键的实体类型。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private EntityType type;
-        /**  当前实体键的正 ID。 读取该键的正实体 ID。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private long id;
-        /**
-         * 校验并建立类型与正实体 ID 的组合键。
-         * @param type 四类终态实体之一
-         * @param id 当前类别的正实体 ID
-         */
-        private EntityKey(EntityType type, long id) { reset(type, id); }
-        /**
-         * 复用查询键时更换类型和 ID；已经放入候选 Map 的键不能这样改写。
-         * @param type 四类终态实体之一
-         * @param id 当前类别的正实体 ID
-         */
-        private EntityKey reset(EntityType type, long id) {
-            if (type == null || id <= 0) throw new IllegalArgumentException("invalid terminal entity key");
-            this.type = type; this.id = id; return this;
-        }
-        /**
-         * 按类型与 ID 计算内存 Map 查询哈希，不作为快照内容。
-         */
-        @Override public int hashCode() { return 31 * type.hashCode() + Long.hashCode(id); }
-        /**
-         * 只有同类型同 ID 的实体键相等。
-         * @param other 参与实体键相等比较的对象
-         */
-        @Override public boolean equals(Object other) { return other instanceof EntityKey /* 当前构造、解码或比较的实体组合键 */ key && type == key.type && id == key.id; }
-    }
-
-    /**
-     * 已导出、等待确认后清理的候选元数据，不复制订单、资金或持仓；当前候选来自恢复输入。
-     */
-    private static final class RetainedEntity {
-        /**  候选的稳定实体键，不与可变查询键共用。 借出该候选稳定存储键。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private final EntityKey key;
-        /**  候选所属正用户 ID。 读取候选所属用户。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private final long userId;
-        /**  候选原客户号，可为空字符串但不能是 null。 读取已保存的客户号文本。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private final String clientId;
-        /**  候选已经导出的正序号，确认水位达到它后才可清理。 读取导出确认所需的原序号。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private final long exportSequence;
-
-        /**
-         * 要求键、正用户、非空客户号和正导出序号，保存恢复候选元数据；不在这里查实际业务实体。
-         * @param key 该候选持有的稳定实体键
-         * @param userId 实体所属用户，客户号查询与它组合定位
-         * @param clientId 可空客户号，按入口规则规范化
-         * @param exportSequence 已经导出的正序号
-         */
-        private RetainedEntity(EntityKey key, long userId, String clientId, long exportSequence) {
-            if (key == null || userId <= 0 || clientId == null || exportSequence <= 0) {
-                throw new IllegalArgumentException("invalid retained terminal entity");
-            }
-            this.key = key;
-            this.userId = userId;
-            this.clientId = clientId;
-            this.exportSequence = exportSequence;
-        }
-
     }
 }

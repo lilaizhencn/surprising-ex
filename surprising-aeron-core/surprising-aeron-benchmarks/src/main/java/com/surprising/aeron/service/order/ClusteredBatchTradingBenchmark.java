@@ -725,10 +725,8 @@ public class ClusteredBatchTradingBenchmark {
             var before = runtime.algoOrder(9_000_000);
             long runtimeRevision = runtime.revision();
             long revision = before.revision() + 1;
-            var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(9_000_000, 1000,
-                    "algo-lane-0", "10", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
-                    CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
-                    0, 0, "", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
+            var next = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
+                    9_000_000, before.revision(), 0, 0, "", 1, 0, revision, 0);
             long terminalBefore = terminal;
             singleResponses = true;
             expectSingleRejection = true;
@@ -754,10 +752,15 @@ public class ClusteredBatchTradingBenchmark {
                     long id = 9_000_000L + i;
                     var current = service.state().runtimeState().algoOrder(id);
                     long revision = current == null ? 1 : current.revision() + 1;
-                    var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(id, 1000 + i,
-                            "algo-lane-" + i, "10", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
-                            CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
-                            0, 0, "", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
+                    com.surprising.aeron.protocol.CoreAlgoOrderCommand algo;
+                    if (current == null) {
+                        algo = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create(id, "algo-lane-" + i,
+                                "10", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS,
+                                CorePositionSide.NET, false, false, CoreTimeInForce.IOC, 1);
+                    } else {
+                        algo = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
+                                id, current.revision(), 0, 0, "", 1, 0, revision, 0);
+                    }
                     send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000 + i,
                             com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(algo)));
                 }
@@ -771,9 +774,7 @@ public class ClusteredBatchTradingBenchmark {
             singleResponses = true;
             try {
                 for (int i = 0; i < 128; i++) {
-                    var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
-                            com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET,
-                            1000 + i, "10", 1000, 2000, 0, 0, 0, 1000);
+                    var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "10", 1000, 2000, 0, 0, 0, 1000);
                     send(command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 1000 + i,
                             com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
                 }
@@ -806,16 +807,13 @@ public class ClusteredBatchTradingBenchmark {
                     for (int user = 0; user < maxInFlight; user++) {
                         if (phase == 2) {
                             firstOrders[user] = orderId++;
-                            var trigger = new com.surprising.aeron.model.CoreTriggerOrderState(
-                                    firstOrders[user], productLine, 1_000 + user, "trigger-" + firstOrders[user], "",
-                                    "10", service.state().tradingState().instruments().get("10"),
-                                    CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
-                                    CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
+                            var trigger = new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
+                                    firstOrders[user], "trigger-" + firstOrders[user], "", "10", CoreOrderSide.SELL,
+                                    CoreTriggerOrderType.STOP_LOSS, CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0,
                                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
-                                    CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
-                                    0, 0, 1, 1, 1);
+                                    CorePositionSide.NET, 0, com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK);
                             wave[user] = command(CoreMessageType.PLACE_TRIGGER_ORDER, 1_000 + user,
-                                    CoreTriggerOrderCodec.encodePlacement(trigger.view()));
+                                    CoreTriggerOrderCodec.encodePlacement(trigger));
                         } else if (phase == 3) {
                             wave[user] = command(CoreMessageType.CANCEL_TRIGGER_ORDER, 1_000 + user,
                                     CoreTriggerOrderCodec.encodeId(firstOrders[user]));

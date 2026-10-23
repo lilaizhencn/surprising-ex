@@ -933,27 +933,25 @@ public final class TriggerOrderCommands {
      * @param clusterTimestamp 本次复制命令的业务毫秒时间，用于物化创建视图的时间字段
      */
     public void executeUpsertAlgoOrder(CoreMessage message, long clusterTimestamp) {
-        // 按当前命令业务时间物化的算法单创建或更新视图
-        var algo = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeCommand(message.payloadUnsafe())
-                .materializeCreation(clusterTimestamp);
-        if (owner.runtimeState().algoRoute(algo.algoOrderId()) == null
-                && owner.terminalAlgoRetained(algo.algoOrderId(), message.header().userId(),
-                algo.clientAlgoOrderId())) {
-            throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
-                    "terminal algo order identity is retained");
+        var algo = com.surprising.aeron.protocol.CoreAlgoOrderCodec.decodeCommand(message.payloadUnsafe());
+        var current = owner.runtimeState().algoRoute(algo.algoOrderId());
+        long userId = message.header().userId();
+        if (current != null && current.userId() != userId) {
+            throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
         }
+        int symbolId = -1;
+        if (algo instanceof com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create create) {
+            if (current == null && owner.terminalAlgoRetained(create.algoOrderId(), userId, create.clientAlgoOrderId())) {
+                throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
+                        "terminal algo order identity is retained");
+            }
+            symbolId = owner.identities().symbolId(create.instrumentId());
+        } else if (current != null) symbolId = owner.identities().symbolId(current.instrumentId());
         if (owner.runtimeState().asynchronousCommands()) {
-            // 已有算法单路由，异步路径用它确认请求用户没有越权
-            var current = owner.runtimeState().algoRoute(algo.algoOrderId());
-            if (current != null && current.userId() != message.header().userId())
-                throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
-            // 本标的解析得到的内部整数身份，find 入口没找到时可为空
-            int symbolId = owner.identities().symbolId(algo.instrumentId());
-            owner.directCommand.deferAlgoUpsertControl(message.header().userId(), algo, symbolId);
+            owner.directCommand.deferAlgoUpsertControl(userId, algo, symbolId, clusterTimestamp);
             return;
         }
-        RuntimeAlgoOrderStateTransitions.upsert(owner.runtimeState(), owner.identities(),
-                message.header().userId(), algo);
+        RuntimeAlgoOrderStateTransitions.upsert(owner.runtimeState(), owner.identities(), userId, algo, clusterTimestamp);
         owner.requestCommitPublication();
     }
 
@@ -975,12 +973,12 @@ public final class TriggerOrderCommands {
      */
     public void executePlaceTriggerOcoPair(CoreMessage message, long clusterTimestamp) {
         // OCO 请求解出的两腿创建视图列表，数量必须恰好二
-        var views = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeList(message.payloadUnsafe());
+        var views = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodePlacementList(message.payloadUnsafe());
         if (views.size() != 2) throw new CoreStateRejectedException("INVALID_COMMAND", "OCO requires two legs");
         // 按本次业务时间物化的 OCO 第一腿
-        var first = views.get(0).materializeCreation(clusterTimestamp);
+        var first = views.get(0).materialize(message.header().productLine(), message.header().userId(), clusterTimestamp);
         // 按当前业务时间物化的 OCO 第二腿
-        var second = views.get(1).materializeCreation(clusterTimestamp);
+        var second = views.get(1).materialize(message.header().productLine(), message.header().userId(), clusterTimestamp);
         RuntimeTriggerOrderStateTransitions.validateOcoPair(first, second);
         // 本触发单已有标的配置，供交易开关或子单产品规则检查
         var instrument = owner.runtimeState().instrument(first.instrumentId());
@@ -1021,7 +1019,7 @@ public final class TriggerOrderCommands {
     public void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {
         // 按本次业务时间物化的触发单创建或更新视图
         var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodePlacement(message.payloadUnsafe())
-                .materializeCreation(clusterTimestamp);
+                .materialize(message.header().productLine(), message.header().userId(), clusterTimestamp);
         // 触发单所属的已注册标的，存在时先检查当前交易状态及订单开关
         var maintenanceInstrument = owner.runtimeState().instrument(trigger.instrumentId());
         if (maintenanceInstrument != null) {

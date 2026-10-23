@@ -8,26 +8,59 @@ import java.util.List;
 
 public final class CoreAlgoOrderCodec {
     private static final int VERSION = 1;
-    private static final int COMMAND_VERSION = 2;
+    private static final int COMMAND_VERSION = 3;
     private static final int MAX_TEXT_BYTES = 256;
     private static final int FIXED_ITEM_BYTES =
             Long.BYTES * 16 + Integer.BYTES * 8 + Byte.BYTES * 2;
 
     private CoreAlgoOrderCodec() { }
 
-    /** 命令只携带父单输入；成交和活动子单统计由账户状态提供。 */
-    public static byte[] encodeCommand(CoreAlgoOrderView value) {
-        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES + encodedItemLength(value)
-                - Long.BYTES * 2 - Integer.BYTES).order(ByteOrder.LITTLE_ENDIAN);
+    public static byte[] encodeCommand(CoreAlgoOrderCommand command) {
+        int length = switch (command) {
+            case CoreAlgoOrderCommand.Create value -> Integer.BYTES * 7 + Long.BYTES * 7 + 2
+                    + textLength(value.clientAlgoOrderId()) + textLength(value.instrumentId());
+            case CoreAlgoOrderCommand.Update value -> Integer.BYTES * 3 + Long.BYTES * 7
+                    + textLength(value.rejectReason());
+        };
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(COMMAND_VERSION);
-        writeFields(buffer, value);
+        switch (command) {
+            case CoreAlgoOrderCommand.Create value -> {
+                buffer.putInt(1).putLong(value.algoOrderId());
+                CoreStateQueryCodec.putText(buffer, value.clientAlgoOrderId(), true, MAX_TEXT_BYTES);
+                CoreStateQueryCodec.putText(buffer, value.instrumentId(), true, MAX_TEXT_BYTES);
+                buffer.putInt(value.algoTypeCode()).putInt(value.side().wireCode())
+                        .putLong(value.priceTicks()).putLong(value.quantitySteps()).putLong(value.childQuantitySteps())
+                        .putLong(value.intervalSeconds()).putLong(value.durationSeconds())
+                        .putInt(value.marginMode().wireCode()).putInt(value.positionSide().wireCode())
+                        .put((byte) (value.reduceOnly() ? 1 : 0)).put((byte) (value.postOnly() ? 1 : 0))
+                        .putInt(value.timeInForce().wireCode()).putLong(value.startAtEpochMillis());
+            }
+            case CoreAlgoOrderCommand.Update value -> {
+                buffer.putInt(2).putLong(value.algoOrderId()).putLong(value.expectedRevision())
+                        .putInt(value.statusCode()).putLong(value.currentOrderId());
+                CoreStateQueryCodec.putText(buffer, value.rejectReason(), true, MAX_TEXT_BYTES);
+                buffer.putLong(value.nextSliceAtEpochMillis()).putLong(value.completedAtEpochMillis())
+                        .putLong(value.updatedAtEpochMillis()).putLong(value.appendedChildOrderId());
+            }
+        }
         return buffer.array();
     }
 
-    public static CoreAlgoOrderView decodeCommand(byte[] payload) {
+    public static CoreAlgoOrderCommand decodeCommand(byte[] payload) {
         Reader reader = new Reader(payload);
         if (reader.intValue() != COMMAND_VERSION) throw new ProtocolException("unsupported algo command version");
-        CoreAlgoOrderView value = read(reader, false);
+        CoreAlgoOrderCommand value = switch (reader.intValue()) {
+            case 1 -> new CoreAlgoOrderCommand.Create(reader.longValue(), reader.text(), reader.text(),
+                    reader.intValue(), CoreOrderSide.fromWireCode(reader.intValue()), reader.longValue(),
+                    reader.longValue(), reader.longValue(), reader.longValue(), reader.longValue(),
+                    CoreMarginMode.fromWireCode(reader.intValue()), CorePositionSide.fromWireCode(reader.intValue()),
+                    reader.bool(), reader.bool(), CoreTimeInForce.fromWireCode(reader.intValue()), reader.longValue());
+            case 2 -> new CoreAlgoOrderCommand.Update(reader.longValue(), reader.longValue(), reader.intValue(),
+                    reader.longValue(), reader.text(), reader.longValue(), reader.longValue(), reader.longValue(),
+                    reader.longValue());
+            default -> throw new ProtocolException("unsupported algo command action");
+        };
         reader.consumed();
         return value;
     }
@@ -64,7 +97,7 @@ public final class CoreAlgoOrderCodec {
     public static List<CoreAlgoOrderView> decodeList(byte[] payload) {
         Reader reader = new Reader(payload); reader.version();
         int count = reader.count(); List<CoreAlgoOrderView> values = new ArrayList<>(count);
-        for (int index = 0; index < count; index++) values.add(read(reader, true));
+        for (int index = 0; index < count; index++) values.add(read(reader));
         reader.consumed(); return List.copyOf(values);
     }
 
@@ -128,7 +161,7 @@ public final class CoreAlgoOrderCodec {
 
 
 
-    private static CoreAlgoOrderView read(Reader reader, boolean statistics) {
+    private static CoreAlgoOrderView read(Reader reader) {
         long id = reader.longValue(), userId = reader.longValue(); String clientId = reader.text(), instrumentId = reader.text();
         int type = reader.intValue(); CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
         long price = reader.longValue(), quantity = reader.longValue(), childQuantity = reader.longValue();
@@ -143,8 +176,8 @@ public final class CoreAlgoOrderCodec {
         for (int index = 0; index < childCount; index++) children.add(reader.longValue());
         return new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
                 interval, duration, margin, position, reduce, post, tif, status, current, reason,
-                start, next, completed, created, updated, revision, children, statistics ? reader.longValue() : 0,
-                statistics ? reader.longValue() : 0, statistics ? reader.intValue() : 0);
+                start, next, completed, created, updated, revision, children, reader.longValue(),
+                reader.longValue(), reader.intValue());
     }
 
     public record Query(long userId, long algoOrderId, String instrumentId, long dueAtEpochMillis, int limit) {

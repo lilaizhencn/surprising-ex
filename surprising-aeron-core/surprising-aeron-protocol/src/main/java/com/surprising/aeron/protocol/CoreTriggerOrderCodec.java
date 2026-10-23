@@ -11,7 +11,7 @@ public final class CoreTriggerOrderCodec {
     private static final int VERSION = 1;
     private static final int QUERY_VERSION = 3;
     private static final int STATE_VERSION = 3;
-    private static final int PLACEMENT_VERSION = 4;
+    private static final int PLACEMENT_VERSION = 5;
     private static final int MAX_TEXT_BYTES = 128;
     private static final CoreTriggerOrderType[] TYPES = CoreTriggerOrderType.values();
     private static final CoreTriggerCondition[] CONDITIONS = CoreTriggerCondition.values();
@@ -20,45 +20,74 @@ public final class CoreTriggerOrderCodec {
 
     private CoreTriggerOrderCodec() { }
 
-    /** 创建命令不接受费率；实际执行费率由 Core 的标的配置固定。 */
-    public static byte[] encodePlacement(CoreTriggerOrderStateView state) {
-        ByteBuffer buffer = ByteBuffer.allocate(encodedStateLength(state) - Long.BYTES * 2)
-                .order(ByteOrder.LITTLE_ENDIAN);
-        writeState(buffer, state, false);
+    public static byte[] encodePlacement(PlaceTriggerOrderCommand command) {
+        ByteBuffer buffer = ByteBuffer.allocate(placementLength(command)).order(ByteOrder.LITTLE_ENDIAN);
+        writePlacement(buffer, command);
         return buffer.array();
     }
 
-    public static CoreTriggerOrderStateView decodePlacement(byte[] encoded) {
-        return decodeState(new Reader(encoded, 0, encoded == null ? 0 : encoded.length), false);
+    public static PlaceTriggerOrderCommand decodePlacement(byte[] encoded) {
+        return readPlacement(new Reader(encoded, 0, encoded == null ? 0 : encoded.length));
     }
 
-    public static byte[] encodePlacementList(List<CoreTriggerOrderStateView> values) {
+    public static byte[] encodePlacementList(List<PlaceTriggerOrderCommand> values) {
         int length = Integer.BYTES * 2;
-        for (CoreTriggerOrderStateView value : values)
-            length = Math.addExact(length, Integer.BYTES + encodedStateLength(value) - Long.BYTES * 2);
+        for (var value : values) length = Math.addExact(length, Integer.BYTES + placementLength(value));
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION).putInt(values.size());
-        for (CoreTriggerOrderStateView value : values) {
-            buffer.putInt(encodedStateLength(value) - Long.BYTES * 2);
-            writeState(buffer, value, false);
+        for (var value : values) {
+            buffer.putInt(placementLength(value));
+            writePlacement(buffer, value);
         }
         return buffer.array();
     }
 
-    public static List<CoreTriggerOrderStateView> decodePlacementList(byte[] encoded) {
+    public static List<PlaceTriggerOrderCommand> decodePlacementList(byte[] encoded) {
         Reader reader = new Reader(encoded, 0, encoded == null ? 0 : encoded.length);
         reader.version();
         int count = reader.count();
-        List<CoreTriggerOrderStateView> result = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) result.add(decodeState(reader.slice(), false));
+        List<PlaceTriggerOrderCommand> result = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) result.add(readPlacement(reader.slice()));
         reader.consumed();
         return List.copyOf(result);
+    }
+
+    private static int placementLength(PlaceTriggerOrderCommand value) {
+        return Integer.BYTES * 9 + Long.BYTES * 7 + textLength(value.clientTriggerOrderId())
+                + textLength(value.ocoGroupId()) + textLength(value.instrumentId());
+    }
+
+    private static void writePlacement(ByteBuffer buffer, PlaceTriggerOrderCommand value) {
+        buffer.putInt(PLACEMENT_VERSION).putLong(value.triggerOrderId());
+        CoreStateQueryCodec.putText(buffer, value.clientTriggerOrderId(), true, MAX_TEXT_BYTES);
+        CoreStateQueryCodec.putText(buffer, value.ocoGroupId(), true, MAX_TEXT_BYTES);
+        CoreStateQueryCodec.putText(buffer, value.instrumentId(), true, MAX_TEXT_BYTES);
+        buffer.putInt(value.side().wireCode()).putInt(value.triggerType().ordinal())
+                .putInt(value.triggerCondition().ordinal()).putLong(value.triggerPriceTicks())
+                .putLong(value.activationPriceTicks()).putLong(value.callbackRatePpm())
+                .putInt(value.orderType().wireCode()).putInt(value.timeInForce().wireCode())
+                .putLong(value.priceTicks()).putLong(value.quantitySteps())
+                .putInt(value.marginMode().wireCode()).putInt(value.positionSide().wireCode())
+                .putLong(value.expiresAtEpochMillis()).putInt(value.priceSource().ordinal());
+    }
+
+    private static PlaceTriggerOrderCommand readPlacement(Reader reader) {
+        if (reader.intValue() != PLACEMENT_VERSION) throw new ProtocolException("unsupported trigger placement version");
+        var result = new PlaceTriggerOrderCommand(reader.positive(), reader.text(), reader.text(), reader.text(),
+                CoreOrderSide.fromWireCode(reader.intValue()), TYPES[reader.enumIndex(TYPES.length)],
+                CONDITIONS[reader.enumIndex(CONDITIONS.length)], reader.nonNegative(), reader.nonNegative(),
+                reader.nonNegative(), CoreOrderType.fromWireCode(reader.intValue()),
+                CoreTimeInForce.fromWireCode(reader.intValue()), reader.nonNegative(), reader.positive(),
+                CoreMarginMode.fromWireCode(reader.intValue()), CorePositionSide.fromWireCode(reader.intValue()),
+                reader.nonNegative(), PRICE_SOURCES[reader.enumIndex(PRICE_SOURCES.length)]);
+        reader.consumed();
+        return result;
     }
 
     public static byte[] encodeState(CoreTriggerOrderStateView state) {
         int length = encodedStateLength(state);
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
-        writeState(buffer, state, true);
+        writeState(buffer, state);
         return buffer.array();
     }
 
@@ -67,12 +96,12 @@ public final class CoreTriggerOrderCodec {
         int stateLength = encodedStateLength(state);
         ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 3 + stateLength).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION).putInt(1).putInt(stateLength);
-        writeState(buffer, state, true);
+        writeState(buffer, state);
         return buffer.array();
     }
 
-    private static void writeState(ByteBuffer buffer, CoreTriggerOrderStateView state, boolean executionFees) {
-        buffer.putInt(executionFees ? STATE_VERSION : PLACEMENT_VERSION)
+    private static void writeState(ByteBuffer buffer, CoreTriggerOrderStateView state) {
+        buffer.putInt(STATE_VERSION)
                 .putLong(state.triggerOrderId())
                 .putInt(ProductLineWireCode.encode(state.productLine()))
                 .putLong(state.userId());
@@ -93,7 +122,7 @@ public final class CoreTriggerOrderCodec {
         buffer.putLong(state.expiresAtEpochMillis()).putLong(state.triggeredAtEpochMillis())
                 .putLong(state.createdAtEpochMillis()).putLong(state.updatedAtEpochMillis())
                 .putLong(state.revision());
-        if (executionFees) buffer.putLong(state.makerFeeRatePpm()).putLong(state.takerFeeRatePpm());
+        buffer.putLong(state.makerFeeRatePpm()).putLong(state.takerFeeRatePpm());
         buffer.putInt(state.priceSource().ordinal());
     }
 
@@ -119,12 +148,11 @@ public final class CoreTriggerOrderCodec {
 
     public static CoreTriggerOrderStateView decodeState(byte[] encoded) {
         Reader reader = new Reader(encoded, 0, encoded == null ? 0 : encoded.length);
-        return decodeState(reader, true);
+        return decodeState(reader);
     }
 
-    private static CoreTriggerOrderStateView decodeState(Reader reader, boolean executionFees) {
-        int version = executionFees ? reader.stateVersion() : reader.intValue();
-        if (!executionFees && version != PLACEMENT_VERSION) throw new ProtocolException("unsupported trigger placement version");
+    private static CoreTriggerOrderStateView decodeState(Reader reader) {
+        int version = reader.stateVersion();
         CoreTriggerOrderStateView result = new CoreTriggerOrderStateView(
                 reader.positive(), ProductLineWireCode.decode(reader.intValue()), reader.positive(),
                 reader.text(), reader.text(), reader.text(), CoreOrderSide.fromWireCode(reader.intValue()),
@@ -137,7 +165,7 @@ public final class CoreTriggerOrderCodec {
                 STATUSES[reader.enumIndex(STATUSES.length)], reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.text(), reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.nonNegative(), reader.nonNegative(),
-                executionFees ? reader.longValue() : 0, executionFees ? reader.longValue() : 0,
+                reader.longValue(), reader.longValue(),
                 version < 3 ? CoreTriggerPriceSource.MARK
                         : PRICE_SOURCES[reader.enumIndex(PRICE_SOURCES.length)]);
         reader.consumed(); return result;
@@ -152,7 +180,7 @@ public final class CoreTriggerOrderCodec {
         buffer.putInt(VERSION).putInt(values.size());
         for (CoreTriggerOrderStateView value : values) {
             buffer.putInt(encodedStateLength(value));
-            writeState(buffer, value, true);
+            writeState(buffer, value);
         }
         return buffer.array();
     }
@@ -163,7 +191,7 @@ public final class CoreTriggerOrderCodec {
         int count = reader.count();
         List<CoreTriggerOrderStateView> result = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            result.add(decodeState(reader.slice(), true));
+            result.add(decodeState(reader.slice()));
         }
         reader.consumed(); return List.copyOf(result);
     }

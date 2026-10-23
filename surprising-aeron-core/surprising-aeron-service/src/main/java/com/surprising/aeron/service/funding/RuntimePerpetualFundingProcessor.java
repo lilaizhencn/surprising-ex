@@ -22,7 +22,6 @@ import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
@@ -36,12 +35,11 @@ public final class RuntimePerpetualFundingProcessor {
      * @param before 用于核对产品线与修订号并补齐缺省用户集合的旧状态
      * @param command 资金费结算编号、费率及用户分页参数
      * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
-     * @param chunkCommandId 本页命令 UUID，空表示不按 maxUsers 分页
      * @param runtime 产品线和账户数据的原权威运行时
      * @param identities 币对及结算资产内部编号映射
      */
     public static FundingResult apply(TradingCoreState before, ApplyFundingCommand command,
-                                      Iterable<Long> indexedUserIds, UUID chunkCommandId,
+                                      Iterable<Long> indexedUserIds,
                                       TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -49,23 +47,22 @@ public final class RuntimePerpetualFundingProcessor {
         }
         // 未传用户索引时使用旧状态用户集合，否则沿用调用方的索引。
         Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
-        return applyRuntime(command, users, chunkCommandId, runtime, identities);
+        return applyRuntime(command, users, runtime, identities);
     }
 
     /**
      * 仅在 System Ledger 未激活时准备并同步执行各 Lane 资金费，合并财库和结果。在线账本已激活时拒绝此入口，改由 FundingWork.poll 分次推进。
      * @param command 资金费结算编号、费率及用户分页参数
      * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
-     * @param chunkCommandId 本页命令 UUID，空表示不按 maxUsers 分页
      * @param runtime 产品线和账户数据的原权威运行时
      * @param identities 币对及结算资产内部编号映射
      */
     public static FundingResult applyRuntime(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
-                                             UUID chunkCommandId, TradingAccountRuntime runtime,
+                                             TradingAccountRuntime runtime,
                                              RuntimeIdentityRegistry identities) {
         if (runtime.systemLedgerStarted()) throw new IllegalStateException("active funding requires its asynchronous continuation");
         // 当前页同步资金费工作对象。
-        FundingWork work = prepare(command, indexedUserIds, chunkCommandId, runtime, identities);
+        FundingWork work = prepare(command, indexedUserIds, runtime, identities);
         // 同步执行各账户 Lane 后取得的回执数组。
         Object[] results = runtime.executeLifecycleSettlements(work.laneMask, work.selectedUserIds.size(),
                 work::applyLane);
@@ -76,13 +73,12 @@ public final class RuntimePerpetualFundingProcessor {
      * 校验当前资金费请求并创建工作对象，尚不表示账户与账本已经结算完成。
      * @param command 资金费结算编号、费率及用户分页参数
      * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
-     * @param chunkCommandId 本页命令 UUID，空表示不按 maxUsers 分页
      * @param runtime 产品线和账户数据的原权威运行时
      * @param identities 币对及结算资产内部编号映射
      */
     public static FundingWork prepare(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
-            UUID chunkCommandId, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        return prepare(null, command, indexedUserIds, chunkCommandId, runtime, identities);
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+        return prepare(null, command, indexedUserIds, runtime, identities);
     }
 
     /**
@@ -90,12 +86,11 @@ public final class RuntimePerpetualFundingProcessor {
      * @param reuse 可选旧工作对象，满足继承的 reusable 条件时复用
      * @param command 资金费结算编号、费率及用户分页参数
      * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
-     * @param chunkCommandId 本页命令 UUID，空表示不按 maxUsers 分页
      * @param runtime 产品线和账户数据的原权威运行时
      * @param identities 币对及结算资产内部编号映射
      */
     public static FundingWork prepare(FundingWork reuse, ApplyFundingCommand command,
-            Iterable<Long> indexedUserIds, UUID chunkCommandId, TradingAccountRuntime runtime,
+            Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities) {
         if (command == null || indexedUserIds == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual funding apply");
@@ -135,23 +130,19 @@ public final class RuntimePerpetualFundingProcessor {
         long fundingMark = previousProgress == null ? mark.markPriceTicks() : previousProgress.markPriceTicks();
         // 与固定标记价配对的原价格序号。
         long fundingPriceSequence = previousProgress == null ? mark.priceSequence() : previousProgress.priceSequence();
-        // 是否提供本页命令 UUID，从而需要校验并保存分页进度。
-        boolean chunked = chunkCommandId != null;
-        if (chunked) {
-            if (previousProgress == null && command.cursorUserId() != 0) {
-                throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
-            }
-            if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
-                    || previousProgress.instrument() != instrument
-                    || previousProgress.fundingRatePpm() != command.fundingRatePpm()
-                    || previousProgress.nextCursorUserId() != command.cursorUserId())) {
-                throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor does not match progress");
-            }
+        if (previousProgress == null && command.cursorUserId() != 0) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
+        }
+        if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
+                || previousProgress.instrument() != instrument
+                || previousProgress.fundingRatePpm() != command.fundingRatePpm()
+                || previousProgress.nextCursorUserId() != command.cursorUserId())) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor does not match progress");
         }
 
-        if (reuse == null || !reuse.reusable()) return new FundingWork(command, chunkCommandId, runtime, instrument, symbolId,
+        if (reuse == null || !reuse.reusable()) return new FundingWork(command, runtime, instrument, symbolId,
                 settleAssetId, fundingMark, fundingPriceSequence, indexedUserIds);
-        return reuse.reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
+        return reuse.reset(command, runtime, instrument, symbolId, settleAssetId,
                 fundingMark, fundingPriceSequence, indexedUserIds);
     }
 
@@ -185,8 +176,6 @@ public final class RuntimePerpetualFundingProcessor {
         private final SystemLedgerLane.Entry userInput = /* 账本选页接口传入的财库参数，此任务只读取用户索引。 */ ignored -> selectAccountUsers();
         /** 本页按全局顺序选中的只读原语用户列表。 */
         private ImmutableLongArrayList selectedUserIds;
-        /** 本次是否启用用户分页，非分页路径一次选取全部剩余用户。 */
-        private boolean chunked;
         /** 本页含有用户的账户 Lane 位图。 */
         private long laneMask;
         /** 按实际账户归属划分的用户列表，重置保留容量。 */
@@ -210,7 +199,6 @@ public final class RuntimePerpetualFundingProcessor {
         /**
          * 保存当前命令及固定价格输入，初始化该页可复用状态；账本未激活时立即选用户，否则等账本线程读取索引。
          * @param command 资金费结算编号、费率及用户分页参数
-         * @param chunkCommandId 本页命令 UUID，空表示不按 maxUsers 分页
          * @param runtime 产品线和账户数据的原权威运行时
          * @param instrument 本轮固定使用的永续币对配置
          * @param symbolId 币对内部编号
@@ -219,17 +207,16 @@ public final class RuntimePerpetualFundingProcessor {
          * @param fundingPriceSequence 该固定标记价的价格序号
          * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
          */
-        private FundingWork(ApplyFundingCommand command, UUID chunkCommandId, TradingAccountRuntime runtime,
+        private FundingWork(ApplyFundingCommand command, TradingAccountRuntime runtime,
                 CoreInstrument instrument, int symbolId, int settleAssetId, long fundingMark,
                 long fundingPriceSequence, Iterable<Long> indexedUserIds) {
-            reset(command, chunkCommandId, runtime, instrument, symbolId, settleAssetId,
+            reset(command, runtime, instrument, symbolId, settleAssetId,
                     fundingMark, fundingPriceSequence, indexedUserIds);
         }
 
         /**
          * 拒绝覆盖账本尚未完成的选页输入；重置继承的财务范围与本页标记，清空回执、明细和差额并复用 Lane 分组容量，拓扑数量变化时重新创建分组及回执数组。
          * @param command 资金费结算编号、费率及用户分页参数
-         * @param chunkCommandId 本页命令 UUID，空表示不按 maxUsers 分页
          * @param runtime 产品线和账户数据的原权威运行时
          * @param instrument 本轮固定使用的永续币对配置
          * @param symbolId 币对内部编号
@@ -238,7 +225,7 @@ public final class RuntimePerpetualFundingProcessor {
          * @param fundingPriceSequence 该固定标记价的价格序号
          * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
          */
-        private FundingWork reset(ApplyFundingCommand command, UUID chunkCommandId,
+        private FundingWork reset(ApplyFundingCommand command,
                 TradingAccountRuntime runtime, CoreInstrument instrument, int symbolId,
                 int settleAssetId, long fundingMark, long fundingPriceSequence, Iterable<Long> indexedUserIds) {
             if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns funding routes");
@@ -248,7 +235,6 @@ public final class RuntimePerpetualFundingProcessor {
             this.fundingMark = fundingMark; this.fundingPriceSequence = fundingPriceSequence;
             this.indexedUserIds = indexedUserIds; userPage = null; selectedUserIds = null;
             usersReady = usersQueued = false;
-            this.chunked = chunkCommandId != null;
             if (usersByLane == null || usersByLane.length != runtime.topology().accountLaneCount()) {
                 usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
                 laneResults = new LaneFundingResult[usersByLane.length];
@@ -267,7 +253,7 @@ public final class RuntimePerpetualFundingProcessor {
          * 在账本上按全局游标选用户，再按实际账户 Lane 分组；未激活账本时内联执行。完成后释放索引来源引用，发布 usersReady 并唤醒 Owner。
          */
         private void selectAccountUsers() {
-            userPage = UserIndexPage.select(indexedUserIds, command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
+            userPage = UserIndexPage.select(indexedUserIds, command.cursorUserId(), command.maxUsers());
             selectedUserIds = userPage.userIds();
             for (/* 本页原语用户列表的读取下标。 */ int index = 0; index < selectedUserIds.size(); index++) {
                 // 当前选中的全局用户编号。
@@ -364,7 +350,7 @@ public final class RuntimePerpetualFundingProcessor {
                 treasuryDelta.merge(receipt.treasuryDelta());
             }
             treasuryDelta.apply(ledger);
-            if (!chunked || userPage.complete()) ledger.setFundingSettlement(symbolId, command.settlementId());
+            if (userPage.complete()) ledger.setFundingSettlement(symbolId, command.settlementId());
             else ledger.setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(command.settlementId(),
                     instrument, command.fundingRatePpm(), userPage.nextCursorUserId(), fundingMark, fundingPriceSequence));
             payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));
@@ -375,7 +361,7 @@ public final class RuntimePerpetualFundingProcessor {
          */
         private FundingResult finishOwnerResult() {
             // 非分页或已读到用户末尾时，整轮资金费才可登记完成。
-            boolean complete = !chunked || userPage.complete();
+            boolean complete = userPage.complete();
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
                     complete ? 0 : userPage.nextCursorUserId(), selectedUserIds.size()));

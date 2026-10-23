@@ -5,9 +5,9 @@ package com.surprising.aeron.config;
  * 同一产品账户的全部资产、全仓/逐仓持仓、冻结及风险状态必须留在同一 Lane；
  * matcher 数量和币对路由不得改变保证金共享范围。六产品账户间仍通过显式划转连接。
  * 路由和种子随快照保存，恢复时不能重新按当前配置分配已有账户。
+ * 三项窗口/队列容量只用于当前部署分配空工作资源，不进入快照。
  *
  * @param matchingEngineCount Matcher 分片数量，必须是允许范围内的 2 次幂
- * @param matcherShardMask 选取 Matcher 分片用的位掩码，固定等于分片数减一
  * @param accountLaneCount 账户 Lane 数量，同一用户始终只归属其中一个 Lane
  * @param accountLaneSeed 用户编号混合运算的种子，恢复后不能随意改动
  * @param matcherWindowSize 允许登记的 Matcher 在途窗口大小
@@ -16,7 +16,6 @@ package com.surprising.aeron.config;
  */
 public record LaneTopology(
         int matchingEngineCount,
-        int matcherShardMask,
         int accountLaneCount,
         long accountLaneSeed,
         int matcherWindowSize,
@@ -34,27 +33,28 @@ public record LaneTopology(
     /** 默认队列槽位数，供完成队列和账户输入队列使用。 */
     public static final int DEFAULT_QUEUE_CAPACITY = 4_096;
 
-    /** 创建前统一检查数量、容量和分片掩码，避免位掩码算法收到不合法的参数。 */
+    /** 创建前统一检查数量和容量，避免位掩码算法收到不合法的参数。 */
     public LaneTopology {
         requirePowerOfTwo(matchingEngineCount, 1, 64, "matchingEngineCount");
         requirePowerOfTwo(accountLaneCount, 1, Long.SIZE, "accountLaneCount");
         requirePowerOfTwo(matcherWindowSize, 1, 1 << 20, "matcherWindowSize");
         requirePowerOfTwo(matchingCompletionCapacity, 1, 1 << 20, "matchingCompletionCapacity");
         requirePowerOfTwo(accountLaneQueueCapacity, 1, 1 << 20, "accountLaneQueueCapacity");
-        if (matcherShardMask != matchingEngineCount - 1) {
-            throw new IllegalArgumentException("invalid deterministic lane topology");
-        }
     }
+
+    /** 分片掩码完全由已校验的分片数量决定。 */
+    public int matcherShardMask() { return matchingEngineCount - 1; }
 
     /** 创建固定默认拓扑；外部配置统一由 CoreConfiguration 绑定并传入。 */
     public static LaneTopology productionDefault() {
-        return new LaneTopology(DEFAULT_MATCHING_ENGINE_COUNT, DEFAULT_MATCHING_ENGINE_COUNT - 1, DEFAULT_ACCOUNT_LANE_COUNT,
-                DEFAULT_ACCOUNT_LANE_SEED, DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
+        return new LaneTopology(DEFAULT_MATCHING_ENGINE_COUNT, DEFAULT_ACCOUNT_LANE_COUNT, DEFAULT_ACCOUNT_LANE_SEED,
+                DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
     }
 
     /** 创建只有一个 Matcher 和一个账户 Lane 的固定测试拓扑，便于核对基础行为。 */
     public static LaneTopology characterization() {
-        return new LaneTopology(1, 0, 1, DEFAULT_ACCOUNT_LANE_SEED, DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
+        return new LaneTopology(1, 1, DEFAULT_ACCOUNT_LANE_SEED, DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY,
+                DEFAULT_QUEUE_CAPACITY);
     }
 
     /**
@@ -64,7 +64,7 @@ public record LaneTopology(
      */
     public int matcherShardId(int stableSymbolId) {
         if (stableSymbolId <= 0) throw new IllegalArgumentException("stableSymbolId must be positive");
-        return stableSymbolId & matcherShardMask;
+        return stableSymbolId & matcherShardMask();
     }
 
     /**

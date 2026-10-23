@@ -179,7 +179,7 @@ class CoreLifecycleStateTest {
 
         // 第一页处理后的状态、进度和相应业务事实。
         RuntimeTestStateTransitions.FundingApplication first = reducer.applyFundingWithFacts(state, firstCommand,
-                List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000095"));
+                List.of(1L, 2L));
 
         assertThat(first.progress().complete()).isFalse();
         assertThat(first.progress().nextCursorUserId()).isEqualTo(1);
@@ -192,8 +192,7 @@ class CoreLifecycleStateTest {
 
         // 使用第一页面游标处理后续页的结果。
         RuntimeTestStateTransitions.FundingApplication second = reducer.applyFundingWithFacts(restored,
-                new ApplyFundingCommand(95, "1", 10_000, 1, 1), List.of(1L, 2L),
-                UUID.fromString("00000000-0000-0000-0000-000000000096"));
+                new ApplyFundingCommand(95, "1", 10_000, 1, 1), List.of(1L, 2L));
 
         assertThat(second.progress().complete()).isTrue();
         assertThat(second.state().treasuryState().fundingProgress("1")).isNull();
@@ -221,8 +220,8 @@ class CoreLifecycleStateTest {
         // 从等额收付前置状态投影出的独立运行时。
         TradingAccountRuntime netZeroRuntime = RuntimeStateProjector.project(netZero, netZeroIdentities);
         // 实际运行时资金费入口返回的等额收付结果。
-        var netZeroActual = RuntimePerpetualFundingProcessor.apply(netZero, netZeroCommand,
-                null, null, netZeroRuntime, netZeroIdentities);
+        var netZeroActual = RuntimePerpetualFundingProcessor.apply(netZero, netZeroCommand, null, netZeroRuntime,
+                netZeroIdentities);
         RuntimeStateParityChecker.assertMatches(netZeroExpected.state(), netZeroIdentities, netZeroActual.state());
         assertThat(netZeroActual.payments()).isEqualTo(netZeroExpected.payments());
         assertThat(netZeroActual.progress()).isEqualTo(netZeroExpected.progress());
@@ -239,8 +238,7 @@ class CoreLifecycleStateTest {
         // 扣款封顶运行时模拟及状态对照共用的身份表。
         RuntimeIdentityRegistry cappedIdentities = new RuntimeIdentityRegistry();
         // 独立运行时模拟器返回的扣款封顶结果。
-        var cappedActual = RuntimePerpetualFundingFixture.simulate(capped, cappedCommand,
-                null, null, cappedIdentities);
+        var cappedActual = RuntimePerpetualFundingFixture.simulate(capped, cappedCommand, null, cappedIdentities);
         RuntimeStateParityChecker.assertMatches(cappedExpected.state(), cappedIdentities, cappedActual.state());
         assertThat(cappedActual.payments()).isEqualTo(cappedExpected.payments());
 
@@ -251,15 +249,15 @@ class CoreLifecycleStateTest {
         // 当前资金费或到期结算首个用户页命令，用户游标为零且每页一人。
         ApplyFundingCommand firstCommand = new ApplyFundingCommand(103, "1", 10_000, 0, 1);
         // 辅助状态推进器得到的第一页期望状态、明细和游标。
-        RuntimeTestStateTransitions.FundingApplication firstExpected = reducer.applyFundingWithFacts(chunked, firstCommand,
-                List.of(1L, 2L), firstCommandId);
+        RuntimeTestStateTransitions.FundingApplication firstExpected = reducer.applyFundingWithFacts(chunked,
+                firstCommand, List.of(1L, 2L));
         // 两页实际运行时共用的身份表。
         RuntimeIdentityRegistry chunkedIdentities = new RuntimeIdentityRegistry();
         // 第一页建立并继续用于第二页的可变权威运行时。
         TradingAccountRuntime chunkedRuntime = RuntimeStateProjector.project(chunked, chunkedIdentities);
         // 实际运行时第一页结果，后续继续使用其中原运行时引用。
-        var firstActual = RuntimePerpetualFundingProcessor.apply(chunked, firstCommand,
-                List.of(1L, 2L), firstCommandId, chunkedRuntime, chunkedIdentities);
+        var firstActual = RuntimePerpetualFundingProcessor.apply(chunked, firstCommand, List.of(1L, 2L), chunkedRuntime,
+                chunkedIdentities);
         RuntimeStateParityChecker.assertMatches(firstExpected.state(), chunkedIdentities, firstActual.state());
         assertThat(firstActual.payments()).isEqualTo(firstExpected.payments());
         assertThat(firstActual.progress()).isEqualTo(firstExpected.progress());
@@ -272,11 +270,11 @@ class CoreLifecycleStateTest {
         // 沿用同结算编号及第一页返回用户游标的续页命令。
         ApplyFundingCommand secondCommand = new ApplyFundingCommand(103, "1", 10_000, 1, 1);
         // 辅助状态推进器从恢复状态得到的第二页期望结果。
-        RuntimeTestStateTransitions.FundingApplication secondExpected = reducer.applyFundingWithFacts(restored, secondCommand,
-                List.of(1L, 2L), secondCommandId);
+        RuntimeTestStateTransitions.FundingApplication secondExpected = reducer.applyFundingWithFacts(restored,
+                secondCommand, List.of(1L, 2L));
         // 继续使用原可变运行时执行第二页得到的实际结果。
-        var secondActual = RuntimePerpetualFundingProcessor.apply(restored, secondCommand,
-                List.of(1L, 2L), secondCommandId, firstActual.state(), chunkedIdentities);
+        var secondActual = RuntimePerpetualFundingProcessor.apply(restored, secondCommand, List.of(1L, 2L),
+                firstActual.state(), chunkedIdentities);
         RuntimeStateParityChecker.assertMatches(secondExpected.state(), chunkedIdentities, secondActual.state());
         assertThat(secondActual.payments()).isEqualTo(secondExpected.payments());
         assertThat(secondActual.progress()).isEqualTo(secondExpected.progress());
@@ -292,8 +290,8 @@ class CoreLifecycleStateTest {
                 ContractType.LINEAR_PERPETUAL, 100, 10, 100);
         // 在缺价与已完成编号两种场景复用的资金费请求。
         ApplyFundingCommand command = new ApplyFundingCommand(104, "1", 10_000);
-        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(state, command,
-                null, null, new RuntimeIdentityRegistry()))
+        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(state, command, null,
+                new RuntimeIdentityRegistry()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("MARK_PRICE_NOT_FOUND"));
 
@@ -302,15 +300,14 @@ class CoreLifecycleStateTest {
                 new ApplyMarkPriceCommand("1", 100, 1, 1_700_000_000_000L));
         // 资金费或保险调整后的业务状态。
         TradingCoreState funded = reducer.applyFunding(marked, command);
-        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(funded, command,
-                null, null, new RuntimeIdentityRegistry()))
+        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(funded, command, null,
+                new RuntimeIdentityRegistry()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("STALE_SETTLEMENT_ID"));
 
         // 尚无保存进度却从用户一之后开始的非法首轮请求。
         ApplyFundingCommand invalidCursor = new ApplyFundingCommand(105, "1", 10_000, 1, 1);
-        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(marked, invalidCursor,
-                List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000105"),
+        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(marked, invalidCursor, List.of(1L, 2L),
                 new RuntimeIdentityRegistry()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 实际捕获的业务拒绝异常，用于检查准确拒绝码。 */ exception -> assertThat(exception.code()).isEqualTo("INVALID_COMMAND"));

@@ -394,11 +394,11 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
     private void trigger(int i) {
         refresh(i);long id=nextOrder();boolean loss=i==SYMBOLS-1;
-        var trigger=new CoreTriggerOrderStateView(id,ProductLine.LINEAR_PERPETUAL,taker(i),"mixed-trigger-"+id,"",instrumentId(i),
-                CoreOrderSide.SELL,loss?CoreTriggerOrderType.STOP_LOSS:CoreTriggerOrderType.TAKE_PROFIT,
-                loss?CoreTriggerCondition.LESS_OR_EQUAL:CoreTriggerCondition.GREATER_OR_EQUAL,mark[i],
-                0,0,0,0,0,CoreOrderType.LIMIT,CoreTimeInForce.IOC,110,1,CoreMarginMode.CROSS,CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING,0,0,0,"",0,0,0,0,1,0,0);
+        var trigger=new PlaceTriggerOrderCommand(id, "mixed-trigger-"+id, "", instrumentId(i), CoreOrderSide.SELL,
+                loss?CoreTriggerOrderType.STOP_LOSS:CoreTriggerOrderType.TAKE_PROFIT,
+                loss?CoreTriggerCondition.LESS_OR_EQUAL:CoreTriggerCondition.GREATER_OR_EQUAL, mark[i], 0, 0,
+                CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1, CoreMarginMode.CROSS, CorePositionSide.NET, 0,
+                com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK);
         send(CoreMessageType.PLACE_TRIGGER_ORDER,taker(i),CoreTriggerOrderCodec.encodePlacement(trigger),1,null);
         send(CoreMessageType.EXECUTE_TRIGGER_ORDER,0,CoreTriggerOrderCodec.encodeExecute(id,markSequence[i],mark[i],System.currentTimeMillis()),1,null);
         triggerExecutions++;

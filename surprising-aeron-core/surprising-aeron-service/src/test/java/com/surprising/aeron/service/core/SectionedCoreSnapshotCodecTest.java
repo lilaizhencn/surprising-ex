@@ -505,17 +505,16 @@ class SectionedCoreSnapshotCodecTest {
             snapshot = state.snapshot(74);
         }
 
-        // 九类预期错误名称到各自 CRC 已重算输入的有序表。
+        // 八类预期错误名称到各自 CRC 已重算输入的有序表。
         Map<String, byte[]> mismatches = new LinkedHashMap<>();
         mismatches.put("product line", mutateHeaderProductLine(snapshot));
-        mismatches.put("topology", mutateHeaderLong(snapshot, 13));
-        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 33));
-        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 41));
-        mismatches.put("core sequence", mutateHeaderLong(snapshot, 49));
-        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 57));
-        mismatches.put("business state hash", mutateHeaderLong(snapshot, 97));
-        mismatches.put("funds hash", mutateHeaderLong(snapshot, 105));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 113));
+        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 1));
+        mismatches.put("snapshot id", mutateHeaderLong(snapshot, 9));
+        mismatches.put("core sequence", mutateHeaderLong(snapshot, 17));
+        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 25));
+        mismatches.put("business state hash", mutateHeaderLong(snapshot, 65));
+        mismatches.put("funds hash", mutateHeaderLong(snapshot, 73));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 81));
 
         mismatches.forEach((/* 本变体预期出现于异常中的字段名称。 */ field, /* 为当前独立错误变体克隆并修改的完整快照字节。 */ mutated) -> {
             // 解码本变体捕获到的异常，要求是协议错误并含指定字段名。
@@ -526,7 +525,7 @@ class SectionedCoreSnapshotCodecTest {
     }
 
     /**
-     * 使用当前 v27 快照，改产品线为期权并把第五段交易状态清零，再重算 CRC；要求先报产品线不匹配，说明该检查早于交易状态解码，方法名中的 V9 不改变当前格式。
+     * 使用当前 v29 快照，改产品线为期权并把第五段交易状态清零，再重算 CRC；要求先报产品线不匹配，说明该检查早于交易状态解码，方法名中的 V9 不改变当前格式。
      */
     @Test
     void rejectsWrongProductLineBeforeDecodingOtherV9Sections() {
@@ -571,10 +570,10 @@ class SectionedCoreSnapshotCodecTest {
         }
 
         assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 81), ProductLine.SPOT))
+                mutateHeaderLongWithoutChecksum(snapshot, 49), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
         assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(
-                mutateHeaderLongWithoutChecksum(snapshot, 89), ProductLine.SPOT))
+                mutateHeaderLongWithoutChecksum(snapshot, 57), ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
     }
 

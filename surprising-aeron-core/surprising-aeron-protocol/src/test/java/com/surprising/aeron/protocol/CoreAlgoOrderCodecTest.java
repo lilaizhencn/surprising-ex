@@ -18,18 +18,12 @@ class CoreAlgoOrderCodecTest {
     }
 
     @Test
-    void materializesCreationTemplateWithClusterTime() {
-        CoreAlgoOrderView template = new CoreAlgoOrderView(7, 11, "client-7", "1", 0,
-                CoreOrderSide.BUY, 0, 100, 25, 10, 40, CoreMarginMode.CROSS, CorePositionSide.NET,
-                false, false, CoreTimeInForce.IOC, 0, 0, "", 0, 0, 0, 0, 0, 1,
-                List.of(), 0, 0, 0);
-
-        CoreAlgoOrderView decoded = CoreAlgoOrderCodec.decode(CoreAlgoOrderCodec.encode(template));
-        CoreAlgoOrderView materialized = decoded.materializeCreation(1_700_000_000_000L);
-
-        assertThat(materialized.startAtEpochMillis()).isEqualTo(1_700_000_000_000L);
-        assertThat(materialized.nextSliceAtEpochMillis()).isEqualTo(1_700_000_000_000L);
-        assertThat(materialized.createdAtEpochMillis()).isEqualTo(1_700_000_000_000L);
-        assertThat(materialized.updatedAtEpochMillis()).isEqualTo(1_700_000_000_000L);
+    void roundTripsCreationAndLifecycleDelta() {
+        var create = new CoreAlgoOrderCommand.Create(7, "client-7", "1", 0, CoreOrderSide.BUY,
+                0, 100, 25, 10, 40, CoreMarginMode.CROSS, CorePositionSide.NET,
+                false, false, CoreTimeInForce.IOC, 0);
+        var update = new CoreAlgoOrderCommand.Update(7, 1, 1, 91, "", 2, 0, 2, 91);
+        assertThat(CoreAlgoOrderCodec.decodeCommand(CoreAlgoOrderCodec.encodeCommand(create))).isEqualTo(create);
+        assertThat(CoreAlgoOrderCodec.decodeCommand(CoreAlgoOrderCodec.encodeCommand(update))).isEqualTo(update);
     }
 }

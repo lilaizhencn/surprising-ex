@@ -1,6 +1,7 @@
 package com.surprising.trading.order.service;
 
 import com.surprising.aeron.protocol.CoreAlgoOrderCodec;
+import com.surprising.aeron.protocol.CoreAlgoOrderCommand;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -34,23 +35,36 @@ public class AeronAlgoOrderStore {
         this.properties = properties;
     }
 
-    public AlgoOrderRecord upsert(AlgoOrderRecord record, List<Long> childOrderIds, long revision) {
-        CoreAlgoOrderView view = view(record, childOrderIds, revision, 0, 0, 0);
-        UUID commandId = revision == 1
-                ? StableOrderIdentity.algoCommandId(record.productLine(), record.userId(), record.clientAlgoOrderId())
-                : UUID.nameUUIDFromBytes(("ALGO:" + record.algoOrderId() + ':' + revision)
-                        .getBytes(StandardCharsets.UTF_8));
-        aeron.command(CoreMessageType.UPSERT_ALGO_ORDER, commandId, record.userId(), CoreAlgoOrderCodec.encodeCommand(view));
-        CoreAlgoOrderView persisted = aeron.algoOrder(record.userId(), record.algoOrderId());
-        if (persisted == null) throw new IllegalStateException("algo order missing after Aeron upsert");
-        return record(persisted);
+    public AlgoOrderRecord create(AlgoOrderRecord record) {
+        var command = new CoreAlgoOrderCommand.Create(record.algoOrderId(), text(record.clientAlgoOrderId()),
+                record.instrumentId(), record.algoType().ordinal(), CoreOrderSide.valueOf(record.side().name()),
+                record.priceTicks(), record.quantitySteps(), record.childQuantitySteps(), record.intervalSeconds(),
+                record.durationSeconds(), CoreMarginMode.valueOf(record.marginMode().name()),
+                CorePositionSide.valueOf(record.positionSide().name()), record.reduceOnly(), record.postOnly(),
+                CoreTimeInForce.valueOf(record.timeInForce().name()), epoch(record.startAt()));
+        aeron.command(CoreMessageType.UPSERT_ALGO_ORDER,
+                StableOrderIdentity.algoCommandId(record.productLine(), record.userId(), record.clientAlgoOrderId()),
+                record.userId(), CoreAlgoOrderCodec.encodeCommand(command));
+        return record(get(record.userId(), record.algoOrderId()));
+    }
+
+    public void update(AlgoOrderRecord record, long expectedRevision, long appendedChildOrderId) {
+        UUID commandId = UUID.nameUUIDFromBytes(("ALGO:" + record.algoOrderId() + ':'
+                + Math.incrementExact(expectedRevision)).getBytes(StandardCharsets.UTF_8));
+        aeron.command(CoreMessageType.UPSERT_ALGO_ORDER, commandId, record.userId(),
+                CoreAlgoOrderCodec.encodeCommand(updateCommand(record, expectedRevision, appendedChildOrderId)));
     }
 
     public CoreAlgoOrderView tryClaim(CoreAlgoOrderView current, AlgoOrderRecord claimed) {
-        CoreAlgoOrderView next = view(claimed, current.childOrderIds(), current.revision() + 1, 0, 0, 0);
         boolean applied = aeron.tryCommand(CoreMessageType.UPSERT_ALGO_ORDER, UUID.randomUUID(), claimed.userId(),
-                CoreAlgoOrderCodec.encodeCommand(next));
+                CoreAlgoOrderCodec.encodeCommand(updateCommand(claimed, current.revision(), 0)));
         return applied ? aeron.algoOrder(claimed.userId(), claimed.algoOrderId()) : null;
+    }
+
+    private static CoreAlgoOrderCommand.Update updateCommand(AlgoOrderRecord value, long revision, long appendedChild) {
+        return new CoreAlgoOrderCommand.Update(value.algoOrderId(), revision, value.status().ordinal(),
+                value.currentOrderId() == null ? 0 : value.currentOrderId(), text(value.rejectReason()),
+                epoch(value.nextSliceAt()), epoch(value.completedAt()), epoch(value.updatedAt()), appendedChild);
     }
 
     public CoreAlgoOrderView get(long userId, long id) {
@@ -96,17 +110,7 @@ public class AeronAlgoOrderStore {
                 progress.activeQuantitySteps(), progress.childOrderCount(), record.currentOrderId(), record.rejectReason(),
                 record.startAt(), record.nextSliceAt(), record.completedAt(), record.createdAt(), record.updatedAt());
     }
-    private CoreAlgoOrderView view(AlgoOrderRecord value, List<Long> children, long revision,
-                                   long executed, long active, int activeCount) {
-        return new CoreAlgoOrderView(value.algoOrderId(), value.userId(), text(value.clientAlgoOrderId()), value.instrumentId(),
-                value.algoType().ordinal(), CoreOrderSide.valueOf(value.side().name()), value.priceTicks(), value.quantitySteps(),
-                value.childQuantitySteps(), value.intervalSeconds(), value.durationSeconds(),
-                CoreMarginMode.valueOf(value.marginMode().name()), CorePositionSide.valueOf(value.positionSide().name()),
-                value.reduceOnly(), value.postOnly(), CoreTimeInForce.valueOf(value.timeInForce().name()), value.status().ordinal(),
-                value.currentOrderId() == null ? 0 : value.currentOrderId(), text(value.rejectReason()),
-                epoch(value.startAt()), epoch(value.nextSliceAt()), epoch(value.completedAt()), epoch(value.createdAt()),
-                epoch(value.updatedAt()), revision, children, executed, active, activeCount);
-    }
+
     private static long epoch(Instant value) { return value == null ? 0 : value.toEpochMilli(); }
     private static Instant instant(long value) { return value == 0 ? null : Instant.ofEpochMilli(value); }
     private static String text(String value) { return value == null ? "" : value; }

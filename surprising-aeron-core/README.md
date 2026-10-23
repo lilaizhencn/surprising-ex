@@ -167,7 +167,7 @@ flowchart TB
 
 FUSED 使用相同业务边界，在 Owner 内联执行 Matcher 和账户工作，不创建独立 Matcher/Account Lane 线程。PIPELINED 普通下单可提前把带准入门闩的输入交给 Matcher，但账户准入成功后才能撮合。队列提交成功或内部 `MATCHING_PENDING` 都不是客户端交易终态。
 
-`LaneTopology.accountLaneId(userId)` 决定账户归属，`matcherShardId(symbolId)` 决定订单簿归属；两者不混用。快照保存拓扑与路由种子，恢复不能按新配置重新分配账户。
+`LaneTopology.accountLaneId(userId)` 决定账户归属，`matcherShardId(symbolId)` 决定订单簿归属；两者不混用。快照只保存固定分片数、账户 Lane 数和路由种子，恢复不能按新配置重新分配账户；三项窗口/队列容量只由当前部署决定。
 
 ## 下单
 

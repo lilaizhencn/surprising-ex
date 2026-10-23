@@ -121,7 +121,7 @@ public final class CommandResultLedger {
     public CoreResponse duplicateResponse(StoredResult duplicate, com.surprising.aeron.protocol.CoreMessage message,
                                    CommandFingerprint fingerprint,
                                    long appliedCommandCount) {
-        if (!duplicate.fingerprint.matchesCommittedCommand(message, fingerprint)) {
+        if (!duplicate.fingerprint.equals(fingerprint)) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                     CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, EMPTY_RESPONSE_DATA);
         }

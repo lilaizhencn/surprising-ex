@@ -143,7 +143,7 @@ class TradingAccountRuntimeTest {
     @Test
     void commitEventStampsOnLanesPublishesOnOwnerAndClearsReusedMetadata() throws Exception {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        var topology = new LaneTopology(1, 0, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        var topology = new LaneTopology(1, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ var state = new TradingAccountRuntime(topology)) {
             // 从八开始寻找、确保与用户七不同 Lane 的第二用户
             long second = 8;
@@ -313,7 +313,7 @@ class TradingAccountRuntimeTest {
     @Test
     void controlLanesPublishRevisionDeltasOnlyWhenOwnerCollects() throws Exception {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        var topology = new LaneTopology(1, 0, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        var topology = new LaneTopology(1, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ var state = new TradingAccountRuntime(topology)) {
             state.setMetadata(com.surprising.product.api.ProductLine.SPOT, 10);
             state.startAccountLanes();
@@ -375,7 +375,7 @@ class TradingAccountRuntimeTest {
     @Test
     void idleCompletionProbeRaisesLaneErrorAndShutdownStopsEveryWorker() throws Exception {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        var topology = new LaneTopology(1, 0, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        var topology = new LaneTopology(1, 2, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         var state = new TradingAccountRuntime(topology);
         state.setMetadata(com.surprising.product.api.ProductLine.SPOT, 10);

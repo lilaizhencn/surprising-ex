@@ -260,7 +260,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                                 TradingCommandCodec.decodeBalanceAdjustment(command.payloadUnsafe()).asset()), null);
                 case TRANSFER_OUT, TRANSFER_IN -> {
                     // 当前解析的转账命令或待完成转账事实
-                    var transfer = TradingCommandCodec.decodeTransferFunds(command.payloadUnsafe(), user);
+                    var transfer = TradingCommandCodec.decodeTransferFunds(command.payloadUnsafe());
                     // 根据划入划出类型选出的实际转账端用户 ID
                     long owner = command.header().messageType() == CoreMessageType.TRANSFER_OUT
                             ? transfer.sourceUserId() : transfer.targetUserId();
@@ -401,7 +401,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                 && commandResult != null && commandResult.status() == ResponseStatus.APPLIED) {
             // 成功算法更新载荷中的父单元数据
             var submitted = CoreAlgoOrderCodec.decodeCommand(command.payloadUnsafe());
-            dirty.put(submitted.algoOrderId(), submitted.userId());
+            dirty.put(submitted.algoOrderId(), command.header().userId());
         }
         // 首子单可能尚未挂父路由就已成交，因此复用已解析的下单收据身份，避免每条普通订单帧都重复解析客户身份。
         // 最近下单收据提供的可空客户号，首子单可从算法格式识别父身份

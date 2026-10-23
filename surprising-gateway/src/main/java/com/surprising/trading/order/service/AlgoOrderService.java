@@ -77,7 +77,7 @@ public class AlgoOrderService {
                 normalized.durationSeconds(), normalized.marginMode(), normalized.positionSide(), normalized.reduceOnly(),
                 normalized.postOnly(), normalized.timeInForce(), AlgoOrderStatus.PENDING, null, null,
                 normalized.startAt(), null, null, null, null);
-        var persisted = store.upsert(record, List.of(), 1);
+        var persisted = store.create(record);
         AlgoOrderResponse response = store.response(store.get(persisted.userId(), persisted.algoOrderId()));
         return response;
     }
@@ -215,8 +215,8 @@ public class AlgoOrderService {
         AlgoOrderProgress progress = store.progress(current);
         if (progress.executedQuantitySteps() >= record.quantitySteps()
                 && progress.activeChildOrderCount() == 0) {
-            update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
-                    null, now, now, record.currentOrderId()), current.childOrderIds());
+            store.update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
+                    null, now, now, record.currentOrderId()), current.revision(), 0);
             return;
         }
         if (!now.isBefore(record.startAt().plusSeconds(record.durationSeconds()))) {
@@ -224,31 +224,30 @@ public class AlgoOrderService {
             return;
         }
         if (progress.activeChildOrderCount() > 0) {
-            update(withStatus(record, AlgoOrderStatus.RUNNING, null,
-                    now.plusMillis(properties.getAlgo().getScanDelayMs()), null, now, record.currentOrderId()), current.childOrderIds());
+            store.update(withStatus(record, AlgoOrderStatus.RUNNING, null,
+                    now.plusMillis(properties.getAlgo().getScanDelayMs()), null, now, record.currentOrderId()),
+                            current.revision(), 0);
             return;
         }
 
         long remainingTarget = Math.subtractExact(record.quantitySteps(), progress.executedQuantitySteps());
         if (remainingTarget <= 0L) {
-            update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
-                    null, now, now, record.currentOrderId()), current.childOrderIds());
+            store.update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
+                    null, now, now, record.currentOrderId()), current.revision(), 0);
             return;
         }
         long childQuantity = Math.min(record.childQuantitySteps(), remainingTarget);
         PlaceOrderRequest childRequest = childRequest(record, progress.nextSliceIndex(), childQuantity);
         OrderResponse child = orderService.placeAlgoChild(childRequest);
         if (child.status() == OrderStatus.REJECTED) {
-            update(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
-                    null, now, now, null), current.childOrderIds());
+            store.update(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
+                    null, now, now, null), current.revision(), 0);
             return;
         }
         Instant nextSliceAt = nextSliceAt(record, now);
         AlgoOrderRecord updated = withStatus(record, AlgoOrderStatus.RUNNING, null, nextSliceAt,
                 null, now, child.orderId());
-        List<Long> children = new ArrayList<>(current.childOrderIds());
-        children.add(child.orderId());
-        update(updated, children);
+        store.update(updated, current.revision(), child.orderId());
     }
 
     // Share the existing scheduler monitor: finish linking any locally submitted child
@@ -264,7 +263,7 @@ public class AlgoOrderService {
         String reason = requestedReason == null ? record.rejectReason() : requestedReason;
         AlgoOrderRecord requested = withStatus(record, AlgoOrderStatus.CANCEL_REQUESTED, reason,
                 now.plusSeconds(1), null, now, record.currentOrderId());
-        update(requested, current.childOrderIds());
+        store.update(requested, current.revision(), 0);
         current = recoverUnlinkedChild(store.get(record.userId(), record.algoOrderId()));
         RuntimeException cancellationFailure = null;
         for (AlgoOrderChild child : store.children(current)) {
@@ -282,7 +281,7 @@ public class AlgoOrderService {
         }
         AlgoOrderRecord canceled = withStatus(store.record(current), AlgoOrderStatus.CANCELED, reason,
                 null, now, Instant.now(), current.currentOrderId() == 0 ? null : current.currentOrderId());
-        update(canceled, current.childOrderIds());
+        store.update(canceled, current.revision(), 0);
         return store.response(store.get(canceled.userId(), canceled.algoOrderId()));
     }
 
@@ -292,11 +291,9 @@ public class AlgoOrderService {
         String key = childClientOrderId(parent.algoOrderId(), parent.childOrderIds().size());
         if (child.userId() != parent.userId() || !child.instrumentId().equals(parent.instrumentId())
                 || !key.equals(child.clientOrderId())) throw new IllegalStateException("algo child recovery identity mismatch");
-        var children = new ArrayList<Long>(parent.childOrderIds());
-        children.add(child.orderId());
         var record = store.record(parent);
-        store.upsert(withStatus(record, record.status(), record.rejectReason(), record.nextSliceAt(),
-                record.completedAt(), Instant.now(), child.orderId()), children, parent.revision() + 1);
+        store.update(withStatus(record, record.status(), record.rejectReason(), record.nextSliceAt(),
+                record.completedAt(), Instant.now(), child.orderId()), parent.revision(), child.orderId());
         return store.get(parent.userId(), parent.algoOrderId());
     }
 
@@ -307,12 +304,6 @@ public class AlgoOrderService {
                 record.instrumentId(), record.side(), orderType, timeInForce,
                 orderType == OrderType.MARKET ? 0L : record.priceTicks(), quantitySteps,
                 record.marginMode(), record.positionSide(), record.reduceOnly(), record.postOnly());
-    }
-
-    private void update(AlgoOrderRecord record, List<Long> childOrderIds) {
-        var current = store.get(record.userId(), record.algoOrderId());
-        List<Long> children = childOrderIds.isEmpty() ? current.childOrderIds() : childOrderIds;
-        store.upsert(record, children, current.revision() + 1);
     }
 
     private Instant nextSliceAt(AlgoOrderRecord record, Instant now) {

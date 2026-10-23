@@ -180,6 +180,6 @@ class SnapshotFieldEvolutionTest {
     private static byte[] joinWithVersion(List<byte[]> fields) {
         // 拆分记录或拼接新版本头时使用的小端字节缓冲。
         var buffer = ByteBuffer.allocate(4 + fields.stream().mapToInt(/* 参与计算拼接总长度的一段完整字段字节。 */ a -> a.length).sum()).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(38); fields.forEach(buffer::put); return buffer.array();
+        buffer.putInt(39); fields.forEach(buffer::put); return buffer.array();
     }
 }

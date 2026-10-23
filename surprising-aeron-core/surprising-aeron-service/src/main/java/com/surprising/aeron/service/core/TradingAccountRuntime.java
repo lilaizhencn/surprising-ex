@@ -2806,9 +2806,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
                     for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < positions.size(); index++)
                         event.identities().releasePublishedPosition(positions.keyAt(index));
                 }
-                changes.laneDelta(laneId).commitTerminalToOwner(
-                        this, laneId, terminalOrderSink, event.plan().coreSequence(),
-                        changedUsers, changedOrders);
+                changes.laneDelta(laneId).commitTerminalToOwner(this, laneId, terminalOrderSink, changedUsers,
+                        changedOrders);
                 // 该 Lane 交出的余额补丁，逐项发布可用余额并标记变化用户
                 LaneBalancePatches balances = changes.balancePatch(laneId);
                 for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < balances.size(); index++) {
@@ -2987,8 +2986,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 本次撮合或撤单的变化容器，按当前分支借出、取走或读取
         MatcherSettlementChanges changes = event.takeChanges();
         try {
-            changes.laneDelta(laneId).commitTerminalToOwner(
-                    this, laneId, terminalOrderSink, event.coreSequence(), changedUsers, changedOrders);
+            changes.laneDelta(laneId).commitTerminalToOwner(this, laneId, terminalOrderSink, changedUsers, changedOrders);
             // 撤单后该 Lane 的余额补丁，用于发布解冻后的可用余额变化
             LaneBalancePatches balances = changes.balancePatch(laneId);
             for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < balances.size(); index++) {
@@ -3042,28 +3040,26 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * Owner 收集终态订单身份的接收器，只传订单、用户、客户号和序号；默认批次入口遍历已有原始缓冲，结束钩子供需要统一收尾的实现使用。
+     * Owner 收集终态订单身份的接收器，只传订单、用户和客户号；默认批次入口遍历已有原始缓冲，结束钩子供需要统一收尾的实现使用。
      */
     @FunctionalInterface
     public interface TerminalOrderSink {
         /**
-         * 接收一个终态订单的原始身份和所属 Core 序号，避免 Owner 再遍历订单对象取得这些字段。
+         * 接收一个终态订单的原始身份，避免 Owner 再遍历订单对象取得这些字段。
          * @param orderId 本次需要读取、登记或撤销的订单实体 ID
          * @param userId 业务所属用户身份，按本产品线固定拓扑路由
          * @param clientOrderId 该终态订单所属用户下的客户订单号
-         * @param coreSequence 原命令或当前收集结果关联的 Core 序号
          */
-        void accept(long orderId, long userId, String clientOrderId, long coreSequence);
+        void accept(long orderId, long userId, String clientOrderId);
 
         /**
          * 按已有 Lane 终态缓冲的顺序逐项调用接收器，不另建订单列表。
          * @param delta 已完成 Lane 交出的终态订单原始缓冲，不在接收器内复制
-         * @param coreSequence 原命令或当前收集结果关联的 Core 序号
          */
-        default void acceptBatch(LaneCommitDelta delta, long coreSequence) {
+        default void acceptBatch(LaneCommitDelta delta) {
             for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < delta.terminalOrderCount(); index++) {
                 accept(delta.terminalOrderId(index), delta.terminalOrderUser(index),
-                        delta.terminalOrderClient(index), coreSequence);
+                        delta.terminalOrderClient(index));
             }
         }
 

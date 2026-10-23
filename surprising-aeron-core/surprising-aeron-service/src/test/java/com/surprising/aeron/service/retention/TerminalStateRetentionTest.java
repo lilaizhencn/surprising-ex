@@ -41,7 +41,7 @@ class TerminalStateRetentionTest {
     void reusingLookupKeysCannotMutateStoredKeysOrSnapshot() {
         // 本场景实际终态与资金身份保留器
         var retention = new TerminalStateRetention();
-        retention.accept(1, 7, "", 1);
+        retention.accept(1, 7, "");
         // 修改前取得的独立保留段编码，用来核对无变化或恢复
         byte[] snapshot = retention.encode();
         for (/* 当前循环的终态订单 ID */ int id = 2; id < 1000; id++) {
@@ -76,7 +76,7 @@ class TerminalStateRetentionTest {
         // 本场景实际终态与资金身份保留器
         var retention = new TerminalStateRetention();
         for (/* 当前循环的终态订单 ID */ long id = 1; id <= TerminalStateRetention.MAX_TOMBSTONES + 40; id++)
-            retention.accept(id, 7, "", 1);
+            retention.accept(id, 7, "");
         retention.completeSequence();
         assertThat(retention.tombstoneCount()).isEqualTo(TerminalStateRetention.MAX_TOMBSTONES);
         for (var /* 本次检查的原保留器或编码恢复副本 */ state : new TerminalStateRetention[]{retention, TerminalStateRetention.decode(retention.encode())}) {

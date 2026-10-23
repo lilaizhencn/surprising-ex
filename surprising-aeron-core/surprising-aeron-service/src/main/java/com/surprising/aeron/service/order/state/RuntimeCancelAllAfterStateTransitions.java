@@ -16,7 +16,7 @@ public final class RuntimeCancelAllAfterStateTransitions {
     /**
      * 核对用户后按用户及币对范围读旧计时器；SET 新建或重置并清统计，其他动作须匹配原版本及到期或认领状态，成功写入下一状态并推进命令版本。
      * @param runtime 提供原计时器与版本写入入口的所属运行时
-     * @param userId 命令头所指定的计时器用户，必须与载荷一致
+     * @param userId 命令头所指定的计时器用户，作为唯一归属身份
      * @param command 复制命令中的动作、范围、业务时间、预期版本和撤单统计
      */
     public static void update(TradingAccountRuntime runtime, long userId, CoreCancelAllAfterCommand command) {
@@ -24,10 +24,6 @@ public final class RuntimeCancelAllAfterStateTransitions {
             throw new IllegalArgumentException("invalid runtime cancel-all-after update");
         }
         runtime.assertOwner();
-        if (command.userId() != userId) {
-            throw new CoreStateRejectedException("CANCEL_ALL_AFTER_OWNER_MISMATCH",
-                    "cancel-all-after timer belongs to another user");
-        }
         // 当前用户加币对范围形成的计时器业务键。
         CoreCancelAllAfterKey key = new CoreCancelAllAfterKey(userId, command.symbolScope());
         // 该范围当前保存的计时状态，SET 可从无记录开始。

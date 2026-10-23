@@ -74,9 +74,16 @@ class CoreTriggerOrderCodecTest {
                 CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
                 0, 0, 0, 0, 1);
 
-        CoreTriggerOrderStateView decoded = CoreTriggerOrderCodec.decodeState(
-                CoreTriggerOrderCodec.encodeState(template));
-        CoreTriggerOrderStateView materialized = decoded.materializeCreation(1_700_000_000_000L);
+        var command = new PlaceTriggerOrderCommand(
+                template.triggerOrderId(), template.clientTriggerOrderId(), template.ocoGroupId(),
+                        template.instrumentId(), template.side(), template.triggerType(), template.triggerCondition(),
+                        template.triggerPriceTicks(), template.activationPriceTicks(), template.callbackRatePpm(),
+                        template.orderType(), template.timeInForce(), template.priceTicks(), template.quantitySteps(),
+                        template.marginMode(), template.positionSide(), template.expiresAtEpochMillis(),
+                        template.priceSource());
+        var decoded = CoreTriggerOrderCodec.decodePlacement(CoreTriggerOrderCodec.encodePlacement(command));
+        CoreTriggerOrderStateView materialized = decoded.materialize(
+                ProductLine.LINEAR_PERPETUAL, 1001, 1_700_000_000_000L);
 
         assertThat(materialized.createdAtEpochMillis()).isEqualTo(1_700_000_000_000L);
         assertThat(materialized.updatedAtEpochMillis()).isEqualTo(1_700_000_000_000L);

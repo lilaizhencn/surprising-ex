@@ -22,7 +22,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.CoreTriggerCondition;
 import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
-import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.PlaceTriggerOrderCommand;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
@@ -773,12 +773,10 @@ public final class LinearPerpetualMixedWorkload {
                 ? CoreTriggerOrderType.STOP_LOSS : CoreTriggerOrderType.TAKE_PROFIT;
         CoreTriggerCondition triggerCondition = liquidationSymbol
                 ? CoreTriggerCondition.LESS_OR_EQUAL : CoreTriggerCondition.GREATER_OR_EQUAL;
-        CoreTriggerOrderStateView trigger = new CoreTriggerOrderStateView(triggerId,
-                ProductLine.LINEAR_PERPETUAL, taker, "mixed-trigger-" + triggerId, "", instrumentId,
-                CoreOrderSide.SELL, triggerType, triggerCondition, mark.markPriceTicks(),
-                0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
-                CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+        PlaceTriggerOrderCommand trigger = new PlaceTriggerOrderCommand(triggerId, "mixed-trigger-" + triggerId, "",
+                instrumentId, CoreOrderSide.SELL, triggerType, triggerCondition, mark.markPriceTicks(), 0, 0,
+                CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1, CoreMarginMode.CROSS, CorePositionSide.NET, 0,
+                com.surprising.aeron.protocol.CoreTriggerPriceSource.MARK);
         harness.execute(harness.command(CoreMessageType.PLACE_TRIGGER_ORDER, CommandSource.GATEWAY, taker,
                 CoreTriggerOrderCodec.encodePlacement(trigger)));
         harness.execute(harness.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, CommandSource.OPERATIONS, 0,

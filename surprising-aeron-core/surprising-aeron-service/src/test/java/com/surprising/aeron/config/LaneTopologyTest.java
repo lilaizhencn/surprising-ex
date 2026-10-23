@@ -57,15 +57,13 @@ class LaneTopologyTest {
     }
 
     /**
-     * 分别验证分片掩码与 Matcher 数量不符、Matcher 数量不是二次幂、账户 Lane 数量不是二次幂时拒绝构造。
+     * 分别验证 Matcher 或账户 Lane 数量不是二次幂时拒绝构造。
      */
     @Test
-    void rejectsInvalidShardMaskOrNonPowerOfTwoCounts() {
-        assertThatThrownBy(() -> new LaneTopology(4, 2, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
+    void rejectsNonPowerOfTwoCounts() {
+        assertThatThrownBy(() -> new LaneTopology(3, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LaneTopology(3, 2, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LaneTopology(4, 3, 3, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
+        assertThatThrownBy(() -> new LaneTopology(4, 3, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4, 4, 4))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

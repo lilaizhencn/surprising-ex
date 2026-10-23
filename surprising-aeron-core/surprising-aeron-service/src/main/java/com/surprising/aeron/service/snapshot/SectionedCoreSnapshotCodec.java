@@ -14,21 +14,21 @@ import lombok.experimental.Accessors;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 
-/** 分段快照 v27 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。提供整体编码、恢复和增量接收；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。 构造约定：禁止实例化纯静态格式入口。 */
+/** 分段快照 v29 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。提供整体编码、恢复和增量接收；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。 构造约定：禁止实例化纯静态格式入口。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SectionedCoreSnapshotCodec {
 
     /** 外层小端魔数，标识 Surprising 核心分段快照。 */
     public static final int MAGIC = 0x5358534E;
-    /** 当前外层格式版本二十八，不代表内嵌负载版本。 */
-    public static final int VERSION = 28;
+    /** 当前外层格式版本二十九，不代表内嵌负载版本。 */
+    public static final int VERSION = 29;
     /** 封套十二字节：魔数、版本、保留位与总段数。 */
     public static final int ENVELOPE_LENGTH = 12;
     /** 每个段头八字节：顺序段编号和负载长度。 */
     public static final int SECTION_HEADER_LENGTH = 8;
-    /** 第一段固定元数据负载长度一百二十五字节。 */
-    public static final int HEADER_LENGTH = 121;
-    /** 一个来源水位条目二十四字节，包含来源码、保留位、实例号与序号。 */
+    /** 第一段固定元数据负载长度八十九字节。 */
+    public static final int HEADER_LENGTH = 89;
+    /** 一个来源水位条目二十字节，包含来源码、实例号与序号。 */
     public static final int SOURCE_SEQUENCE_LENGTH = 20;
     /** 一个命令结果负载的固定部分七十六字节，不含前置条目长度和变长响应数据。 */
     public static final int RESULT_FIXED_LENGTH = 76;
@@ -111,12 +111,28 @@ public final class SectionedCoreSnapshotCodec {
 
     public static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-        return recovery(snapshot, configuration.snapshot().maxBytes()).decode(expectedProductLine, configuration);
+        return decode(snapshot, expectedProductLine, configuration,
+                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
+    }
+
+    public static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
+            com.surprising.aeron.config.LaneTopology deploymentTopology) {
+        return recovery(snapshot, configuration.snapshot().maxBytes())
+                .decode(expectedProductLine, configuration, deploymentTopology);
     }
 
     public static TradingCoreRuntime decodePassive(byte[] snapshot, ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-        return recovery(snapshot, configuration.snapshot().maxBytes()).decodePassive(expectedProductLine, configuration);
+        return decodePassive(snapshot, expectedProductLine, configuration,
+                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
+    }
+
+    public static TradingCoreRuntime decodePassive(byte[] snapshot, ProductLine expectedProductLine,
+            com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
+            com.surprising.aeron.config.LaneTopology deploymentTopology) {
+        return recovery(snapshot, configuration.snapshot().maxBytes())
+                .decodePassive(expectedProductLine, configuration, deploymentTopology);
     }
 
     /**
@@ -186,12 +202,26 @@ public final class SectionedCoreSnapshotCodec {
 
         public TradingCoreRuntime decode(ProductLine expectedProductLine,
                 com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-            return delegate.decode(expectedProductLine, configuration);
+            return decode(expectedProductLine, configuration,
+                    com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
+        }
+
+        public TradingCoreRuntime decode(ProductLine expectedProductLine,
+                com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
+                com.surprising.aeron.config.LaneTopology deploymentTopology) {
+            return delegate.decode(expectedProductLine, configuration, deploymentTopology);
         }
 
         public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
                 com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-            return delegate.decodePassive(expectedProductLine, configuration);
+            return decodePassive(expectedProductLine, configuration,
+                    com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
+        }
+
+        public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
+                com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
+                com.surprising.aeron.config.LaneTopology deploymentTopology) {
+            return delegate.decodePassive(expectedProductLine, configuration, deploymentTopology);
         }
 
         /**

@@ -62,7 +62,7 @@ class SettlementChangesReuseTest {
             assertThat(lane.reservation(11).reservedUnits()).isEqualTo(60);
             assertThat(delta.terminalOrderCount()).isEqualTo(1);
             assertThat(delta.terminalOrderId(0)).isEqualTo(12);
-            delta.commitTerminalToOwner(runtime, laneId, null, 1, null, null);
+            delta.commitTerminalToOwner(runtime, laneId, null, null, null);
             assertThat(runtime.changedOrderValue(11).executedQuantitySteps()).isEqualTo(4);
             assertThat(runtime.changedOrderValue(11).cumulativeFeeUnits()).isEqualTo(7);
             assertThat(runtime.changedOrderValue(12).remainingQuantitySteps()).isZero();
@@ -78,7 +78,7 @@ class SettlementChangesReuseTest {
             assertThat(delta.terminalOrderId(0)).isEqualTo(11);
             assertThat(lane.order(11)).isNull();
             assertThat(lane.reservation(11)).isNull();
-            delta.commitTerminalToOwner(runtime, laneId, null, 2, null, null);
+            delta.commitTerminalToOwner(runtime, laneId, null, null, null);
             assertThat(runtime.changedOrderValue(11).cumulativeFeeUnits()).isEqualTo(7);
             assertThat(runtime.changedOrderValue(12)).isNull();
         }
@@ -124,7 +124,7 @@ class SettlementChangesReuseTest {
      */
     @Test void pooledChangesMoveBetweenLanesWithoutRetainingPreviousOrdersOrPendingCounts() {
         // 池化缓冲跨 Lane 轮转用例使用的四账户 Lane 拓扑。
-        var topology = new LaneTopology(1, 0, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        var topology = new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
         try (/* 本用例独占并在退出时关闭的交易运行时。 */ var runtime = new TradingAccountRuntime(topology)) {
             for (/* 当前借还变化缓冲的轮次。 */ int turn = 0; turn < 100; turn++) {
                 // 本用例持有的账户 Lane，或池轮转用例当前 Lane 数组下标。
@@ -157,7 +157,7 @@ class SettlementChangesReuseTest {
                     instrument, 2, 100, 200, 0, 20);
             delta.putPosition(1, source);
             delta.preparePublication();
-            delta.commitTerminalToOwner(runtime, 0, null, 1, null, null);
+            delta.commitTerminalToOwner(runtime, 0, null, null, null);
             assertThat(runtime.positionChanges().get(1)).isEqualTo(source);
             runtime.clearChangedKeys();
             delta.clear();
@@ -165,14 +165,14 @@ class SettlementChangesReuseTest {
             source.applyInPlace(instrument, 3, 100, 300, 5, 30);
             delta.putPosition(1, source);
             delta.preparePublication();
-            delta.commitTerminalToOwner(runtime, 0, null, 2, null, null);
+            delta.commitTerminalToOwner(runtime, 0, null, null, null);
             assertThat(runtime.positionChanges().get(1)).isEqualTo(source);
             runtime.clearChangedKeys();
             delta.clear();
 
             delta.putPosition(1, null);
             delta.preparePublication();
-            delta.commitTerminalToOwner(runtime, 0, null, 3, null, null);
+            delta.commitTerminalToOwner(runtime, 0, null, null, null);
             assertThat(runtime.positionChanges().toArray()).containsExactly(1);
         }
     }

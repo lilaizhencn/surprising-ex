@@ -319,14 +319,13 @@ public final class LaneCommitDelta {
      * @param state 接收本边界发布变化及计数的 Owner 运行时
      * @param laneId 当前收据实际所属的账户 Lane 编号
      * @param terminalOrderSink 可选的终态身份批量消费者，读取本收据已保存的原语身份列
-     * @param coreSequence 本次提交结果所属的 Core 命令序号
      * @param changedUsers 可选的本命令变化用户键集合，不需要时为 null
      * @param changedOrders 可选的本命令变化订单键集合，不需要时为 null
      */
     public void commitTerminalToOwner(TradingAccountRuntime state, int laneId,
-                               TradingAccountRuntime.TerminalOrderSink terminalOrderSink, long coreSequence,
-                               com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
-                               com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
+            TradingAccountRuntime.TerminalOrderSink terminalOrderSink,
+            com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
+            com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         publishTriggersToOwner(state);
         if (closedTriggerCount != 0) {
             state.restoreRevision(Math.addExact(state.revision(), closedTriggerCount));
@@ -336,7 +335,7 @@ public final class LaneCommitDelta {
         publishPositionCountToOwner(state, laneId);
         publishPreparedToOwner(state, changedUsers, changedOrders);
         if (terminalOrderSink != null && terminalOrderCount != 0)
-            terminalOrderSink.acceptBatch(this, coreSequence);
+            terminalOrderSink.acceptBatch(this);
         for (/* 当前正在消费的收据连续有效槽。 */ int index = 0; index < liquidations.size(); index++)
             state.changedLiquidations().put(liquidations.keyAt(index), liquidations.valueAt(index));
         liquidations.clear();

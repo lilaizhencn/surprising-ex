@@ -171,25 +171,14 @@ public final class SectionedCoreSnapshotWriter {
     }
 
     /**
-     * 编码固定元数据，包含路由参数、Core/投影水位、投影反码、Lane 摘要、Cluster 位置和各哈希；本地 snapshotState 引用未被后续语句读取，业务哈希使用镜像已保存值。
+     * 编码固定元数据，包含 Core/投影水位、投影反码、Lane 摘要、Cluster 位置和各哈希；本地 snapshotState 引用未被后续语句读取，业务哈希使用镜像已保存值。
      * @param image 输入引用在编码期间保持稳定的快照镜像
      */
     private static byte[] header(CoreSnapshotImage image) {
-        // 本次镜像已经配对的 Matcher 快照引用。
-        var matcherSnapshot = image.matcherSnapshot();
-        // 捕获点物化的交易状态；header 方法中仅取得引用而未继续使用。
-        var snapshotState = image.tradingState();
         // 当前段或条目的已分配小端写入缓冲。
         ByteBuffer buffer = ByteBuffer.allocate(SectionedCoreSnapshotCodec.HEADER_LENGTH)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .put((byte) ProductLineWireCode.encode(image.productLine()))
-                .putInt(matcherSnapshot.matchingEngineCount())
-                .putInt(matcherSnapshot.matcherShardMask())
-                .putInt(matcherSnapshot.accountLaneCount())
-                .putLong(matcherSnapshot.accountLaneSeed())
-                .putInt(matcherSnapshot.topology().matcherWindowSize())
-                .putInt(matcherSnapshot.topology().matchingCompletionCapacity())
-                .putInt(matcherSnapshot.topology().accountLaneQueueCapacity())
                 .putLong(image.appliedCommandCount())
                 .putLong(image.snapshotId())
                 .putLong(image.coreSequence())

@@ -236,8 +236,20 @@ public final class RuntimeTestStateTransitions {
      * @param view 需要应用到算法父单的协议视图
      */
     public TradingCoreState upsertAlgoOrder(TradingCoreState before, long userId, CoreAlgoOrderView view) {
-        return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                RuntimeAlgoOrderStateTransitions.upsert(runtime, identities, userId, view));
+        var current = before.algoOrders().get(view.algoOrderId());
+        long appended = current != null && view.childOrderIds().size() > current.childOrderIds().size()
+                ? view.childOrderIds().getLast() : 0;
+        com.surprising.aeron.protocol.CoreAlgoOrderCommand command = view.revision() == 1
+                ? new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create(
+                view.algoOrderId(), view.clientAlgoOrderId(), view.instrumentId(), view.algoTypeCode(), view.side(),
+                        view.priceTicks(), view.quantitySteps(), view.childQuantitySteps(), view.intervalSeconds(),
+                        view.durationSeconds(), view.marginMode(), view.positionSide(), view.reduceOnly(),
+                        view.postOnly(), view.timeInForce(), view.startAtEpochMillis())
+                : new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
+                view.algoOrderId(), view.revision() - 1, view.statusCode(), view.currentOrderId(), view.rejectReason(),
+                        view.nextSliceAtEpochMillis(), view.completedAtEpochMillis(), view.updatedAtEpochMillis(), appended);
+        return mutate(before, (runtime, identities) -> RuntimeAlgoOrderStateTransitions.upsert(
+                runtime, identities, userId, command, Math.max(1, view.createdAtEpochMillis())));
     }
 
     /**
@@ -273,29 +285,27 @@ public final class RuntimeTestStateTransitions {
     }
 
     /**
-     * 使用生产资金费入口的默认用户集合及分块标识规则，返回后状态、支付事实和进度。
+     * 使用生产资金费入口的默认用户集合及分页规则，返回后状态、支付事实和进度。
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      */
     public FundingApplication applyFundingWithFacts(TradingCoreState before, ApplyFundingCommand command) {
-        return applyFundingWithFacts(before, command, null, null);
+        return applyFundingWithFacts(before, command, null);
     }
 
     /**
-     * 投影一份冷运行时，按指定用户集合和分块 UUID 应用生产资金费规则，捕获实际支付与进度，再物化后状态并关闭运行时。
+     * 投影一份冷运行时，按指定用户集合和命令批量上限应用生产资金费规则，捕获实际支付与进度，再物化后状态并关闭运行时。
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      * @param userIds 本次资金费或生命周期页选择的用户集合，null 交给生产入口采用其默认规则
-     * @param chunkCommandId 当前分页命令的幂等 UUID，null 交给生产入口处理默认标识
      */
     public FundingApplication applyFundingWithFacts(TradingCoreState before, ApplyFundingCommand command,
-                                              Iterable<Long> userIds, UUID chunkCommandId) {
+            Iterable<Long> userIds) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
             // 生产资金费处理返回的实际支付事实和分页进度，与物化后状态一起交给测试。
-            var result = RuntimePerpetualFundingProcessor.apply(before, command,
-                    userIds, chunkCommandId, runtime, identities);
+            var result = RuntimePerpetualFundingProcessor.apply(before, command, userIds, runtime, identities);
             return new FundingApplication(RuntimeStateMaterializer.materialize(runtime, identities),
                     result.payments(), result.progress());
         }

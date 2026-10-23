@@ -210,8 +210,8 @@ class CorePerpetualFinancialMatrixTest {
                     .isNotEqualTo(runtime.topology().accountLaneId(SECOND_MAKER_ID));
             // 直接资金费处理返回的支付事实和进度，不是另一个运行时快照
             RuntimePerpetualFundingProcessor.FundingResult actual =
-                    RuntimePerpetualFundingProcessor.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID),
-                            null, runtime, identities);
+                    RuntimePerpetualFundingProcessor.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
+                            identities);
 
             RuntimeStateParityChecker.assertMatches(expected.state(), identities, runtime);
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
@@ -296,7 +296,8 @@ class CorePerpetualFinancialMatrixTest {
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 // 在原 System Ledger 作用域内准备的资金费续步工作
-                var work = RuntimePerpetualFundingProcessor.prepare(command, List.of(USER_ID, SECOND_MAKER_ID), null, runtime, identities);
+                var work = RuntimePerpetualFundingProcessor.prepare(command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
+                        identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(work.poll()).isTrue();
                 assertThat(work.result().payments()).isEqualTo(expected.payments());
@@ -1163,16 +1164,14 @@ class CorePerpetualFinancialMatrixTest {
         UUID firstId = UUID.fromString("00000000-0000-0000-0000-000000000301");
         // 资金费首段处理一个用户后的状态、支付事实和未完成进度
         RuntimeTestStateTransitions.FundingApplication first = reducer.applyFundingWithFacts(marked,
-                new ApplyFundingCommand(301, SYMBOL, 100_000, 0, 1),
-                List.of(USER_ID, MAKER_ID), firstId);
+                new ApplyFundingCommand(301, SYMBOL, 100_000, 0, 1), List.of(USER_ID, MAKER_ID));
         // 资金费首段结果快照往返后的冷状态，保留用户续步游标
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(first.state()), variant.productLine());
         assertThat(restored).isEqualTo(first.state());
         // 恢复后继续处理下一用户返回的完整资金费结果
         RuntimeTestStateTransitions.FundingApplication second = reducer.applyFundingWithFacts(restored,
-                new ApplyFundingCommand(301, SYMBOL, 100_000, USER_ID, 1),
-                List.of(USER_ID, MAKER_ID), UUID.fromString("00000000-0000-0000-0000-000000000302"));
+                new ApplyFundingCommand(301, SYMBOL, 100_000, USER_ID, 1), List.of(USER_ID, MAKER_ID));
         assertThat(first.progress().complete()).isFalse();
         assertThat(second.progress().complete()).isTrue();
         assertThat(second.state().treasuryState().fundingSettlements()).containsEntry(SYMBOL, 301L);

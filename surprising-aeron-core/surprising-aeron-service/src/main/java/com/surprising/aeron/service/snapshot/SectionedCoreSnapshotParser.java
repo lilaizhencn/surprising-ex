@@ -39,7 +39,8 @@ public final class SectionedCoreSnapshotParser {
      * @param expectedProductLine 调用方明确要求恢复或检查的产品线
      */
     static Components parse(byte[][] payloads, ProductLine expectedProductLine,
-            java.nio.file.Path fundsIndexDirectory) {
+            java.nio.file.Path fundsIndexDirectory,
+            com.surprising.aeron.config.LaneTopology deploymentTopology) {
         // 从第一段读取且产品线已核对的内部元数据。
         HeaderManifest manifest = SectionedCoreSnapshotValidation.parseHeader(payloads[0], expectedProductLine);
         // 解码的来源消费水位表，重复来源键会被拒绝。
@@ -47,7 +48,7 @@ public final class SectionedCoreSnapshotParser {
         // 解码的幂等结果表，按输入条目顺序保存。
         Map<UUID, CommandResultLedger.StoredResult> commandResults = parseResults(payloads[2]);
         // 独立 Matcher 编解码器解出的原生模块与配对元数据。
-        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[3]);
+        MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[3], deploymentTopology);
         // 独立交易状态编解码器解出的不可变交易视图。
         TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[4], manifest.productLine());
         // 解码后的费率策略表，参与业务哈希配对。
@@ -56,18 +57,17 @@ public final class SectionedCoreSnapshotParser {
         Map<Long, TransferRuntime> pendingTransfers = CoreTransferSnapshotCodec.decode(payloads[6]);
         // 总负载段数扣除九个固定段后的账户 Lane 数量。
         int laneSectionCount = payloads.length - SectionedCoreSnapshotCodec.BASE_SECTION_COUNT;
-        if (laneSectionCount != manifest.topology().accountLaneCount()) {
+        if (laneSectionCount != matcherSnapshot.topology().accountLaneCount()) {
             throw new ProtocolException("snapshot account lane section count mismatch");
         }
         // 按 Lane 段顺序收集的账户清单，随后验证摘要与恢复边界。
         List<AccountLaneSnapshot> accountLanes = new ArrayList<>(laneSectionCount);
         for (/* 当前账户段、用户条目或来源/结果条目的零基下标。 */ int index = 0; index < laneSectionCount; index++) {
-            accountLanes.add(parseAccountLane(payloads[8 + index], manifest, index));
+            accountLanes.add(parseAccountLane(payloads[8 + index], matcherSnapshot.topology(), index));
         }
         SectionedCoreSnapshotValidation.validateAccountLanes(manifest, accountLanes);
         SectionedCoreSnapshotValidation.validatePairing(
-                manifest, sourceSequences, matcherSnapshot, tradingState, feePolicies, pendingTransfers,
-                CoreTransferSnapshotCodec.usesImplicitUserHash(payloads[6]));
+                manifest, sourceSequences, matcherSnapshot, tradingState, feePolicies, pendingTransfers);
         CoreSnapshotImage.verifyMatcherState(matcherSnapshot, tradingState,
                 manifest.appliedCommandCount(), manifest.businessStateHash());
         // 已由外层验证过的页尾 CRC 数值，这里只读入公开清单。
@@ -83,11 +83,11 @@ public final class SectionedCoreSnapshotParser {
     /**
      * 检查最小长度、预期 Lane 号、数量及精确用户字节数，逐用户验证路由后构造账户清单；构造器参数错误转为协议异常，列表顺序/重复等进一步约束由 AccountLaneSnapshot 自身检查。
      * @param payload 当前正在读取的某一段负载字节
-     * @param manifest 第一段解码的内部头部清单
+     * @param topology 已解析 Matcher 段的固定账户路由
      * @param expectedLaneId 当前账户段在协议顺序中必须匹配的零基 Lane 号
      */
     private static AccountLaneSnapshot parseAccountLane(
-            byte[] payload, HeaderManifest manifest, int expectedLaneId) {
+            byte[] payload, com.surprising.aeron.config.LaneTopology topology, int expectedLaneId) {
         // 当前账户段的小端读取视图。
         ByteBuffer lane = wrap(payload);
         if (lane.remaining() < Integer.BYTES * 2 + Long.BYTES * 5) {
@@ -120,7 +120,7 @@ public final class SectionedCoreSnapshotParser {
         for (/* 当前账户段、用户条目或来源/结果条目的零基下标。 */ int index = 0; index < userCount; index++) {
             // 当前用户编号，必须按快照拓扑路由到此 Lane。
             long userId = lane.getLong();
-            if (manifest.topology().accountLaneId(userId) != laneId) {
+            if (topology.accountLaneId(userId) != laneId) {
                 throw new ProtocolException("account lane user route mismatch");
             }
             userIds.add(userId);
@@ -310,9 +310,9 @@ public final class SectionedCoreSnapshotParser {
             TradingCoreRuntime candidate = null;
             try {
                 com.surprising.aeron.service.core.TradingAccountRuntime.validateAccountLaneSnapshotManifest(
-                        accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
+                        accountLanes, manifest.coreSequence(), tradingState, matcherSnapshot.topology());
                 candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount,
-                        commandResults, sourceSequences, tradingState, retention, matcherForRestoredState(),
+                        commandResults, sourceSequences, tradingState, retention, matcherSnapshot,
                         manifest.projectionSequence(), feePolicies, pendingTransfers, configuration);
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
                 if (activate) candidate.activate();
@@ -332,21 +332,6 @@ public final class SectionedCoreSnapshotParser {
         }
 
         /**
-         * 按当前包含显式划转用户的公式重算业务哈希；与 Matcher 元数据相同就复用，否则仅以已校验的同一事实更新哈希元数据，模块、路由和原生序号保持原引用。旧负载原哈希已在 parse 阶段验证。
-         */
-        private MatcherSnapshot matcherForRestoredState() {
-            // 以当前费率和显式用户划转公式重算的业务哈希。
-            long currentHash = TradingCoreRuntime.canonicalBusinessStateHash(
-                    tradingState.businessStateHash(), feePolicies, pendingTransfers);
-            if (currentHash == matcherSnapshot.coreBusinessStateHash()) return matcherSnapshot;
-            // parse 已核验旧格式哈希、资金、Lane 和原生撮合状态。只更新同一批事实的哈希元数据。
-            return new MatcherSnapshot(matcherSnapshot.productLine(), matcherSnapshot.topology(),
-                    matcherSnapshot.snapshotId(), matcherSnapshot.coreSequence(), matcherSnapshot.matcherSequence(),
-                    matcherSnapshot.matcherShardProgress(), currentHash, matcherSnapshot.engineStateHash(),
-                    matcherSnapshot.symbols(), matcherSnapshot.users(), matcherSnapshot.modules());
-        }
-
-        /**
          * 再次核对预期产品线后，从已解析元数据和 Matcher 构造公开清单，不创建运行时，也不计算新 CRC。
          * @param expectedProductLine 调用方明确要求恢复或检查的产品线
          */
@@ -356,7 +341,7 @@ public final class SectionedCoreSnapshotParser {
                     manifest.snapshotId(), manifest.coreSequence(), manifest.clusterTimestamp(),
                     manifest.clusterPosition(), appliedCommandCount, matcherSnapshot.matcherSequence(),
                     manifest.businessStateHash(), matcherSnapshot.engineStateHash(),
-                    manifest.sourceSequenceDigest(), manifest.topology(), manifest.globalFundsHash(), checksum);
+                    manifest.sourceSequenceDigest(), matcherSnapshot.topology(), manifest.globalFundsHash(), checksum);
         }
 
         /**

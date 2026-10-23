@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
+import com.surprising.aeron.protocol.PlaceTriggerOrderCommand;
 import com.surprising.aeron.protocol.CoreTriggerOrderQuery;
 import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
@@ -55,21 +56,21 @@ public final class TriggerOrderAeronGateway implements AutoCloseable {
             return response;
         });
     }
-    public CoreTriggerOrderStateView place(UUID id, long userId, CoreTriggerOrderStateView view) {
+    public CoreTriggerOrderStateView place(UUID id, long userId, PlaceTriggerOrderCommand view) {
         CoreResponse response = command(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,
                 CoreTriggerOrderCodec.encodePlacement(view));
         return CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst()
                 .orElseThrow(() -> new IllegalStateException("Aeron trigger placement returned no state"));
     }
     public CompletionStage<CoreTriggerOrderStateView> placeAsync(
-            UUID id, long userId, CoreTriggerOrderStateView view) {
+            UUID id, long userId, PlaceTriggerOrderCommand view) {
         return commandAsync(CoreMessageType.PLACE_TRIGGER_ORDER, id, userId,
                         CoreTriggerOrderCodec.encodePlacement(view))
                 .thenApply(response -> CoreTriggerOrderCodec.decodeList(response.data()).stream().findFirst()
                         .orElseThrow(() -> new IllegalStateException(
                                 "Aeron trigger placement returned no state")));
     }
-    public List<CoreTriggerOrderStateView> placeOcoPair(UUID id, long userId, List<CoreTriggerOrderStateView> legs) {
+    public List<CoreTriggerOrderStateView> placeOcoPair(UUID id, long userId, List<PlaceTriggerOrderCommand> legs) {
         return CoreTriggerOrderCodec.decodeList(command(CoreMessageType.PLACE_TRIGGER_OCO_PAIR, id,
                 userId, CoreTriggerOrderCodec.encodePlacementList(legs)).data());
     }

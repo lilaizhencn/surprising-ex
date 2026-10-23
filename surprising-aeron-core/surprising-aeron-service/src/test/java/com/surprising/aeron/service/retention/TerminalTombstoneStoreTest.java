@@ -18,7 +18,7 @@ class TerminalTombstoneStoreTest {
         var store = new TerminalTombstoneStore();
         for (/* 当前插入或核对的原始顺序计数 */ int i = 1; i <= 100000; i++) {
             assertThat(store.contains(i % 4, i)).isFalse();
-            assertThat(store.putIfAbsent(i % 4, i, 7, "client-" + i, i)).isTrue();
+            assertThat(store.putIfAbsent(i % 4, i, 7, "client-" + i)).isTrue();
             store.trim(1280);
             if (i > 1280) assertThat(store.contains((i - 1280) % 4, i - 1280)).isFalse();
             assertThat(store.contains(i % 4, i)).isTrue();
@@ -33,9 +33,9 @@ class TerminalTombstoneStoreTest {
     @Test void overwritingAnEntityKeepsItsFifoPositionAndReplacesItsClientIndex() {
         // 本场景实际数组终态存储
         var store = new TerminalTombstoneStore();
-        store.put(0, 7, 11, "old", 1);
-        store.put(0, 8, 11, "next", 2);
-        store.put(0, 7, 11, "replacement", 3);
+        store.put(0, 7, 11, "old");
+        store.put(0, 8, 11, "next");
+        store.put(0, 7, 11, "replacement");
         assertThat(store.size()).isEqualTo(2);
         assertThat(store.containsClient(0, 11, "old")).isFalse();
         assertThat(store.containsClient(0, 11, "replacement")).isTrue();
@@ -44,7 +44,7 @@ class TerminalTombstoneStoreTest {
         assertThat(store.contains(0, 8)).isTrue();
         assertThat(store.containsClient(0, 11, "replacement")).isFalse();
         store.trim(0);
-        store.put(3, 7, 12, "reused", 4);
+        store.put(3, 7, 12, "reused");
         assertThat(store.contains(3, 7)).isTrue();
         assertThat(store.contains(0, 7)).isFalse();
     }
@@ -55,17 +55,17 @@ class TerminalTombstoneStoreTest {
     @Test void upperBoundNeverHidesOutOfOrderIdsOrDuplicatesAfterEvictionAndCopy() {
         // 本场景实际数组终态存储
         var store = new TerminalTombstoneStore();
-        store.put(0, Long.MAX_VALUE, 1, "highest", 1);
-        store.put(0, 7, 1, "late", 2);
-        store.put(3, 7, 1, "other-type", 3);
+        store.put(0, Long.MAX_VALUE, 1, "highest");
+        store.put(0, 7, 1, "late");
+        store.put(3, 7, 1, "other-type");
         store.trim(2);
         for (var /* 当前检查的原存储或独立副本 */ current : new TerminalTombstoneStore[]{store, store.copy()}) {
             assertThat(current.contains(0, Long.MAX_VALUE)).isFalse();
             assertThat(current.contains(0, 7)).isTrue();
             assertThat(current.contains(3, 7)).isTrue();
-            current.put(0, 7, 1, "overwritten", 4);
+            current.put(0, 7, 1, "overwritten");
             assertThat(current.size()).isEqualTo(2);
-            current.put(0, 8, 1, "new", 5);
+            current.put(0, 8, 1, "new");
             assertThat(current.contains(0, 8)).isTrue();
             assertThat(current.contains(1, 8)).isFalse();
         }
@@ -78,12 +78,11 @@ class TerminalTombstoneStoreTest {
      */
     record Key(int type, long id) {}
     /**
-     * 参照 Map 保存的用户、客户号和原提交序号。
+     * 参照 Map 保存的用户和客户号。
      * @param user 当前终态用户 ID
      * @param client 完整客户号文本，碰撞场景仍须精确比较
-     * @param sequence 该条终态原提交序号
      */
-    record Value(long user, String client, long sequence) {}
+    record Value(long user, String client) {}
     /**
      * 参照客户号映射使用的类型、用户和完整文本组合键。
      * @param type 零到三的终态实体类别
@@ -109,8 +108,8 @@ class TerminalTombstoneStoreTest {
             // 含相同 String 哈希前缀的客户文本，内容仍不同
             String client = (i % 2 == 0 ? "Aa" : "BB") + i % 37;
             // 当前参照实体组合键
-            var key = new Key(type, id); /* 当前写入参照 Map 的终态值 */ var value = new Value(user, client, i);
-            store.put(type, id, user, client, i);
+            var key = new Key(type, id); /* 当前写入参照 Map 的终态值 */ var value = new Value(user, client);
+            store.put(type, id, user, client);
             reference.put(key, value); clients.put(new Client(type, user, client), key);
             if (i % 29 == 0) {
                 // 当前退窗保留条数一千
@@ -149,7 +148,7 @@ class TerminalTombstoneStoreTest {
         // 收集当前二进制输出的独立字节流
         var bytes = new ByteArrayOutputStream(); /* 参照 Map 按协议字段顺序写入的二进制输出 */ var out = new DataOutputStream(bytes); out.writeInt(values.size());
         for (var /* 当前序列化的参照实体项 */ e : values.entrySet()) {
-            out.writeByte(e.getKey().type()); out.writeLong(e.getKey().id()); out.writeLong(e.getValue().user()); out.writeLong(e.getValue().sequence());
+            out.writeByte(e.getKey().type()); out.writeLong(e.getKey().id()); out.writeLong(e.getValue().user());
             // 当前客户号的 UTF-8 编码字节
             byte[] text = e.getValue().client().getBytes(StandardCharsets.UTF_8); out.writeInt(text.length); out.write(text);
         }
