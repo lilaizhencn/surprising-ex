@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第十七轮：A87–A88清理并通过17模块干净编译；累计87项解决，A11/A89两项候选。Core16/registerV10/snapshot48，全量审查继续。",
+    "checkpoint": "第十八轮：A89六个冷订单转换清理并通过17模块干净/最终编译；累计88项解决，A90一项确认，A11一项候选。Core16/registerV10/snapshot48，全量审查继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -5688,8 +5688,8 @@
     },
     {
       "id": "A89",
-      "status": "candidate",
-      "analysis_status": "candidate",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "普通订单冷记录的六个状态转换方法仅被模型测试和索引夹具调用",
       "fields": [
         "CoreOrderState.cancel",
@@ -5707,8 +5707,39 @@
           "purpose": "按完整方法描述符只有CoreOrderStateTest、ActiveOrderIndexTest与fill重载内部转传；没有其他生产class调用。线上使用OrderRuntime和原订单/结算流程。"
         }
       ],
+      "business_code_changed": true,
+      "proposed_cleanup": "先复核两个测试类的用途：保留对冷记录数量及恢复不变量的验证，移除只验证无人使用API的重复测试；索引夹具可直接构造后状态或使用既有测试夹具。不能只因调用方是测试就一律删除便利入口，需比较最终可读性与重复业务维护成本。",
+      "resolved_in_round": "eighteenth_cleanup_round",
+      "implementation": "删除冷订单cancel/reject/fill两重载/replacePrice/withCommitMetadata六个转换入口。索引夹具在原executeUserSettlement内使用已有OrderRuntime.withFill/withStatus，补同一(-1,0)未知成交额；冷记录测试改为构造实际后状态并验证派生剩余量及拒绝，原运行时测试不变。"
+    },
+    {
+      "id": "A90",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "冻结冷记录的四个测试专用金额转换及私有复制构造形成重复业务入口",
+      "fields": [
+        "OrderReservation.releaseAll",
+        "OrderReservation.release",
+        "OrderReservation.consume",
+        "OrderReservation.replaceReservedUnits",
+        "OrderReservation(OrderReservation,long,long,long)",
+        "CoreValueValidationTest中对instrumentId/asset的isSameAs断言"
+      ],
+      "evidence_basis_commit": "f22c0624bbd52a02093a5ab60aaaf9b2c5a7b465",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderReservation.java",
+          "anchor": "public OrderReservation releaseAll()",
+          "purpose": "CodeGraph定位后，完整classfile owner+描述符只指向CoreValueValidationTest、CoreUserStateTest与内部转传，没有线上外部调用；私有4参复制构造仅由这些冷转换调用。"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreValueValidationTest.java",
+          "anchor": "assertThat(value.asset()).isSameAs(original.asset())",
+          "purpose": "孤立冷转换测试要求文本引用相同，但业务使用规范文本值/整数身份；此对象引用约束不能作为保留无用复制构造的理由。"
+        }
+      ],
       "business_code_changed": false,
-      "proposed_cleanup": "先复核两个测试类的用途：保留对冷记录数量及恢复不变量的验证，移除只验证无人使用API的重复测试；索引夹具可直接构造后状态或使用既有测试夹具。不能只因调用方是测试就一律删除便利入口，需比较最终可读性与重复业务维护成本。"
+      "proposed_cleanup": "删除四个冷转换和私有复制构造；验证测试直接构造消耗/释放后的金额事实并检查remainingUnits、等值及输入边界，用户快照夹具直接提供释放后记录。保留实际使用的create、全部8字段、规范化、validateAmounts精确金额守恒和原运行时资金/冻结流程。"
     }
   ],
   "preserve_verified_purposes": [
@@ -5726,8 +5757,8 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "复核A89冷订单六个测试专用状态转换入口及原索引夹具，先确定真实用途后清理重复业务逻辑。",
-    "214个静态字段已做保守预筛，仅确认VERSION需删；继续按业务用途检查其他代码，不以引用数量替代职责判断。",
+    "清理A90冻结冷记录的四个测试专用转换、私有复制构造和文本引用相同测试约束，保留实际金额/标识与规范化。",
+    "继续逐业务核对剩余字段和无用约束，不按没有生产调用机械删除实际夹具便利入口。",
     "保持A11一致性边界；仅编译相关模块，不运行测试、服务和性能。"
   ],
   "rejected_false_positives": [
@@ -6025,24 +6056,23 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "7a58057999c9d6fc7658870b2cd4b78007cf95e7",
+    "source_basis_commit": "f22c0624bbd52a02093a5ab60aaaf9b2c5a7b465",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A87",
-      "A88"
-    ],
-    "new_candidate_ids": [
       "A89"
+    ],
+    "new_confirmed_ids": [
+      "A90"
     ],
     "candidate_ids": [
-      "A11",
-      "A89"
+      "A11"
     ],
     "counts": {
-      "resolved": 87,
-      "candidate": 2
+      "resolved": 88,
+      "candidate": 1,
+      "confirmed": 1
     },
-    "evidence": "seventeenth_cleanup_round",
+    "evidence": "eighteenth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -17227,6 +17257,559 @@
         "/tmp/aeron-static-fields-20261024-scan.py": "b4b799c005ce79f0b9b044d59e6655d5e76e982279970d264427340956d094a4",
         "/tmp/aeron-static-fields-20261024-static.json": "1044fb872e71c55e70d18692c4fa7292419ea47b6edf528ec55a5ea1fd709e13",
         "/tmp/aeron-static-fields-20261024-static.py": "9639791d7bbba39968ba4ba0a05ae2b54f104dbac971f2c1d1df932ef946fddc"
+      },
+      "errors": [],
+      "no_task_services_started": true
+    }
+  },
+  "eighteenth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "f22c0624bbd52a02093a5ab60aaaf9b2c5a7b465",
+    "resolved_ids": [
+      "A89"
+    ],
+    "new_confirmed_ids": [
+      "A90"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 88,
+      "candidate": 1,
+      "confirmed": 1
+    },
+    "flow": "线上下单/撮合/撤单及提交元数据仍由原运行时和Lane执行；冷记录只保存物化、查询及恢复的业务事实，不再提供第二套状态转换。索引夹具直接使用真实运行时复制更新，范围和断言不变。",
+    "implementation": {
+      "removed_cold_order_methods": 6,
+      "retained_cold_order_components": 27,
+      "retained_constructor_arities": [
+        11,
+        13,
+        20,
+        27
+      ],
+      "new_types_interfaces_registries": 0,
+      "new_test_classes": 0,
+      "wire_snapshot_layout_or_live_execution_changed": false
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 48,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4
+    },
+    "verification": {
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "disk_available_before_build": "187GiB",
+      "clean": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "49.421 s",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-aeron-tools",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-maker",
+          "surprising-realtime-api",
+          "surprising-price-provider",
+          "surprising-aeron-benchmarks",
+          "surprising-derivatives-lifecycle-api",
+          "surprising-realtime-provider",
+          "surprising-gateway"
+        ],
+        "log_sha256": "672b418a286840c51f760029eecbb397cc21c2db6545dea0501bac1bcdcc0a12"
+      },
+      "final": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "24.572 s",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-aeron-tools",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-maker",
+          "surprising-realtime-api",
+          "surprising-price-provider",
+          "surprising-aeron-benchmarks",
+          "surprising-derivatives-lifecycle-api",
+          "surprising-realtime-provider",
+          "surprising-gateway"
+        ],
+        "log_sha256": "95e547cda3352425e298f7b0be06bb56b3ce4a1e086bf4be51e2b4d17af8b0af"
+      },
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "test_source_changes": "冷模型测试4改3，取消只针对删除API的转换/费用/提交断言；保留六产品冷数量约束并增加REJECTED历史未成交量。索引测试改用原运行时更新，最后编译前显式保留旧未知成交额标记。原OrderRuntimeTest保持原源码。",
+      "unverified": [
+        "测试实际执行",
+        "真实交易正常/拒绝/异常路径",
+        "做市/资金/持仓/终态和资金守恒运行核对",
+        "Cluster日志/快照恢复运行",
+        "真实查询、数据库和前端交互",
+        "性能"
+      ]
+    },
+    "static_verification": {
+      "status": "passed",
+      "removed_cold_transition_signatures": [
+        "cancel()",
+        "reject()",
+        "fill(long)",
+        "fill(long,long)",
+        "replacePrice(long)",
+        "withCommitMetadata(long,long)"
+      ],
+      "remaining_cold_source_verbatim_except_class_javadoc": true,
+      "index_test_source_unchanged_except_two_fixture_updates": true,
+      "fixture_equivalence": {
+        "basis": "原opening总量5、已成交0、版本1；冷fill(3)后为成交3/剩余2/费用0/宽成交值(-1,0)/OPEN/版本2。原reducing未成交0/剩余3，cancel后为CANCELED/版本2。新调用使用相同身份、标的引用、数量、费用、状态、版本及元数据；仍在原executeUserSettlement范围。",
+        "runtime_fill_preserves_other_fields": "OrderRuntime.withFill默认时间和位置为-1，沿用原字段；executionValue(-1,0)补回冷fill原未知成交额哨兵。",
+        "runtime_cancel_preserves_other_fields": "OrderRuntime.withStatus沿用成交、剩余、费用与宽成交值，时间和位置不变。"
+      },
+      "unchanged_business_sources": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java",
+          "sha256": "18f82b3deaae458185007fdd7534fee596e8953c209454d637b5e275bc9357a5"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeOrderStateTransitions.java",
+          "sha256": "469daedf7b9d0e2d84677f1cb7d06df90a84972c8bdb932713f05a1d939b083f"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeOrderCommitStateTransitions.java",
+          "sha256": "3d8fc774430e6fbfe192db73229da5a09fbd5a700d95e329f7956c3d6b34fa43"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java",
+          "sha256": "f81aa3d05365ab6173cde1c05378e14d5822101d08c90f249919ec9783c7f22e"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java",
+          "sha256": "4c01c819b8718034ee17cac2326973f50166092626c5cc55e76dce41c1c0db77"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "sha256": "65ea1aa2d73da6182537acefb7779388712fee258f45b69e6b5597539a7fab9a"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java",
+          "sha256": "421171cd30f8d70c6ee5656652df42c1352b41c2c96eff73625b2d420ac46a9f"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "sha256": "85a3705b1d1957f97f56139fbe9dc95cd005fc258f365d59f8387686f97a2361"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+          "sha256": "d52f7bd8e8da25ab78f28e27d8b321d3da184b5cd0f2506f1f8e1a2aa63ca833"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/OrderRuntimeTest.java",
+          "sha256": "4d45ecb495326845ac7d5adba229aa0ec9f66790d9b4f5a26272b4099d2af711"
+        }
+      ],
+      "test_scope_change": "移除冷记录未被线上使用的转换断言；保留六产品历史剩余量、Long.MAX_VALUE边界和非法成交量/已满量OPEN构造拒绝。原OrderRuntime成交/取消/元数据测试不变。",
+      "java_business_execution": false
+    },
+    "binary_post_verification": {
+      "status": "passed",
+      "all_available_class_counts": {
+        "test": 894,
+        "main": 3131
+      },
+      "fresh_reactor_class_counts": {
+        "test": 860,
+        "main": 3004
+      },
+      "cold_order_fields": 27,
+      "remaining_constructor_arities": [
+        11,
+        13,
+        20,
+        27
+      ],
+      "removed_cold_transition_refs": 0,
+      "same_remaining_getter_retained": true,
+      "reservation_followup_references": [
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "remainingUnits",
+          "descriptor": "()J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/SpotMixedWorkload$1.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/LifecyclePaginationBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/DerivativeMixedWorkload$1.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreRiskLaneQueryTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/account/CoreUserStateTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/CoreUserState.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "create",
+          "descriptor": "(JLjava/lang/String;Lcom/surprising/aeron/protocol/ReservationKind;Ljava/lang/String;JJ)Lcom/surprising/aeron/service/order/state/OrderReservation;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/core/ReplacementAdmissionBenchmark.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/order/admission/ReplacementAdmissionEventTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreAlgoLaneQueryTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/settlement/MatcherTreasurySettlementTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/account/CoreUserStateTest.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "reservedUnits",
+          "descriptor": "()J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreMatchingStateTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "consume",
+          "descriptor": "(J)Lcom/surprising/aeron/service/order/state/OrderReservation;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "release",
+          "descriptor": "(J)Lcom/surprising/aeron/service/order/state/OrderReservation;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "replaceReservedUnits",
+          "descriptor": "(J)Lcom/surprising/aeron/service/order/state/OrderReservation;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "releaseAll",
+          "descriptor": "()Lcom/surprising/aeron/service/order/state/OrderReservation;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/account/CoreUserStateTest.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "instrumentId",
+          "descriptor": "()Ljava/lang/String;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "asset",
+          "descriptor": "()Ljava/lang/String;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/CoreUserState.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "orderId",
+          "descriptor": "()J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/account/CoreUserStateTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/CoreUserState.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "kind",
+          "descriptor": "()Lcom/surprising/aeron/protocol/ReservationKind;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "releasedUnits",
+          "descriptor": "()J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "consumedUnits",
+          "descriptor": "()J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "orderQuantitySteps",
+          "descriptor": "()J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "<init>",
+          "descriptor": "(JLjava/lang/String;Lcom/surprising/aeron/protocol/ReservationKind;Ljava/lang/String;JJJJ)V",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "hashCode",
+          "descriptor": "()I",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "toString",
+          "descriptor": "()Ljava/lang/String;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreValueValidationTest.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "requireInstrumentId",
+          "descriptor": "(Ljava/lang/String;)Ljava/lang/String;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreFeePolicyState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreOrderState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreAlgoOrderState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreLeverageKey.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreRiskSnapshot.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreMarkPriceState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CorePositionState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreLiquidationState.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/index/OpenInterestIndex.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/index/LiquidationIndex$LiquidationKey.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/index/PositionUserIndex.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/index/ActiveOrderIndex.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/treasury/CoreTreasuryState.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "validateAmounts",
+          "descriptor": "(JLcom/surprising/aeron/protocol/ReservationKind;JJJJ)V",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 9,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "orderId",
+          "descriptor": "J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 9,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "instrumentId",
+          "descriptor": "Ljava/lang/String;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 9,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "kind",
+          "descriptor": "Lcom/surprising/aeron/protocol/ReservationKind;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 9,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "asset",
+          "descriptor": "Ljava/lang/String;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 9,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "reservedUnits",
+          "descriptor": "J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 9,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "releasedUnits",
+          "descriptor": "J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 9,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "consumedUnits",
+          "descriptor": "J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 9,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "orderQuantitySteps",
+          "descriptor": "J",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/state/OrderReservation",
+          "name": "<init>",
+          "descriptor": "(Lcom/surprising/aeron/service/order/state/OrderReservation;JJJ)V",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/OrderReservation.class"
+          ]
+        }
+      ],
+      "java_business_execution": false
+    },
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreOrderState.java": "16a3d3823f30e3b17260e1db0f3c8d14b54114e929b05c78a5b4936794ecee4b",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/model/CoreOrderStateTest.java": "7b24c8ee7e1b10844ebf26bec5896cb4bc9b5c17b0ede6a464c38dcbfbf498c6",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/ActiveOrderIndexTest.java": "2b9a76cc78b2f4c8732af28f06370a529ccda0e6b69c18abda5b0d10c06c5792"
+    },
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "2ad3a3ef0ac4c78d89f695a2ee8fc9f81af1dc968ce02afc6ce41ab64bf86834"
+    },
+    "graph_verification": {
+      "command": "codegraph sync -q",
+      "exit_code": 0,
+      "status": "up_to_date",
+      "files": 2241,
+      "nodes": 52649,
+      "edges": 151484,
+      "mcp_tools_available": false
+    },
+    "remaining_scope": [
+      "A90冻结冷状态转换及私有复制构造；保留所有金额和守恒校验。",
+      "A11仍受读取顺序、屏障和分页会话约束，不绕过一致性边界。",
+      "其他业务字段、无用约束及持久化数据继续审查，未以编译替代全功能或恢复验证。"
+    ],
+    "temporary_resources": {
+      "status": "removed_after_archival",
+      "owned_files_removed": {
+        "/tmp/aeron-cold-order-api-20261024-archive.py": "25856bfabf2fa704958b3ef49cf4de5bb3fc0217bb60abc1fdf0ce11458defea",
+        "/tmp/aeron-cold-order-api-20261024-binary.json": "5caeaa4e1925aaebae86dcfed71066b92e0ad7a26405ac4a1f63ab8296133e16",
+        "/tmp/aeron-cold-order-api-20261024-binary.py": "fa793f7dab4b9425e2d0283aaf14f338b98ff33e5bc971164a8f6747247ea056",
+        "/tmp/aeron-cold-order-api-20261024-build.log": "672b418a286840c51f760029eecbb397cc21c2db6545dea0501bac1bcdcc0a12",
+        "/tmp/aeron-cold-order-api-20261024-final-build.log": "95e547cda3352425e298f7b0be06bb56b3ce4a1e086bf4be51e2b4d17af8b0af",
+        "/tmp/aeron-cold-order-api-20261024-graph.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/aeron-cold-order-api-20261024-impact.json": "6ba03d26eea6f64df732ce1051648adfd1919b0ff51f7e79d67fd51ab523602b",
+        "/tmp/aeron-cold-order-api-20261024-static.json": "2efb40ca1beba136d0477b2f11f77ca51e1f17188009afc786d3a9e0a5545510",
+        "/tmp/aeron-cold-order-api-20261024-static.py": "f82a1e8c46b3789ca7116f65924a9a52233b6aa5d9654d889ff3ff2bca74db0c"
       },
       "errors": [],
       "no_task_services_started": true

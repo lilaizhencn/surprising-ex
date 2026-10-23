@@ -10,7 +10,7 @@ import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 
 /**
- * 普通订单的不可变业务记录，集中保存委托、成交进度、费率、状态和提交信息。状态变化返回新记录；实际撮合、资金冻结和账户结算由各自流程负责。
+ * 普通订单的不可变业务记录，集中保存委托、成交进度、费率、状态和提交信息。只记录业务事实；实际撮合、资金冻结、账户结算和状态变化由原运行时流程负责。
  * @param orderId 普通订单在 Core 中的唯一编号
  * @param productLine 这笔业务所属的产品线，用来隔离现货、各类期货和期权
  * @param userId 这份状态所属的用户编号，必须为正数
@@ -177,99 +177,5 @@ public record CoreOrderState(
                 executedQuantitySteps, reduceOnly, marginMode, positionSide,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "", new UUID(0, orderId),
                 0, 0, status, revision);
-    }
-
-    /**
-     * 有效订单转为已撤销并增加修订号，保留成交量、未成交量和历史费用；已结束的订单直接返回自身。
-     */
-    public CoreOrderState cancel() {
-        if (status.terminal()) {
-            return this;
-        }
-        return new CoreOrderState(orderId, productLine, userId, instrumentId,
-                side, priceTicks, matchingPriceTicks, quantitySteps,
-                executedQuantitySteps, reduceOnly, marginMode, positionSide,
-                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
-                CoreOrderStatus.CANCELED,
-                Math.incrementExact(revision));
-    }
-
-    /**
-     * 有效订单转为已拒绝并增加修订号，保留原委托和成交事实；已结束的订单直接返回自身。
-     */
-    public CoreOrderState reject() {
-        if (status.terminal()) {
-            return this;
-        }
-        return new CoreOrderState(orderId, productLine, userId, instrumentId,
-                side, priceTicks, matchingPriceTicks, quantitySteps,
-                executedQuantitySteps, reduceOnly, marginMode, positionSide,
-                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
-                CoreOrderStatus.REJECTED,
-                Math.incrementExact(revision));
-    }
-
-    /**
-     * 给订单增加一笔成交数量，本次费用按 0 处理，其他校验和状态推进交给带费用的方法。
-     * @param quantitySteps 本次新增成交数量步数，必须为正且不超过当前剩余量
-     */
-    public CoreOrderState fill(long quantitySteps) {
-        return fill(quantitySteps, 0);
-    }
-
-    /**
-     * 仅允许有效订单在剩余量内增加成交，累计费用并增加修订号；剩余量为 0 时标为全部成交，此入口不接收成交价。
-     * @param quantitySteps 本次新增成交数量步数，必须为正且不超过当前剩余量
-     * @param feeUnits 这笔成交累计到订单上的费用金额，单位为结算资产最小单位
-     */
-    public CoreOrderState fill(long quantitySteps, long feeUnits) {
-        if (status != CoreOrderStatus.OPEN || quantitySteps <= 0 || quantitySteps > remainingQuantitySteps()) {
-            throw new IllegalStateException("invalid order fill");
-        }
-        // 本次成交加上历史成交后的累计数量步数。
-        long nextExecuted = Math.addExact(executedQuantitySteps, quantitySteps);
-        // 累计成交量达到总量时转为全部成交，剩余历史数量由记录推导。
-        return new CoreOrderState(orderId, productLine, userId, instrumentId,
-                side, priceTicks, matchingPriceTicks, quantitySteps(), nextExecuted,
-                reduceOnly, marginMode, positionSide,
-                orderType, timeInForce, postOnly,
-                clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                Math.addExact(cumulativeFeeUnits, feeUnits), -1, 0, createdAtEpochMillis, updatedAtEpochMillis,
-                clusterPosition,
-                nextExecuted == quantitySteps() ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN,
-                Math.incrementExact(revision));
-    }
-
-    /**
-     * 只允许有效订单修改成正的新价格，委托价和撮合价一并更新并增加修订号，不在这里重做资金预占或操作订单簿。
-     * @param newPriceTicks 改单后的新委托价和撮合价，单位为价格 tick，必须为正数
-     */
-    public CoreOrderState replacePrice(long newPriceTicks) {
-        if (status != CoreOrderStatus.OPEN || newPriceTicks <= 0) {
-            throw new IllegalStateException("invalid order replace");
-        }
-        return new CoreOrderState(orderId, productLine, userId, instrumentId,
-                side, newPriceTicks, newPriceTicks, quantitySteps, executedQuantitySteps,
-                reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly,
-                clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
-                status, Math.incrementExact(revision));
-    }
-
-    /**
-     * 把集群提交时间和日志位置写进新记录；首次提交补创建时间，后续提交保留原创建时间，业务修订号不变。
-     * @param timestamp 本次提交采用的集群 Unix 毫秒时间戳
-     * @param position 本次提交在集群日志中的位置
-     */
-    public CoreOrderState withCommitMetadata(long timestamp, long position) {
-        return new CoreOrderState(orderId, productLine, userId, instrumentId, side, priceTicks,
-                matchingPriceTicks,
-                quantitySteps, executedQuantitySteps, reduceOnly, marginMode, positionSide,
-                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                cumulativeFeeUnits, executedValueHigh, executedValueLow,
-                createdAtEpochMillis == 0 ? timestamp : createdAtEpochMillis,
-                timestamp, position, status, revision);
     }
 }

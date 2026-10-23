@@ -315,10 +315,10 @@ class ActiveOrderIndexTest {
             assertThat(summary.reduceOnlyQuantity()).isZero();
             assertThat(summary.marginModeCount()).isEqualTo(1);
             runtime.executeUserSettlement(11, () -> {
-                runtime.replaceOrder(com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
-                        opening.fill(3), identities, runtime.instrument("1")));
-                runtime.replaceOrder(com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(
-                        reducing.cancel(), identities, runtime.instrument("1")));
+                var filled = runtime.order(7).withFill(3, 2, 0, CoreOrderStatus.OPEN, 2);
+                filled.executionValue(-1, 0); // 原夹具未提供累计成交额，保留同一哨兵。
+                runtime.replaceOrder(filled);
+                runtime.replaceOrder(runtime.order(8).withStatus(CoreOrderStatus.CANCELED, 2));
                 return null;
             });
             summary = laneOrders.inspect(11, "1", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);
