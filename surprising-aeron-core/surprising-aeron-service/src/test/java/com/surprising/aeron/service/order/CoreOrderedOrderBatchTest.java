@@ -1029,7 +1029,7 @@ class CoreOrderedOrderBatchTest {
                             10_000_000, 100_000, 50_000))),
                     0, 0, 0, -1, 0);
             assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.REGISTER_INSTRUMENT,
-                    UUID.randomUUID(), 1, TradingCommandCodec.encodeRegisterInstrument(instrument))).status())
+                    UUID.randomUUID(), 1, TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.LINEAR_PERPETUAL))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.APPLY_MARK_PRICE,
                     UUID.randomUUID(), 2, TradingCommandCodec.encodeApplyMarkPrice(
@@ -2602,7 +2602,7 @@ class CoreOrderedOrderBatchTest {
         assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(
                 CoreMessageType.REGISTER_INSTRUMENT, UUID.randomUUID(), ProductLine.SPOT,
                 CommandSource.OPERATIONS, 9, 1, 0, 1_000, 1),
-                TradingCommandCodec.encodeRegisterInstrument(instrument))).status())
+                TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.SPOT))).status())
                 .isEqualTo(ResponseStatus.APPLIED);
     }
 
@@ -2621,7 +2621,7 @@ class CoreOrderedOrderBatchTest {
                 0, 0, 0, -1, 0);
         assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.OPERATIONS,
-                9, 1, 0, 1_000, 1), TradingCommandCodec.encodeRegisterInstrument(instrument))).status())
+                9, 1, 0, 1_000, 1), TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.LINEAR_PERPETUAL))).status())
                 .isEqualTo(ResponseStatus.APPLIED);
         assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.KAFKA_INPUT_BRIDGE,

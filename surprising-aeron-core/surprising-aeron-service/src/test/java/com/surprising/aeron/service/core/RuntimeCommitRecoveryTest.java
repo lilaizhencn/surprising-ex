@@ -431,7 +431,7 @@ class RuntimeCommitRecoveryTest {
                                             100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0,
                                             Long.MAX_VALUE,
                                             java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                                    0, 0, 0, -1, 0))),
+                                    0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL)),
                     kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(
                                     new ApplyMarkPriceCommand("1", 100, 1, 1_000))),
@@ -699,7 +699,7 @@ class RuntimeCommitRecoveryTest {
                         new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                        0, 0, 0, -1, 0))));
+                        0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL)));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand("1", 100, 1, 1_000))));
@@ -722,7 +722,7 @@ class RuntimeCommitRecoveryTest {
                         new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                        10_000, 20_000, 0, -1, 0))));
+                        10_000, 20_000, 0, -1, 0), ProductLine.LINEAR_PERPETUAL)));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand("1", 100, 1, 1_000))));

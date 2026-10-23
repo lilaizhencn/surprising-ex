@@ -141,7 +141,7 @@ class CrossShardCancellationTest {
                         new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                        0, 0, 0, -1, 0))));
+                        0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL)));
     }
 
     /**

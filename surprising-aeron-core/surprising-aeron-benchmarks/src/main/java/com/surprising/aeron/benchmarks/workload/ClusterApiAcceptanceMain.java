@@ -83,7 +83,7 @@ public final class ClusterApiAcceptanceMain {
 
     private void setup() {
         applied(1, CoreMessageType.REGISTER_INSTRUMENT,
-                TradingCommandCodec.encodeRegisterInstrument(instrument()));
+                TradingCommandCodec.encodeRegisterInstrument(instrument(), productLine));
         if (productLine == ProductLine.SPOT) {
             adjust(seller(), "BTC", SPOT_BASE_UNITS);
             adjust(buyer(), "USDT", SPOT_QUOTE_UNITS);

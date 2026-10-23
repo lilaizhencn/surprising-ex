@@ -480,8 +480,6 @@ public final class CoreInstrument {
                     || configuration.strikePriceTicks() <= 0) {
                 throw new IllegalArgumentException("option instrument requires expiry, type, and strike");
             }
-        } else if (configuration.optionType() != null || configuration.strikePriceTicks() != 0) {
-            throw new IllegalArgumentException("non-option instrument contains option parameters");
         }
     }
 
@@ -532,8 +530,6 @@ public final class CoreInstrument {
                 throw new CoreStateRejectedException("INVALID_OPTION_TYPE", "option type code is unknown");
             }
             optionType = OptionType.values()[command.optionTypeCode()];
-        } else if (command.optionTypeCode() != -1) {
-            throw new CoreStateRejectedException("INVALID_OPTION_TYPE", "non-option must not set option type");
         }
         return new CoreInstrument(
                 command.instrumentId(), contractType, command.baseAsset(), command.quoteAsset(), command.settleAsset(),
@@ -555,18 +551,11 @@ public final class CoreInstrument {
      * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
      * @param riskLimits 衍生品风险配置；现货必须为空
-     * @param initialMarginRatePpm 初始保证金率，按百万分之一保存
-     * @param maintenanceMarginRatePpm 维持保证金率，按百万分之一保存
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
      * @param takerFeeRatePpm 吃单成交费率，按百万分之一保存，负数表示返佣
      * @param expiryEpochMillis 到期毫秒时间戳，交割和期权必须为正
      * @param optionType 期权看涨或看跌类型，非期权必须为空
      * @param strikePriceTicks 期权行权价格，按价格 tick 保存，非期权必须为零
-     * @param maxLeveragePpm 最大杠杆，按一百万倍缩放，一百万表示一倍
-     * @param maxPositionNotionalUnits 该标的允许的用户持仓名义金额固定上限
-     * @param userOpenInterestLimitRatePpm 按市场未平仓规模计算用户上限的比例，按百万分之一保存，零表示不使用该比例
-     * @param userOpenInterestLimitFloorUnits 按未平仓规模计算用户上限时采用的最低名义金额
-     * @param riskLimitBrackets 需要连续覆盖限额的风险档位；本 record 复制列表，完整覆盖校验由外层执行
      * @param instrumentStatus 标的业务状态，与维护任务模式分别判断
      * @param marketOrderEnabled 是否额外允许市价单，仍需通过订单类型掩码检查
      * @param postOnlyEnabled 是否允许只挂单委托
@@ -591,6 +580,14 @@ public final class CoreInstrument {
             Objects.requireNonNull(contractType, "contractType");
             if ((contractType == ContractType.SPOT) != (riskLimits == null))
                 throw new IllegalArgumentException("risk limits are required only for derivative instruments");
+            if (riskLimits != null) riskLimits = riskLimits.forProduct(contractType.productLine());
+            if (contractType != ContractType.SPOT) quantityStepUnits = 1;
+            if (!contractType.isInverse()) settleScaleUnits = 1;
+            if (!contractType.isDelivery() && !contractType.isOption()) expiryEpochMillis = 0;
+            if (!contractType.isOption()) {
+                optionType = null;
+                strikePriceTicks = 0;
+            }
             Objects.requireNonNull(instrumentStatus, "instrumentStatus");
         }
     }

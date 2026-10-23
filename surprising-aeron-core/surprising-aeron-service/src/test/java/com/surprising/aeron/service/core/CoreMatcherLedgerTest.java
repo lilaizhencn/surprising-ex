@@ -30,7 +30,7 @@ class CoreMatcherLedgerTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            0, 0, 0, -1, 0)));
+                            0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             applied(state, CoreMessageType.ADJUST_BALANCE, 1001,
@@ -69,7 +69,7 @@ class CoreMatcherLedgerTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            10_000, 10_000, 0, -1, 0)));
+                            10_000, 10_000, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             for (long /* 本轮测试用户，用于注入余额或最终核对其预留已清空。 */ user : new long[]{1001, 1002}) applied(state, CoreMessageType.ADJUST_BALANCE, user,
@@ -110,7 +110,7 @@ class CoreMatcherLedgerTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            0, 0, 0, -1, 0)));
+                            0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             applied(state, CoreMessageType.ADJUST_BALANCE, 1001,

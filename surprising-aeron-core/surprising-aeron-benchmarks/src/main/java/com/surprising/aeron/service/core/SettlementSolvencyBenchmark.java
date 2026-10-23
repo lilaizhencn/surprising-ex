@@ -37,7 +37,7 @@ public class SettlementSolvencyBenchmark {
                             (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
-                            0, 0, type.isPerpetual() ? 0 : 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
+                            0, 0, type.isPerpetual() ? 0 : 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0), type.productLine())));
             h.execute(h.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(option
                             ? new ApplyMarkPriceCommand("41", 100, 100, 100, 1, h.nextCommandTimestamp())

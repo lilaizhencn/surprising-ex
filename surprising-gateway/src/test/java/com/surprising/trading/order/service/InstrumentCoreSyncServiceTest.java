@@ -106,7 +106,7 @@ class InstrumentCoreSyncServiceTest {
                 long next = sequence.incrementAndGet();
                 var applied = restored.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                         java.util.UUID.randomUUID(), line, CommandSource.OPERATIONS, 993, next, 0,
-                        1_700_000_000_000L + next, next), TradingCommandCodec.encodeRegisterInstrument(registration)));
+                        1_700_000_000_000L + next, next), TradingCommandCodec.encodeRegisterInstrument(registration, line)));
                 assertThat(applied.commandStatus()).as("new instrument after business activity and snapshot restore").isEqualTo(ResponseStatus.APPLIED);
                 assertThat(restored.tradingState().instruments()).containsKeys("1", "2");
                 assertThat(restored.tradingState().instruments().get("2").instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);

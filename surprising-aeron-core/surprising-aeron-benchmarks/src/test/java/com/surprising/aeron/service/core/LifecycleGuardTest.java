@@ -14,7 +14,7 @@ class LifecycleGuardTest {
         try (var h = LinearPerpetualBenchmarkSupport.Harness.create(4, ProductLine.SPOT)) {
             var response = h.state().apply(h.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "40", "BTC", "BTC", "BTC", 1, 1, 1, null, 0, 0, 0, -1, 0))));
+                            "40", "BTC", "BTC", "BTC", 1, 1, 1, null, 0, 0, 0, -1, 0), ProductLine.SPOT)));
             assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(response.resultCode()).isEqualTo(CoreResultCode.INVALID_COMMAND);
             assertThat(h.state().tradingState().instruments()).isEmpty();
@@ -36,7 +36,7 @@ class LifecycleGuardTest {
                             (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
-                            0, 0, 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
+                            0, 0, 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0), line)));
             var early = h.state().apply(h.command(CoreMessageType.SETTLE_INSTRUMENT, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(10, "42", 100))));
             assertThat(early.status()).isEqualTo(ResponseStatus.REJECTED);

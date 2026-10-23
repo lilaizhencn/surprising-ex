@@ -182,7 +182,7 @@ class CoreLiquidationLaneCheckTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            0, 0, 0, -1, 0)));
+                            0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             for (long /* 当前准备或撤销挂单的测试用户，资金守恒汇总时表示当前累计的账户。 */ user : new long[]{1, 2, 7}) applied(core, CoreMessageType.ADJUST_BALANCE, user,

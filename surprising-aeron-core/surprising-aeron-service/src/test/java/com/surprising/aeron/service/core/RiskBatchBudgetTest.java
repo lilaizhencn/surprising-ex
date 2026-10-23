@@ -42,7 +42,7 @@ class RiskBatchBudgetTest {
                                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                                 0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
-                                type.isOption()?100:0))));
+                                type.isOption()?100:0), line)));
             }
             for (/* 注册币对、发送初始行情或推进后续有限批次的循环下标。 */ int i=0;i<2;i++) applied(state,mark(line,Integer.toString(100+i),1));
             for(/* 当前依次充值和建仓的五十个用户，前四十八个放繁忙币对，后两个放轻币对。 */ long user=1;user<=50;user++) {
@@ -121,7 +121,7 @@ class RiskBatchBudgetTest {
                                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                                 0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
-                                type.isOption()?100:0))));
+                                type.isOption()?100:0), line)));
             }
             for (/* 注册币对、发送初始行情或推进后续有限批次的循环下标。 */ int i=0;i<5;i++) applied(state, mark(line,Integer.toString(100+i),1));
             for(long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user:new long[]{7,8}) applied(state,command(line,CoreMessageType.ADJUST_BALANCE,user,
@@ -171,7 +171,7 @@ class RiskBatchBudgetTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            0, 0, 0, -1, 0))));
+                            0, 0, 0, -1, 0), line)));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{7, 8}) {
                 applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
@@ -230,7 +230,7 @@ class RiskBatchBudgetTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            0, 0, 0, -1, 0))));
+                            0, 0, 0, -1, 0), line)));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));
@@ -296,7 +296,7 @@ class RiskBatchBudgetTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            0, 0, 0, -1, 0))));
+                            0, 0, 0, -1, 0), line)));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));

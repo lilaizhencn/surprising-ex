@@ -259,7 +259,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private void setup() {
         for (String instrumentId : symbols) {
             applied(CoreMessageType.REGISTER_INSTRUMENT, 1,
-                    TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId)), stableId("instrument:" + instrumentId));
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId), productLine), stableId("instrument:" + instrumentId));
         }
         for (int pair = 0; pair < pairCount; pair++) {
             long first = firstUser(pair);

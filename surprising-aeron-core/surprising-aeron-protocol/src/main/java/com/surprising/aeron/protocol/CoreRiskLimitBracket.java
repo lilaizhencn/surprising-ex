@@ -10,10 +10,9 @@ public record CoreRiskLimitBracket(
 
     public CoreRiskLimitBracket {
         if (notionalCapUnits <= 0
-                || maxLeveragePpm < 1_000_000L || initialMarginRatePpm <= 0
+                || initialMarginRatePpm <= 0
                 || initialMarginRatePpm > 1_000_000L || maintenanceMarginRatePpm <= 0
-                || maintenanceMarginRatePpm > 1_000_000L || optionMarginFactorPpm <= 0
-                || optionMarginFactorPpm > 10_000_000L) {
+                || maintenanceMarginRatePpm > 1_000_000L) {
             throw new IllegalArgumentException("invalid risk limit bracket");
         }
     }

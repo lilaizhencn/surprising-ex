@@ -45,8 +45,12 @@ public final class CoreContractMath {
             throw new IllegalArgumentException("unsupported contract type: " + instrument.contractType());
         CoreRiskLimitBracket bracket = riskBracket(instrument, riskNotionalUnits(instrument, quantitySteps,
                 instrument.contractType().isOption() ? indexPriceTicks : priceTicks));
-        return openingMarginUnits(instrument, side, priceTicks, quantitySteps, bracket.initialMarginRatePpm(),
-                indexPriceTicks, forwardPriceTicks, bracket.optionMarginFactorPpm());
+        if (instrument.contractType().isOption())
+            return openingMarginUnits(instrument, side, priceTicks, quantitySteps, bracket.initialMarginRatePpm(),
+                    indexPriceTicks, forwardPriceTicks, bracket.optionMarginFactorPpm());
+        return PerpetualContractMath.initialMarginUnits(instrument.contractType(), quantitySteps, priceTicks,
+                instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits(),
+                bracket.initialMarginRatePpm());
     }
 
     /**

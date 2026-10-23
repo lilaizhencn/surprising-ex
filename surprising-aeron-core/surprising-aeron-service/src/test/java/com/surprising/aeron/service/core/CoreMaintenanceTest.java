@@ -64,7 +64,7 @@ class CoreMaintenanceTest {
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             // 停牌期间重新注册当前合约和风险配置的响应，成功不表示解除维护
             var sameConfig=apply(state,command(line,0,CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(config(instrument))));
+                    TradingCommandCodec.encodeRegisterInstrument(config(instrument), line)));
             assertThat(sameConfig.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             try (/* 从维护或清仓中间快照恢复的运行时，离开作用域关闭 */ var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(501))) {
                 // 恢复后查询得到的标的外壳，用于检查维护任务状态
@@ -202,7 +202,7 @@ class CoreMaintenanceTest {
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                         0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
-                        type.isOption()?100:0))));
+                        type.isOption()?100:0), line)));
         applied(state,command(line,1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                 ? new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_000L)
                 : new ApplyMarkPriceCommand("1",100,1,1_700_000_000_000L))));

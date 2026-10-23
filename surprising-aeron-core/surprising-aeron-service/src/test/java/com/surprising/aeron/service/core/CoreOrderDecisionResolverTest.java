@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.product.api.ProductLine;
+
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
@@ -38,14 +40,14 @@ class CoreOrderDecisionResolverTest {
         var policy = new com.surprising.aeron.protocol.CoreOrderProtection(20_000, 8_000, true, 30_000, 4_000);
         // 包含自定义保护配置和风险档位的币对注册命令。
         var command = new com.surprising.aeron.protocol.RegisterInstrumentCommand(
-                "1", "BTC", "USDT", "USDT", 1, 1, 1_000_000,
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, Long.MAX_VALUE, 0, 1,
-                        List.of(new CoreRiskLimitBracket(Long.MAX_VALUE,10_000_000,100_000,50_000))),
+                        List.of(new CoreRiskLimitBracket(Long.MAX_VALUE,10_000_000,100_000,50_000,0))),
                 -10, 25, 0, -1, 0, 1, true, true, true, 3, 15, 1, policy);
         // 注册命令编码后再解码的结果，应完整保留所有自定义参数。
         var decoded = com.surprising.aeron.protocol.TradingCommandCodec.decodeRegisterInstrument(
-                com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command),
+                com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command, com.surprising.product.api.ProductLine.LINEAR_PERPETUAL),
                 com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
         assertThat(decoded).isEqualTo(command);
         // 从解码注册命令创建的规范币对，价格事实与决策必须引用同一身份。
@@ -73,7 +75,7 @@ class CoreOrderDecisionResolverTest {
                     com.surprising.aeron.protocol.CoreMessageHeader.command(
                     com.surprising.aeron.protocol.CoreMessageType.REGISTER_INSTRUMENT,java.util.UUID.randomUUID(),
                     com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,com.surprising.aeron.protocol.CommandSource.OPERATIONS,0,1,0,1,1),
-                    com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command));
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeRegisterInstrument(command, ProductLine.LINEAR_PERPETUAL));
             assertThat(core.apply(message).commandStatus()).isEqualTo(com.surprising.aeron.protocol.ResponseStatus.APPLIED);
             try(/* 从刚捕获快照恢复的核心实例，核对原价格保护配置仍一致。 */ var restored=com.surprising.aeron.service.core.TradingCoreRuntime.fromSnapshot(
                     com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,core.snapshot(71))) {

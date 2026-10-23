@@ -87,7 +87,7 @@ public final class DerivativeMixedWorkload {
             for (int index = 0; index < symbolCount; index++) {
                 String instrumentId = symbols.get(index);
                 harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                        TradingCommandCodec.encodeRegisterInstrument(instrument(profile, instrumentId, index))));
+                        TradingCommandCodec.encodeRegisterInstrument(instrument(profile, instrumentId, index), productLine)));
             }
             for (String instrumentId : symbols) {
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,

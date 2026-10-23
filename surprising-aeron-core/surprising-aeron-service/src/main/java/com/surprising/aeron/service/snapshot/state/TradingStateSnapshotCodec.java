@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本四十二。 */
-    private static final int VERSION = 43;
+    private static final int VERSION = 44;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十二头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -517,20 +517,19 @@ public final class TradingStateSnapshotCodec {
     }
 
     /** 风险档按列表顺序保存上界及金融参数；档位编号和由前档上界确定的下界不落盘。 */
-    private static byte[] writeCoreRiskLimitBracket(CoreRiskLimitBracket value) {
-        return new SnapshotFields.Writer()
-                .number(3, value.notionalCapUnits())
-                .number(4, value.maxLeveragePpm())
-                .number(5, value.initialMarginRatePpm())
-                .number(6, value.maintenanceMarginRatePpm())
-                .number(7, value.optionMarginFactorPpm())
-                .encode();
+    private static byte[] writeCoreRiskLimitBracket(CoreRiskLimitBracket value, ProductLine productLine) {
+        SnapshotFields.Writer writer = new SnapshotFields.Writer().number(3, value.notionalCapUnits());
+        if (!productLine.isOptionProduct()) writer.number(4, value.maxLeveragePpm());
+        writer.number(5, value.initialMarginRatePpm()).number(6, value.maintenanceMarginRatePpm());
+        if (productLine.isOptionProduct()) writer.number(7, value.optionMarginFactorPpm());
+        return writer.encode();
     }
 
     /** 列表顺序及递增上界由CoreInstrumentRiskLimits统一校验，字段1、2已退役。 */
-    private static CoreRiskLimitBracket readCoreRiskLimitBracket(byte[] encoded) {
+    private static CoreRiskLimitBracket readCoreRiskLimitBracket(byte[] encoded, ProductLine productLine) {
         var r = new SnapshotFields.Reader(encoded);
-        return new CoreRiskLimitBracket(r.number(3), r.number(4), r.number(5), r.number(6), r.number(7));
+        return new CoreRiskLimitBracket(r.number(3), productLine.isOptionProduct() ? 0 : r.number(4),
+                r.number(5), r.number(6), productLine.isOptionProduct() ? r.number(7) : 0);
     }
 
     /**
@@ -939,24 +938,28 @@ public final class TradingStateSnapshotCodec {
                 .text(1, value.instrumentId())
                 .text(3, value.baseAsset()).text(4, value.quoteAsset()).text(5, value.settleAsset())
                 .number(6, value.notionalMultiplierUnits()).number(7, value.priceTickUnits())
-                .number(8, value.settleScaleUnits()).number(11, value.makerFeeRatePpm())
-                .number(12, value.takerFeeRatePpm()).number(13, value.expiryEpochMillis())
-                .number(14, value.optionType() == null ? -1 : SnapshotEnumCodes.encode(value.optionType()))
-                .number(15, value.strikePriceTicks()).bytes(21, writeCoreInstrumentMaintenance(value.maintenance()))
+                .number(11, value.makerFeeRatePpm()).number(12, value.takerFeeRatePpm())
+                .bytes(21, writeCoreInstrumentMaintenance(value.maintenance()))
                 .number(22, SnapshotEnumCodes.encode(value.instrumentStatus()))
                 .bool(23, value.marketOrderEnabled()).bool(24, value.postOnlyEnabled()).bool(25, value.reduceOnlyEnabled())
                 .number(26, value.supportedOrderTypeMask()).number(27, value.supportedTimeInForceMask())
-                .number(28, value.quantityStepUnits()).number(29, value.orderProtection().marketMaxSlippagePpm())
+                .number(29, value.orderProtection().marketMaxSlippagePpm())
                 .number(30, value.orderProtection().marketMaxMarkAgeMs())
                 .number(31, value.orderProtection().limitPriceProtectionEnabled() ? 1 : 0)
                 .number(32, value.orderProtection().limitPriceBandPpm())
                 .number(33, value.orderProtection().limitPriceMaxMarkAgeMs());
+        if (value.contractType().isInverse()) writer.number(8, value.settleScaleUnits());
+        if (productLine.isDeliveryProduct()) writer.number(13, value.expiryEpochMillis());
+        if (productLine.isOptionProduct())
+            writer.number(14, SnapshotEnumCodes.encode(value.optionType())).number(15, value.strikePriceTicks());
+        if (!productLine.isDerivative()) writer.number(28, value.quantityStepUnits());
         if (value.riskLimits() != null) {
             var risk = value.riskLimits();
             writer.number(9, risk.initialMarginRatePpm())
-                    .number(16, risk.maxLeveragePpm()).number(17, risk.maxPositionNotionalUnits())
+                    .number(17, risk.maxPositionNotionalUnits())
                     .number(18, risk.userOpenInterestLimitRatePpm()).number(19, risk.userOpenInterestLimitFloorUnits())
-                    .list(20, risk.riskLimitBrackets(), TradingStateSnapshotCodec::writeCoreRiskLimitBracket);
+                    .list(20, risk.riskLimitBrackets(), item -> writeCoreRiskLimitBracket(item, productLine));
+            if (!productLine.isOptionProduct()) writer.number(16, risk.maxLeveragePpm());
         }
         return writer.encode();
     }
@@ -964,16 +967,19 @@ public final class TradingStateSnapshotCodec {
     /** 根产品线决定风险字段是否存在；衍生品读取完整风险字段，现货没有风险配置。 */
     private static CoreInstrument readCoreInstrument(byte[] encoded, ProductLine productLine) {
         var r = new SnapshotFields.Reader(encoded);
+        var contractType = ContractType.valueOf(productLine.contractTypeCode());
         var risk = productLine.isDerivative() ? new CoreInstrumentRiskLimits(
-                r.number(9), r.number(16), r.number(17), r.number(18), r.number(19),
-                r.list(20, TradingStateSnapshotCodec::readCoreRiskLimitBracket)) : null;
-        return new CoreInstrument(r.text(1),
-                ContractType.valueOf(productLine.contractTypeCode()),
-                r.text(3), r.text(4), r.text(5), r.number(6), r.number(7), r.number(8), risk,
-                r.number(11), r.number(12), r.number(13),
-                r.integer(14) == -1 ? null : SnapshotEnumCodes.readOptionType(r.integer(14)), r.number(15),
+                r.number(9), productLine.isOptionProduct() ? 0 : r.number(16), r.number(17), r.number(18), r.number(19),
+                r.list(20, item -> readCoreRiskLimitBracket(item, productLine))) : null;
+        return new CoreInstrument(r.text(1), contractType,
+                r.text(3), r.text(4), r.text(5), r.number(6), r.number(7),
+                contractType.isInverse() ? r.number(8) : 1, risk,
+                r.number(11), r.number(12), productLine.isDeliveryProduct() ? r.number(13) : 0,
+                productLine.isOptionProduct() ? SnapshotEnumCodes.readOptionType(r.integer(14)) : null,
+                productLine.isOptionProduct() ? r.number(15) : 0,
                 readCoreInstrumentMaintenance(r.bytes(21)), SnapshotEnumCodes.readInstrumentStatus(r.integer(22)),
-                r.bool(23), r.bool(24), r.bool(25), r.integer(26), r.integer(27), r.number(28),
+                r.bool(23), r.bool(24), r.bool(25), r.integer(26), r.integer(27),
+                productLine.isDerivative() ? 1 : r.number(28),
                 new com.surprising.aeron.protocol.CoreOrderProtection(r.number(29), r.number(30),
                         r.number(31) != 0, r.number(32), r.number(33)));
     }

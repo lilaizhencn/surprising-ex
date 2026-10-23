@@ -113,7 +113,7 @@ public class InProcessTradingAllocationBenchmark {
                                     100_000, 10_000_000, Long.MAX_VALUE, 1_000_000, Long.MAX_VALUE / 2,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, 10_000_000, 100_000, 50_000))),
                             0, 0, 0, -1, 0);
-            control(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument));
+            control(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.LINEAR_PERPETUAL));
             control(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME)));
         }

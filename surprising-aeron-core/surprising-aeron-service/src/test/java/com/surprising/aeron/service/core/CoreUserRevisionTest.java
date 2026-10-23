@@ -50,7 +50,7 @@ class CoreUserRevisionTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            0, 0, 0, -1, 0)));
+                            0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             send(core, CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                     new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             for (long /* 本轮被入账或下单的用户七或八 */ user : new long[]{7, 8}) {

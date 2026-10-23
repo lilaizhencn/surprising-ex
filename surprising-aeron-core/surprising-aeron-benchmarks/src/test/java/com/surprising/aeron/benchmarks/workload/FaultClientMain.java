@@ -105,7 +105,7 @@ public final class FaultClientMain {
                         case "init" -> {
                             type = CoreMessageType.REGISTER_INSTRUMENT;
                             payload = TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                                    "14", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0));
+                                    "14", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0), PRODUCT);
                         }
                         case "adjust" -> {
                             type = CoreMessageType.ADJUST_BALANCE;

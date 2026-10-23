@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "A61/A62/A64及A59/A60两批已清理，相关模块仅编译验证；累计57项解决、A54–A58五项待清理、A11/A63两项候选。风险档7→5字段，schema13/registerV8/snapshot43；其余产品字段和全链路约束仍在审查。",
+    "checkpoint": "A54–A58五项已按产品清理并通过17模块干净编译；累计62项解决，新增A65/A66两项确认待清理，A11/A63两项候选。schema14/registerV9/snapshot44；全量字段及业务约束审查继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -906,7 +906,7 @@
         "quantityStepUnits",
         "orderProtection"
       ],
-      "source_basis": "sixth_cleanup_round"
+      "source_basis": "ninth_cleanup_round"
     },
     "ExecuteLiquidationCommand": {
       "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ExecuteLiquidationCommand.java",
@@ -1069,7 +1069,7 @@
         "userOpenInterestLimitFloorUnits",
         "riskLimitBrackets"
       ],
-      "source_basis": "sixth_cleanup_round"
+      "source_basis": "ninth_cleanup_round"
     },
     "CoreRiskLimitBracket": {
       "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreRiskLimitBracket.java",
@@ -1080,7 +1080,7 @@
         "maintenanceMarginRatePpm",
         "optionMarginFactorPpm"
       ],
-      "source_basis": "eighth_cleanup_round"
+      "source_basis": "ninth_cleanup_round"
     }
   },
   "findings": [
@@ -3942,7 +3942,7 @@
     },
     {
       "id": "A54",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed",
       "topic": "现货、永续和交割的注册载荷仍携带不适用的到期或期权要素",
       "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
@@ -3997,11 +3997,16 @@
         "Core当前仍接受非到期产品的正到期时间，通用准入会读取它；不能直接宣称零消费者。实施时必须依据入口禁止此配置的产品定义，明确规范化或拒绝非法输入的行为，消除恢复前后差异。",
         "保留交割/期权到期拒单及行政结算边界；非期权类型/行权价约束随相应载荷退出而收窄。"
       ],
-      "business_code_changed": false
+      "business_code_changed": false,
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "ninth_cleanup_round",
+        "change": "注册编码/解码和快照由产品线确定到期及期权字段：现货/永续不携带，交割只携带到期，期权保留完整到期和行权要素；Core配置同步规范化不适用值。"
+      }
     },
     {
       "id": "A55",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed",
       "topic": "五条衍生品的数量步长只保存固定1并约束身份，不参与Core金额计算",
       "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
@@ -4041,11 +4046,16 @@
         "现货报价资产还依赖notionalMultiplierUnits，不能连带删除该乘数。",
         "衍生品共享模型需明确固定单位语义，不能让恢复丢弃可观察配置而不处理构造路径。"
       ],
-      "business_code_changed": false
+      "business_code_changed": false,
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "ninth_cleanup_round",
+        "change": "数量步长只在现货传输与持久化，衍生品按份数解释并取固定单位1；无效衍生品步长输入不再触发无用约束。"
+      }
     },
     {
       "id": "A56",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed",
       "topic": "只有反向合约使用结算精度比例，其他四种产品仍重复传输和保存恒1",
       "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
@@ -4088,13 +4098,18 @@
       "preserve_and_implementation_requirements": [
         "反向公式的结算精度、价格tick、舍入和大整数溢出路径都保留。",
         "线性共享数学入口当前仍验证此参数为正，实施时收窄产品数据后应清理无效约束或提供明确固定值，不能无意改变错误路径。",
-        "priceTickUnits还有跨产品价格换算和保护用途，不因线性金额公式不乘它而删除。"
+        "管理API/价格生产者的priceTickUnits有真实换算用途，继续保留；Core副本另按A65核对，不能把外部单位与Core副本混同。"
       ],
-      "business_code_changed": false
+      "business_code_changed": false,
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "ninth_cleanup_round",
+        "change": "结算精度只在反向永续/交割传输与持久化，其他产品取固定比例1；保留反向实际金额公式及其正数约束。"
+      }
     },
     {
       "id": "A57",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed",
       "topic": "期权不支持用户杠杆，却仍携带两级杠杆上限并读取缓存、校验和计算后丢弃",
       "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
@@ -4156,11 +4171,16 @@
         "期权多个共享入口目前仍有leverage>0检查，必须一并收窄，不能仅把期权杠杆默认改为0后留旧校验。",
         "期权成交的实际成交价参与权利金/费用；只删除卖方保证金专有方法中完全不读取的priceTicks形参。"
       ],
-      "business_code_changed": false
+      "business_code_changed": false,
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "ninth_cleanup_round",
+        "change": "期权不传输/持久化两级杠杆上限，风险值按产品只校验实际参数；准入和两条成交路径跳过杠杆读取/缓存/换算，三个共享成交入口只对期货要求正杠杆。"
+      }
     },
     {
       "id": "A58",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed",
       "topic": "四条期货的风险档仍保存只用于期权公式的保证金因子及范围约束",
       "evidence_basis_commit": "e5880318a36efc78f9a727aa3deb82fb7ba8c929",
@@ -4203,7 +4223,12 @@
         "不能把期权的风险因子、风险档初始/维持保证金率删除或固定为1倍。",
         "这些参数可能出现在统一产品规则接口中，接口有实际多产品职责；优先收敛专有公式，不能为消除形参机械增设策略/接口。"
       ],
-      "business_code_changed": false
+      "business_code_changed": false,
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "ninth_cleanup_round",
+        "change": "期货不传输/持久化期权保证金因子；期货准入/成交直接调用原PerpetualContractMath公式，移除无意义的方向、指数价、远期价和因子透传；期权保留真实因子。"
+      }
     },
     {
       "id": "A59",
@@ -4937,6 +4962,143 @@
         "round": "seventh_cleanup_round",
         "change": "行情解码严格读取六个long字段，缺失或多余字节拒绝，保留字段值0的业务含义。"
       }
+    },
+    {
+      "id": "A65",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "非反向产品仍在Core保存只被反向公式实际使用的价格单位副本",
+      "evidence_basis_round": "ninth_cleanup_round",
+      "operations": [
+        "REGISTER_INSTRUMENT",
+        "PLACE_ORDER",
+        "MATCH_SETTLEMENT",
+        "SNAPSHOT"
+      ],
+      "fields": [
+        "RegisterInstrumentCommand.priceTickUnits（非反向产品）",
+        "CoreInstrument.Configuration.priceTickUnits（非反向产品）",
+        "标的快照7（非反向产品）"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+          "line": 26,
+          "anchor": "if (contractType.isInverse()) {",
+          "sha256": "0b7a9e733170231c0b7afeaa7c9e1d32ce065e71cfb73b1fd26ec534860f210b"
+        },
+        {
+          "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+          "line": 63,
+          "anchor": "return Math.multiplyExact(markPriceTicks, notionalMultiplierUnits);",
+          "sha256": "0b7a9e733170231c0b7afeaa7c9e1d32ce065e71cfb73b1fd26ec534860f210b"
+        },
+        {
+          "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+          "line": 100,
+          "anchor": "return Math.multiplyExact(Math.multiplyExact(signedQuantitySteps, priceDiff),",
+          "sha256": "0b7a9e733170231c0b7afeaa7c9e1d32ce065e71cfb73b1fd26ec534860f210b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java",
+          "line": 275,
+          "anchor": "return Math.multiplyExact(Math.multiplyExact(priceTicks, quantitySteps), instrument.notionalMultiplierUnits());",
+          "sha256": "c21983a18222bd6c44fb30a51192d5df654482c71cc7e6f788e4d998e9ffc660"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java",
+          "line": 108,
+          "anchor": "value.strikePriceUnits()/value.priceTickUnits()",
+          "sha256": "a1a453055a93c7027e2a842c0eb61246f9a7f78e6735cf600410f42aa29342b2"
+        }
+      ],
+      "typed_consumers": [
+        "com/surprising/aeron/support/math/CoreContractMath",
+        "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+        "com/surprising/aeron/service/product/derivative/FuturesOrderAdmission",
+        "com/surprising/aeron/service/product/derivative/FuturesFillCalculator",
+        "com/surprising/aeron/service/query/state/RuntimeRiskQueryService",
+        "com/surprising/aeron/service/risk/RiskLaneProcessor",
+        "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor"
+      ],
+      "direct_configuration_consumers": [
+        "com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions",
+        "com/surprising/aeron/service/instrument/CoreInstrument"
+      ],
+      "proposed_cleanup": "仅反向产品携带/保存Core价格单位；非反向Core配置使用固定单位，移除其无实际作用的输入正数/身份约束。",
+      "preserve_and_implementation_requirements": [
+        "Shared InstrumentResponse、管理校验、价格生产和行权价入Core前的单位换算仍必须保留真实priceTickUnits；不改HTTP字段或外部价格语义。",
+        "现货、线性及期权的有效金额乘数继续保留，不重算或改变舍入/溢出。",
+        "反向真实价格单位、分母和精度约束继续保留。",
+        "本项基于实际公式分支和精确所属类getter调用方；同名外部模型getter不作为Core消费证据。"
+      ],
+      "business_code_changed": false
+    },
+    {
+      "id": "A66",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "现货仍被迫构造并保存完全不消费的五项订单保护配置",
+      "evidence_basis_round": "ninth_cleanup_round",
+      "operations": [
+        "REGISTER_INSTRUMENT",
+        "PLACE_ORDER",
+        "REPLACE_ORDER",
+        "AMEND_ORDER",
+        "SNAPSHOT"
+      ],
+      "fields": [
+        "RegisterInstrumentCommand.orderProtection（现货）",
+        "CoreInstrument.Configuration.orderProtection（现货）",
+        "标的快照29–33（现货）"
+      ],
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+          "line": 226,
+          "anchor": "if (!spot) {",
+          "sha256": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+          "line": 240,
+          "anchor": "spot || intent.orderType() == CoreOrderType.LIMIT",
+          "sha256": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+          "line": 375,
+          "anchor": "if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {",
+          "sha256": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+          "line": 327,
+          "anchor": "|| intent.orderType() != CoreOrderType.LIMIT || !instrument.orderProtection().limitPriceProtectionEnabled()) return;",
+          "sha256": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/RegisterInstrumentCommand.java",
+          "line": 28,
+          "anchor": "java.util.Objects.requireNonNull(orderProtection, \"orderProtection\")",
+          "sha256": "bb5a527af5ca4deffdaa3acc01e476914d1480ed37a497f020439ec6537078dc"
+        }
+      ],
+      "typed_consumers": [
+        "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+        "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec"
+      ],
+      "direct_configuration_consumers": [
+        "com/surprising/aeron/service/instrument/CoreInstrument"
+      ],
+      "proposed_cleanup": "现货不再创建订单保护值或接受其约束，注册和快照省去五项保护字段；按已有产品边界在现货使用空值，衍生品保留真实规则。",
+      "preserve_and_implementation_requirements": [
+        "现货市价仍必须携带用户给出的保护价格边界，不能删掉该请求字段或其正数拒绝。",
+        "五条衍生品的行情鲜度、滑点、限价保护带及预留保守价格继续保留。",
+        "不因消除现货假配置而新增策略/接口或每产品类。",
+        "本项是清理后扫描的新发现，尚未实施，不包含在本轮五项解决数中。"
+      ],
+      "business_code_changed": false
     }
   ],
   "preserve_verified_purposes": [
@@ -4954,9 +5116,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "清理A54–A58：按产品上下文收窄注册、风险值和快照，只保留对应产品真实字段；不保留旧格式读取。",
-    "继续追踪A63行情最终消费者；A11保留查询一致性、读栅栏和分页会话语义。",
-    "清理后继续扫描字段、实例入口和业务约束；只编译相关模块，不以编译代替交易和恢复验证。"
+    "清理A65：只在反向产品传输/保存Core价格单位，保留外部管理和价格生产的真实精度。",
+    "清理A66：现货不再创建和持久化完全不消费的订单保护，保留市价请求自身的保护价格边界与衍生品真实规则。",
+    "继续A63行情最终消费者及A11查询一致性审查；只做相关模块编译，未证明完整运行与资金/恢复语义全部通过。"
   ],
   "rejected_false_positives": [
     {
@@ -9942,7 +10104,7 @@
         "按档位对象及风险参数断言选档，去除已不存在的编号getter。",
         "覆盖零金额、中间上界前一单位、恰好中间上界、最高上界及最高上界之外的选档。",
         "覆盖重复/逆序上界、未覆盖持仓限额和负名义金额的拒绝。",
-        "五条衍生品快照断言每个风险档只含字段3–7，不写字段1/2；现货继续没有风险档。",
+        "现货与线性永续示例断言衍生品风险档只含字段3–7，不写字段1/2；现货继续没有风险档。",
         "协议往返和现货/衍生品风险段长度差同步为84字节。"
       ],
       "unverified": [
@@ -10260,6 +10422,1484 @@
       "files": 2239,
       "nodes": 52655,
       "edges": 151773
+    }
+  },
+  "ninth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "3850b5b34de5a333654b2172be6cc9672f246ddf",
+    "resolved_ids": [
+      "A54",
+      "A55",
+      "A56",
+      "A57",
+      "A58"
+    ],
+    "new_confirmed_ids": [
+      "A65",
+      "A66"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 62,
+      "candidate": 2,
+      "confirmed": 2
+    },
+    "flow": "管理配置按真实产品生成注册值→发送方显式传入既有产品上下文→命令V9只编码适用字段→Core配置规范化→原产品资金公式/所有权边界→快照v44按相同产品规则保存和恢复。",
+    "implementation": {
+      "new_types_interfaces_factories": 0,
+      "shared_risk_normalization": "CoreInstrumentRiskLimits.forProduct在编码与Core配置两个真实边界复用，按实际产品校验杠杆或期权因子；已规范化值直接复用。",
+      "option_leverage_path": "准入与两条成交路径均跳过杠杆查询/缓存，三个成交入口的正杠杆约束只属于期货；期权金额仍用真实档位与全局初始风险下限。",
+      "futures_math": "继续调用同一PerpetualContractMath.initialMarginUnits，传入同一数量、价格、乘数、真实反向单位及max(全局、档位、杠杆换算)比例；删除不使用的期权方向/因子/指数价/远期价传参。",
+      "product_field_policy": {
+        "SPOT": {
+          "quantityStepUnits": true,
+          "settleScaleUnits": false,
+          "expiry": false,
+          "option": false,
+          "risk": false
+        },
+        "LINEAR_PERPETUAL": {
+          "quantityStepUnits": false,
+          "settleScaleUnits": false,
+          "expiry": false,
+          "option": false,
+          "risk": "futures"
+        },
+        "INVERSE_PERPETUAL": {
+          "quantityStepUnits": false,
+          "settleScaleUnits": true,
+          "expiry": false,
+          "option": false,
+          "risk": "futures"
+        },
+        "LINEAR_DELIVERY": {
+          "quantityStepUnits": false,
+          "settleScaleUnits": false,
+          "expiry": true,
+          "option": false,
+          "risk": "futures"
+        },
+        "INVERSE_DELIVERY": {
+          "quantityStepUnits": false,
+          "settleScaleUnits": true,
+          "expiry": true,
+          "option": false,
+          "risk": "futures"
+        },
+        "OPTION": {
+          "quantityStepUnits": false,
+          "settleScaleUnits": false,
+          "expiry": true,
+          "option": true,
+          "risk": "option"
+        }
+      },
+      "snapshot_conditional_fields": {
+        "8": "反向结算精度",
+        "13": "交割/期权到期",
+        "14/15": "期权类型/行权价",
+        "16": "期货标的最大杠杆",
+        "28": "现货数量步长",
+        "risk_tier4": "期货档位最大杠杆",
+        "risk_tier7": "期权保证金因子"
+      },
+      "risk_tier_wire_longs": 4,
+      "one_tier_payload_bytes": {
+        "SPOT": 112,
+        "LINEAR_PERPETUAL": 180,
+        "INVERSE_PERPETUAL": 188,
+        "LINEAR_DELIVERY": 188,
+        "INVERSE_DELIVERY": 196,
+        "OPTION": 192
+      },
+      "payload_reduction_from_v8_bytes": {
+        "SPOT": "28",
+        "LINEAR_PERPETUAL": "36 + 8*N",
+        "INVERSE_PERPETUAL": "28 + 8*N",
+        "LINEAR_DELIVERY": "28 + 8*N",
+        "INVERSE_DELIVERY": "20 + 8*N",
+        "OPTION": "24 + 8*N",
+        "note": "N为真实风险档数量，只是布局字节计数，不是性能实测。"
+      },
+      "registration_calls_migrated": 112,
+      "registration_files": 72,
+      "registration_contexts": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterAccountControlBenchmark.java",
+          "baseline_line": 43,
+          "context": "product",
+          "context_basis": "class_product_line",
+          "argument_sha256": "d02f03290e0075f699f104e44e3928f87ba06c106873561bad0b8d2482ec8cf1"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterApiAcceptanceMain.java",
+          "baseline_line": 86,
+          "context": "productLine",
+          "context_basis": "class_product_line",
+          "argument_sha256": "8b9482fb18e30a227da53040317d06b5be1039e4a45c5b173b79f59b5d66ae4b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterBatchResponseBenchmark.java",
+          "baseline_line": 47,
+          "context": "product",
+          "context_basis": "local_product_line",
+          "argument_sha256": "d02f03290e0075f699f104e44e3928f87ba06c106873561bad0b8d2482ec8cf1"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.java",
+          "baseline_line": 262,
+          "context": "productLine",
+          "context_basis": "class_product_line",
+          "argument_sha256": "6dd8b8da88cec9d81404b610e9b7550cdf0a21a0ca9f2ef4ebd55ebfd2ee55b3"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterDerivativeSmokeMain.java",
+          "baseline_line": 62,
+          "context": "productLine",
+          "context_basis": "method_product_line",
+          "argument_sha256": "1dee27b1a62860e740f85c0f9a16a7822588a92cde932ffabaf5c8a55ada1ade"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterDirectSettlementBenchmark.java",
+          "baseline_line": 54,
+          "context": "product",
+          "context_basis": "class_product_line",
+          "argument_sha256": "7c58c7babfb88836ede4e8532d371fccb0f49113fdab47edecb7f43bc403c373"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterFundsSmokeMain.java",
+          "baseline_line": 65,
+          "context": "productLine",
+          "context_basis": "method_product_line",
+          "argument_sha256": "cf85636654ce04f3c7e3ee1cb1003ed909ce26fe5705d6ef2f2a1d140fb8897d"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterLifecycleCapacityMain.java",
+          "baseline_line": 99,
+          "context": "productLine",
+          "context_basis": "class_product_line",
+          "argument_sha256": "8b9482fb18e30a227da53040317d06b5be1039e4a45c5b173b79f59b5d66ae4b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterMixedCapacityMain.java",
+          "baseline_line": 190,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_file_product",
+          "argument_sha256": "63fcd8501f4a5681bd3622f25d460ac6b76c9e718a8bc51a2c20256ad6a45bf6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterProductLineGateMain.java",
+          "baseline_line": 86,
+          "context": "productLine",
+          "context_basis": "class_product_line",
+          "argument_sha256": "8b9482fb18e30a227da53040317d06b5be1039e4a45c5b173b79f59b5d66ae4b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterSequentialBatchBenchmark.java",
+          "baseline_line": 37,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "020106fdfa5fd55b8b050dd036ce9af562222b3518d5b3b998938998951f8b22"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterSpotMatchSmokeMain.java",
+          "baseline_line": 72,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_file_product",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/OperationalLifecycle.java",
+          "baseline_line": 38,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_file_product",
+          "argument_sha256": "ab11985c1ce3c6e1d0e08914c27dddb731c607494391629aeca25e6dcf82889c"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/SmallControlReproMain.java",
+          "baseline_line": 35,
+          "context": "PRODUCT",
+          "context_basis": "class_product_line",
+          "argument_sha256": "5bf991484bcd5531f3ec3ee6194b2ec15e2fbec607ab94e8482b9c687d4f071d"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/SmallControlReproMain.java",
+          "baseline_line": 90,
+          "context": "PRODUCT",
+          "context_basis": "class_product_line",
+          "argument_sha256": "6dd8b8da88cec9d81404b610e9b7550cdf0a21a0ca9f2ef4ebd55ebfd2ee55b3"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/SmallControlReproMain.java",
+          "baseline_line": 179,
+          "context": "PRODUCT",
+          "context_basis": "class_product_line",
+          "argument_sha256": "6dd8b8da88cec9d81404b610e9b7550cdf0a21a0ca9f2ef4ebd55ebfd2ee55b3"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/SmallControlReproMain.java",
+          "baseline_line": 223,
+          "context": "PRODUCT",
+          "context_basis": "class_product_line",
+          "argument_sha256": "6dd8b8da88cec9d81404b610e9b7550cdf0a21a0ca9f2ef4ebd55ebfd2ee55b3"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/W4LifecycleQaMain.java",
+          "baseline_line": 449,
+          "context": "type.productLine()",
+          "context_basis": "method_contract_type",
+          "argument_sha256": "e05af5498008d29e67af39a6e33a5b6f252ca0cd003f12f80c5ae413a774fdfd"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/CommittedReplayAllocationBenchmark.java",
+          "baseline_line": 28,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "09ba8f63448a6120405f022be84f3633476d816d1b0c7bcd467cb08becd4237d"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/ContinuousOwnerBenchmark.java",
+          "baseline_line": 109,
+          "context": "type.productLine()",
+          "context_basis": "method_contract_type",
+          "argument_sha256": "310bdc3431a94834bdfa1819598a95fabeb84b19f1a9db56e2d57df55c158957"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/CoreAcceptFreezeBenchmark.java",
+          "baseline_line": 44,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "8b9482fb18e30a227da53040317d06b5be1039e4a45c5b173b79f59b5d66ae4b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/CoreInMemoryBenchmark.java",
+          "baseline_line": 51,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "8b9482fb18e30a227da53040317d06b5be1039e4a45c5b173b79f59b5d66ae4b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/CorePerpetualEndToEndBenchmark.java",
+          "baseline_line": 87,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_file_product",
+          "argument_sha256": "8b9482fb18e30a227da53040317d06b5be1039e4a45c5b173b79f59b5d66ae4b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/DerivativeMixedWorkload.java",
+          "baseline_line": 90,
+          "context": "productLine",
+          "context_basis": "method_product_line",
+          "argument_sha256": "3054b59b7d6eaf4922cde30f530281dcd7b82d9c47ab37409ff08fd4b0443baf"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/DerivativeRiskBoundaryBenchmark.java",
+          "baseline_line": 80,
+          "context": "type.productLine()",
+          "context_basis": "method_contract_type",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/InProcessTradingAllocationBenchmark.java",
+          "baseline_line": 116,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/InstrumentPauseAdmissionBenchmark.java",
+          "baseline_line": 36,
+          "context": "productLine",
+          "context_basis": "class_product_line",
+          "argument_sha256": "a7a9dc5bcf71adb2edc202814060a5ab6fca515382e9f1133dcc47d52d9090a2"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/LifecyclePaginationBenchmark.java",
+          "baseline_line": 34,
+          "context": "type.productLine()",
+          "context_basis": "method_contract_type",
+          "argument_sha256": "933de443a44af26d7cd919dec336938d6f3e0f556afbc708a6b062815a81d2f8"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/LinearPerpetualBenchmarkSupport.java",
+          "baseline_line": 1076,
+          "context": "harness.productLine()",
+          "context_basis": "actual_enclosing_harness",
+          "argument_sha256": "8b9482fb18e30a227da53040317d06b5be1039e4a45c5b173b79f59b5d66ae4b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/LinearPerpetualMixedWorkload.java",
+          "baseline_line": 123,
+          "context": "harness.state().productLine",
+          "context_basis": "actual_harness_runtime",
+          "argument_sha256": "6dd8b8da88cec9d81404b610e9b7550cdf0a21a0ca9f2ef4ebd55ebfd2ee55b3"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/SettlementSolvencyBenchmark.java",
+          "baseline_line": 35,
+          "context": "type.productLine()",
+          "context_basis": "method_contract_type",
+          "argument_sha256": "4882c487e59a9d6cd3bb0ab78c7ce42ed5cb5d7a93a81322284ec3308e01f474"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/SpotMixedWorkload.java",
+          "baseline_line": 81,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "7f130d93e0b79b2b6be42525e024bbc49cab22d17a6a6ada90c0018b36381374"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/order/ClusteredBatchTradingBenchmark.java",
+          "baseline_line": 548,
+          "context": "type.productLine()",
+          "context_basis": "method_contract_type",
+          "argument_sha256": "33817c67d9a39f8e0a8449aa0e51fca299892da3bf854f50ab61b8f66782dd2b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/test/java/com/surprising/aeron/benchmarks/workload/FaultClientMain.java",
+          "baseline_line": 107,
+          "context": "PRODUCT",
+          "context_basis": "class_product_line",
+          "argument_sha256": "6aab03ecd7329ed27a4d16539a51235c674a46a582e360365303a478b92282ae"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/test/java/com/surprising/aeron/service/core/LifecycleGuardTest.java",
+          "baseline_line": 16,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "479cf1285f44b61893ecbc9410cf3e161b2c4356028028034b4ed684ffc9bd95"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/src/test/java/com/surprising/aeron/service/core/LifecycleGuardTest.java",
+          "baseline_line": 34,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "577bcb05ef23de6c60f8ebaed2ebae9c55ca32248538fd4cada0a7582f8fa51a"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/TradingCommandCodecTest.java",
+          "baseline_line": 245,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "enclosing_decode_context",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/TradingCommandCodecTest.java",
+          "baseline_line": 330,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "5d347fd948b66308f502c3f65c8f7e12ff1c5cf8c760bcdfb188ae1ec7b8b618"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/TradingCommandCodecTest.java",
+          "baseline_line": 349,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "enclosing_decode_context",
+          "argument_sha256": "5d347fd948b66308f502c3f65c8f7e12ff1c5cf8c760bcdfb188ae1ec7b8b618"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/TradingCommandCodecTest.java",
+          "baseline_line": 350,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "5d347fd948b66308f502c3f65c8f7e12ff1c5cf8c760bcdfb188ae1ec7b8b618"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/TradingCommandCodecTest.java",
+          "baseline_line": 364,
+          "context": "ProductLine.SPOT",
+          "context_basis": "decoded_spot_fixture",
+          "argument_sha256": "be2bdbb3100e41191874b192057ae7418f549e9d4ec8b3eb1a3ada7b9453d365"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/TradingCommandCodecTest.java",
+          "baseline_line": 365,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "decoded_futures_fixture",
+          "argument_sha256": "1c7ed7db63641bd51e6e18fe8b0bad974272fc4e5ea59744707acace81a49b6b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/AsyncFundingCommandTest.java",
+          "baseline_line": 34,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "7dc9832fab0908affb247abadd1980fdc75322e790e019a3e5fbb4c34da92919"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/AsyncFundingCommandTest.java",
+          "baseline_line": 102,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "7dc9832fab0908affb247abadd1980fdc75322e790e019a3e5fbb4c34da92919"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CommittedDeliveryReplayTest.java",
+          "baseline_line": 110,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "069dbc01f84b74705474b2843bf7af6890f64727170827ac0a942a29e2436bd4"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CommittedFundingReplayTest.java",
+          "baseline_line": 36,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "7dc9832fab0908affb247abadd1980fdc75322e790e019a3e5fbb4c34da92919"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CommittedOptionExerciseReplayTest.java",
+          "baseline_line": 41,
+          "context": "ProductLine.OPTION",
+          "context_basis": "single_method_product",
+          "argument_sha256": "7ef0445ef399f4e95ac47ec0fcc31047bc5aab919d30bf77795c28591fdf4fdc"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreActiveLaneIngressTest.java",
+          "baseline_line": 37,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "937d87f75bdbc26990961af96705ed3313d8b4d4f106ad9e6939d4b4feded9d1"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreAdmissionInputOwnershipTest.java",
+          "baseline_line": 46,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "2a5565275ff1f26a77bdff8731e8a18368abadc8acd9f739551815a8a7e38e5b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreAdmissionInputOwnershipTest.java",
+          "baseline_line": 127,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "f5595d0785073ef296b936b0e16d3d4e539c7ed69396e067dba3ab089e744098"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreFinancialLedgerProductionTest.java",
+          "baseline_line": 215,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "7e78b1c93bd704ceecfa1b310aba435b5a31704735028346f5bee433090ccf6e"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLaneMetricsBoundaryTest.java",
+          "baseline_line": 33,
+          "context": "core.productLine",
+          "context_basis": "enclosing_message_header",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLiquidationLaneCheckTest.java",
+          "baseline_line": 180,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMaintenanceTest.java",
+          "baseline_line": 67,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "24fbef4c79cd8bc44ab55bd14d84b5a4d93f264c7e72836689a8e8be3ee25f4f"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMaintenanceTest.java",
+          "baseline_line": 198,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "928f8e32247fb6ba19414fe627229f7f6f6f8135684b137e70df5041ef5e3fbc"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMatcherLedgerTest.java",
+          "baseline_line": 28,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMatcherLedgerTest.java",
+          "baseline_line": 67,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "131788abb16955d76b096ed7a1f26be8c0b4eb7e584e990ba33a41feb57379c2"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMatcherLedgerTest.java",
+          "baseline_line": 108,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMatchingStateTest.java",
+          "baseline_line": 1347,
+          "context": "productLine",
+          "context_basis": "enclosing_message_header",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreOptionPremiumFeeFundingTest.java",
+          "baseline_line": 39,
+          "context": "ProductLine.OPTION",
+          "context_basis": "single_method_product",
+          "argument_sha256": "29c9c30e0604515ced98b3d14fd88751a8f8e4b9bc69d483a67a257c14ab79fb"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreOrderDecisionResolverTest.java",
+          "baseline_line": 48,
+          "context": "com.surprising.product.api.ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "enclosing_decode_context",
+          "argument_sha256": "5d347fd948b66308f502c3f65c8f7e12ff1c5cf8c760bcdfb188ae1ec7b8b618"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreOrderDecisionResolverTest.java",
+          "baseline_line": 76,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "5d347fd948b66308f502c3f65c8f7e12ff1c5cf8c760bcdfb188ae1ec7b8b618"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CorePreflightLaneQueryTest.java",
+          "baseline_line": 203,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "bcf3bb2f40bffa02cdc60c8f89b856838b630e6a71929b45bc1d87e19d13adb3"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreSelfTradePrefixTest.java",
+          "baseline_line": 64,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "ed688c3f25417e0f775f21ea70dc0c5b3f22445543d23fddfabc395a814b11a8"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreSelfTradePrefixTest.java",
+          "baseline_line": 143,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "fa4de127d1faba00eaa11be9fc9cb65aa3566dbb3b6c1ea6f7e8161b6d36bc9e"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreSpotAssetUnitsTest.java",
+          "baseline_line": 40,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "29c9c30e0604515ced98b3d14fd88751a8f8e4b9bc69d483a67a257c14ab79fb"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreSpotAssetUnitsTest.java",
+          "baseline_line": 114,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "29c9c30e0604515ced98b3d14fd88751a8f8e4b9bc69d483a67a257c14ab79fb"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreSpotAssetUnitsTest.java",
+          "baseline_line": 172,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "29c9c30e0604515ced98b3d14fd88751a8f8e4b9bc69d483a67a257c14ab79fb"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreUserRevisionTest.java",
+          "baseline_line": 47,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CrossShardCancellationTest.java",
+          "baseline_line": 139,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_file_product",
+          "argument_sha256": "736e8c7dde75fd64c12a5be41fe61aa935cb75d11da60378d6f64d1c7ad24c19"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/ProductRecoveryLifecycleTest.java",
+          "baseline_line": 43,
+          "context": "product",
+          "context_basis": "method_product_line",
+          "argument_sha256": "ec0ae89915990ff576d30d427f88f612ab19d7b8af79448dd2cb532782c22974"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RealtimeTerminalEmissionTest.java",
+          "baseline_line": 37,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "456c11be81ff7bf6572fd1bcd6ba54ee501119d622188a592314287059e15bc6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RiskBatchBudgetTest.java",
+          "baseline_line": 39,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "0c45262a07a26e85b6406075941a248fe821529c5cbc3efb52c4311c13629a6d"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RiskBatchBudgetTest.java",
+          "baseline_line": 117,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "71ba23e92dec9fb9937a3c8fe4dae5839a80895582e728534d859e106537b9aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RiskBatchBudgetTest.java",
+          "baseline_line": 169,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RiskBatchBudgetTest.java",
+          "baseline_line": 228,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RiskBatchBudgetTest.java",
+          "baseline_line": 294,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeCommitRecoveryTest.java",
+          "baseline_line": 428,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "7b019e836c9368d0f95b403369b0832706e04222809823ec788ec2fd36ad48d9"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeCommitRecoveryTest.java",
+          "baseline_line": 697,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "b92f08df1926f23264e0e777e9eb3c876f2bc24f13ca206b9484f78c092630e7"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeCommitRecoveryTest.java",
+          "baseline_line": 720,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "456528fc7c3930ca3b2efb6ddd40dd35c4eb33a01c54d76af8d942e8754f5f9b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/SharedProductLineSnapshotContractTest.java",
+          "baseline_line": 65,
+          "context": "productLine",
+          "context_basis": "method_product_line",
+          "argument_sha256": "7cf8c538971ae28b21511ebaa20fc47007602376f371f6d7363f5d38ee43d51c"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java",
+          "baseline_line": 92,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "87780fa5de684e87cb92b279f0bc07b14f572851e73b8943a097c1770a5f38e6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java",
+          "baseline_line": 562,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "20fa35374f102199a2da4b3e461cd146f78791838152cd7c07e7e829367523a3"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java",
+          "baseline_line": 620,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "14c324088471e8f9f214a4bec47dad688b77bca40596f463e3aae368b0cb431e"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java",
+          "baseline_line": 2062,
+          "context": "ProductLine.SPOT",
+          "context_basis": "enclosing_message_header",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java",
+          "baseline_line": 2074,
+          "context": "ProductLine.SPOT",
+          "context_basis": "enclosing_message_header",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/BatchDecisionCaptureTest.java",
+          "baseline_line": 25,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "ec9a4b1a169a71837e9780d1f2d8a560845e7f72eda6676d93847268e7d7c813"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/ClusterCommandPipelineTest.java",
+          "baseline_line": 55,
+          "context": "product",
+          "context_basis": "method_product_line",
+          "argument_sha256": "709842d1fc7bbf80b4219e79ffdb63321791b8a9b0226f49c34eec41ca588d25"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/ClusterCommandPipelineTest.java",
+          "baseline_line": 1737,
+          "context": "product",
+          "context_basis": "method_product_line",
+          "argument_sha256": "603037887ad5c2d826f36c884df9adfe105c26afaa5f68c926eaa811f259c070"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/ClusterCommandPipelineTest.java",
+          "baseline_line": 3166,
+          "context": "type.productLine()",
+          "context_basis": "method_contract_type",
+          "argument_sha256": "ab33f7ef83813944331bf63d03b5afc5b0506c29c9c7877d4d4944bbd8b674d1"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/CoreOrderedOrderBatchTest.java",
+          "baseline_line": 1032,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "single_method_product",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/CoreOrderedOrderBatchTest.java",
+          "baseline_line": 2605,
+          "context": "ProductLine.SPOT",
+          "context_basis": "enclosing_message_header",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/CoreOrderedOrderBatchTest.java",
+          "baseline_line": 2624,
+          "context": "ProductLine.LINEAR_PERPETUAL",
+          "context_basis": "enclosing_message_header",
+          "argument_sha256": "d3e43f83d066d0cc621c971c101d990224e9a9e387b6cd47e8eea834192129aa"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreAccountLaneQueryTest.java",
+          "baseline_line": 343,
+          "context": "LINE",
+          "context_basis": "class_product_line",
+          "argument_sha256": "6cc791e6b8701deeb000cbd78d88b7dba0c54d5bbab490bdb7bb9112672eb774"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 25,
+          "context": "line",
+          "context_basis": "local_product_line",
+          "argument_sha256": "b1f1b1b5caae426d95871e97bef9266722a2afca998e404eeb96581ffec2b472"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 58,
+          "context": "line",
+          "context_basis": "local_product_line",
+          "argument_sha256": "31cb1197b8076de5d5fe81a813c5e6aa60e51559f059f4467492c052daa50749"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 120,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "b1f1b1b5caae426d95871e97bef9266722a2afca998e404eeb96581ffec2b472"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 148,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "b1f1b1b5caae426d95871e97bef9266722a2afca998e404eeb96581ffec2b472"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 203,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "b1f1b1b5caae426d95871e97bef9266722a2afca998e404eeb96581ffec2b472"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 233,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "b1f1b1b5caae426d95871e97bef9266722a2afca998e404eeb96581ffec2b472"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 254,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "b1f1b1b5caae426d95871e97bef9266722a2afca998e404eeb96581ffec2b472"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 297,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "b1f1b1b5caae426d95871e97bef9266722a2afca998e404eeb96581ffec2b472"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java",
+          "baseline_line": 323,
+          "context": "line",
+          "context_basis": "method_product_line",
+          "argument_sha256": "c6ed0ef5ffdd7ecdbc8738f3ad6f87a1bbd968c24ea9ba368918e013d60c730f"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-tools/src/test/java/com/surprising/aeron/tools/replay/OfflineReplayMainTest.java",
+          "baseline_line": 63,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "a7f7fe7e229eb29b388a3625d7f6ad895a1499e16cce26430650b6124cda11cc"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java",
+          "baseline_line": 63,
+          "context": "line",
+          "context_basis": "class_product_line",
+          "argument_sha256": "b7d64a9221007dfd5390f7df6cd5b8f3ea4f82faa1237141e35ebf161f5511a1"
+        },
+        {
+          "file": "surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java",
+          "baseline_line": 312,
+          "context": "product",
+          "context_basis": "method_product_line",
+          "argument_sha256": "bbb9a0b489fd9a1befee17482b012634b530313952e32f248fd43ca21e8c7d8c"
+        },
+        {
+          "file": "surprising-gateway/src/test/java/com/surprising/trading/order/service/InstrumentCoreSyncServiceTest.java",
+          "baseline_line": 109,
+          "context": "line",
+          "context_basis": "enclosing_message_header",
+          "argument_sha256": "29c9c30e0604515ced98b3d14fd88751a8f8e4b9bc69d483a67a257c14ab79fb"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedAlgoProjectionPostgresTest.java",
+          "baseline_line": 55,
+          "context": "ProductLine.SPOT",
+          "context_basis": "single_method_product",
+          "argument_sha256": "87780fa5de684e87cb92b279f0bc07b14f572851e73b8943a097c1770a5f38e6"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedDeliveryRepairIntegrationTest.java",
+          "baseline_line": 55,
+          "context": "line",
+          "context_basis": "class_product_line",
+          "argument_sha256": "660a588223c94f07d594afacc49bbfa5b50d113dc49f5f262131f78b1bb025bb"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedFundingRepairIntegrationTest.java",
+          "baseline_line": 57,
+          "context": "line",
+          "context_basis": "class_product_line",
+          "argument_sha256": "1dee27b1a62860e740f85c0f9a16a7822588a92cde932ffabaf5c8a55ada1ade"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java",
+          "baseline_line": 112,
+          "context": "line",
+          "context_basis": "local_product_line",
+          "argument_sha256": "ba47b4eb02f69ae9b36e79e655af98ab54945129335a32ef9f791d044449155b"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedTradeExportIntegrationTest.java",
+          "baseline_line": 389,
+          "context": "ProductLine.SPOT",
+          "context_basis": "enclosing_message_header",
+          "argument_sha256": "a7f7fe7e229eb29b388a3625d7f6ad895a1499e16cce26430650b6124cda11cc"
+        }
+      ],
+      "public_http_or_websocket_contract_changed": false
+    },
+    "versions": {
+      "core_schema": 14,
+      "register_layout": "V9",
+      "register_marker": "0x49525639",
+      "trading_snapshot": 44,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4,
+      "header_bytes": 72,
+      "old_formats_read": false
+    },
+    "verification": {
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "disk_available_before_build": "190GiB",
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "result": "BUILD SUCCESS",
+      "duration": "01:05 min",
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-aeron-tools",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-maker",
+        "surprising-realtime-api",
+        "surprising-price-provider",
+        "surprising-aeron-benchmarks",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-realtime-provider",
+        "surprising-gateway"
+      ],
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "initial_compile_failure": {
+        "exit_code": 1,
+        "duration": "35.425 s",
+        "reason": "LinearPerpetualBenchmarkSupport.base不在嵌套类productLine字段的作用域，改为既有harness.productLine上下文后完整重编译。",
+        "corrected": true,
+        "log_sha256": "163b4b78414fc7e973edc63ff4cc009d97b8440452312a4b9ca0e00e44d6fd7f"
+      },
+      "log_sha256": "e7bd7401b4a44153e55d85c4c8d2982395e4fa0675c3ac2ea5b2ea38827195e7",
+      "test_source_updates": [
+        "六产品完整注册往返、各自载荷长度及无关参数不改变载荷。",
+        "六产品快照按字段存在/缺席和还原配置断言，覆盖真实反向单位、现货步长、交割/期权到期和两类风险字段。",
+        "产品相关风险参数拒绝仍保留，非本产品参数不再施加无用限制。",
+        "原协议/服务用例中线性标的的无用结算比例、期权因子和衍生品步长改为规范值。",
+        "补改上轮漏同步的一处旧行情缺字段成功断言，要求拒绝不完整载荷，与已实现的严格解码一致。"
+      ],
+      "unverified": [
+        "测试实际执行",
+        "真实交易正常/拒绝/异常路径",
+        "做市资金、持仓、终态和资金守恒",
+        "Cluster日志/快照恢复",
+        "数据库、前端和实时运行",
+        "性能"
+      ]
+    },
+    "static_verification": {
+      "status": "passed",
+      "checks": [
+        "112_existing_registration_arguments_and_explicit_product_contexts_verified",
+        "no_single_argument_registration_encoder_or_calls",
+        "schema14_registerV9_snapshot44_strict_versions",
+        "generic_dto_no_inapplicable_field_constraints",
+        "configuration_canonicalizes_inapplicable_fields",
+        "risk_value_validates_only_active_product_parameters",
+        "canonical_risk_value_reuses_its_identity",
+        "actual_encoder_write_sizes_match_allocated_product_layout_for_6_products_and_1_2_128_tiers",
+        "snapshot_product_field_presence_and_derived_values_verified",
+        "option_admission_and_both_settlement_paths_skip_leverage",
+        "all_three_fill_guards_keep_positive_leverage_only_for_futures",
+        "option_formula_no_discarded_leverage_calculation_or_unused_price_input",
+        "futures_formulas_no_option_factor_index_or_forward_passthrough",
+        "protocol_and_snapshot_test_sources_cover_all_6_products"
+      ],
+      "registration_calls_verified": 112,
+      "baseline_registration_files": 72,
+      "current_encode_call_sites": 114,
+      "one_tier_payload_bytes": {
+        "SPOT": 112,
+        "LINEAR_PERPETUAL": 180,
+        "INVERSE_PERPETUAL": 188,
+        "LINEAR_DELIVERY": 188,
+        "INVERSE_DELIVERY": 196,
+        "OPTION": 192
+      },
+      "git_diff_check": "passed",
+      "new_finding_source_anchors_checked": 10
+    },
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterAccountControlBenchmark.java": "8d05825669df698df7daa8ea3ea0ec1296ac754f9590b68d6d56e86827aee778",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterApiAcceptanceMain.java": "6614fd3992b811da3a0299d88579ca3f55e6ce4cec38a06684d98ba18fbdbcbc",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterBatchResponseBenchmark.java": "f9823e0ea81dff01b4955017afe18ab6b28801cfec7d05de20fd3a03fd75887c",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.java": "e303c79deee1943abd89eac748a27105abe136431ac7699b0cc698cc686e013d",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterDerivativeSmokeMain.java": "436a6cae942bfec45477ce912bfd4b54745b5fde969f2690388c81a240943e21",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterDirectSettlementBenchmark.java": "45aef3ba71217ab8687e95cd48d76b7d14fb3d3d08cb63a7833fef27e7e86291",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterFundsSmokeMain.java": "d4f55984c1ba0778675a3ccb3227147dfb558c255010ab9831b0dad3b7215727",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterLifecycleCapacityMain.java": "4002bcc2f6b0a6dd43a820a67f8ea4b64d82f7e62f680f4a474df05d4bd24ac4",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterMixedCapacityMain.java": "be734f20e15a38207a5508baaec9016c6f548571fa29aee4ecd6a99edab7ca68",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterProductLineGateMain.java": "a8bc690506a5f3ce4346de5768e40f83059be1d6847f3ac6e6c96fa35eb55f10",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterSequentialBatchBenchmark.java": "a49ae22edc78378438d6148dda4179926e5324d3f8706b25e9a5e5d1b1516cbd",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterSpotMatchSmokeMain.java": "0b4c745430aaea25ae8ae0a79aa8a020190060a34014c8c6c44e65952099f864",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/OperationalLifecycle.java": "f7869a439a44dabb2dbfecbbcb6ec1113e77a769d745d71bd35af4321ec9b96c",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/SmallControlReproMain.java": "8b0ca34f73268b4070c20f67bd2226406cfd23154d73c70b4e4d77224aca5cea",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/W4LifecycleQaMain.java": "2005c48d4243cce962f5e16b321b37d9340e74d1f431b40039536c2430a31f4b",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/CommittedReplayAllocationBenchmark.java": "d1be21cb3f379550522407d21d2d5b69bb21469f32fc3471e11d76ac6d18e83b",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/ContinuousOwnerBenchmark.java": "b7e0ad5e6415f8480df4f6f7b7422bb2378a7b620739fb21e7cde0e250afce1e",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/CoreAcceptFreezeBenchmark.java": "4fe8c2d8febefcfb02ecff95ae178d1e622572df4dc03e6edb7456aa1780e92a",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/CoreInMemoryBenchmark.java": "1bbf688c58764bccc32851573f657842c0aab9c020edeaaf5daa087dad5e897b",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/CorePerpetualEndToEndBenchmark.java": "fdec95a584cd3d900d46a3aac4beabf3a4e83c624a7eaf9479c3a9a490a95677",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/DerivativeMixedWorkload.java": "ea2382e23585c37f0fa923b08aa4b2666c1e3d7a0a7a6d5bf57d955b91e12d78",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/DerivativeRiskBoundaryBenchmark.java": "08dffe126409261e95d4a4d0e609a669ead31ff78aba45417b04af58de3f68eb",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/InProcessTradingAllocationBenchmark.java": "815b6210f961fe01788457035819a81546ca508113376b0c21d6696ee9313ec4",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/InstrumentPauseAdmissionBenchmark.java": "c0d514f8c526268a13d36db2ed9015357ecaf6fa095fa9d8500d967d538f9905",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/LifecyclePaginationBenchmark.java": "fcf408b3a51f2a7c72bc84575a1229d871cbffbb127c6e6cde080c2d08232c7e",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/LinearPerpetualBenchmarkSupport.java": "427116932cca96189a2a815da1d5ad45de0f70f9667186e2cdc27cdc2e3bc84a",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/LinearPerpetualMixedWorkload.java": "eefa80a74de4e60829c42355350bea47d71ed864d4d2685a0a2f095b197e18eb",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/SettlementSolvencyBenchmark.java": "9b449fae34a7d874a4ca1dab65b178061c65588bb1e3f4f9c237c97037f8a93c",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/SpotMixedWorkload.java": "12521fffe0b4b01c26c927d6e1d7f61b911277b08eb1bf582599d8662518f2a2",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/order/ClusteredBatchTradingBenchmark.java": "4c5b77d5a6dd4db9a50bc155660f841603e47b06058d69365aa076c0c24eaa12",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/test/java/com/surprising/aeron/benchmarks/workload/FaultClientMain.java": "e8f0eb9027aecf24409426add09b5253ddce951c743719c4cf446a5261aeee0b",
+      "surprising-aeron-core/surprising-aeron-benchmarks/src/test/java/com/surprising/aeron/service/core/LifecycleGuardTest.java": "b1f2f906097b40b62bdbc1f4d5929bde6e79d1c96b982e41fd5a325dffc9686a",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreInstrumentRiskLimits.java": "5ba32f57212fd23eba268f8c8fe5f65ee7baaa94203cca2772566a1b66efd69d",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreProtocol.java": "e0b648e35c65950d8ee4220dbbd89281930190470a6ef4616336713a0c39155e",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreRiskLimitBracket.java": "2232a52d7fe6b0bd6257f9f2a599d9956a345b7a659b809fbbc89df2d4e38339",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/RegisterInstrumentCommand.java": "bb5a527af5ca4deffdaa3acc01e476914d1480ed37a497f020439ec6537078dc",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java": "f5164178bbeca4f2a9744c444d5ae9b96053a96166b2279cbac076096ebc7169",
+      "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/TradingCommandCodecTest.java": "8ff910b3c62f4632ccca0bf4020dc1fa6d1671b684360b2b366bf3e5b6f411fe",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.java": "6078c284ea05a4e17ec992f03290ce6d01014aece680c5227149b69a2fa827b9",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/CoreInstrument.java": "f8aba0427592c9b4231f0e5679d0a72d0f25ca8978932a24e029d9ed300adfe7",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java": "7e70feec8237ccdbda11bc1cab2da2092165909c0c03ff2d3420415d35bd592b",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/derivative/FuturesFillCalculator.java": "7ebf07cedd6b90a8fa4668071b4f6f14ba5f6b31cec15fdade014211cb7295c7",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/derivative/FuturesOrderAdmission.java": "d030cb3cb2e48bfc2b6c16596909550e3224b8f9738edb271abbd47f0a8e357f",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/option/OptionFillCalculator.java": "72ad9a83475579536263ee75d3f8d006a9bba7f246aa6ba22ebddfbd5f7cd894",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeFillCalculator.java": "53886eee168fe56c1a784998453c0342dc0f072b04545489f57c2183ea3013bc",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java": "4c01c819b8718034ee17cac2326973f50166092626c5cc55e76dce41c1c0db77",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "2a706c752192b559db1cae40b55f1e0a4409d02c56a59e92107756d558ec5f14",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java": "c21983a18222bd6c44fb30a51192d5df654482c71cc7e6f788e4d998e9ffc660",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/AsyncFundingCommandTest.java": "feda6499219da3b1e89b67a6acda9ea309cfbc8113f685d568958e15ea978465",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CommittedDeliveryReplayTest.java": "726250a4db278f80ad315541a8d80b38424c4225019873bceff42d579da9bc62",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CommittedFundingReplayTest.java": "d03aaa0a7ca8462b682400587d38d18edba4ab758df142243c9a11835d6bb69e",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CommittedOptionExerciseReplayTest.java": "14292f562a272ad234e6128eaefa2473223f5a2a24d03654bbcb7844d8c7846b",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreActiveLaneIngressTest.java": "b40229364fa1d23e20a4edec1fc460879c2dac4a7f6497b03249759e40b97ebf",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreAdmissionInputOwnershipTest.java": "97019e2de9d12dea5825db9e508714162512823d01e525d8fa9b544122c3310a",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreFinancialLedgerProductionTest.java": "a450afaff8f5badf80c682b83674971c038c796914028c9570e1845e8416fa17",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLaneMetricsBoundaryTest.java": "7717a7db21e027d5adcb7e72a564a2127301c1201483205bb8218188b32f3310",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLiquidationLaneCheckTest.java": "40f091fa760e28b021d218dce2c2a3cb412934aa1651e9ea10397b21b44304aa",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMaintenanceTest.java": "2ac733e96340ba338e6579b470fdba86c42fc9ef0963c8b8dec4fcb98dadfc02",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMatcherLedgerTest.java": "7d4e1c637ef5185cea1b2b9a254db72fdedacb81596759eb8b122d30edbef905",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMatchingStateTest.java": "4614c69a84f602ce0fa3a11fb257e6a10b2202ab2c5eaa514a72c8d26db56511",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreOptionPremiumFeeFundingTest.java": "93747571c1a23062653ee2af840cb2e12754d1cec5d35e2f5119f4eadf39ea2e",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreOrderDecisionResolverTest.java": "ea0da7fcbd91fb38e235de5f8895cd08412306500fb52bb4c977ee1f179980f5",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CorePreflightLaneQueryTest.java": "f53406bb252d23584e5e4108335a91b4ec9173af68bcfe6e1f104289225fe853",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreSelfTradePrefixTest.java": "1f8581b14c06393f023aaa46c0546898ae6925cc88cd62f811c73b8ac34fcd33",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreSpotAssetUnitsTest.java": "23e5899090e85df2065f20f55d7943c51407584d670cada6fb9ecdb28713275f",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreUserRevisionTest.java": "d1971ae97b1521492e64fec738b84e289d5afad5f35941bbd36997285f62a194",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CrossShardCancellationTest.java": "baf9f928a1a5a1d08f2ca097a4bf4bd78f07db759c7a5b641ceb0a38f57fbee6",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/ProductRecoveryLifecycleTest.java": "df0df8a49f7bfd6b6e68d575f6107da7e2897eb389a21d863ee9ea854ce5b462",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RealtimeTerminalEmissionTest.java": "3a0b4ad65d50dd342702e08924ca9eb18ce257d85601ee634d94e0544f5653b8",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RiskBatchBudgetTest.java": "7c842f7f4a9ea3ea07df8366bfadcbe30fb93d07294676353c0af529215ab990",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeCommitRecoveryTest.java": "febcc7983fc861d4395200f107242e8becf21ea4dde23e24090854f8312f6d99",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/SharedProductLineSnapshotContractTest.java": "407760cb12dbb71b25858a5f6e91fb6c2d1dbd3fa884ada8a70bf63bec07c9d2",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java": "e6e1eda1e0cd41d8bad324ad081b343f476ed3b08fb629f5cd7b0ee7a26c364c",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/BatchDecisionCaptureTest.java": "d29bd56d55f95a4dfd200fc8b9d1d52629211e09f25dadac6b1a07de9767f700",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/ClusterCommandPipelineTest.java": "0025be1c32a248d9a64a8c730e088ac949cd62e52dd9551535913178c3a27187",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/CoreOrderedOrderBatchTest.java": "e573ea10e12a499eb3ec1cf1a556167d3519b21387855d3bb94189b8d19683eb",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreAccountLaneQueryTest.java": "3f57ecf0f176248cb571eb8fda55a2dc4c849ea71fd3666fdcdb976405885366",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java": "8236b86833708e7c496381c1be3f6511ee8c5ff9a0652d69fc6c3188045957a7",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/snapshot/state/SnapshotFieldEvolutionTest.java": "0902f7d9f7e94a3276f16c3ae27cbe6fdb6720de97dcb09863d27c4d911864fc",
+      "surprising-aeron-core/surprising-aeron-tools/src/test/java/com/surprising/aeron/tools/replay/OfflineReplayMainTest.java": "7cfc16b449dc332886e97c292fd8aa274367c41a49e70d36f174e4944d7474c6",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java": "a1a453055a93c7027e2a842c0eb61246f9a7f78e6735cf600410f42aa29342b2",
+      "surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java": "8b970e57e521081a528662be4dc3ddc3b4f28496aacd4091d5fcc3d18bf28249",
+      "surprising-gateway/src/test/java/com/surprising/trading/order/service/InstrumentCoreSyncServiceTest.java": "3faf3d33dd197a20facdc461c89fe440814eef49496605567d78094b13ea28cd",
+      "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedAlgoProjectionPostgresTest.java": "2eabe3b7cbed5158c2790ed195a0da95d0dbcf3de40fd9f548008941e4800063",
+      "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedDeliveryRepairIntegrationTest.java": "7bda3632cf59224dff4e609678b5dd2b21b48cced3911d7f4ce7492c4d95eb98",
+      "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedFundingRepairIntegrationTest.java": "b60e0bcda01fbee6735bd80a633abccb71caa20b0cc9cf7d313076cc4551c753",
+      "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java": "473b8fa48d72e3fbeca7d62060ce58852ff71b6001fe0b52ddcba0f54ef76353",
+      "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedTradeExportIntegrationTest.java": "fb0d234030f7c33367b71dcaf97ef4266b5f75315dc16178f5b9f0307f905479"
+    },
+    "compiled_field_and_consumer_review": {
+      "classfiles": 4025,
+      "record_fields": {
+        "com/surprising/aeron/service/instrument/CoreInstrument": [
+          "instrumentId",
+          "instrumentIdValue",
+          "configuration",
+          "maintenance"
+        ],
+        "com/surprising/aeron/service/instrument/CoreInstrument$Configuration": [
+          "contractType",
+          "baseAsset",
+          "quoteAsset",
+          "settleAsset",
+          "notionalMultiplierUnits",
+          "priceTickUnits",
+          "settleScaleUnits",
+          "riskLimits",
+          "makerFeeRatePpm",
+          "takerFeeRatePpm",
+          "expiryEpochMillis",
+          "optionType",
+          "strikePriceTicks",
+          "instrumentStatus",
+          "marketOrderEnabled",
+          "postOnlyEnabled",
+          "reduceOnlyEnabled",
+          "supportedOrderTypeMask",
+          "supportedTimeInForceMask",
+          "quantityStepUnits",
+          "orderProtection"
+        ],
+        "com/surprising/aeron/protocol/CoreRiskLimitBracket": [
+          "notionalCapUnits",
+          "maxLeveragePpm",
+          "initialMarginRatePpm",
+          "maintenanceMarginRatePpm",
+          "optionMarginFactorPpm"
+        ]
+      },
+      "references": {
+        "com/surprising/aeron/protocol/CoreRiskLimitBracket": {
+          "optionMarginFactorPpm()J": [
+            "com/surprising/aeron/support/math/CoreContractMath",
+            "com/surprising/aeron/support/math/OptionContractMath",
+            "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+            "com/surprising/aeron/service/product/option/OptionFillCalculator",
+            "com/surprising/aeron/protocol/TradingCommandCodec",
+            "com/surprising/aeron/protocol/CoreInstrumentRiskLimits"
+          ],
+          "maxLeveragePpm()J": [
+            "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission",
+            "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+            "com/surprising/aeron/service/account/DerivativeAccountCommandProcessor",
+            "com/surprising/aeron/protocol/TradingCommandCodec",
+            "com/surprising/aeron/protocol/CoreInstrumentRiskLimits"
+          ]
+        },
+        "com/surprising/aeron/service/instrument/CoreInstrument": {
+          "priceTickUnits()J": [
+            "com/surprising/aeron/support/math/CoreContractMath",
+            "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+            "com/surprising/aeron/service/product/derivative/FuturesOrderAdmission",
+            "com/surprising/aeron/service/product/derivative/FuturesFillCalculator",
+            "com/surprising/aeron/service/query/state/RuntimeRiskQueryService",
+            "com/surprising/aeron/service/risk/RiskLaneProcessor",
+            "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor"
+          ],
+          "settleAsset()Ljava/lang/String;": [
+            "com/surprising/aeron/service/order/OrderBatchExecutor",
+            "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+            "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission",
+            "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+            "com/surprising/aeron/service/snapshot/state/RuntimeStateProjector",
+            "com/surprising/aeron/service/trigger/command/TriggerOrderCommands$TriggerExecutionContinuation",
+            "com/surprising/aeron/service/core/TradingCoreRuntime",
+            "com/surprising/aeron/service/settlement/MatcherSettlementDispatcher",
+            "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+            "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement",
+            "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation",
+            "com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions",
+            "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage",
+            "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+            "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork",
+            "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+            "com/surprising/aeron/service/replay/CommittedTradeReplay",
+            "com/surprising/aeron/service/treasury/InsuranceAllocationPolicy",
+            "com/surprising/aeron/service/query/CoreQueryService$LiquidationWorkQuery",
+            "com/surprising/aeron/service/query/state/RuntimeRiskQueryService$MarketInputs",
+            "com/surprising/aeron/service/query/state/RuntimeRiskQueryService",
+            "com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService",
+            "com/surprising/aeron/service/risk/RiskScanCoordinator",
+            "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor"
+          ],
+          "orderProtection()Lcom/surprising/aeron/protocol/CoreOrderProtection;": [
+            "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+            "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec"
+          ],
+          "maxLeveragePpm()J": [
+            "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission",
+            "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor$DerivativeSettlementAccumulator",
+            "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+            "com/surprising/aeron/service/account/DerivativeAccountCommandProcessor"
+          ]
+        },
+        "com/surprising/aeron/service/instrument/CoreInstrument$Configuration": {
+          "settleAsset()Ljava/lang/String;": [
+            "com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions",
+            "com/surprising/aeron/service/instrument/CoreInstrument"
+          ],
+          "priceTickUnits()J": [
+            "com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions",
+            "com/surprising/aeron/service/instrument/CoreInstrument"
+          ],
+          "orderProtection()Lcom/surprising/aeron/protocol/CoreOrderProtection;": [
+            "com/surprising/aeron/service/instrument/CoreInstrument"
+          ]
+        }
+      }
+    },
+    "new_findings": [
+      {
+        "id": "A65",
+        "status": "confirmed",
+        "analysis_status": "confirmed",
+        "topic": "非反向产品仍在Core保存只被反向公式实际使用的价格单位副本",
+        "evidence_basis_round": "ninth_cleanup_round",
+        "operations": [
+          "REGISTER_INSTRUMENT",
+          "PLACE_ORDER",
+          "MATCH_SETTLEMENT",
+          "SNAPSHOT"
+        ],
+        "fields": [
+          "RegisterInstrumentCommand.priceTickUnits（非反向产品）",
+          "CoreInstrument.Configuration.priceTickUnits（非反向产品）",
+          "标的快照7（非反向产品）"
+        ],
+        "evidence": [
+          {
+            "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+            "line": 26,
+            "anchor": "if (contractType.isInverse()) {",
+            "sha256": "0b7a9e733170231c0b7afeaa7c9e1d32ce065e71cfb73b1fd26ec534860f210b"
+          },
+          {
+            "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+            "line": 63,
+            "anchor": "return Math.multiplyExact(markPriceTicks, notionalMultiplierUnits);",
+            "sha256": "0b7a9e733170231c0b7afeaa7c9e1d32ce065e71cfb73b1fd26ec534860f210b"
+          },
+          {
+            "file": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+            "line": 100,
+            "anchor": "return Math.multiplyExact(Math.multiplyExact(signedQuantitySteps, priceDiff),",
+            "sha256": "0b7a9e733170231c0b7afeaa7c9e1d32ce065e71cfb73b1fd26ec534860f210b"
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java",
+            "line": 275,
+            "anchor": "return Math.multiplyExact(Math.multiplyExact(priceTicks, quantitySteps), instrument.notionalMultiplierUnits());",
+            "sha256": "c21983a18222bd6c44fb30a51192d5df654482c71cc7e6f788e4d998e9ffc660"
+          },
+          {
+            "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentCoreSyncService.java",
+            "line": 108,
+            "anchor": "value.strikePriceUnits()/value.priceTickUnits()",
+            "sha256": "a1a453055a93c7027e2a842c0eb61246f9a7f78e6735cf600410f42aa29342b2"
+          }
+        ],
+        "typed_consumers": [
+          "com/surprising/aeron/support/math/CoreContractMath",
+          "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+          "com/surprising/aeron/service/product/derivative/FuturesOrderAdmission",
+          "com/surprising/aeron/service/product/derivative/FuturesFillCalculator",
+          "com/surprising/aeron/service/query/state/RuntimeRiskQueryService",
+          "com/surprising/aeron/service/risk/RiskLaneProcessor",
+          "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor"
+        ],
+        "direct_configuration_consumers": [
+          "com/surprising/aeron/service/instrument/RuntimeInstrumentStateTransitions",
+          "com/surprising/aeron/service/instrument/CoreInstrument"
+        ],
+        "proposed_cleanup": "仅反向产品携带/保存Core价格单位；非反向Core配置使用固定单位，移除其无实际作用的输入正数/身份约束。",
+        "preserve_and_implementation_requirements": [
+          "Shared InstrumentResponse、管理校验、价格生产和行权价入Core前的单位换算仍必须保留真实priceTickUnits；不改HTTP字段或外部价格语义。",
+          "现货、线性及期权的有效金额乘数继续保留，不重算或改变舍入/溢出。",
+          "反向真实价格单位、分母和精度约束继续保留。",
+          "本项基于实际公式分支和精确所属类getter调用方；同名外部模型getter不作为Core消费证据。"
+        ],
+        "business_code_changed": false
+      },
+      {
+        "id": "A66",
+        "status": "confirmed",
+        "analysis_status": "confirmed",
+        "topic": "现货仍被迫构造并保存完全不消费的五项订单保护配置",
+        "evidence_basis_round": "ninth_cleanup_round",
+        "operations": [
+          "REGISTER_INSTRUMENT",
+          "PLACE_ORDER",
+          "REPLACE_ORDER",
+          "AMEND_ORDER",
+          "SNAPSHOT"
+        ],
+        "fields": [
+          "RegisterInstrumentCommand.orderProtection（现货）",
+          "CoreInstrument.Configuration.orderProtection（现货）",
+          "标的快照29–33（现货）"
+        ],
+        "evidence": [
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+            "line": 226,
+            "anchor": "if (!spot) {",
+            "sha256": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015"
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+            "line": 240,
+            "anchor": "spot || intent.orderType() == CoreOrderType.LIMIT",
+            "sha256": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015"
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+            "line": 375,
+            "anchor": "if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {",
+            "sha256": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015"
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+            "line": 327,
+            "anchor": "|| intent.orderType() != CoreOrderType.LIMIT || !instrument.orderProtection().limitPriceProtectionEnabled()) return;",
+            "sha256": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015"
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/RegisterInstrumentCommand.java",
+            "line": 28,
+            "anchor": "java.util.Objects.requireNonNull(orderProtection, \"orderProtection\")",
+            "sha256": "bb5a527af5ca4deffdaa3acc01e476914d1480ed37a497f020439ec6537078dc"
+          }
+        ],
+        "typed_consumers": [
+          "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+          "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec"
+        ],
+        "direct_configuration_consumers": [
+          "com/surprising/aeron/service/instrument/CoreInstrument"
+        ],
+        "proposed_cleanup": "现货不再创建订单保护值或接受其约束，注册和快照省去五项保护字段；按已有产品边界在现货使用空值，衍生品保留真实规则。",
+        "preserve_and_implementation_requirements": [
+          "现货市价仍必须携带用户给出的保护价格边界，不能删掉该请求字段或其正数拒绝。",
+          "五条衍生品的行情鲜度、滑点、限价保护带及预留保守价格继续保留。",
+          "不因消除现货假配置而新增策略/接口或每产品类。",
+          "本项是清理后扫描的新发现，尚未实施，不包含在本轮五项解决数中。"
+        ],
+        "business_code_changed": false
+      }
+    ],
+    "historical_evidence_correction": "上轮SnapshotFieldEvolutionTest实际只列出现货和线性永续，已纠正eighth_cleanup_round覆盖描述；本轮真实扩展为ProductLine.values六产品。未将未执行的测试描述为通过。",
+    "remaining_scope": [
+      "A65、A66是清理后扫描的新确认项，下一批继续删除Core非反向价格单位副本及现货假订单保护。",
+      "A63行情远期价和A11查询一致性仍为候选，继续按业务与最终消费者核对。",
+      "全模块所有字段/约束审查未完成；编译不能证明资金、恢复或运行路径全部正常。"
+    ],
+    "temporary_resources": {
+      "status": "removed_after_evidence_archived",
+      "services_started": false,
+      "files": [
+        {
+          "path": "/tmp/__pycache__/aeron-products-20261024-bytecode.cpython-311.pyc",
+          "bytes": 5236,
+          "sha256": "ce2064cee78f37d96dd15793b4996e6ae8ff859d53e1a3a5b9762649ef91c4a1"
+        },
+        {
+          "path": "/tmp/__pycache__/aeron-products-20261024.cpython-311.pyc",
+          "bytes": 5200,
+          "sha256": "a9adb8365f2cc3204562d9baa9e217e9912b2b0767bc348a01b627bbd260f22b"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-archive.py",
+          "bytes": 14159,
+          "sha256": "13b5d5df4cc4c74b11d03f5ab48ac653adc6736fa83ea8700d5c7744822a13f4"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-build-final.log",
+          "bytes": 38151,
+          "sha256": "e7bd7401b4a44153e55d85c4c8d2982395e4fa0675c3ac2ea5b2ea38827195e7"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-build.log",
+          "bytes": 30204,
+          "sha256": "163b4b78414fc7e973edc63ff4cc009d97b8440452312a4b9ca0e00e44d6fd7f"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-bytecode.json",
+          "bytes": 5903,
+          "sha256": "e3d38c19157536a9c02caa2652a60147121a5ec3b4cfa1486d24e0f122a839a7"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-bytecode.log",
+          "bytes": 2101,
+          "sha256": "3598c66eb5add6830a27133ed8a68ccd06b2e0fc79885996eea6997bd2a89112"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-bytecode.py",
+          "bytes": 1954,
+          "sha256": "a9af440a5fa0e3ccf929f0758e2641fd509cdcf8026de62c4f32bba28d8c3038"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-codec.txt",
+          "bytes": 3985,
+          "sha256": "51f4b37c89696550fc4dababb82f102992d3a66d2bda9369ecaf233396116e95"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-decode.txt",
+          "bytes": 4021,
+          "sha256": "73e425e73e98ba3f38310e087d0b82d85b147c85e6ae01f371125504ccbfd9b9"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-formulas.py",
+          "bytes": 5402,
+          "sha256": "82df3e955121b736b94d0d9f9cc79857c6b9250b4edb9fa02210b4acbea3b378"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-graph.json",
+          "bytes": 5984096,
+          "sha256": "3150a0f7d0492a419ba52fc1d6e3453679b11799d500563473c62211f527fdd8"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-index.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-migrate.py",
+          "bytes": 1791,
+          "sha256": "be9545084a72bbbf062dd1ed4ac8552ebbaa3d550ed52363ea4bd6fb538274d8"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-migration.json",
+          "bytes": 75139,
+          "sha256": "4fa0085df5268a0d9684bd2de2eed27f742a5f495378677680cb75cd153fc014"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-sites.json",
+          "bytes": 72697,
+          "sha256": "b0bb45144a5f285f1e504d7c4f4a33e8d71eb169db339455a56dbfe2210613d3"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-sites.log",
+          "bytes": 16441,
+          "sha256": "b21e747f86085d8a38df035cb94b129bffec3516247416ad187011d4ec5d03df"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-sites.py",
+          "bytes": 4039,
+          "sha256": "4ac845797d53524c0106f1bd8b73ee84ed3ff089c4a1e02bbcae080f0cf70a98"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-snapshot-read.txt",
+          "bytes": 1420,
+          "sha256": "565d1f225cffe21b57de1d4696852e8cbbd91aee058c3d4748b6d55155964c57"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-snapshot-test.txt",
+          "bytes": 3205,
+          "sha256": "29423ea54e17b15ccc69de82ebbf2cbc176ad3627faeed3aec713103b7e9e270"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-snapshot.txt",
+          "bytes": 2426,
+          "sha256": "ea7a912d9ea4a532d92c8990441a03c6ec9224a6950daa75a09e82624c8163e0"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-verified.json",
+          "bytes": 19273,
+          "sha256": "cab80c0cbb670d19fb3deb63d29994d4a419f0e3a426e1f2ea1bae577184405a"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024-verify.py",
+          "bytes": 8871,
+          "sha256": "8c202a3e302636ffbdbf44b77f42f0ec6b4389f786397d67cd2aeb987ebd75d0"
+        },
+        {
+          "path": "/tmp/aeron-products-20261024.py",
+          "bytes": 1672,
+          "sha256": "fd4a20184e1c309759bd8856fc784e2d3ab5308ac5c711805fd76c3be2c1bd81"
+        }
+      ]
+    },
+    "graph_verification": {
+      "status": "up_to_date",
+      "command": "codegraph index --force -q; codegraph status",
+      "files": 2239,
+      "nodes": 52657,
+      "edges": 151824
+    },
+    "compiled_record_field_counts": {
+      "RegisterInstrumentCommand": 21,
+      "CoreInstrumentRiskLimits": 6,
+      "CoreRiskLimitBracket": 5
     }
   }
 }

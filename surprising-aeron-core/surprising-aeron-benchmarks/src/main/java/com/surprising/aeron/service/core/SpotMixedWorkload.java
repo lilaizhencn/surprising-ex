@@ -79,7 +79,7 @@ public final class SpotMixedWorkload {
             for (int index = 0; index < symbolCount; index++) {
                 harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
                         TradingCommandCodec.encodeRegisterInstrument(
-                                instrument(symbols.get(index), baseAssets.get(index)))));
+                                instrument(symbols.get(index), baseAssets.get(index)), ProductLine.SPOT)));
             }
 
             List<Long> users = LinearPerpetualBenchmarkSupport.usersAcrossLanes(

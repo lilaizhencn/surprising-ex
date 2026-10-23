@@ -13,6 +13,52 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
+    void registrationsCarryOnlyTheFieldsUsedByTheirProduct() {
+        for (ProductLine line : ProductLine.values()) {
+            boolean spot = !line.isDerivative();
+            boolean option = line.isOptionProduct();
+            boolean inverse = line == ProductLine.INVERSE_PERPETUAL || line == ProductLine.INVERSE_DELIVERY;
+            var rawRisk = spot ? null : new CoreInstrumentRiskLimits(100_000, option ? -99 : 10_000_000,
+                    1_000_000, 0, 1_000_000, List.of(new CoreRiskLimitBracket(
+                    1_000_000, option ? -88 : 10_000_000, 100_000, 50_000, option ? 1_200_000 : -77)));
+            var expectedRisk = spot ? null : rawRisk.forProduct(line);
+            var canonical = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 2, 3,
+                    inverse ? 100 : 1, expectedRisk, -10, 20, line.isDeliveryProduct() ? 2_000 : 0,
+                    option ? 0 : -1, option ? 100 : 0, 1, true, true, true, 3, 15, spot ? 7 : 1);
+            var unusedInputs = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 2, 3,
+                    inverse ? 100 : -99, rawRisk, -10, 20, line.isDeliveryProduct() ? 2_000 : -99,
+                    option ? 0 : -99, option ? 100 : -99, 1, true, true, true, 3, 15, spot ? 7 : -99);
+            byte[] encoded = TradingCommandCodec.encodeRegisterInstrument(canonical, line);
+            assertThat(TradingCommandCodec.encodeRegisterInstrument(unusedInputs, line)).isEqualTo(encoded);
+            assertThat(TradingCommandCodec.decodeRegisterInstrument(encoded, line)).isEqualTo(canonical);
+            int expectedBytes = switch (line) {
+                case SPOT -> 112;
+                case LINEAR_PERPETUAL -> 180;
+                case INVERSE_PERPETUAL, LINEAR_DELIVERY -> 188;
+                case INVERSE_DELIVERY -> 196;
+                case OPTION -> 192;
+            };
+            assertThat(encoded).hasSize(expectedBytes);
+        }
+    }
+
+    @Test
+    void riskLimitsValidateOnlyTheParametersUsedByTheProduct() {
+        var option = new CoreInstrumentRiskLimits(100_000, -1, 200, 0, 1,
+                List.of(new CoreRiskLimitBracket(200, -1, 100_000, 50_000, 1_200_000)))
+                .forProduct(ProductLine.OPTION);
+        assertThat(option.maxLeveragePpm()).isZero();
+        assertThat(option.riskLimitBrackets().getFirst().maxLeveragePpm()).isZero();
+        assertThat(option.riskLimitBrackets().getFirst().optionMarginFactorPpm()).isEqualTo(1_200_000);
+        assertThatThrownBy(() -> new CoreInstrumentRiskLimits(100_000, 10_000_000, 200, 0, 1,
+                List.of(new CoreRiskLimitBracket(200, 20_000_000, 100_000, 50_000, -1)))
+                .forProduct(ProductLine.LINEAR_PERPETUAL)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CoreInstrumentRiskLimits(100_000, -1, 200, 0, 1,
+                List.of(new CoreRiskLimitBracket(200, -1, 100_000, 50_000, 0)))
+                .forProduct(ProductLine.OPTION)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void riskBracketsRequireIncreasingCapsAndCoverThePositionLimit() {
         var first = new CoreRiskLimitBracket(100, 10_000_000, 100_000, 50_000);
         var second = new CoreRiskLimitBracket(200, 5_000_000, 200_000, 100_000);
@@ -202,11 +248,11 @@ class TradingCommandCodecTest {
         AmendOrderCommand amendOrder = new AmendOrderCommand(6, 8, "client-8", 61_000L,
                 4L, CoreTimeInForce.GTC, true);
         RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
-                "1", "BTC", "USDT", "USDT", 1, 1, 100_000_000,
+                "1", "BTC", "USDT", "USDT", 1, 1, 1,
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, Long.MAX_VALUE, 0, Long.MAX_VALUE,
                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE,
-                        10_000_000, 100_000, 50_000, 1_250_000))),
+                        10_000_000, 100_000, 50_000, 0))),
                 -10, 20, 0, -1, 0);
         ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("1", 60_500,
                 60_000, 60_250, 9, 1_700_000_000_000L);
@@ -242,13 +288,14 @@ class TradingCommandCodecTest {
         assertThat(TradingCommandCodec.decodeAmendOrder(
                 TradingCommandCodec.encodeAmendOrder(amendOrder))).isEqualTo(amendOrder);
         assertThat(TradingCommandCodec.decodeRegisterInstrument(
-                TradingCommandCodec.encodeRegisterInstrument(instrument), ProductLine.LINEAR_PERPETUAL)).isEqualTo(instrument);
+                TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.LINEAR_PERPETUAL), ProductLine.LINEAR_PERPETUAL)).isEqualTo(instrument);
         assertThat(TradingCommandCodec.decodeApplyMarkPrice(
                 TradingCommandCodec.encodeApplyMarkPrice(markPrice))).isEqualTo(markPrice);
         byte[] archivedMark = java.util.Arrays.copyOf(
                 TradingCommandCodec.encodeApplyMarkPrice(markPrice),
                 TradingCommandCodec.encodeApplyMarkPrice(markPrice).length - Long.BYTES);
-        assertThat(TradingCommandCodec.decodeApplyMarkPrice(archivedMark).lastPriceTicks()).isZero();
+        assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(archivedMark))
+                .isInstanceOf(ProtocolException.class);
         assertThat(TradingCommandCodec.decodeApplyFunding(
                 TradingCommandCodec.encodeApplyFunding(funding))).isEqualTo(funding);
         assertThat(TradingCommandCodec.decodeApplyFunding(
@@ -327,7 +374,7 @@ class TradingCommandCodecTest {
                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                 0, 0, 0, -1, 0);
-        byte[] current = TradingCommandCodec.encodeRegisterInstrument(command);
+        byte[] current = TradingCommandCodec.encodeRegisterInstrument(command, ProductLine.LINEAR_PERPETUAL);
         int appendedRiskPolicyBytes = Integer.BYTES * 3 + Long.BYTES * 9;
         byte[] withoutRiskPolicy = java.util.Arrays.copyOf(current, current.length - appendedRiskPolicyBytes);
 
@@ -342,12 +389,12 @@ class TradingCommandCodecTest {
                 new CoreInstrumentRiskLimits(
                         100_000, 10_000_000, 1_000_000, 0, 1_000_000,
                         java.util.List.of(new CoreRiskLimitBracket(1_000_000, 10_000_000,
-                        100_000, 50_000, 1_000_000))),
-                0, 0, 0, -1, 0, 3, false, false, true, 0b01, 0b0011, 100_000L);
+                        100_000, 50_000, 0))),
+                0, 0, 0, -1, 0, 3, false, false, true, 0b01, 0b0011, 1L);
 
         assertThat(TradingCommandCodec.decodeRegisterInstrument(
-                TradingCommandCodec.encodeRegisterInstrument(command), ProductLine.LINEAR_PERPETUAL)).isEqualTo(command);
-        byte[] encoded = TradingCommandCodec.encodeRegisterInstrument(command);
+                TradingCommandCodec.encodeRegisterInstrument(command, ProductLine.LINEAR_PERPETUAL), ProductLine.LINEAR_PERPETUAL)).isEqualTo(command);
+        byte[] encoded = TradingCommandCodec.encodeRegisterInstrument(command, ProductLine.LINEAR_PERPETUAL);
         assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(
                 java.util.Arrays.copyOf(encoded, encoded.length - Long.BYTES), ProductLine.LINEAR_PERPETUAL))
                 .isInstanceOf(ProtocolException.class);
@@ -356,17 +403,17 @@ class TradingCommandCodecTest {
     @Test
     void spotRegistrationHasNoDerivativeRiskPayload() {
         var risk = new CoreInstrumentRiskLimits(100_000, 10_000_000, 1_000_000, 0, 1_000_000,
-                List.of(new CoreRiskLimitBracket(1_000_000, 10_000_000, 100_000, 50_000)));
+                List.of(new CoreRiskLimitBracket(1_000_000, 10_000_000, 100_000, 50_000, 0)));
         var spot = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 null, 0, 0, 0, -1, 0);
         var derivative = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 risk, 0, 0, 0, -1, 0);
-        byte[] spotBytes = TradingCommandCodec.encodeRegisterInstrument(spot);
-        byte[] derivativeBytes = TradingCommandCodec.encodeRegisterInstrument(derivative);
+        byte[] spotBytes = TradingCommandCodec.encodeRegisterInstrument(spot, ProductLine.SPOT);
+        byte[] derivativeBytes = TradingCommandCodec.encodeRegisterInstrument(derivative, ProductLine.LINEAR_PERPETUAL);
         assertThat(TradingCommandCodec.decodeRegisterInstrument(spotBytes, ProductLine.SPOT)).isEqualTo(spot);
         assertThat(TradingCommandCodec.decodeRegisterInstrument(derivativeBytes, ProductLine.LINEAR_PERPETUAL))
                 .isEqualTo(derivative);
-        assertThat(derivativeBytes.length - spotBytes.length).isEqualTo(84);
+        assertThat(derivativeBytes.length - spotBytes.length).isEqualTo(68);
         assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(spotBytes, ProductLine.LINEAR_PERPETUAL))
                 .isInstanceOf(RuntimeException.class);
         assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(derivativeBytes, ProductLine.SPOT))

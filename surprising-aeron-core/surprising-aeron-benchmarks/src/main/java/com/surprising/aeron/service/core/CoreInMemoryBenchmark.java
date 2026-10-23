@@ -48,7 +48,7 @@ public final class CoreInMemoryBenchmark {
             long gatewaySequence = 1;
             long operationsSequence = 1;
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
-                    TradingCommandCodec.encodeRegisterInstrument(instrument()));
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(), ProductLine.SPOT));
             applied(state, CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, gatewaySequence++, 2,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", BALANCE_UNITS)));
             long[] latencies = measured ? new long[orderCount] : new long[0];

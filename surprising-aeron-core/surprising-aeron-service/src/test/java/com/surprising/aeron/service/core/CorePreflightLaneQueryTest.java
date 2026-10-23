@@ -200,7 +200,7 @@ class CorePreflightLaneQueryTest {
         var core = new TradingCoreRuntime(line);
         try {
             command(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(instrument(line, 100_000)));
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(line, 100_000), line));
             if (line != ProductLine.SPOT) command(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(line.isOptionProduct() ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
                             : new ApplyMarkPriceCommand("1", 100, 1, TIME)));

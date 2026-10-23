@@ -33,7 +33,7 @@ public class InstrumentPauseAdmissionBenchmark {
                         config.notionalMultiplierUnits(), config.priceTickUnits(), config.settleScaleUnits(),
                         config.riskLimits(), config.makerFeeRatePpm(), config.takerFeeRatePpm(),
                         config.expiryEpochMillis(), config.optionTypeCode(), config.strikePriceTicks());
-                requireApplied(state.apply(message(productLine,1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(paused))));
+                requireApplied(state.apply(message(productLine,1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(paused, productLine))));
                 if (productLine.isDerivative()) requireApplied(state.apply(message(productLine,2,CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                 ? new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_002L)

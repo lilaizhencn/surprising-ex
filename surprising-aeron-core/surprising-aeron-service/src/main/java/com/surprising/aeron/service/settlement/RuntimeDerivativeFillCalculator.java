@@ -37,7 +37,7 @@ public final class RuntimeDerivativeFillCalculator {
      * @param fillPriceTicks 本笔实际成交价刻度，须为正
      * @param fillQuantitySteps 本笔成交数量步长，须为正且不超过游标剩余量
      * @param taker 本笔是否为主动成交，用于选择 taker 或 maker 费率
-     * @param leveragePpm 本次成交使用的百万分比杠杆，须为正
+     * @param leveragePpm 期货成交使用的百万分比杠杆，期权不使用
      * @param settleAssetId 结算资产的运行时编号
      * @param treasuryDelta 所属 Lane 当前事件的系统财务差额接收槽
      * @param commitTimestamp 订单写回时使用的复制业务时间，负值沿既有调用约定处理
@@ -49,7 +49,8 @@ public final class RuntimeDerivativeFillCalculator {
                       boolean taker, long leveragePpm, int settleAssetId,
                       RuntimeTreasuryDelta treasuryDelta, long commitTimestamp, long commitPosition) {
         if (runtime == null || identities == null || instrument == null || order == null || treasuryDelta == null
-                || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0 || settleAssetId < 0) {
+                || fillPriceTicks <= 0 || fillQuantitySteps <= 0
+                || !instrument.contractType().isOption() && leveragePpm <= 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("invalid perpetual fill arguments");
         }
         // 根据当前合约选择的产品资金规则，期权与各本位期货保持各自公式。
@@ -192,7 +193,7 @@ public final class RuntimeDerivativeFillCalculator {
          * @param price 本笔实际成交价刻度
          * @param size 本笔成交数量步长
          * @param taker 本笔是否为主动成交，用于选择 taker 或 maker 费率
-         * @param leverage 本轮使用的百万分比杠杆
+         * @param leverage 期货成交使用的百万分比杠杆，期权不使用
          * @param timestamp 本轮订单业务时间
          * @param position 本轮复制日志位置
          */
@@ -261,7 +262,7 @@ public final class RuntimeDerivativeFillCalculator {
      * @param instrument 当前订单的规范衍生品币对
      * @param order 当前需要应用成交的开放权威订单
      * @param positionKey 此订单用户、合约及持仓方向对应的运行时键
-     * @param leverage 本轮使用的百万分比杠杆
+     * @param leverage 期货成交使用的百万分比杠杆，期权不使用
      * @param assetId 本轮使用的结算资产编号
      * @param timestamp 本轮订单业务时间
      * @param position 本轮复制日志位置
@@ -270,7 +271,7 @@ public final class RuntimeDerivativeFillCalculator {
                       OrderRuntime order, long positionKey, long leverage, int assetId,
                       long timestamp, long position) {
         if (cursor == null || runtime == null || instrument == null || order == null
-                || order.symbolId() < 0 || leverage <= 0 || assetId < 0
+                || order.symbolId() < 0 || !instrument.contractType().isOption() && leverage <= 0 || assetId < 0
                 || instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 || timestamp < -1 || position < -1 || timestamp >= 0 && position < 0) {
             throw new IllegalArgumentException("invalid perpetual fill cursor");
@@ -301,7 +302,7 @@ public final class RuntimeDerivativeFillCalculator {
      * @param fillPriceTicks 本笔实际成交价刻度，须为正
      * @param fillQuantitySteps 本笔成交数量步长，须为正且不超过游标剩余量
      * @param taker 本笔是否为主动成交，用于选择 taker 或 maker 费率
-     * @param leveragePpm 本次成交使用的百万分比杠杆，须为正
+     * @param leveragePpm 期货成交使用的百万分比杠杆，期权不使用
      * @param commitTimestamp 订单写回时使用的复制业务时间，负值沿既有调用约定处理
      * @param commitPosition 订单写回时使用的复制日志位置
      */
@@ -318,7 +319,8 @@ public final class RuntimeDerivativeFillCalculator {
         // 本笔计算开始前游标冻结余额。
         // 本笔计算开始前游标可用余额。
         long availableUnits = state.available, lockedUnits = state.locked;
-        if (instrument == null || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0
+        if (instrument == null || fillPriceTicks <= 0 || fillQuantitySteps <= 0
+                || !instrument.contractType().isOption() && leveragePpm <= 0
                 || fillQuantitySteps > state.remaining) throw new IllegalArgumentException("invalid perpetual fill calculation");
         // 根据当前合约选择的产品资金规则，期权与各本位期货保持各自公式。
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
@@ -526,7 +528,7 @@ public final class RuntimeDerivativeFillCalculator {
      * @param signedFillSteps 本笔有符号成交数量，买正卖负
      * @param openSteps 本笔真正增加或反向建立的新仓数量
      * @param priceTicks 本笔成交价刻度
-     * @param leveragePpm 本次成交使用的百万分比杠杆，须为正
+     * @param leveragePpm 期货成交使用的百万分比杠杆，期权不使用
      * @param riskMark 产品保证金计算所需的标记价输入
      */
     private static long openingMarginForFill(CoreInstrument instrument,
@@ -537,9 +539,7 @@ public final class RuntimeDerivativeFillCalculator {
                                              long leveragePpm,
                                              MarkPriceRuntime riskMark) {
         return instrument.contractType().isOption()
-                ? OptionFillCalculator.openingMarginForFill(instrument, projectedQuantitySteps, signedFillSteps,
-                openSteps, priceTicks, leveragePpm, riskMark)
-                : FuturesFillCalculator.openingMarginForFill(instrument, projectedQuantitySteps, signedFillSteps,
-                openSteps, priceTicks, leveragePpm, riskMark);
+                ? OptionFillCalculator.openingMarginForFill(instrument, projectedQuantitySteps, signedFillSteps, openSteps, riskMark)
+                : FuturesFillCalculator.openingMarginForFill(instrument, projectedQuantitySteps, openSteps, priceTicks, leveragePpm);
     }
 }

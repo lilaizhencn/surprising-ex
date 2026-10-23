@@ -62,7 +62,7 @@ class SharedProductLineSnapshotContractTest {
                         new BalanceAdjustmentCommand(settleAsset(productLine), BALANCE_UNITS)));
         try (/* 当前产品线的原始运行时，完成恢复比较后退出关闭。 */ TradingCoreRuntime original = new TradingCoreRuntime(productLine)) {
             assertApplied(applyTerminal(original, operations(productLine, 1, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(instrument(productLine)))));
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(productLine), productLine))));
             if (productLine.isDerivative()) {
                 assertApplied(applyTerminal(original, market(productLine, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(

@@ -77,7 +77,7 @@ public class DerivativeRiskBoundaryBenchmark {
                         0, 0, 2_000_000_000_000L, type.isOption() ? OptionType.CALL.ordinal() : -1,
                         type.isOption() ? 100 : 0);
                 harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS,
-                        0, TradingCommandCodec.encodeRegisterInstrument(instrument)));
+                        0, TradingCommandCodec.encodeRegisterInstrument(instrument, type.productLine())));
             }
             for (String instrumentId : new String[]{"27", "28"}) {
                 mark(instrumentId, 100);

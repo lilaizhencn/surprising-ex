@@ -69,7 +69,7 @@ public final class ClusterSpotMatchSmokeMain {
         RegisterInstrumentCommand instrument = new RegisterInstrumentCommand(
                 "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
         return command(sourceId, sequence, 1, CoreMessageType.REGISTER_INSTRUMENT,
-                TradingCommandCodec.encodeRegisterInstrument(instrument));
+                TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.SPOT));
     }
 
     private static byte[] order(long orderId, CoreOrderSide side, long quantity, String asset, long reserved) {

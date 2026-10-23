@@ -89,7 +89,7 @@ class TradingCoreOwnerTest {
                             java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                     0, 0, 0, -1, 0);
             onSessionMessage(service, responses, command(line, CoreMessageType.REGISTER_INSTRUMENT, 1, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(register)));
+                    TradingCommandCodec.encodeRegisterInstrument(register, line)));
             onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, 2, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(
                             new com.surprising.aeron.protocol.ApplyMarkPriceCommand("1", 100, 1, 1_000))));
@@ -564,7 +564,7 @@ class TradingCoreOwnerTest {
                             (line == com.surprising.product.api.ProductLine.SPOT ? null : new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
-                            10_000, 10_000, 0, -1, 0))));
+                            10_000, 10_000, 0, -1, 0), line)));
             onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, sequence++, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(
                             new com.surprising.aeron.protocol.ApplyMarkPriceCommand(symbol, 100, 1, 1_000))));
@@ -622,7 +622,7 @@ class TradingCoreOwnerTest {
                             (line == com.surprising.product.api.ProductLine.SPOT ? null : new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
-                            10_000, 10_000, 0, -1, 0))));
+                            10_000, 10_000, 0, -1, 0), line)));
             onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, 2, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(
                             new com.surprising.aeron.protocol.ApplyMarkPriceCommand("1", 100, 1, 1_000))));
@@ -2059,7 +2059,7 @@ class TradingCoreOwnerTest {
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.fromString("00000000-0000-0000-0000-000000000001"), ProductLine.SPOT,
                 CommandSource.OPERATIONS, 88, 1, 0, 1_000, 1),
-                TradingCommandCodec.encodeRegisterInstrument(instrument));
+                TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.SPOT));
     }
 
     /**
@@ -2071,7 +2071,7 @@ class TradingCoreOwnerTest {
                 "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 88, 1, 0, 1_000, 1),
-                TradingCommandCodec.encodeRegisterInstrument(instrument));
+                TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.SPOT));
     }
 
     /**

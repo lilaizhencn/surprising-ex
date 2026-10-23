@@ -36,7 +36,7 @@ class CoreOptionPremiumFeeFundingTest {
                             10_000, 100_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
                             List.of(new CoreRiskLimitBracket(1_000_000_000_000_000L, 100_000_000, 10_000, 5_000))),
                     200, 500, 1_800_000_000_000L, 0, 500_000, 1, true, true, true, 0b11, 0b1111, 1);
-            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
+            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.OPTION));
             for (long /* 当前初始化钱包或核对终态的用户编号。 */ user : List.of(101L, 202L)) apply(runtime, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", WALLET)));
             apply(runtime, CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(

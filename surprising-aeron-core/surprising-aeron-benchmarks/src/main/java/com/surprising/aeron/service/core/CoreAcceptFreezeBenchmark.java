@@ -41,7 +41,7 @@ public final class CoreAcceptFreezeBenchmark {
             long operationsSequence = 1;
             long kafkaSequence = 1;
             apply(state, CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
-                    TradingCommandCodec.encodeRegisterInstrument(instrument()));
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(), ProductLine.LINEAR_PERPETUAL));
             apply(state, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, kafkaSequence++, 2,
                     TradingCommandCodec.encodeApplyMarkPrice(
                             new ApplyMarkPriceCommand(SYMBOL, 1_000, 1, 1_000)));

@@ -96,7 +96,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
 
     private void setup() {
         applied(CoreMessageType.REGISTER_INSTRUMENT, 1,
-                TradingCommandCodec.encodeRegisterInstrument(instrument()), "instrument");
+                TradingCommandCodec.encodeRegisterInstrument(instrument(), productLine), "instrument");
         // 与生产准入一致：建仓前提供新鲜标记价；期权同时提供指数价和远期价。
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION

@@ -32,7 +32,7 @@ public final class SmallControlReproMain {
             try (var pool = new AeronClientPool("small-control-repro", PRODUCT, HOSTS,
                     EGRESS_HOST, Duration.ofSeconds(10), 2)) {
                 var response = pool.command(CoreMessageType.REGISTER_INSTRUMENT, UUID.randomUUID(), 1,
-                        TradingCommandCodec.encodeRegisterInstrument(instrument("30")));
+                        TradingCommandCodec.encodeRegisterInstrument(instrument("30"), PRODUCT));
                 requireApplied(response);
                 log.info("poolCommand=PASS");
                 var query = pool.query(CoreMessageType.TREASURY_STATE_QUERY, UUID.randomUUID(), 0, new byte[0]);
@@ -87,7 +87,7 @@ public final class SmallControlReproMain {
 
     private void orders() {
         String instrumentId = "29";
-        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId)));
+        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId), PRODUCT));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                 new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
         for (long user : new long[]{1001, 1002}) command(CoreMessageType.ADJUST_BALANCE, user,
@@ -176,7 +176,7 @@ public final class SmallControlReproMain {
     private void amendRejection(int index) {
         String instrumentId = Integer.toString(20000 + index);
         long user = 1001 + index * 2L, maker = user + 1, base = 3001 + index * 10L;
-        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId)));
+        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId), PRODUCT));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                 new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
         for (long account : new long[]{user, maker}) command(CoreMessageType.ADJUST_BALANCE, account,
@@ -220,7 +220,7 @@ public final class SmallControlReproMain {
     private void trigger(int index, boolean scan) {
         String instrumentId = Integer.toString(30000 + index);
         long maker = 1001 + index * 2L, user = maker + 1, triggerId = 9001 + index;
-        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId)));
+        command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId), PRODUCT));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                 new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
         for (long account : new long[]{maker, user}) command(CoreMessageType.ADJUST_BALANCE, account,

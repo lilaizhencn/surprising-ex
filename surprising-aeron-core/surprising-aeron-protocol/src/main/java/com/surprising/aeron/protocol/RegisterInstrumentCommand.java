@@ -29,9 +29,8 @@ public record RegisterInstrumentCommand(
         com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         if (baseAsset == null || baseAsset.isBlank() || quoteAsset == null || quoteAsset.isBlank()
                 || settleAsset == null || settleAsset.isBlank() || notionalMultiplierUnits <= 0
-                || priceTickUnits <= 0 || quantityStepUnits <= 0 || settleScaleUnits <= 0
+                || priceTickUnits <= 0
                 || Math.absExact(makerFeeRatePpm) > 1_000_000 || Math.absExact(takerFeeRatePpm) > 1_000_000
-                || expiryEpochMillis < 0 || optionTypeCode < -1 || strikePriceTicks < 0
                 || instrumentStatusCode < 0 || instrumentStatusCode > 5
                 || supportedOrderTypeMask <= 0 || (supportedOrderTypeMask & ~0b11) != 0
                 || supportedTimeInForceMask <= 0 || (supportedTimeInForceMask & ~0b1111) != 0

@@ -60,7 +60,7 @@ public class InstrumentCoreSyncService {
         boolean applied=false;
         try {
             var outcome=gateway.commandOutcome(CoreMessageType.REGISTER_INSTRUMENT,id,0,
-                    TradingCommandCodec.encodeRegisterInstrument(configuration));
+                    TradingCommandCodec.encodeRegisterInstrument(configuration, line));
             if (outcome instanceof CoreCommandOutcome.Terminal terminal) {
                 applied=terminal.response().commandStatus()==ResponseStatus.APPLIED;
                 if (!applied) error=terminal.response().resultCode().name();
@@ -104,9 +104,9 @@ public class InstrumentCoreSyncService {
     }
 
     private static RegisterInstrumentCommand command(InstrumentResponse value,long settleScale, CoreOrderProtection protection) {
-        // 现货没有衍生品风险档；只在衍生品风险配置中转换真实档位。
-        long strike=value.strikePriceUnits()==null?0:value.strikePriceUnits()/value.priceTickUnits();
-        if (value.strikePriceUnits()!=null && value.strikePriceUnits()%value.priceTickUnits()!=0)
+        boolean option=value.contractType().isOption();
+        long strike=option && value.strikePriceUnits()!=null?value.strikePriceUnits()/value.priceTickUnits():0;
+        if (option && value.strikePriceUnits()!=null && value.strikePriceUnits()%value.priceTickUnits()!=0)
             throw new IllegalArgumentException("strike price does not align with tick size");
         int supportedOrderTypes=0;
         if (value.supportedOrderTypes()!=null) {
@@ -126,18 +126,18 @@ public class InstrumentCoreSyncService {
             }
         }
         CoreInstrumentRiskLimits riskLimits = value.contractType() == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
-                        value.initialMarginRatePpm(), value.maxLeveragePpm(), value.maxPositionNotionalUnits(),
+                        value.initialMarginRatePpm(), option?0:value.maxLeveragePpm(), value.maxPositionNotionalUnits(),
                         value.userOpenInterestLimitRatePpm(), value.userOpenInterestLimitFloorUnits(),
                         value.riskLimitBrackets().stream()
                                 .map(b -> new CoreRiskLimitBracket(
-                                        b.notionalCapUnits(), b.maxLeveragePpm(), b.initialMarginRatePpm(),
-                                        b.maintenanceMarginRatePpm(), b.optionMarginFactorPpm())).toList());
+                                        b.notionalCapUnits(), option?0:b.maxLeveragePpm(), b.initialMarginRatePpm(),
+                                        b.maintenanceMarginRatePpm(), option?b.optionMarginFactorPpm():0)).toList());
         return new RegisterInstrumentCommand(
                 Integer.toString(value.instrumentId()), value.baseAsset(), value.quoteAsset(), value.settleAsset(),
                 value.notionalMultiplierUnits(), value.priceTickUnits(), settleScale, riskLimits,
                 value.makerFeeRatePpm(), value.takerFeeRatePpm(),
-                value.expiryTime()==null?0:value.expiryTime().toEpochMilli(),
-                value.optionType()==null?-1:value.optionType().ordinal(), strike, value.status().ordinal(),
+                (value.contractType().isDelivery() || option) && value.expiryTime()!=null?value.expiryTime().toEpochMilli():0,
+                option && value.optionType()!=null?value.optionType().ordinal():-1, strike, value.status().ordinal(),
                 value.marketOrderEnabled(), value.postOnlyEnabled(), value.reduceOnlyEnabled(), supportedOrderTypes,
                 supportedTimeInForce, value.contractType() == ContractType.SPOT ? value.quantityStepUnits() : 1L,
                 protection);

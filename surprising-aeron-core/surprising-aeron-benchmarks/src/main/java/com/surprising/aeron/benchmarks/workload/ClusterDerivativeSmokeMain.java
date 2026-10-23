@@ -64,7 +64,7 @@ public final class ClusterDerivativeSmokeMain {
                                 new CoreInstrumentRiskLimits(
                                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                                0, 0, 0, -1, 0))));
+                                0, 0, 0, -1, 0), productLine)));
                 applied(client, command(productLine, sourceId, seed, longUser, CoreMessageType.ADJUST_BALANCE,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000))));
                 applied(client, command(productLine, sourceId, seed + 1, shortUser, CoreMessageType.ADJUST_BALANCE,

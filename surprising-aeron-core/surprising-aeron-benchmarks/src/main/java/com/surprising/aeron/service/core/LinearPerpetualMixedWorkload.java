@@ -120,7 +120,7 @@ public final class LinearPerpetualMixedWorkload {
         try {
             for (String instrumentId : listedSymbols) {
                 harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                        TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId))));
+                        TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId), harness.state().productLine)));
             }
             for (String instrumentId : listedSymbols) {
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,

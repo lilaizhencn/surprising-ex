@@ -37,7 +37,7 @@ class CoreSpotAssetUnitsTest {
             var registration = new RegisterInstrumentCommand(
                     "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
                     0b11, 0b1111, 100_000);
-            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
+            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
             // 非单位数量步长必须按当前布局完整保存，恢复值不得静默降为单位步长。
             byte[] encoded = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(runtime.tradingState());
             var restored = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.decode(encoded, ProductLine.SPOT);
@@ -111,7 +111,7 @@ class CoreSpotAssetUnitsTest {
             var registration = new RegisterInstrumentCommand(
                     "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
                     0b11, 0b1111, 100_000);
-            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
+            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
             fund(runtime, 101, "USDT", 100_000_000_000L);
             fund(runtime, 202, "BTC", 1_000_000L);
             place(runtime, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
@@ -169,7 +169,7 @@ class CoreSpotAssetUnitsTest {
             var registration = new RegisterInstrumentCommand(
                     "1", "BTC", "USDT", "USDT", 10_000, 10_000_000, 1, null, 200, 500, 0, -1, 0, 1, true, true, false,
                     0b11, 0b1111, 100_000);
-            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
+            apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration, ProductLine.SPOT));
             fund(runtime, 101, "USDT", 100_000_000_000L); fund(runtime, 202, "BTC", 1_000_000L);
             place(runtime, 101, 41, CoreOrderSide.BUY, 2, 400_000, CoreTimeInForce.GTC);
             place(runtime, 101, 43, CoreOrderSide.BUY, 3, 410_000, CoreTimeInForce.GTC);

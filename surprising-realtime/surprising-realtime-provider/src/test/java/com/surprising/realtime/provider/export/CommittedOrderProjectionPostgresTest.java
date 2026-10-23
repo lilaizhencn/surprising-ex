@@ -115,7 +115,7 @@ class CommittedOrderProjectionPostgresTest {
                             new CoreInstrumentRiskLimits(
                                     100000, (1_000_000_000_000L / (100000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100000)), 100000, 50000))),
-                            0, 0, 2000000000000L, 0, 100))));
+                            0, 0, 2000000000000L, 0, 100), line)));
             for(long user:new long[]{7,8})frames.addAll(replayed(replay,++seq,CoreMessageType.ADJUST_BALANCE,user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000))));
             frames.addAll(replayed(replay,++seq,CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(

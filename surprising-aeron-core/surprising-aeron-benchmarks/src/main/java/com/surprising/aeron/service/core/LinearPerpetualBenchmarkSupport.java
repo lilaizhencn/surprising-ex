@@ -1073,7 +1073,7 @@ public final class LinearPerpetualBenchmarkSupport {
             throw new IllegalStateException("Core did not start with requested account lane count");
         }
         harness.execute(harness.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                TradingCommandCodec.encodeRegisterInstrument(instrument())));
+                TradingCommandCodec.encodeRegisterInstrument(instrument(), harness.productLine())));
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand(SYMBOL, ENTRY_PRICE, 1, BASE_EPOCH_MILLIS))));

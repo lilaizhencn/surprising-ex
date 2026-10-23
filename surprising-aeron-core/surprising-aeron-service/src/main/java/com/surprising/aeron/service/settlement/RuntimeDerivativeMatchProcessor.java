@@ -333,19 +333,18 @@ public final class RuntimeDerivativeMatchProcessor {
                 // 当前用户上一笔尚需写回的活动订单编号，零表示还没有记录。
                 long activeOrder = activeOrderByUser.get(order.userId());
                 if (activeOrder != 0 && activeOrder != orderId) flush(activeOrder);
-                // 按当前订单全仓或逐仓模式选出的本轮用户杠杆暂存表。
-                LongLongHashMap leverageByUser = order.marginMode()
-                        == com.surprising.aeron.protocol.CoreMarginMode.CROSS
-                        ? crossLeverageByUser : isolatedLeverageByUser;
-                // 本轮当前用户及保证金模式实际使用的杠杆。
-                long leverage;
-                if (leverageByUser.containsKey(order.userId())) {
-                    leverage = leverageByUser.get(order.userId());
-                } else {
-                    // 本用户已设置的可空杠杆，空时使用币对最大值。
-                    Long configured = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
-                    leverage = configured == null ? instrument.maxLeveragePpm() : configured;
-                    leverageByUser.put(order.userId(), leverage);
+                long leverage = 0;
+                if (!instrument.contractType().isOption()) {
+                    LongLongHashMap leverageByUser = order.marginMode()
+                            == com.surprising.aeron.protocol.CoreMarginMode.CROSS
+                            ? crossLeverageByUser : isolatedLeverageByUser;
+                    if (leverageByUser.containsKey(order.userId())) {
+                        leverage = leverageByUser.get(order.userId());
+                    } else {
+                        Long configured = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
+                        leverage = configured == null ? instrument.maxLeveragePpm() : configured;
+                        leverageByUser.put(order.userId(), leverage);
+                    }
                 }
                 // 为当前订单已经准备好的所属账户持仓身份键。
                 long key = identities.preparedPositionKey(lane, order);
@@ -498,10 +497,11 @@ public final class RuntimeDerivativeMatchProcessor {
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta,
                                        long commitTimestamp, long commitPosition) {
-        // 直接逐笔路径从所属 Lane 读取的可空用户杠杆。
-        Long configuredLeverage = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
-        // 本轮当前用户及保证金模式实际使用的杠杆。
-        long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
+        long leverage = 0;
+        if (!instrument.contractType().isOption()) {
+            Long configuredLeverage = runtime.leverage(lane, order.userId(), instrument.instrumentId(), order.marginMode());
+            leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
+        }
         RuntimeDerivativeFillCalculator.apply(runtime, lane, identities, instrument, order,
                 identities.preparedPositionKey(lane, order),
                 priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, commitTimestamp, commitPosition);

@@ -470,7 +470,7 @@ public final class RuntimeOrderAdmission {
     private static long effectiveLeverage(
             AccountLaneState lane, CoreInstrument instrument,
             ResolvedPlaceOrder order, long userId) {
-        if (!instrument.contractType().productLine().isDerivative()) return 0;
+        if (!instrument.contractType().productLine().isDerivative() || instrument.contractType().isOption()) return 0;
         if (lane.leverageValuesEmpty()) return instrument.maxLeveragePpm();
         // 所属 Lane 借用的杠杆查找键，本次查询完成或失败都要清理。
         var lookup = lane.leverageLookup();

@@ -83,7 +83,7 @@ public final class ClusterProductLineGateMain {
 
     private void execute() {
         applied(1, CoreMessageType.REGISTER_INSTRUMENT,
-                TradingCommandCodec.encodeRegisterInstrument(instrument()));
+                TradingCommandCodec.encodeRegisterInstrument(instrument(), productLine));
         if (productLine == ProductLine.SPOT) {
             executeSpot();
             return;

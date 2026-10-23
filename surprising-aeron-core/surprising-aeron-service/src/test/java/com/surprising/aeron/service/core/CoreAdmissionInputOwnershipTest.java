@@ -43,7 +43,7 @@ class CoreAdmissionInputOwnershipTest {
     @ParameterizedTest @ValueSource(strings = {"RATE_ZERO", "FLOOR_CAP", "FLOOR_ABOVE", "PROPORTIONAL"})
     void ownerSkipsUnneededOiWithoutDroppingFixedFloorCapOrProportionalChecks(String mode) throws Exception {
         try (/* 本场景自动关闭的真实交易 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
-            applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument(core.productLine, mode)));
+            applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument(core.productLine, mode), ProductLine.LINEAR_PERPETUAL));
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             applied(core, CoreMessageType.ADJUST_BALANCE, 7,
@@ -124,7 +124,7 @@ class CoreAdmissionInputOwnershipTest {
         var release = new java.util.concurrent.CountDownLatch(1);
         try (/* 本场景自动关闭的真实交易 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(instrument(core.productLine, "PROPORTIONAL")));
+                    TradingCommandCodec.encodeRegisterInstrument(instrument(core.productLine, "PROPORTIONAL"), ProductLine.LINEAR_PERPETUAL));
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
             applied(core, CoreMessageType.ADJUST_BALANCE, 7,

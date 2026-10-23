@@ -52,7 +52,7 @@ class CommittedAlgoProjectionPostgresTest {
         try(var replay=new CommittedTradeReplay(ProductLine.SPOT,null)) {
             var register=new RegisterInstrumentCommand(
                     "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
-            apply(replay,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(register),1);
+            apply(replay,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(register, ProductLine.SPOT),1);
             var parent = new CoreAlgoOrderCommand.Create(701, "client-701", "604", 0, CoreOrderSide.BUY,
                     100, 4, 2, 5, 20, CoreMarginMode.CROSS, CorePositionSide.NET, false, false,
                     CoreTimeInForce.GTC, 1000);

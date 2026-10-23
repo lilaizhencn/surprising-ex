@@ -24,7 +24,7 @@ class CommittedTradeReplayTest {
         try(/* 本场景自动关闭的独立真实回放实例 */ var replay=new CommittedTradeReplay(line,null)) {
             send(replay,line,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
                     new RegisterInstrumentCommand(
-                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
+                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0), line));
             send(replay,line,CoreMessageType.ADJUST_BALANCE,7,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000)));
             place(replay,line,7,201,CoreOrderSide.BUY);/* 同 UUID 冲突前独立保存的成功尝试收据 */ var original=replay.commandResult();
             // 本次独立日志和来源序号
@@ -60,7 +60,7 @@ class CommittedTradeReplayTest {
                             new CoreInstrumentRiskLimits(
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
-                            0, 0, 2_000_000_000_000L, 0, 100)));
+                            0, 0, 2_000_000_000_000L, 0, 100), line));
             for (long /* 当前循环需要备资的用户 ID */ user : new long[]{7, 8}) send(replay, line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000_000)));
             send(replay, line, CoreMessageType.APPLY_MARK_PRICE, 0,
@@ -118,7 +118,7 @@ class CommittedTradeReplayTest {
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
             send(replay, ProductLine.SPOT, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
+                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0), ProductLine.SPOT));
             send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1000000)));
             place(replay, ProductLine.SPOT, 7, 201, CoreOrderSide.BUY);
@@ -146,7 +146,7 @@ class CommittedTradeReplayTest {
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
             send(replay, ProductLine.SPOT, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
+                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0), ProductLine.SPOT));
             send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1000000)));
             send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 8,
@@ -201,7 +201,7 @@ class CommittedTradeReplayTest {
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT,null)) {
             send(replay,ProductLine.SPOT,CoreMessageType.REGISTER_INSTRUMENT,0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
+                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0), ProductLine.SPOT));
             send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,7,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000)));
             send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,8,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC",1000000)));
             place(replay,ProductLine.SPOT,8,202,CoreOrderSide.SELL);
@@ -231,7 +231,7 @@ class CommittedTradeReplayTest {
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT,null)) {
             send(replay,ProductLine.SPOT,CoreMessageType.REGISTER_INSTRUMENT,0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
+                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0), ProductLine.SPOT));
             send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(0,1,List.of()), 0));
             send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(2,2,List.of()), 0));
             send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(1,3,List.of()), 0));
@@ -252,7 +252,7 @@ class CommittedTradeReplayTest {
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT,null)) {
             send(replay,ProductLine.SPOT,CoreMessageType.REGISTER_INSTRUMENT,0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
+                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0), ProductLine.SPOT));
             send(replay,ProductLine.SPOT,CoreMessageType.ADJUST_BALANCE,7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000)));
             send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(0,1,List.of()), 0));
@@ -295,7 +295,7 @@ class CommittedTradeReplayTest {
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
             send(replay, ProductLine.SPOT, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0)));
+                            "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0), ProductLine.SPOT));
             send(replay, ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
             assertThat(place(replay, ProductLine.SPOT, 7, 201, CoreOrderSide.BUY)).isEmpty();
@@ -326,7 +326,7 @@ class CommittedTradeReplayTest {
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                             0, 0, type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
-                            type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
+                            type.isOption() ? 0 : -1, type.isOption() ? 100 : 0), line));
             for (long /* 当前循环需要备资的用户 ID */ user : new long[]{7, 8}) for (String /* 本轮给用户备资的 BTC 或 USDT */ asset : List.of("BTC", "USDT"))
                 send(replay, line, CoreMessageType.ADJUST_BALANCE, user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 1_000_000)));

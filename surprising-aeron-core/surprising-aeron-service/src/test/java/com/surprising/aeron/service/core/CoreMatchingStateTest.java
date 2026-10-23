@@ -1344,7 +1344,7 @@ class CoreMatchingStateTest {
         // 当前辅助器构造的完整协议命令帧。
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), productLine, CommandSource.OPERATIONS, 88, 1, 1,
-                1_000, 1), TradingCommandCodec.encodeRegisterInstrument(instrument));
+                1_000, 1), TradingCommandCodec.encodeRegisterInstrument(instrument, productLine));
         assertThat(submit(state, message).status()).isEqualTo(ResponseStatus.APPLIED);
         // 注册后提交的固定参考价命令，期权同时提供指数和远期参考价。
         CoreMessage mark = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,

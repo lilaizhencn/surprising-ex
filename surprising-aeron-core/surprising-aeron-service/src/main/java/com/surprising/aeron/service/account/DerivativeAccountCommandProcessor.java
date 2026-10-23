@@ -208,11 +208,9 @@ public final class DerivativeAccountCommandProcessor {
             // 原保证金、按入场价与标记价计算的目标保证金三者的最大值，不在降杠杆时释放原保证金。
             long margin = Math.max(position.positionMarginUnits(), Math.max(
                     com.surprising.aeron.service.product.derivative.FuturesFillCalculator.openingMarginForFill(
-                            instrument, position.signedQuantitySteps(), position.signedQuantitySteps(), quantity,
-                            position.entryPriceTicks(), leveragePpm, mark),
+                            instrument, position.signedQuantitySteps(), quantity, position.entryPriceTicks(), leveragePpm),
                     com.surprising.aeron.service.product.derivative.FuturesFillCalculator.openingMarginForFill(
-                            instrument, position.signedQuantitySteps(), position.signedQuantitySteps(), quantity,
-                            mark.markPriceTicks(), leveragePpm, mark)));
+                            instrument, position.signedQuantitySteps(), quantity, mark.markPriceTicks(), leveragePpm)));
             additional = Math.addExact(additional, Math.subtractExact(margin, position.positionMarginUnits()));
             if (assetId != -1 && assetId != position.assetId()) throw new IllegalStateException("position settlement asset mismatch");
             assetId = position.assetId();

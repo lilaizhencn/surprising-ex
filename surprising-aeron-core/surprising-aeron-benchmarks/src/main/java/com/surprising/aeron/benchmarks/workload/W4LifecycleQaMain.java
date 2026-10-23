@@ -452,7 +452,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                         (type == ContractType.SPOT ? null : new CoreInstrumentRiskLimits(
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 100_000)))),
-                        MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM, expiry, optionCode, strike)));
+                        MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM, expiry, optionCode, strike), type.productLine()));
     }
 
     private void registerInstrumentViaProvider(String instrumentId, ContractType type, int optionCode,
