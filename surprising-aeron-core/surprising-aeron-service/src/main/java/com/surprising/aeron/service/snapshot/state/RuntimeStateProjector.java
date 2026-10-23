@@ -213,7 +213,7 @@ public final class RuntimeStateProjector {
     public static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities,
                                               CoreInstrument instrument) {
         return new OrderRuntime(order.orderId(), order.productLine(), order.userId(),
-                identities.symbolId(order.instrumentId()), instrument, order.side(), order.priceTicks(),
+                identities.symbolId(order.instrumentId()), instrument, order.side(),
                 order.matchingPriceTicks(),
                 order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
                 order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),

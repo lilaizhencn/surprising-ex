@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 48;
+    private static final int VERSION = 49;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -254,7 +254,7 @@ public final class TradingStateSnapshotCodec {
     }
 
     /**
-     * 按固定字段编号写入普通订单，保存原请求价、撮合保护价、累计数量与费用、一百二十八位成交值、时间和状态；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
+     * 按固定字段编号写入普通订单，保存撮合保护价（原请求价按产品和类型读取）、累计数量与费用、一百二十八位成交值、时间和状态；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的普通订单业务值
      */
     private static byte[] writeCoreOrderState(CoreOrderState value) {
@@ -263,7 +263,6 @@ public final class TradingStateSnapshotCodec {
                 .number(3, value.userId()) // 3：所属用户编号
                 .text(4, value.instrumentId()) // 4：币对或合约业务编号
                 .number(5, SnapshotEnumCodes.encode(value.side())) // 5：买入或卖出方向
-                .number(6, value.priceTicks()) // 6：原请求订单价格
                 .number(7, value.matchingPriceTicks()) // 7：订单提交给 Matcher 的实际撮合保护价格
                 .number(8, value.quantitySteps()) // 8：订单原请求数量
                 .number(9, value.executedQuantitySteps()) // 9：订单累计已成交数量
@@ -288,7 +287,7 @@ public final class TradingStateSnapshotCodec {
                 .encode();
     }
     /**
-     * 按固定字段编号读取并构造普通订单，恢复原请求价、撮合保护价、累计数量与费用、一百二十八位成交值、时间和状态；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
+     * 按固定字段编号读取并构造普通订单，恢复撮合保护价（原请求价按产品和类型读取）、累计数量与费用、一百二十八位成交值、时间和状态；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前普通订单的独立字段记录字节
      */
     private static CoreOrderState readCoreOrderState(byte[] encoded, ProductLine productLine) {
@@ -300,7 +299,6 @@ public final class TradingStateSnapshotCodec {
                 r.number(3), // 3：所属用户编号
                 r.text(4), // 4：币对或合约业务编号
                 SnapshotEnumCodes.readCoreOrderSide(r.integer(5)), // 5：买入或卖出方向
-                r.number(6), // 6：原请求订单价格
                 r.number(7), // 7：订单提交给 Matcher 的实际撮合保护价格
                 r.number(8), // 8：订单原请求数量
                 r.number(9), // 9：订单累计已成交数量

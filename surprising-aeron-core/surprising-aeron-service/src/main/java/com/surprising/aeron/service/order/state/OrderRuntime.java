@@ -44,11 +44,7 @@ public final class OrderRuntime {
     @Accessors(fluent = true, chain = false)
     @Getter
     private CoreOrderSide side;
-    /** 原请求的限价或现货市价保护边界，衍生品市价请求可为 0。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long priceTicks;
-    /** 实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存。 */
+    /** 实际交给Matcher的价格或市价保护边界，也是限价或现货请求价的权威值。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private long matchingPriceTicks;
@@ -143,8 +139,7 @@ public final class OrderRuntime {
      * @param symbolId 币对的运行时稠密编号
      * @param instrument 订单绑定的规范币对对象，业务值比较也要求同一对象身份
      * @param side 买入或卖出方向
-     * @param priceTicks 原请求的限价或现货市价保护边界，衍生品市价请求可为 0
-     * @param matchingPriceTicks 实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存
+     * @param matchingPriceTicks 实际交给Matcher的价格或市价保护边界
      * @param quantitySteps 订单原始总数量步数，等于已成交加剩余数量
      * @param executedQuantitySteps 已经累计成交的数量步数
      * @param remainingQuantitySteps 仍未成交的数量步数，撤销后也可保留未成交数量
@@ -166,7 +161,7 @@ public final class OrderRuntime {
      * @param revision 订单业务版本，更新时由调用方提供后继版本
      */
     public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
-                        CoreInstrument instrument, CoreOrderSide side, long priceTicks,
+                        CoreInstrument instrument, CoreOrderSide side,
                         long matchingPriceTicks, long quantitySteps, long executedQuantitySteps,
                         long remainingQuantitySteps, boolean reduceOnly, CoreMarginMode marginMode,
                         CorePositionSide positionSide, CoreOrderType orderType,
@@ -174,7 +169,7 @@ public final class OrderRuntime {
                         UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
                         long cumulativeFeeUnits, long createdAtEpochMillis, long updatedAtEpochMillis,
                         long clusterPosition, CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbolId, instrument, side, priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedQuantitySteps == 0 ? 0 : -1, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
+        this(orderId, productLine, userId, symbolId, instrument, side, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedQuantitySteps == 0 ? 0 : -1, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
     }
 
     /**
@@ -185,8 +180,7 @@ public final class OrderRuntime {
      * @param symbolId 币对的运行时稠密编号
      * @param instrument 订单绑定的规范币对对象，业务值比较也要求同一对象身份
      * @param side 买入或卖出方向
-     * @param priceTicks 原请求的限价或现货市价保护边界，衍生品市价请求可为 0
-     * @param matchingPriceTicks 实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存
+     * @param matchingPriceTicks 实际交给Matcher的价格或市价保护边界
      * @param quantitySteps 订单原始总数量步数，等于已成交加剩余数量
      * @param executedQuantitySteps 已经累计成交的数量步数
      * @param remainingQuantitySteps 仍未成交的数量步数，撤销后也可保留未成交数量
@@ -210,7 +204,7 @@ public final class OrderRuntime {
      * @param revision 订单业务版本，更新时由调用方提供后继版本
      */
     public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
-                        CoreInstrument instrument, CoreOrderSide side, long priceTicks,
+                        CoreInstrument instrument, CoreOrderSide side,
                         long matchingPriceTicks, long quantitySteps, long executedQuantitySteps,
                         long remainingQuantitySteps, boolean reduceOnly, CoreMarginMode marginMode,
                         CorePositionSide positionSide, CoreOrderType orderType,
@@ -219,7 +213,7 @@ public final class OrderRuntime {
                         long cumulativeFeeUnits, long executedValueHigh, long executedValueLow, long createdAtEpochMillis, long updatedAtEpochMillis,
                         long clusterPosition, CoreOrderStatus status, long revision) {
         if (orderId <= 0 || productLine == null || userId <= 0 || symbolId < 0 || instrument == null
-                || side == null || priceTicks < 0 || matchingPriceTicks < 0
+                || side == null || matchingPriceTicks < 0
                 || quantitySteps <= 0 || executedQuantitySteps < 0 || remainingQuantitySteps < 0
                 || Math.addExact(executedQuantitySteps, remainingQuantitySteps) != quantitySteps
                 || marginMode == null || positionSide == null || orderType == null || timeInForce == null
@@ -236,7 +230,6 @@ public final class OrderRuntime {
         this.symbolId = symbolId;
         this.instrument = instrument;
         this.side = side;
-        this.priceTicks = priceTicks;
         this.matchingPriceTicks = matchingPriceTicks;
         this.quantitySteps = quantitySteps;
         this.executedQuantitySteps = executedQuantitySteps;
@@ -269,8 +262,7 @@ public final class OrderRuntime {
      * @param symbolId 币对的运行时稠密编号
      * @param instrument 订单绑定的规范币对对象，业务值比较也要求同一对象身份
      * @param side 买入或卖出方向
-     * @param priceTicks 原请求的限价或现货市价保护边界，衍生品市价请求可为 0
-     * @param matchingPriceTicks 实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存
+     * @param matchingPriceTicks 实际交给Matcher的价格或市价保护边界
      * @param quantitySteps 订单原始总数量步数，等于已成交加剩余数量
      * @param executedQuantitySteps 已经累计成交的数量步数
      * @param remainingQuantitySteps 仍未成交的数量步数，撤销后也可保留未成交数量
@@ -295,7 +287,7 @@ public final class OrderRuntime {
      * @param mutable 值用于可变 Lane 状态还是只读交接的标记，写入仍由调用方遵守原所有权
      */
     private OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
-                         CoreInstrument instrument, CoreOrderSide side, long priceTicks,
+                         CoreInstrument instrument, CoreOrderSide side,
                          long matchingPriceTicks, long quantitySteps, long executedQuantitySteps,
                          long remainingQuantitySteps, boolean reduceOnly, CoreMarginMode marginMode,
                          CorePositionSide positionSide, CoreOrderType orderType,
@@ -303,7 +295,7 @@ public final class OrderRuntime {
                          UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
                          long cumulativeFeeUnits, long executedValueHigh, long executedValueLow, long createdAtEpochMillis, long updatedAtEpochMillis,
                          long clusterPosition, CoreOrderStatus status, long revision, boolean mutable) {
-        this(orderId, productLine, userId, symbolId, instrument, side, priceTicks,
+        this(orderId, productLine, userId, symbolId, instrument, side,
                 matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId,
                 commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis,
@@ -313,100 +305,13 @@ public final class OrderRuntime {
     }
 
     /**
-     * 只提供一个价格时把原价格与实际撮合价设为相同，累计手续费从零开始。
-     * @param orderId 本订单唯一 Core 编号
-     * @param productLine 订单所属独立产品线
-     * @param userId 订单所属用户编号
-     * @param symbolId 币对的运行时稠密编号
-     * @param instrument 订单绑定的规范币对对象，业务值比较也要求同一对象身份
-     * @param side 买入或卖出方向
-     * @param priceTicks 原请求的限价或现货市价保护边界，衍生品市价请求可为 0
-     * @param quantitySteps 订单原始总数量步数，等于已成交加剩余数量
-     * @param executedQuantitySteps 已经累计成交的数量步数
-     * @param remainingQuantitySteps 仍未成交的数量步数，撤销后也可保留未成交数量
-     * @param reduceOnly 是否只允许减少已有持仓
-     * @param marginMode 全仓或逐仓保证金模式
-     * @param positionSide 净持仓或双向持仓腿身份
-     * @param orderType 限价或市价等订单类型
-     * @param timeInForce GTC、IOC、FOK 或 GTX 等有效期策略
-     * @param postOnly 是否要求只成为挂单方，构造校验要求 LIMIT 且 GTX
-     * @param clientOrderId 用户客户端订单标识，普通有效值不超过 64 个字符
-     * @param commandId 创建该订单的业务命令 UUID
-     * @param makerFeeRatePpm 下单时固定的 Maker 百万分比费率，可为负返佣
-     * @param takerFeeRatePpm 下单时固定的 Taker 百万分比费率
-     * @param createdAtEpochMillis 订单创建的集群业务时间，初始为 0 时可在首次提交补齐
-     * @param updatedAtEpochMillis 最近一次订单提交或状态更新的集群业务时间
-     * @param clusterPosition 最近一次提交的集群日志位置
-     * @param status 订单当前活动或终态状态
-     * @param revision 订单业务版本，更新时由调用方提供后继版本
-     */
-    public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
-                        CoreInstrument instrument, CoreOrderSide side, long priceTicks,
-                        long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
-                        boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
-                        CoreOrderType orderType, CoreTimeInForce timeInForce, boolean postOnly,
-                        String clientOrderId, UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
-                        long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
-                        CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbolId, instrument, side, priceTicks, priceTicks,
-                quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode,
-                positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
-                makerFeeRatePpm, takerFeeRatePpm, 0, createdAtEpochMillis, updatedAtEpochMillis,
-                clusterPosition, status, revision);
-    }
-
-    /**
-     * 显式区分原请求价和撮合边界，但不提供累计费用，初始费用为零。
-     * @param orderId 本订单唯一 Core 编号
-     * @param productLine 订单所属独立产品线
-     * @param userId 订单所属用户编号
-     * @param symbolId 币对的运行时稠密编号
-     * @param instrument 订单绑定的规范币对对象，业务值比较也要求同一对象身份
-     * @param side 买入或卖出方向
-     * @param priceTicks 原请求的限价或现货市价保护边界，衍生品市价请求可为 0
-     * @param matchingPriceTicks 实际交给 Matcher 的价格或市价保护边界，与原请求价格分开保存
-     * @param quantitySteps 订单原始总数量步数，等于已成交加剩余数量
-     * @param executedQuantitySteps 已经累计成交的数量步数
-     * @param remainingQuantitySteps 仍未成交的数量步数，撤销后也可保留未成交数量
-     * @param reduceOnly 是否只允许减少已有持仓
-     * @param marginMode 全仓或逐仓保证金模式
-     * @param positionSide 净持仓或双向持仓腿身份
-     * @param orderType 限价或市价等订单类型
-     * @param timeInForce GTC、IOC、FOK 或 GTX 等有效期策略
-     * @param postOnly 是否要求只成为挂单方，构造校验要求 LIMIT 且 GTX
-     * @param clientOrderId 用户客户端订单标识，普通有效值不超过 64 个字符
-     * @param commandId 创建该订单的业务命令 UUID
-     * @param makerFeeRatePpm 下单时固定的 Maker 百万分比费率，可为负返佣
-     * @param takerFeeRatePpm 下单时固定的 Taker 百万分比费率
-     * @param createdAtEpochMillis 订单创建的集群业务时间，初始为 0 时可在首次提交补齐
-     * @param updatedAtEpochMillis 最近一次订单提交或状态更新的集群业务时间
-     * @param clusterPosition 最近一次提交的集群日志位置
-     * @param status 订单当前活动或终态状态
-     * @param revision 订单业务版本，更新时由调用方提供后继版本
-     */
-    public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
-                        CoreInstrument instrument, CoreOrderSide side, long priceTicks,
-                        long matchingPriceTicks, long quantitySteps, long executedQuantitySteps,
-                        long remainingQuantitySteps, boolean reduceOnly, CoreMarginMode marginMode,
-                        CorePositionSide positionSide, CoreOrderType orderType, CoreTimeInForce timeInForce,
-                        boolean postOnly, String clientOrderId, UUID commandId, long makerFeeRatePpm,
-                        long takerFeeRatePpm, long createdAtEpochMillis, long updatedAtEpochMillis,
-                        long clusterPosition, CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbolId, instrument, side, priceTicks,
-                matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
-                reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId,
-                commandId, makerFeeRatePpm, takerFeeRatePpm, 0, createdAtEpochMillis,
-                updatedAtEpochMillis, clusterPosition, status, revision);
-    }
-
-    /**
      * 简化构造入口默认采用 U 本位永续产品线，再按给定成交量和取消标记创建订单。
      * @param orderId 本订单唯一 Core 编号
      * @param userId 订单所属用户编号
      * @param symbolId 币对的运行时稠密编号
      * @param instrument 订单绑定的规范币对对象，业务值比较也要求同一对象身份
      * @param side 买入或卖出方向
-     * @param priceTicks 原请求的限价或现货市价保护边界，衍生品市价请求可为 0
+     * @param priceTicks 实际撮合价或市价保护边界
      * @param reduceOnly 是否只允许减少已有持仓
      * @param marginMode 全仓或逐仓保证金模式
      * @param positionSide 净持仓或双向持仓腿身份
@@ -439,7 +344,7 @@ public final class OrderRuntime {
      * @param symbolId 币对的运行时稠密编号
      * @param instrument 订单绑定的规范币对对象，业务值比较也要求同一对象身份
      * @param side 买入或卖出方向
-     * @param priceTicks 原请求的限价或现货市价保护边界，衍生品市价请求可为 0
+     * @param priceTicks 实际撮合价或市价保护边界
      * @param reduceOnly 是否只允许减少已有持仓
      * @param marginMode 全仓或逐仓保证金模式
      * @param positionSide 净持仓或双向持仓腿身份
@@ -458,11 +363,16 @@ public final class OrderRuntime {
                         CoreOrderType orderType, CoreTimeInForce timeInForce, long makerFeeRatePpm,
                         long takerFeeRatePpm, long quantitySteps, long executedQuantitySteps,
                         long remainingQuantitySteps, boolean canceled) {
-        this(orderId, productLine, userId, symbolId, instrument, side, priceTicks, priceTicks,
+        this(orderId, productLine, userId, symbolId, instrument, side, priceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode,
                 positionSide, orderType, timeInForce, false, "", new UUID(0, orderId),
                 makerFeeRatePpm, takerFeeRatePpm, 0, 0, 0, 0,
                 canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
+    }
+
+    /** 原请求价：衍生品市价为0，现货保护边界和限价由实际撮合价提供。 */
+    public long priceTicks() {
+        return productLine != ProductLine.SPOT && orderType == CoreOrderType.MARKET ? 0 : matchingPriceTicks;
     }
 
     /** 返回总量减累计成交量的历史未成交数量，撤销后仍保留；不另存副本。 */
@@ -480,7 +390,7 @@ public final class OrderRuntime {
      */
     public OrderRuntime snapshot() {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
-                priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps,
+                matchingPriceTicks, quantitySteps, executedQuantitySteps,
                 remainingQuantitySteps(), reduceOnly, marginMode, positionSide, orderType, timeInForce,
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
@@ -534,7 +444,6 @@ public final class OrderRuntime {
         target.symbolId = symbolId;
         target.instrument = instrument;
         target.side = side;
-        target.priceTicks = priceTicks;
         target.matchingPriceTicks = matchingPriceTicks;
         target.quantitySteps = quantitySteps;
         target.reduceOnly = reduceOnly;
@@ -658,7 +567,7 @@ public final class OrderRuntime {
             throw new IllegalArgumentException("invalid order admission");
         target.orderId = intent.orderId(); target.productLine = product; target.userId = userId;
         target.symbolId = symbolId; target.instrument = intent.instrument(); target.side = intent.side();
-        target.priceTicks = intent.limitPriceTicks(); target.matchingPriceTicks = intent.matchingPriceTicks();
+        target.matchingPriceTicks = intent.matchingPriceTicks();
         target.quantitySteps = intent.quantitySteps();
         target.executedQuantitySteps = target.cumulativeFeeUnits = target.executedValueHigh = target.executedValueLow = 0;
         target.reduceOnly = intent.reduceOnly(); target.marginMode = intent.marginMode(); target.positionSide = intent.positionSide();
@@ -724,7 +633,7 @@ public final class OrderRuntime {
      */
     private OrderRuntime mutableCopy() {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
-                priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps(),
+                matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps(),
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
                 makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis,
                 clusterPosition, status, revision);
@@ -855,7 +764,7 @@ public final class OrderRuntime {
      * @param nextRevision 本次推进到的正数订单版本
      */
     public OrderRuntime withExecution(long executed, long remaining, CoreOrderStatus nextStatus, long nextRevision) {
-        return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side, priceTicks,
+        return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
                 matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm,
                 takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis,
@@ -889,7 +798,7 @@ public final class OrderRuntime {
                           CoreOrderStatus nextStatus, long nextRevision,
                           long commitTimestamp, long commitPosition) {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
-                priceTicks, matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly,
+                matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
                 makerFeeRatePpm, takerFeeRatePpm, Math.addExact(cumulativeFeeUnits, feeUnits), executedValueHigh, executedValueLow,
                 createdAtEpochMillis == 0 && commitTimestamp >= 0 ? commitTimestamp : createdAtEpochMillis,
@@ -926,7 +835,7 @@ public final class OrderRuntime {
      */
     public OrderRuntime withCommitMetadata(long timestamp, long position) {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
-                priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps,
+                matchingPriceTicks, quantitySteps, executedQuantitySteps,
                 remainingQuantitySteps(), reduceOnly, marginMode, positionSide, orderType, timeInForce,
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis == 0 ? timestamp : createdAtEpochMillis,
@@ -942,7 +851,7 @@ public final class OrderRuntime {
         if (this == other) return true;
         if (!(other instanceof OrderRuntime /* 类型匹配成功的待比较订单，只比较业务字段。 */ value)) return false;
         return orderId == value.orderId && userId == value.userId && symbolId == value.symbolId
-                && instrument == value.instrument && priceTicks == value.priceTicks
+                && instrument == value.instrument
                 && matchingPriceTicks == value.matchingPriceTicks && quantitySteps == value.quantitySteps
                 && executedQuantitySteps == value.executedQuantitySteps
                 && reduceOnly == value.reduceOnly
@@ -962,7 +871,7 @@ public final class OrderRuntime {
      */
     @Override
     public int hashCode() {
-        return Objects.hash(orderId, productLine, userId, symbolId, System.identityHashCode(instrument), side, priceTicks,
+        return Objects.hash(orderId, productLine, userId, symbolId, System.identityHashCode(instrument), side, priceTicks(),
                 matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps(),
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId,
                 commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis,
@@ -976,7 +885,7 @@ public final class OrderRuntime {
     public String toString() {
         return "OrderRuntime[orderId=" + orderId + ", productLine=" + productLine + ", userId=" + userId
                 + ", symbolId=" + symbolId + ", instrument=" + instrument + ", side=" + side
-                + ", priceTicks=" + priceTicks + ", matchingPriceTicks=" + matchingPriceTicks
+                + ", priceTicks=" + priceTicks() + ", matchingPriceTicks=" + matchingPriceTicks
                 + ", quantitySteps=" + quantitySteps + ", executedQuantitySteps=" + executedQuantitySteps
                 + ", remainingQuantitySteps=" + remainingQuantitySteps() + ", status=" + status
                 + ", revision=" + revision + "]";

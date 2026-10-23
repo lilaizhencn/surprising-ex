@@ -59,7 +59,7 @@ class RuntimeStateQueryServiceTest {
                 CorePositionSide.NET, instrument, 2, 60_000, 120_000, 7, 50));
         runtime.putLeverage(new CoreLeverageKey(1001, "1", CoreMarginMode.CROSS), 5_000_000);
         runtime.putOrder(new OrderRuntime(71, ProductLine.LINEAR_PERPETUAL, 1001, symbolId, instrument,
-                CoreOrderSide.BUY, 60_000, 60_000, 2, 0, 2, false, CoreMarginMode.CROSS,
+                CoreOrderSide.BUY, 60_000, 2, 0, 2, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-71",
                 UUID.fromString("10000000-0000-0000-0000-000000000071"), -10, 25, 0,
                 1_000, 1_000, 9, CoreOrderStatus.OPEN, 1));

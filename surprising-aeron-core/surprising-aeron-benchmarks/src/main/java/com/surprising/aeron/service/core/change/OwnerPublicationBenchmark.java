@@ -83,7 +83,7 @@ public class OwnerPublicationBenchmark {
         for (int i = 0; i < settlementOrders.length; i++) {
             boolean terminal = i % 4 == 0;
             settlementOrders[i] = new OrderRuntime(i + 1, ProductLine.LINEAR_PERPETUAL,
-                    7, 0, instrument, CoreOrderSide.BUY, 100, 100, 1, terminal ? 1 : 0,
+                    7, 0, instrument, CoreOrderSide.BUY, 100, 1, terminal ? 1 : 0,
                     terminal ? 0 : 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-" + i,
                     new UUID(1, i + 1), 0, 0, 0, 1000, 1000, 2000,

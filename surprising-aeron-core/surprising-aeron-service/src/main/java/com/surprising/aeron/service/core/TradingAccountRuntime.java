@@ -7497,7 +7497,7 @@ appendBalanceFundsDelta(patches, target);
             long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId,
             long timestamp, long position) {
         return new OrderRuntime(command.orderId(), productLine, userId, symbolId,
-                command.instrument(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
+                command.instrument(), command.side(), command.matchingPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
                 command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),

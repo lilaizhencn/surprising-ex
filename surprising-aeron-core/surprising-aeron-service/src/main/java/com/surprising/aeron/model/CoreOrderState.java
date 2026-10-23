@@ -16,8 +16,7 @@ import java.util.UUID;
  * @param userId 这份状态所属的用户编号，必须为正数
  * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
  * @param side 订单的买入或卖出方向
- * @param priceTicks 委托价格，单位为最小价格 tick，具体可否为零由订单类型决定
- * @param matchingPriceTicks 实际交给撮合的价格 tick，与对外保存的委托价格分别记录
+ * @param matchingPriceTicks 实际撮合价格或保护边界；原请求价格按产品和类型读取
  * @param quantitySteps 委托总数量，以币对配置的最小数量步数表示
  * @param executedQuantitySteps 已经成交的累计数量步数
  * @param reduceOnly 是否只允许减少已有持仓，不能借这笔订单增加反向或同向风险
@@ -45,7 +44,6 @@ public record CoreOrderState(
         long userId,
         String instrumentId,
         CoreOrderSide side,
-        long priceTicks,
         long matchingPriceTicks,
         long quantitySteps,
         long executedQuantitySteps,
@@ -73,7 +71,7 @@ public record CoreOrderState(
      */
     public CoreOrderState {
         if (orderId <= 0 || productLine == null || userId <= 0
-                || side == null || priceTicks < 0 || matchingPriceTicks < 0
+                || side == null || matchingPriceTicks < 0
                 || quantitySteps <= 0 || executedQuantitySteps < 0 || executedQuantitySteps > quantitySteps
                 || marginMode == null || positionSide == null || orderType == null || timeInForce == null
                 || clientOrderId == null || clientOrderId.length() > 64 || commandId == null
@@ -86,6 +84,11 @@ public record CoreOrderState(
         if (status == CoreOrderStatus.OPEN && executedQuantitySteps == quantitySteps) {
             throw new IllegalArgumentException("open order must have remaining quantity");
         }
+    }
+
+    /** 原请求价：衍生品市价为0，现货保护边界和限价由实际撮合价提供。 */
+    public long priceTicks() {
+        return productLine != ProductLine.SPOT && orderType == CoreOrderType.MARKET ? 0 : matchingPriceTicks;
     }
 
     /** 返回尚未成交的历史数量，撤单后仍保留；由总量和累计成交量推导，不另存副本。 */
@@ -146,7 +149,7 @@ public record CoreOrderState(
                           CoreMarginMode marginMode, CorePositionSide positionSide, CoreOrderType orderType,
                           CoreTimeInForce timeInForce, boolean postOnly, String clientOrderId, UUID commandId,
                           long makerFeeRatePpm, long takerFeeRatePpm, CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, instrumentId, side, priceTicks, priceTicks, quantitySteps,
+        this(orderId, productLine, userId, instrumentId, side, priceTicks, quantitySteps,
                 executedQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce,
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, 0,
                 executedQuantitySteps == 0 ? 0 : -1, 0, 0, 0, 0, status, revision);

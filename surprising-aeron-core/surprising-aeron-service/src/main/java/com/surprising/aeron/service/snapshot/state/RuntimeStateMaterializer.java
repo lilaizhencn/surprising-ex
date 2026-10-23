@@ -110,7 +110,7 @@ public final class RuntimeStateMaterializer {
             if (runtime.pendingReservations().pendingReservation(orderId, order.userId())) return;
             orders.put(orderId,
                 new CoreOrderState(orderId, order.productLine(), order.userId(), identities.instrumentId(order.symbolId()),
-                        order.side(), order.priceTicks(), order.matchingPriceTicks(),
+                        order.side(), order.matchingPriceTicks(),
                         order.quantitySteps(),
                         order.executedQuantitySteps(), order.reduceOnly(),
                         order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),

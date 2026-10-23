@@ -52,8 +52,7 @@ public class AccountQueryProjectionBenchmark {
         runtime.putPosition(identities.positionKey(7, "1"), new PositionRuntime(7, symbol, asset,
                 CoreMarginMode.CROSS, CorePositionSide.NET, instrument, 2, 100, 200, 7, 50));
         runtime.putLeverage(new CoreLeverageKey(7, "1", CoreMarginMode.CROSS), 5_000_000);
-        runtime.putOrder(new OrderRuntime(71, product, 7, symbol, instrument, CoreOrderSide.BUY,
-                100, 100, 2, 0, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+        runtime.putOrder(new OrderRuntime(71, product, 7, symbol, instrument, CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "query-71", new UUID(1, 71), 0, 0, 0,
                 1000, 1000, 9, CoreOrderStatus.OPEN, 1));
         runtime.putClientOrder(7, identities.clientKey(7, "query-71"), 71);

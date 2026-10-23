@@ -65,7 +65,7 @@ public final class DirectMatcherTestInputs {
             runtime.registerInstrument(instrument);
             // 为事件准备的 OPEN 准入订单，数量、方向和订单类型沿用输入
             var admitted = new OrderRuntime(order.orderId(), ProductLine.SPOT, userId,
-                    identities.symbolId(Integer.toString(order.instrumentId())), instrument, order.side(), order.matchingPriceTicks(),
+                    identities.symbolId(Integer.toString(order.instrumentId())), instrument, order.side(),
                     order.matchingPriceTicks(), order.quantitySteps(), 0, order.quantitySteps(), false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, order.orderType(), order.timeInForce(),
                     order.timeInForce() == CoreTimeInForce.GTX, "", commandId, 0, 0, 0,
