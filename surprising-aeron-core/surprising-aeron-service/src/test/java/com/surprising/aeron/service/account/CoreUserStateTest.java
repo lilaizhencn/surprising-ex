@@ -40,7 +40,8 @@ class CoreUserStateTest {
 
         // 从冻结后状态派生的预留变更，保留记录但把剩余量释放为零。
         Map<Long, OrderReservation> releasedReservations = new TreeMap<>(reserved.reservations());
-        releasedReservations.put(reservation.orderId(), reservation.releaseAll());
+        releasedReservations.put(reservation.orderId(), new OrderReservation(11, "1",
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 300, 300, 0, 1));
         // 恢复可用一千、冻结为零的余额完整。
         Map<String, AssetBalance> releasedBalances = new TreeMap<>(reserved.balances());
         releasedBalances.put("USDT", new AssetBalance("USDT", 1_000, 0));
@@ -150,7 +151,8 @@ class CoreUserStateTest {
         settledBalances.put("USDT", new AssetBalance("USDT", 1_000, 0));
         // 从冻结后状态继续派生、准备释放预留的完整表。
         Map<Long, OrderReservation> settledOrders = new TreeMap<>(reserved.reservations());
-        settledOrders.put(11L, reservedOrders.get(11L).releaseAll());
+        settledOrders.put(11L, new OrderReservation(11, "1",
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", 300, 300, 0, 1));
         // 完成第二次完整快照构造的最终用户。
         CoreUserState settled = new CoreUserState(reserved.productLine(), reserved.userId(), 2, settledBalances, settledOrders, reserved.positions(),
                 reserved.positionMode());

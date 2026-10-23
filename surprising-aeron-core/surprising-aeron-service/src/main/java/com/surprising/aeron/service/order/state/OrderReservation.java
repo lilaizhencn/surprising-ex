@@ -1,13 +1,12 @@
 package com.surprising.aeron.service.order.state;
 
-import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.protocol.ReservationKind;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
 /**
- * 不可变的业务冻结记录，剩余冻结等于总额扣掉累计释放和累计消耗。金额变化返回新记录并复用已校验身份文本；本对象只描述金额，真实账户余额移动由账户入口处理。
+ * 不可变的业务冻结记录，剩余冻结等于总额扣掉累计释放和累计消耗。本对象保存导出、恢复和核对所需的金额事实，实际冻结和余额移动由原账户运行时处理。
  */
 public final class OrderReservation {
     /** 这份冻结对应的正数订单编号。 */
@@ -67,26 +66,6 @@ public final class OrderReservation {
         this.releasedUnits = releasedUnits;
         this.consumedUnits = consumedUnits;
         this.orderQuantitySteps = orderQuantitySteps;
-    }
-
-    /**
-     * 按新的金额构造后状态，继续校验金额守恒并借用原记录已经校验的身份、资产和数量基数。
-     * @param previous 提供已校验身份和数量基数的原冻结记录
-     * @param reservedUnits 本记录的冻结总额上限，不是当前剩余额度
-     * @param releasedUnits 已经从冻结中释放的累计金额
-     * @param consumedUnits 已经因成交等业务消耗的累计冻结金额
-     */
-    private OrderReservation(OrderReservation previous, long reservedUnits, long releasedUnits, long consumedUnits) {
-        validateAmounts(previous.orderId, previous.kind, reservedUnits,
-                releasedUnits, consumedUnits, previous.orderQuantitySteps);
-        orderId = previous.orderId;
-        instrumentId = previous.instrumentId;
-        kind = previous.kind;
-        asset = previous.asset;
-        this.reservedUnits = reservedUnits;
-        this.releasedUnits = releasedUnits;
-        this.consumedUnits = consumedUnits;
-        orderQuantitySteps = previous.orderQuantitySteps;
     }
 
     /**
@@ -174,49 +153,6 @@ public final class OrderReservation {
      */
     public long remainingUnits() {
         return Math.subtractExact(reservedUnits, Math.addExact(releasedUnits, consumedUnits));
-    }
-
-    /**
-     * 把全部剩余额度作为正数释放；已经没有余额时会沿用 release 的拒绝规则，不是空操作。
-     */
-    public OrderReservation releaseAll() {
-        return release(remainingUnits());
-    }
-
-    /**
-     * 要求释放金额为正且不超过剩余额度，返回累计释放增加的新记录，原记录不变。
-     * @param units 本次要释放或消耗的正数金额，不能超过剩余额度
-     */
-    public OrderReservation release(long units) {
-        if (units <= 0 || units > remainingUnits()) {
-            throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
-                    "order reservation is insufficient for release");
-        }
-        return new OrderReservation(this, reservedUnits, Math.addExact(releasedUnits, units), consumedUnits);
-    }
-
-    /**
-     * 要求消耗金额为正且不超过剩余额度，返回累计消耗增加的新记录，原记录不变。
-     * @param units 本次要释放或消耗的正数金额，不能超过剩余额度
-     */
-    public OrderReservation consume(long units) {
-        if (units <= 0 || units > remainingUnits()) {
-            throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
-                    "order reservation is insufficient for fill");
-        }
-        return new OrderReservation(this, reservedUnits, releasedUnits, Math.addExact(consumedUnits, units));
-    }
-
-    /**
-     * 替换冻结总额上限，必须仍为正且足以覆盖已有释放及消耗，原身份和数量基数保持相同。
-     * @param newReservedUnits 调整后的冻结总额，不能低于已经释放和消耗的精确和
-     */
-    public OrderReservation replaceReservedUnits(long newReservedUnits) {
-        if (newReservedUnits <= 0 || newReservedUnits < Math.addExact(releasedUnits, consumedUnits)) {
-            throw new CoreStateRejectedException("INVALID_REPLACEMENT_RESERVATION",
-                    "replacement reservation is below already settled units");
-        }
-        return new OrderReservation(this, newReservedUnits, releasedUnits, consumedUnits);
     }
 
     /**

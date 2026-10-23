@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第十八轮：A89六个冷订单转换清理并通过17模块干净/最终编译；累计88项解决，A90一项确认，A11一项候选。Core16/registerV10/snapshot48，全量审查继续。",
+    "checkpoint": "第十九轮：A90四个冷冻结转换及私有复制构造清理并通过17模块干净编译；累计89项解决，A91/A92两项确认，A11一项候选。Core16/registerV10/snapshot48，全量审查继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -5714,8 +5714,8 @@
     },
     {
       "id": "A90",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "冻结冷记录的四个测试专用金额转换及私有复制构造形成重复业务入口",
       "fields": [
         "OrderReservation.releaseAll",
@@ -5738,8 +5738,56 @@
           "purpose": "孤立冷转换测试要求文本引用相同，但业务使用规范文本值/整数身份；此对象引用约束不能作为保留无用复制构造的理由。"
         }
       ],
+      "business_code_changed": true,
+      "proposed_cleanup": "删除四个冷转换和私有复制构造；验证测试直接构造消耗/释放后的金额事实并检查remainingUnits、等值及输入边界，用户快照夹具直接提供释放后记录。保留实际使用的create、全部8字段、规范化、validateAmounts精确金额守恒和原运行时资金/冻结流程。",
+      "resolved_in_round": "nineteenth_cleanup_round",
+      "implementation": "删除四个冻结冷记录转换和私有复制构造；两个用户快照夹具直接构造同值的释放后记录，金额验证改为规范文本值相等及完整金额事实边界，不要求文本对象引用相同。保留create、全部8字段、规范化、剩余量、validateAmounts精确守恒和全部真实运行时资金代码。"
+    },
+    {
+      "id": "A91",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "下单决策保留仅供测试的冷状态解析分支和未分配身份模式",
+      "fields": [
+        "CoreOrderDecisionResolver.resolve(TradingCoreState,PlaceOrderCommand)",
+        "该入口生成ResolvedPlaceOrder.symbolId=-1的模式"
+      ],
+      "evidence_basis_commit": "9e0168e27d7852a9e49ed2cfbeeac4ef2e7be780",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+          "anchor": "public static ResolvedPlaceOrder resolve(TradingCoreState state, PlaceOrderCommand intent)",
+          "purpose": "精确classfile方法描述符只有测试RuntimeTestStateTransitions调用；分支重复价格/资产计算，跳过在线到期、价格鲜度及用户费率上下文。"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java",
+          "anchor": "CoreOrderDecisionResolver.resolve(before, command)",
+          "purpose": "辅助下单已先投影到runtime，却又用原冷状态重复决策；应核对场景后改走已有真实决策上下文。"
+        }
+      ],
       "business_code_changed": false,
-      "proposed_cleanup": "删除四个冷转换和私有复制构造；验证测试直接构造消耗/释放后的金额事实并检查remainingUnits、等值及输入边界，用户快照夹具直接提供释放后记录。保留实际使用的create、全部8字段、规范化、validateAmounts精确金额守恒和原运行时资金/冻结流程。"
+      "proposed_cleanup": "迁移该测试辅助入口并删除冷决策分支；审查symbolId=-1与相关重复身份传参的实际消费者。必须给测试明确、有效的时间/行情/费率上下文，不能为使测试继续构造而放松线上到期、鲜度或费用约束；运行时resolve、预检和触发下单路径保留。"
+    },
+    {
+      "id": "A92",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "测试下单辅助入口构造和传递无人使用的活动订单索引",
+      "fields": [
+        "RuntimeTestStateTransitions.placeOrder完整重载activeOrders形参",
+        "PlaceOrderCommand简短重载new ActiveOrderIndex(before)",
+        "ResolvedPlaceOrder重载局部activeOrders及new ActiveOrderIndex(before)"
+      ],
+      "evidence_basis_commit": "9e0168e27d7852a9e49ed2cfbeeac4ef2e7be780",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java",
+          "anchor": "UUID commandId, long openInterestSteps, ActiveOrderIndex activeOrders)",
+          "purpose": "该重载使用runtime.admissionOrders取得真实准入汇总，不读取传入索引；已决策重载的局部索引也从不读取。其他生命周期/成交夹具的同名索引有用途，不一并删除。"
+        }
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "删去这一下单形参和两处冗余索引创建并迁移调用；仅清理此作用域，保留其他实际使用的生命周期或成交索引参数。"
     }
   ],
   "preserve_verified_purposes": [
@@ -5757,8 +5805,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "清理A90冻结冷记录的四个测试专用转换、私有复制构造和文本引用相同测试约束，保留实际金额/标识与规范化。",
-    "继续逐业务核对剩余字段和无用约束，不按没有生产调用机械删除实际夹具便利入口。",
+    "清理A91测试专用冷下单决策，先核对并给出真实决策上下文，保留线上到期/鲜度/费用规则。",
+    "清理A92测试placeOrder的无用活动索引形参和两处构造；保留其他确有用途的索引。",
+    "postOnly与TIF先保留现有契约和改单语义；继续检查业务字段，不按表面关系直接派生。",
     "保持A11一致性边界；仅编译相关模块，不运行测试、服务和性能。"
   ],
   "rejected_false_positives": [
@@ -6056,23 +6105,24 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "f22c0624bbd52a02093a5ab60aaaf9b2c5a7b465",
+    "source_basis_commit": "9e0168e27d7852a9e49ed2cfbeeac4ef2e7be780",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A89"
+      "A90"
     ],
     "new_confirmed_ids": [
-      "A90"
+      "A91",
+      "A92"
     ],
     "candidate_ids": [
       "A11"
     ],
     "counts": {
-      "resolved": 88,
+      "resolved": 89,
       "candidate": 1,
-      "confirmed": 1
+      "confirmed": 2
     },
-    "evidence": "eighteenth_cleanup_round",
+    "evidence": "nineteenth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -7777,6 +7827,11 @@
       "reason": "全仓putRiskAndLiquidation接收riskRatio(同资产总maintenance,共享equity)，同时记录positionRisk.maintenance。两个全仓各需100且共享权益1000时，比率200000；单行100/1000只有100000。比例必须独立保留，不能从该行金额重算。",
       "review_round": "fifteenth_cleanup_round",
       "source": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskLaneProcessor.java:208"
+    },
+    {
+      "topic": "未核对契约就直接令postOnly等于timeInForce==GTX",
+      "reason": "PlaceOrderCommand只强制postOnly=>LIMIT+GTX，Gateway另外校验GTX=>postOnly；改单分别继承TIF和postOnly。现阶段未证明所有可接受Core状态都可等价派生，不能机械删除标记或改变改单错误路径。当前只记录分析，本轮未改动该字段/契约。",
+      "review_round": "nineteenth_cleanup_round"
     }
   ],
   "third_cleanup_round": {
@@ -17810,6 +17865,259 @@
         "/tmp/aeron-cold-order-api-20261024-impact.json": "6ba03d26eea6f64df732ce1051648adfd1919b0ff51f7e79d67fd51ab523602b",
         "/tmp/aeron-cold-order-api-20261024-static.json": "2efb40ca1beba136d0477b2f11f77ca51e1f17188009afc786d3a9e0a5545510",
         "/tmp/aeron-cold-order-api-20261024-static.py": "f82a1e8c46b3789ca7116f65924a9a52233b6aa5d9654d889ff3ff2bca74db0c"
+      },
+      "errors": [],
+      "no_task_services_started": true
+    }
+  },
+  "nineteenth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "9e0168e27d7852a9e49ed2cfbeeac4ef2e7be780",
+    "resolved_ids": [
+      "A90"
+    ],
+    "new_confirmed_ids": [
+      "A91",
+      "A92"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 89,
+      "candidate": 1,
+      "confirmed": 2
+    },
+    "flow": "冻结和余额移动仍由原Lane与ReservationRuntime/BalanceRuntime处理；OrderReservation只保存导出、恢复和核对事实。冷记录转换不再实现第二套金额变更，构造仍校验所有金额，快照/命令布局不变。",
+    "implementation": {
+      "removed_cold_reservation_methods": 4,
+      "removed_private_copy_constructors": 1,
+      "retained_reservation_fields": 8,
+      "new_types_interfaces_registries": 0,
+      "new_test_classes": 0,
+      "wire_snapshot_layout_or_live_execution_changed": false
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 48,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4
+    },
+    "verification": {
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "disk_available_before_build": "187GiB",
+      "clean": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "50.617 s",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-aeron-tools",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-maker",
+          "surprising-realtime-api",
+          "surprising-price-provider",
+          "surprising-aeron-benchmarks",
+          "surprising-derivatives-lifecycle-api",
+          "surprising-realtime-provider",
+          "surprising-gateway"
+        ],
+        "log_sha256": "4d1196b56c724ac18873f6d7dacd71e1822921be325c20f9a32ec746b7415ccf"
+      },
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "test_source_changes": "用五种完整金额事实取代冷金额转换步骤，保留剩余量/值语义及溢出断言，补负金额/超额输入；删除仅针对无人使用API的业务拒绝断言和文本isSameAs约束。两个用户释放夹具改为同值完整记录，原资金/冻结解释断言不变。",
+      "unverified": [
+        "测试实际执行",
+        "真实交易正常/拒绝/异常路径",
+        "做市/资金/持仓/终态和资金守恒运行核对",
+        "Cluster日志/快照恢复运行",
+        "真实查询、数据库和前端交互",
+        "性能"
+      ]
+    },
+    "static_verification": {
+      "status": "passed",
+      "removed_cold_reservation_methods": [
+        "releaseAll",
+        "release",
+        "consume",
+        "replaceReservedUnits"
+      ],
+      "removed_private_copy_constructor": 1,
+      "remaining_source_verbatim_except_class_javadoc_and_unused_import": true,
+      "user_snapshot_assertions_unchanged": true,
+      "user_snapshot_fixture_equivalence": {
+        "original": "OrderReservation.create(11,\"1\",DERIVATIVE_MARGIN,\"USDT\",300,1).releaseAll()",
+        "new_values": {
+          "orderId": 11,
+          "instrumentId": "1",
+          "kind": "DERIVATIVE_MARGIN",
+          "asset": "USDT",
+          "reservedUnits": 300,
+          "releasedUnits": 300,
+          "consumedUnits": 0,
+          "orderQuantitySteps": 1
+        },
+        "reason": "初始释放/消耗均0，remaining为300；原releaseAll精确加到released=300，新完整记录提供同一业务值。"
+      },
+      "text_identity_test_constraint_removed": true,
+      "unchanged_business_sources": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/ReservationRuntime.java",
+          "sha256": "c927381e9a31c2bc3a3029547bcdc4da8cb69c8229027fd247b4930baf85a94b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/BalanceRuntime.java",
+          "sha256": "1a860b7110a893be6f0844993a110dac719aa42b89f5c16afa5d73bcb113a700"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/CoreUserState.java",
+          "sha256": "040784b9ca7e8965d41e9e5ffb1cf89303b561a25844c92e3a62341ba5489d88"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/RuntimeAccountStateTransitions.java",
+          "sha256": "1558422005572db6c6a7d53869e48373e44729e94e189eb7f72db383c228abb3"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java",
+          "sha256": "f81aa3d05365ab6173cde1c05378e14d5822101d08c90f249919ec9783c7f22e"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java",
+          "sha256": "4c01c819b8718034ee17cac2326973f50166092626c5cc55e76dce41c1c0db77"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "sha256": "65ea1aa2d73da6182537acefb7779388712fee258f45b69e6b5597539a7fab9a"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "sha256": "85a3705b1d1957f97f56139fbe9dc95cd005fc258f365d59f8387686f97a2361"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java",
+          "sha256": "421171cd30f8d70c6ee5656652df42c1352b41c2c96eff73625b2d420ac46a9f"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+          "sha256": "d52f7bd8e8da25ab78f28e27d8b321d3da184b5cd0f2506f1f8e1a2aa63ca833"
+        }
+      ],
+      "java_business_execution": false
+    },
+    "binary_post_verification": {
+      "status": "passed",
+      "all_available_class_counts": {
+        "test": 894,
+        "main": 3131
+      },
+      "fresh_reactor_class_counts": {
+        "test": 860,
+        "main": 3004
+      },
+      "reservation_fields": 8,
+      "remaining_constructor_arities": [
+        8
+      ],
+      "removed_reservation_mutation_refs": 0,
+      "unchanged_validation_and_value_methods_present": true,
+      "java_business_execution": false
+    },
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderReservation.java": "2ffeb636b8384900cc006347368a839c717963655d455442445f7c2a1051a8d4",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/account/CoreUserStateTest.java": "e38bae12796a7230d4ed85e78b5bc28877c7e27314eda2c541b335361f59c750",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreValueValidationTest.java": "77446385f27feaab2ea63173f16301b9020d081f0c1d6cd3a282c303b84cecb0"
+    },
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "544ea75ea1a3df09d843335d68cc0e7dad677a02c989b5ed463e8fe89fc03c50"
+    },
+    "followup_analysis": {
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java": "7e6a78c1e2f492aaa862b53d5fa96d787eebbffe7e290ae969ab6d3626b5b015",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/ResolvedPlaceOrder.java": "9595299a27d85f19ac882581ef839de931892998692700dfdb2e0695c08e1fb4",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java": "7e70feec8237ccdbda11bc1cab2da2092165909c0c03ff2d3420415d35bd592b",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java": "b8229d5700f9f6af8750434c9074bac25a562bc71f7c5532e3db9d711ef4943c",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java": "8c1376d4041ff52ec0ba01f31fd3daeb430313dc515d519dbdaf6bd4c99360e0",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/PlaceOrderCommand.java": "9318ddbc04f2d337ac024c00eab09e1f6c1a4d23869059f2d172a6f436ec6313",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderValidator.java": "27a3416f2b901b046af86a0acba2f3a691f24fe8294c90ae96f9255a2f639480"
+      },
+      "cold_decision_consumer": "RuntimeTestStateTransitions.placeOrder(TradingCoreState,long,PlaceOrderCommand,UUID,long,ActiveOrderIndex) only",
+      "cold_vs_live_decision_difference": "冷入口重复解析价格/预留资产，symbolId=-1，未走运行态已有的用户费率、到期及价格鲜度完整路径。删除前需把测试场景绑定到明确、有效的真实决策上下文，而不是默默放松线上约束。",
+      "unused_active_index": "测试辅助placeOrder简单重载创建并传递new ActiveOrderIndex(before)，已决策重载还创建未读取的局部activeOrders；完整重载未读取其activeOrders形参，实际使用runtime.admissionOrders。",
+      "post_only_cleanup_not_proven": "PlaceOrderCommand仅强制postOnly=>LIMIT+GTX，CoreMatchingFlow改单分别继承timeInForce和postOnly，Gateway另外要求GTX=>postOnly。不能在未统一实际契约前仅用TIF派生标记；本轮未改变命令、快照或该字段。",
+      "java_business_execution": false,
+      "exact_resolver_references": [
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+          "name": "resolve",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/protocol/PlaceOrderCommand;)Lcom/surprising/aeron/service/order/admission/ResolvedPlaceOrder;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+          "name": "resolve",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;JLcom/surprising/aeron/protocol/PlaceOrderCommand;J)Lcom/surprising/aeron/service/order/admission/ResolvedPlaceOrder;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreOrderDecisionResolverTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePreflightLaneQueryTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingCoreRuntime.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+          "name": "resolve",
+          "descriptor": "(Lcom/surprising/aeron/service/order/admission/CoreOrderDecisionResolver$Context;JLcom/surprising/aeron/protocol/PlaceOrderCommand;)Lcom/surprising/aeron/service/order/admission/ResolvedPlaceOrder;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreOrderDecisionResolverTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$TriggerExecutionContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/CoreQueryService$PreflightQuery.class"
+          ]
+        }
+      ]
+    },
+    "graph_verification": {
+      "command": "codegraph sync -q",
+      "exit_code": 0,
+      "status": "up_to_date",
+      "files": 2241,
+      "nodes": 52642,
+      "edges": 151391,
+      "mcp_tools_available": false
+    },
+    "remaining_scope": [
+      "A91仅供测试的冷决策分支及-1身份模式，迁移时核对真实价格/时间/费率边界。",
+      "A92测试下单的无用活动索引参数/创建，保留其他实际用途。",
+      "A11查询一致性边界保留；其他字段/约束及全链路运行功能尚未审查/验证完成。"
+    ],
+    "temporary_resources": {
+      "status": "removed_after_archival",
+      "owned_files_removed": {
+        "/tmp/aeron-cold-reservation-api-20261024-archive.py": "90ad8e72dc15c3fb46f9df0dcb5707eaf2f3dd1e8a1064172b2f0729e2b35477",
+        "/tmp/aeron-cold-reservation-api-20261024-binary.json": "672df1540ecf86406be0f616c18f468d08c328749e5d8c33d208173d7869d2cd",
+        "/tmp/aeron-cold-reservation-api-20261024-binary.py": "f0a280c58d890b30fdf73a873099fcfe10a7795b7e4ac96990139c469949da95",
+        "/tmp/aeron-cold-reservation-api-20261024-build.log": "4d1196b56c724ac18873f6d7dacd71e1822921be325c20f9a32ec746b7415ccf",
+        "/tmp/aeron-cold-reservation-api-20261024-followup.json": "874881e60fc24514cfcf85e5d5f763dc68390f83860335a5357faa0ac75ed471",
+        "/tmp/aeron-cold-reservation-api-20261024-graph.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/aeron-cold-reservation-api-20261024-impact.json": "4dc35fdcb4d72fb0a916ef514debb9584b2514661273442d926083cf357f8281",
+        "/tmp/aeron-cold-reservation-api-20261024-state-files.txt": "302f9183e39b3d8f90bc5350fb4079b8b8737e20c65478b00c1f164fa76be8df",
+        "/tmp/aeron-cold-reservation-api-20261024-static.json": "07c30bbb0042a96a350f82e7c6baa7e9b5fbdef474ec2922a0fe5d88f88998dd",
+        "/tmp/aeron-cold-reservation-api-20261024-static.py": "21c3d45fb20f712976b055ccc21a3045ecd56d14f6a88ae6852dc3f960c509b6"
       },
       "errors": [],
       "no_task_services_started": true

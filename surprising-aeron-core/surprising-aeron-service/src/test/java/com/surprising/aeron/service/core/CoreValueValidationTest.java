@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.order.state.OrderReservation;
@@ -9,47 +8,33 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 验证订单预留的不可变数量转换、共享身份和值比较，以及标的 ID 和资产名的基础输入边界；不启动账户线程或撮合器。
+ * 验证订单预留的金额守恒、规范身份和值比较，以及标的 ID 和资产名的基础输入边界；不启动账户线程或撮合器。
  */
 class CoreValueValidationTest {
 
-    /**
-     * 依次消耗、释放、调整总预留及释放剩余，确认共享规范身份、剩余金额和值语义；越界数量和总额溢出必须失败，原对象保持原值。
-     */
+    /** 构造不同释放/消耗进度，检查剩余金额、规范文本和值语义，不要求文本引用相同。 */
     @Test
-    void reservationAmountTransitionsPreserveImmutableValidatedIdentityAndValueSemantics() {
-        // 初始预留一百的不可变对象，后续派生不能改写它
-        var original = OrderReservation.create(9, "1",
-                ReservationKind.SPOT_ASSET, " usdt ", 100, 10);
-        // 已消耗三十、剩余七十的预留版本
-        var consumed = original.consume(30);
-        // 再释放二十、剩余五十的预留版本
-        var released = consumed.release(20);
-        // 把总预留改成八十、剩余三十的版本，已消耗和已释放数量保留
-        var resized = released.replaceReservedUnits(80);
-        // 把剩余三十也释放后的版本，剩余零、累计释放五十
-        var closed = resized.releaseAll();
-        for (var /* 当前待检查共享身份和值比较的派生预留版本 */ value : new OrderReservation[]{consumed, released, resized, closed}) {
-            assertThat(value.instrumentId()).isSameAs(original.instrumentId());
-            assertThat(value.asset()).isSameAs(original.asset());
-            // 使用该版本全部值重建的对象，用于比较 equals、hashCode 和诊断文本
-            var reconstructed = new OrderReservation(value.orderId(), value.instrumentId(), value.kind(), value.asset(), value.reservedUnits(), value.releasedUnits(),
-                    value.consumedUnits(), value.orderQuantitySteps());
+    void reservationRecordsValidateAmountsAndValueSemantics() {
+        long[][] amounts = {{100, 0, 0, 100}, {100, 0, 30, 70}, {100, 20, 30, 50},
+                {80, 20, 30, 30}, {80, 50, 30, 0}};
+        for (long[] amount : amounts) {
+            var value = new OrderReservation(9, new String("1"), ReservationKind.SPOT_ASSET,
+                    " usdt ", amount[0], amount[1], amount[2], 10);
+            var reconstructed = new OrderReservation(9, "1", ReservationKind.SPOT_ASSET,
+                    "USDT", amount[0], amount[1], amount[2], 10);
+            assertThat(value.instrumentId()).isEqualTo("1");
+            assertThat(value.asset()).isEqualTo("USDT");
+            assertThat(value.remainingUnits()).isEqualTo(amount[3]);
             assertThat(value).isEqualTo(reconstructed);
             assertThat(value.hashCode()).isEqualTo(reconstructed.hashCode());
             assertThat(value.toString()).isEqualTo(reconstructed.toString());
         }
-        assertThat(original.remainingUnits()).isEqualTo(100);
-        assertThat(consumed.remainingUnits()).isEqualTo(70);
-        assertThat(released.remainingUnits()).isEqualTo(50);
-        assertThat(resized.remainingUnits()).isEqualTo(30);
-        assertThat(closed.remainingUnits()).isZero();
-        assertThat(closed.consumedUnits()).isEqualTo(30);
-        assertThat(closed.releasedUnits()).isEqualTo(50);
-        assertThatThrownBy(() -> consumed.consume(71)).isInstanceOf(CoreStateRejectedException.class);
-        assertThatThrownBy(() -> released.replaceReservedUnits(49)).isInstanceOf(CoreStateRejectedException.class);
-        assertThatThrownBy(() -> closed.release(1)).isInstanceOf(CoreStateRejectedException.class);
-        assertThatThrownBy(() -> original.consume(0)).isInstanceOf(CoreStateRejectedException.class);
+        for (long[] invalid : new long[][]{{0, 0, 0}, {100, -1, 0}, {100, 0, -1},
+                {100, 0, 101}, {49, 20, 30}, {80, 51, 30}}) {
+            assertThatThrownBy(() -> new OrderReservation(9, "1", ReservationKind.SPOT_ASSET,
+                    "USDT", invalid[0], invalid[1], invalid[2], 10))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
         assertThatThrownBy(() -> new OrderReservation(1, "1", ReservationKind.SPOT_ASSET,
                 "USDT", Long.MAX_VALUE, Long.MAX_VALUE, 1, 1)).isInstanceOf(ArithmeticException.class);
     }
