@@ -348,7 +348,7 @@ public final class MatchingCommandAdmission {
             }
             if (replacementAdmission == null)
                 preMatchingCancellations = preMatchingCloseCapacityCancellations(
-                        operation, message, decodedCommand, placeAdmission);
+                        operation, placeAdmission);
         } catch (/* 当前准入或盖戳过程中抛出的错误，按所在边界拒绝、回滚或继续传播 */ CoreStateRejectedException exception) {
             if (owner.commits.publication.dirty()) {
                 if (!owner.pendingMatching().isEmpty()) {
@@ -518,8 +518,7 @@ public final class MatchingCommandAdmission {
         String instrumentId = amend ? order.instrumentId()
                 : decodedCommand.replaceOrder().replacement().instrumentId();
         // 按当前业务时间和产品规则准备的订单判断输入
-        var decision = CoreOrderDecisionResolver.context(owner.runtimeState(), owner.identities(),
-                message.header().userId(), instrumentId, owner.currentClusterTimestamp());
+        var decision = CoreOrderDecisionResolver.context(owner.runtimeState(), owner.identities(), instrumentId, owner.currentClusterTimestamp());
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         owner.resultBuilder.setSingleChangedOrder(originalOrderId);
         return owner.runtimeState().dispatchReplacementAdmission(sequence, message.header().userId(), originalOrderId,
@@ -531,12 +530,9 @@ public final class MatchingCommandAdmission {
     /**
      * 只有 PLACE 才读取准入的先撤单列表，收据未完成暂给空表；非 PLACE 直接为空，消息和解码参数在此实现中不读取。
      * @param operation 当前撮合操作类别
-     * @param message 沿用入口签名的原消息，此方法不读取
-     * @param decodedCommand 沿用入口签名的解码输入，此方法不读取
      * @param placeAdmission 普通下单的账户准入收据
      */
     List<Long> preMatchingCloseCapacityCancellations(CommandSlot.Operation operation,
-            CoreMessage message, DecodedMatchingCommand decodedCommand,
             com.surprising.aeron.service.order.admission.PlaceAdmissionEvent placeAdmission) {
         if (operation != CommandSlot.Operation.PLACE) return List.of();
         if (placeAdmission == null) throw new IllegalStateException("place matching requires its Lane admission");
@@ -660,10 +656,7 @@ public final class MatchingCommandAdmission {
         TradingCoreRuntime.LifecycleOrderChunk orderChunk = owner.matchingFlow.lifecycleOrders(0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
         // 当前结算是否仍处在撤单阶段
         boolean orderPhase = progress == null || !progress.ordersComplete();
-        if (orderPhase && !orderChunk.more()) {
-            owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
-            owner.resultBuilder.addChangedUsersFromOrders(orderChunk.orders());
-        } else if (orderPhase) {
+        if (orderPhase) {
             owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
             owner.resultBuilder.addChangedUsersFromOrders(orderChunk.orders());
         } else {
@@ -683,7 +676,7 @@ public final class MatchingCommandAdmission {
             ensureLifecycleScopeAvailable(lifecycleScope(message, operation, decodedCommand));
         } else {
             ensureLifecycleScopeAvailable(message.header().userId(),
-                    matchingSymbol(message, operation, decodedCommand), null);
+                    matchingSymbol(operation, decodedCommand), null);
         }
     }
 
@@ -832,7 +825,7 @@ public final class MatchingCommandAdmission {
             case SETTLEMENT -> new LifecycleScope(true, 0, decodedCommand.settlement().instrumentId(),
                     decodedCommand.settlement().settlementId(), true, false);
             default -> new LifecycleScope(false, message.header().userId(),
-                    matchingSymbol(message, operation, decodedCommand), 0, false, true);
+                    matchingSymbol(operation, decodedCommand), 0, false, true);
         };
     }
 
@@ -875,11 +868,10 @@ public final class MatchingCommandAdmission {
 
     /**
      * 下单取解码合约，撤改单取原活动订单路由，触发子单取源触发路由并要求品种仍存在；批次取第一项，单笔强平和结算留给专用路径。
-     * @param message 当前完整 Core 消息
      * @param operation 当前撮合操作类别
      * @param decodedCommand 已经解码的类型化命令输入
      */
-    String matchingSymbol(CoreMessage message, CommandSlot.Operation operation,
+    String matchingSymbol(CommandSlot.Operation operation,
                                   DecodedMatchingCommand decodedCommand) {
         return switch (operation) {
             case PLACE -> decodedCommand.placeOrder().instrumentId();

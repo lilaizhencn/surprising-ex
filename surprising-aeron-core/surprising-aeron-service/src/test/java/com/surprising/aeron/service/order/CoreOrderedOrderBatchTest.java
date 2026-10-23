@@ -1175,7 +1175,7 @@ class CoreOrderedOrderBatchTest {
             long firstDeadline = System.nanoTime() + 5_000_000_000L;
             while (activeBatch.nextIndex == 0) {
                 assertThat(System.nanoTime()).isLessThan(firstDeadline);
-                state.commits.advanceMatchingProgress(2_900, 4, fatalSequence);
+                state.commits.advanceMatchingProgress(fatalSequence);
                 assertThat(state.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
                 Thread.onSpinWait();
             }
@@ -1197,7 +1197,7 @@ class CoreOrderedOrderBatchTest {
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (divergence == null) {
                 assertThat(System.nanoTime()).isLessThan(deadline);
-                state.commits.advanceMatchingProgress(3_000, 5, fatalSequence);
+                state.commits.advanceMatchingProgress(fatalSequence);
                 divergence = org.assertj.core.api.Assertions.catchThrowable(
                         () -> state.completeMatching(fatalSequence, fatal, 3_000, 5));
                 Thread.onSpinWait();
@@ -1939,20 +1939,20 @@ class CoreOrderedOrderBatchTest {
                 // 当前普通撤单消息的类型化解码输入
                 var decoded = com.surprising.aeron.service.order.command.DecodedMatchingCommand.decode(single);
                 state.admissions().validatePendingCancel(single, decoded);
-                assertThat(state.admissions().matchingSymbol(single, CommandSlot.Operation.CANCEL, decoded))
+                assertThat(state.admissions().matchingSymbol(CommandSlot.Operation.CANCEL, decoded))
                         .isEqualTo("1");
                 // 只用于查原单路由的普通改单消息
                 var amendSingle = command(CoreMessageType.AMEND_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(
                                 13_101, 13_103, "route-amend", 900L, 1L, CoreTimeInForce.GTC, false)), 1001);
-                assertThat(state.admissions().matchingSymbol(amendSingle, CommandSlot.Operation.AMEND,
+                assertThat(state.admissions().matchingSymbol(CommandSlot.Operation.AMEND,
                         com.surprising.aeron.service.order.command.DecodedMatchingCommand.decode(amendSingle)))
                         .isEqualTo("1");
                 // 只用于查原单路由的普通替换消息
                 var replaceSingle = command(CoreMessageType.REPLACE_ORDER, UUID.randomUUID(), 5,
                         TradingCommandCodec.encodeReplaceOrder(new com.surprising.aeron.protocol.ReplaceOrderCommand(
                                 13_101, place(13_103, "route-replace", 900))), 1001);
-                assertThat(state.admissions().matchingSymbol(replaceSingle, CommandSlot.Operation.REPLACE,
+                assertThat(state.admissions().matchingSymbol(CommandSlot.Operation.REPLACE,
                         com.surprising.aeron.service.order.command.DecodedMatchingCommand.decode(replaceSingle)))
                         .isEqualTo("1");
                 // 请求用户尝试撤对方订单的普通消息
@@ -2117,7 +2117,7 @@ class CoreOrderedOrderBatchTest {
         long firstDeadline = System.nanoTime() + 5_000_000_000L;
         while (activeBatch.nextIndex == 0) {
             assertThat(System.nanoTime()).isLessThan(firstDeadline);
-            state.commits.advanceMatchingProgress(2_000, 3, sequence);
+            state.commits.advanceMatchingProgress(sequence);
             assertThat(state.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
             Thread.onSpinWait();
         }
@@ -2339,7 +2339,7 @@ class CoreOrderedOrderBatchTest {
             while (activeBatch.nextIndex == 0) {
                 assertThat(System.nanoTime()).isLessThan(firstDeadline);
                 // 账本派发尚在追赶时保留同一撮合事实，像正常完成推进入口一样继续尝试。
-                state.commits.advanceMatchingProgress(2_000, 3, sequence);
+                state.commits.advanceMatchingProgress(sequence);
                 assertThat(state.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
                 Thread.onSpinWait();
             }
@@ -2353,7 +2353,7 @@ class CoreOrderedOrderBatchTest {
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (divergence == null) {
                 assertThat(System.nanoTime()).isLessThan(deadline);
-                state.commits.advanceMatchingProgress(2_001, 4, sequence);
+                state.commits.advanceMatchingProgress(sequence);
                 divergence = org.assertj.core.api.Assertions.catchThrowable(() ->
                         state.completeMatching(sequence, failedResult, 2_001, 4));
                 Thread.onSpinWait();

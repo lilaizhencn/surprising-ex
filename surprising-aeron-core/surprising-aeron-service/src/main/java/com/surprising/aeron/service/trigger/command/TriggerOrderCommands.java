@@ -954,9 +954,8 @@ public final class TriggerOrderCommands {
     /**
      * 解码延时全撤控制并应用原用户状态转换，正常返回后请求发布；此入口不读取额外传入的 clusterTimestamp。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
      */
-    public void executeUpdateCancelAllAfter(CoreMessage message, long clusterTimestamp) {
+    public void executeUpdateCancelAllAfter(CoreMessage message) {
         RuntimeCancelAllAfterStateTransitions.update(owner.runtimeState(), message.header().userId(),
                 com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payloadUnsafe()));
         owner.requestCommitPublication();
@@ -1040,9 +1039,8 @@ public final class TriggerOrderCommands {
     /**
      * 解码触发 ID，异步交取消类型控制任务，冷路径在请求用户账户范围取消。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
      */
-    public void executeCancelTriggerOrder(CoreMessage message, long clusterTimestamp) {
+    public void executeCancelTriggerOrder(CoreMessage message) {
         // 本次协议解出或平仓关联遍历到的触发单 ID
         long triggerOrderId = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
@@ -1056,9 +1054,8 @@ public final class TriggerOrderCommands {
     /**
      * 解码认领参数，按触发单真实所属用户选择异步控制或冷账户转换，不用请求头用户替代路由用户。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
      */
-    public void executeClaimTriggerOrder(CoreMessage message, long clusterTimestamp) {
+    public void executeClaimTriggerOrder(CoreMessage message) {
         // 协议解出的认领数组，依次为 ID、行情序列、触发价格和时间
         long[] claim = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeClaim(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
@@ -1072,9 +1069,8 @@ public final class TriggerOrderCommands {
     /**
      * 解码成功标记、子单 ID 和完成时间，按真实所属用户完成触发单；该协议入口拒绝原因固定空文本。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
      */
-    public void executeCompleteTriggerOrder(CoreMessage message, long clusterTimestamp) {
+    public void executeCompleteTriggerOrder(CoreMessage message) {
         // 协议解出的完成数组，依次为 ID、成功标记、关联子单 ID 和完成时间
         long[] complete = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeComplete(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
@@ -1088,9 +1084,8 @@ public final class TriggerOrderCommands {
     /**
      * 解码追踪高低价与激活时间，按真实用户选择原异步或冷转换。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
      */
-    public void executeUpdateTriggerTrailing(CoreMessage message, long clusterTimestamp) {
+    public void executeUpdateTriggerTrailing(CoreMessage message) {
         // 协议解出的追踪数组，依次为 ID、最高价、最低价及激活时间
         long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
@@ -1104,9 +1099,8 @@ public final class TriggerOrderCommands {
     /**
      * 解码触发 ID 与过期检查时间，按真实用户选择过期控制或冷转换。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
      */
-    public void executeExpireTriggerOrder(CoreMessage message, long clusterTimestamp) {
+    public void executeExpireTriggerOrder(CoreMessage message) {
         // 协议解出的触发单 ID 与过期检查时间或重试陈旧界限
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
@@ -1120,9 +1114,8 @@ public final class TriggerOrderCommands {
     /**
      * 解码触发 ID 和陈旧界限，以请求头提交时间作为重试时间，按真实用户选择控制或冷转换。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
      */
-    public void executeRetryTriggerOrder(CoreMessage message, long clusterTimestamp) {
+    public void executeRetryTriggerOrder(CoreMessage message) {
         // 协议解出的触发单 ID 与过期检查时间或重试陈旧界限
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
         if (owner.runtimeState().asynchronousCommands()) {
@@ -1136,9 +1129,8 @@ public final class TriggerOrderCommands {
     /**
      * 显式执行请求的分流入口：冷路径进入同步执行，活动账户路径解码并把子单续步交直接控制槽等待。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     * @param clusterTimestamp 原复制命令业务时间参数，本入口当前不直接读取
      */
-    public void executeExecuteTriggerOrder(CoreMessage message, long clusterTimestamp) {
+    public void executeExecuteTriggerOrder(CoreMessage message) {
         if (!owner.runtimeState().asynchronousCommands()) {
             executeTriggerOrder(message);
             return;
@@ -1245,7 +1237,7 @@ public final class TriggerOrderCommands {
             this.price = price; this.triggeredAt = triggeredAt; this.commandId = commandId;
             preparedClientKey = 0;
             decision = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.context(
-                    owner.runtimeState(), owner.identities(), route.userId(), route.instrumentId(), owner.currentClusterTimestamp());
+                    owner.runtimeState(), owner.identities(), route.instrumentId(), owner.currentClusterTimestamp());
             baseAssetId = owner.identities().assetId(decision.instrument().baseAsset());
             quoteAssetId = owner.identities().assetId(decision.instrument().quoteAsset());
             settleAssetId = owner.identities().assetId(decision.instrument().settleAsset());

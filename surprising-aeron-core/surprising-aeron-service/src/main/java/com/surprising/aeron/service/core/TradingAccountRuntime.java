@@ -6674,9 +6674,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 标记本命令涉及余额及用户变化；具体资产明细仍由余额补丁持有。
      * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param assetId 此入口未单独读取的资产身份，实际明细仍由余额补丁保存
      */
-    public void markBalanceChanged(long userId, int assetId) {
+    public void markBalanceChanged(long userId) {
         assertOwner();
         markBalancesChanged();
         markUserChanged(userId);

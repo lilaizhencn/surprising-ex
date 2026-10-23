@@ -437,7 +437,7 @@ public final class OrderedCommitCoordinator {
                         if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
                             // 本命令要挂起轮询的强平、到期或批次控制工作
                             var work = owner.instrumentSettlement().beginAsyncSettlement(
-                                    pending.settlementWork(), command, pending.command().header().commandId());
+                                    pending.settlementWork(), command);
                             pending.settlementWork(work);
                             pending.deferSettlementControl(this, work);
                         } else {
@@ -1072,11 +1072,9 @@ public final class OrderedCommitCoordinator {
 
     /**
      * 在允许序号内激活队首批次、排空已有完成通知并推进账本资金 FIFO，不提交终态；时间和日志位置沿用入口签名，此方法体不读取。
-     * @param clusterTimestamp 沿用调用签名的 Cluster 时间，当前方法不读取
-     * @param clusterPosition 沿用调用签名的日志位置，当前方法不读取
      * @param throughSequence 本轮允许推进或提交的 Core 序号上限
      */
-    public void advanceMatchingProgress(long clusterTimestamp, long clusterPosition, long throughSequence) {
+    public void advanceMatchingProgress(long throughSequence) {
         // 当前待命令全局最小序号
         long first = owner.pendingMatching().firstSequence();
         if (first > throughSequence) return;
@@ -1244,16 +1242,13 @@ public final class OrderedCommitCoordinator {
 
     /**
      * 确认队首在上限内，推进一次已有完成源后再探测队首，不阻塞等待 Matcher 或账户线程。
-     * @param clusterTimestamp 本次推进可用于首次固定提交边界的 Cluster 时间
-     * @param clusterPosition 本次推进可用于首次固定提交边界的日志位置
      * @param throughSequence 本轮允许推进或提交的 Core 序号上限
      */
-    CommandSlot pollReadyHead(
-            long clusterTimestamp, long clusterPosition, long throughSequence) {
+    CommandSlot pollReadyHead(long throughSequence) {
         if (owner.pendingMatching().isEmpty() || owner.pendingMatching().firstSequence() > throughSequence) {
             return null;
         }
-        advanceMatchingProgress(clusterTimestamp, clusterPosition, throughSequence);
+        advanceMatchingProgress(throughSequence);
         return pollReadyPending();
     }
 
@@ -1346,7 +1341,7 @@ public final class OrderedCommitCoordinator {
         if (maxCompletions <= 0 || handler == null) {
             throw new IllegalArgumentException("matching commit batch requires a positive limit and handler");
         }
-        if (advanceProgress) advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
+        if (advanceProgress) advanceMatchingProgress(dispatchThroughSequence);
         // 本轮实际完成并回调的终态数量
         int completed = 0;
         // 本轮已尝试推进的队首次数，未完成的一次也计入预算
@@ -1356,7 +1351,7 @@ public final class OrderedCommitCoordinator {
             // 当前按完整序号或有序游标取得的命令槽
             CommandSlot pending = pollReadyPending();
             if (pending == null && attempts == 0 && awaitFirst) {
-                pending = pollReadyHead(clusterTimestamp, clusterPosition, throughSequence);
+                pending = pollReadyHead(throughSequence);
             }
             if (pending == null) break;
             // 当前命令完整 Core 序号
@@ -1391,7 +1386,7 @@ public final class OrderedCommitCoordinator {
         owner.assertHealthy();
         if (throughSequence <= 0) throw new IllegalArgumentException("matching head sequence must be positive");
         if (advanceProgress) {
-            advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
+            advanceMatchingProgress(dispatchThroughSequence);
         }
         if (owner.pendingMatching().firstSequence() > throughSequence) return null;
         // 当前按完整序号或有序游标取得的命令槽

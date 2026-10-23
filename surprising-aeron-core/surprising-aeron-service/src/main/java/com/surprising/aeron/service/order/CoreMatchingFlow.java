@@ -167,7 +167,7 @@ public final class CoreMatchingFlow {
                 || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
                 || pending.operation() == CommandSlot.Operation.SETTLEMENT
                 ? owner.admissions().pendingLifecycleSymbol(pending)
-                : owner.admissions().matchingSymbol(pending.command(), pending.operation(), pending.decodedCommand());
+                : owner.admissions().matchingSymbol(pending.operation(), pending.decodedCommand());
         // 当前静态 Matcher 分片号。
         int shard = instrumentId == null || instrumentId.isBlank() ? 0 : owner.matchingAdapter().matcherShardId(instrumentId);
         pending.cachedMatcherShard(shard);

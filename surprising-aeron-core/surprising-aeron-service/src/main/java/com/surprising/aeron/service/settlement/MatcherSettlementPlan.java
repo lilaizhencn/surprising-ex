@@ -138,7 +138,7 @@ public final class MatcherSettlementPlan {
                 || instrument != taker.instrument())
             throw new IllegalArgumentException("invalid direct matcher fact");
         buildDirect(sequence, taker.orderId(), taker.userId(), taker.side(), taker.symbolId(),
-                taker.instrument(), taker.remainingQuantitySteps(), taker, instrument, result, runtime);
+                taker.instrument(), taker.remainingQuantitySteps(), taker, result, runtime);
     }
 
     /**
@@ -158,7 +158,7 @@ public final class MatcherSettlementPlan {
                 || instrument != taker.instrument())
             throw new IllegalArgumentException("invalid direct matcher fact");
         buildDirect(sequence, taker.orderId(), userId, taker.side(), taker.symbolId(),
-                taker.instrument(), taker.quantitySteps(), null, instrument, result, runtime);
+                taker.instrument(), taker.quantitySteps(), null, result, runtime);
     }
 
     /**
@@ -171,14 +171,12 @@ public final class MatcherSettlementPlan {
      * @param takerInstrument 主动订单输入中保存的规范币对对象
      * @param remainingQuantity 本代主动订单可供累计成交的数量上限
      * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
-     * @param instrument 当前事实的规范币对对象，必须与订单输入一致
      * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
      * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
      */
     private void buildDirect(long sequence, long orderId, long userId,
                              com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
-                             CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker,
-                             CoreInstrument instrument, MatchingResult result,
+                             CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker, MatchingResult result,
                              TradingAccountRuntime runtime) {
         clearReferences();
         coreSequence = sequence; admittedTaker = taker;

@@ -293,7 +293,7 @@ public final class OrderBatchExecutor {
                 if (command.reduceOnly()) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 owner.requireOrderIdentityAvailable(userId, command);
                 // 本品种共享的配置判断输入或其上下文
-                var decision = prepareBatchDecision(batch, userId, command.instrumentId());
+                var decision = prepareBatchDecision(batch, command.instrumentId());
                 if (decision.context().instrument().usesOpenInterestForUserLimit())
                     throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 batch.preparedDecisions[index] = decision;
@@ -485,17 +485,15 @@ public final class OrderBatchExecutor {
     /**
      * 本批同品种复用已捕获的只读配置、标记价和资产编号；首次使用才解析并保存，账户资金及 OI 判断仍由每项准入完成。
      * @param batch 本条批量命令的复用上下文
-     * @param userId 本批请求用户，账户按该用户路由
      * @param instrumentId 本项准入对应的品种名称
      */
     com.surprising.aeron.service.order.admission.PlaceBatchIntentSource.Decision prepareBatchDecision(
-            OrderBatchPending batch, long userId, String instrumentId) {
+            OrderBatchPending batch, String instrumentId) {
         // 当前批内项或变更用户的遍历下标
         int index = batch.preparedSymbols.indexOf(instrumentId);
         if (index >= 0) return batch.preparedContextDecisions[index];
         // 按整批业务时间捕获的品种配置、价格与产品判断上下文
-        var context = CoreOrderDecisionResolver.context(owner.runtimeState(), owner.identities(),
-                userId, instrumentId, batch.clusterTimestamp);
+        var context = CoreOrderDecisionResolver.context(owner.runtimeState(), owner.identities(), instrumentId, batch.clusterTimestamp);
         // 该上下文中的品种配置
         var instrument = context.instrument();
         // 品种基础资产名称
@@ -530,7 +528,7 @@ public final class OrderBatchExecutor {
     private java.util.function.BooleanSupplier beginBatchReservation(OrderBatchPending batch, long userId,
                                                                     PlaceOrderCommand command, UUID commandId) {
         // 本品种共享的配置判断输入或其上下文
-        var decision = prepareBatchDecision(batch, userId, command.instrumentId());
+        var decision = prepareBatchDecision(batch, command.instrumentId());
         // 本批复用的顺序下单账户预留工作
         var work = batch.placeReservation;
         work.prepare(owner.runtimeState(), owner.identities(), batch.sequence, userId, commandId,
@@ -614,7 +612,7 @@ public final class OrderBatchExecutor {
                     if (command.replacementOrderId() == command.originalOrderId())
                         throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
                     // 本品种共享的配置判断输入或其上下文
-                    var decision = prepareBatchDecision(batch, userId, instrumentId).context();
+                    var decision = prepareBatchDecision(batch, instrumentId).context();
                     batch.replacementAdmissionEvent = owner.runtimeState().dispatchReplacementAdmission(
                             batch.sequence, userId, command.originalOrderId(), command, null, decision,
                             owner.matchingAdapter().matcherShardId(instrumentId), owner.identities());

@@ -35,23 +35,23 @@ class BatchDecisionCaptureTest {
             var batch = new OrderBatchPending(2, core.responseArena());
             batch.clusterTimestamp = TIME;
             // 品种一首次捕获的判断对象，后续价格更新不能改它
-            var first = core.batches().prepareBatchDecision(batch, 7, "1");
+            var first = core.batches().prepareBatchDecision(batch, "1");
             // 品种二独立捕获的判断对象
-            var second = core.batches().prepareBatchDecision(batch, 7, "2");
-            assertThat(core.batches().prepareBatchDecision(batch, 7, "1")).isSameAs(first);
+            var second = core.batches().prepareBatchDecision(batch, "2");
+            assertThat(core.batches().prepareBatchDecision(batch, "1")).isSameAs(first);
             assertThat(second).isNotSameAs(first);
             assertThat(batch.preparedSymbols).containsExactly("1", "2");
             assertThat(first.context().mark().markPriceTicks()).isEqualTo(100);
 
             // 该独立批次没有派发；更新价格用来证明已捕获输入会保留到显式清理边界。
             mark(core, "1", 200, 2);
-            assertThat(core.batches().prepareBatchDecision(batch, 7, "1")).isSameAs(first);
+            assertThat(core.batches().prepareBatchDecision(batch, "1")).isSameAs(first);
             assertThat(first.context().mark().markPriceTicks()).isEqualTo(100);
             batch.clearPreparedDecisionCache();
             assertThat(batch.preparedSymbols).isEmpty();
             assertThat(batch.preparedContextDecisions).containsOnlyNulls();
             // 清空本批判断前缀后重新捕获的品种一对象
-            var next = core.batches().prepareBatchDecision(batch, 7, "1");
+            var next = core.batches().prepareBatchDecision(batch, "1");
             assertThat(next).isNotSameAs(first);
             assertThat(next.context().mark().markPriceTicks()).isEqualTo(200);
             assertThat(first.context().mark().markPriceTicks()).isEqualTo(100);

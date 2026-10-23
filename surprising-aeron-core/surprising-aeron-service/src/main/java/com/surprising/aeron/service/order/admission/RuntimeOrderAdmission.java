@@ -73,7 +73,7 @@ public final class RuntimeOrderAdmission {
             if (excluded != null) excludedSymbol = identities.instrumentId(excluded.symbolId());
         }
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                excludedOrderId, identity.clientKey(), identity.symbolId(), identity.positionKey(),
+                excludedOrderId, identity.clientKey(), identity.positionKey(),
                 identity.lifecycleSettled(), identity.fundingInProgress(), excludedSymbol);
     }
 
@@ -115,7 +115,7 @@ public final class RuntimeOrderAdmission {
             throw new IllegalArgumentException("invalid prepared runtime order admission input");
         }
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                0, identity.clientKey(), identity.symbolId(), identity.positionKey(),
+                0, identity.clientKey(), identity.positionKey(),
                 identity.lifecycleSettled(), identity.fundingInProgress(), null);
     }
 
@@ -128,7 +128,6 @@ public final class RuntimeOrderAdmission {
      * @param openInterestSteps 账本或调用方固定的该币对 OI 数量步数，用于比例限额检查
      * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
      * @param clientKey 当前客户端订单标识的整数身份，0 表示没有已有身份
-     * @param symbolId 已经准备好的币对稠密编号，该参数在统一检查中不重新分配
      * @param positionKey 当前用户、币对和持仓腿的已有持仓键，0 表示没有持仓身份
      * @param lifecycleSettled 当前币对是否已经完成到期结算，已完成就拒绝新准入
      * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
@@ -136,13 +135,13 @@ public final class RuntimeOrderAdmission {
     public static long requiredReservationPrepared(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders,
-            long clientKey, int symbolId, long positionKey,
+            long clientKey, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress) {
         if (runtime == null || order == null || activeOrders == null || userId <= 0) {
             throw new IllegalArgumentException("invalid primitive prepared runtime order admission input");
         }
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                0, clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, null);
+                0, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
     /**
@@ -169,7 +168,7 @@ public final class RuntimeOrderAdmission {
         String originalSymbol = original != null && original.symbolId() == order.symbolId()
                 ? order.instrumentId() : null;
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                excludedOrderId, clientKey, order.symbolId(), positionKey,
+                excludedOrderId, clientKey, positionKey,
                 lifecycleSettled, fundingInProgress, originalSymbol);
     }
 
@@ -183,7 +182,6 @@ public final class RuntimeOrderAdmission {
      * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
      * @param excludedOrderId 改单时排除的原订单编号，普通下单使用 0
      * @param clientKey 当前客户端订单标识的整数身份，0 表示没有已有身份
-     * @param symbolId 已经准备好的币对稠密编号，该参数在统一检查中不重新分配
      * @param positionKey 当前用户、币对和持仓腿的已有持仓键，0 表示没有持仓身份
      * @param lifecycleSettled 当前币对是否已经完成到期结算，已完成就拒绝新准入
      * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
@@ -192,10 +190,10 @@ public final class RuntimeOrderAdmission {
     private static long requiredReservation(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
-            long clientKey, int symbolId, long positionKey,
+            long clientKey, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol) {
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders, excludedOrderId,
-                clientKey, symbolId, positionKey, lifecycleSettled, fundingInProgress, excludedSymbol, null);
+                clientKey, positionKey, lifecycleSettled, fundingInProgress, excludedSymbol, null);
     }
 
     /**
@@ -213,7 +211,7 @@ public final class RuntimeOrderAdmission {
                 || order == null || identity == null)
             throw new IllegalStateException("preflight query requires its owning Lane scope");
         return requiredReservation(runtime, lane, userId, order, openInterestSteps,
-                lane.admissionOrderIndex(identity.symbolId()), 0, identity.clientKey(), identity.symbolId(),
+                lane.admissionOrderIndex(identity.symbolId()), 0, identity.clientKey(),
                 identity.positionKey(), identity.lifecycleSettled(), identity.fundingInProgress(), null, order.instrument());
     }
 
@@ -227,7 +225,6 @@ public final class RuntimeOrderAdmission {
      * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
      * @param excludedOrderId 改单时排除的原订单编号，普通下单使用 0
      * @param clientKey 当前客户端订单标识的整数身份，0 表示没有已有身份
-     * @param symbolId 已经准备好的币对稠密编号，该参数在统一检查中不重新分配
      * @param positionKey 当前用户、币对和持仓腿的已有持仓键，0 表示没有持仓身份
      * @param lifecycleSettled 当前币对是否已经完成到期结算，已完成就拒绝新准入
      * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
@@ -237,7 +234,7 @@ public final class RuntimeOrderAdmission {
     private static long requiredReservation(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
-            long clientKey, int symbolId, long positionKey,
+            long clientKey, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument) {
         runtime.requireLaneAccess(lane, userId);
         RuntimeAlgoOrderStateTransitions.requireChildAdmission(lane, userId, order);
@@ -287,7 +284,7 @@ public final class RuntimeOrderAdmission {
                 admissionSummary, userId, excluded);
         // 按账户配置或币对默认得到的本次有效杠杆。
         long leverage = effectiveLeverage(lane, instrument, order, userId);
-        validateRiskLimits(runtime, instrument, position, order, admissionSummary, userId,
+        validateRiskLimits(instrument, position, order, admissionSummary, userId,
                 openInterestSteps, excluded, leverage);
         return ProductTradingRulesRegistry.forProductLine(instrument.contractType().productLine())
                 .reservationUnits(instrument, position, order, leverage, admissionSummary.pendingQuantity());
@@ -405,7 +402,6 @@ public final class RuntimeOrderAdmission {
 
     /**
      * 非只减仓衍生品按当前持仓、同向挂单和新单预估持仓名义价值，依次检查合约总限额、OI 比例限额、风险档位和非期权杠杆限制。
-     * @param runtime 沿用既有调用契约的运行时参数，本方法实际只用已传入的配置、持仓、挂单和 OI 值
      * @param instrument 订单绑定的币对配置，提供资金公式、资产、风险档位及杠杆限制
      * @param position 当前订单对应的已有持仓，尚未建仓时为 null
      * @param order 已经完成价格、费率和冻结资产决策的订单输入
@@ -415,8 +411,7 @@ public final class RuntimeOrderAdmission {
      * @param excluded 改单时被排除的原订单，非改单为 null
      * @param leverage 本次准入使用的有效杠杆，单位与币对杠杆百万分比契约一致
      */
-    private static void validateRiskLimits(
-            TradingAccountRuntime runtime, CoreInstrument instrument, PositionRuntime position,
+    private static void validateRiskLimits(CoreInstrument instrument, PositionRuntime position,
             ResolvedPlaceOrder order, AdmissionSummary admissionSummary, long userId, long openInterestSteps,
             OrderRuntime excluded, long leverage) {
         if (!instrument.contractType().productLine().isDerivative() || order.reduceOnly()) return;
@@ -459,9 +454,6 @@ public final class RuntimeOrderAdmission {
         }
         // 预估名义价值对应的风险档位，提供档位上限、初始保证金率和最大杠杆。
         var bracket = CoreContractMath.riskBracket(instrument, projectedNotional);
-        if (projectedNotional > bracket.notionalCapUnits()) {
-            throw rejected("RISK_BRACKET_EXCEEDED", "projected position exceeds risk bracket");
-        }
         if (!instrument.contractType().isOption() && (leverage > bracket.maxLeveragePpm()
                 || CoreContractMath.initialMarginRateFromLeverage(leverage) < bracket.initialMarginRatePpm())) {
             throw rejected("LEVERAGE_EXCEEDS_RISK_BRACKET", "configured leverage exceeds risk bracket");

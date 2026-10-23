@@ -85,34 +85,34 @@ public final class DirectCommandDispatcher {
      */
     public boolean dispatch(CoreMessage message, long clusterTimestamp) {
         switch (message.header().messageType()) {
-            case ADJUST_BALANCE -> balances.executeAdjustBalance(message, clusterTimestamp);
-            case TRANSFER_OUT -> balances.executeTransferOut(message, clusterTimestamp);
-            case TRANSFER_IN -> balances.executeTransferIn(message, clusterTimestamp);
-            case COMPLETE_TRANSFER -> balances.executeCompleteTransfer(message, clusterTimestamp);
-            case REGISTER_INSTRUMENT -> instruments.executeRegisterInstrument(message, clusterTimestamp);
-            case APPLY_MARK_PRICE -> risk.executeApplyMarkPrice(message, clusterTimestamp);
-            case APPLY_FUNDING -> funding.executeApplyFunding(message, clusterTimestamp);
-            case EXECUTE_ADL -> adl.executeExecuteAdl(message, clusterTimestamp);
-            case RESOLVE_LIQUIDATION -> liquidations.executeResolveLiquidation(message, clusterTimestamp);
-            case CONTINUE_RISK_SCAN -> risk.executeContinueRiskScan(message, clusterTimestamp);
+            case ADJUST_BALANCE -> balances.executeAdjustBalance(message);
+            case TRANSFER_OUT -> balances.executeTransferOut(message);
+            case TRANSFER_IN -> balances.executeTransferIn(message);
+            case COMPLETE_TRANSFER -> balances.executeCompleteTransfer(message);
+            case REGISTER_INSTRUMENT -> instruments.executeRegisterInstrument(message);
+            case APPLY_MARK_PRICE -> risk.executeApplyMarkPrice(message);
+            case APPLY_FUNDING -> funding.executeApplyFunding(message);
+            case EXECUTE_ADL -> adl.executeExecuteAdl(message);
+            case RESOLVE_LIQUIDATION -> liquidations.executeResolveLiquidation(message);
+            case CONTINUE_RISK_SCAN -> risk.executeContinueRiskScan(message);
             case UPDATE_RISK_SCAN_CONTROL -> risk.executeUpdateRiskScanControl(message, clusterTimestamp);
-            case UPDATE_INSTRUMENT_MAINTENANCE -> instruments.executeUpdateInstrumentMaintenance(message, clusterTimestamp);
-            case UPSERT_FEE_POLICY -> fees.executeUpsertFeePolicy(message, clusterTimestamp);
+            case UPDATE_INSTRUMENT_MAINTENANCE -> instruments.executeUpdateInstrumentMaintenance(message);
+            case UPSERT_FEE_POLICY -> fees.executeUpsertFeePolicy(message);
             case UPDATE_POSITION_MODE -> positions.executeUpdatePositionMode(message);
             case ADJUST_POSITION_MARGIN -> positions.executeAdjustPositionMargin(message);
-            case ADJUST_INSURANCE_FUND -> insurance.executeAdjustInsuranceFund(message, clusterTimestamp);
-            case UPDATE_LEVERAGE -> leverage.executeUpdateLeverage(message, clusterTimestamp);
+            case ADJUST_INSURANCE_FUND -> insurance.executeAdjustInsuranceFund(message);
+            case UPDATE_LEVERAGE -> leverage.executeUpdateLeverage(message);
             case UPSERT_ALGO_ORDER -> triggers.executeUpsertAlgoOrder(message, clusterTimestamp);
-            case UPDATE_CANCEL_ALL_AFTER -> triggers.executeUpdateCancelAllAfter(message, clusterTimestamp);
+            case UPDATE_CANCEL_ALL_AFTER -> triggers.executeUpdateCancelAllAfter(message);
             case PLACE_TRIGGER_OCO_PAIR -> triggers.executePlaceTriggerOcoPair(message, clusterTimestamp);
             case PLACE_TRIGGER_ORDER -> triggers.executePlaceTriggerOrder(message, clusterTimestamp);
-            case CANCEL_TRIGGER_ORDER -> triggers.executeCancelTriggerOrder(message, clusterTimestamp);
-            case CLAIM_TRIGGER_ORDER -> triggers.executeClaimTriggerOrder(message, clusterTimestamp);
-            case COMPLETE_TRIGGER_ORDER -> triggers.executeCompleteTriggerOrder(message, clusterTimestamp);
-            case UPDATE_TRIGGER_TRAILING -> triggers.executeUpdateTriggerTrailing(message, clusterTimestamp);
-            case EXPIRE_TRIGGER_ORDER -> triggers.executeExpireTriggerOrder(message, clusterTimestamp);
-            case RETRY_TRIGGER_ORDER -> triggers.executeRetryTriggerOrder(message, clusterTimestamp);
-            case EXECUTE_TRIGGER_ORDER -> triggers.executeExecuteTriggerOrder(message, clusterTimestamp);
+            case CANCEL_TRIGGER_ORDER -> triggers.executeCancelTriggerOrder(message);
+            case CLAIM_TRIGGER_ORDER -> triggers.executeClaimTriggerOrder(message);
+            case COMPLETE_TRIGGER_ORDER -> triggers.executeCompleteTriggerOrder(message);
+            case UPDATE_TRIGGER_TRAILING -> triggers.executeUpdateTriggerTrailing(message);
+            case EXPIRE_TRIGGER_ORDER -> triggers.executeExpireTriggerOrder(message);
+            case RETRY_TRIGGER_ORDER -> triggers.executeRetryTriggerOrder(message);
+            case EXECUTE_TRIGGER_ORDER -> triggers.executeExecuteTriggerOrder(message);
             default -> { return false; }
         }
         return true;

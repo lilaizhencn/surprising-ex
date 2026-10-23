@@ -94,7 +94,7 @@ class CoreOrderDecisionResolverTest {
             int symbolId = identities.symbolId("1");
             runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 60_000, 9, 1_000));
             // 在线价格和费率更新前保存的决策上下文，继续引用当时的价格及费率表。
-            var context = CoreOrderDecisionResolver.context(runtime, identities, 1001, "1", 1_500);
+            var context = CoreOrderDecisionResolver.context(runtime, identities, "1", 1_500);
             runtime.putMarkPrice(new MarkPriceRuntime(symbolId, runtime.instrument("1"), 80_000, 10, 1_500));
             runtime.upsertFeePolicy(new UpsertFeePolicyCommand(71, 1, 1001, "1", -25, 75, 0, true, 900, 0));
             // 同一旧上下文下的市价买单，用来核对旧价格上界及旧费率。

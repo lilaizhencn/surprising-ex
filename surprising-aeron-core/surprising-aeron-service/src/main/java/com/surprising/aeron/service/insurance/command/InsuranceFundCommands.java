@@ -23,9 +23,8 @@ public final class InsuranceFundCommands {
     /**
      * 异步时准备可复用保险基金调整并登记控制续步，冷路径直接应用原财库转换；两条路径都请求发布，最终成功仍等待控制完成。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeAdjustInsuranceFund(CoreMessage message, long clusterTimestamp) {
+    public void executeAdjustInsuranceFund(CoreMessage message) {
         // 本次解出的保险基金资产和调整数量
         var command = TradingCommandCodec.decodeAdjustInsuranceFund(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {

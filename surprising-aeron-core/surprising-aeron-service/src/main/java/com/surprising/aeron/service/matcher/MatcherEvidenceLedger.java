@@ -153,7 +153,6 @@ final class MatcherEvidenceLedger {
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandId 原命令非空 UUID
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -162,21 +161,20 @@ final class MatcherEvidenceLedger {
      */
     exchange.core2.core.common.MatcherResult publishNative(
             long coreSequence, java.util.UUID commandId, long orderId,
-            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("native matcher publication is required");
         return publishNative(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, aeronTimestamp, sequence, matcherShardId, nativeMatcherShardId, result, target);
+                orderId, sequence, matcherShardId, nativeMatcherShardId, result, target);
     }
 
     /**
-     * 检查结果和目标非空，正原生序号先按实际订单簿分片推进，再推进业务证据分片并向现有结算事件直接发布原生成交或撤单结果。当前直接发布实现不读取 aeronTimestamp 参数，失败不自动回退已写进度。
+     * 检查结果和目标非空，正原生序号先按实际订单簿分片推进，再推进业务证据分片并向现有结算事件直接发布原生成交或撤单结果。失败不自动回退已写进度。
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandIdMsb 原命令 UUID 高六十四位
      * @param commandIdLsb 原命令 UUID 低六十四位
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -185,7 +183,7 @@ final class MatcherEvidenceLedger {
      */
     exchange.core2.core.common.MatcherResult publishNative(
             long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (result == null || target == null)
@@ -211,7 +209,6 @@ final class MatcherEvidenceLedger {
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandId 原命令非空 UUID
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -221,13 +218,13 @@ final class MatcherEvidenceLedger {
      */
     exchange.core2.core.common.MatcherResult publishReplacement(
             long coreSequence, java.util.UUID commandId, long orderId,
-            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult cancellation,
             exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("native matcher replacement publication is required");
         return publishReplacement(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, aeronTimestamp, sequence, matcherShardId, nativeMatcherShardId, cancellation, result, target);
+                orderId, sequence, matcherShardId, nativeMatcherShardId, cancellation, result, target);
     }
 
     /**
@@ -236,7 +233,6 @@ final class MatcherEvidenceLedger {
      * @param commandIdMsb 原命令 UUID 高六十四位
      * @param commandIdLsb 原命令 UUID 低六十四位
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -246,7 +242,7 @@ final class MatcherEvidenceLedger {
      */
     exchange.core2.core.common.MatcherResult publishReplacement(
             long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult cancellation,
             exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
@@ -271,7 +267,6 @@ final class MatcherEvidenceLedger {
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandId 原命令非空 UUID
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -281,12 +276,12 @@ final class MatcherEvidenceLedger {
      */
     exchange.core2.core.common.MatcherResult publishBatchItem(
             long coreSequence, java.util.UUID commandId, long orderId,
-            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult result, int index,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("native matcher batch publication is required");
         return publishBatchItem(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, aeronTimestamp, sequence, matcherShardId, nativeMatcherShardId, result, index, target);
+                orderId, sequence, matcherShardId, nativeMatcherShardId, result, index, target);
     }
 
     /**
@@ -295,7 +290,6 @@ final class MatcherEvidenceLedger {
      * @param commandIdMsb 原命令 UUID 高六十四位
      * @param commandIdLsb 原命令 UUID 低六十四位
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -305,7 +299,7 @@ final class MatcherEvidenceLedger {
      */
     exchange.core2.core.common.MatcherResult publishBatchItem(
             long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long aeronTimestamp, long sequence, int matcherShardId, int nativeMatcherShardId,
+            long sequence, int matcherShardId, int nativeMatcherShardId,
             exchange.core2.core.common.MatcherResult result, int index,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (result == null || target == null)

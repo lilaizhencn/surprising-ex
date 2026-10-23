@@ -242,7 +242,7 @@ public final class DirectCommandSlot {
     private CoreResponse pollFundsCheck() {
         if (!fundsIndexWork.poll(owner)) return null;
         // 资金身份查询或来源序号检查给出的可空既有响应
-        CoreResponse replay = owner.fundsReplayResponse(command, fingerprint, fundsIndexWork.retained());
+        CoreResponse replay = owner.fundsReplayResponse(fingerprint, fundsIndexWork.retained());
         if (replay == null) replay = owner.checkSourceSequence(command, fundsLastSourceSequence);
         // 清槽前保存的原命令，查重通过后继续执行
         CoreMessage checkedCommand = command;

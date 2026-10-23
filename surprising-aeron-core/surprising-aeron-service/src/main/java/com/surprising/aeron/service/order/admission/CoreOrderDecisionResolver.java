@@ -134,25 +134,21 @@ public final class CoreOrderDecisionResolver {
      * 把永久币对文本解析成正整数编号，再取得当前命令的市场与账本决策输入。
      * @param runtime 所属交易运行时，用于 Owner 读取币对、市场、费率及账本元数据
      * @param identities 当前运行时身份表，用于核对币对已存在的稠密编号
-     * @param userId 沿用调用契约的用户编号，本方法只解析币对并传给整数入口，不读取账户
      * @param instrumentId 需要准备决策输入的永久币对编号，文本入口先解析成正整数
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
      */
-    public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                  long userId, String instrumentId, long clusterTimestamp) {
-        return context(runtime, identities, userId, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), clusterTimestamp);
+    public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId, long clusterTimestamp) {
+        return context(runtime, identities, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), clusterTimestamp);
     }
 
     /**
      * 在 Owner 按整数编号取得规范币对、稠密身份、标记价、费率表及账本状态，不复制这些引用指向的业务数据。
      * @param runtime 所属交易运行时，用于 Owner 读取币对、市场、费率及账本元数据
      * @param identities 当前运行时身份表，用于核对币对已存在的稠密编号
-     * @param userId 沿用调用契约的用户编号，当前实现仅准备币对元数据，按用户选费率在后续 resolve 执行
      * @param instrumentId 需要准备决策输入的永久币对编号，文本入口先解析成正整数
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
      */
-    public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                  long userId, int instrumentId, long clusterTimestamp) {
+    public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, int instrumentId, long clusterTimestamp) {
         runtime.assertOwner();
         // 按永久编号取得的本次币对配置，缺失时不能继续解析订单。
         CoreInstrument instrument = runtime.instrument(instrumentId);
@@ -180,14 +176,12 @@ public final class CoreOrderDecisionResolver {
      * 为只读预检捕获币对配置副本；价格引用原规范币对时重绑到副本，保持数值和序号相同，其他身份异常仍留给正常校验拒绝。费率表和结算事实沿用原上下文引用。
      * @param runtime 所属交易运行时，用于 Owner 读取币对、市场、费率及账本元数据
      * @param identities 当前运行时身份表，用于核对币对已存在的稠密编号
-     * @param userId 下单用户编号，用于决策时选择用户费率，必须符合对应入口的用户约束
      * @param instrumentId 需要准备决策输入的永久币对编号，文本入口先解析成正整数
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
      */
-    public static Context queryContext(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-            long userId, String instrumentId, long clusterTimestamp) {
+    public static Context queryContext(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId, long clusterTimestamp) {
         // 预检开始时取得的原配置上下文，后续仅捕获查询需要固定的币对及价格身份。
-        Context source = context(runtime, identities, userId, instrumentId, clusterTimestamp);
+        Context source = context(runtime, identities, instrumentId, clusterTimestamp);
         // 本次预检捕获的币对配置副本，阻塞 Lane 等待期间的在线配置更新不能改变它。
         CoreInstrument instrument = source.instrument().captureForQuery();
         // 原上下文的价格事实，若属于原规范币对则把相同数值重绑到查询副本。

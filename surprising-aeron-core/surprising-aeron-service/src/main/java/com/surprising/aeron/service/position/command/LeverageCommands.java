@@ -23,9 +23,8 @@ public final class LeverageCommands {
     /**
      * 异步时记录变更前修订并准备杠杆控制续步；冷路径只有实际改变状态才请求发布。响应用户提示先于校验登记，不表示变更已成功。
      * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeUpdateLeverage(CoreMessage message, long clusterTimestamp) {
+    public void executeUpdateLeverage(CoreMessage message) {
         // 请求头指定的杠杆所属用户，同时用于响应提示
         long userId = message.header().userId();
         owner.resultBuilder.setSingleChangedUser(userId);

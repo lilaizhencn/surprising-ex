@@ -168,10 +168,9 @@ public final class MatcherSettlementChanges {
      * @param laneId 当前操作的账户 Lane 编号
      * @param identities 解析合约名称及释放客户订单身份的运行时字典
      * @param lane 当前线程持有的对应账户 Lane
-     * @param runtime 所属运行时参数；此收尾实现不读取它
      * @param sequence 本代 Core 序号，用于设置订单再次复用前必须越过的退休边界
      */
-    public void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingAccountRuntime runtime, long sequence) {
+    public void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, long sequence) {
         applyUserRevisions(laneId, lane);
         // 当前 Lane 的实体、终态及发布变化缓冲。
         LaneCommitDelta changes = laneDeltas[laneId];
@@ -241,9 +240,8 @@ public final class MatcherSettlementChanges {
     /**
      * 从指定 Lane 已捕获的余额前后值准备准入资金增量，不在这里执行完整订单终态清理。
      * @param laneId 当前操作的账户 Lane 编号
-     * @param runtime 所属运行时参数；当前准入资金准备不读取它
      */
-    public void prepareAdmissionLane(int laneId, TradingAccountRuntime runtime) {
+    public void prepareAdmissionLane(int laneId) {
         TradingAccountRuntime.prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
     }
 

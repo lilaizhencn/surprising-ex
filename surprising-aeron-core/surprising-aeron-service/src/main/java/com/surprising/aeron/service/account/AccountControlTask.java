@@ -333,7 +333,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         if (!runtime.pollControlLanes()) return false;
         switch (kind) {
             case KIND_BALANCE -> {
-                runtime.markBalanceChanged(userId, assetId);
+                runtime.markBalanceChanged(userId);
                 runtime.setMetadata(runtime.productLine(), nextRevision);
                 stateChanged = true;
             }

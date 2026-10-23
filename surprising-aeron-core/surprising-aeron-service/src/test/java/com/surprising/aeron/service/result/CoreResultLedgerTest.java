@@ -66,11 +66,11 @@ class CoreResultLedgerTest {
                 expected.remove(expected.keySet().iterator().next());
             for (var /* 仍应保留的参照 Map 当前键值项 */ entry : expected.entrySet())
                 assertThat(ledger.get(entry.getKey()).fingerprint()).isEqualTo(entry.getValue());
-            assertThat(ledger.duplicateResponse(ledger.get(id), owned, stable, sequence).status())
+            assertThat(ledger.duplicateResponse(ledger.get(id), stable, sequence).status())
                     .isEqualTo(ResponseStatus.DUPLICATE);
             // 保留相同头部 UUID 但改动载荷的冲突请求，只用于检查重复判定
             var changed = new CoreMessage(owned.header(), com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", sequence + 1)));
-            assertThat(ledger.duplicateResponse(ledger.get(id), changed, calculator.of(changed), sequence).resultCode())
+            assertThat(ledger.duplicateResponse(ledger.get(id), calculator.of(changed), sequence).resultCode())
                     .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
         }
         assertThat(firstExposed).isEqualTo(firstExpected);

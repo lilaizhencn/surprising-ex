@@ -21,9 +21,8 @@ public final class InstrumentConfigurationCommands {
     /**
      * 解码标的参数并应用注册或更新，转换正常返回后请求发布；相同配置是否需要增加修订由转换方法决定。
      * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeRegisterInstrument(CoreMessage message, long clusterTimestamp) {
+    public void executeRegisterInstrument(CoreMessage message) {
         // 本次载荷解出的注册或更新配置
         var command = TradingCommandCodec.decodeRegisterInstrument(message.payloadUnsafe(), owner.runtimeState().productLine());
         RuntimeInstrumentStateTransitions.applyConfiguration(
@@ -34,9 +33,8 @@ public final class InstrumentConfigurationCommands {
     /**
      * 解码带任务归属的维护命令，交给状态转换检查并修改维护状态，成功后请求发布。
      * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeUpdateInstrumentMaintenance(CoreMessage message, long clusterTimestamp) {
+    public void executeUpdateInstrumentMaintenance(CoreMessage message) {
         RuntimeInstrumentStateTransitions.updateMaintenance(owner.runtimeState(), owner.identities(),
                 com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeCommand(message.payloadUnsafe()));
         owner.requestCommitPublication();

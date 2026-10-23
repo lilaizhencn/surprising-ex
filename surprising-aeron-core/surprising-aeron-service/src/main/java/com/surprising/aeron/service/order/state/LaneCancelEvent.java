@@ -160,7 +160,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                 }
                 // 两条分支均已在构造终态时写入本次提交元数据，无需再查订单补写。
             }
-            changes.prepareLaneTerminal(laneId, identities, lane, runtime, coreSequence);
+            changes.prepareLaneTerminal(laneId, identities, lane, coreSequence);
             changes.laneFundsDelta(laneId).requireConserved(false);
             if (commitLane) {
                 if (resultTarget != null) LaneOrderResultTarget.capture(resultTarget, changes.laneDelta(laneId), identities, lane);

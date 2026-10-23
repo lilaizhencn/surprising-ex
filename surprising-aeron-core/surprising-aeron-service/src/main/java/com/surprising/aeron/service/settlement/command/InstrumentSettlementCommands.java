@@ -81,22 +81,20 @@ public final class InstrumentSettlementCommands {
     /**
      * 为本页结算创建新的异步续步工作，实际账户与账本执行由调用方后续轮询。
      * @param command 币对结算编号、固定价格及订单和用户分页参数
-     * @param commandId 本页结算命令 UUID，异步入口要求非空
      */
     public RuntimeLifecycleSettlementContinuation.SettlementWork beginAsyncSettlement(
-            com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
-        return beginAsyncSettlement(null, command, commandId);
+            com.surprising.aeron.protocol.SettleInstrumentCommand command) {
+        return beginAsyncSettlement(null, command);
     }
 
     /**
      * 把持仓用户索引、活动订单索引与原运行时交给续步入口，旧对象满足回收条件时复用；此处不复制账户状态，也不另加执行线程。
      * @param reuse 可选的旧命令槽工作对象，由续步入口判断是否可复用
      * @param command 币对结算编号、固定价格及订单和用户分页参数
-     * @param commandId 本页结算命令 UUID，异步入口要求非空
      */
     public RuntimeLifecycleSettlementContinuation.SettlementWork beginAsyncSettlement(
             RuntimeLifecycleSettlementContinuation.SettlementWork reuse,
-            com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
+            com.surprising.aeron.protocol.SettleInstrumentCommand command) {
         return RuntimeLifecycleSettlementContinuation.prepare(reuse, command,
                 owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()),
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities());

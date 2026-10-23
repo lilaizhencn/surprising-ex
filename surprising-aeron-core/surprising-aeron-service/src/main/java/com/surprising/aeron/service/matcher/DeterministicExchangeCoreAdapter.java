@@ -552,8 +552,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(),
-                    aeronTimestamp, placeNativeAdmitted(userId, command, target.nativeResultSlot(0)), target);
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(), placeNativeAdmitted(userId, command, target.nativeResultSlot(0)), target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
@@ -603,8 +602,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(),
-                    aeronTimestamp, placeNative(userId, command, target.nativeResultSlot(0)), target);
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(), placeNative(userId, command, target.nativeResultSlot(0)), target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
@@ -654,8 +652,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(),
-                    aeronTimestamp, placeNative(userId, command, target.nativeResultSlot(0)), target);
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(), placeNative(userId, command, target.nativeResultSlot(0)), target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
@@ -708,8 +705,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, orderId,
-                    aeronTimestamp, cancelNative(userId, orderId, instrumentId, target.nativeResultSlot(0)), target);
+            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, orderId, cancelNative(userId, orderId, instrumentId, target.nativeResultSlot(0)), target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
@@ -779,7 +775,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int nativeShard = result.symbol() <= 0 ? shardId : topology.matcherShardId(result.symbol());
             if (nativeShard != shardId)
                 throw new IllegalStateException("native matcher replacement crossed its evidence partition");
-            return matcherEvidence.publishReplacement(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp,
+            return matcherEvidence.publishReplacement(coreSequence, commandIdMsb, commandIdLsb, orderId,
                     matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     cancellation, result, target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
@@ -819,8 +815,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int nativeShard = result.symbol() <= 0 ? -1 : topology.matcherShardId(result.symbol());
             if (nativeShard >= 0 && nativeShard != shardId)
                 throw new IllegalStateException("native matcher batch crossed its evidence partition");
-            return matcherEvidence.publishBatchItem(coreSequence, commandId, command.orderId(),
-                    aeronTimestamp, matcherEvidence.nextSequence(shardId), shardId, nativeShard,
+            return matcherEvidence.publishBatchItem(coreSequence, commandId, command.orderId(), matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     result, index, target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -860,8 +855,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int nativeShard = result.symbol() <= 0 ? shardId : topology.matcherShardId(result.symbol());
             if (nativeShard != shardId)
                 throw new IllegalStateException("native matcher cancellation crossed its evidence partition");
-            return matcherEvidence.publishBatchItem(coreSequence, commandId, orderId,
-                    aeronTimestamp, matcherEvidence.nextSequence(shardId), shardId, nativeShard,
+            return matcherEvidence.publishBatchItem(coreSequence, commandId, orderId, matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     result, index, target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -887,17 +881,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param commandId 逻辑命令 UUID
      * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
      * @param result 当前原生或普通撮合结果，方法签名决定具体类型
      * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     private exchange.core2.core.common.MatcherResult publishNativeMatcherResult(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
-            long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId, exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
         return publishNativeMatcherResult(shardId, coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), orderId, aeronTimestamp, result, target);
+                commandId.getLeastSignificantBits(), orderId, result, target);
     }
 
     /**
@@ -907,13 +899,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param commandIdMsb 逻辑命令 UUID 高六十四位
      * @param commandIdLsb 逻辑命令 UUID 低六十四位
      * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
      * @param result 当前原生或普通撮合结果，方法签名决定具体类型
      * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     private exchange.core2.core.common.MatcherResult publishNativeMatcherResult(
-            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId,
-            long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
+            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long orderId, exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         // 先前记录的首个 Matcher 故障，存在时禁止发布后续完成结果。
         Throwable poison = matcherFailure.get();
@@ -923,7 +913,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         int nativeShard = result.symbol() <= 0 ? -1 : topology.matcherShardId(result.symbol());
         if (nativeShard >= 0 && nativeShard != shardId)
             throw new IllegalStateException("native matcher result crossed its evidence partition");
-        return matcherEvidence.publishNative(coreSequence, commandIdMsb, commandIdLsb, orderId, aeronTimestamp,
+        return matcherEvidence.publishNative(coreSequence, commandIdMsb, commandIdLsb, orderId,
                 matcherEvidence.nextSequence(shardId), shardId, nativeShard, result, target);
     }
 
@@ -954,13 +944,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param commandId 逻辑命令 UUID
      * @param logicalOrderId 外层控制命令关联的逻辑订单号
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
      * @param result 当前原生或普通撮合结果，方法签名决定具体类型
      * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
      */
     public exchange.core2.core.common.MatcherResult publishDirectPrefixFailure(
-            int shardId, long coreSequence, java.util.UUID commandId, long logicalOrderId,
-            long aeronTimestamp, exchange.core2.core.common.MatcherResult result,
+            int shardId, long coreSequence, java.util.UUID commandId, long logicalOrderId, exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (MatcherPrefixFailure.TYPE.isEnabled()) {
             // 仅在 JFR 启用时创建的失败事件，记录逻辑身份与原生撤单结果。
@@ -979,8 +967,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 结算事件自己持有的原生结果槽，捕获临时结果后按租约消费。
         var retained = target.nativeResultSlot(0);
         retained.capture(result);
-        return publishNativeMatcherResult(shardId, coreSequence, commandId, logicalOrderId,
-                aeronTimestamp, retained, target);
+        return publishNativeMatcherResult(shardId, coreSequence, commandId, logicalOrderId, retained, target);
     }
 
     /**

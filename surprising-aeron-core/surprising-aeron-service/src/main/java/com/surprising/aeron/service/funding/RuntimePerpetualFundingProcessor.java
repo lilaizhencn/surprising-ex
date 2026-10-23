@@ -305,7 +305,7 @@ public final class RuntimePerpetualFundingProcessor {
         private void collectAccountReceipt(int lane, Object value) {
             if (!(value instanceof LaneFundingResult /* 某个账户 Lane 的实际收付与财库差额回执。 */ receipt)) return;
             laneResults[lane] = receipt;
-            for (long /* 当前正在计算或登记余额发布变化的用户编号。 */ userId : receipt.changedUserIds()) runtime.markBalanceChanged(userId, settleAssetId);
+            for (long /* 当前正在计算或登记余额发布变化的用户编号。 */ userId : receipt.changedUserIds()) runtime.markBalanceChanged(userId);
         }
 
         /**

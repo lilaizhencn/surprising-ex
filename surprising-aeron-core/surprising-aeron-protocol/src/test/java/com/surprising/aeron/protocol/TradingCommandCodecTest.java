@@ -13,6 +13,19 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
+    void markPriceRequiresTheCompleteCurrentLayout() {
+        var command = new ApplyMarkPriceCommand("1", 100, 99, 0, 1, 1_000, 0);
+        byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(command);
+        assertThat(TradingCommandCodec.decodeApplyMarkPrice(payload)).isEqualTo(command);
+        assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(
+                java.util.Arrays.copyOf(payload, payload.length - Long.BYTES)))
+                .isInstanceOf(ProtocolException.class);
+        assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(
+                java.util.Arrays.copyOf(payload, payload.length + Long.BYTES)))
+                .isInstanceOf(ProtocolException.class);
+    }
+
+    @Test
     void zeroBalanceInitializationKeepsTheExistingWireFormat() {
         var command = new BalanceAdjustmentCommand("USDT", 0);
         assertThat(TradingCommandCodec.decodeBalanceAdjustment(

@@ -154,7 +154,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
             long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
             // 本项经过规则、容量和风险检查后计算出的所需预留金额。
             long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, lane, userId, this,
-                    openInterestSteps, lane.admissionOrderIndex(symbolId()), clientKey, symbolId(), positionKey,
+                    openInterestSteps, lane.admissionOrderIndex(symbolId()), clientKey, positionKey,
                     decision.context().lifecycleSettled(), decision.context().fundingInProgress());
             // 当前已有持仓，逆向新单可能需要先撤冲突的平仓委托。
             PositionRuntime position = positionKey == 0 ? null : lane.position(positionKey);

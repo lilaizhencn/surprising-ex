@@ -311,7 +311,7 @@ public final class TradingCommandCodec {
     public static PlaceOrderCommand decodePlaceOrderInto(byte[] payload, int start, int length, PlaceOrderCommand target) {
         requireRange(payload, start, length);
         int limit = start + length;
-        requireRange(payload, start, Integer.BYTES + Long.BYTES, limit);
+        requireRange(start, Integer.BYTES + Long.BYTES, limit);
         int offset = start;
         int version = getInt(payload, offset);
         offset += Integer.BYTES;
@@ -320,16 +320,16 @@ public final class TradingCommandCodec {
         }
         long orderId = getLong(payload, offset);
         offset += Long.BYTES;
-        requireRange(payload, offset, Short.BYTES, limit);
+        requireRange(offset, Short.BYTES, limit);
         int symbolLength = getUnsignedShort(payload, offset);
         offset += Short.BYTES;
         if (symbolLength == 0 || symbolLength > MAX_TEXT_BYTES) {
             throw new ProtocolException("invalid text length: " + symbolLength);
         }
-        requireRange(payload, offset, symbolLength, limit);
+        requireRange(offset, symbolLength, limit);
         String instrumentId = decodeAsciiSymbol(payload, offset, symbolLength);
         offset += symbolLength;
-        requireRange(payload, offset, Integer.BYTES + Long.BYTES * 2 + Byte.BYTES + Integer.BYTES * 4
+        requireRange(offset, Integer.BYTES + Long.BYTES * 2 + Byte.BYTES + Integer.BYTES * 4
                 + Byte.BYTES + Short.BYTES, limit);
         CoreOrderSide side = CoreOrderSide.fromWireCode(getInt(payload, offset));
         offset += Integer.BYTES;
@@ -358,7 +358,7 @@ public final class TradingCommandCodec {
         if (clientLength > MAX_TEXT_BYTES) {
             throw new ProtocolException("invalid optional text length: " + clientLength);
         }
-        requireRange(payload, offset, clientLength, limit);
+        requireRange(offset, clientLength, limit);
         String clientOrderId = clientLength == 0 ? ""
                 : target == null ? new String(payload, offset, clientLength, StandardCharsets.UTF_8)
                 : target.decodeClientOrderId(payload, offset, clientLength);
@@ -510,7 +510,7 @@ public final class TradingCommandCodec {
             AmendOrderCommand target) {
         requireRange(payload, offset, length);
         int limit = offset + length;
-        requireRange(payload, offset, Integer.BYTES * 2 + Long.BYTES * 2, limit);
+        requireRange(offset, Integer.BYTES * 2 + Long.BYTES * 2, limit);
         if (getInt(payload, offset) != AMEND_ORDER_V1_MARKER)
             throw new ProtocolException("invalid amend order marker");
         offset += Integer.BYTES;
@@ -524,35 +524,35 @@ public final class TradingCommandCodec {
             throw new ProtocolException("invalid amend order field mask");
         long priceTicks = 0L;
         if ((mask & 1) != 0) {
-            requireRange(payload, offset, Long.BYTES, limit);
+            requireRange(offset, Long.BYTES, limit);
             priceTicks = getLong(payload, offset);
             offset += Long.BYTES;
         }
         long quantitySteps = 0L;
         if ((mask & (1 << 1)) != 0) {
-            requireRange(payload, offset, Long.BYTES, limit);
+            requireRange(offset, Long.BYTES, limit);
             quantitySteps = getLong(payload, offset);
             offset += Long.BYTES;
         }
         CoreTimeInForce timeInForce = null;
         if ((mask & (1 << 2)) != 0) {
-            requireRange(payload, offset, Integer.BYTES, limit);
+            requireRange(offset, Integer.BYTES, limit);
             timeInForce = CoreTimeInForce.fromWireCode(getInt(payload, offset));
             offset += Integer.BYTES;
         }
         byte postOnly = AmendOrderCommand.UNCHANGED_POST_ONLY;
         if ((mask & (1 << 3)) != 0) {
-            requireRange(payload, offset, Byte.BYTES, limit);
+            requireRange(offset, Byte.BYTES, limit);
             postOnly = payload[offset++];
             if (postOnly != 0 && postOnly != 1) throw new ProtocolException("invalid postOnly flag");
         }
         String clientOrderId = null;
         if ((mask & (1 << 4)) != 0) {
-            requireRange(payload, offset, Short.BYTES, limit);
+            requireRange(offset, Short.BYTES, limit);
             int textLength = getUnsignedShort(payload, offset);
             offset += Short.BYTES;
             if (textLength > MAX_TEXT_BYTES) throw new ProtocolException("invalid optional text length");
-            requireRange(payload, offset, textLength, limit);
+            requireRange(offset, textLength, limit);
             clientOrderId = decodeAsciiSymbol(payload, offset, textLength);
             offset += textLength;
         }
@@ -679,10 +679,10 @@ public final class TradingCommandCodec {
     public static ApplyMarkPriceCommand decodeApplyMarkPrice(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String instrumentId = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 5);
+        requireRemaining(buffer, Long.BYTES * 6);
         long mark = buffer.getLong(), index = buffer.getLong(), forward = buffer.getLong();
         long sequence = buffer.getLong(), generatedAt = buffer.getLong();
-        long last = buffer.remaining() == Long.BYTES ? buffer.getLong() : 0;
+        long last = buffer.getLong();
         ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(instrumentId, mark, index, forward,
                 sequence, generatedAt, last);
         requireConsumed(buffer);
@@ -1013,7 +1013,7 @@ public final class TradingCommandCodec {
         }
     }
 
-    private static void requireRange(byte[] payload, int offset, int length, int limit) {
+    private static void requireRange(int offset, int length, int limit) {
         if (length < 0 || offset < 0 || offset > limit - length) {
             throw new ProtocolException("truncated trading command payload");
         }

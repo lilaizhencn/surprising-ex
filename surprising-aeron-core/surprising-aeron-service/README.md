@@ -25,22 +25,22 @@ Lombok只处理直接样板，校验、复制和状态转换显式实现，可�
 查询、实时事件和数据库模型保留各自消费的完整业务字段。按用户确认，旧命令与快照格式不再读取。
 
 清理及逐字段证据见[命令与持久化数据审计](validation/command-data-audit-20261023.json)，
-当前累计52项已解决。2026-10-24深入分析新增A54–A64，其中10项确认待清理，A63行情远期价仍待核实；
-A11查询一致性继续保留候选。新增确认项包括产品不适用的注册/风险字段、可派生的风险档编号和下界、
-期权无用杠杆链路、重复分支、行情旧布局读取，以及41个内部方法中44个未读取形参。
-这轮只更新分析证据，未修改业务代码，未运行编译、测试或服务；全量字段及业务约束审查仍在进行。
+当前累计55项已解决，A54–A60七项产品条件字段及派生风险档结构待清理，A11查询一致性和A63行情远期价仍为候选。
+内部入口及纯转发重载已删除55个方法中的59个无用形参；删除重复风险上限检查，结算撤单阶段使用单一分支。
+行情解码要求完整当前布局，缺字段或多余字节直接拒绝；值为0的可选最新成交价仍表示未提供。
+全量字段及业务约束审查仍在进行。
 历史字段、索引和运行时清理过程也保存在审计及[早期验证记录](validation/simplify-20261022.json)，不以无引用扫描代替业务用途判断。
 
-上一轮清理使用HotSpot JDK27、Maven3.9.16执行：
+最近一批清理使用HotSpot JDK27、Maven3.9.16执行：
 
 ```bash
-mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider \
+mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools \
     -am -DskipTests clean test-compile
-mvn -pl surprising-gateway -am -DskipTests test-compile
 ```
 
-17个相关模块及依赖干净编译通过，随后网关整理再次编译通过，均包含测试源码编译。
-29项静态检查通过，164处注册构造的非风险参数逐项对照未变。未执行测试、服务、交易、做市、数据库、前端交互、日志/快照恢复或性能采样，
+14个相关模块及依赖干净编译通过，包含测试源码编译；170处签名和调用点的保留参数及顺序逐项对照未变。
+沿转发链继续删参后，相同模块再次以`-am -DskipTests test-compile`编译通过。
+未执行测试、服务、交易、做市、数据库、前端交互、日志/快照恢复或性能采样，
 因此没有宣称这些运行路径已验证通过。
 
 先读本文的启动和业务步骤，再进入对应源码。更完整的模块架构、配置表、启动命令、

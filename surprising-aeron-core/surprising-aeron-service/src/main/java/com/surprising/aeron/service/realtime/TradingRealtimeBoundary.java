@@ -111,9 +111,8 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
      * @param state 本产品线当前交易运行时，提供捕获、快照及盘口读取入口
      * @param position 本次命令原日志位置，提交后成为实时可读水位
      * @param timestamp 本次复制命令原业务时间
-     * @param header 本次命令原头部，本方法当前不读取
      */
-    public void beginCapture(TradingCoreRuntime state, long position, long timestamp, CoreMessageHeader header) {
+    public void beginCapture(TradingCoreRuntime state, long position, long timestamp) {
         if (capture == null || !leader) return;
         try {
             capture.begin(position, timestamp, 0, state.realtimeExportSequence());

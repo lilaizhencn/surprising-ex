@@ -113,7 +113,7 @@ public class OwnerPublicationBenchmark {
             changes.putOrder(i + 1, settlementOrders[i]);
             changes.putReservation(i + 1, settlementReservations[i]);
         }
-        settlement.prepareLaneTerminal(laneId, identities, settlementLane, runtime, 1);
+        settlement.prepareLaneTerminal(laneId, identities, settlementLane, 1);
         int terminals = changes.terminalOrderCount();
         changes.clear();
         return terminals;

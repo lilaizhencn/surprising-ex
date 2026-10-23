@@ -27,9 +27,8 @@ public final class LiquidationCommands {
     /**
      * 解码强平结果确认；异步准备原结果处理任务并交接控制槽，冷路径直接应用确认后请求发布。保险分配、状态合法性和剩余亏空由结果处理器决定。
      * @param message 当前借用的请求头与载荷，解码期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeResolveLiquidation(CoreMessage message, long clusterTimestamp) {
+    public void executeResolveLiquidation(CoreMessage message) {
         // 解码得到的强平任务身份、确认方式及需要核对的覆盖金额
         var command = TradingCommandCodec.decodeResolveLiquidation(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {

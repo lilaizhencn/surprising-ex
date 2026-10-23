@@ -114,8 +114,7 @@ public final class RuntimeOrderStateTransitions {
                 command.instrument(), command.positionSide());
         // 触发子单经过原账户准入规则算出的所需预留金额。
         long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, lane, userId, command,
-                openInterestSteps, lane.admissionOrderIndex(command.symbolId()), clientKey,
-                command.symbolId(), positionKey, lifecycleSettled, fundingInProgress);
+                openInterestSteps, lane.admissionOrderIndex(command.symbolId()), clientKey, positionKey, lifecycleSettled, fundingInProgress);
         placePrepared(runtime, userId, command, commandId, required, clientKey, command.symbolId(), assetId);
         lane.markPendingReservation(command.orderId(), coreSequence);
         // 原 Lane 变更缓冲中的获准子订单回执，需复制到该子单独有命令槽再交给 Matcher。

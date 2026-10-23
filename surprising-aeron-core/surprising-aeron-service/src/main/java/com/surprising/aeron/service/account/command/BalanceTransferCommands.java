@@ -26,9 +26,8 @@ public final class BalanceTransferCommands {
     /**
      * 预先登记响应用户提示，解码余额调整后交给统一分流；用户提示不代表账户已经修改成功。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeAdjustBalance(CoreMessage message, long clusterTimestamp) {
+    public void executeAdjustBalance(CoreMessage message) {
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         adjustBalance(message.header().userId(), TradingCommandCodec.decodeBalanceAdjustment(message.payloadUnsafe()));
     }
@@ -50,9 +49,8 @@ public final class BalanceTransferCommands {
     /**
      * 解码带原用户上下文的划转，异步路径交给转出控制槽，冷路径执行原转出转换后请求发布。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeTransferOut(CoreMessage message, long clusterTimestamp) {
+    public void executeTransferOut(CoreMessage message) {
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         // 载荷解出的划转参数，后续沿用源/目标用户及产品线信息
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
@@ -74,9 +72,8 @@ public final class BalanceTransferCommands {
     /**
      * 先核对收款用户及目标产品线，再以划转金额进入统一余额调整；不在这里重复执行转出账户扣款。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeTransferIn(CoreMessage message, long clusterTimestamp) {
+    public void executeTransferIn(CoreMessage message) {
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         // 载荷解出的划转参数，后续沿用源/目标用户及产品线信息
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
@@ -92,9 +89,8 @@ public final class BalanceTransferCommands {
     /**
      * 解码划转身份，异步路径准备完成划转续步，冷路径完成原待转记录并要求发布。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeCompleteTransfer(CoreMessage message, long clusterTimestamp) {
+    public void executeCompleteTransfer(CoreMessage message) {
         // 本次需要完成的划转业务 ID
         long id = TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId();
         if (owner.asynchronousCommands()) {

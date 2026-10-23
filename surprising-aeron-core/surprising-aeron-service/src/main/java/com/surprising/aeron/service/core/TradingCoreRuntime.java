@@ -1345,7 +1345,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             // 近期收据表中的同 UUID 终态，随后核对指纹
             CommandResultLedger.StoredResult terminalDuplicate = resultLedger.get(msb, lsb);
             if (terminalDuplicate != null) {
-                return resultLedger.duplicateResponse(terminalDuplicate, message, fingerprint, appliedCommandCount);
+                return resultLedger.duplicateResponse(terminalDuplicate, fingerprint, appliedCommandCount);
             }
         }
         if (!pendingMatching.isEmpty()) {
@@ -1369,11 +1369,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /**
      * 把长期资金身份查询结果转换为重试响应：未命中返回空，指纹不符拒绝，已完成的同一资金命令返回重复成功和当前计数，不重建原响应正文。
-     * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
      * @param fingerprint 与当前命令身份配套的内容指纹
      * @param retained 长期资金索引查出的可空命令身份记录
      */
-    public CoreResponse fundsReplayResponse(CoreMessage message, CommandFingerprint fingerprint, CommandFingerprint retained) {
+    public CoreResponse fundsReplayResponse(CommandFingerprint fingerprint, CommandFingerprint retained) {
         if (retained == null) return null;
         if (!retained.equals(fingerprint)) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,

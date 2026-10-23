@@ -23,9 +23,8 @@ public final class AdlCommands {
     /**
      * 解码请求后登记目标用户提示；异步时准备复用工作并交给原控制槽，冷路径直接执行后请求发布。提示先登记不代表目标持仓已经减仓成功。
      * @param message 当前借用的请求头与载荷，解码期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeExecuteAdl(CoreMessage message, long clusterTimestamp) {
+    public void executeExecuteAdl(CoreMessage message) {
         // 解码得到的强平 ID、目标用户及持仓、价格序列、减仓量和补亏要求
         var command = TradingCommandCodec.decodeExecuteAdl(message.payloadUnsafe());
         owner.resultBuilder.setSingleChangedUser(command.targetUserId());

@@ -63,7 +63,7 @@ class DeterministicExchangeCoreAdapterTest {
             target.recordDirectPreCancellation(1);
             // 第二笔前置撤单失败时取得的原生回执。
             var failure = adapter.cancelDirectPrefix(1000, 7, 2, "1");
-            adapter.publishDirectPrefixFailure(adapter.matcherShardId("1"), 3, id, 3, 1000, failure, target);
+            adapter.publishDirectPrefixFailure(adapter.matcherShardId("1"), 3, id, 3, failure, target);
             assertThat(target.accepted()).isFalse();
             assertThat(target.plan().preCancellationCount()).isEqualTo(1);
             assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.FATAL_DIVERGENCE);

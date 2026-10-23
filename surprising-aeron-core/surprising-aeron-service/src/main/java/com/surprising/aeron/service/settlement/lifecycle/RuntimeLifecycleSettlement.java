@@ -75,7 +75,7 @@ public final class RuntimeLifecycleSettlement {
         // 活动订单索引是否还留有后续页。
         boolean moreOrders = false;
         if (!chunked) {
-            selectedOrders = openOrders(runtime, identities, activeOrderIndex, instrument.instrumentId());
+            selectedOrders = openOrders(activeOrderIndex, instrument.instrumentId());
             cancelOrders(runtime, selectedOrders);
             ordersComplete = true;
         } else if (!ordersComplete) {
@@ -303,13 +303,10 @@ public final class RuntimeLifecycleSettlement {
 
     /**
      * 取币对全部活动订单编号并按降序转换为撤单路由，缺失路由跳过；空结果用空列表，其余返回只读副本。runtime 和 identities 当前未使用。
-     * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
-     * @param identities 把币对和资产名称转换为内部编号的身份表
      * @param index 活动订单路由索引
      * @param instrumentId 需要结算并清空订单的币对名称
      */
-    private static List<CancellationOrder> openOrders(TradingAccountRuntime runtime,
-                                                   RuntimeIdentityRegistry identities,
+    private static List<CancellationOrder> openOrders(
                                                    ActiveOrderIndex index, String instrumentId) {
         // 币对活动订单编号的降序数组。
         long[] orderIds = index.sortedIdsDescending(instrumentId);

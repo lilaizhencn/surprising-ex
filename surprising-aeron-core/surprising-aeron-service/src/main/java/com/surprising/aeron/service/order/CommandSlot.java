@@ -420,7 +420,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
                     || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
             if (accepted) target.recordDirectPreCancellation(cancellation.orderId());
             else return owner.matchingAdapter().publishDirectPrefixFailure(shard, coreSequence,
-                    command.header().commandId(), logicalOrderId, command.header().submittedAtEpochMillis(), result, target);
+                    command.header().commandId(), logicalOrderId, result, target);
         }
         return null;
     }
@@ -1541,8 +1541,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
                     settlement.recordDirectPreCancellation(orderId);
                 } else {
                     return owner.matchingAdapter().publishDirectPrefixFailure(
-                            matcherShard, coreSequence, command.header().commandId(), place.orderId(),
-                            command.header().submittedAtEpochMillis(), result, settlement);
+                            matcherShard, coreSequence, command.header().commandId(), place.orderId(), result, settlement);
                 }
             }
             return original.get();

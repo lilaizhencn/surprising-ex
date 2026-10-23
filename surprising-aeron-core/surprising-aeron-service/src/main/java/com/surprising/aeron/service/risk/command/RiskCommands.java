@@ -27,9 +27,8 @@ public final class RiskCommands {
     /**
      * 解码价格并记录扫描积压及计时，应用原价格转换，再初始化触发扫描、请求发布并记录耗时；价格序列与产品规则由价格处理器核对。
      * @param message 当前借用的请求头与载荷，解码期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeApplyMarkPrice(CoreMessage message, long clusterTimestamp) {
+    public void executeApplyMarkPrice(CoreMessage message) {
         // 解码得到的标记价、价格序列及报价时间
         var command = TradingCommandCodec.decodeApplyMarkPrice(message.payloadUnsafe());
         // 更新标记价前记录的未完成扫描数量，用于本次诊断日志
@@ -46,9 +45,8 @@ public final class RiskCommands {
     /**
      * 先核对扫描已启用且请求预算未超控制上限；优先选风险未完扫描，否则选仍有触发工作的一项。触发未完时只给风险一半预算，整数折半可能为零。异步交接控制槽等待后续推进；冷路径实际续扫后将剩余预算交触发单，并记录本轮扫描。
      * @param message 当前借用的请求头与载荷，解码期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeContinueRiskScan(CoreMessage message, long clusterTimestamp) {
+    public void executeContinueRiskScan(CoreMessage message) {
         // 本次续扫请求允许处理的最大工作预算
         var command = TradingCommandCodec.decodeContinueRiskScan(message.payloadUnsafe());
         // 当前生效的扫描开关和批量上限，决定是否接受续扫请求

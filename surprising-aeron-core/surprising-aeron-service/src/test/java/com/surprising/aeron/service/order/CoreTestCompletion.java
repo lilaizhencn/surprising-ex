@@ -211,7 +211,7 @@ public final class CoreTestCompletion {
         int loop = 0;
         while (true) {
             owner.runtimeState().assertAccountLanesHealthy();
-            owner.commits.advanceMatchingProgress(clusterTimestamp, clusterPosition, Long.MAX_VALUE);
+            owner.commits.advanceMatchingProgress(Long.MAX_VALUE);
             owner.matchingProgress.drainMatchingCompletions();
             // 当前回调完成或主循环准备推进的 Core 序号。
             long sequence = requestedSequence != 0 && owner.pendingMatching().contains(requestedSequence)

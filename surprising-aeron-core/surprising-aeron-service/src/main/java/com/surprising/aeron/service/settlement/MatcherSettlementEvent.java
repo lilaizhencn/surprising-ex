@@ -1110,7 +1110,7 @@ public final class MatcherSettlementEvent implements
             throw new IllegalStateException("place admission receipt is missing");
         }
         if (admissionRequired && !admissionAccepted) {
-            changes().prepareLaneTerminal(laneId, identities, lane, runtime, directCoreSequence);
+            changes().prepareLaneTerminal(laneId, identities, lane, directCoreSequence);
             publishCompletion(lane);
             return;
         }
@@ -1132,7 +1132,7 @@ public final class MatcherSettlementEvent implements
                             lane, batchPlan, commitTimestamp, commitClusterPosition);
                 }
             }
-            changes.prepareLaneTerminal(laneId, identities, lane, runtime, directCoreSequence);
+            changes.prepareLaneTerminal(laneId, identities, lane, directCoreSequence);
             if (resultTarget != null
                     && laneId == runtime.topology().accountLaneId(plan().activeUserId())) {
                 LaneOrderResultTarget.capture(resultTarget, changes.laneDeltas[laneId], identities, lane);

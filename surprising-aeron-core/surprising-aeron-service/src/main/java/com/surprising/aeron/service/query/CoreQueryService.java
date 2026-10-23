@@ -129,7 +129,7 @@ public final class CoreQueryService {
                 "DUPLICATE_ORDER_ID", "orderId already exists");
         // Owner 为当前预检取得的币对决策输入，避免 Lane 任意回读变化中的产品元数据。
         var context = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.queryContext(
-                owner.runtimeState(), owner.identities(), userId, command.instrumentId(), timestamp);
+                owner.runtimeState(), owner.identities(), command.instrumentId(), timestamp);
         // 为本次异步读取新分配的内部查询编号，与外部命令 UUID 另行关联。
         long id = nextAsyncQueryId++;
         // 可等待账本 OI 输入的预检任务，之后只读用户账户计算所需预留。

@@ -199,7 +199,7 @@ public final class TradingCoreOwner {
                     && !state.runtimeState.tryAcquireOwnerLaneAccess()) return;
             state.assertClusterCallbackComplete();
             commandPipeline.beginControl(next);
-            beginCapture(next.position(), next.timestamp(), next.command().header());
+            beginCapture(next.position(), next.timestamp());
             commandPipeline.startProgressDeadline();
             // 当前队首是否属于撮合命令，用来登记需要等待的撮合序号
             boolean matching = TradingCoreRuntime.isMatchingCommand(next.command().header().messageType());
@@ -274,7 +274,7 @@ public final class TradingCoreOwner {
                         && !state.runtimeState.tryAcquireOwnerLaneAccess()) break;
                 commandPipeline.beginControl(next);
                 state.assertClusterCallbackComplete();
-                beginCapture(next.position(), next.timestamp(), next.command().header());
+                beginCapture(next.position(), next.timestamp());
                 commandPipeline.startProgressDeadline();
                 commandPipeline.controlResponse(state.applyDecodedCommand(next.command(), next.timestamp(), next.position(),
                         window.decodedIfPresent(next.command()), false, next.fingerprint()));
@@ -310,14 +310,13 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 仅在实时边界启用时，按本命令原日志位置、业务时间和头部开启变更捕获。
+     * 仅在实时边界启用时，按本命令原日志位置和业务时间开启变更捕获。
      * @param position 本命令原复制日志位置
      * @param timestamp 本命令原业务时间，不用系统时钟替代
-     * @param header 本命令的请求或响应头，调用边界内保持租约有效
      */
-    private void beginCapture(long position, long timestamp, CoreMessageHeader header) {
+    private void beginCapture(long position, long timestamp) {
         if (realtimeBoundary.enabled()) {
-            realtimeBoundary.beginCapture(state, position, timestamp, header);
+            realtimeBoundary.beginCapture(state, position, timestamp);
         }
     }
 
@@ -328,7 +327,7 @@ public final class TradingCoreOwner {
         commandPipeline.beginHeadCommit();
         // 当前正在提交的窗口队首，名称不表示窗口尾部
         var last = commandPipeline.committingHead();
-        beginCapture(last.position, last.timestamp, last.request.header());
+        beginCapture(last.position, last.timestamp);
         commandPipeline.startProgressDeadline();
     }
 

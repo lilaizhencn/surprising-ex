@@ -24,9 +24,8 @@ public final class FeePolicyCommands implements java.util.function.IntFunction<O
     /**
      * 解码政策；异步时先保存唯一 pending 并派发 Lane 0，派发失败清槽，成功后登记 Owner 控制续步；冷路径直接更新并要求发布。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
-     * @param clusterTimestamp 原命令业务时间参数，本入口当前不直接读取
      */
-    public void executeUpsertFeePolicy(CoreMessage message, long clusterTimestamp) {
+    public void executeUpsertFeePolicy(CoreMessage message) {
         // 本请求载荷解出的费用政策配置
         var command = TradingCommandCodec.decodeUpsertFeePolicy(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {

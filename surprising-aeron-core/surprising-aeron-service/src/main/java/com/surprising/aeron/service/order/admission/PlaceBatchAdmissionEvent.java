@@ -177,7 +177,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     // 当前项通过统一账户准入后算出的所需冻结金额。
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                             runtime, lane, userId, order, decision.openInterestSteps(),
-                            lane.admissionOrderIndex(symbolId), key, symbolId, positionKey,
+                            lane.admissionOrderIndex(symbolId), key, positionKey,
                             decision.context().lifecycleSettled(), decision.context().fundingInProgress());
                     runtime.placeOrderInLane(lane, userId, order, commandId,
                             requiredReservation, clientKeys[index], symbolId, assetId,
@@ -187,7 +187,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     admittedOrders[index] = source.captureAdmittedOrder(index, live);
                     admittedCount++;
                 }
-                changes.prepareAdmissionLane(laneId, runtime);
+                changes.prepareAdmissionLane(laneId);
             } finally {
                 lane.admissionIndexCapacity(2);
                 runtime.exitMatcherSettlementScope(lane, changes);

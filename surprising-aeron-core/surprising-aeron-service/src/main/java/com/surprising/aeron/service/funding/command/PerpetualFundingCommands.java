@@ -35,9 +35,8 @@ public final class PerpetualFundingCommands {
     /**
      * 解码资金费参数并取得全局游标之后的持仓用户索引；在线模式复用工作对象后交给 directCommand 轮询，回放模式同步结算、填写结果并通知观察者。clusterTimestamp 当前不参与资金费计算。
      * @param message 已路由到本产品线的资金费命令及其 UUID
-     * @param clusterTimestamp 接口携带的 Cluster 时间戳，本方法当前未使用
      */
-    public void executeApplyFunding(CoreMessage message, long clusterTimestamp) {
+    public void executeApplyFunding(CoreMessage message) {
         // 从协议载荷解出的资金费编号、费率与用户分页参数。
         var command = TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe());
         // 本币对全局用户游标之后的持仓用户来源，具体页由账本阶段选择。

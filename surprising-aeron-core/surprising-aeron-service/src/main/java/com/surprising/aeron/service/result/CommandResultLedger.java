@@ -114,11 +114,10 @@ public final class CommandResultLedger {
     /**
      * 使用已取得的非空保留记录核对原命令身份；内容冲突返回 IDEMPOTENCY_CONFLICT，匹配则保留原终态和应用计数、把本次响应标记 DUPLICATE，并为池内字节增加独立发送引用。
      * @param duplicate 已经查到的非空保留记录
-     * @param message 本次重复请求的原消息，用于核对身份
      * @param fingerprint 当前结果或请求的命令指纹
      * @param appliedCommandCount 当前要保存的应用计数；冲突响应使用传入计数，重复成功响应沿用原记录计数
      */
-    public CoreResponse duplicateResponse(StoredResult duplicate, com.surprising.aeron.protocol.CoreMessage message,
+    public CoreResponse duplicateResponse(StoredResult duplicate,
                                    CommandFingerprint fingerprint,
                                    long appliedCommandCount) {
         if (!duplicate.fingerprint.equals(fingerprint)) {
