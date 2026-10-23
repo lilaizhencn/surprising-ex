@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.funding;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.CoreFundingPaymentView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
@@ -29,26 +28,6 @@ import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 /** 永续合约资金费的账户与财库处理。固定本轮标记价和价格序号后，按全局用户页分给账户 Lane；用户应付金额只扣可用余额，扣不到的部分从持仓收付明细中依次减免。账本记录实际收付的反向差额与分页进度，Owner 最后推进修订号。 构造约定：静态业务入口不创建实例；每页状态保存在 FundingWork。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimePerpetualFundingProcessor {
-
-    /**
-     * 核对旧状态与运行时的产品线、修订号一致；未给用户索引时使用旧状态用户集合，再执行账本未激活的同步路径。
-     * @param before 用于核对产品线与修订号并补齐缺省用户集合的旧状态
-     * @param command 资金费结算编号、费率及用户分页参数
-     * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
-     * @param runtime 产品线和账户数据的原权威运行时
-     * @param identities 币对及结算资产内部编号映射
-     */
-    public static FundingResult apply(TradingCoreState before, ApplyFundingCommand command,
-                                      Iterable<Long> indexedUserIds,
-                                      TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid perpetual funding apply");
-        }
-        // 未传用户索引时使用旧状态用户集合，否则沿用调用方的索引。
-        Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
-        return applyRuntime(command, users, runtime, identities);
-    }
 
     /**
      * 仅在 System Ledger 未激活时准备并同步执行各 Lane 资金费，合并财库和结果。在线账本已激活时拒绝此入口，改由 FundingWork.poll 分次推进。

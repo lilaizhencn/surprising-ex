@@ -63,7 +63,7 @@ public final class CoreStateTestFixtures {
         int optionType = type.isOption() ? 0 : -1;
         // 期权固定行权价一百，非期权为零
         long strike = type.isOption() ? 100 : 0;
-        return new RegisterInstrumentCommand(instrumentId, type.ordinal(), baseAsset, quoteAsset, settleAsset,
+        return new RegisterInstrumentCommand(instrumentId, baseAsset, quoteAsset, settleAsset,
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 expiry, optionType, strike);
     }

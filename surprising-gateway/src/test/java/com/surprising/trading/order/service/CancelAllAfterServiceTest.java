@@ -25,7 +25,7 @@ class CancelAllAfterServiceTest {
         AeronCancelAllAfterStore store = mock(AeronCancelAllAfterStore.class);
         CancelAllAfterService service = service(store, mock(OrderService.class), mock(TriggerOrderService.class));
         when(store.set(org.mockito.ArgumentMatchers.eq(1001L), org.mockito.ArgumentMatchers.eq("1"),
-                org.mockito.ArgumentMatchers.eq(0L), org.mockito.ArgumentMatchers.isNull(), any()))
+                org.mockito.ArgumentMatchers.eq(0L), any()))
                 .thenReturn(timer("DISABLED", null));
 
         var response = service.set(new CancelAllAfterRequest(1001L, "1", 0L));

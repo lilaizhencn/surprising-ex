@@ -24,7 +24,6 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.account.BalanceState;
 import com.surprising.aeron.service.account.ControlLaneDispatcher;
 import com.surprising.aeron.service.account.LaneBalancePatches;
 import com.surprising.aeron.service.account.RuntimeAccountRollback;
@@ -92,7 +91,6 @@ import java.util.TreeSet;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 import org.agrona.collections.Long2LongHashMap;
-import org.agrona.collections.Long2ObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
@@ -178,7 +176,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     static final long LANE_COMMIT_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     /** 变化身份缓冲触发压缩的数量阈值，固定为 512。 */
     static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
-
 
     /**  本运行时所属产品线，投影或恢复前默认值为 U 本位永续。 返回当前运行时元数据中的产品线。 */
     @Accessors(fluent = true, chain = false)
@@ -1827,28 +1824,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 把非空值写入 Agrona 长整数映射，空值解释为删除该键。
-     * @param <V> 长整数映射所保存的业务值类型
-     * @param values 需要写入或删除的 Agrona 长整数映射
-     * @param key 长整数映射中的业务身份键
-     * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
-     */
-    static <V> void putOrRemove(Long2ObjectHashMap<V> values, long key, V value) {
-        if (value == null) values.remove(key); else values.put(key, value);
-    }
-
-    /**
-     * 把非空值写入 Eclipse 长整数映射，空值解释为删除该键。
-     * @param <V> 长整数映射所保存的业务值类型
-     * @param values 需要写入或删除的 Eclipse 长整数映射
-     * @param key 长整数映射中的业务身份键
-     * @param value 本次登记的业务值，变化发布和映射写入中空值保留删除含义
-     */
-    static <V> void putOrRemove(LongObjectHashMap<V> values, long key, V value) {
-        if (value == null) values.remove(key); else values.put(key, value);
-    }
-
-    /**
      * 先归还 Owner 账户访问权并清账户启动标记，再逐一关闭账户工作对象与账本，汇总已捕获的关闭异常；账本线程确认退出后解除索引业务所有者，最后保留 Error 或包装其他故障抛出。
      */
     @Override
@@ -1871,10 +1846,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     record CanceledOrder(OrderRuntime order, ReservationRuntime reservation) {
     }
-
-
-
-
 
     /**
      * 校验序号及用户集合，按 Lane 收集正用户身份后同步等待提交，返回实际提交掩码。
@@ -3569,29 +3540,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 向普通键值映射写入非空值，空值解释为删除。
-     * @param <K> 普通映射的业务键类型
-     * @param <V> 映射所保存的业务值类型
-     * @param values 需要写入或删除的原映射
-     * @param key 本次操作的业务键
-     * @param value 要写入的业务值，空值解释为删除该键
-     */
-    static <K, V> void putOrRemove(Map<K, V> values, K key, V value) {
-        if (value == null) values.remove(key); else values.put(key, value);
-    }
-
-    /**
-     * 向整数键原始映射写入非空值，空值解释为删除。
-     * @param <V> 映射所保存的业务值类型
-     * @param values 需要写入或删除的原映射
-     * @param key 本次操作的业务键
-     * @param value 要写入的业务值，空值解释为删除该键
-     */
-    static <V> void putOrRemove(IntObjectHashMap<V> values, int key, V value) {
-        if (value == null) values.remove(key); else values.put(key, value);
-    }
-
-    /**
      * 当前全局修订已经达到 long 上限时抛出算术溢出异常，供修改前检查。
      */
     public void requireRevisionCapacity() {
@@ -4922,25 +4870,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             publishAlgoOrder(algoOrder);
             return null;
         });
-    }
-
-    /**
-     * 在当前 Lane 删除算法单并交出删除标记；没有范围时逐 Lane 删除，再在 Owner 缓冲登记空值。
-     * @param algoOrderId 算法单实体 ID
-     */
-    public void removeAlgoOrder(long algoOrderId) {
-        assertOwner();
-        rejectUnsupportedOrderBatchMutation("algo-order state");
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
-        AccountLaneState scoped = currentLaneCommandScope();
-        if (scoped != null) {
-            scoped.removeAlgoOrderValue(algoOrderId);
-            laneDelta(scoped.laneId()).putAlgo(algoOrderId, null);
-        } else {
-            for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++)
-                onLane(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> { lane.removeAlgoOrderValue(algoOrderId); return null; });
-            changedAlgoOrders.put(algoOrderId, null);
-        }
     }
 
     /**
@@ -7256,22 +7185,6 @@ appendBalanceFundsDelta(patches, target);
                     FundsPosting.Subledger.LOCKED,
                     Math.subtractExact(afterLocked, beforeLocked));
         }
-    }
-
-    /**
-     * 取得余额可用数量，缺失余额按零参与差额计算。
-     * @param value 可空余额前后值，缺失按零处理
-     */
-    static long available(BalanceState value) {
-        return value == null ? 0 : value.availableUnits();
-    }
-
-    /**
-     * 取得余额冻结数量，缺失余额按零参与差额计算。
-     * @param value 可空余额前后值，缺失按零处理
-     */
-    static long locked(BalanceState value) {
-        return value == null ? 0 : value.lockedUnits();
     }
 
     /**

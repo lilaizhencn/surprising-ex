@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.treasury;
 
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -26,13 +25,6 @@ public final class InsuranceAllocationPolicy {
             .thenComparing(Claim::instrumentId)
             .thenComparingInt(/* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim -> claim.liquidation().positionSide().ordinal())
             .thenComparingLong(/* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim -> claim.liquidation().liquidationId());
-    /** 冷状态强平使用的同一业务比较顺序，不使用集合遍历或线程完成顺序。 */
-    private static final Comparator<CoreLiquidationState> CORE_LIQUIDATION_ORDER = Comparator
-            .comparingLong(CoreLiquidationState::triggerPriceSequence)
-            .thenComparingLong(CoreLiquidationState::userId)
-            .thenComparing(CoreLiquidationState::instrumentId)
-            .thenComparingInt(/* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim -> claim.positionSide().ordinal())
-            .thenComparingLong(CoreLiquidationState::liquidationId);
 
     /**
      * 在原运行时可读边界准备候选索赔，再通过静默账本查询读取各资产保险预算并计算全部分配，不直接从 Owner 读取可变财库。
@@ -135,34 +127,6 @@ public final class InsuranceAllocationPolicy {
         Map<Long, Long> result = new HashMap<>();
         inputs.byAsset.forEach((/* 当前索赔所属结算资产编号。 */ assetId, /* 当前资产需要分配的独占索赔列表，排序会改变列表顺序。 */ claims) -> allocateAsset(ledger.insurance(assetId), claims, result));
         return result;
-    }
-
-    /**
-     * 沿运行时解析入口返回目标当前预期保险补偿，不在这里实际扣款。
-     * @param runtime 提供当前可读取强平事实及账本查询边界的运行时
-     * @param identities 把运行时币对及结算资产转换为业务名称或稠密编号的字典
-     * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
-     * @param liquidationId 本次要查询保险份额及优先级的目标强平编号
-     */
-    public static long expectedCoverage(TradingAccountRuntime runtime,
-                                        RuntimeIdentityRegistry identities,
-                                        Iterable<Long> candidateIds,
-                                        long liquidationId) {
-        return resolve(runtime, identities, candidateIds, liquidationId).expectedCoverage();
-    }
-
-    /**
-     * 沿同一次运行时解析返回目标是否在同资产待保险索赔的确定性首位，不依赖线程回执到达顺序。
-     * @param runtime 提供当前可读取强平事实及账本查询边界的运行时
-     * @param identities 把运行时币对及结算资产转换为业务名称或稠密编号的字典
-     * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
-     * @param liquidationId 本次要查询保险份额及优先级的目标强平编号
-     */
-    public static boolean isNext(TradingAccountRuntime runtime,
-                                 RuntimeIdentityRegistry identities,
-                                 Iterable<Long> candidateIds,
-                                 long liquidationId) {
-        return resolve(runtime, identities, candidateIds, liquidationId).next();
     }
 
     /**
@@ -311,67 +275,6 @@ public final class InsuranceAllocationPolicy {
     public record Resolution(boolean next, long expectedCoverage) { }
 
     /**
-     * 从冷状态收集同结算资产且待保险的强平，排序后计算目标份额，目标或币对不存在时返回零。
-     * @param state 用于冷状态查询的交易核心值
-     * @param liquidationId 本次要查询保险份额及优先级的目标强平编号
-     */
-    public static long expectedCoverage(TradingCoreState state, long liquidationId) {
-        if (state == null || liquidationId <= 0) {
-            throw new IllegalArgumentException("insurance allocation state is required");
-        }
-        // 本次查询的目标强平记录，必须仍适用保险分配。
-        CoreLiquidationState target = state.riskState().liquidations().get(liquidationId);
-        if (target == null || target.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) return 0;
-        // 目标强平对应的规范合约。
-        CoreInstrument targetInstrument = state.instruments().get(target.instrumentId());
-        if (targetInstrument == null) return 0;
-        // 冷状态目标合约的结算资产名称。
-        String asset = targetInstrument.settleAsset();
-        // 当前资产需要分配的独占索赔列表，排序会改变列表顺序。
-        ArrayList<CoreLiquidationState> claims = new ArrayList<>();
-        for (CoreLiquidationState /* 当前运行时或冷状态读取到的强平记录。 */ liquidation : state.riskState().liquidations().values()) {
-            if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
-            // 当前候选对应的规范合约对象，需与强平输入中的对象匹配。
-            CoreInstrument instrument = state.instruments().get(liquidation.instrumentId());
-            if (instrument != null && asset.equals(instrument.settleAsset())) {
-                claims.add(liquidation);
-            }
-        }
-        claims.sort(CORE_LIQUIDATION_ORDER);
-        // 当前非负保险余额与同资产总缺口取小后的可分配预算。
-        long available = state.treasuryState().insuranceBalances().getOrDefault(asset, 0L);
-        return allocationForCore(Math.max(0, available), claims, liquidationId);
-    }
-
-    /**
-     * 遍历冷状态同资产待保险记录，直接找固定比较规则的最小项，判断是否目标，不要求先全量排序。
-     * @param state 用于冷状态查询的交易核心值
-     * @param liquidationId 本次要查询保险份额及优先级的目标强平编号
-     */
-    public static boolean isNext(TradingCoreState state, long liquidationId) {
-        // 本次查询的目标强平记录，必须仍适用保险分配。
-        CoreLiquidationState target = state.riskState().liquidations().get(liquidationId);
-        if (target == null) return false;
-        // 目标强平对应的规范合约。
-        CoreInstrument targetInstrument = state.instruments().get(target.instrumentId());
-        if (targetInstrument == null) return false;
-        // 冷状态优先级查询的目标结算资产名称。
-        String targetAsset = targetInstrument.settleAsset();
-        // 当前找到的同资产待保险索赔固定顺序最小项。
-        CoreLiquidationState first = null;
-        for (CoreLiquidationState /* 当前运行时或冷状态读取到的强平记录。 */ liquidation : state.riskState().liquidations().values()) {
-            if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
-            // 当前候选对应的规范合约对象，需与强平输入中的对象匹配。
-            CoreInstrument instrument = state.instruments().get(liquidation.instrumentId());
-            if (instrument == null || !targetAsset.equals(instrument.settleAsset())) continue;
-            if (first == null || CORE_LIQUIDATION_ORDER.compare(liquidation, first) < 0) {
-                first = liquidation;
-            }
-        }
-        return first != null && first.liquidationId() == liquidationId;
-    }
-
-    /**
      * 对单资产索赔原地排序，以非负预算和总缺口取小，按大整数比例整除并把剩余单位按排序前缀补一，写入每个强平编号的结果。
      * @param availableUnits 此资产当前可分配保险预算
      * @param claims 当前调用独占的待保险索赔列表，分配方法会原地排序
@@ -406,41 +309,6 @@ public final class InsuranceAllocationPolicy {
             long coverage = base[index] + (index < remainder ? 1 : 0);
             result.put(claims.get(index).liquidation().liquidationId(), coverage);
         }
-    }
-
-    /**
-     * 对已经排序的冷状态索赔计算目标比例份额和余数补偿；总缺口为零时各基础份额为零，目标未出现返回零。
-     * @param availableUnits 此资产当前可分配保险预算
-     * @param claims 当前调用独占的待保险索赔列表，分配方法会原地排序
-     * @param targetId 冷状态分配中需要计算份额的目标编号
-     */
-    private static long allocationForCore(long availableUnits, ArrayList<CoreLiquidationState> claims, long targetId) {
-        // 使用 BigInteger 汇总的同资产总缺口，避免长整数总额溢出。
-        BigInteger total = BigInteger.ZERO;
-        for (CoreLiquidationState /* 当前运行时或冷状态读取到的强平记录。 */ liquidation : claims) total = total.add(BigInteger.valueOf(liquidation.deficitUnits()));
-        // 当前非负保险余额与同资产总缺口取小后的可分配预算。
-        BigInteger available = BigInteger.valueOf(availableUnits).min(total);
-        // 已按比例整除分出的基础金额大整数合计。
-        BigInteger allocated = BigInteger.ZERO;
-        // 目标按比例整除得到的基础补偿，不含余数补一。
-        long targetBase = 0;
-        // 目标在固定排序中的下标，负一表示目标不在当前索赔列表。
-        int targetIndex = -1;
-        for (/* 当前候选、有效回执或已排序索赔列表下标。 */ int index = 0; index < claims.size(); index++) {
-            // 当前运行时或冷状态读取到的强平记录。
-            CoreLiquidationState liquidation = claims.get(index);
-            // 当前索赔按预算乘缺口再除总缺口得到的基础份额。
-            BigInteger share = total.signum() == 0 ? BigInteger.ZERO
-                    : available.multiply(BigInteger.valueOf(liquidation.deficitUnits())).divide(total);
-            if (liquidation.liquidationId() == targetId) {
-                targetBase = share.longValueExact();
-                targetIndex = index;
-            }
-            allocated = allocated.add(share);
-        }
-        // 预算减基础份额合计后的剩余单位数，按固定排序前缀逐项补一。
-        int remainder = available.subtract(allocated).intValueExact();
-        return targetIndex < 0 ? 0 : targetBase + (targetIndex < remainder ? 1 : 0);
     }
 
     /**

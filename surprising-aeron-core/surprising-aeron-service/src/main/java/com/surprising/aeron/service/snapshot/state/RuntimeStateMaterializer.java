@@ -13,12 +13,7 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.risk.*;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
-import com.surprising.aeron.service.risk.RiskScanRuntime;
-import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.HashMap;
@@ -243,68 +238,6 @@ public final class RuntimeStateMaterializer {
     }
 
     /**
-     * 把一条资金费运行时进度转成导出值，保留固定标记价、价格序号及用户游标。
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     */
-    static CoreTreasuryState.FundingProgress fundingProgress(
-            TreasuryRuntime.FundingProgressRuntime value) {
-        return new CoreTreasuryState.FundingProgress(value.settlementId(), value.fundingRatePpm(), value.nextCursorUserId(),
-                value.markPriceTicks(), value.priceSequence());
-    }
-
-    /**
-     * 把一条到期或固定价格结算进度转成导出值，保留撤单阶段、双游标和所需保险金额。
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     */
-    static CoreTreasuryState.LifecycleProgress lifecycleProgress(
-            TreasuryRuntime.LifecycleProgressRuntime value) {
-        return new CoreTreasuryState.LifecycleProgress(value.settlementId(), value.settlementPriceTicks(),
-                value.ordersComplete(), value.nextCursorOrderId(), value.nextCursorUserId(), value.requiredInsuranceUnits());
-    }
-
-    /**
-     * 把运行时预留转换为导出值，导出总预留额以及累计释放、消耗，而非把剩余额度当总额。
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     * @param identities 把内部资产、币对、持仓和客户别名编号解析为业务名称的原身份表
-     */
-    static OrderReservation reservation(ReservationRuntime value, RuntimeIdentityRegistry identities) {
-        return new OrderReservation(value.orderId(), identities.instrumentId(value.symbolId()),
-                value.kind(), identities.asset(value.assetId()), value.totalReservedUnits(), value.releasedUnits(),
-                value.consumedUnits(), value.orderQuantitySteps());
-    }
-
-    /**
-     * 把运行时持仓转成业务值，并核对生成的币对方向键与身份表一致；不一致时拒绝导出。
-     * @param positionKey 该运行时持仓的内部身份键
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     * @param identities 把内部资产、币对、持仓和客户别名编号解析为业务名称的原身份表
-     */
-    static CorePositionState position(long positionKey, PositionRuntime value,
-                                      RuntimeIdentityRegistry identities) {
-        // 从身份表解析出的该用户持仓业务键。
-        String identity = identities.positionKey(value.userId(), positionKey);
-        // 由持仓字段构造的导出值，随后还要核对业务键一致性。
-        CorePositionState result = new CorePositionState(identities.instrumentId(value.symbolId()),
-                identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
-                value.signedQuantitySteps(), value.entryPriceTicks(),
-                value.entryValueTicks(), value.realizedPnlUnits(), value.positionMarginUnits());
-        if (!result.key().equals(identity)) {
-            throw new IllegalStateException("runtime position identity mismatch: " + positionKey);
-        }
-        return result;
-    }
-
-    /**
-     * 校验订单和身份表非空，先解析币对名称，再构造只读订单快照。
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     * @param identities 把内部资产、币对、持仓和客户别名编号解析为业务名称的原身份表
-     */
-    public static CoreOrderState orderSnapshot(OrderRuntime value, RuntimeIdentityRegistry identities) {
-        if (value == null || identities == null) throw new IllegalArgumentException("runtime order is required");
-        return orderSnapshot(value, identities.instrumentId(value.symbolId()));
-    }
-
-    /**
      * 使用已解析的币对名称复制订单业务字段，保留原请求价、撮合保护价、成交值、费用、时间和修订号；本方法本身不等待账户写入完成。
      * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
      * @param instrumentId 已经解析的订单币对名称
@@ -318,51 +251,6 @@ public final class RuntimeStateMaterializer {
                 value.orderType(), value.timeInForce(), value.postOnly(), value.clientOrderId(), value.commandId(),
                 value.makerFeeRatePpm(), value.takerFeeRatePpm(), value.cumulativeFeeUnits(), value.executedValueHigh(), value.executedValueLow(), value.createdAtEpochMillis(),
                 value.updatedAtEpochMillis(), value.clusterPosition(), value.status(), value.revision());
-    }
-
-    /**
-     * 解析币对名称并复制权益、未实现盈亏、维持保证金及风险状态。
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     * @param identities 把内部资产、币对、持仓和客户别名编号解析为业务名称的原身份表
-     */
-    static CoreRiskSnapshot riskSnapshot(RiskSnapshotRuntime value,
-                                         RuntimeIdentityRegistry identities) {
-        return new CoreRiskSnapshot(value.userId(), identities.instrumentId(value.symbolId()), value.positionSide(),
-                value.priceSequence(), value.equityUnits(), value.unrealizedPnlUnits(),
-                value.maintenanceMarginUnits(), value.marginRatioPpm(), value.status());
-    }
-
-    /**
-     * 解析币对名称并复制强平记录，包含执行数据、费用、亏空、状态及下一撤单游标。
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     * @param identities 把内部资产、币对、持仓和客户别名编号解析为业务名称的原身份表
-     */
-    static CoreLiquidationState liquidation(LiquidationRuntime value,
-                                            RuntimeIdentityRegistry identities) {
-        return new CoreLiquidationState(value.liquidationId(), value.userId(),
-                identities.instrumentId(value.symbolId()), value.marginMode(), value.positionSide(),
-                value.triggerPriceSequence(), value.signedQuantitySteps(),
-                value.closeQuantitySteps(), value.deficitUnits(), value.executionPriceTicks(),
-                value.liquidationFeeRatePpm(), value.liquidationFeeUnits(), value.status(),
-                value.nextCancelOrderId());
-    }
-
-    /**
-     * 复制风险与触发扫描的阶段、游标和中间累计值，保证后续可从原位置继续，而非重新从头扫描。
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     * @param identities 把内部资产、币对、持仓和客户别名编号解析为业务名称的原身份表
-     */
-    static CoreRiskState.RiskScan riskScan(RiskScanRuntime value,
-                                           RuntimeIdentityRegistry identities) {
-        return new CoreRiskState.RiskScan(identities.instrumentId(value.symbolId()), value.accountLaneId(),
-                value.priceSequence(),
-                value.scanStartPriceSequence(), value.lastUserId(), value.riskComplete(), value.riskUserId(),
-                value.riskPhase(), value.riskPositionCursor(), value.riskReservationCursor(),
-                value.riskUnrealizedPnlUnits(), value.riskMaintenanceMarginUnits(),
-                value.riskIsolatedMarginUnits(), value.riskIsolatedReservationUnits(), value.triggerComplete(),
-                value.triggerPhase(), value.triggerPriceCursor(), value.triggerOrderCursor(), value.triggerUpperId(),
-                value.triggerMarkPriceTicks(), value.triggerGeneratedAtEpochMillis(), value.triggerOcoOrderId(),
-                value.triggerOcoCursor(), value.lastScheduledRevision(), value.laneProgress());
     }
 
 }

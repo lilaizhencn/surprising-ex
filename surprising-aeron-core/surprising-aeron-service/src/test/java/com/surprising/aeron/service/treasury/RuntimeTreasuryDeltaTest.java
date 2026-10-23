@@ -9,7 +9,6 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.settlement.FundsPosting;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.Map;
@@ -369,7 +368,7 @@ class RuntimeTreasuryDeltaTest {
      */
     private static CoreInstrument instrument(String instrumentId, String baseAsset) {
         return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand(instrumentId,
                         baseAsset, "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0));
     }

@@ -35,13 +35,15 @@ public final class RuntimeCancelAllAfterStateTransitions {
                 // SET 的目标状态，倒计时为 0 则禁用，否则激活且触发时间须晚于命令业务时间。
                 CoreCancelAllAfterStatus status = command.countdownMillis() == 0
                         ? CoreCancelAllAfterStatus.DISABLED : CoreCancelAllAfterStatus.ACTIVE;
-                if (status == CoreCancelAllAfterStatus.ACTIVE
-                        && command.triggerAtEpochMillis() <= command.updatedAtEpochMillis()) {
-                    throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_TRIGGER",
-                            "active cancel-all-after timer must trigger in the future");
+                long triggerAt;
+                try {
+                    triggerAt = command.countdownMillis() == 0 ? 0
+                            : Math.addExact(command.updatedAtEpochMillis(), command.countdownMillis());
+                } catch (ArithmeticException overflow) {
+                    throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_TRIGGER", "timer deadline overflow");
                 }
                 next = new CoreCancelAllAfterState(userId, command.symbolScope(), command.countdownMillis(), status,
-                        status == CoreCancelAllAfterStatus.ACTIVE ? command.triggerAtEpochMillis() : 0,
+                        triggerAt,
                         command.updatedAtEpochMillis(), 0, 0,
                         current == null ? 1 : Math.incrementExact(current.revision()));
             }

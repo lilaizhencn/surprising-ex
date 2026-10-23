@@ -1331,7 +1331,7 @@ class CoreMatchingStateTest {
         // 交割和期权测试币对的未来到期时刻，永续及现货为零。
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
         // 带本样例资产、风险和费率配置的注册币对命令。
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", type.ordinal(),
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                 "BTC", "USDT", settleAsset(productLine), 1, 1, type.isInverse() ? 1_000 : 1,
                 100_000, 50_000, makerFeeRatePpm, takerFeeRatePpm, expiry,
                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);

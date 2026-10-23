@@ -17,7 +17,6 @@ import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -179,7 +178,7 @@ class RuntimeStateTransitionsTest {
         TradingCoreState before = TradingCoreState.empty(ProductLine.SPOT);
         // 标的一的现货注册命令，使用 BTC 基础资产和 USDT 报价及结算
         RegisterInstrumentCommand command = new RegisterInstrumentCommand(
-                "1", ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT",
+                "1", "BTC", "USDT", "USDT",
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
         // 冷转换辅助对同一输入生成的预期完整状态
         TradingCoreState expected = new RuntimeTestStateTransitions().registerInstrument(before, command);
@@ -225,7 +224,7 @@ class RuntimeStateTransitionsTest {
         // 当前用例变更前的完整状态，作为投影起点及未变断言基线
         TradingCoreState before = reference.registerInstrument(
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0));
         // 把用户七标的一的全仓杠杆改为五倍的命令

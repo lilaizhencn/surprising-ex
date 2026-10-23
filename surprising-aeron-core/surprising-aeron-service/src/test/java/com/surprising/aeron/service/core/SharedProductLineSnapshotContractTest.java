@@ -183,7 +183,7 @@ class SharedProductLineSnapshotContractTest {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         // 交割/期权的固定到期时间，其余为零。
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new RegisterInstrumentCommand(SYMBOL, type.ordinal(), "BTC", "USDT", settleAsset(productLine),
+        return new RegisterInstrumentCommand(SYMBOL, "BTC", "USDT", settleAsset(productLine),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0, expiry,
                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }

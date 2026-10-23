@@ -2,7 +2,6 @@ package com.surprising.trading.order.service;
 
 import com.surprising.aeron.protocol.CoreCancelAllAfterCodec;
 import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
-import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
 import com.surprising.aeron.protocol.CoreCancelAllAfterView;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.trading.order.model.CancelAllAfterTimer;
@@ -22,9 +21,8 @@ public class AeronCancelAllAfterStore {
     }
 
     public CancelAllAfterTimer set(long userId, String symbolScope, long countdownMillis,
-                                   Instant triggerAt, Instant now) {
-        command(userId, CoreCancelAllAfterCommand.set(symbolScope, countdownMillis,
-                triggerAt == null ? 0 : triggerAt.toEpochMilli(), now.toEpochMilli()));
+                                   Instant now) {
+        command(userId, CoreCancelAllAfterCommand.set(symbolScope, countdownMillis, now.toEpochMilli()));
         return exact(userId, symbolScope).orElseThrow(() -> new IllegalStateException("Aeron timer write not visible"));
     }
 
@@ -57,8 +55,6 @@ public class AeronCancelAllAfterStore {
         aeron.command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, commandId(userId, command), userId,
                 CoreCancelAllAfterCodec.encodeCommand(command));
     }
-
-
 
     private UUID commandId(long userId, CoreCancelAllAfterCommand command) {
         String key = "CANCEL_AFTER:" + command.action() + ':' + userId + ':' + command.symbolScope()

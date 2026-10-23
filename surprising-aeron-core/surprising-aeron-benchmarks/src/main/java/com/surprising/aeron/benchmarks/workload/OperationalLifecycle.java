@@ -1,7 +1,6 @@
 package com.surprising.aeron.benchmarks.workload;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -36,8 +35,7 @@ final class OperationalLifecycle implements AutoCloseable {
     }
     public void setup() {
         for(String instrumentId:List.of(ACTIVE,RISK))endpoint.command(CoreMessageType.REGISTER_INSTRUMENT,0,
-                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
-                        ContractType.LINEAR_PERPETUAL.ordinal(),"OPS","USDT","USDT",1,1,1,
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,"OPS","USDT","USDT",1,1,1,
                         100_000,50_000,0,0,0,-1,0)));
         for(long account:new long[]{maker,user,riskMaker})deposit(account,ClusterMixedCapacityMain.BALANCE);
         price(ACTIVE,100);price(RISK,100);

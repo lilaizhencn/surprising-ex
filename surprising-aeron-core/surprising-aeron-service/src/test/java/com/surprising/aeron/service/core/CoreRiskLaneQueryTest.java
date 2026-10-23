@@ -311,7 +311,7 @@ class CoreRiskLaneQueryTest {
     private static CoreInstrument instrument(ProductLine line, String name, long maintenance) {
         // 由产品线确定的合约类型，用于选择反向精度及到期、行权参数。
         var type = ContractType.valueOf(line.contractTypeCode());
-        return CoreInstrument.from(line, new RegisterInstrumentCommand(name, type.ordinal(), "BTC", "USDT", asset(line),
+        return CoreInstrument.from(line, new RegisterInstrumentCommand(name, "BTC", "USDT", asset(line),
                 1, 1, type.isInverse() ? 1000 : 1, 100_000, maintenance, 0, 0,
                 type.isDelivery() || type.isOption() ? TIME + 20_000 : 0, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0));
     }

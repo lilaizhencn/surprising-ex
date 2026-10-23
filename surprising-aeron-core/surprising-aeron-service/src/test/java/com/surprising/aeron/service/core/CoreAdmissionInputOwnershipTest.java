@@ -183,7 +183,7 @@ class CoreAdmissionInputOwnershipTest {
         var type = ContractType.valueOf(line.contractTypeCode());
         // 按模式选择的用户限额下限，覆盖低于、达到或超过固定上限
         long floor = mode.equals("FLOOR_CAP") ? 1_000 : mode.equals("FLOOR_ABOVE") ? 2_000 : 200;
-        return new RegisterInstrumentCommand("1", type.ordinal(), "BTC", "USDT", type.isInverse() ? "BTC" : "USDT",
+        return new RegisterInstrumentCommand("1", "BTC", "USDT", type.isInverse() ? "BTC" : "USDT",
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 type.isDelivery() || type.isOption() ? TIME + 20_000 : 0, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0,
                 10_000_000, 1_000, mode.equals("RATE_ZERO") ? 0 : 100_000, floor,

@@ -1,6 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -152,7 +151,7 @@ public final class CoreTriggerOrderCodec {
     }
 
     private static CoreTriggerOrderStateView decodeState(Reader reader) {
-        int version = reader.stateVersion();
+        reader.stateVersion();
         CoreTriggerOrderStateView result = new CoreTriggerOrderStateView(
                 reader.positive(), ProductLineWireCode.decode(reader.intValue()), reader.positive(),
                 reader.text(), reader.text(), reader.text(), CoreOrderSide.fromWireCode(reader.intValue()),
@@ -166,8 +165,7 @@ public final class CoreTriggerOrderCodec {
                 reader.nonNegative(), reader.nonNegative(), reader.text(), reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.nonNegative(), reader.nonNegative(),
                 reader.longValue(), reader.longValue(),
-                version < 3 ? CoreTriggerPriceSource.MARK
-                        : PRICE_SOURCES[reader.enumIndex(PRICE_SOURCES.length)]);
+                PRICE_SOURCES[reader.enumIndex(PRICE_SOURCES.length)]);
         reader.consumed(); return result;
     }
 
@@ -208,9 +206,9 @@ public final class CoreTriggerOrderCodec {
     }
 
     public static CoreTriggerOrderQuery decodeQuery(byte[] encoded) {
-        Reader reader = new Reader(encoded, 0, encoded == null ? 0 : encoded.length); int version = reader.queryVersion();
+        Reader reader = new Reader(encoded, 0, encoded == null ? 0 : encoded.length); reader.queryVersion();
         CoreTriggerOrderQuery result = new CoreTriggerOrderQuery(reader.nonNegative(), reader.text(), reader.nonNegative(), reader.intValue(),
-                version == 1 ? null : reader.status(), version < QUERY_VERSION ? 0 : reader.nonNegative());
+                reader.status(), reader.nonNegative());
         reader.consumed(); return result;
     }
 
@@ -320,12 +318,12 @@ public final class CoreTriggerOrderCodec {
         }
         int queryVersion() {
             int value = intValue();
-            if (value < VERSION || value > QUERY_VERSION) throw new ProtocolException("unsupported trigger query codec version");
+            if (value != QUERY_VERSION) throw new ProtocolException("unsupported trigger query codec version");
             return value;
         }
         int stateVersion() {
             int value = intValue();
-            if (value < 2 || value > STATE_VERSION) {
+            if (value != STATE_VERSION) {
                 throw new ProtocolException("unsupported trigger state codec version");
             }
             return value;

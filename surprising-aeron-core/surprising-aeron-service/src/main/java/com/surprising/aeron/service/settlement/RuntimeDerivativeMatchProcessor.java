@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -22,24 +21,6 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeDerivativeMatchProcessor {
-
-    /**
-     * 先核对传入冷状态与运行时的产品线和修订号，再委托通用运行时成交入口；不把冷状态重新投影或作为账户副本更新。
-     * @param before 与当前运行时产品线及修订号一致的冷状态参照，只用于入口校验
-     * @param takerOrderId 主动成交订单编号
-     * @param matches 原始撮合事件列表，只有 TRADE 参与成交计算
-     * @param runtime 当前所属交易运行时，具体读写边界由通用或 Lane 入口决定
-     * @param identities 运行时资产及预准备持仓身份字典
-     */
-    public static TradingAccountRuntime apply(TradingCoreState before, long takerOrderId,
-                                            List<MatcherEvent> matches, TradingAccountRuntime runtime,
-                                            RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid perpetual match apply");
-        }
-        return applyRuntime(takerOrderId, matches, runtime, identities);
-    }
 
     /**
      * 在原 Owner 可读写边界核验成交并准备持仓身份，逐事件应用 taker 和 maker、释放终态预留，再应用系统差额并推进产品修订；不是在线跨 Lane 直接消费事实的入口。

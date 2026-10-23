@@ -746,24 +746,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * 返回触发扫描每轮的默认工作预算。
      */
     public int defaultTriggerScanBatchSize() { return DEFAULT_TRIGGER_SCAN_BATCH_SIZE; }
-    /**
-     * 判断算法单实体 ID 或该用户的客户算法单号是否仍在终态保留范围内。
-     * @param algoOrderId 要检查终态保留的算法单实体 ID
-     * @param userId 本次业务所属用户身份
-     * @param clientAlgoOrderId 同一用户下要检查的客户算法单号
-     */
-    public boolean terminalAlgoRetained(long algoOrderId, long userId, String clientAlgoOrderId) {
-        return terminalRetention.containsAlgo(algoOrderId, userId, clientAlgoOrderId);
-    }
-    /**
-     * 判断触发单实体 ID 或该用户的客户触发单号是否仍在终态保留范围内。
-     * @param triggerOrderId 要检查终态保留的触发单实体 ID
-     * @param userId 本次业务所属用户身份
-     * @param clientTriggerOrderId 同一用户下要检查的客户触发单号
-     */
-    public boolean terminalTriggerRetained(long triggerOrderId, long userId, String clientTriggerOrderId) {
-        return terminalRetention.containsTrigger(triggerOrderId, userId, clientTriggerOrderId);
-    }
+
     /**
      * 取得指定标的的衍生品生命周期进度；不存在标的或进度时可返回空。
      * @param instrumentId 对外标的 ID，按本产品线身份表解析
@@ -2648,16 +2631,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 取得结算计划已有的订单身份视图；没有计划时复用空列表，不逐项装箱复制。
-     * @param plan 借用的结算计划，按已有订单及成交事件视图读取
-     */
-    public static List<Long> boxedOrderIds(
-            com.surprising.aeron.service.settlement.MatcherSettlementPlan plan) {
-        if (plan == null || plan.orderCount() == 0) return List.of();
-        return plan.orderIdList();
-    }
-
-    /**
      * 把撤单描述中的订单号收集到新原始数组，并交给只读长整数列表持有，避免先构造逐项装箱集合。
      * @param orders 本次按顺序借用的撤单描述，调用方保持列表稳定
      */
@@ -3021,8 +2994,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                 resultCode, appliedCommandCount);
     }
-
-
 
     /**
      * 当前批量命令不适用独立窗口的内部信号，避免为正常分流创建栈轨迹。

@@ -34,7 +34,7 @@ class CoreSpotAssetUnitsTest {
         TradingCoreRuntime runtime = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
-            var registration = new RegisterInstrumentCommand("1", 0, "BTC", "USDT", "USDT",
+            var registration = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                     10_000, 10_000_000, 1, 1_000_000, 1_000_000, 200, 500, 0, -1, 0,
                     1_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
                     List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),
@@ -119,7 +119,7 @@ class CoreSpotAssetUnitsTest {
         TradingCoreRuntime runtime = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
-            var registration = new RegisterInstrumentCommand("1", 0, "BTC", "USDT", "USDT",
+            var registration = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                     10_000, 10_000_000, 1, 1_000_000, 1_000_000, 200, 500, 0, -1, 0,
                     1_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
                     List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),
@@ -179,7 +179,7 @@ class CoreSpotAssetUnitsTest {
         TradingCoreRuntime runtime = original;
         try {
             // 数量步单位十万、价格和数量精度独立配置的原现货合约参数
-            var registration = new RegisterInstrumentCommand("1", 0, "BTC", "USDT", "USDT",
+            var registration = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                     10_000, 10_000_000, 1, 1_000_000, 1_000_000, 200, 500, 0, -1, 0,
                     1_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
                     List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),

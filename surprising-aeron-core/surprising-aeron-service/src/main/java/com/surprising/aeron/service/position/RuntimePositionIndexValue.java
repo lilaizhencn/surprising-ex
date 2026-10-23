@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.position;
 
-import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.protocol.CorePositionSide;
 
 /**
@@ -13,15 +12,5 @@ import com.surprising.aeron.protocol.CorePositionSide;
  */
 public record RuntimePositionIndexValue(long userId, String instrumentId, String asset,
                                  CorePositionSide positionSide, long signedQuantitySteps) {
-
-    /**
-     * 从业务持仓记录提取索引需要的字段，并补上所属用户编号；不在这里更新任何索引或账户状态。
-     * @param userId 本次发布持仓所属的用户编号
-     * @param position 需要提取索引字段的业务持仓记录
-     */
-    public static RuntimePositionIndexValue from(long userId, CorePositionState position) {
-        return new RuntimePositionIndexValue(userId, position.instrumentId(), position.marginAsset(),
-                position.positionSide(), position.signedQuantitySteps());
-    }
 
 }

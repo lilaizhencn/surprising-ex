@@ -172,7 +172,7 @@ class TradingCommandCodecTest {
         ReplaceOrderCommand replaceOrder = new ReplaceOrderCommand(6, placeOrder);
         AmendOrderCommand amendOrder = new AmendOrderCommand(6, 8, "client-8", 61_000L,
                 4L, CoreTimeInForce.GTC, true);
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
                 "BTC", "USDT", "USDT", 1, 1, 100_000_000, 100_000, 50_000, -10, 20,
                 0, -1, 0, 10_000_000, Long.MAX_VALUE, 0, Long.MAX_VALUE,
                 java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE,
@@ -290,7 +290,7 @@ class TradingCommandCodecTest {
 
     @Test
     void rejectsInstrumentPayloadWithoutRiskPolicy() {
-        RegisterInstrumentCommand command = new RegisterInstrumentCommand("1", 1,
+        RegisterInstrumentCommand command = new RegisterInstrumentCommand("1",
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0);
         byte[] current = TradingCommandCodec.encodeRegisterInstrument(command);
@@ -303,7 +303,7 @@ class TradingCommandCodecTest {
 
     @Test
     void registerInstrumentRoundTripPreservesTradingAdmissionSettings() {
-        var command = new RegisterInstrumentCommand("1", 1,
+        var command = new RegisterInstrumentCommand("1",
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0, 10_000_000, 1_000_000, 0, 1_000_000,
                 java.util.List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000,

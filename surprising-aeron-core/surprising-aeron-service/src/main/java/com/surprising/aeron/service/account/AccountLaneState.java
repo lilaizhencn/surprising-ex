@@ -1764,11 +1764,7 @@ public final class AccountLaneState {
      * @param value 要保存的算法单记录
      */
     public com.surprising.aeron.model.CoreAlgoOrderState storeAlgoOrder(long key, com.surprising.aeron.model.CoreAlgoOrderState value) { return cold.algoOrders.put(key, value); }
-    /**
-     * 只移除并返回算法单值，调度索引清理由外层负责。
-     * @param key 算法单编号
-     */
-    public com.surprising.aeron.model.CoreAlgoOrderState removeAlgoOrderValue(long key) { return cold.algoOrders.remove(key); }
+
     /**
      * 按触发单编号读取权威记录。
      * @param key 触发单编号

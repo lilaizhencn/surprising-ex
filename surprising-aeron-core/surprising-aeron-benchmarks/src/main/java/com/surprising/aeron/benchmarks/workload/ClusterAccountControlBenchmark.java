@@ -41,7 +41,7 @@ public class ClusterAccountControlBenchmark {
                 Duration.ofSeconds(30), "account-control", UUID.randomUUID().toString(),
                 new AeronClientCapacity(1, 1, 256, 64, 256, 32, 128));
         send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                new RegisterInstrumentCommand(SYMBOL, type.ordinal(), "BTC", "USDT", asset, 1, 1, 1,
+                new RegisterInstrumentCommand(SYMBOL, "BTC", "USDT", asset, 1, 1, 1,
                         100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? System.currentTimeMillis() + 3_600_000 : 0,
                         type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
         for (long user : new long[]{USER, MAKER, POSITION_USER}) balance(user, FUNDS);

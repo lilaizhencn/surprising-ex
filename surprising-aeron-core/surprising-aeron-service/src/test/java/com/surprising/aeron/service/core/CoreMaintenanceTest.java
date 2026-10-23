@@ -89,7 +89,7 @@ class CoreMaintenanceTest {
      * @param v 需要复制合约、费率及风险字段的原标的
      */
     private static RegisterInstrumentCommand config(com.surprising.aeron.service.instrument.CoreInstrument v) {
-        return new RegisterInstrumentCommand(v.instrumentId(),v.contractType().ordinal(),v.baseAsset(),v.quoteAsset(),v.settleAsset(),
+        return new RegisterInstrumentCommand(v.instrumentId(),v.baseAsset(),v.quoteAsset(),v.settleAsset(),
                 v.notionalMultiplierUnits(),v.priceTickUnits(),v.settleScaleUnits(),v.initialMarginRatePpm(),v.maintenanceMarginRatePpm(),
                 v.makerFeeRatePpm(),v.takerFeeRatePpm(),v.expiryEpochMillis(),v.optionType()==null?-1:v.optionType().ordinal(),v.strikePriceTicks(),
                 v.maxLeveragePpm(),v.maxPositionNotionalUnits(),v.userOpenInterestLimitRatePpm(),v.userOpenInterestLimitFloorUnits(),
@@ -197,7 +197,7 @@ class CoreMaintenanceTest {
         // 该产品线采用的结算资产，反向为 BTC，其余为 USDT
         String asset = type.isInverse() ? "BTC" : "USDT";
         applied(state,command(line,1,CoreMessageType.REGISTER_INSTRUMENT,TradingCommandCodec.encodeRegisterInstrument(
-                new RegisterInstrumentCommand("1",type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1_000:1,
+                new RegisterInstrumentCommand("1","BTC","USDT",asset,1,1,type.isInverse()?1_000:1,
                         100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,type.isOption()?0:-1,type.isOption()?100:0))));
         applied(state,command(line,1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                 ? new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_000L)

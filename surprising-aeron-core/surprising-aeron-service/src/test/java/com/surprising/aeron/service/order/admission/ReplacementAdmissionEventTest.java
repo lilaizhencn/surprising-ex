@@ -29,7 +29,6 @@ import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +50,7 @@ class ReplacementAdmissionEventTest {
     @Test void laneAloneReadsAccountTablesAndReusesItsAdmissionAfterRejection() throws Exception {
         // 测试永续合约 1，设定显式杠杆、持仓限额和风险档位。
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000,
                         0, 0, 0, -1, 0, 10_000_000, 10_000, 0, 10_000,
                         List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))));

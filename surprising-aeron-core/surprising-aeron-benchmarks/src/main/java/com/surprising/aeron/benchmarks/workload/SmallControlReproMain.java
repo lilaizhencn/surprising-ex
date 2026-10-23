@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.*;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.List;
@@ -78,7 +77,7 @@ public final class SmallControlReproMain {
     }
 
     private static RegisterInstrumentCommand instrument(String instrumentId) {
-        return new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(),
+        return new RegisterInstrumentCommand(instrumentId,
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 

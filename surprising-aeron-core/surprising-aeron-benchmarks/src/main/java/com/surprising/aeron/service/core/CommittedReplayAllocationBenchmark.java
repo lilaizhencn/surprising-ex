@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.replay.CommittedTradeReplay;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -27,7 +26,7 @@ public class CommittedReplayAllocationBenchmark {
         sequence = orderId = 0;
         replay = new CommittedTradeReplay(ProductLine.LINEAR_PERPETUAL, null);
         send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                new RegisterInstrumentCommand("604", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                new RegisterInstrumentCommand("604", "BTC", "USDT", "USDT",
                         1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
         for (long user : new long[]{7, 8}) send(CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000_000_000_000L)));

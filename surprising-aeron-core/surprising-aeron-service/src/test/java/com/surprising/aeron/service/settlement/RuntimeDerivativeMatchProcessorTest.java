@@ -29,7 +29,6 @@ import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.List;
@@ -99,8 +98,7 @@ class RuntimeDerivativeMatchProcessorTest {
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThatThrownBy(() -> RuntimeDerivativeMatchProcessor.apply(before, 11,
-                List.of(trade(12, 8, 100, 1, true, true),
+        assertThatThrownBy(() -> RuntimeTestStateTransitions.applyDerivativeMatches(before, 11, List.of(trade(12, 8, 100, 1, true, true),
                         trade(99, 9, 100, 1, true, true)), runtime, identities))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("runtime matched order is not open: 99");
@@ -400,7 +398,7 @@ class RuntimeDerivativeMatchProcessorTest {
      */
     private static CoreInstrument instrument() {
         return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0,
                         10_000_000, 10_000, 0, 1,
@@ -412,7 +410,7 @@ class RuntimeDerivativeMatchProcessorTest {
      * 构造高精度、大金额平仓用例的永续注册命令；这是内存测试配置，不启动在线节点。
      */
     private static RegisterInstrumentCommand liveInstrument() {
-        return new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+        return new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 10_000_000L, 10_000_000L, 100_000_000L,
                         10_000L, 5_000L, 0, 500L, 0, -1, 0,
                         100_000_000L, 1_000_000_000_000_000L, 1_000_000L, 25_000_000_000_000L,

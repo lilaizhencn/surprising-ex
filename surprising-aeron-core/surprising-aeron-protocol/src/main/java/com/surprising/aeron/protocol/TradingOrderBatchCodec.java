@@ -511,11 +511,6 @@ public final class TradingOrderBatchCodec {
             return this;
         }
 
-        private LittleEndianWriter put(byte[] value) {
-            System.arraycopy(value, 0, bytes, position, value.length);
-            position += value.length;
-            return this;
-        }
     }
 
     private static CoreOrderBatchResult.Item decodeResultFrame(ByteBuffer buffer) {
@@ -557,10 +552,6 @@ public final class TradingOrderBatchCodec {
         } catch (IllegalArgumentException exception) {
             throw new ProtocolException(exception.getMessage());
         }
-    }
-
-    private static ByteBuffer readable(byte[] encoded) {
-        return ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
     }
 
     private static ByteBuffer readable(byte[] encoded, int offset, int length) {

@@ -23,7 +23,6 @@ import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.UUID;
@@ -46,7 +45,7 @@ class AdmissionSettlementFactTest {
     void delayedLaneUsesTheBorrowedFactInsteadOfLaterLedgerStatus(String transition) throws Exception {
         // 本用例标的一的 U 本位永续合约
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         // 用户七初始一万 USDT、无持仓和订单的冷状态
         var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,

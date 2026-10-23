@@ -16,7 +16,6 @@ import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
@@ -214,7 +213,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private RegisterInstrumentCommand instrument() {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new RegisterInstrumentCommand(instrumentId, type.ordinal(), "BTC", "USDT", settleAsset(),
+        return new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", settleAsset(),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }

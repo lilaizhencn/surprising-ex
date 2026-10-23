@@ -18,7 +18,6 @@ import com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.HashMap;
 import java.util.List;
@@ -50,8 +49,7 @@ public class ReplacementAdmissionBenchmark {
     @Setup public void setup() {
         var product = ProductLine.valueOf(productLine);
         var instrument = CoreInstrument.from(product,
-                new RegisterInstrumentCommand("1", product == ProductLine.SPOT
-                        ? ContractType.SPOT.ordinal() : ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000,
                         0, 0, 0, -1, 0, 10_000_000, 10_000, 0, 10_000,
                         List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))));

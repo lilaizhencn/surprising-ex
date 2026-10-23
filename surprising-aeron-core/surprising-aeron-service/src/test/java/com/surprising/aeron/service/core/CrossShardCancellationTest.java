@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -137,8 +136,7 @@ class CrossShardCancellationTest {
      */
     private void register(TradingCoreRuntime state, String instrumentId) {
         applied(state, command(CoreMessageType.REGISTER_INSTRUMENT, 0,
-                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
-                        ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0))));
     }
 

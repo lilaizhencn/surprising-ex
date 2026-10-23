@@ -8,7 +8,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
@@ -33,7 +32,7 @@ public class PositionIndexAllocationBenchmark {
         identities = new RuntimeIdentityRegistry();
         runtime = RuntimeStateProjector.project(state, identities);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                         1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
         source = new PositionRuntime(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,

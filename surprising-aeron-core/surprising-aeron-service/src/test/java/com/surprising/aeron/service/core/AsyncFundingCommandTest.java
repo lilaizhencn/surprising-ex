@@ -31,8 +31,7 @@ class AsyncFundingCommandTest {
             // 币本位使用 BTC，U 本位使用 USDT。
             String asset = type.isInverse() ? "BTC" : "USDT";
             applied(state, message(line, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            type.ordinal(), "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME))));
@@ -96,8 +95,7 @@ class AsyncFundingCommandTest {
             // 币本位使用 BTC，U 本位使用 USDT。
             String asset = type.isInverse() ? "BTC" : "USDT";
             applied(state, message(line, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            type.ordinal(), "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME))));

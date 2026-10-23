@@ -36,7 +36,6 @@ import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.BenchmarkMatchingAwait;
 import com.surprising.aeron.service.order.ClusterCommandWindow;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -1091,7 +1090,7 @@ public final class LinearPerpetualBenchmarkSupport {
     }
 
     private static RegisterInstrumentCommand instrument() {
-        return new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
+        return new RegisterInstrumentCommand(SYMBOL, "BTC", "USDT",
                 SETTLE_ASSET, 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 

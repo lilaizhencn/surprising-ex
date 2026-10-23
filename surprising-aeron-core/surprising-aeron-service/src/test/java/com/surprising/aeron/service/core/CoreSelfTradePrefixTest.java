@@ -61,7 +61,7 @@ class CoreSelfTradePrefixTest {
                 // 标的一选 BTC、标的二选 ETH 的基础资产
                 String base = symbol.equals("1") ? "BTC" : "ETH";
                 applied(core, message(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol, type.ordinal(),
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
                                 base, "USDT", type.isInverse() ? base : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
                                 100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));
@@ -136,7 +136,7 @@ class CoreSelfTradePrefixTest {
             // 按产品线选出的合约类型
             var type = ContractType.valueOf(line.contractTypeCode());
             applied(core, message(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", type.ordinal(),
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             "BTC", "USDT", type.isInverse() ? "BTC" : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
                             100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
                             type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));

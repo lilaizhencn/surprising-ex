@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 六产品线合约映射及业务规则边界测试：正确类型可注册，其他产品类型拒绝且原状态不变；资金费和到期结算能力由各产品规则决定，不把共享调用入口当成产品模型可混用。
+ * 六产品线合约映射及业务规则边界测试：注册类型取本线映射，跨线合约不能混入快照且原状态不变；资金费和到期结算能力由各产品规则决定，不把共享调用入口当成产品模型可混用。
  */
 class CoreProductLineArchitectureContractTest {
 
@@ -53,25 +53,22 @@ class CoreProductLineArchitectureContractTest {
     }
 
     /**
-     * 对每对不同产品线尝试注册外部合约，检查明确 PRODUCT_LINE_MISMATCH，原业务哈希及空合约表均不改变。
+     * 对每对不同产品线构造含外线合约的冷状态，拒绝把外线合约编码为当前产品，原状态不变。
      */
     @Test
-    void everyProductLineRejectsEveryForeignContractWithoutMutation() {
-        for (ProductLine /* 当前尝试接入其他产品合约的目标产品线 */ target : ProductLine.values()) {
-            for (ProductLine /* 不同产品线或由它构造的外部合约，用来验证边界拒绝 */ foreign : ProductLine.values()) {
-                if (target == foreign) {
-                    continue;
-                }
-                // 本轮尚未注册合约的原冷状态
+    void snapshotRejectsEveryForeignInstrumentWithoutMutation() {
+        for (ProductLine target : ProductLine.values()) {
+            for (ProductLine foreign : ProductLine.values()) {
+                if (target == foreign) continue;
                 TradingCoreState state = TradingCoreState.empty(target);
-                // 错误注册尝试前原状态的业务哈希
-                long beforeHash = state.businessStateHash();
-
-                assertThatThrownBy(() -> reducer.registerInstrument(state, instrument(foreign)))
-                        .isInstanceOfSatisfying(CoreStateRejectedException.class,
-                                /* 跨线注册得到的业务拒绝，检查具体错误码 */ exception -> assertThat(exception.code()).isEqualTo("PRODUCT_LINE_MISMATCH"));
-                assertThat(state.businessStateHash()).isEqualTo(beforeHash);
-                assertThat(state.instruments()).isEmpty();
+                CoreInstrument instrument = CoreInstrument.from(foreign, instrument(foreign));
+                TradingCoreState mixed = new TradingCoreState(target, 0, state.users(), state.orders(),
+                        java.util.Map.of(instrument.instrumentId(), instrument), state.riskState(), state.treasuryState());
+                long hash = mixed.businessStateHash();
+                assertThatThrownBy(() -> com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(mixed))
+                        .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)
+                        .hasMessage("snapshot instrument product line mismatch");
+                assertThat(mixed.businessStateHash()).isEqualTo(hash);
             }
         }
     }
@@ -155,7 +152,7 @@ class CoreProductLineArchitectureContractTest {
         // 当前合约是否有到期时间，即交割或期权
         boolean lifecycle = contractType.isDelivery() || contractType.isOption();
         return new RegisterInstrumentCommand(
-                "1", contractType.ordinal(), "BTC",
+                "1", "BTC",
                 inverse ? "USD" : "USDT", inverse ? "BTC" : "USDT",
                 inverse ? 100 : 1, 1, inverse ? 100 : 1,
                 100_000, 50_000, 100_000, 200_000,

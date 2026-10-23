@@ -5,7 +5,6 @@ import com.surprising.aeron.client.AeronClientPool;
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.*;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.*;
@@ -189,7 +188,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void setup() {
         for(int i=0;i<SYMBOLS;i++) {
             send(CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
-                    new RegisterInstrumentCommand(instrumentId(i),ContractType.LINEAR_PERPETUAL.ordinal(),"MIX"+i,
+                    new RegisterInstrumentCommand(instrumentId(i),"MIX"+i,
                             "USDT","USDT",1,1,1,100_000,50_000,0,0,0,-1,0)),1,null);
         }
         for(int i=0;i<SYMBOLS;i++) price(i,100);

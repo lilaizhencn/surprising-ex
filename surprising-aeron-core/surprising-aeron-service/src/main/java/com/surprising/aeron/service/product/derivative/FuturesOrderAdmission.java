@@ -1,19 +1,11 @@
 package com.surprising.aeron.service.product.derivative;
 
-import com.surprising.aeron.model.CoreLeverageKey;
-import com.surprising.aeron.model.CorePositionState;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.product.OrderAdmissionMath;
 import com.surprising.aeron.support.math.CoreContractMath;
-import com.surprising.aeron.support.math.OptionContractMath;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -27,12 +19,9 @@ public final class FuturesOrderAdmission {
      * @param position 当前对应持仓，没有持仓时为 null
      * @param order 已解析的委托方向、数量、价格和有效费率
      * @param leverage 杠杆倍数，按一百万倍缩放保存
-     * @param pendingQuantitySteps 统一接口传入的其他在途数量，本期货公式没有读取它
      * @return 结算资产最小整数单位表示的预留金额，当前结果至少为 1
      */
-    public static long reservationUnits(CoreInstrument instrument, PositionRuntime position,
-                                        ResolvedPlaceOrder order, long leverage,
-                                        long pendingQuantitySteps) {
+    public static long reservationUnits(CoreInstrument instrument, PositionRuntime position, ResolvedPlaceOrder order, long leverage) {
         // 现有持仓的带方向数量；没有持仓时以 0 参与风险规模计算。
         long current = position == null ? 0 : position.signedQuantitySteps();
         // 买入记为正、卖出记为负，只用于计算方向，不在这里改变持仓。
@@ -81,62 +70,4 @@ public final class FuturesOrderAdmission {
                 indexPriceTicks, forwardPriceTicks, bracket.optionMarginFactorPpm());
     }
 
-    /**
-     * 从已保存的确定性状态计算预留，供状态重放使用；不在重放时修改账户。
-     * @param state 包含用户杠杆设置等信息的确定性业务状态
-     * @param instrument 本次订单的合约配置
-     * @param user 订单所属用户的持仓与账户状态
-     * @param command 已解析的订单方向、价格、数量、保证金模式和费率
-     * @param activeOrderIndex 统一重放接口提供的活动订单索引，本公式没有读取它
-     * @return 以结算资产最小整数单位表示的预留金额，当前结果至少为 1
-     */
-    public static long reservationUnitsForState(
-            TradingCoreState state,
-            CoreInstrument instrument,
-            CoreUserState user,
-            ResolvedPlaceOrder command,
-        ActiveOrderIndex activeOrderIndex) {
-        // 用币对和持仓方向找到该订单对应的持仓，不能拿另一个方向的持仓抵扣。
-        CorePositionState position = user.positions().get(
-                positionKey(instrument.instrumentId(), command.positionSide()));
-        // 没有已有持仓时用 0，已有持仓则保留它的方向。
-        long currentQuantity = position == null ? 0 : position.signedQuantitySteps();
-        // 本次委托的带方向数量，买入为正、卖出为负。
-        long signedOrder = command.side() == CoreOrderSide.BUY
-                ? command.quantitySteps() : Math.negateExact(command.quantitySteps());
-
-        // 只减仓单不增加开仓保证金，其他委托按完整下单量预留。
-        long openSteps = command.reduceOnly() ? 0 : command.quantitySteps();
-        // 优先用该用户、币对、保证金模式的杠杆设置，缺省时用币对允许的最大杠杆。
-        long leverage = state.leverages().getOrDefault(
-                new CoreLeverageKey(user.userId(), instrument.instrumentId(), command.marginMode()),
-                instrument.maxLeveragePpm());
-        // 为风险选档合并已有持仓绝对量和新单数量，不把它写回真实仓位。
-        long projectedRiskQuantity = Math.addExact(Math.absExact(currentQuantity), command.quantitySteps());
-        // 给预计风险数量附上本次委托方向，交给合约数学函数处理。
-        long projectedSteps = signedOrder > 0 ? projectedRiskQuantity : Math.negateExact(projectedRiskQuantity);
-        // 与在线入口共用的开仓保证金计算结果。
-        long margin = openingMargin(instrument, projectedSteps, signedOrder, openSteps,
-                command.reservationPriceTicks(), leverage, command.indexPriceTicks(),
-                command.forwardPriceTicks());
-        // 这条重放公式保留买方期权的权利金项；普通永续和交割合约的这一项为 0。
-        long premium = instrument.contractType().isOption() && command.side() == CoreOrderSide.BUY
-                ? OptionContractMath.optionPremiumUnits(instrument, command.reservationPriceTicks(),
-                command.quantitySteps()) : 0;
-        // 此重放入口按整笔数量计算费用变化，只有扣款部分会加入预留。
-        long fee = CoreContractMath.feeDeltaUnits(instrument, command.reservationPriceTicks(),
-                command.quantitySteps(), command.takerFeeRatePpm());
-        return Math.max(1, Math.addExact(Math.addExact(margin, premium), Math.max(0, Math.negateExact(fee))));
-    }
-
-    /**
-     * 生成用户持仓表使用的键；双向持仓附加方向，净持仓直接使用标准币对编号。
-     * @param instrumentId 订单对应的币对编号
-     * @param side 净持仓或多空方向标记
-     */
-    private static String positionKey(String instrumentId, CorePositionSide side) {
-        // 先检查并规范化币对编号，避免同一币对出现多种键写法。
-        String normalized = OrderReservation.requireInstrumentId(instrumentId);
-        return side.hedgeSide() ? normalized + ':' + side.name() : normalized;
-    }
 }

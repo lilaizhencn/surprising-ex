@@ -352,8 +352,7 @@ class CoreRiskStateTest {
     @Test
     void markPriceBeyondHighestRiskBracketStillProducesLiquidationSnapshot() {
         // 最高档名义金额上限只有 100 的合约注册命令，用来制造行情变化后的持仓超档。
-        RegisterInstrumentCommand command = new RegisterInstrumentCommand("1",
-                ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+        RegisterInstrumentCommand command = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0, 10_000_000L, 100,
                 10_000_000L, 100, List.of(new CoreRiskLimitBracket(1, 0, 100,
                         10_000_000L, 100_000, 50_000)));
@@ -546,8 +545,7 @@ class CoreRiskStateTest {
         TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
         runtime.startAccountLanes();
         try {
-            RuntimeDerivativeRiskProcessor.applyMarkPrice(
-                    state, command, state.users().keySet(), runtime, identities);
+            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, state.users().keySet(), runtime, identities);
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .isEqualTo(first);
             RuntimeStateParityChecker.assertMatches(first, identities, runtime);
@@ -556,8 +554,7 @@ class CoreRiskStateTest {
                 // 本批继续扫描开始前的参照状态，状态转换和运行时都从同一业务进度推进。
                 TradingCoreState before = first;
                 first = reducer.continueRiskScan(before, 64);
-                RuntimeDerivativeRiskProcessor.applyContinuation(
-                        before, 64, before.users().keySet(), runtime, identities);
+                RuntimeTestStateTransitions.applyRiskContinuation(before, 64, before.users().keySet(), runtime, identities);
                 RuntimeStateParityChecker.assertMatches(first, identities, runtime);
             }
         } finally {
@@ -590,15 +587,13 @@ class CoreRiskStateTest {
         TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
         runtime.startAccountLanes();
         try {
-            RuntimeDerivativeRiskProcessor.applyMarkPrice(
-                    state, command, state.users().keySet(), runtime, identities);
+            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, state.users().keySet(), runtime, identities);
             RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
             while (!authoritative.riskState().scan().riskComplete()) {
                 // 本批继续扫描开始前的参照状态，状态转换和运行时都从同一业务进度推进。
                 TradingCoreState before = authoritative;
                 authoritative = reducer.continueRiskScan(before, 7);
-                RuntimeDerivativeRiskProcessor.applyContinuation(
-                        before, 7, before.users().keySet(), runtime, identities);
+                RuntimeTestStateTransitions.applyRiskContinuation(before, 7, before.users().keySet(), runtime, identities);
                 RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
             }
         } finally {
@@ -655,7 +650,7 @@ class CoreRiskStateTest {
      * @param settleScale 测试结算资产的缩放精度，反向合约需要用它换算金额
      */
     private static RegisterInstrumentCommand instrument(ContractType type, long settleScale) {
-        return new RegisterInstrumentCommand("1", type.ordinal(), "BTC", "USDT", "USDT",
+        return new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                 1, 1, settleScale, 100_000, 100_000, 0, 0, 0, -1, 0);
     }
 
@@ -664,7 +659,7 @@ class CoreRiskStateTest {
      * @param instrumentId 需要创建的测试币对编号
      */
     private static RegisterInstrumentCommand instrument(String instrumentId) {
-        return new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(),
+        return new RegisterInstrumentCommand(instrumentId,
                 (instrumentId.equals("1") ? "BTC" : "ETH"), "USDT", "USDT", 1, 1, 1,
                 100_000, 100_000, 0, 0, 0, -1, 0);
     }

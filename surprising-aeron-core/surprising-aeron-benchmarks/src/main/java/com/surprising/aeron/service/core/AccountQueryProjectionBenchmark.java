@@ -14,7 +14,6 @@ import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.query.state.RuntimeStateQueryService;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -38,8 +37,7 @@ public class AccountQueryProjectionBenchmark {
         var product = ProductLine.LINEAR_PERPETUAL;
         identities = new RuntimeIdentityRegistry();
         runtime = RuntimeStateProjector.project(TradingCoreState.empty(product), identities);
-        var instrument = CoreInstrument.from(product, new RegisterInstrumentCommand("1",
-                ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+        var instrument = CoreInstrument.from(product, new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         runtime.registerInstrument(instrument);
         int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");

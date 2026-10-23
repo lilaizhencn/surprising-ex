@@ -53,9 +53,7 @@ public class CancelAllAfterService {
 
         String symbolScope = normalizeSymbolScope(request.instrumentId());
         Instant now = Instant.now();
-        boolean active = request.countdownMs() > 0;
-        Instant triggerAt = active ? now.plusMillis(request.countdownMs()) : null;
-        CancelAllAfterTimer timer = timerStore.set(request.userId(), symbolScope, request.countdownMs(), triggerAt, now);
+        CancelAllAfterTimer timer = timerStore.set(request.userId(), symbolScope, request.countdownMs(), now);
         return toResponse(timer);
     }
 

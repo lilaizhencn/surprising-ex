@@ -10,7 +10,6 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.result.ResponseArena;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -113,7 +112,7 @@ public class AccountLaneCommitBenchmark {
             var userList = new java.util.ArrayList<Long>(accountLanes);
             var orderList = new java.util.ArrayList<Long>(accountLanes);
             var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                    new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                    new RegisterInstrumentCommand("1",
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             for (int laneId = 0; laneId < accountLanes; laneId++) {
                 long user = users[laneId];

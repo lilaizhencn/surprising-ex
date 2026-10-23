@@ -36,8 +36,7 @@ class RiskBatchBudgetTest {
                 // 由当前下标生成的测试币对编号，让共享预算能够在多个币对之间轮转。
                 String instrumentId=Integer.toString(100+i);
                 applied(state,command(line,CoreMessageType.REGISTER_INSTRUMENT,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
-                                type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1000:1,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,"BTC","USDT",asset,1,1,type.isInverse()?1000:1,
                                 100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                                 type.isOption()?0:-1,type.isOption()?100:0))));
             }
@@ -111,8 +110,7 @@ class RiskBatchBudgetTest {
                 // 由当前下标生成的测试币对编号，让共享预算能够在多个币对之间轮转。
                 String instrumentId=Integer.toString(100+i);
                 applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,
-                                type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",1,1,
+                        TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(instrumentId,"BTC","USDT",type.isInverse()?"BTC":"USDT",1,1,
                                 type.isInverse()?1000:1,100_000,50_000,0,0,
                                 type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                                 type.isOption()?0:-1,type.isOption()?100:0))));
@@ -160,8 +158,7 @@ class RiskBatchBudgetTest {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{7, 8}) {
@@ -216,8 +213,7 @@ class RiskBatchBudgetTest {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
@@ -279,8 +275,7 @@ class RiskBatchBudgetTest {
         ProductLine line = ProductLine.LINEAR_PERPETUAL;
         try (/* 本用例创建的交易运行时，离开作用域时关闭线程等资源。 */ var state = new TradingCoreRuntime(line)) {
             applied(state, command(line, CoreMessageType.REGISTER_INSTRUMENT,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                             100_000, 50_000, 0, 0, 0, -1, 0))));
             applied(state, mark(line, "1", 1));
             for (long /* 当前充值、建仓或汇总余额的测试账户，各场景按指定集合分布到不同 Lane。 */ user : new long[]{1, 2, 7}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,

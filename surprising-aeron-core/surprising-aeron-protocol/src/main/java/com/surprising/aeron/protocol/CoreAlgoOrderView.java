@@ -16,13 +16,11 @@ public record CoreAlgoOrderView(
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
         rejectReason = rejectReason == null ? "" : rejectReason;
         childOrderIds = List.copyOf(childOrderIds);
-        boolean creationTemplate = revision == 1 && createdAtEpochMillis == 0 && updatedAtEpochMillis == 0;
         if (algoOrderId <= 0 || userId <= 0 || instrumentId == null || instrumentId.isBlank() || algoTypeCode < 0
                 || side == null || quantitySteps <= 0 || childQuantitySteps <= 0 || intervalSeconds <= 0
                 || durationSeconds <= 0 || marginMode == null || positionSide == null || timeInForce == null
-                || statusCode < 0 || startAtEpochMillis < 0
-                || (!creationTemplate && (startAtEpochMillis <= 0 || createdAtEpochMillis <= 0
-                || updatedAtEpochMillis <= 0)) || revision < 0 || executedQuantitySteps < 0
+                || statusCode < 0 || startAtEpochMillis <= 0 || createdAtEpochMillis <= 0
+                || updatedAtEpochMillis <= 0 || revision < 0 || executedQuantitySteps < 0
                 || activeQuantitySteps < 0 || activeChildOrderCount < 0) {
             throw new IllegalArgumentException("invalid algo order view");
         }

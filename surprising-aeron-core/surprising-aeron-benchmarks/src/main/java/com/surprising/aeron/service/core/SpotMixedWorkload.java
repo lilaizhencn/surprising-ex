@@ -21,7 +21,6 @@ import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Scenari
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.support.metrics.CoreLaneMetrics;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -413,7 +412,7 @@ public final class SpotMixedWorkload {
     }
 
     private static RegisterInstrumentCommand instrument(String instrumentId, String baseAsset) {
-        return new RegisterInstrumentCommand(instrumentId, ContractType.SPOT.ordinal(), baseAsset, QUOTE_ASSET,
+        return new RegisterInstrumentCommand(instrumentId, baseAsset, QUOTE_ASSET,
                 QUOTE_ASSET, 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 }

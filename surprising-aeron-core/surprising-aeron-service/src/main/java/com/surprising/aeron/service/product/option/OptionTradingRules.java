@@ -89,7 +89,6 @@ public final class OptionTradingRules implements ProductTradingRules {
     public long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage,
                                  long pendingQuantitySteps) {
-        return OptionOrderAdmission.reservationUnits(
-                instrument, position, order, leverage, pendingQuantitySteps);
+        return OptionOrderAdmission.reservationUnits(instrument, position, order, pendingQuantitySteps);
     }
 }

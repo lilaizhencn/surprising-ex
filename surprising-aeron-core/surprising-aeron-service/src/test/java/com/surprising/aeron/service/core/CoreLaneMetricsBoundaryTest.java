@@ -4,7 +4,6 @@ import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -31,7 +30,7 @@ class CoreLaneMetricsBoundaryTest {
             // 注册测试合约的复制命令
             var register = new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                     new UUID(990, 1), core.productLine, CommandSource.OPERATIONS, 990, 1, 0, TIME, 1),
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
             assertThat(CoreTestCompletion.applyAsynchronously(core, register).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             // 测试合约的运行时符号编号

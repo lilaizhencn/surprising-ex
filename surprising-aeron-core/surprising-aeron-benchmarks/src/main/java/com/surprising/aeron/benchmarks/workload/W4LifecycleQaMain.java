@@ -443,7 +443,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         registerInstrumentViaProvider(instrumentId, type, optionCode, strike, expiry);
         command(CoreMessageType.REGISTER_INSTRUMENT, 0,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        instrumentId, type.ordinal(), BASE_ASSET,
+                        instrumentId, BASE_ASSET,
                         type.isInverse() ? "USD" : "USDT", settleAsset(),
                         type.isInverse() ? 100 : 1, 1, type.isInverse() ? 100 : 1,
                         100_000, 100_000, MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,

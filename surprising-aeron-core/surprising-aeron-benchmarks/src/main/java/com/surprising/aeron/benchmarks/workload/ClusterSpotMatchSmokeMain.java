@@ -15,11 +15,9 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.time.Duration;
 import java.util.Arrays;
@@ -68,8 +66,7 @@ public final class ClusterSpotMatchSmokeMain {
     }
 
     private static CoreMessage instrumentCommand(long sourceId, long sequence) {
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
         return command(sourceId, sequence, 1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(instrument));

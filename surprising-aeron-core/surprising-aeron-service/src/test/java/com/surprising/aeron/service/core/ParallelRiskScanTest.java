@@ -25,7 +25,6 @@ import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
@@ -197,7 +196,7 @@ class ParallelRiskScanTest {
         var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
-                new RegisterInstrumentCommand("2", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("2",
                         "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
         // 需要加入第二币对持仓或替换一个用户的业务账户映射副本。
         var users = new TreeMap<>(source.users());
@@ -253,7 +252,7 @@ class ParallelRiskScanTest {
         var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
-                new RegisterInstrumentCommand("2", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("2",
                         "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
         // 需要加入第二币对持仓或替换一个用户的业务账户映射副本。
         var users = new TreeMap<>(source.users());
@@ -367,7 +366,7 @@ class ParallelRiskScanTest {
         var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
         // 逐步注册合约、充值并加入测试账户持仓的初始业务状态。
         var state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
-                new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand(SYMBOL,
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
         // 每条 Lane 已经加入的测试用户数量，达到 usersPerLane 后跳过该 Lane 的更多用户。
         int[] counts = new int[TOPOLOGY.accountLaneCount()];

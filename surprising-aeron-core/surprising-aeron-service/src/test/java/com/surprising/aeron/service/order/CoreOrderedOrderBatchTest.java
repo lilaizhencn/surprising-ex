@@ -36,7 +36,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline;
 import com.surprising.aeron.service.matcher.pipeline.MatcherPipelineGroup;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.OrderAction;
@@ -1020,8 +1019,7 @@ class CoreOrderedOrderBatchTest {
     void perpetualBatchAdmissionIncludesEarlierItemsAndConservesReservedFunds() {
         try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             // 本测试注册的现货或 U 本位永续品种配置
-            RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                    ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+            RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                     1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0,
                     10_000_000, 1_500, 0, 1_500,
                     List.of(new CoreRiskLimitBracket(1, 0, 1_500,
@@ -2595,8 +2593,7 @@ class CoreOrderedOrderBatchTest {
      */
     private static void applySpotInstrument(TradingCoreRuntime state) {
         // 本测试注册的现货或 U 本位永续品种配置
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
         assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(
                 CoreMessageType.REGISTER_INSTRUMENT, UUID.randomUUID(), ProductLine.SPOT,
@@ -2611,8 +2608,7 @@ class CoreOrderedOrderBatchTest {
      */
     private static void applyLinearPerpetualInstrument(TradingCoreRuntime state) {
         // 本测试注册的现货或 U 本位永续品种配置
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0,
                 10_000_000, 1_500, 0, 1_500,
                 List.of(new CoreRiskLimitBracket(1, 0, 1_500,

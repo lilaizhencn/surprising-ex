@@ -19,7 +19,6 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
 import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.BenchmarkMatchingAwait;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherEventType;
 import java.util.Arrays;
@@ -194,7 +193,7 @@ public final class CorePerpetualEndToEndBenchmark {
     }
 
     private static RegisterInstrumentCommand instrument() {
-        return new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
+        return new RegisterInstrumentCommand(SYMBOL, "BTC", "USDT",
                 "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0);
     }
 

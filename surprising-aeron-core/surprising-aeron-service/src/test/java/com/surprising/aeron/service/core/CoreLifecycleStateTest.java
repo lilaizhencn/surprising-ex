@@ -19,7 +19,6 @@ import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.*;
@@ -220,8 +219,7 @@ class CoreLifecycleStateTest {
         // 从等额收付前置状态投影出的独立运行时。
         TradingAccountRuntime netZeroRuntime = RuntimeStateProjector.project(netZero, netZeroIdentities);
         // 实际运行时资金费入口返回的等额收付结果。
-        var netZeroActual = RuntimePerpetualFundingProcessor.apply(netZero, netZeroCommand, null, netZeroRuntime,
-                netZeroIdentities);
+        var netZeroActual = RuntimeTestStateTransitions.applyFundingRuntime(netZero, netZeroCommand, null, netZeroRuntime, netZeroIdentities);
         RuntimeStateParityChecker.assertMatches(netZeroExpected.state(), netZeroIdentities, netZeroActual.state());
         assertThat(netZeroActual.payments()).isEqualTo(netZeroExpected.payments());
         assertThat(netZeroActual.progress()).isEqualTo(netZeroExpected.progress());
@@ -256,8 +254,7 @@ class CoreLifecycleStateTest {
         // 第一页建立并继续用于第二页的可变权威运行时。
         TradingAccountRuntime chunkedRuntime = RuntimeStateProjector.project(chunked, chunkedIdentities);
         // 实际运行时第一页结果，后续继续使用其中原运行时引用。
-        var firstActual = RuntimePerpetualFundingProcessor.apply(chunked, firstCommand, List.of(1L, 2L), chunkedRuntime,
-                chunkedIdentities);
+        var firstActual = RuntimeTestStateTransitions.applyFundingRuntime(chunked, firstCommand, List.of(1L, 2L), chunkedRuntime, chunkedIdentities);
         RuntimeStateParityChecker.assertMatches(firstExpected.state(), chunkedIdentities, firstActual.state());
         assertThat(firstActual.payments()).isEqualTo(firstExpected.payments());
         assertThat(firstActual.progress()).isEqualTo(firstExpected.progress());
@@ -273,8 +270,11 @@ class CoreLifecycleStateTest {
         RuntimeTestStateTransitions.FundingApplication secondExpected = reducer.applyFundingWithFacts(restored,
                 secondCommand, List.of(1L, 2L));
         // 继续使用原可变运行时执行第二页得到的实际结果。
-        var secondActual = RuntimePerpetualFundingProcessor.apply(restored, secondCommand, List.of(1L, 2L),
-                firstActual.state(), chunkedIdentities);
+        var secondActual = RuntimeTestStateTransitions.applyFundingRuntime(restored,
+                secondCommand,
+                List.of(1L, 2L),
+                firstActual.state(),
+                chunkedIdentities);
         RuntimeStateParityChecker.assertMatches(secondExpected.state(), chunkedIdentities, secondActual.state());
         assertThat(secondActual.payments()).isEqualTo(secondExpected.payments());
         assertThat(secondActual.progress()).isEqualTo(secondExpected.progress());
@@ -632,7 +632,7 @@ class CoreLifecycleStateTest {
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
         // 按当前保险分配规则为本强平记录算出的可覆盖金额。
-        long coverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
+        long coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(funded, 1);
 
         // 保险回执或 ADL 处理完成后的业务状态。
         TradingCoreState resolved = reducer.resolveLiquidation(funded,
@@ -669,9 +669,9 @@ class CoreLifecycleStateTest {
         CoreLiquidationState secondUser = state.riskState().liquidations().values().stream()
                 .filter(/* 按所属用户筛选的当前强平记录。 */ value -> value.userId() == 2).findFirst().orElseThrow();
         // 用户一按固定比例与余数规则可分得的保险。
-        long firstCoverage = InsuranceAllocationPolicy.expectedCoverage(state, firstUser.liquidationId());
+        long firstCoverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(state, firstUser.liquidationId());
         // 用户二按相同规则可分得的保险。
-        long secondCoverage = InsuranceAllocationPolicy.expectedCoverage(state, secondUser.liquidationId());
+        long secondCoverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(state, secondUser.liquidationId());
 
         // 独立运行时投影或业务状态对照使用的身份表。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -683,13 +683,13 @@ class CoreLifecycleStateTest {
         // 对反向候选列表一次性求出的全部保险分配结果。
         var allAllocations = InsuranceAllocationPolicy.allocations(runtime, identities, reverseIds);
         for (long /* 当前要比较逐项保险覆盖结果的强平编号。 */ id : reverseIds) {
-            assertThat(InsuranceAllocationPolicy.expectedCoverage(runtime, identities, reverseIds, id))
+            assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.resolve(runtime, identities, reverseIds, id).expectedCoverage())
                     .isEqualTo(allAllocations.get(id))
-                    .isEqualTo(InsuranceAllocationPolicy.expectedCoverage(state, id));
+                    .isEqualTo(RuntimeTestStateTransitions.expectedInsuranceCoverage(state, id));
         }
-        assertThat(InsuranceAllocationPolicy.isNext(runtime, identities, reverseIds, firstUser.liquidationId()))
+        assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.resolve(runtime, identities, reverseIds, firstUser.liquidationId()).next())
                 .isTrue();
-        assertThat(InsuranceAllocationPolicy.isNext(runtime, identities, reverseIds, secondUser.liquidationId()))
+        assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.resolve(runtime, identities, reverseIds, secondUser.liquidationId()).next())
                 .isFalse();
 
         assertThat(firstCoverage).isEqualTo(secondCoverage + 1);
@@ -708,8 +708,7 @@ class CoreLifecycleStateTest {
                 new ResolveLiquidationCommand(firstUser.liquidationId(),
                         ResolveLiquidationCommand.Resolution.INSURANCE, firstCoverage));
         // 首条分配已应用后，第二条记录当前应获的剩余保险额。
-        long remainingCoverage = InsuranceAllocationPolicy.expectedCoverage(
-                allocated, secondUser.liquidationId());
+        long remainingCoverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(allocated, secondUser.liquidationId());
         allocated = reducer.resolveLiquidation(allocated,
                 new ResolveLiquidationCommand(secondUser.liquidationId(),
                         ResolveLiquidationCommand.Resolution.INSURANCE, remainingCoverage));
@@ -734,7 +733,7 @@ class CoreLifecycleStateTest {
         state = reducer.adjustInsuranceFund(state,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
         // 按当前保险分配规则为本强平记录算出的可覆盖金额。
-        long coverage = InsuranceAllocationPolicy.expectedCoverage(state, 1);
+        long coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(state, 1);
         state = reducer.resolveLiquidation(state,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage));
         // 成功 ADL 之前按本测试口径加未实现盈亏的经济权益。
@@ -778,7 +777,7 @@ class CoreLifecycleStateTest {
         state = reducer.adjustInsuranceFund(state,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
         // 按当前保险分配规则为本强平记录算出的可覆盖金额。
-        long coverage = InsuranceAllocationPolicy.expectedCoverage(state, 1);
+        long coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(state, 1);
         // 已应用部分保险、仍有 ADL 亏空的拒绝场景前置状态。
         TradingCoreState beforeAdl = reducer.resolveLiquidation(state,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage));
@@ -851,7 +850,7 @@ class CoreLifecycleStateTest {
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
         // 本场景当前交易状态，后续赋值表示应用一条业务命令后的新值。
         TradingCoreState state = reducer.registerInstrument(TradingCoreState.empty(productLine),
-                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1", type.ordinal(),
+                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0,
                         expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0));
         return withPositionAndBalance(state, userId, quantity, entryPrice, wallet, margin);

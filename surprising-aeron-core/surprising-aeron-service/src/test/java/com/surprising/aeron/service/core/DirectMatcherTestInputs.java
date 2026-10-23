@@ -13,7 +13,6 @@ import com.surprising.aeron.service.matcher.CoreMatchingOrder;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -59,7 +58,7 @@ public final class DirectMatcherTestInputs {
             var identities = new RuntimeIdentityRegistry();
             // 按 Matcher 输入标的构造的现货测试合约
             var instrument = CoreInstrument.from(ProductLine.SPOT,
-                    new RegisterInstrumentCommand(Integer.toString(order.instrumentId()), ContractType.SPOT.ordinal(),
+                    new RegisterInstrumentCommand(Integer.toString(order.instrumentId()),
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             runtime.setMetadata(ProductLine.SPOT, 0);
             runtime.registerInstrument(instrument);

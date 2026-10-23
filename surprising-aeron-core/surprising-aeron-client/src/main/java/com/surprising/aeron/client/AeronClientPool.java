@@ -656,7 +656,6 @@ public final class AeronClientPool implements AutoCloseable {
             return commandRequest(type, commandId, userId, payload, RequestMode.ONE_WAY_CALLBACK, callback);
         }
 
-        private ProductLine product() { return productLine; }
 
         private Request commandRequest(CoreMessageType type, UUID commandId, long userId, byte[] payload,
                                        RequestMode mode, CommandAdmissionCallback callback) {

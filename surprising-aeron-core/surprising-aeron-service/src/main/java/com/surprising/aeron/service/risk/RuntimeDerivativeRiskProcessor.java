@@ -19,27 +19,6 @@ import lombok.NoArgsConstructor;
 public final class RuntimeDerivativeRiskProcessor {
 
     /**
-     * 先核对业务状态与运行时版本，登记新标记价；风险扫描启用时再按配置预算推进一批，保持调用方需要的状态转换顺序。
-     * @param before 本次操作前的业务状态，只用来核对产品线与运行时修订号是否一致
-     * @param command 包含币对、标记价、指数价、远期价、最新价及价格序号的本次行情命令
-     * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    public static void applyMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
-                                      Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
-                                      RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid perpetual risk apply");
-        }
-        applyMarkPriceRuntime(command, runtime, identities);
-        if (runtime.riskScanControl().enabled()) {
-            applyContinuationRuntime(runtime.riskScanControl().scanBatchSize(), indexedUserIds, runtime, identities);
-        }
-    }
-
-    /**
      * 拒绝未注册币对、旧价格序号或缺失的期权风险价格，写入新行情并重建本币对扫描；旧轮未完成时保留已完成用户边界，丢弃旧用户累计值，最后推进市场与全局修订号。
      * @param command 包含币对、标记价、指数价、远期价、最新价及价格序号的本次行情命令
      * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
@@ -96,24 +75,6 @@ public final class RuntimeDerivativeRiskProcessor {
     }
 
     /**
-     * 核对业务状态与运行时的产品线和修订号，再按指定预算继续当前待扫币对。
-     * @param before 本次操作前的业务状态，只用来核对产品线与运行时修订号是否一致
-     * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
-     * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    public static void applyContinuation(TradingCoreState before, int maxWork,
-                                         Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
-                                         RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid perpetual risk continuation apply");
-        }
-        applyContinuationRuntime(maxWork, indexedUserIds, runtime, identities);
-    }
-
-    /**
      * 校验预算和用户来源，扫描停用或没有未完成币对时直接返回，否则选一份扫描交给指定币对入口。
      * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
      * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
@@ -163,9 +124,8 @@ public final class RuntimeDerivativeRiskProcessor {
             throw new IllegalStateException("risk scan input is missing");
         }
         // 统一续扫流程本片实际消耗的工作量，回给共享预算调用方。
-        int completedWork = continueScan(runtime, instrument, sourceScan.priceSequence(),
-                Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
-                        runtime.incompleteRiskScanCount())), null, indexedUserIds, identities);
+        int completedWork = RiskScanCoordinator.runSlice(Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
+                        runtime.incompleteRiskScanCount())), sourceScan.symbolId(), null, indexedUserIds, runtime, identities);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return completedWork;
     }
@@ -199,9 +159,8 @@ public final class RuntimeDerivativeRiskProcessor {
             throw new IllegalStateException("risk scan input is missing");
         }
         // 统一续扫流程本片实际消耗的工作量，回给共享预算调用方。
-        int completedWork = continueScan(runtime, instrument, sourceScan.priceSequence(),
-                Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
-                        runtime.incompleteRiskScanCount())), positionUsers, null, identities);
+        int completedWork = RiskScanCoordinator.runSlice(Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
+                        runtime.incompleteRiskScanCount())), symbolId, positionUsers, null, runtime, identities);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         return completedWork;
     }
@@ -252,23 +211,6 @@ public final class RuntimeDerivativeRiskProcessor {
         }
         source.riskState().scans().forEach((/* 从整数币对编号还原的外部编号，或同步扫描映射中的币对键。 */ instrumentId, /* 同步时读取的业务扫描记录，转换后装入当前运行时。 */ scan) -> runtime.putRiskScan(toRuntimeScan(
                 identities.symbolId(instrumentId), scan)));
-    }
-
-    /**
-     * 把已选币对和预算交给统一续扫流程；行情一致性由调用方和续扫准备阶段负责，不在这里重新计算风险。
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param instrument 本次扫描币对的配置，提供结算资产及价格金额计算参数
-     * @param priceSequence 调用路径传入的行情序号；此转接方法不直接使用，实际一致性由扫描准备阶段校验
-     * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
-     * @param positionUsers 按币对和 Lane 定位有持仓用户的索引，避免为每轮风险扫描遍历全体账户
-     * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    private static int continueScan(TradingAccountRuntime runtime, CoreInstrument instrument,
-            long priceSequence, int maxWork, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
-            RuntimeIdentityRegistry identities) {
-        return RiskScanCoordinator.runSlice(maxWork, identities.symbolId(instrument.instrumentIdValue()), positionUsers,
-                indexedUserIds, runtime, identities);
     }
 
     /**

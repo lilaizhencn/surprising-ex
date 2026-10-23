@@ -733,21 +733,21 @@ class RuntimeStateBusinessRulesTest {
         // 本用例从空现货状态开始，只推进延时全撤计时器，不创建真实订单
         TradingCoreState state = TradingCoreState.empty(ProductLine.SPOT);
         // 为用户一百零一设置标的一延时全撤计时器的命令
-        var set = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1_000, 2_000, 0, 0, 0, 1_000);
+        var set = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1_000, 0, 0, 0, 1_000);
         // 计时器已设置为 ACTIVE 的冷状态
         TradingCoreState active = reducer.updateCancelAllAfter(state, 101, set);
         // 首个有效计时器及其修订，供认领命令做版本校验
         CoreCancelAllAfterState activeTimer = active.cancelAllAfterTimers()
                 .get(new CoreCancelAllAfterKey(101, "1"));
         // 按有效修订和到期时间认领计时器的命令
-        var claim = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.CLAIM, "1", 1_000, 2_000, activeTimer.revision(), 0, 0, 2_000);
+        var claim = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.CLAIM, "1", 1_000, activeTimer.revision(), 0, 0, 2_000);
         // 计时器已认领为 TRIGGERING 的冷状态
         TradingCoreState triggering = reducer.updateCancelAllAfter(active, 101, claim);
         // 已认领计时器及其新修订，供完成命令校验
         CoreCancelAllAfterState triggeringTimer = triggering.cancelAllAfterTimers()
                 .get(new CoreCancelAllAfterKey(101, "1"));
         // 按当前修订结束计时器并记录普通撤单三、触发撤单二的命令，未在此实际执行撤单
-        var complete = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.COMPLETE, "1", 1_000, 2_000, triggeringTimer.revision(), 3, 2, 2_100);
+        var complete = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.COMPLETE, "1", 1_000, triggeringTimer.revision(), 3, 2, 2_100);
         // 计时器记录为已触发并保留完成统计的冷状态
         TradingCoreState completed = reducer.updateCancelAllAfter(triggering, 101, complete);
 
@@ -878,7 +878,6 @@ class RuntimeStateBusinessRulesTest {
                                                        long bracketMaxLeverage) {
         // 使用指定固定限额、比例限额和唯一风险档位的注册命令
         RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0, 10_000_000L, maxPosition, openInterestRate, openInterestFloor,
                 List.of(new CoreRiskLimitBracket(1, 0, bracketCap, bracketMaxLeverage, 100_000, 50_000)));
@@ -893,7 +892,6 @@ class RuntimeStateBusinessRulesTest {
     private TradingCoreState derivativeWithBrackets() {
         // 包含两档初始保证金率的正向永续注册命令
         RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0,
                 0, -1, 0, 10_000_000L, 1_000, 10_000_000L, 1_000,
                 List.of(new CoreRiskLimitBracket(1, 0, 200, 10_000_000L, 100_000, 50_000),

@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -26,7 +25,7 @@ class CoreMatcherLedgerTest {
     void collectedOrderDeletionWinsBeforeOldActiveRouteIsRetired() throws Exception {
         try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
@@ -61,7 +60,7 @@ class CoreMatcherLedgerTest {
     void matchingAndBatchFeesUseOriginalLedgerAndAccountFactsRemainConserved() throws Exception {
         try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 10_000, 10_000, 0, -1, 0)));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
@@ -98,7 +97,7 @@ class CoreMatcherLedgerTest {
     void laneAdmissionCancelsOwnCrossingOrderWithoutOwnerBusinessReads() throws Exception {
         try (/* 本场景创建并在结束时关闭的 U 本位永续运行时。 */ var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(state, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));

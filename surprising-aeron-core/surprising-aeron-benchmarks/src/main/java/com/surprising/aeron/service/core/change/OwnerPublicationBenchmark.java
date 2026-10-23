@@ -17,7 +17,6 @@ import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -69,7 +68,7 @@ public class OwnerPublicationBenchmark {
         settlement = new MatcherSettlementChanges(runtime.topology().accountLaneCount());
         settlement.ensureOrderCapacity(settlementOrders.length, 1L << laneId);
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         countPosition = new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
                 instrument, 1, 100, 100, 0, 10);

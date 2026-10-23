@@ -23,7 +23,6 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.CoreTriggerCondition;
 import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
 import com.surprising.aeron.protocol.PlaceTriggerOrderCommand;
-import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
 import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchAction;
@@ -40,8 +39,6 @@ import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Snapsho
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.support.metrics.CoreLaneMetrics;
-import com.surprising.instrument.api.model.ContractType;
-import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -814,12 +811,6 @@ public final class LinearPerpetualMixedWorkload {
         return liquidation;
     }
 
-    private static CoreLiquidationState liquidation(TradingCoreState state, long liquidationId) {
-        CoreLiquidationState liquidation = state.riskState().liquidations().get(liquidationId);
-        if (liquidation == null) throw new IllegalStateException("liquidation state is missing");
-        return liquidation;
-    }
-
     private static void verifyPopulation(TradingCoreState state, List<Long> retailUsers,
                                          LinearPerpetualScaleConfig scaleConfig) {
         Set<Long> positionSizes = new HashSet<>();
@@ -952,7 +943,7 @@ public final class LinearPerpetualMixedWorkload {
     private static RegisterInstrumentCommand instrument(String instrumentId) {
         int symbolIndex = Integer.parseInt(instrumentId) - 10000;
         String baseAsset = "MIX" + symbolIndex;
-        return new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(),
+        return new RegisterInstrumentCommand(instrumentId,
                 baseAsset, SETTLE_ASSET, SETTLE_ASSET,
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }

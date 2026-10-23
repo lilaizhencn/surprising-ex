@@ -47,7 +47,6 @@ class TerminalStateRetentionTest {
         for (/* 当前循环的终态订单 ID */ int id = 2; id < 1000; id++) {
             assertThat(retention.containsOrder(id, 8, "client-" + id)).isFalse();
             assertThat(retention.containsOrder(1, 7, "")).isTrue();
-            assertThat(retention.containsAlgo(id, 9, "algo-" + id)).isFalse();
         }
         assertThat(retention.encode()).isEqualTo(snapshot);
         assertThat(TerminalStateRetention.decode(snapshot).containsOrder(1, 7, "")).isTrue();

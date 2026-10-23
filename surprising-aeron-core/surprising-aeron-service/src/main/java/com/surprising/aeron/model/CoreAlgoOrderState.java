@@ -1,6 +1,5 @@
 package com.surprising.aeron.model;
 
-import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -127,19 +126,6 @@ public record CoreAlgoOrderState(
                 throw new IllegalArgumentException("invalid algo order state");
             }
         }
-    }
-
-    /**
-     * 从协议视图还原母单字段；视图不含退役进度，因此这两项按初始值 0 构造。
-     * @param value 需要还原成内部母单记录的协议视图
-     */
-    public static CoreAlgoOrderState from(CoreAlgoOrderView value) {
-        return new CoreAlgoOrderState(value.algoOrderId(), value.userId(), value.clientAlgoOrderId(), value.instrumentId(),
-                value.algoTypeCode(), value.side(), value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(),
-                value.intervalSeconds(), value.durationSeconds(), value.marginMode(), value.positionSide(), value.reduceOnly(),
-                value.postOnly(), value.timeInForce(), value.statusCode(), value.currentOrderId(), value.rejectReason(),
-                value.startAtEpochMillis(), value.nextSliceAtEpochMillis(), value.completedAtEpochMillis(),
-                value.createdAtEpochMillis(), value.updatedAtEpochMillis(), value.revision(), value.childOrderIds());
     }
 
     /**

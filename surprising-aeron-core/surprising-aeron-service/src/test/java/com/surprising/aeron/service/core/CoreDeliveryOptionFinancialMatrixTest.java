@@ -8,6 +8,7 @@ import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.CoreRiskSnapshot;
 import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -329,9 +330,11 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState wrongLine = TradingCoreState.empty(ProductLine.LINEAR_DELIVERY);
         // 跨线注册前的业务哈希，拒绝后不能变化
         long wrongLineHash = wrongLine.businessStateHash();
-        assertThatThrownBy(() -> reducer.registerInstrument(wrongLine, instrument(VARIANTS.get(4))))
+        assertThatThrownBy(() -> com.surprising.aeron.service.product.ProductTradingRulesRegistry
+                .forProductLine(wrongLine.productLine())
+                .requireInstrument(CoreInstrument.from(ProductLine.OPTION, instrument(VARIANTS.get(4)))))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
-                        /* 本次预期的业务拒绝异常，用稳定业务代码核对原因 */ exception -> assertThat(exception.code()).isEqualTo("PRODUCT_LINE_MISMATCH"));
+                        /* 本次预期的业务拒绝异常，用稳定业务代码核对原因 */ exception -> assertThat(exception.code()).isEqualTo("PRODUCT_LINE_UNSUPPORTED"));
         assertThat(wrongLine.businessStateHash()).isEqualTo(wrongLineHash);
     }
 
@@ -1094,7 +1097,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
      * @param instrumentId 本次手工持仓或委托所属的规范数字标的 ID
      */
     private RegisterInstrumentCommand instrument(Variant variant, String instrumentId) {
-        return new RegisterInstrumentCommand(instrumentId, variant.type().ordinal(), variant.baseAsset(),
+        return new RegisterInstrumentCommand(instrumentId, variant.baseAsset(),
                 variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(), 1,
                 variant.settleScaleUnits(), 100_000, 100_000, 0, 0, 2_000_000_000_000L,
                 variant.optionType() == null ? -1 : variant.optionType().ordinal(),

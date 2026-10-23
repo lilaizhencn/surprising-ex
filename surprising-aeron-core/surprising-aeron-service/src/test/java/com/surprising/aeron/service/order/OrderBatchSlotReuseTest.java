@@ -54,7 +54,6 @@ class OrderBatchSlotReuseTest {
         var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(
                 com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
                 new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
-                        com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         return new com.surprising.aeron.service.order.state.OrderRuntime(id, 7, 1, instrument,
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, 0, false,

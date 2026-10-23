@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.BalanceRuntime;
@@ -26,26 +25,6 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 /** 下单步骤 4.4 的现货结算。买方从计价资产冻结中支付成交额及收费、得到基础资产，卖方交付冻结基础资产、收到计价资产并扣费或返佣。在线 applyLane 只处理所属账户，按单笔或累加路径更新订单和预留，系统费用留在本事件财务差额中交给账本。 构造约定：只提供静态现货结算入口，不允许单独创建工具实例。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeSpotMatchProcessor {
-
-    /**
-     * 检查冷状态参照与运行时的产品线及修订号一致，再委托通用成交入口；传入的资产名称在此实现中不读取，实际资产取规范币对。
-     * @param before 与当前运行时产品线及修订号一致的冷状态参照
-     * @param takerOrderId 主动成交订单编号
-     * @param baseAsset 既有入口传入的基础资产名称，当前实现不读取，实际使用规范币对资产
-     * @param quoteAsset 既有入口传入的计价资产名称，当前实现不读取
-     * @param matches 原始撮合事件列表，非 TRADE 事件不应用成交
-     * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-     * @param identities 解析实际币对及资产编号的运行时字典
-     */
-    public static void apply(TradingCoreState before, long takerOrderId, String baseAsset, String quoteAsset,
-                             List<MatcherEvent> matches, TradingAccountRuntime runtime,
-                             RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid spot match apply");
-        }
-        applyRuntime(takerOrderId, matches, runtime, identities);
-    }
 
     /**
      * 在通用运行时所有权边界处理现货成交：无成交的非即时限价单直接返回，其余先核对规范币对、产品与累计数量，再逐笔应用买卖双方、释放终态预留，应用系统费用并推进产品修订。

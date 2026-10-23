@@ -928,7 +928,7 @@ public final class TriggerOrderCommands {
     }
 
     /**
-     * 解码并用业务时间物化算法视图，先拒绝已保留终态身份；异步路径另核用户并准备标的索引，交原控制槽，冷路径直接更新并请求发布。
+     * 解码并用业务时间物化算法视图，异步路径另核用户并准备标的索引，交原控制槽，冷路径直接更新并请求发布。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
      * @param clusterTimestamp 本次复制命令的业务毫秒时间，用于物化创建视图的时间字段
      */
@@ -941,10 +941,6 @@ public final class TriggerOrderCommands {
         }
         int symbolId = -1;
         if (algo instanceof com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create create) {
-            if (current == null && owner.terminalAlgoRetained(create.algoOrderId(), userId, create.clientAlgoOrderId())) {
-                throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
-                        "terminal algo order identity is retained");
-            }
             symbolId = owner.identities().symbolId(create.instrumentId());
         } else if (current != null) symbolId = owner.identities().symbolId(current.instrumentId());
         if (owner.runtimeState().asynchronousCommands()) {
@@ -967,7 +963,7 @@ public final class TriggerOrderCommands {
     }
 
     /**
-     * 要求恰好两条并按业务时间建立视图，核对配对、交易开关及终态身份，再准备标的、持仓键和已结算标记；异步交控制槽，冷路径在一次用户结算内写入两腿并返回视图。
+     * 要求恰好两条并按业务时间建立视图，核对配对和交易开关，再准备标的、持仓键和已结算标记；异步交控制槽，冷路径在一次用户结算内写入两腿并返回视图。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
      * @param clusterTimestamp 本次复制命令的业务毫秒时间，用于物化创建视图的时间字段
      */
@@ -985,10 +981,6 @@ public final class TriggerOrderCommands {
         if (instrument != null) {
             instrument.requireOrderEnabled(first.orderType(), first.timeInForce(), false, false);
             instrument.requireOrderEnabled(second.orderType(), second.timeInForce(), false, false);
-        }
-        for (var /* 当前检查终态保留身份的 OCO 一条腿 */ leg : java.util.List.of(first, second)) {
-            if (owner.terminalTriggerRetained(leg.triggerOrderId(), message.header().userId(), leg.clientTriggerOrderId()))
-                throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID", "terminal trigger identity is retained");
         }
         // 本标的解析得到的内部整数身份，find 入口没找到时可为空
         int symbolId = owner.identities().symbolId(first.instrumentId());
@@ -1012,7 +1004,7 @@ public final class TriggerOrderCommands {
     }
 
     /**
-     * 解码并建立带业务时间的视图，检查标的开关和终态保留身份，再准备标的与持仓输入；异步交控制槽，冷路径在用户账户范围更新、请求发布并放入响应视图。
+     * 解码并建立带业务时间的视图，检查标的开关，再准备标的与持仓输入；异步交控制槽，冷路径在用户账户范围更新、请求发布并放入响应视图。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
      * @param clusterTimestamp 本次复制命令的业务毫秒时间，用于物化创建视图的时间字段
      */
@@ -1024,12 +1016,6 @@ public final class TriggerOrderCommands {
         var maintenanceInstrument = owner.runtimeState().instrument(trigger.instrumentId());
         if (maintenanceInstrument != null) {
             maintenanceInstrument.requireOrderEnabled(trigger.orderType(), trigger.timeInForce(), false, false);
-        }
-        if (owner.triggerOrderIndex().route(trigger.triggerOrderId()) == null
-                && owner.terminalTriggerRetained(trigger.triggerOrderId(), message.header().userId(),
-                trigger.clientTriggerOrderId())) {
-            throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
-                    "terminal trigger order identity is retained");
         }
         // 本标的解析得到的内部整数身份，find 入口没找到时可为空
         int symbolId = owner.identities().symbolId(trigger.instrumentId());

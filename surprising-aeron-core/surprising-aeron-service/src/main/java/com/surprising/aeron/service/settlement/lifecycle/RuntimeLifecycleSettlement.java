@@ -2,7 +2,6 @@ package com.surprising.aeron.service.settlement.lifecycle;
 
 import com.surprising.aeron.service.account.UserIndexPage;
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
@@ -29,30 +28,6 @@ import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 /** 按固定结算价结束合约持仓：先撤单，再按页准备余额与持仓后值，确认保险够用后应用账户并更新财库进度。同步主入口仅用于 System Ledger 未激活的回放或离线路径；在线命令由 RuntimeLifecycleSettlementContinuation 分次推进并复用本类的 Lane 操作。 构造约定：工具类只提供静态结算步骤，不创建实例。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeLifecycleSettlement {
-
-    /**
-     * 从旧状态补齐缺省的用户集合与活动订单索引后执行同步结算。这里只检查必要对象非空，不另核对 before 与 runtime 的产品线或修订号；用户输入顺序仍由调用方保证。
-     * @param before 旧状态；用于补齐缺省用户索引
-     * @param command 固定结算价、结算编号及订单和用户分页参数
-     * @param indexedUserIds 按全局用户编号递增提供的索引，apply 允许空时使用旧状态用户集合
-     * @param chunkCommandId 本页命令 UUID；同步主入口为空表示不分页
-     * @param activeOrderIndex 币对活动订单路由索引，apply 允许空时从旧状态构建
-     * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
-     * @param identities 把币对和资产名称转换为内部编号的身份表
-     */
-    public static CoreSettlementProgressView apply(TradingCoreState before, SettleInstrumentCommand command,
-                                                   Iterable<Long> indexedUserIds, UUID chunkCommandId,
-                                                   ActiveOrderIndex activeOrderIndex, TradingAccountRuntime runtime,
-                                                   RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || runtime == null || identities == null) {
-            throw new IllegalArgumentException("invalid runtime settlement");
-        }
-        // 本次使用的用户来源；未传索引时取旧状态用户集合。
-        Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
-        // 本次使用的活动订单索引；未传时从旧状态构建。
-        ActiveOrderIndex orders = activeOrderIndex == null ? new ActiveOrderIndex(before) : activeOrderIndex;
-        return applyRuntime(command, users, chunkCommandId, orders, runtime, identities);
-    }
 
     /**
      * 同步推进本次结算：核对编号与游标，先完成撤单，再准备账户后值并汇总保险需求。保险不足时保存当前用户游标并返回等待，已执行的撤单不在这里撤销；保险足够才应用本页账户、清算差额和分页进度。已完成的同一编号直接返回完成，较旧编号拒绝。

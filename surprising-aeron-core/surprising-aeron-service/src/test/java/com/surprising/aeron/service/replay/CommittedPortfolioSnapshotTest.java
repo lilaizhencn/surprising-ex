@@ -109,7 +109,7 @@ class CommittedPortfolioSnapshotTest {
         // 反向使用 BTC，其余使用 USDT 的单一测试结算资产。
         String settleAsset = type.isInverse() ? "BTC" : "USDT";
         // 具有指定合约类型、反向面值和期权参数的合成品种。
-        var instrument = CoreInstrument.from(type.productLine(), new RegisterInstrumentCommand("604", type.ordinal(), "BTC", "USDT", settleAsset,
+        var instrument = CoreInstrument.from(type.productLine(), new RegisterInstrumentCommand("604", "BTC", "USDT", settleAsset,
                 1, 1, type.isInverse() ? 1_000_000 : 1, 100_000, 50_000, 0, 0, type.isOption() || type.isDelivery() ? NOW + 86_400_000 : 0,
                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0));
         // 现货为空，其余含两单位多仓、入场价一百及入场值二百的持仓表。

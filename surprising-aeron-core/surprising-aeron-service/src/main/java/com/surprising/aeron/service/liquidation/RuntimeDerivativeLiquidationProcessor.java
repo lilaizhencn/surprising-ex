@@ -3,7 +3,6 @@ package com.surprising.aeron.service.liquidation;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreRiskStatus;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
@@ -34,26 +33,6 @@ import lombok.NoArgsConstructor;
 /** 强平步骤 3–6：校验执行条件，等待 Matcher 撤单，再完成账户和账本交接。 衍生品强平的账户执行与账本交接。前置检查由所属 Lane 确认持仓仍需强平，随后在该 Lane 应用已撤订单回执、解冻并平仓；收付、实收强平费及未覆盖亏空形成差额交唯一账本，Owner 等两边完成后提交修订号。 构造约定：只提供强平执行步骤，不额外保存账户权威状态。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeDerivativeLiquidationProcessor {
-
-    /**
-     * 核对命令前业务状态与运行时的产品线和修订号，再进入同步强平执行。
-     * @param before 本命令执行前的业务状态，用来检查产品线和运行时修订号一致
-     * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
-     * @param canceledOrders Matcher 已完成的撤单回执集合，账户步骤据此解除源用户订单和资金冻结
-     * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-     * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
-     */
-    public static TradingAccountRuntime applyExecution(TradingCoreState before,
-                                                     ExecuteLiquidationCommand command,
-                                                     Collection<CancellationOrder> canceledOrders,
-                                                     TradingAccountRuntime runtime,
-                                                     RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid perpetual liquidation apply");
-        }
-        return applyExecutionRuntime(command, canceledOrders, runtime, identities);
-    }
 
     /**
      * 在账本线程尚未启动的同步运行环境执行最终强平账户步骤；账本已启动时要求改用异步续步。
@@ -881,28 +860,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         treasuryDelta.addDeficit(settleAssetId, uncovered);
         treasuryDelta.addClearing(settleAssetId, uncovered);
         return treasuryDelta;
-    }
-
-    /**
-     * 核对命令前业务状态版本后，同步应用本批强平撤单回执并保存下一撤单编号，暂不执行最终平仓。
-     * @param before 本命令执行前的业务状态，用来检查产品线和运行时修订号一致
-     * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
-     * @param canceledOrders Matcher 已完成的撤单回执集合，账户步骤据此解除源用户订单和资金冻结
-     * @param nextCursorOrderId 本批后仍待撤的下一订单编号，此继续撤单入口要求为正数
-     * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-     * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
-     */
-    public static TradingAccountRuntime applyCancellationAdvance(TradingCoreState before,
-                                                               ExecuteLiquidationCommand command,
-                                                               Collection<CancellationOrder> canceledOrders,
-                                                               long nextCursorOrderId,
-                                                               TradingAccountRuntime runtime,
-                                                               RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid liquidation cancellation apply");
-        }
-        return applyCancellationAdvanceRuntime(command, canceledOrders, nextCursorOrderId, runtime, identities);
     }
 
     /**

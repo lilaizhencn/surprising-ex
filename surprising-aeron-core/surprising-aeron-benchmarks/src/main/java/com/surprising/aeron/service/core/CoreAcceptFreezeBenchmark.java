@@ -15,7 +15,6 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
@@ -84,7 +83,7 @@ public final class CoreAcceptFreezeBenchmark {
     }
 
     private static RegisterInstrumentCommand instrument() {
-        return new RegisterInstrumentCommand(SYMBOL, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT",
+        return new RegisterInstrumentCommand(SYMBOL, "BTC", "USDT",
                 "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0);
     }
 

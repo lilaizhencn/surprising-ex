@@ -35,7 +35,7 @@ public final class DeliveryTradingRules implements ProductTradingRules {
     @Override
     public long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage, long pendingQuantitySteps) {
-        return FuturesOrderAdmission.reservationUnits(instrument, position, order, leverage, pendingQuantitySteps);
+        return FuturesOrderAdmission.reservationUnits(instrument, position, order, leverage);
     }
 
     @Override

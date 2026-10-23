@@ -36,7 +36,7 @@ public final class PerpetualTradingRules implements ProductTradingRules {
     @Override
     public long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage, long pendingQuantitySteps) {
-        return FuturesOrderAdmission.reservationUnits(instrument, position, order, leverage, pendingQuantitySteps);
+        return FuturesOrderAdmission.reservationUnits(instrument, position, order, leverage);
     }
 
     /** 永续只允许经过维护门禁批准的管理结算。 */

@@ -4,7 +4,6 @@ import com.surprising.aeron.bootstrap.TradingOwnerLoop;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.aeron.support.ingress.CoreMessageFlyweightDecoder;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
@@ -102,9 +101,9 @@ public class InProcessTradingAllocationBenchmark {
         for (int symbol = 0; symbol < symbols; symbol++) {
             String instrumentId = Integer.toString(symbol + 1);
             var instrument = oiLimitMode.equals("FIXED")
-                    ? new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                    ? new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", "USDT",
                             1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)
-                    : new RegisterInstrumentCommand(instrumentId, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                    : new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", "USDT",
                             1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0, 10_000_000,
                             Long.MAX_VALUE, 1_000_000, Long.MAX_VALUE / 2,
                             java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));

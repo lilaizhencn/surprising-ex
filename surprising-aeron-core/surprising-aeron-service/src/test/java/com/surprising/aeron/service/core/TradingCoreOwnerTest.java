@@ -31,7 +31,6 @@ import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.order.PipelineTestAccess;
 import com.surprising.aeron.service.snapshot.CoreSnapshotLifecycle;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
@@ -79,7 +78,7 @@ class TradingCoreOwnerTest {
         service.onStart(cluster(), null);
         try {
             // 按当前现货或永续产品类型构造的原合约注册参数
-            var register = new RegisterInstrumentCommand("1", ContractType.valueOf(line.contractTypeCode()).ordinal(),
+            var register = new RegisterInstrumentCommand("1",
                     "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
             onSessionMessage(service, responses, command(line, CoreMessageType.REGISTER_INSTRUMENT, 1, 0,
                     TradingCommandCodec.encodeRegisterInstrument(register)));
@@ -552,8 +551,7 @@ class TradingCoreOwnerTest {
         long sequence = 1;
         for (String /* 当前初始化合约的永久数字文本一或二 */ symbol : List.of("1", "2")) {
             onSessionMessage(service, responses, command(line, CoreMessageType.REGISTER_INSTRUMENT, sequence++, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol,
-                            ContractType.valueOf(line.contractTypeCode()).ordinal(), "BTC", "USDT", "USDT",
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(symbol, "BTC", "USDT", "USDT",
                             1, 1, 1, 100_000, 50_000, 10_000, 10_000, 0, -1, 0))));
             onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, sequence++, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(
@@ -607,8 +605,7 @@ class TradingCoreOwnerTest {
         service.onStart(cluster(), null);
         try {
             onSessionMessage(service, responses, command(line, CoreMessageType.REGISTER_INSTRUMENT, 1, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
-                            ContractType.valueOf(line.contractTypeCode()).ordinal(), "BTC", "USDT", "USDT",
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                             1, 1, 1, 100_000, 50_000, 10_000, 10_000, 0, -1, 0))));
             onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, 2, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(
@@ -929,7 +926,7 @@ class TradingCoreOwnerTest {
                     command(CoreMessageType.CONTINUE_RISK_SCAN, 2, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1))));
             finishCommands(service);
             // 原用户标的一延时全撤 SET 命令
-            var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1000, 2000, 0, 0, 0, 1000);
+            var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1000, 0, 0, 0, 1000);
             onSessionMessage(service, responses, command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 3, 1001,
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
             finishCommands(service);
@@ -2041,8 +2038,7 @@ class TradingCoreOwnerTest {
      */
     private static CoreMessage timerInstrument() {
         // 本夹具构造的现货标的一注册配置
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.fromString("00000000-0000-0000-0000-000000000001"), ProductLine.SPOT,
@@ -2055,8 +2051,7 @@ class TradingCoreOwnerTest {
      */
     private static CoreMessage instrument() {
         // 本夹具构造的现货标的一注册配置
-        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1",
-                ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+        RegisterInstrumentCommand instrument = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.REGISTER_INSTRUMENT,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 88, 1, 0, 1_000, 1),

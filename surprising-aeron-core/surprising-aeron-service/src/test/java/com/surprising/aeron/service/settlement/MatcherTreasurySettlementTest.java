@@ -27,7 +27,6 @@ import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
 import java.util.List;
@@ -121,7 +120,7 @@ class MatcherTreasurySettlementTest {
         while (topology.accountLaneId(makerUser) == topology.accountLaneId(takerUser)) takerUser++;
         // 本次真实 Lane 成交使用的规范 U 本位永续币对。
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000,
                         0, 0, 0, -1, 0, 10_000_000, 10_000, 0, 1,
                         List.of(new CoreRiskLimitBracket(1, 0, 10_000, 10_000_000, 100_000, 50_000))));

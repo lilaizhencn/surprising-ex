@@ -1,7 +1,6 @@
 package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.config.TradeExportProperties;
 import com.surprising.realtime.provider.export.service.CommittedOrderProjectionService;
@@ -56,7 +55,7 @@ class CommittedFundingRepairIntegrationTest {
                 long recording=RecordingPos.getRecordingId(aeron.countersReader(),counter);
                 try(var log=new RecordingLog(cluster.toFile(),true)){log.appendTerm(recording,1,0,TIME);log.force(2);}
                 offer(pub,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
-                        new RegisterInstrumentCommand("1",ContractType.LINEAR_PERPETUAL.ordinal(),"BTC","USDT","USDT",1,1,1,100_000,50_000,0,0,0,-1,0)));
+                        new RegisterInstrumentCommand("1","BTC","USDT","USDT",1,1,1,100_000,50_000,0,0,0,-1,0)));
                 offer(pub,CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1",100,1,TIME)));
                 long before=0;
                 for(long user=1;user<=2;user++) {

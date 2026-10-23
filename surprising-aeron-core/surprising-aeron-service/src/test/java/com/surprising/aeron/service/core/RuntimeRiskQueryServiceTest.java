@@ -136,7 +136,7 @@ class RuntimeRiskQueryServiceTest {
         runtime.putBalance(new BalanceRuntime(7, asset, 9_843_770_736_865L, 152_130_614_718L));
         // 本持仓的合约与金额精度配置，决定 tick、数量步数如何换成结算金额。
         var instrument = CoreInstrument.from(product, new com.surprising.aeron.protocol.RegisterInstrumentCommand(
-                "604", com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
+                "604",
                 "BTC", "USDT", "USDT", 100_000, 10_000_000, 100_000_000,
                 10_000, 5_000, 200, 500, 0, -1, 0));
         runtime.registerInstrument(instrument);

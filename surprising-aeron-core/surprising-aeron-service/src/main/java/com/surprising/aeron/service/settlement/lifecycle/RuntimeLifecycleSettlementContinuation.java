@@ -90,9 +90,9 @@ public final class RuntimeLifecycleSettlementContinuation {
         // 币对结算资产的内部编号。
         int assetId = identities.assetId(instrument.settleAsset());
         if (reuse == null || !reuse.reusable()) {
-            return new SettlementWork(command, runtime, instrument, kernel, symbolId, assetId, previousProgress, selectedOrders, moreOrders, indexedUserIds);
+            return new SettlementWork(command, runtime, instrument, kernel, symbolId, assetId, selectedOrders, moreOrders, indexedUserIds);
         }
-        return reuse.reset(command, runtime, instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
+        return reuse.reset(command, runtime, instrument, kernel, symbolId, assetId, selectedOrders,
                 moreOrders, indexedUserIds);
     }
 
@@ -142,8 +142,6 @@ public final class RuntimeLifecycleSettlementContinuation {
          * assetId：本次结算资产的内部编号。
          */
         private int symbolId, assetId;
-        /** 准备任务时读取的原进度，用于续页参数及进度位置。 */
-        private TreasuryRuntime.LifecycleProgressRuntime previousProgress;
         /** 本页需要账户侧撤销的订单路由，原 Matcher 处理由外层流程负责。 */
         private List<CancellationOrder> selectedOrders;
         /** 本订单页后是否仍有活动订单，有则本页不结算持仓。 */
@@ -201,7 +199,6 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param kernel 本产品结算计算规则
          * @param symbolId 币对内部编号
          * @param assetId 结算资产内部编号
-         * @param previousProgress 本页开始前已保存的结算进度，首次开始为空
          * @param selectedOrders 本页要交给账户 Lane 撤销预留的订单路由
          * @param moreOrders 订单索引是否还有后续页
          * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
@@ -209,14 +206,13 @@ public final class RuntimeLifecycleSettlementContinuation {
         private SettlementWork(SettleInstrumentCommand command,
                 TradingAccountRuntime runtime, CoreInstrument instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
-                TreasuryRuntime.LifecycleProgressRuntime previousProgress,
                 List<CancellationOrder> selectedOrders, boolean moreOrders, Iterable<Long> indexedUserIds) {
             // 创建对象时固定的账户 Lane 数量。
             int laneCount = runtime.topology().accountLaneCount();
             this.usersByLane = new LongArrayList[laneCount];
             for (/* 当前分组数组的 Lane 下标。 */ int lane = 0; lane < laneCount; lane++) usersByLane[lane] = new LongArrayList();
             this.ordersByLane = newLaneOrderGroups(laneCount);
-            reset(command, runtime, instrument, kernel, symbolId, assetId, previousProgress, selectedOrders, moreOrders, indexedUserIds);
+            reset(command, runtime, instrument, kernel, symbolId, assetId, selectedOrders, moreOrders, indexedUserIds);
         }
 
         /**
@@ -229,7 +225,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             initializeLedgerCommand(runtime);
             this.command = null;
             this.instrument = null; this.kernel = null;
-            this.symbolId = this.assetId = 0; this.previousProgress = null; this.selectedOrders = List.of();
+            this.symbolId = this.assetId = 0; this.selectedOrders = List.of();
             this.moreOrders = false; this.selectedUserIds = List.of();
             this.usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
             for (/* 当前分组数组的 Lane 下标。 */ int lane = 0; lane < usersByLane.length; lane++) usersByLane[lane] = new LongArrayList();
@@ -256,14 +252,13 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param kernel 本产品结算计算规则
          * @param symbolId 币对内部编号
          * @param assetId 结算资产内部编号
-         * @param previousProgress 本页开始前已保存的结算进度，首次开始为空
          * @param selectedOrders 本页要交给账户 Lane 撤销预留的订单路由
          * @param moreOrders 订单索引是否还有后续页
          * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
          */
         private SettlementWork reset(SettleInstrumentCommand command, TradingAccountRuntime runtime,
                 CoreInstrument instrument, ProductTradingRules kernel, int symbolId, int assetId,
-                TreasuryRuntime.LifecycleProgressRuntime previousProgress, List<CancellationOrder> selectedOrders,
+                List<CancellationOrder> selectedOrders,
                 boolean moreOrders, Iterable<Long> indexedUserIds) {
             if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns settlement routes");
             initializeLedgerCommand(runtime);
@@ -272,7 +267,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             }
             this.command = command;
             this.instrument = instrument; this.kernel = kernel; this.symbolId = symbolId; this.assetId = assetId;
-            this.previousProgress = previousProgress; this.selectedOrders = selectedOrders;
+            this.selectedOrders = selectedOrders;
             this.moreOrders = moreOrders; this.selectedUserIds = List.of();
             this.indexedUserIds = indexedUserIds;
             usersReady = usersQueued = false;
@@ -342,7 +337,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             initializeLedgerCommand(runtime);
             this.command = null;
             this.instrument = null; this.kernel = null; this.symbolId = this.assetId = 0;
-            this.previousProgress = null; this.selectedOrders = List.of(); this.selectedUserIds = List.of();
+            this.selectedOrders = List.of(); this.selectedUserIds = List.of();
             this.moreOrders = false; this.usersComplete = true; this.orderLaneMask = this.userLaneMask = 0;
             indexedUserIds = null; usersReady = true; usersQueued = false;
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
@@ -361,7 +356,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             if (usersQueued && !usersReady) return;
             indexedUserIds = null;
             command = null;  instrument = null; kernel = null;
-            previousProgress = null; selectedOrders = List.of(); selectedUserIds = List.of();
+            selectedOrders = List.of(); selectedUserIds = List.of();
             result = null; phase = Phase.DONE;
             dispatchedPhase = null;
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();

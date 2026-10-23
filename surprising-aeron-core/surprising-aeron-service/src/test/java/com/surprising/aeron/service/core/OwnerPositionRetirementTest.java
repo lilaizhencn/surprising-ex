@@ -11,7 +11,6 @@ import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -91,7 +90,7 @@ class OwnerPositionRetirementTest {
             // 夹具固定使用的线性永续产品线
             var line = ProductLine.LINEAR_PERPETUAL;
             // 用于建立持仓身份的测试合约
-            var instrument = CoreInstrument.from(line, new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+            var instrument = CoreInstrument.from(line, new RegisterInstrumentCommand("1",
                     "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             // 包含测试合约的初始业务状态
             var initial = new TradingCoreState(line, 0, Map.of(7L, CoreUserState.empty(line, 7)), Map.of(),

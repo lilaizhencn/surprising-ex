@@ -2,7 +2,6 @@ package com.surprising.aeron.service.adl;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
@@ -22,23 +21,6 @@ import lombok.NoArgsConstructor;
 /** ADL 步骤 1–4：源强平校验、目标账户减仓、源强平补亏、账本记账。 自动减仓执行：先读取并校验亏空来源的强平记录，再由盈利目标账户的 Lane 减仓和结算，由源账户 Lane 扣减亏空，最后把资金差额交唯一账本。Owner 只安排顺序并收集完成结果。 构造约定：只提供 ADL 执行入口，运行状态由命令槽内的续步保存。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeAdlExecution {
-
-    /**
-     * 核对业务状态与运行时的产品线及修订号后，进入同步 ADL 执行入口。
-     * @param before 本命令前的业务状态，用来校验产品线与运行时修订号一致
-     * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
-     */
-    public static TradingAccountRuntime apply(TradingCoreState before, ExecuteAdlCommand command,
-                                            TradingAccountRuntime runtime,
-                                            RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid ADL apply");
-        }
-        return applyRuntime(command, runtime, identities);
-    }
 
     /**
      * 在账本线程尚未启动的同步运行环境执行 ADL；账本已经启动时拒绝同步调用，要求使用异步续步。

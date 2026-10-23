@@ -21,10 +21,10 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
 
     // 内存终态身份由当前产品 Owner 管理；资金 I/O 单独交给 Ledger，快照输出为独立字节。
 
-    /** 近期四类终态身份共用的六万五千五百三十六项保留上限。 */
+    /** 近期订单终态身份的六万五千五百三十六项保留上限。 */
     static final int MAX_TOMBSTONES = 65_536;
-    /** 终态保留段快照版本三。 */
-    private static final int VERSION = 3;
+    /** 订单终态保留段快照版本四。 */
+    private static final int VERSION = 4;
     /** 快照客户号的最大 UTF-8 字节数二百五十六。 */
     private static final int MAX_CLIENT_ID_BYTES = 256;
     /** Owner 持有的近期终态身份 FIFO，客户号与实体索引引用同一槽。 */
@@ -44,14 +44,14 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     }
 
     /**
-     * 将一条已提交终态订单身份写入墓碑，客户号按字节上限规范化；已有同类型同 ID 不重复插入，不在每条写入时裁剪窗口。
+     * 将一条已提交终态订单身份写入墓碑，客户号按字节上限规范化；已有同订单 ID 不重复插入，不在每条写入时裁剪窗口。
      * @param orderId 正普通订单 ID
      * @param userId 实体所属用户，客户号查询与它组合定位
      * @param clientOrderId 可空普通订单客户号
      */
     @Override
     public void accept(long orderId, long userId, String clientOrderId) {
-        tombstones.putIfAbsent(EntityType.ORDER.code, orderId, userId,
+        tombstones.putIfAbsent(orderId, userId,
                 normalizeClientId(clientOrderId));
     }
 
@@ -89,7 +89,10 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      * @param clientOrderId 可空普通订单客户号
      */
     public boolean containsOrder(long orderId, long userId, String clientOrderId) {
-        return contains(EntityType.ORDER, orderId, userId, clientOrderId);
+        if (orderId <= 0) throw new IllegalArgumentException("invalid terminal order key");
+        if (tombstones.contains(orderId)) return true;
+        String client = normalizeClientId(clientOrderId);
+        return !client.isEmpty() && tombstones.containsClient(userId, client);
     }
 
     /**
@@ -98,27 +101,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
      */
     public boolean orderIdInUse(long orderId) {
         if (orderId <= 0) throw new IllegalArgumentException("invalid terminal order key");
-        return tombstones.contains(EntityType.ORDER.code, orderId);
-    }
-
-    /**
-     * 按算法单 ID 或同用户客户算法号查近期墓碑。
-     * @param algoOrderId 正算法父单 ID
-     * @param userId 实体所属用户，客户号查询与它组合定位
-     * @param clientAlgoOrderId 可空客户算法号
-     */
-    public boolean containsAlgo(long algoOrderId, long userId, String clientAlgoOrderId) {
-        return contains(EntityType.ALGO, algoOrderId, userId, clientAlgoOrderId);
-    }
-
-    /**
-     * 按触发单 ID 或同用户客户触发号查近期墓碑。
-     * @param triggerOrderId 正触发单 ID
-     * @param userId 实体所属用户，客户号查询与它组合定位
-     * @param clientTriggerOrderId 可空客户触发号
-     */
-    public boolean containsTrigger(long triggerOrderId, long userId, String clientTriggerOrderId) {
-        return contains(EntityType.TRIGGER, triggerOrderId, userId, clientTriggerOrderId);
+        return tombstones.contains(orderId);
     }
 
     /**
@@ -384,29 +367,12 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
         }
     }
 
-    /**
-     * 正实体 ID 已在墓碑中就直接命中；否则把客户号规范化后按实体类型、用户和非空客户号查找，不把实体 ID 命中当作用户归属校验。
-     * @param type 四类终态实体之一
-     * @param id 当前类别的正实体 ID
-     * @param userId 实体所属用户，客户号查询与它组合定位
-     * @param clientId 可空客户号，按入口规则规范化
-     */
-    private boolean contains(EntityType type, long id, long userId, String clientId) {
-        if (id <= 0) throw new IllegalArgumentException("invalid terminal entity key");
-        if (tombstones.contains(type.code, id)) return true;
-        // 把空客户号规范为空字符串后的原文本
-        String normalized = normalizeClientId(clientId);
-        if (normalized.isEmpty()) return false;
-        return tombstones.containsClient(type.code, userId, normalized);
-    }
-
     /** 直接按 FIFO 顺序恢复近期墓碑，拒绝越界条数、非法身份、重复实体及截断文本。 */
     private static TerminalTombstoneStore readTombstones(DataInputStream input) throws IOException {
         int count = input.readInt();
         if (count < 0 || count > MAX_TOMBSTONES) throw new IllegalArgumentException("invalid terminal retention count");
         TerminalTombstoneStore tombstones = new TerminalTombstoneStore();
         for (int index = 0; index < count; index++) {
-            int type = EntityType.fromCode(input.readUnsignedByte()).code;
             long id = input.readLong();
             long userId = input.readLong();
             int length = input.readInt();
@@ -415,7 +381,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
             }
             byte[] text = input.readNBytes(length);
             if (text.length != length) throw new IllegalArgumentException("truncated terminal client id");
-            if (!tombstones.putIfAbsent(type, id, userId, new String(text, StandardCharsets.UTF_8))) {
+            if (!tombstones.putIfAbsent(id, userId, new String(text, StandardCharsets.UTF_8))) {
                 throw new IllegalArgumentException("duplicate terminal entity");
             }
         }
@@ -438,27 +404,4 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
         return normalized;
     }
 
-    /** 终态实体的四种持久化类别，同一个数值 ID 在不同类别中分别索引。 构造约定：固定快照与墓碑使用的实体类型代码。 参数 code：四种已定义的实体代码 */
-    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-    private enum EntityType {
-        /**
-         * 普通订单终态身份，快照代码零。
-         */
-        ORDER(0), /** 算法父单终态身份，快照代码一。 */ ALGO(1), /** 触发条件单终态身份，快照代码二。 */ TRIGGER(2), /** 强平记录终态身份，快照代码三。 */ LIQUIDATION(3);
-        /** 实体类别的固定持久化代码。 */
-        final int code;
-        /**
-         * 把四种持久化代码转为实体类型，其他值明确拒绝。
-         * @param code 四种已定义的实体代码
-         */
-        static EntityType fromCode(int code) {
-            return switch (code) {
-                case 0 -> ORDER;
-                case 1 -> ALGO;
-                case 2 -> TRIGGER;
-                case 3 -> LIQUIDATION;
-                default -> throw new IllegalArgumentException("invalid entity type");
-            };
-        }
-    }
 }

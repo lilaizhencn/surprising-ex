@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -31,7 +30,7 @@ class CoreOptionPremiumFeeFundingTest {
         TradingCoreRuntime runtime = original;
         try {
             // 固定期权参数、手续费、风险档和订单支持范围的注册命令。
-            var registration = new RegisterInstrumentCommand("1", ContractType.VANILLA_OPTION.ordinal(), "BTC", "USDT", "USDT",
+            var registration = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                     10_000, 10_000_000, 1, 10_000, 5_000, 200, 500, 1_800_000_000_000L, 0, 500_000,
                     100_000_000, 1_000_000_000_000_000L, 0, 1_000_000_000_000_000L,
                     List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 100_000_000, 10_000, 5_000)),

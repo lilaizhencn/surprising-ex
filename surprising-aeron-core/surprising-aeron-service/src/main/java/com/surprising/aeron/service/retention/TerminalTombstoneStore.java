@@ -5,13 +5,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Owner 独占的近期终态身份 FIFO。实体及客户号哈希链直接链接同一组数组槽，覆写实体保留原 FIFO 位置，淘汰按已知槽解链；同一客户号可由多个实体保留，查找优先命中最近挂入的匹配项。
+ * Owner 独占的近期终态订单身份 FIFO。订单及客户号哈希链链接同一组数组槽，只追加新订单，淘汰时按槽解链；同一客户号可由多个订单保留。
  */
 final class TerminalTombstoneStore {
-    /** 快照协议四类终态身份的数量。 */
-    private static final int ENTITY_TYPE_COUNT = 4;
-    /** 每类曾新增 ID 的保守最大值，淘汰不降低，仅用于快速排除更大 ID。 */
-    private final long[] maximumIndexedIds = new long[ENTITY_TYPE_COUNT];
+    /** 曾新增订单 ID 的保守最大值，淘汰不降低，用于快速排除更大 ID。 */
+    private long maximumIndexedId;
     /** 默认初始 FIFO 槽数八千一百九十二。 */
     static final int DEFAULT_INITIAL_CAPACITY = 8192;
     /**
@@ -32,8 +30,6 @@ final class TerminalTombstoneStore {
      * users：各 FIFO 槽的用户 ID。
      */
     private long[] ids, users;
-    /** 各 FIFO 槽的四类实体代码。 */
-    private int[] types;
     /** 各有效槽保存的客户号原文本，淘汰清引用，不做文本归一化。 */
     private String[] clients;
     /**
@@ -70,7 +66,6 @@ final class TerminalTombstoneStore {
         ids = new long[capacity];
         users = new long[capacity];
 
-        types = new int[capacity];
         clients = new String[capacity];
         buckets = new int[capacity * 2];
         next = new int[capacity];
@@ -84,70 +79,31 @@ final class TerminalTombstoneStore {
      */
     int size() { return size; }
     /**
-     * 按合法实体类型和 ID 查精确实体索引，不读取客户号或用户归属。
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
-     * @param id 当前类别的实体 ID，写入必须为正
+     * 按订单 ID 查精确身份索引，不读取客户号或用户归属。
+     * @param id 订单 ID，写入必须为正
      */
-    boolean contains(int type, long id) { return entitySlot(type, id) >= 0; }
+    boolean contains(long id) { return entitySlot(id) >= 0; }
     /**
-     * 按类型、用户及客户号查客户索引链，多个匹配项存在时仍只返回是否命中。
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
+     * 按用户及客户号查客户索引链，多个匹配项存在时仍只返回是否命中。
      * @param user 客户号所属用户，写入必须为正
      * @param client 非空客户号文本，空字符串表示不建立客户索引
      */
-    boolean containsClient(int type, long user, String client) { return clientSlot(type, user, client) >= 0; }
+    boolean containsClient(long user, String client) { return clientSlot(user, client) >= 0; }
 
-    /**
-     * 校验类型后探测已有实体；有则原位改元数据并重新挂客户链，无则追加 FIFO。覆写不把实体移到队尾。
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
-     * @param id 当前类别的实体 ID，写入必须为正
-     * @param user 客户号所属用户，写入必须为正
-     * @param client 非空客户号文本，空字符串表示不建立客户索引
-     */
-    void put(int type, long id, long user, String client) {
-        if (type < 0 || type >= ENTITY_TYPE_COUNT)
-            throw new IllegalArgumentException("invalid retained terminal entity");
-        putAt(entitySlot(type, id), type, id, user, client);
-    }
-
-    /**
-     * 校验类型并只探测一次；已有同类型 ID 立即返回假，不改原元数据，也不继续校验新用户、客户号。新实体才进入完整字段校验并返回真。
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
-     * @param id 当前类别的实体 ID，写入必须为正
-     * @param user 客户号所属用户，写入必须为正
-     * @param client 非空客户号文本，空字符串表示不建立客户索引
-     */
-    boolean putIfAbsent(int type, long id, long user, String client) {
-        if (type < 0 || type >= ENTITY_TYPE_COUNT)
-            throw new IllegalArgumentException("invalid retained terminal entity");
-        // 单次探测到的可空实体位置，负一表示尚未保留
-        int existing = entitySlot(type, id);
-        if (existing >= 0) return false;
-        putAt(-1, type, id, user, client);
-        return true;
-    }
-
-    /**
-     * 校验实体、用户及非空客户文本，容量满且新增时扩容；已有槽先脱旧客户链，写字段后接新客户链，新增实体另更新保守最大 ID 和实体链。
-     * @param existing 已有实体槽号，负一表示新增
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
-     * @param id 当前类别的实体 ID，写入必须为正
-     * @param user 客户号所属用户，写入必须为正
-     * @param client 非空客户号文本，空字符串表示不建立客户索引
-     */
-    private void putAt(int existing, int type, long id, long user, String client) {
-        if (type < 0 || type >= ENTITY_TYPE_COUNT || id <= 0 || user <= 0 || client == null)
-            throw new IllegalArgumentException("invalid retained terminal entity");
-        if (existing < 0 && size == ids.length) grow();
-        // 当前需要写入、查询、复制或输出的真实 FIFO 槽下标
-        int slot = existing >= 0 ? existing : (head + size++) & (ids.length - 1);
-        if (existing >= 0) unlinkClientSlot(slot);
-        ids[slot] = id; users[slot] = user; types[slot] = type; clients[slot] = client;
-        if (existing < 0) {
-            maximumIndexedIds[type] = Math.max(maximumIndexedIds[type], id);
-            indexEntity(slot);
-        }
+    /** 只追加新订单身份；重复 ID 保留原用户、客户号及 FIFO 位置。 */
+    boolean putIfAbsent(long id, long user, String client) {
+        if (entitySlot(id) >= 0) return false;
+        if (id <= 0 || user <= 0 || client == null)
+            throw new IllegalArgumentException("invalid retained terminal order");
+        if (size == ids.length) grow();
+        int slot = (head + size++) & (ids.length - 1);
+        ids[slot] = id;
+        users[slot] = user;
+        clients[slot] = client;
+        maximumIndexedId = Math.max(maximumIndexedId, id);
+        indexEntity(slot);
         indexClient(slot);
+        return true;
     }
 
     /**
@@ -167,25 +123,23 @@ final class TerminalTombstoneStore {
     }
 
     /**
-     * 混合实体类别与 ID，计算实体哈希桶号。
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
-     * @param id 当前类别的实体 ID，写入必须为正
+     * 按订单 ID 计算身份哈希桶号。
+     * @param id 订单 ID，写入必须为正
      */
-    private int entityBucket(int type, long id) {
-        return org.agrona.collections.Hashing.hash(id ^ (type * 0x9e3779b97f4a7c15L), entityBuckets.length - 1);
+    private int entityBucket(long id) {
+        return org.agrona.collections.Hashing.hash(id, entityBuckets.length - 1);
     }
 
     /**
-     * 大于该类历史最大 ID 直接未命中，其余走精确桶链；保守上界不要求 ID 按顺序到达。
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
-     * @param id 当前类别的实体 ID，写入必须为正
+     * 大于历史最大订单 ID 直接未命中，其余走精确桶链；保守上界不要求 ID 按顺序到达。
+     * @param id 订单 ID，写入必须为正
      */
-    private int entitySlot(int type, long id) {
-        if (id > maximumIndexedIds[type]) return -1;
-        for (/* 桶链当前链接值，真实槽号等于它减一，零表示链尾 */ int link = entityBuckets[entityBucket(type, id)]; link != 0; link = entityNext[link - 1]) {
+    private int entitySlot(long id) {
+        if (id > maximumIndexedId) return -1;
+        for (/* 桶链当前链接值，真实槽号等于它减一，零表示链尾 */ int link = entityBuckets[entityBucket(id)]; link != 0; link = entityNext[link - 1]) {
             // 当前需要写入、查询、复制或输出的真实 FIFO 槽下标
             int slot = link - 1;
-            if (types[slot] == type && ids[slot] == id) return slot;
+            if (ids[slot] == id) return slot;
         }
         return -1;
     }
@@ -196,7 +150,7 @@ final class TerminalTombstoneStore {
      */
     private void indexEntity(int slot) {
         // 当前实体或客户号对应的哈希桶号
-        int bucket = entityBucket(types[slot], ids[slot]);
+        int bucket = entityBucket(ids[slot]);
         entityBucketBySlot[slot] = bucket;
         // 原实体桶头的链接值，不是未加一的真实数组下标
         int nextSlot = entityBuckets[bucket];
@@ -222,28 +176,26 @@ final class TerminalTombstoneStore {
     }
 
     /**
-     * 按类型、用户与客户号完整文本计算客户桶，不把哈希相同当作身份相同。
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
+     * 按用户与客户号完整文本计算客户桶，不把哈希相同当作身份相同。
      * @param user 客户号所属用户，写入必须为正
      * @param client 非空客户号文本，空字符串表示不建立客户索引
      */
-    private int bucket(int type, long user, String client) {
+    private int bucket(long user, String client) {
         // 客户身份完整字段混合得到的中间哈希值
-        int hash = 31 * (31 * type + Long.hashCode(user)) + client.hashCode();
+        int hash = 31 * Long.hashCode(user) + client.hashCode();
         hash ^= hash >>> 16;
         return hash & (buckets.length - 1);
     }
     /**
-     * 遍历客户桶链并逐项精确比较类型、用户和文本，返回第一个匹配槽或负一。
-     * @param type 零到三的合法实体类别，查询入口依赖调用方保证
+     * 遍历客户桶链并逐项精确比较用户和文本，返回第一个匹配槽或负一。
      * @param user 客户号所属用户，写入必须为正
      * @param client 非空客户号文本，空字符串表示不建立客户索引
      */
-    private int clientSlot(int type, long user, String client) {
-        for (/* 桶链当前链接值，真实槽号等于它减一，零表示链尾 */ int link = buckets[bucket(type, user, client)]; link != 0; link = next[link - 1]) {
+    private int clientSlot(long user, String client) {
+        for (/* 桶链当前链接值，真实槽号等于它减一，零表示链尾 */ int link = buckets[bucket(user, client)]; link != 0; link = next[link - 1]) {
             // 当前需要写入、查询、复制或输出的真实 FIFO 槽下标
             int slot = link - 1;
-            if (types[slot] == type && users[slot] == user && clients[slot].equals(client)) return slot;
+            if (users[slot] == user && clients[slot].equals(client)) return slot;
         }
         return -1;
     }
@@ -267,7 +219,7 @@ final class TerminalTombstoneStore {
         clientBucketBySlot[slot] = -1;
     }
     /**
-     * 空客户号不入客户索引；非空直接挂到桶头并标记已索引。新槽尚未挂链，覆写路径已经先解链，因此无需再次查找或删除其他同客户号项。
+     * 空客户号不入客户索引；非空直接挂到桶头并标记已索引。新槽尚未挂链，无需查找或删除其他同客户号项。
      * @param slot 当前已知且有效的 FIFO 数组槽下标
      */
     private void indexClient(int slot) {
@@ -278,8 +230,8 @@ final class TerminalTombstoneStore {
             return;
         }
         // 当前实体或客户号对应的哈希桶号
-        int bucket = bucket(types[slot], users[slot], clients[slot]);
-        // 新 FIFO 槽尚未在客户链中，覆写路径也已经先解链。
+        int bucket = bucket(users[slot], clients[slot]);
+        // 新 FIFO 槽尚未在客户链中。
         // 这里直接挂桶头，不为每个新增终态再次遍历客户桶。
         // 当前槽后继链接值，零表示链尾
         int following = buckets[bucket];
@@ -298,15 +250,15 @@ final class TerminalTombstoneStore {
         // 扩容后的实体 ID 数组
         // 扩容后的用户 ID 数组
         long[] newIds = new long[capacity], newUsers = new long[capacity];
-        // 扩容后的实体类别数组
-        int[] newTypes = new int[capacity]; /* 扩容后按 FIFO 重排的客户号引用数组 */ String[] newClients = new String[capacity];
+        // 扩容后按 FIFO 重排的客户号引用数组。
+        String[] newClients = new String[capacity];
         for (/* 当前有效 FIFO 项的相对顺序下标 */ int i = 0; i < size; i++) {
             // 当前需要写入、查询、复制或输出的真实 FIFO 槽下标
             int slot = (head + i) & (ids.length - 1);
             newIds[i] = ids[slot]; newUsers[i] = users[slot];
-            newTypes[i] = types[slot]; newClients[i] = clients[slot];
+            newClients[i] = clients[slot];
         }
-        ids = newIds; users = newUsers; types = newTypes; clients = newClients;
+        ids = newIds; users = newUsers; clients = newClients;
         next = new int[capacity];
         clientBucketBySlot = new int[capacity];
         java.util.Arrays.fill(clientBucketBySlot, -1);
@@ -322,21 +274,9 @@ final class TerminalTombstoneStore {
             indexClient(i);
         }
     }
+
     /**
-     * 按当前 FIFO 顺序创建独立数组和索引的副本；客户号字符串可共享，历史空槽、数组容量与最大 ID 上界不要求逐值复制。
-     */
-    TerminalTombstoneStore copy() {
-        // 按当前有效内容独立构建的终态存储副本
-        TerminalTombstoneStore copy = new TerminalTombstoneStore(Math.max(DEFAULT_INITIAL_CAPACITY, size));
-        for (/* 当前有效 FIFO 项的相对顺序下标 */ int i = 0; i < size; i++) {
-            // 当前需要写入、查询、复制或输出的真实 FIFO 槽下标
-            int slot = (head + i) & (ids.length - 1);
-            copy.put(types[slot], ids[slot], users[slot], clients[slot]);
-        }
-        return copy;
-    }
-    /**
-     * 按当前 FIFO 顺序写条数、实体类别、身份、用户和 UTF-8 客户号；不在这里写版本或另外验证客户号字节上限。
+     * 按当前 FIFO 顺序写条数、订单身份、用户和 UTF-8 客户号；不在这里写版本或另外验证客户号字节上限。
      * @param out 当前终态段二进制输出流
      */
     void write(DataOutputStream out) throws IOException {
@@ -344,7 +284,7 @@ final class TerminalTombstoneStore {
         for (/* 当前有效 FIFO 项的相对顺序下标 */ int i = 0; i < size; i++) {
             // 当前需要写入、查询、复制或输出的真实 FIFO 槽下标
             int slot = (head + i) & (ids.length - 1);
-            out.writeByte(types[slot]); out.writeLong(ids[slot]); out.writeLong(users[slot]);
+            out.writeLong(ids[slot]); out.writeLong(users[slot]);
             // 当前客户号编码后的 UTF-8 字节数组
             byte[] text = clients[slot].getBytes(StandardCharsets.UTF_8);
             out.writeInt(text.length); out.write(text);

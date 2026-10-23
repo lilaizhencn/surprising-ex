@@ -32,8 +32,7 @@ public class SettlementSolvencyBenchmark {
         if (type.isPerpetual() && !"MAINTENANCE".equals(settlementTrigger)) throw new IllegalArgumentException("perpetual clearance requires MAINTENANCE");
         try (var h = LinearPerpetualBenchmarkSupport.Harness.create(4, productLine)) {
             h.execute(h.command(CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("41",
-                            type.ordinal(), "BTC", inverse ? "USD" : "USDT", asset, inverse ? 100 : 1,
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("41", "BTC", inverse ? "USD" : "USDT", asset, inverse ? 100 : 1,
                             1, inverse ? 100 : 1, 100_000, 50_000, 0, 0,
                             type.isPerpetual() ? 0 : 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
             h.execute(h.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,

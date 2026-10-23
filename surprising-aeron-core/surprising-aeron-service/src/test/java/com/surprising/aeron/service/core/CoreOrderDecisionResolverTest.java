@@ -35,7 +35,7 @@ class CoreOrderDecisionResolverTest {
         // 自定义 2% 市价滑点、八秒价格年龄和启用的限价保护配置，用于协议及快照检查。
         var policy = new com.surprising.aeron.protocol.CoreOrderProtection(20_000, 8_000, true, 30_000, 4_000);
         // 包含自定义保护配置和风险档位的币对注册命令。
-        var command = new com.surprising.aeron.protocol.RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+        var command = new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
                 "BTC", "USDT", "USDT", 1, 1, 1_000_000, 100_000, 50_000, -10, 25, 0, -1, 0,
                 10_000_000, Long.MAX_VALUE, 0, 1,
                 List.of(new CoreRiskLimitBracket(1,0,Long.MAX_VALUE,10_000_000,100_000,50_000)),

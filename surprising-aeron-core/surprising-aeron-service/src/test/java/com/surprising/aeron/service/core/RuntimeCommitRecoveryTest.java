@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
+
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreFeePolicyState;
 import com.surprising.aeron.model.CoreLiquidationState;
@@ -39,7 +41,6 @@ import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.account.TransferRuntime;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
 import io.aeron.cluster.service.Cluster;
@@ -421,7 +422,7 @@ class RuntimeCommitRecoveryTest {
             ReplayResult setup = replayClustered(uninterrupted, List.of(
                     operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                             TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                                    "1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                                    "1",
                                     "BTC", "USDT", "USDT", 1, 1, 1,
                                     100_000, 50_000, 0, 0, 0, -1, 0))),
                     kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
@@ -527,10 +528,9 @@ class RuntimeCommitRecoveryTest {
                                         planned.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE, 25))));
                 replayClustered(uninterrupted, List.of(partialInsurance.getFirst()));
                 replayClustered(restoredBeforeInsurance, List.of(partialInsurance.getFirst()));
-                assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.isNext(
-                        uninterrupted.state().tradingState(), planned.liquidationId())).isTrue();
-                assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.expectedCoverage(
-                        uninterrupted.state().tradingState(), planned.liquidationId())).isEqualTo(25);
+                assertThat(RuntimeTestStateTransitions.isNextInsuranceClaim(uninterrupted.state().tradingState(), planned.liquidationId())).isTrue();
+                assertThat(RuntimeTestStateTransitions.expectedInsuranceCoverage(uninterrupted.state().tradingState(),
+                        planned.liquidationId())).isEqualTo(25);
                 // 部分保险确认前的原账户交接代号，执行不得接管其他 Lane
                 long insuranceHandoff = uninterrupted.state().runtimeState.laneHandoffEpoch();
                 // 原入口执行部分保险确认的响应
@@ -688,7 +688,7 @@ class RuntimeCommitRecoveryTest {
         TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        "1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                        "1", "BTC", "USDT", "USDT",
                         1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0))));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
@@ -708,7 +708,7 @@ class RuntimeCommitRecoveryTest {
         TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.REGISTER_INSTRUMENT,
                 TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
-                        "1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                        "1", "BTC", "USDT", "USDT",
                         1, 1, 1, 100_000, 50_000, 10_000, 20_000, 0, -1, 0))));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(

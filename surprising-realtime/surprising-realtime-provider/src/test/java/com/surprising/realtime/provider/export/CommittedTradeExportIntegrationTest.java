@@ -1,7 +1,6 @@
 package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.*;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.*;
 import com.surprising.product.api.utils.ProductTopicNames;
 import com.surprising.realtime.provider.export.config.TradeExportProperties;
@@ -390,7 +389,6 @@ class CommittedTradeExportIntegrationTest {
                 TradingCommandCodec.encodeRegisterInstrument(
                         new RegisterInstrumentCommand(
                                 "1",
-                                ContractType.SPOT.ordinal(),
                                 "BTC",
                                 "USDT",
                                 "USDT",

@@ -26,7 +26,6 @@ public final class SpotTradingRules implements ProductTradingRules {
     public long reservationUnits(CoreInstrument instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage,
                                  long pendingQuantitySteps) {
-        return SpotOrderAdmission.reservationUnits(
-                instrument, position, order, leverage, pendingQuantitySteps);
+        return SpotOrderAdmission.reservationUnits(instrument, order);
     }
 }

@@ -15,7 +15,6 @@ import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionCloseCapacity;
 import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -47,7 +46,7 @@ public class OrderAdmissionAllocationBenchmark {
 
     @Setup public void setup() {
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         reservation = new ReservationRuntime(11, 7, 0, ReservationKind.DERIVATIVE_MARGIN,
                 0, 100, 0, 0, 1);
@@ -77,7 +76,7 @@ public class OrderAdmissionAllocationBenchmark {
 
         @Setup public void setup() {
             var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                    new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                    new RegisterInstrumentCommand("1",
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             lane = new AccountLaneState(0, 256);
             long quantity = Math.max(1, liveOrders);
@@ -113,7 +112,7 @@ public class OrderAdmissionAllocationBenchmark {
             for (int user = 1; user <= users; user++) lane.registerUser(4L * user);
             var instruments = new CoreInstrument[symbols];
             for (int symbol = 0; symbol < symbols; symbol++) instruments[symbol] = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                    new RegisterInstrumentCommand(Integer.toString(symbol + 1), ContractType.LINEAR_PERPETUAL.ordinal(),
+                    new RegisterInstrumentCommand(Integer.toString(symbol + 1),
                             "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             for (int item = 0; item < orders.length; item++) orders[item] = new OrderRuntime(1_000_000L + item,
                     4L * (item % users + 1), item % symbols, instruments[item % symbols], CoreOrderSide.BUY, 100,

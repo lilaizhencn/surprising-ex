@@ -586,16 +586,8 @@ public final class CoreInstrument {
      * @param command 已由协议构造器检查基础边界的注册或配置更新命令
      */
     public static CoreInstrument from(ProductLine productLine, RegisterInstrumentCommand command) {
-        // 合约类型枚举数组，注册命令的类型码按下标解释
-        ContractType[] values = ContractType.values();
-        if (command.contractTypeCode() >= values.length) {
-            throw new CoreStateRejectedException("INVALID_CONTRACT_TYPE", "contract type code is unknown");
-        }
-        // 类型码选出的具体合约类型，必须属于本运行时产品线
-        ContractType contractType = values[command.contractTypeCode()];
-        if (contractType.productLine() != productLine) {
-            throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "instrument belongs to another product line");
-        }
+        // 运行时产品线是合约类型的唯一输入。
+        ContractType contractType = ContractType.valueOf(productLine.contractTypeCode());
         // 解释出的看涨或看跌类型，非期权时保持为空
         OptionType optionType = null;
         if (contractType.isOption()) {

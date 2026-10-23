@@ -5,7 +5,6 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.result.ResponseArena;
 import com.surprising.aeron.service.result.ResponseArenaTestAccess;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
@@ -91,7 +90,7 @@ class LaneReplacementResponseTest {
 
     /** 本组 Lane 结果测试共用的 U 本位永续品种配置。 */
     private static final CoreInstrument INSTRUMENT = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-            new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+            new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                     1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
 
     /**

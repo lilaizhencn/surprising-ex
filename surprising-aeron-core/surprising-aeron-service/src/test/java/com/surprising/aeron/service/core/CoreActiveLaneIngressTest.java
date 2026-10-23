@@ -34,7 +34,7 @@ class CoreActiveLaneIngressTest {
             // 当前产品线对应的币对或合约类型
             var type = ContractType.valueOf(line.contractTypeCode());
             applied(core, message(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", type.ordinal(),
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             "BTC", "USDT", type.isInverse() ? "BTC" : "USDT", 1, 1, type.isInverse() ? 1000 : 1,
                             100_000, 50_000, 500, 1000, type.isDelivery() || type.isOption() ? TIME + 20_000 : 0,
                             type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))));

@@ -12,7 +12,6 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
 import exchange.core2.core.common.OrderAction;
@@ -697,7 +696,7 @@ class DeterministicExchangeCoreAdapterTest {
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
                 Map.of(instrumentId, CoreInstrument.from(ProductLine.SPOT,
-                        new RegisterInstrumentCommand(instrumentId, ContractType.SPOT.ordinal(),
+                        new RegisterInstrumentCommand(instrumentId,
                                 "BTC", "USDT", "USDT", 1, 1, 1,
                                 100_000, 50_000, 0, 0, 0, -1, 0))),
                 CoreRiskState.empty(), CoreTreasuryState.empty());

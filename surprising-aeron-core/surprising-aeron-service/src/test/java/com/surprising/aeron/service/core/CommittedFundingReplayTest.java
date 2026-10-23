@@ -33,7 +33,7 @@ class CommittedFundingReplayTest {
         byte[] snapshot;
         try (/* 首段输入使用并在快照保存后关闭的提交回放器。 */ var replay = new CommittedTradeReplay(line, null)) {
             send(replay, line, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", type.ordinal(),
+                    TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                             "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1000 : 1,
                             100_000, 50_000, 0, 0, 0, -1, 0)));
             send(replay, line, CoreMessageType.APPLY_MARK_PRICE, 0,

@@ -43,7 +43,7 @@ class CoreTriggerOrderCodecTest {
     }
 
     @Test
-    void decodesArchivedVersionTwoTriggerAsMarkPrice() {
+    void rejectsArchivedTriggerLayouts() {
         CoreTriggerOrderStateView state = new CoreTriggerOrderStateView(501, ProductLine.LINEAR_PERPETUAL, 1001,
                 "old", "", "1", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
@@ -52,7 +52,13 @@ class CoreTriggerOrderCodecTest {
         byte[] versionThree = CoreTriggerOrderCodec.encodeState(state);
         byte[] versionTwo = java.util.Arrays.copyOf(versionThree, versionThree.length - Integer.BYTES);
         versionTwo[0] = 2;
-        assertThat(CoreTriggerOrderCodec.decodeState(versionTwo)).isEqualTo(state);
+        assertThatThrownBy(() -> CoreTriggerOrderCodec.decodeState(versionTwo))
+                .isInstanceOf(ProtocolException.class);
+        for (int version : new int[] {1, 2}) {
+            byte[] query = CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(0, "1", 0, 10));
+            query[0] = (byte) version;
+            assertThatThrownBy(() -> CoreTriggerOrderCodec.decodeQuery(query)).isInstanceOf(ProtocolException.class);
+        }
     }
 
     @Test

@@ -9,7 +9,6 @@ import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreArithmetic;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.aeron.support.math.OptionContractMath;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -25,7 +24,7 @@ class CoreContractMathTest {
     void optionBuyerZeroMarginDoesNotEvaluateOverflowingPremium() {
         // 使用乘数为 2 的看涨期权，让后面的极大价格一旦参与权利金乘法就会溢出。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("6", ContractType.VANILLA_OPTION.ordinal(),
+                new RegisterInstrumentCommand("6",
                         "BTC", "USDT", "USDT", 2, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.CALL.ordinal(), 100));
@@ -42,7 +41,6 @@ class CoreContractMathTest {
         // 两个保证金率不同的风险档位，用来区分小规模、大规模及超出最高金额上限的情况。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand("1",
-                        com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(),
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0,
                         10_000_000, 10_000, 0, 1,
@@ -66,7 +64,7 @@ class CoreContractMathTest {
     void optionShortMarginUsesIndexForwardOtmAndCurrentPremium() {
         // 行权价 100、保证金调整系数 1.2 的看涨期权，供手工核对保证金与市值结果。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("6", ContractType.VANILLA_OPTION.ordinal(),
+                new RegisterInstrumentCommand("6",
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.CALL.ordinal(), 100, 10_000_000, 10_000, 0, 1,
@@ -87,7 +85,7 @@ class CoreContractMathTest {
     void putShortMarginUsesPutOtmDirectionAndMarkBasedMaintenanceFloor() {
         // 使用与看涨用例相同的档位参数，仅改变期权类型来验证看跌专属公式。
         CoreInstrument instrument = CoreInstrument.from(ProductLine.OPTION,
-                new RegisterInstrumentCommand("7", ContractType.VANILLA_OPTION.ordinal(),
+                new RegisterInstrumentCommand("7",
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 2_000_000_000_000L,
                         OptionType.PUT.ordinal(), 100, 10_000_000, 10_000, 0, 1,

@@ -20,7 +20,6 @@ import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.TradingRuntimeSnapshot;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -391,7 +390,7 @@ class RuntimeDerivativeFillCalculatorTest {
      */
     private static CoreInstrument instrument() {
         return CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1,
                         100_000, 50_000, 0, 0, 0, -1, 0,
                         10_000_000, 10_000, 0, 1,

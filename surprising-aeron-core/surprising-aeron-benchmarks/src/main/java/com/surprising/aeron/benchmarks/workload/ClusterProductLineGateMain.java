@@ -238,7 +238,7 @@ public final class ClusterProductLineGateMain {
     private RegisterInstrumentCommand instrument() {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? expiryEpochMillis : 0;
-        return new RegisterInstrumentCommand(SYMBOL, type.ordinal(), "BTC", "USDT", settleAsset(),
+        return new RegisterInstrumentCommand(SYMBOL, "BTC", "USDT", settleAsset(),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000,
                 MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);

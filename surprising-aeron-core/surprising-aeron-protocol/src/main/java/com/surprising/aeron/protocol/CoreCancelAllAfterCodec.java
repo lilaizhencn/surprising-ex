@@ -8,7 +8,7 @@ import java.util.List;
 
 public final class CoreCancelAllAfterCodec {
     private static final int VERSION = 1;
-    private static final int COMMAND_VERSION = 3;
+    private static final int COMMAND_VERSION = 4;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreCancelAllAfterCodec() {
@@ -16,7 +16,8 @@ public final class CoreCancelAllAfterCodec {
 
     public static byte[] encodeCommand(CoreCancelAllAfterCommand command) {
         int actionBytes = switch (command.action()) {
-            case SET, COMPLETE -> Long.BYTES * 2;
+            case COMPLETE -> Long.BYTES * 2;
+            case SET -> Long.BYTES;
             case CLAIM, RETRY -> Long.BYTES;
         };
         ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 2 + Long.BYTES
@@ -25,7 +26,7 @@ public final class CoreCancelAllAfterCodec {
         CoreStateQueryCodec.putText(buffer, command.symbolScope(), true, MAX_TEXT_BYTES);
         buffer.putLong(command.updatedAtEpochMillis());
         switch (command.action()) {
-            case SET -> buffer.putLong(command.countdownMillis()).putLong(command.triggerAtEpochMillis());
+            case SET -> buffer.putLong(command.countdownMillis());
             case CLAIM, RETRY -> buffer.putLong(command.expectedRevision());
             case COMPLETE -> buffer.putLong(command.expectedRevision())
                     .putInt(command.canceledOrders()).putInt(command.canceledTriggerOrders());
@@ -40,7 +41,7 @@ public final class CoreCancelAllAfterCodec {
         String scope = reader.text();
         long now = reader.longValue();
         CoreCancelAllAfterCommand command = switch (action) {
-            case SET -> CoreCancelAllAfterCommand.set(scope, reader.longValue(), reader.longValue(), now);
+            case SET -> CoreCancelAllAfterCommand.set(scope, reader.longValue(), now);
             case CLAIM -> CoreCancelAllAfterCommand.claim(scope, reader.longValue(), now);
             case RETRY -> CoreCancelAllAfterCommand.retry(scope, reader.longValue(), now);
             case COMPLETE -> CoreCancelAllAfterCommand.complete(scope, reader.longValue(), reader.intValue(),

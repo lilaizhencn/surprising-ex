@@ -140,7 +140,7 @@ public final class ClusterApiAcceptanceMain {
     private RegisterInstrumentCommand instrument() {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new RegisterInstrumentCommand(instrumentId, type.ordinal(), "BTC", "USDT", settleAsset(),
+        return new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", settleAsset(),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }

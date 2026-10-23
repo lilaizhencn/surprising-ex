@@ -393,7 +393,7 @@ public final class DerivativeMixedWorkload {
     }
 
     private static RegisterInstrumentCommand instrument(Profile profile, String instrumentId, int index) {
-        return new RegisterInstrumentCommand(instrumentId, profile.contractType().ordinal(),
+        return new RegisterInstrumentCommand(instrumentId,
                 "D" + index, profile.quoteAsset(), profile.settleAsset(),
                 profile.notionalMultiplier(), 1, profile.settleScale(), 100_000, 50_000,
                 0, 0, profile.expiryEpochMillis(), profile.optionTypeCode(), profile.strikePrice());

@@ -292,42 +292,6 @@ public final class CoreStateQueryCodec {
         return Math.toIntExact(length);
     }
 
-    static void writeUserState(java.nio.ByteBuffer output, CoreUserStateView state) {
-        output.putInt(VERSION);
-        output.putInt(ProductLineWireCode.encode(state.productLine()));
-        output.putLong(state.userId());
-        output.putLong(state.revision());
-        output.putInt(state.positionMode().wireCode());
-        output.putInt(state.balances().size());
-        for (CoreBalanceView balance : state.balances()) {
-            putText(output, balance.asset(), false);
-            output.putLong(balance.availableUnits()).putLong(balance.lockedUnits());
-        }
-        output.putInt(state.reservations().size());
-        for (CoreReservationView reservation : state.reservations()) {
-            output.putLong(reservation.orderId());
-            putText(output, reservation.instrumentId(), false);
-            output.putInt(reservation.kind().wireCode());
-            putText(output, reservation.asset(), false);
-            output.putLong(reservation.reservedUnits()).putLong(reservation.releasedUnits())
-                    .putLong(reservation.consumedUnits()).putLong(reservation.orderQuantitySteps());
-        }
-        output.putInt(state.positions().size());
-        for (CorePositionView position : state.positions()) {
-            putText(output, position.instrumentId(), false);
-            putText(output, position.marginAsset(), false);
-            output.putInt(position.marginMode().wireCode()).putInt(position.positionSide().wireCode())
-                    .putLong(position.signedQuantitySteps())
-                    .putLong(position.entryPriceTicks()).putLong(position.entryValueTicks())
-                    .putLong(position.realizedPnlUnits()).putLong(position.positionMarginUnits());
-        }
-        output.putInt(state.leverages().size());
-        for (CoreLeverageView leverage : state.leverages()) {
-            putText(output, leverage.instrumentId(), false);
-            output.putInt(leverage.marginMode().wireCode()).putLong(leverage.leveragePpm());
-        }
-    }
-
     public static CoreUserStateView decodeUserState(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version(VERSION);

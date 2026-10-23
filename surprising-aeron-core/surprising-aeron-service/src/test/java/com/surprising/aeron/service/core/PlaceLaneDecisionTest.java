@@ -21,7 +21,6 @@ import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.UUID;
@@ -40,7 +39,7 @@ class PlaceLaneDecisionTest {
     @Test void priceAndFeeResolveOnlyAfterLaneConsumesAndRejectedSlotsAreReusable() throws Exception {
         // 标的一的 U 本位永续测试合约
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         // 用户七一万 USDT 可用余额、无订单持仓的冷状态
         var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,

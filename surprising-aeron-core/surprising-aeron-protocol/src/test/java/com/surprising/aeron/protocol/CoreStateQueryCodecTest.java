@@ -79,9 +79,9 @@ class CoreStateQueryCodecTest {
                 .isEqualTo(CoreStateQueryCodec.encodeUserState(user).length);
         assertThat(CoreStateQueryCodec.encodedOrderStateLength(order))
                 .isEqualTo(CoreStateQueryCodec.encodeOrderState(order).length);
-        ByteBuffer directUser = ByteBuffer.allocate(CoreStateQueryCodec.encodedUserStateLength(user))
+        ByteBuffer directUser = ByteBuffer.allocateDirect(CoreStateQueryCodec.encodedUserStateLength(user))
                 .order(ByteOrder.LITTLE_ENDIAN);
-        CoreStateQueryCodec.writeUserState(directUser, user);
+        directUser.put(CoreStateQueryCodec.encodeUserState(user));
         ByteBuffer directOrder = ByteBuffer.allocate(CoreStateQueryCodec.encodedOrderStateLength(order))
                 .order(ByteOrder.LITTLE_ENDIAN);
         CoreStateQueryCodec.writeOrderState(directOrder, order);

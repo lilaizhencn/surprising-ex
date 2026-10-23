@@ -21,10 +21,10 @@ public class InstrumentPauseAdmissionBenchmark {
         @Setup(Level.Trial) public void initialize() {
             var type=ContractType.valueOf(productLine.contractTypeCode());
             try(var state=new TradingCoreRuntime(productLine)) {
-                var config=new RegisterInstrumentCommand("1",type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",
+                var config=new RegisterInstrumentCommand("1","BTC","USDT",type.isInverse()?"BTC":"USDT",
                         1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                         type.isOption()?0:-1,type.isOption()?100:0);
-                var paused=new RegisterInstrumentCommand(config.instrumentId(),config.contractTypeCode(),config.baseAsset(),
+                var paused=new RegisterInstrumentCommand(config.instrumentId(),config.baseAsset(),
                         config.quoteAsset(),config.settleAsset(),config.notionalMultiplierUnits(),config.priceTickUnits(),config.settleScaleUnits(),
                         config.initialMarginRatePpm(),config.maintenanceMarginRatePpm(),config.makerFeeRatePpm(),config.takerFeeRatePpm(),
                         config.expiryEpochMillis(),config.optionTypeCode(),config.strikePriceTicks(),config.maxLeveragePpm(),config.maxPositionNotionalUnits(),

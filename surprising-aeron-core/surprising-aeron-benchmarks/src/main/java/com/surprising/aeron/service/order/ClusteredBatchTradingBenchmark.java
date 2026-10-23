@@ -546,7 +546,7 @@ public class ClusteredBatchTradingBenchmark {
             String[] startupSymbols = {"11", pipelineSymbolB, "10"};
             for (String instrumentId : startupSymbols) {
                 apply(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                        new RegisterInstrumentCommand(instrumentId, type.ordinal(), "BTC", "USDT", settleAsset, 1, 1,
+                        new RegisterInstrumentCommand(instrumentId, "BTC", "USDT", settleAsset, 1, 1,
                                 type.isInverse() ? 1000 : 1, 100_000, 50_000, 0, 0,
                                 type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
                                 type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
@@ -774,7 +774,7 @@ public class ClusteredBatchTradingBenchmark {
             singleResponses = true;
             try {
                 for (int i = 0; i < 128; i++) {
-                    var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "10", 1000, 2000, 0, 0, 0, 1000);
+                    var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "10", 1000, 0, 0, 0, 1000);
                     send(command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 1000 + i,
                             com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
                 }
@@ -846,11 +846,8 @@ public class ClusteredBatchTradingBenchmark {
                 if (automaticClose) for (int user = 0; user < maxInFlight; user++) {
                     long id = firstOrders[user];
                     var trigger = service.state().runtimeState().triggerOrder(id);
-                    if (trigger != null && trigger.status() != CoreTriggerOrderStatus.CANCELED)
-                        throw new IllegalStateException("closed position retains trigger " + id + ": " + trigger.status());
-                    if (trigger == null && !service.state().terminalRetention().containsTrigger(
-                            id, 1000 + user, "trigger-" + id))
-                        throw new IllegalStateException("closed trigger lost terminal identity");
+                    if (trigger == null || trigger.status() != CoreTriggerOrderStatus.CANCELED)
+                        throw new IllegalStateException("closed position trigger must retain canceled identity: " + id);
                 }
             } finally {
                 singleResponses = false;

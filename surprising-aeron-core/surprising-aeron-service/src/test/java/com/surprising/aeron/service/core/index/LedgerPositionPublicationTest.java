@@ -38,8 +38,7 @@ class LedgerPositionPublicationTest {
         var product = ProductLine.LINEAR_PERPETUAL;
         // 本用例注册的标的一 U 本位永续合约
         var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(product,
-                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1",
-                        com.surprising.instrument.api.model.ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                new com.surprising.aeron.protocol.RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
                         1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         // 用户七的初始净仓，数量十、保证金一百
         var position = new com.surprising.aeron.model.CorePositionState("1", "USDT",

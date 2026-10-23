@@ -110,7 +110,7 @@ class CommittedOrderProjectionPostgresTest {
             var frames = new java.util.ArrayList<RealtimeFrame>();
             long seq = 0;
             frames.addAll(replayed(replay,++seq,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(
-                    new RegisterInstrumentCommand("604",com.surprising.instrument.api.model.ContractType.VANILLA_OPTION.ordinal(),
+                    new RegisterInstrumentCommand("604",
                             "BTC","USDT","USDT",1,1,1,100000,50000,0,0,2000000000000L,0,100))));
             for(long user:new long[]{7,8})frames.addAll(replayed(replay,++seq,CoreMessageType.ADJUST_BALANCE,user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000))));

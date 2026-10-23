@@ -34,7 +34,6 @@ import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
-import com.surprising.aeron.service.treasury.InsuranceAllocationPolicy;
 import com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
@@ -240,7 +239,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(
                         variant.settleAsset(), insuranceCoverage));
-        insuranceCoverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
+        insuranceCoverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(funded, 1);
         // 保险确认后仍需 ADL 补亏的冷状态，作为自动减仓起点
         TradingCoreState beforeAdl = reducer.resolveLiquidation(funded,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE,
@@ -337,7 +336,7 @@ class CorePerpetualFinancialMatrixTest {
                 expected = reducer.adjustInsuranceFund(expected, adjustment);
                 LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, adjustment));
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, true)).isEqualTo(expected);
-                coverage = InsuranceAllocationPolicy.expectedCoverage(expected, 1);
+                coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(expected, 1);
                 // 按政策金额确认保险覆盖的强平结果命令
                 var resolve = new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
                 expected = reducer.resolveLiquidation(expected, resolve);
@@ -450,8 +449,12 @@ class CorePerpetualFinancialMatrixTest {
         // 本次验证直接转换或异步控制使用的投影运行时
         TradingAccountRuntime runtime = RuntimeStateProjector.project(ordered, identities);
 
-        assertThat(RuntimeDerivativeLiquidationProcessor.applyCancellationAdvance(
-                ordered, command, RuntimeTestStateTransitions.cancellationRoutes(canceled), 702, runtime, identities)).isSameAs(runtime);
+        assertThat(RuntimeTestStateTransitions.applyLiquidationCancellationAdvance(ordered,
+                command,
+                RuntimeTestStateTransitions.cancellationRoutes(canceled),
+                702,
+                runtime,
+                identities)).isSameAs(runtime);
         RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
 
         // 仅应用所列撤单后的冷状态，供撤完再执行的预期结果使用
@@ -462,8 +465,11 @@ class CorePerpetualFinancialMatrixTest {
         RuntimeIdentityRegistry executionIdentities = new RuntimeIdentityRegistry();
         // 从同一 ordered 起点投影、供撤单加执行一步对照的运行时
         TradingAccountRuntime executionRuntime = RuntimeStateProjector.project(ordered, executionIdentities);
-        assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
-                ordered, command, RuntimeTestStateTransitions.cancellationRoutes(canceled), executionRuntime, executionIdentities)).isSameAs(executionRuntime);
+        assertThat(RuntimeTestStateTransitions.applyLiquidationExecution(ordered,
+                command,
+                RuntimeTestStateTransitions.cancellationRoutes(canceled),
+                executionRuntime,
+                executionIdentities)).isSameAs(executionRuntime);
         RuntimeStateParityChecker.assertMatches(executionExpected, executionIdentities, executionRuntime);
     }
 
@@ -734,8 +740,11 @@ class CorePerpetualFinancialMatrixTest {
         RuntimeIdentityRegistry liquidationIdentities = new RuntimeIdentityRegistry();
         // 执行同一强平命令的直接投影运行时，与冷状态结果逐项比较
         TradingAccountRuntime runtimeLiquidated = RuntimeStateProjector.project(marked, liquidationIdentities);
-        assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
-                marked, liquidationCommand, List.of(), runtimeLiquidated, liquidationIdentities))
+        assertThat(RuntimeTestStateTransitions.applyLiquidationExecution(marked,
+                liquidationCommand,
+                List.of(),
+                runtimeLiquidated,
+                liquidationIdentities))
                 .isSameAs(runtimeLiquidated);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用
         TradingCoreState ending = reducer.executeLiquidation(marked, liquidationCommand);
@@ -974,8 +983,11 @@ class CorePerpetualFinancialMatrixTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
         TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(marked, identities);
-        assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
-                marked, command, List.of(), runtimeEnding, identities)).isSameAs(runtimeEnding);
+        assertThat(RuntimeTestStateTransitions.applyLiquidationExecution(marked,
+                command,
+                List.of(),
+                runtimeEnding,
+                identities)).isSameAs(runtimeEnding);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用
         TradingCoreState ending = reducer.executeLiquidation(marked, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
@@ -1021,7 +1033,7 @@ class CorePerpetualFinancialMatrixTest {
         // 强平状态上已向保险基金注资后的冷状态
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), coverage));
-        coverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
+        coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(funded, 1);
         // 按政策算定的实际覆盖量确认强平保险结果的命令
         ResolveLiquidationCommand command = new ResolveLiquidationCommand(
                 1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
@@ -1033,8 +1045,10 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(restoredFunded).isEqualTo(funded);
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
         TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(restoredFunded, identities);
-        assertThat(RuntimeLiquidationResolution.apply(
-                restoredFunded, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
+        assertThat(RuntimeTestStateTransitions.applyLiquidationResolution(restoredFunded,
+                command,
+                runtimeEnding,
+                identities)).isSameAs(runtimeEnding);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用
         TradingCoreState ending = reducer.resolveLiquidation(funded, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
@@ -1070,7 +1084,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), 25));
         // 本轮先注入保险、再由分配政策算定的实际覆盖量
-        long insuranceCoverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
+        long insuranceCoverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(funded, 1);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用
         TradingCoreState ending = reducer.resolveLiquidation(funded,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE,
@@ -1108,7 +1122,7 @@ class CorePerpetualFinancialMatrixTest {
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(
                         variant.settleAsset(), requestedInsuranceCoverage));
         // 本轮先注入保险、再由分配政策算定的实际覆盖量
-        long insuranceCoverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
+        long insuranceCoverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(funded, 1);
         // 分配政策实际覆盖比显式外部注资多出的部分，来源为场景已有保险余额
         long extraInsuranceCoverage = insuranceCoverage - requestedInsuranceCoverage;
         // 保险确认后仍需 ADL 补亏的冷状态，作为自动减仓起点
@@ -1129,8 +1143,7 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(restoredBeforeAdl).isEqualTo(beforeAdl);
         // 直接执行业务的投影运行时，与同输入冷路径完整结果比较
         TradingAccountRuntime runtimeEnding = RuntimeStateProjector.project(restoredBeforeAdl, identities);
-        assertThat(RuntimeAdlExecution.apply(
-                restoredBeforeAdl, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
+        assertThat(RuntimeTestStateTransitions.applyAdlExecution(restoredBeforeAdl, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         // 本场景业务步骤完成后的冷状态，交给局部断言与资金行使用
         TradingCoreState ending = reducer.executeAdl(beforeAdl, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
@@ -1186,21 +1199,23 @@ class CorePerpetualFinancialMatrixTest {
     private Row crossLineRejected(Variant variant) {
         // 本场景建立的原冷状态，作为后续业务转换或资金行基线
         TradingCoreState opening = fundedState(variant, USER_ID, DEFAULT_WALLET);
-        // 和当前组合相反的正反向永续合约类型，故意制造跨产品线注册
+        // 和当前组合相反的正反向永续合约类型，故意构造跨产品线合约
         ContractType otherType = variant.type() == ContractType.LINEAR_PERPETUAL
                 ? ContractType.INVERSE_PERPETUAL : ContractType.LINEAR_PERPETUAL;
-        // 合约类型不属于当前运行时产品线的注册命令
+        // 用于构造外线合约的参数；类型由外线产品决定
         RegisterInstrumentCommand wrongLine = new RegisterInstrumentCommand(
-                SYMBOL, otherType.ordinal(), "BTC", variant.quoteAsset(), variant.settleAsset(),
+                SYMBOL, "BTC", variant.quoteAsset(), variant.settleAsset(),
                 variant.notionalMultiplierUnits(), 1, variant.settleScaleUnits(),
                 100_000, 100_000, 0, 0, 0, -1, 0, 10_000_000,
                 1_000_000, 0, 1_000_000,
                 List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000)));
         // 拒绝或计算溢出前的业务哈希，失败后必须不变
         long hash = opening.businessStateHash();
-        assertThatThrownBy(() -> reducer.registerInstrument(opening, wrongLine))
+        assertThatThrownBy(() -> com.surprising.aeron.service.product.ProductTradingRulesRegistry
+                .forProductLine(variant.type().productLine())
+                .requireInstrument(CoreInstrument.from(otherType.productLine(), wrongLine)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
-                        /* 本次预期的业务拒绝异常，用固定代码核对原因 */ exception -> assertThat(exception.code()).isEqualTo("PRODUCT_LINE_MISMATCH"));
+                        /* 本次预期的业务拒绝异常，用固定代码核对原因 */ exception -> assertThat(exception.code()).isEqualTo("PRODUCT_LINE_UNSUPPORTED"));
         assertThat(opening.businessStateHash()).isEqualTo(hash);
         return row(variant, "CROSS_LINE_REJECTED", opening, opening, List.of(), false, false,
                 funds(1_000, 0, 0, 0, 0, 0, 0, 0, 1_000, 0, 0, 0));
@@ -1591,7 +1606,7 @@ class CorePerpetualFinancialMatrixTest {
                 : List.of(new CoreRiskLimitBracket(1, 0, 1_000_000, 10_000_000, 100_000, 100_000));
         // 单档允许十倍、双档允许五倍的标的杠杆上限
         long maxLeveragePpm = tiered ? 5_000_000 : 10_000_000;
-        return new RegisterInstrumentCommand(instrumentId, variant.type().ordinal(), baseAsset,
+        return new RegisterInstrumentCommand(instrumentId, baseAsset,
                 variant.quoteAsset(), variant.settleAsset(), variant.notionalMultiplierUnits(), 1,
                 variant.settleScaleUnits(), 100_000, 100_000, makerFeeRatePpm, takerFeeRatePpm,
                 0, -1, 0, maxLeveragePpm,

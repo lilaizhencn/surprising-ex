@@ -130,7 +130,7 @@ public class InstrumentCoreSyncService {
                 }
             }
         }
-        return new RegisterInstrumentCommand(Integer.toString(value.instrumentId()),value.contractType().ordinal(),
+        return new RegisterInstrumentCommand(Integer.toString(value.instrumentId()),
                 value.baseAsset(),value.quoteAsset(),value.settleAsset(),value.notionalMultiplierUnits(),value.priceTickUnits(),
                 settleScale,value.initialMarginRatePpm(),value.maintenanceMarginRatePpm(),
                 value.makerFeeRatePpm(),value.takerFeeRatePpm(),value.expiryTime()==null?0:value.expiryTime().toEpochMilli(),

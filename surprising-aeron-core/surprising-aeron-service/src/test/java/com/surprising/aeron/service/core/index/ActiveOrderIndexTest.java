@@ -412,7 +412,7 @@ class ActiveOrderIndexTest {
         // 标的一选择 BTC，否则选择 ETH 的测试基础币
         String baseAsset = (instrumentId.equals("1") ? "BTC" : "ETH");
         return CoreInstrument.from(ProductLine.SPOT,
-                new RegisterInstrumentCommand(instrumentId, ContractType.SPOT.ordinal(), baseAsset,
+                new RegisterInstrumentCommand(instrumentId, baseAsset,
                         "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
     }
 
@@ -430,7 +430,7 @@ class ActiveOrderIndexTest {
             // 按当前产品线选出的合约类型，决定币本位、到期和期权字段
             ContractType type = ContractType.valueOf(productLine.contractTypeCode());
             instruments.put(instrumentId, CoreInstrument.from(productLine,
-                    new RegisterInstrumentCommand(instrumentId, type.ordinal(), baseAsset, "USDT",
+                    new RegisterInstrumentCommand(instrumentId, baseAsset, "USDT",
                             type.isInverse() ? baseAsset : "USDT", 1, 1,
                             type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                             type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,

@@ -5,13 +5,10 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.core.LedgerControlTestSupport;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
@@ -200,7 +197,7 @@ class SystemLedgerControlTest {
             TreasuryRuntime original = runtime.treasury();
             // 构造资金费前值进度使用的规范 U 本位永续币对。
             var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                    new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
+                    new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
             // 操作前保留的资金费分页进度引用，回滚后应恢复同一记录。
             var progress = new TreasuryRuntime.FundingProgressRuntime(3, instrument, 1000, 1, 100, 1);
             original.setFee(asset, 9); original.setFundingSettlement(symbol, 2); original.setFundingProgress(symbol, progress);

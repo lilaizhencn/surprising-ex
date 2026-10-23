@@ -17,7 +17,6 @@ import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -78,7 +77,7 @@ class CoreLedgerQueryTest {
             names = {"EXECUTION", "ADL"})
     void executionAndAdlPagesReadLanesAndKeepExistingBudgets(CoreLiquidationWorkView.Purpose purpose) throws Exception {
         // 所有本用例强平记录对应的线性永续合约 1。
-        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand("1",
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         // 含不同价格序号的执行计划及两笔待 ADL 缺口，用来检查资格筛选和游标推进。
         var liquidations = Map.of(
@@ -126,7 +125,7 @@ class CoreLedgerQueryTest {
     @Test
     void insurancePageAllocatesWholeBudgetIncludingClaimsOutsidePageWithoutAccountReads() throws Exception {
         // 所有本用例强平记录对应的线性永续合约 1。
-        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand("1", ContractType.LINEAR_PERPETUAL.ordinal(),
+        var instrument = CoreInstrument.from(LINE, new RegisterInstrumentCommand("1",
                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         // 用户 1001 的首笔待保险赔付计划，缺口为 70。
         var first = new CoreLiquidationState(1, 1001, "1", 1, 1, 70, CoreLiquidationState.Status.INSURANCE_REQUIRED);

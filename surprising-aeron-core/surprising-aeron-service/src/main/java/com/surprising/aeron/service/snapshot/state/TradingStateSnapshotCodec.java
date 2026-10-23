@@ -40,12 +40,12 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本三十九。 */
-    private static final int VERSION = 39;
+    private static final int VERSION = 40;
     /** 当前支持的最高业务读取修订四，与外层布局版本分开管理。 */
     private static final int READER_REVISION = 4;
 
     /**
-     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本三十九头。根字段十二是最低业务读取修订：数量步长需二、非默认订单保护需三，算法退休量或待关联子单需四；不把 Java 类名或当前接口 DTO 当作磁盘结构。
+     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十头。根字段十二是最低业务读取修订：数量步长需二、非默认订单保护需三，算法退休量或待关联子单需四；不把 Java 类名或当前接口 DTO 当作磁盘结构。
      * @param value 本方法要持久化的对应业务值，字段和顺序由固定编号定义
      */
     public static byte[] encode(TradingCoreState value) {
@@ -55,7 +55,7 @@ public final class TradingStateSnapshotCodec {
                 .number(2, value.revision())
                 .bytes(3, writeValues(value.users(), TradingStateSnapshotCodec::writeCoreUserState))
                 .bytes(4, writeValues(value.orders(), TradingStateSnapshotCodec::writeCoreOrderState))
-                .bytes(5, writeValues(value.instruments(), TradingStateSnapshotCodec::writeCoreInstrument))
+                .bytes(5, writeValues(value.instruments(), item -> writeCoreInstrument(item, value.productLine())))
                 .bytes(6, writeCoreRiskState(value.riskState()))
                 .bytes(7, writeCoreTreasuryState(value.treasuryState()))
                 .bytes(8, writeMap(value.leverages(), TradingStateSnapshotCodec::writeCoreLeverageKey, /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> new SnapshotFields.Writer().number(1, item).encode()))
@@ -112,7 +112,7 @@ public final class TradingStateSnapshotCodec {
             Map<Long, CoreOrderState> orders = readValues(r.bytes(4), item -> readCoreOrderState(item, product),
                     CoreOrderState::orderId);
             // 按币对业务编号恢复的注册配置表，触发单随后引用其中配置。
-            Map<String, CoreInstrument> instruments = readValues(r.bytes(5), TradingStateSnapshotCodec::readCoreInstrument, CoreInstrument::instrumentId);
+            Map<String, CoreInstrument> instruments = readValues(r.bytes(5), item -> readCoreInstrument(item, product), CoreInstrument::instrumentId);
             // 按用户和币对范围恢复的倒计时撤单表。
             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = new TreeMap<>();
             for (var /* 当前解码并需要按业务键查重的倒计时撤单记录。 */ timer : r.list(10, TradingStateSnapshotCodec::readCoreCancelAllAfterState)) putUnique(timers, timer.key(), timer);
@@ -976,10 +976,11 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号写入注册币对配置，保存资产、换算尺度、保证金、费用、到期参数、风险档、支持能力、数量步长和订单保护；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的注册币对配置业务值
      */
-    private static byte[] writeCoreInstrument(CoreInstrument value) {
+    private static byte[] writeCoreInstrument(CoreInstrument value, ProductLine productLine) {
+        if (value.contractType().productLine() != productLine)
+            throw new ProtocolException("snapshot instrument product line mismatch");
         return new SnapshotFields.Writer()
                 .text(1, value.instrumentId()) // 1：币对或合约业务编号
-                .number(2, SnapshotEnumCodes.encode(value.contractType())) // 2：现货、永续、交割或期权合约类型
                 .text(3, value.baseAsset()) // 3：基础资产名称
                 .text(4, value.quoteAsset()) // 4：计价资产名称
                 .text(5, value.settleAsset()) // 5：结算资产名称
@@ -1017,12 +1018,12 @@ public final class TradingStateSnapshotCodec {
      * 恢复注册币对与能力设置，数量步长字段二十八缺失取一；订单保护字段二十九到三十三分别使用明确历史默认值。字段三十一按非零为 true 读取，其余三个支持能力布尔字段使用严格零/一校验，不在这里统一改写历史读取规则。
      * @param encoded 当前注册币对配置的独立字段记录字节
      */
-    private static CoreInstrument readCoreInstrument(byte[] encoded) {
+    private static CoreInstrument readCoreInstrument(byte[] encoded, ProductLine productLine) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
         return new CoreInstrument(
                 r.text(1), // 1：币对或合约业务编号
-                SnapshotEnumCodes.readContractType(r.integer(2)), // 2：现货、永续、交割或期权合约类型
+                com.surprising.instrument.api.model.ContractType.valueOf(productLine.contractTypeCode()), // 合约类型来自根产品线；编号二不再写入
                 r.text(3), // 3：基础资产名称
                 r.text(4), // 4：计价资产名称
                 r.text(5), // 5：结算资产名称

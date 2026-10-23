@@ -220,7 +220,7 @@ class CorePreflightLaneQueryTest {
     private static RegisterInstrumentCommand instrument(ProductLine line, long margin) {
         // 由产品代码确定的合约类型，控制反向、到期和期权参数。
         var type = ContractType.valueOf(line.contractTypeCode());
-        return new RegisterInstrumentCommand("1", type.ordinal(), "BTC", "USDT", type.isInverse() ? "BTC" : "USDT",
+        return new RegisterInstrumentCommand("1", "BTC", "USDT", type.isInverse() ? "BTC" : "USDT",
                 1, 1, type.isInverse() ? 1000 : 1, margin, 50_000, 500, 1000,
                 type.isDelivery() || type.isOption() ? TIME + 20_000 : 0, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }

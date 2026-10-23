@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
+
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
@@ -8,7 +10,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlement;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions;
@@ -174,7 +175,7 @@ class CoreFinancialLedgerProductionTest {
             var opening = core.tradingState();
             // 使用相同底层转换得到的冷对照状态，不是独立公式模型
             var expected = expected(opening, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
-                    RuntimeLifecycleSettlement.apply(opening, settlement, null, null, null, runtime, identities));
+                    RuntimeTestStateTransitions.applyLifecycleSettlement(opening, settlement, null, null, null, runtime, identities));
             // 执行前的账户所有权交接轮次，执行后要求不变
             long handoff = core.runtimeState.laneHandoffEpoch();
             appliedWithGuard(core, CoreMessageType.SETTLE_INSTRUMENT, 0, TradingCommandCodec.encodeSettleInstrument(settlement), TIME + 2_000);
@@ -211,7 +212,7 @@ class CoreFinancialLedgerProductionTest {
         // 该类型是否币本位，用于选择结算资产和尺度
         boolean inverse = type.isInverse();
         applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1", type.ordinal(),
+                TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand("1",
                         "BTC", "USDT", inverse ? "BTC" : "USDT", 1, 1, inverse ? 1_000 : 1,
                         100_000, 50_000, 0, 0, line.isDeliveryProduct() ? TIME + 1_000 : 0,
                         line.isOptionProduct() ? OptionType.CALL.ordinal() : -1, line.isOptionProduct() ? 100 : 0)), TIME);

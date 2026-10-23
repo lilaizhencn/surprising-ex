@@ -5,7 +5,6 @@ import java.util.List;
 
 public record RegisterInstrumentCommand(
         String instrumentId,
-        int contractTypeCode,
         String baseAsset,
         String quoteAsset,
         String settleAsset,
@@ -34,7 +33,6 @@ public record RegisterInstrumentCommand(
 
     public RegisterInstrumentCommand(
         String instrumentId,
-        int contractTypeCode,
         String baseAsset,
         String quoteAsset,
         String settleAsset,
@@ -60,13 +58,13 @@ public record RegisterInstrumentCommand(
         int supportedOrderTypeMask,
         int supportedTimeInForceMask,
         long quantityStepUnits) {
-        this(instrumentId, contractTypeCode, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, instrumentStatusCode, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, CoreOrderProtection.initial());
+        this(instrumentId, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, instrumentStatusCode, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled, supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, CoreOrderProtection.initial());
     }
 
     public RegisterInstrumentCommand {
         java.util.Objects.requireNonNull(orderProtection, "orderProtection");
         com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
-        if (instrumentId == null || instrumentId.isBlank() || contractTypeCode < 0
+        if (instrumentId == null || instrumentId.isBlank()
                 || baseAsset == null || baseAsset.isBlank() || quoteAsset == null || quoteAsset.isBlank()
                 || settleAsset == null || settleAsset.isBlank() || notionalMultiplierUnits <= 0
                 || priceTickUnits <= 0 || quantityStepUnits <= 0 || settleScaleUnits <= 0 || initialMarginRatePpm <= 0
@@ -98,7 +96,7 @@ public record RegisterInstrumentCommand(
     }
 
     /** Unit-step callers must explicitly use the full constructor for non-unit asset quantities. */
-    public RegisterInstrumentCommand(String instrumentId, int contractTypeCode, String baseAsset,
+    public RegisterInstrumentCommand(String instrumentId, String baseAsset,
             String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
             long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
             long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, int optionTypeCode,
@@ -107,7 +105,7 @@ public record RegisterInstrumentCommand(
             List<CoreRiskLimitBracket> riskLimitBrackets, int instrumentStatusCode,
             boolean marketOrderEnabled, boolean postOnlyEnabled, boolean reduceOnlyEnabled,
             int supportedOrderTypeMask, int supportedTimeInForceMask) {
-        this(instrumentId, contractTypeCode, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
+        this(instrumentId, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
                 makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode, strikePriceTicks,
                 maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
@@ -118,13 +116,13 @@ public record RegisterInstrumentCommand(
 
     /** Existing Core callers default to a tradable instrument with all Core order choices enabled. */
     public RegisterInstrumentCommand(
-            String instrumentId, int contractTypeCode, String baseAsset, String quoteAsset, String settleAsset,
+            String instrumentId, String baseAsset, String quoteAsset, String settleAsset,
             long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
             long initialMarginRatePpm, long maintenanceMarginRatePpm, long makerFeeRatePpm,
             long takerFeeRatePpm, long expiryEpochMillis, int optionTypeCode, long strikePriceTicks,
             long maxLeveragePpm, long maxPositionNotionalUnits, long userOpenInterestLimitRatePpm,
             long userOpenInterestLimitFloorUnits, List<CoreRiskLimitBracket> riskLimitBrackets) {
-        this(instrumentId, contractTypeCode, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
+        this(instrumentId, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
                 makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode, strikePriceTicks,
                 maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
@@ -133,11 +131,11 @@ public record RegisterInstrumentCommand(
     }
 
     public RegisterInstrumentCommand(
-            String instrumentId, int contractTypeCode, String baseAsset, String quoteAsset,
+            String instrumentId, String baseAsset, String quoteAsset,
             String settleAsset, long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
             long initialMarginRatePpm, long maintenanceMarginRatePpm, long makerFeeRatePpm, long takerFeeRatePpm,
             long expiryEpochMillis, int optionTypeCode, long strikePriceTicks) {
-        this(instrumentId, contractTypeCode, baseAsset, quoteAsset, settleAsset,
+        this(instrumentId, baseAsset, quoteAsset, settleAsset,
                 notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm,
                 maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode,
                 strikePriceTicks, leverageFromRate(initialMarginRatePpm), Long.MAX_VALUE, 0, Long.MAX_VALUE,

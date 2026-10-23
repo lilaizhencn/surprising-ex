@@ -2,7 +2,6 @@ package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -24,7 +23,7 @@ class BatchDecisionCaptureTest {
         try (/* 测试创建并自动关闭的 U 本位永续 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             for (String /* 当前要注册和定价的品种名称 */ symbol : new String[]{"1", "2"}) {
                 applied(core, CoreMessageType.REGISTER_INSTRUMENT, TradingCommandCodec.encodeRegisterInstrument(
-                        new RegisterInstrumentCommand(symbol, ContractType.LINEAR_PERPETUAL.ordinal(),
+                        new RegisterInstrumentCommand(symbol,
                                 "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
                 mark(core, symbol, 100, 1);
             }

@@ -52,7 +52,7 @@ public class ClusterDirectSettlementBenchmark {
         long now = System.currentTimeMillis();
         for (int index = 0; index < SYMBOLS; index++) {
             applied(send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
-                    new RegisterInstrumentCommand(instrumentId(index), type.ordinal(), "BTC", "USDT", settle,
+                    new RegisterInstrumentCommand(instrumentId(index), "BTC", "USDT", settle,
                             1, 1, 1, 100_000, 50_000, 0, 0,
                             type.isDelivery() || type.isOption() ? now + 3_600_000 : 0,
                             type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))).join());

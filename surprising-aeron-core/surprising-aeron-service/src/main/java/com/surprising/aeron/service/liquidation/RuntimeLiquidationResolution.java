@@ -2,7 +2,6 @@ package com.surprising.aeron.service.liquidation;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -18,24 +17,6 @@ import lombok.NoArgsConstructor;
 /** 强平步骤 7：由后续 RESOLVE_LIQUIDATION 命令确认结果，按决议补亏或完成。 强平执行后的保险基金补亏与完成判定。先由账户 Lane 捕获同资产保险索赔事实，账本按确定顺序校验分配并扣保险余额和亏空，再交源账户 Lane 发布强平新状态；真正 ADL 走单独的减仓流程。 构造约定：只提供强平补亏入口，命令执行进度保存在可复用续步中。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeLiquidationResolution {
-
-    /**
-     * 核对命令前业务状态和运行时的产品线及修订号，使用业务状态中的强平编号集合进入同步补亏入口。
-     * @param before 本命令前的业务状态，用来校验产品线与运行时修订号一致
-     * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
-     */
-    public static TradingAccountRuntime apply(TradingCoreState before,
-                                            ResolveLiquidationCommand command,
-                                            TradingAccountRuntime runtime,
-                                            RuntimeIdentityRegistry identities) {
-        if (before == null || runtime == null || before.productLine() != runtime.productLine()
-                || before.revision() != runtime.revision()) {
-            throw new IllegalArgumentException("invalid liquidation resolution apply");
-        }
-        return applyRuntime(command, runtime, identities, before.riskState().liquidations().keySet());
-    }
 
     /**
      * 在账本线程未启动时同步处理保险补亏或完成；账本已经启动则要求改用异步续步。

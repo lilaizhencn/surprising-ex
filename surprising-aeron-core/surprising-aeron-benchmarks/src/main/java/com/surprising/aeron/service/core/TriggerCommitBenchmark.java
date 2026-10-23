@@ -18,7 +18,6 @@ import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -61,7 +60,7 @@ public class TriggerCommitBenchmark {
                 new ActiveOrderIndex(initial, identities),
                 new AdlPositionIndex(initial, identities)), identities);
         instrument = CoreInstrument.from(ProductLine.SPOT,
-                new RegisterInstrumentCommand("1", ContractType.SPOT.ordinal(),
+                new RegisterInstrumentCommand("1",
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         var accounts = new java.util.ArrayList<Long>();
         var ids = new java.util.ArrayList<Long>();

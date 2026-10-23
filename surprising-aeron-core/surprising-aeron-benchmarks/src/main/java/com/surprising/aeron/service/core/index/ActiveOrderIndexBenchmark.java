@@ -10,7 +10,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
@@ -34,7 +33,7 @@ public class ActiveOrderIndexBenchmark {
         index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities);
         var instruments = new CoreInstrument[symbols];
         for (int i = 0; i < symbols; i++) instruments[i] = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
-                new RegisterInstrumentCommand(Integer.toString(i + 1), ContractType.LINEAR_PERPETUAL.ordinal(),
+                new RegisterInstrumentCommand(Integer.toString(i + 1),
                         "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0));
         for (int i = 0; i < open.length; i++) {
             var instrument = instruments[i % symbols];
