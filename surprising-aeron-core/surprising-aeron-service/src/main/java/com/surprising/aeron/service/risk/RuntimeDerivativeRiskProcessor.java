@@ -1,9 +1,7 @@
 package com.surprising.aeron.service.risk;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.RiskLaneProgress;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -199,21 +197,6 @@ public final class RuntimeDerivativeRiskProcessor {
     }
 
     /**
-     * 将业务状态中按外部币对编号保存的扫描进度转换并写入运行时，保留各 Lane、条件单和关联撤单游标。
-     * @param source 包含要同步扫描进度的不可变业务状态
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    public static void syncScanProgress(TradingCoreState source, TradingAccountRuntime runtime,
-                                        RuntimeIdentityRegistry identities) {
-        if (source == null || runtime == null || identities == null) {
-            throw new IllegalArgumentException("invalid runtime risk scan synchronization");
-        }
-        source.riskState().scans().forEach((/* 从整数币对编号还原的外部编号，或同步扫描映射中的币对键。 */ instrumentId, /* 同步时读取的业务扫描记录，转换后装入当前运行时。 */ scan) -> runtime.putRiskScan(toRuntimeScan(
-                identities.symbolId(instrumentId), scan)));
-    }
-
-    /**
      * 要求当前运行时已经注册该币对，缺失时返回 INSTRUMENT_NOT_FOUND 业务拒绝。
      * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
      * @param instrumentId 对外的币对或合约编号，需要已注册到当前运行时
@@ -223,22 +206,6 @@ public final class RuntimeDerivativeRiskProcessor {
         CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         return instrument;
-    }
-
-    /**
-     * 把使用外部币对编号的业务扫描记录转换成整数币对编号的运行时记录，所有进度及修订号原样保留。
-     * @param symbolId 要继续扫描的币对整数编号
-     * @param scan 包含账户风险及条件单游标的原扫描记录
-     */
-    private static RiskScanRuntime toRuntimeScan(int symbolId, CoreRiskState.RiskScan scan) {
-        return new RiskScanRuntime(symbolId, scan.accountLaneId(), scan.priceSequence(),
-                scan.scanStartPriceSequence(), scan.lastUserId(),
-                scan.riskComplete(), scan.riskUserId(), scan.riskPhase(), scan.riskPositionCursor(),
-                scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(),
-                scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),
-                scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
-                scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
-                scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress());
     }
 
 }

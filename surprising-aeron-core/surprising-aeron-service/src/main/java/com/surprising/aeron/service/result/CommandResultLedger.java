@@ -643,21 +643,6 @@ public final class CommandResultLedger {
         }
 
         /**
-         * 以交入字节创建保留序号为零的独立记录，供后续账本存储分配实际顺序。
-         * @param fingerprint 当前结果或请求的命令指纹
-         * @param status 要保存的原执行状态
-         * @param resultCode 要保存的原确定性结果码
-         * @param appliedCommandCount 当前要保存的应用计数；冲突响应使用传入计数，重复成功响应沿用原记录计数
-         * @param responseData 调用方交入的响应字节数组，空值按入口规则规范为空响应
-         */
-        static StoredResult owned(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
-                                  long appliedCommandCount,
-                                  byte[] responseData) {
-            return new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
-                    responseData, 0, true);
-        }
-
-        /**
          * 创建仅更换保留序号的独立记录，共用原响应切片；不自行增加响应池引用，也不修改当前记录。
          * @param sequence 新记录要采用的保留顺序号
          */

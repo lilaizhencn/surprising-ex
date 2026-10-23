@@ -118,14 +118,6 @@ public final class RuntimeFundsDelta {
     }
 
     /**
-     * 空列表返回共用空值，否则按默认构造开关包装；调用方仍须遵守原列表借用约束。
-     * @param postings 调用方提供的非空分录列表，可信分支要求之后不再修改
-     */
-    static RuntimeFundsDelta from(List<Posting> postings) {
-        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings);
-    }
-
-    /**
      * 用于调用方已经按业务键去重的分录列表，跳过去重准备；本方法只检查非空分录，不自行证明键唯一。
      * @param postings 调用方提供的非空分录列表，可信分支要求之后不再修改
      */

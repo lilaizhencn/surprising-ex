@@ -83,14 +83,6 @@ public final class SectionedCoreSnapshotWriter {
                 state.accountLaneSnapshots(coreSequence, snapshotState));
     }
 
-    /**
-     * 核对镜像的 Matcher 元数据后按固定段序编码，验证账户段数量、单段及总大小，生成小端封套/段头和 CRC 页尾。这里不调用 image.verifyFullState；需要完整审计时由生命周期入口先执行，嵌套负载各用自己的格式。
-     * @param image 输入引用在编码期间保持稳定的快照镜像
-     */
-    public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image) {
-        return encode(image, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
-    }
-
     public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image, int maximumSnapshotBytes) {
         if (maximumSnapshotBytes <= 0 || maximumSnapshotBytes > SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES)
             throw new IllegalArgumentException("invalid snapshot byte limit");

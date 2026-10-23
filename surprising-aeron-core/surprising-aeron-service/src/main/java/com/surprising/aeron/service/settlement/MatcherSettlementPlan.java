@@ -597,24 +597,6 @@ public final class MatcherSettlementPlan {
     }
 
     /**
-     * 从初始订单编号和 MatchingResult 构建新计划，拒绝空编号数组，其余校验交给完整构建入口。
-     * @param coreSequence 当前事实对应的 Core 序号
-     * @param takerOrderId 主动订单或该计划的撤单目标编号
-     * @param activeUserId 发起本代命令的账户用户
-     * @param initialOrderIds 构建前已知的订单编号，非正数项在通用入口跳过
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     */
-    public static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
-                                               long[] initialOrderIds, MatchingResult result,
-                                               TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (initialOrderIds == null) throw new IllegalArgumentException("initial orders are required");
-        return build(coreSequence, takerOrderId, activeUserId, initialOrderIds, result, runtime, identities,
-                null, null, null, null, null);
-    }
-
-    /**
      * 复用目标计划的两个初始身份槽，按通用构建入口校验结果；目标的上一代必须已完成消费。
      * @param target 可独占重建的计划槽，上一代消费者必须已经结束
      * @param sequence 当前事实的 Core 序号

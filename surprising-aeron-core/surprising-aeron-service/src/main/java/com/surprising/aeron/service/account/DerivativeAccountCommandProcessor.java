@@ -120,18 +120,6 @@ public final class DerivativeAccountCommandProcessor {
     }
 
     /**
-     * 以不重定价保证金的方式执行普通账户杠杆变更。
-     * @param runtime 处理当前用户所属产品线的交易运行时
-     * @param key 用户、合约与保证金模式组成的杠杆业务键
-     * @param symbolId 目标合约的稠密编号
-     * @param leveragePpm 目标杠杆，按百万分之一保存
-     */
-    static boolean updateAccountLeverage(TradingAccountRuntime runtime, CoreLeverageKey key,
-                                         int symbolId, long leveragePpm) {
-        return updateAccountLeverage(runtime, key, symbolId, leveragePpm, false);
-    }
-
-    /**
      * 显式重定价时进入同一账户 Lane 的补保证金路径；普通设置相同则无变化，有相关敞口则拒绝，否则记录新杠杆。
      * @param runtime 处理当前用户所属产品线的交易运行时
      * @param key 用户、合约与保证金模式组成的杠杆业务键

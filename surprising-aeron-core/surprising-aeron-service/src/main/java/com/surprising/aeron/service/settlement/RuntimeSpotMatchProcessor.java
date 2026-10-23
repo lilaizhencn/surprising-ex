@@ -224,16 +224,6 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     /**
-     * 从通用允许读取的视图取得主动订单，校验全部成交身份、价格及累计剩余量，不执行资金变化。
-     * @param takerOrderId 主动成交订单编号
-     * @param matches 原始撮合事件列表，非 TRADE 事件不应用成交
-     * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
-     */
-    static void validate(long takerOrderId, List<MatcherEvent> matches, TradingAccountRuntime runtime) {
-        validateMatches(runtime, requireOpen(runtime, takerOrderId), matches);
-    }
-
-    /**
      * 通用入口按订单用户找到所属账户 Lane，委托显式 Lane 单笔计算，时间及日志位置以负一沿既有规则处理。
      * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
      * @param instrument 当前订单的规范现货币对

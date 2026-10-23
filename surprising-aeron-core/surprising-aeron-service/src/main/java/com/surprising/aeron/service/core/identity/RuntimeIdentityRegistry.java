@@ -1049,13 +1049,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * 以用户和已构造的原持仓名计算键，不登记身份。
-     * @param userId 该身份所属用户
-     * @param name 用于计算确定性键的完整原持仓名
-     */
-    static long positionIdentityKey(long userId, String name) { return deterministicKey(userId, name); }
-
-    /**
      * 净仓直接哈希标的，对冲仓按标的、冒号和方向的 UTF-8 字节流哈希；不必构造带方向的新字符串，结果保证正且非零。
      * @param userId 该身份所属用户
      * @param instrumentId 永久数字标的身份；整数重载直接给数值，文本重载使用规范数字文本

@@ -21,27 +21,6 @@ import lombok.NoArgsConstructor;
 public final class RuntimeTriggerOrderStateTransitions {
 
     /**
-     * 准备币对稠密身份、产品对应持仓键及账本结算标记，再进入登记入口；虽然名为 upsert，重复条件单编号仍拒绝。
-     * @param runtime 提供原用户、持仓、条件单及版本写入入口的所属运行时
-     * @param identities 当前产品身份表，准备币对和持仓腿身份使用
-     * @param userId 条件单共同所属的正数用户编号
-     * @param view 需要登记的新条件单视图，携带意图、触发条件和执行参数
-     */
-    public static void upsert(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                       long userId, CoreTriggerOrderStateView view) {
-        if (runtime == null || identities == null || view == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime trigger order update");
-        }
-        // 当前条件单币对已准备的稠密身份。
-        int symbolId = identities.symbolId(view.instrumentId());
-        // 按当前产品、用户和持仓腿取得的身份，衍生品登记时继续核对真实持仓。
-        long positionKey = positionKey(identities, runtime.productLine(), userId, view);
-        // 账本事实中的已到期结算标记，已结算不能再登记条件单。
-        boolean instrumentSettled = runtime.treasury().lifecycleSettlement(symbolId) != 0;
-        upsert(runtime, userId, view, symbolId, positionKey, instrumentSettled);
-    }
-
-    /**
      * 检查全局版本容量，完整准备一份尚未存在的条件单，再写入并递增命令版本，不用于覆盖旧条件单。
      * @param runtime 提供原用户、持仓、条件单及版本写入入口的所属运行时
      * @param userId 条件单共同所属的正数用户编号

@@ -4,8 +4,6 @@ import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.matcher.MatcherSnapshot;
 import com.surprising.product.api.ProductLine;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -60,17 +58,6 @@ public final class SectionedCoreSnapshotCodec {
     }
 
     /**
-     * 只检查至少六字节内的魔数和当前版本，匹配不代表封套、段数、校验和或业务配对完整有效。
-     * @param snapshot 待探测或恢复的完整快照字节数组
-     */
-    public static boolean isSectioned(byte[] snapshot) {
-        if (snapshot == null || snapshot.length < Integer.BYTES + Short.BYTES) return false;
-        // 只为探测外层魔数与版本建立的小端数组视图。
-        ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
-        return buffer.getInt() == MAGIC && Short.toUnsignedInt(buffer.getShort()) == VERSION;
-    }
-
-    /**
      * 使用 Matcher 快照自己的编号与 Core 水位，Cluster 时间和位置填零，交给写入器捕获当前运行时并编码；调用方须已建立一致性边界。
      * @param state 已经建立快照一致性边界的交易运行时
      * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
@@ -78,26 +65,6 @@ public final class SectionedCoreSnapshotCodec {
     public static SectionedSnapshot encode(TradingCoreRuntime state, MatcherSnapshot matcherSnapshot) {
         return SectionedCoreSnapshotWriter.encode(
                 state, matcherSnapshot, matcherSnapshot.snapshotId(), matcherSnapshot.coreSequence(), 0, 0);
-    }
-
-    /**
-     * 带显式快照编号、Core 水位与 Cluster 元数据捕获并编码；一致性检查由写入器执行，本入口不额外等待业务完成。
-     * @param state 已经建立快照一致性边界的交易运行时
-     * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
-     * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
-     * @param coreSequence 快照覆盖的已应用 Core 命令水位
-     * @param clusterTimestamp 捕获点的非负 Cluster 业务时间
-     * @param clusterPosition 捕获点的非负 Cluster 日志位置
-     */
-    public static SectionedSnapshot encode(
-            TradingCoreRuntime state,
-            MatcherSnapshot matcherSnapshot,
-            long snapshotId,
-            long coreSequence,
-            long clusterTimestamp,
-            long clusterPosition) {
-        return SectionedCoreSnapshotWriter.encode(state, matcherSnapshot, snapshotId, coreSequence,
-                clusterTimestamp, clusterPosition);
     }
 
     /**

@@ -238,23 +238,6 @@ public final class CoreMatchingResult implements MatchingResult {
     }
 
     /**
-     * 按 first 再 second 的顺序组合事件；任一空时直接借用另一列表，否则只组合片段引用，不复制每个事件。
-     * @param first 组合顺序中的第一段事件
-     * @param second 组合顺序中的第二段事件
-     */
-    static List<MatcherResult.MatcherEvent> concatenateEvents(
-            List<MatcherResult.MatcherEvent> first,
-            List<MatcherResult.MatcherEvent> second) {
-        if (first.isEmpty()) return second;
-        if (second.isEmpty()) return first;
-        // 当前仅保存内层列表引用的片段构建器，随后固定外层列表。
-        ArrayList<List<MatcherResult.MatcherEvent>> segments = new ArrayList<>(4);
-        appendSegments(segments, first);
-        appendSegments(segments, second);
-        return new SegmentedEvents(segments);
-    }
-
-    /**
      * 按输入结果顺序收集并展开已有片段，空集合返回空列表、单片段直接借用，多片段创建索引视图。
      * @param results 需要按当前迭代顺序拼接事件的结果集合
      */

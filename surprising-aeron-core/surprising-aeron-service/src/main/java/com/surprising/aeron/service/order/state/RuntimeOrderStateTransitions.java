@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.order.state;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.UserRuntime;
@@ -189,42 +188,4 @@ public final class RuntimeOrderStateTransitions {
         return true;
     }
 
-    /**
-     * 核对拒单所属订单与冻结，必要时先完成本命令待处理预留，再把剩余冻结从锁定移回可用，写 REJECTED 后状态并删除冻结，推进用户及命令版本。
-     * @param runtime 提供原账户所有权、订单与资金写入入口的所属运行时
-     * @param userId 订单与冻结所属用户编号
-     * @param orderId 需要取消或拒绝的原订单编号
-     * @param coreSequence 触发、批次或拒单所属的正数 Core 命令序号，用来核对待完成预留
-     */
-    static void reject(TradingAccountRuntime runtime, long userId, long orderId, long coreSequence) {
-        if (runtime == null || userId <= 0 || orderId <= 0 || coreSequence <= 0) {
-            throw new IllegalArgumentException("invalid runtime rejected order");
-        }
-        runtime.assertOwner();
-        // 本次要标为拒绝的原订单，必须存在且属于用户。
-        OrderRuntime order = runtime.order(orderId);
-        if (order == null || order.userId() != userId) {
-            throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        }
-        // 当前订单的冻结记录，下单时创建，取消及拒绝时以剩余额度决定释放金额。
-        ReservationRuntime reservation = runtime.reservation(orderId);
-        if (reservation == null) throw new IllegalStateException("rejected order reservation is missing");
-        if (runtime.pendingReservations().pendingReservation(orderId, userId)) {
-            runtime.pendingReservations().completePendingReservation(userId, orderId, coreSequence);
-        }
-        // 订单冻结资产的真实账户余额，下单核对可用额，拒单核对可释放锁定额。
-        BalanceRuntime balance = runtime.balance(userId, reservation.assetId());
-        if (balance == null) throw new IllegalStateException("rejected order balance is missing");
-        // 拒单时仍剩余的冻结金额，正数才从锁定余额移回可用。
-        long releaseUnits = reservation.reservedUnits();
-        if (releaseUnits > 0) {
-            if (balance.lockedUnits() < releaseUnits) throw new IllegalArgumentException("invalid runtime release");
-            runtime.replaceBalance(new BalanceRuntime(userId, reservation.assetId(),
-                    Math.addExact(balance.availableUnits(), releaseUnits), balance.lockedUnits() - releaseUnits));
-        }
-        runtime.replaceOrder(order.withStatus(CoreOrderStatus.REJECTED, Math.incrementExact(order.revision())));
-        runtime.removeReservation(orderId, userId);
-        runtime.advanceUserRevision(userId);
-        runtime.incrementCommandRevision();
-    }
 }

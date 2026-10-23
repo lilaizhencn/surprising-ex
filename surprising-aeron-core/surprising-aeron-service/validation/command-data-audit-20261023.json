@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "累计47项已解决、2项候选（A11/A26）；A25及后续A48/A49已编译验证。公开静态入口新筛出15个待人工审查的方法，完整业务字段/约束消费者审查尚未完成。",
+    "checkpoint": "A50–A52清理16个方法并编译验证。累计50项已解决、A11/A26共2项候选；全部字段与约束业务消费者审查尚未结束。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -3677,6 +3677,216 @@
         "round": "fourth_cleanup_round",
         "change": "删除3个链式死转换；保留真实materialize订单导出和其他业务枚举编码。"
       }
+    },
+    {
+      "id": "A50",
+      "status": "resolved",
+      "analysis_status": "confirmed",
+      "topic": "9个无调用便利或旧业务入口",
+      "evidence_basis_commit": "681c923a8a334650ef8d0ddd568494dbbca51e4c",
+      "evidence": [
+        "4023个生产/测试classfile按所属类、方法名及完整描述符核对，无生产或测试方法引用。",
+        "已逐项读取方法体并区别现用重载；相关类无框架工厂注解，资源配置无这些类的限定名称，已检查相关反射测试的实际目标。"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/order/state/RuntimeOrderStateTransitions",
+          "method": "reject",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;JJJ)V",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeOrderStateTransitions.java",
+          "source_line": 199,
+          "signature": "static void reject(TradingAccountRuntime runtime, long userId, long orderId, long coreSequence)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions",
+          "method": "upsert",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;JLcom/surprising/aeron/protocol/CoreTriggerOrderStateView;)V",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions.java",
+          "source_line": 30,
+          "signature": "public static void upsert(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,\n                       long userId, CoreTriggerOrderStateView view)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/result/CommandResultLedger$StoredResult",
+          "method": "owned",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CommandFingerprint;Lcom/surprising/aeron/protocol/ResponseStatus;Lcom/surprising/aeron/protocol/CoreResultCode;J[B)Lcom/surprising/aeron/service/result/CommandResultLedger$StoredResult;",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLedger.java",
+          "source_line": 653,
+          "signature": "static StoredResult owned(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,\n                                  long appliedCommandCount,\n                                  byte[] responseData)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+          "method": "positionIdentityKey",
+          "descriptor": "(JLjava/lang/String;)J",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java",
+          "source_line": 1056,
+          "signature": "static long positionIdentityKey(long userId, String name)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "method": "validate",
+          "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;)V",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java",
+          "source_line": 232,
+          "signature": "static void validate(long takerOrderId, List<MatcherEvent> matches, TradingAccountRuntime runtime)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/MatcherSettlementPlan",
+          "method": "build",
+          "descriptor": "(JJJ[JLcom/surprising/aeron/service/matcher/MatchingResult;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/settlement/MatcherSettlementPlan;",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+          "source_line": 609,
+          "signature": "public static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,\n                                               long[] initialOrderIds, MatchingResult result,\n                                               TradingAccountRuntime runtime, RuntimeIdentityRegistry identities)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/matcher/CoreMatchingResult",
+          "method": "concatenateEvents",
+          "descriptor": "(Ljava/util/List;Ljava/util/List;)Ljava/util/List;",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/CoreMatchingResult.java",
+          "source_line": 245,
+          "signature": "static List<MatcherResult.MatcherEvent> concatenateEvents(\n            List<MatcherResult.MatcherEvent> first,\n            List<MatcherResult.MatcherEvent> second)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/account/DerivativeAccountCommandProcessor",
+          "method": "updateAccountLeverage",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/model/CoreLeverageKey;IJ)Z",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.java",
+          "source_line": 129,
+          "signature": "static boolean updateAccountLeverage(TradingAccountRuntime runtime, CoreLeverageKey key,\n                                         int symbolId, long leveragePpm)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/treasury/RuntimeFundsDelta",
+          "method": "from",
+          "descriptor": "(Ljava/util/List;)Lcom/surprising/aeron/service/treasury/RuntimeFundsDelta;",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/RuntimeFundsDelta.java",
+          "source_line": 124,
+          "signature": "static RuntimeFundsDelta from(List<Posting> postings)",
+          "production_and_test_callers": []
+        }
+      ],
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "fifth_cleanup_round",
+        "change": "删除旧拒单入口、自动补齐条件单输入、结果拥有工厂、旧持仓键、现货校验重载、默认结算计划构造、事件二段拼接、默认杠杆重载和资金差额列表工厂；实际调用的重载及资金处理保留。"
+      }
+    },
+    {
+      "id": "A51",
+      "status": "resolved",
+      "analysis_status": "confirmed",
+      "topic": "3个无调用快照探测或便利编码入口",
+      "evidence_basis_commit": "681c923a8a334650ef8d0ddd568494dbbca51e4c",
+      "evidence": [
+        "4023个生产/测试classfile按所属类、方法名及完整描述符核对，无生产或测试方法引用。",
+        "已逐项读取方法体并区别现用重载；相关类无框架工厂注解，资源配置无这些类的限定名称，已检查相关反射测试的实际目标。"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec",
+          "method": "isSectioned",
+          "descriptor": "([B)Z",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java",
+          "source_line": 66,
+          "signature": "public static boolean isSectioned(byte[] snapshot)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec",
+          "method": "encode",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingCoreRuntime;Lcom/surprising/aeron/service/matcher/MatcherSnapshot;JJJJ)Lcom/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec$SectionedSnapshot;",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java",
+          "source_line": 92,
+          "signature": "public static SectionedSnapshot encode(\n            TradingCoreRuntime state,\n            MatcherSnapshot matcherSnapshot,\n            long snapshotId,\n            long coreSequence,\n            long clusterTimestamp,\n            long clusterPosition)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotWriter",
+          "method": "encode",
+          "descriptor": "(Lcom/surprising/aeron/service/snapshot/CoreSnapshotImage;)Lcom/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec$SectionedSnapshot;",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotWriter.java",
+          "source_line": 90,
+          "signature": "public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image)",
+          "production_and_test_callers": []
+        }
+      ],
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "fifth_cleanup_round",
+        "change": "删除无调用的魔数探测和两处补默认参数编码入口；当前明确格式校验、带实际尺寸限制的编码、快照恢复及校验和继续保留。"
+      }
+    },
+    {
+      "id": "A52",
+      "status": "resolved",
+      "analysis_status": "confirmed",
+      "topic": "3个无调用冷状态查询/风险入口及其私有转换",
+      "evidence_basis_commit": "681c923a8a334650ef8d0ddd568494dbbca51e4c",
+      "evidence": [
+        "4023个生产/测试classfile按所属类、方法名及完整描述符核对，无生产或测试方法引用。",
+        "已逐项读取方法体并区别现用重载；相关类无框架工厂注解，资源配置无这些类的限定名称，已检查相关反射测试的实际目标。"
+      ],
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/query/state/RuntimeOperationalQueryService",
+          "method": "triggerOrders",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Ljava/lang/Iterable;JLjava/lang/String;Lcom/surprising/aeron/protocol/CoreTriggerOrderStatus;JJZI)Ljava/util/List;",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeOperationalQueryService.java",
+          "source_line": 130,
+          "signature": "public static List<CoreTriggerOrderStateView> triggerOrders(\n            TradingAccountRuntime runtime, Iterable<Long> candidateIds, long userId, String instrumentId,\n            com.surprising.aeron.protocol.CoreTriggerOrderStatus status, long triggerOrderId,\n            long beforeTriggerOrderId, boolean openOnly, int limit)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeRiskStateTransitions",
+          "method": "replaceScan",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Lcom/surprising/aeron/model/CoreRiskState$RiskScan;)V",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeRiskStateTransitions.java",
+          "source_line": 48,
+          "signature": "public static void replaceScan(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,\n                            CoreRiskState.RiskScan scan)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor",
+          "method": "syncScanProgress",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java",
+          "source_line": 207,
+          "signature": "public static void syncScanProgress(TradingCoreState source, TradingAccountRuntime runtime,\n                                        RuntimeIdentityRegistry identities)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor",
+          "method": "toRuntimeScan",
+          "descriptor": "(ILcom/surprising/aeron/model/CoreRiskState$RiskScan;)Lcom/surprising/aeron/service/risk/RiskScanRuntime;",
+          "reason": "唯一调用者syncScanProgress已删除，私有转换不再有读取方。"
+        }
+      ],
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "fifth_cleanup_round",
+        "change": "删除旧候选条件单查询、冷风险扫描替换及同步入口，并删除唯一调用者消失的toRuntimeScan；当前索引查询、Lane扫描、游标及进度写入保留。"
+      }
     }
   ],
   "preserve_verified_purposes": [
@@ -3694,9 +3904,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "逐项核对fourth_cleanup_round.next_static_method_scan的15个方法；属于死代码时继续清理并只编译相关模块。",
-    "继续A11查询一致性和A26现货风险参数下游消费者核查。",
-    "完整字段和业务约束审查仍在继续，不把零引用扫描等同于所有状态均有独立业务必要性。"
+    "A26继续追踪现货注册的保证金/杠杆/风险档/OI字段，从Gateway命令生产到准入、原生注册、查询/同步和快照逐项核对。",
+    "继续无普通调用的实例入口及重复状态/约束扫描；静态方法清单清空不代表系统已审完。",
+    "A11只读查询复制需要保持领导者、提交水位、账户读栅栏和有期限查询会话语义，不能直接删路由。"
   ],
   "rejected_false_positives": [
     {
@@ -5711,6 +5921,266 @@
         "/tmp/aeron-public-audit.py",
         "/tmp/aeron-public-audit.json"
       ],
+      "services_started": false
+    }
+  },
+  "fifth_cleanup_round": {
+    "source_basis_commit": "681c923a8a334650ef8d0ddd568494dbbca51e4c",
+    "resolved_ids": [
+      "A50",
+      "A51",
+      "A52"
+    ],
+    "methods_removed": 16,
+    "java_files_changed": 14,
+    "java_lines_removed": 283,
+    "counts_after_cleanup": {
+      "resolved": 50,
+      "confirmed": 0,
+      "candidate": 2
+    },
+    "verification": {
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "result": "BUILD SUCCESS",
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-aeron-tools",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-maker",
+        "surprising-realtime-api",
+        "surprising-price-provider",
+        "surprising-aeron-benchmarks",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-realtime-provider",
+        "surprising-gateway"
+      ],
+      "duration": "01:01 min",
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "unverified": [
+        "真实交易与做市资金守恒",
+        "正常/拒绝/异常执行路径",
+        "Cluster日志与快照恢复",
+        "数据库与前端交互",
+        "性能"
+      ]
+    },
+    "static_verification": {
+      "pre_delete_methods": [
+        {
+          "owner": "com/surprising/aeron/service/order/state/RuntimeOrderStateTransitions",
+          "method": "reject",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;JJJ)V",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeOrderStateTransitions.java",
+          "source_line": 199,
+          "signature": "static void reject(TradingAccountRuntime runtime, long userId, long orderId, long coreSequence)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions",
+          "method": "upsert",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;JLcom/surprising/aeron/protocol/CoreTriggerOrderStateView;)V",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions.java",
+          "source_line": 30,
+          "signature": "public static void upsert(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,\n                       long userId, CoreTriggerOrderStateView view)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec",
+          "method": "isSectioned",
+          "descriptor": "([B)Z",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java",
+          "source_line": 66,
+          "signature": "public static boolean isSectioned(byte[] snapshot)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec",
+          "method": "encode",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingCoreRuntime;Lcom/surprising/aeron/service/matcher/MatcherSnapshot;JJJJ)Lcom/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec$SectionedSnapshot;",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java",
+          "source_line": 92,
+          "signature": "public static SectionedSnapshot encode(\n            TradingCoreRuntime state,\n            MatcherSnapshot matcherSnapshot,\n            long snapshotId,\n            long coreSequence,\n            long clusterTimestamp,\n            long clusterPosition)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotWriter",
+          "method": "encode",
+          "descriptor": "(Lcom/surprising/aeron/service/snapshot/CoreSnapshotImage;)Lcom/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec$SectionedSnapshot;",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotWriter.java",
+          "source_line": 90,
+          "signature": "public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/result/CommandResultLedger$StoredResult",
+          "method": "owned",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CommandFingerprint;Lcom/surprising/aeron/protocol/ResponseStatus;Lcom/surprising/aeron/protocol/CoreResultCode;J[B)Lcom/surprising/aeron/service/result/CommandResultLedger$StoredResult;",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLedger.java",
+          "source_line": 653,
+          "signature": "static StoredResult owned(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,\n                                  long appliedCommandCount,\n                                  byte[] responseData)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+          "method": "positionIdentityKey",
+          "descriptor": "(JLjava/lang/String;)J",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java",
+          "source_line": 1056,
+          "signature": "static long positionIdentityKey(long userId, String name)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "method": "validate",
+          "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;)V",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java",
+          "source_line": 232,
+          "signature": "static void validate(long takerOrderId, List<MatcherEvent> matches, TradingAccountRuntime runtime)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/MatcherSettlementPlan",
+          "method": "build",
+          "descriptor": "(JJJ[JLcom/surprising/aeron/service/matcher/MatchingResult;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/settlement/MatcherSettlementPlan;",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+          "source_line": 609,
+          "signature": "public static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,\n                                               long[] initialOrderIds, MatchingResult result,\n                                               TradingAccountRuntime runtime, RuntimeIdentityRegistry identities)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/matcher/CoreMatchingResult",
+          "method": "concatenateEvents",
+          "descriptor": "(Ljava/util/List;Ljava/util/List;)Ljava/util/List;",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/CoreMatchingResult.java",
+          "source_line": 245,
+          "signature": "static List<MatcherResult.MatcherEvent> concatenateEvents(\n            List<MatcherResult.MatcherEvent> first,\n            List<MatcherResult.MatcherEvent> second)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/account/DerivativeAccountCommandProcessor",
+          "method": "updateAccountLeverage",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/model/CoreLeverageKey;IJ)Z",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.java",
+          "source_line": 129,
+          "signature": "static boolean updateAccountLeverage(TradingAccountRuntime runtime, CoreLeverageKey key,\n                                         int symbolId, long leveragePpm)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/treasury/RuntimeFundsDelta",
+          "method": "from",
+          "descriptor": "(Ljava/util/List;)Lcom/surprising/aeron/service/treasury/RuntimeFundsDelta;",
+          "flags": 8,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/RuntimeFundsDelta.java",
+          "source_line": 124,
+          "signature": "static RuntimeFundsDelta from(List<Posting> postings)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/query/state/RuntimeOperationalQueryService",
+          "method": "triggerOrders",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Ljava/lang/Iterable;JLjava/lang/String;Lcom/surprising/aeron/protocol/CoreTriggerOrderStatus;JJZI)Ljava/util/List;",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeOperationalQueryService.java",
+          "source_line": 130,
+          "signature": "public static List<CoreTriggerOrderStateView> triggerOrders(\n            TradingAccountRuntime runtime, Iterable<Long> candidateIds, long userId, String instrumentId,\n            com.surprising.aeron.protocol.CoreTriggerOrderStatus status, long triggerOrderId,\n            long beforeTriggerOrderId, boolean openOnly, int limit)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeRiskStateTransitions",
+          "method": "replaceScan",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Lcom/surprising/aeron/model/CoreRiskState$RiskScan;)V",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeRiskStateTransitions.java",
+          "source_line": 48,
+          "signature": "public static void replaceScan(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,\n                            CoreRiskState.RiskScan scan)",
+          "production_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor",
+          "method": "syncScanProgress",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+          "flags": 9,
+          "source_file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java",
+          "source_line": 207,
+          "signature": "public static void syncScanProgress(TradingCoreState source, TradingAccountRuntime runtime,\n                                        RuntimeIdentityRegistry identities)",
+          "production_and_test_callers": []
+        }
+      ],
+      "post_cleanup_scan": {
+        "class_files": 4023,
+        "removed_methods_verified": 16,
+        "remaining_non_generated_unreferenced_static_methods": []
+      },
+      "java_sources_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.java": "3cfcc8ff5c4f51506c2840b163dd69d7ba58de25063906e78cd1e00abe615b4e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java": "9868c1178e0214f0283ef9517b42692a7b1a7a7401ca79af5ccc3a1c99134db3",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/CoreMatchingResult.java": "0cf9baf5f5e57f5bc7f308c7ca97135e5eabd0f2babc6244f94c3d872d45884e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeOrderStateTransitions.java": "4669aaf9e7a11bfb153cc4b9ec6a0ebc79bc4499b1fad99a5c805dafba8b541c",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions.java": "f786827a5ae592a42252105028beb06b1aeebe126ebb5d1e52c37df486f90037",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeOperationalQueryService.java": "31099174239fc3aeb36e9557f246184c165d0d8b50bf67a1d8ca3fd80f68351f",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLedger.java": "6f540738a88bea27404716743d37a13d0b36cb293a0c215b0032d37b8078367e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java": "ef4bbde5ec815769dd01d8765595bd0aecf43168efe76a071968ac1a4de75936",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeRiskStateTransitions.java": "9a00f2b6f1a902b3308ef7afb101a725d2eadc9ca373034a1307432a2190a4e3",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java": "d8815d66ce9c0cb184dddb046c9beee80425eea712a57a98f87a95ed88d9ae84",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java": "f81aa3d05365ab6173cde1c05378e14d5822101d08c90f249919ec9783c7f22e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java": "16b17e1ed0453dec627af8cdd08749f26e0af1329f208a635a9208fbec7a9a91",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotWriter.java": "037f489cffc0fcfe6876d8c9cd1278bdbf7495eb161ea4e782612388c8bcdb9c",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/RuntimeFundsDelta.java": "10f73bc53e76aab82f3d65ab36d6ae07ed2580595c2725d12a2b38d811445188"
+      },
+      "config_resource_fqn_matches": 0,
+      "selected_method_framework_factory_annotations": 0,
+      "reflection_notes": [
+        "CoreResultLedgerTest反射storeResult而非被删owned工厂。",
+        "RuntimeIdentityRegistryTest反射deterministicKey，保留。",
+        "CoreOrderedOrderBatchTest的通用反射调用辅助当前本身无调用，未把它视为被删静态入口的消费者。"
+      ]
+    },
+    "versions_unchanged": {
+      "core_schema": 11,
+      "trading_state_snapshot": 41,
+      "sectioned_snapshot": 29
+    },
+    "limits": [
+      "无引用手写静态方法为零不能证明所有实例字段、公开实例入口或业务约束都有必要。",
+      "按用户要求只编译，未运行测试、服务或性能采样。"
+    ],
+    "temporary_resources": {
+      "status": "removed_after_evidence_archived",
+      "removed_files": [
+        "/tmp/aeron-next-config-patterns.txt",
+        "/tmp/aeron-next-selected.json",
+        "/tmp/aeron-next-codegraph.log",
+        "/tmp/aeron-next-post-scan.json",
+        "/tmp/aeron-next-removed.json",
+        "/tmp/aeron-next-compile.log",
+        "/tmp/aeron-next-audit.py",
+        "/tmp/__pycache__/aeron-next-audit.cpython-311.pyc"
+      ],
+      "persistent_codegraph_index": "retained",
       "services_started": false
     }
   }

@@ -4,13 +4,11 @@ import com.surprising.aeron.model.CoreAlgoOrderState;
 import com.surprising.aeron.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.model.CoreCancelAllAfterState;
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.protocol.CoreCancelAllAfterView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.CoreTreasuryAssetView;
-import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -113,42 +111,6 @@ public final class RuntimeOperationalQueryService {
                 ? new CoreSettlementProgressView(treasury.lifecycleSettlement(symbolId), true, true, 0, 0, 0, 0)
                 : new CoreSettlementProgressView(progress.settlementId(), false, progress.ordersComplete(),
                 progress.nextCursorOrderId(), progress.nextCursorUserId(), 0, 0, progress.requiredInsuranceUnits());
-    }
-
-    /**
-     * 按候选输入顺序过滤用户、指定单号、币对、状态及开放状态；非指定单号查询还限制 before 游标。遇空编号、扫描上限或已满足条数就结束，不在这里重排候选。
-     * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
-     * @param candidateIds 已经按所需分页顺序准备的条件单候选编号，结果沿该顺序返回
-     * @param userId 需要匹配的用户编号，0 表示不限定用户
-     * @param instrumentId 要查询进度的外部币对编号，条件单过滤中空值或空串表示不限定
-     * @param status 需要匹配的条件单状态，null 表示不限状态
-     * @param triggerOrderId 需要精确查询的条件单编号，0 表示使用分页过滤
-     * @param beforeTriggerOrderId 分页只接收严格小于该编号的条件单，精确单号查询时忽略
-     * @param openOnly 是否只保留协议状态判定仍开放的条件单
-     * @param limit 本次希望返回的最多条件单条数，调用方应先校验为合法正数
-     */
-    public static List<CoreTriggerOrderStateView> triggerOrders(
-            TradingAccountRuntime runtime, Iterable<Long> candidateIds, long userId, String instrumentId,
-            com.surprising.aeron.protocol.CoreTriggerOrderStatus status, long triggerOrderId,
-            long beforeTriggerOrderId, boolean openOnly, int limit) {
-        // 本次入口逐项组装的协议查询视图，达到其结果上限就停止。
-        ArrayList<CoreTriggerOrderStateView> result = new ArrayList<>(Math.min(limit, 256));
-        // 本次已检查的非空候选数量，按入口规则超限时停止或抛响应过大异常。
-        int scanned = 0;
-        for (Long /* 本轮需要读取的条件单候选编号，空编号使这一段候选遍历结束。 */ id : candidateIds) {
-            if (id == null || ++scanned > MAX_INDEX_SCAN) break;
-            // 实际读取到的条件单记录，要通过用户、币对、状态及分页过滤才加入结果。
-            CoreTriggerOrderState order = runtime.triggerOrder(id);
-            if (order == null || userId != 0 && order.userId() != userId
-                    || triggerOrderId != 0 && order.triggerOrderId() != triggerOrderId
-                    || instrumentId != null && !instrumentId.isEmpty() && !order.instrumentId().equalsIgnoreCase(instrumentId)
-                    || status != null && order.status() != status
-                    || triggerOrderId == 0 && order.triggerOrderId() >= beforeTriggerOrderId
-                    || openOnly && !order.status().open()) continue;
-            result.add(order.view());
-            if (result.size() == limit) break;
-        }
-        return List.copyOf(result);
     }
 
     /**
