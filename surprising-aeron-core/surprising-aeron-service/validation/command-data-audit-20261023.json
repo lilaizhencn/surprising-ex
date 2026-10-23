@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第二十轮：A91–A94重复冷决策和无用测试约束/参数清理，17模块干净及最终增量编译通过；累计93项解决，A11/A95两项候选。Core16/registerV10/snapshot48，全量审查继续。",
+    "checkpoint": "第二十一轮：热订单历史剩余量改为派生，实例字段36→35；17模块干净编译通过。累计94项解决，A95/A97两项确认，A11一项候选。Core16/registerV10/snapshot48，全量审查继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -5837,8 +5837,8 @@
     },
     {
       "id": "A95",
-      "status": "candidate",
-      "analysis_status": "candidate",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
       "topic": "普通订单原请求价与撮合价可能重复保存，尚需核对控制单与全生命周期",
       "fields": [
         "CoreOrderState.priceTicks/matchingPriceTicks",
@@ -5854,7 +5854,50 @@
         }
       ],
       "business_code_changed": false,
-      "proposed_cleanup": "逐一审查所有构造、热更新/改单、内部控制订单、查询/实时展示、哈希和恢复。只有证明现有有效状态全部可等价推导后，才删除重复存储及快照槽，不放宽原价格保护或冻结价格。"
+      "proposed_cleanup": "逐一审查所有构造、热更新/改单、内部控制订单、查询/实时展示、哈希和恢复。只有证明现有有效状态全部可等价推导后，才删除重复存储及快照槽，不放宽原价格保护或冻结价格。",
+      "additional_analysis_round": "twenty_first_cleanup_round",
+      "additional_evidence": "普通创建/池化初始化和改单均使用同一价格决策；三种已决策子类不覆盖价格getter，PlaceAdmissionEvent.resolve仅原样绑定。强平直接结算持仓/资金，不制造具有另一请求价的普通订单。实际业务哈希/查询/实时通过priceTicks()读取，可按产品与类型推导。"
+    },
+    {
+      "id": "A96",
+      "status": "resolved",
+      "analysis_status": "resolved",
+      "topic": "热订单独立保存可由总量和成交量推导的历史剩余数量",
+      "fields": [
+        "OrderRuntime.remainingQuantitySteps字段",
+        "构造/复制/准入/发布/成交五处冗余写入"
+      ],
+      "evidence_basis_commit": "aadfc65955b941e155db7e0d262dfb4b64392f37",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java",
+          "anchor": "Math.addExact(executedQuantitySteps, remainingQuantitySteps) != quantitySteps",
+          "purpose": "完整构造、发布原位更新和成交原位更新都要求非负数量精确和等于总量；准入初始成交零，复制/恢复只搬运同一守恒事实。没有独立修改剩余量的业务操作。"
+        }
+      ],
+      "business_code_changed": true,
+      "resolved_in_round": "twenty_first_cleanup_round",
+      "implementation": "删独立字段和五处写入，保留同名getter以Math.subtractExact计算；保留全部原构造/方法签名、传入数量守恒、费用溢出及元数据边界，复制/回滚/池生命周期和诊断剩余值不变。"
+    },
+    {
+      "id": "A97",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "热订单两个默认值构造无调用且与当前完整构造重复",
+      "fields": [
+        "OrderRuntime 25参单价格默认费用构造",
+        "OrderRuntime 26参双价格默认费用构造"
+      ],
+      "evidence_basis_commit": "aadfc65955b941e155db7e0d262dfb4b64392f37",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java",
+          "anchor": "public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,",
+          "purpose": "全部可见classfile按完整owner/构造描述符没有这两个入口的调用；2218个Java源文件的63处冷/热直接构造也不使用25/26参热构造。真实使用的27/29参完整构造、17/18参夹具构造及内部空存储/冻结构造保留。"
+        }
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "删除这两个无调用默认值重载，随后按A95收窄真正使用的完整价格构造，避免为同一字段保留重复转传契约。"
     }
   ],
   "preserve_verified_purposes": [
@@ -5872,9 +5915,10 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "沿A95核对原请求价与撮合价，覆盖内部控制、更新、展示和恢复，证明等价前保留字段。",
-    "保持A11查询一致性和已有资金/顺序/恢复边界。",
-    "继续下一轮业务字段与约束扫描；只编译相关模块，不运行测试、服务或性能。"
+    "按A95清理冷/热订单请求价重复存储与快照字段6，保留实际撮合/预留价格及公开getter。",
+    "删除A97两个无调用默认值构造；保持A11查询一致性。",
+    "全部业务字段/约束及运行恢复功能审查仍未完成。",
+    "只编译相关模块，不运行测试、服务或性能。"
   ],
   "rejected_false_positives": [
     {
@@ -6171,24 +6215,24 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "d88bbe4b5b3e6620dd57151538516da69a6f36f2",
+    "source_basis_commit": "aadfc65955b941e155db7e0d262dfb4b64392f37",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A91",
-      "A92",
-      "A93",
-      "A94"
+      "A96"
     ],
-    "new_confirmed_ids": [],
+    "new_confirmed_ids": [
+      "A95",
+      "A97"
+    ],
     "candidate_ids": [
-      "A11",
-      "A95"
+      "A11"
     ],
     "counts": {
-      "resolved": 93,
-      "candidate": 2
+      "resolved": 94,
+      "candidate": 1,
+      "confirmed": 2
     },
-    "evidence": "twentieth_cleanup_round",
+    "evidence": "twenty_first_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -18469,6 +18513,234 @@
         "/tmp/aeron-decision-cleanup-20261024-unused-order-sites.json": "f8c2a13cab87364860a4985dceedb1cc79807a8fd8840d585eee43e606bfc4e3",
         "/tmp/aeron-decision-cleanup-20261024-callers-before.json": "0173fe06e76f40593cc367f1d28ff398af6608992a9b56c663629cf0491d8f35",
         "/tmp/__pycache__/aeron-decision-cleanup-20261024-inventory.cpython-311.pyc": "ea27794072ebfe4eb8e03bb67b511470b79290209fc61c8124bc2d358c627346"
+      },
+      "errors": [],
+      "no_task_services_started": true
+    }
+  },
+  "twenty_first_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "aadfc65955b941e155db7e0d262dfb4b64392f37",
+    "resolved_ids": [
+      "A96"
+    ],
+    "new_confirmed_ids": [
+      "A95",
+      "A97"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 94,
+      "candidate": 1,
+      "confirmed": 2
+    },
+    "flow": "订单命令仍由原运行时决策及准入；热状态保存总量和累计成交量，历史剩余量按守恒推导。Matcher、冻结、对外读取与冷化/恢复保留原入口。",
+    "implementation": {
+      "removed_instance_fields": 1,
+      "removed_redundant_field_writes": 5,
+      "instance_fields_before": 36,
+      "instance_fields_after": 35,
+      "constructors_and_method_signatures_changed": false,
+      "test_sources_changed": false,
+      "new_test_classes": 0,
+      "wire_or_snapshot_layout_changed": false
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 48,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4
+    },
+    "verification": {
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "disk_available_before_build": "185GiB",
+      "clean": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "49.782 s",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-aeron-tools",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-maker",
+          "surprising-realtime-api",
+          "surprising-price-provider",
+          "surprising-aeron-benchmarks",
+          "surprising-derivatives-lifecycle-api",
+          "surprising-realtime-provider",
+          "surprising-gateway"
+        ],
+        "log_sha256": "d05cddc6cd0f4cf1df1a515974c3423bac4dab5218590188bbf37a8147b65b40"
+      },
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "unverified": [
+        "测试实际执行",
+        "真实交易正常/拒绝/异常路径",
+        "做市/资金/持仓/终态和资金守恒运行核对",
+        "Cluster日志/快照恢复运行",
+        "真实查询、数据库和前端交互",
+        "性能"
+      ]
+    },
+    "static_verification": {
+      "status": "passed",
+      "source_basis_commit": "aadfc65955b941e155db7e0d262dfb4b64392f37",
+      "removed_hot_remaining_quantity_field": true,
+      "removed_field_writes": 5,
+      "retained_constructor_and_update_signatures": true,
+      "quantity_guards_unchanged": true,
+      "fee_arithmetic_and_commit_metadata_unchanged": true,
+      "derived_getter": "Math.subtractExact(quantitySteps, executedQuantitySteps)",
+      "value_hash_and_diagnostic_keep_same_remaining_value": true,
+      "copy_restore_and_pool_lifecycle_preserved": true,
+      "source_sha256": "bbd138c35e8cf545a6361404876bae5f621ff9e034e332e83d9da7d3ff85f01b",
+      "java_business_execution": false
+    },
+    "binary_post_verification": {
+      "status": "passed",
+      "instance_fields_before": 36,
+      "instance_fields_after": 35,
+      "only_removed_field": "remainingQuantitySteps",
+      "constructor_and_method_descriptors_unchanged": true,
+      "removed_field_references": 0,
+      "all_available_classfiles_scanned": 4025,
+      "fresh_reactor_class_counts": {
+        "classes": 3004,
+        "test-classes": 860
+      },
+      "getter_bytecode": "public long remainingQuantitySteps();\n    Code:\n         0: aload_0\n         1: getfield      #80                 // Field quantitySteps:J\n         4: aload_0\n         5: getfield      #83                 // Field executedQuantitySteps:J\n         8: invokestatic  #169                // Method java/lang/Math.subtractExact:(JJ)J\n        11: lreturn",
+      "java_business_execution": false
+    },
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java": "bbd138c35e8cf545a6361404876bae5f621ff9e034e332e83d9da7d3ff85f01b"
+    },
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "96b6827a2053aa9933da7b2652a8b9aa66b994f21b567a60e5ab70f44e7f4aa1"
+    },
+    "followup_analysis": {
+      "status": "source_analysis_completed_followup_implementation_pending",
+      "price_finding": "A95",
+      "normal_price_relation": "现货或LIMIT:请求价=撮合价；其余产品MARKET:请求价=0，撮合价为正保护边界。",
+      "authoritative_order_creation": [
+        "TradingAccountRuntime.preparedOrder",
+        "OrderRuntime.initializeAdmission由prepareCommandOrder/preparePooled共用",
+        "RuntimeStateProjector.toRuntimeOrder恢复"
+      ],
+      "price_write_sites": "构造、copyStateTo与initializeAdmission三处；成交/发布/提交元数据不修改价格。",
+      "replacement": "ReplacementAdmissionEvent.execute和原同步改单路径补意图后进入同一正式决策。",
+      "resolved_subclasses": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/BatchPlaceReservation.java",
+          "name": "BatchPlaceReservation",
+          "overrides": [],
+          "resolve_methods": []
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/PlaceAdmissionEvent.java",
+          "name": "PlaceAdmissionEvent",
+          "overrides": [],
+          "resolve_methods": [
+            {
+              "name": "resolve",
+              "descriptor": "(Lcom/surprising/aeron/protocol/PlaceOrderCommand;Lcom/surprising/aeron/service/instrument/CoreInstrument;IJJJJJLcom/surprising/aeron/protocol/ReservationKind;Ljava/lang/String;JJ)V",
+              "flags": 1
+            }
+          ]
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/ReplacementAdmissionEvent.java",
+          "name": "ReplacementAdmissionEvent",
+          "overrides": [],
+          "resolve_methods": []
+        }
+      ],
+      "no_resolved_price_getter_overrides": true,
+      "place_admission_resolve_override": "PlaceAdmissionEvent.resolve原样转交initializeResolvedOrder，避免清理Owner预绑定路由，不改价格和类型。",
+      "liquidation": "RuntimeDerivativeLiquidationProcessor.executeAccountLiquidation直接推进现金/持仓/强平记录，不创建普通市价订单；取消部分读取并撤销已有订单。",
+      "external_contract": "查询/实时/结果与业务哈希读取priceTicks()，可保留getter按现有产品/类型关系派生，保护价和预留价不删除。",
+      "unused_runtime_constructors": [
+        {
+          "arity": 25,
+          "descriptor": "(JLcom/surprising/product/api/ProductLine;JILcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/protocol/CoreOrderSide;JJJJZLcom/surprising/aeron/protocol/CoreMarginMode;Lcom/surprising/aeron/protocol/CorePositionSide;Lcom/surprising/aeron/protocol/CoreOrderType;Lcom/surprising/aeron/protocol/CoreTimeInForce;ZLjava/lang/String;Ljava/util/UUID;JJJJJLcom/surprising/aeron/model/CoreOrderStatus;J)V",
+          "references": 0
+        },
+        {
+          "arity": 26,
+          "descriptor": "(JLcom/surprising/product/api/ProductLine;JILcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/protocol/CoreOrderSide;JJJJJZLcom/surprising/aeron/protocol/CoreMarginMode;Lcom/surprising/aeron/protocol/CorePositionSide;Lcom/surprising/aeron/protocol/CoreOrderType;Lcom/surprising/aeron/protocol/CoreTimeInForce;ZLjava/lang/String;Ljava/util/UUID;JJJJJLcom/surprising/aeron/model/CoreOrderStatus;J)V",
+          "references": 0
+        }
+      ],
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java": "5750206b0cb167171b38977c85bbe44ba2160606a2e5d337401b6437335b0e34",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/ResolvedPlaceOrder.java": "e6417cacb8ef62168452808fe25494b00283ec336fc4a559fc855da2bae2c208",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/PlaceAdmissionEvent.java": "7a13f5ae7631b4976b335d6ac762151cd4c38a198abd609ea7cb0fd5949cd3c5",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/ReplacementAdmissionEvent.java": "6d5641ee4693855af41d1d00887f60bf43be0efca36f2c6bbae39e742e52ef8b",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/BatchPlaceReservation.java": "dc58cad230798447d6000829f7ff497689f47353a9dafab07faefc26b35c4509",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java": "f929e2c3e287998462b16b0c31854bf029a56d4a8a1b65394050d2235cfbdd43",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "65ea1aa2d73da6182537acefb7779388712fee258f45b69e6b5597539a7fab9a",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "d52f7bd8e8da25ab78f28e27d8b321d3da184b5cd0f2506f1f8e1a2aa63ca833"
+      },
+      "required_next_implementation_checks": [
+        "完整构造同时显式接收两个价格的签名要收窄；两个无调用25/26参默认值重载可删除。",
+        "同步普通订单冷/热记录、复制/池、快照字段6读写与版本，保留getter和业务哈希数据。",
+        "重新编译全部相关模块并审查当前快照布局；不增加旧格式读取层。"
+      ],
+      "java_business_execution": false
+    },
+    "constructor_inventory": {
+      "java_files": 2218,
+      "constructor_sites": 63,
+      "types": {
+        "OrderRuntime": 28,
+        "CoreOrderState": 35
+      },
+      "source_basis_commit": "aadfc65955b941e155db7e0d262dfb4b64392f37"
+    },
+    "graph_verification": {
+      "command": "codegraph sync -q; codegraph status",
+      "exit_code": 0,
+      "status": "up_to_date",
+      "files": 2241,
+      "nodes": 52635,
+      "edges": 150789,
+      "mcp_tools_available": false
+    },
+    "remaining_scope": [
+      "按A95清理冷/热订单请求价重复存储与快照字段6，保留实际撮合/预留价格及公开getter。",
+      "删除A97两个无调用默认值构造；保持A11查询一致性。",
+      "全部业务字段/约束及运行恢复功能审查仍未完成。"
+    ],
+    "temporary_resources": {
+      "status": "removed_after_archival",
+      "owned_file_hashes": {
+        "/tmp/aeron-hot-order-remainder-20261024-static.json": "beb6dbd584532096a1994933ec47f69d835da53b103755e5c40750619b25aba3",
+        "/tmp/aeron-hot-order-remainder-20261024-build.log": "d05cddc6cd0f4cf1df1a515974c3423bac4dab5218590188bbf37a8147b65b40",
+        "/tmp/aeron-hot-order-remainder-20261024-static.py": "b0eefb6f225783c4fe8da076eefdf53e389b2890cf0a770be108cf55bdb52138",
+        "/tmp/aeron-hot-order-remainder-20261024-graph.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/aeron-hot-order-remainder-20261024-binary.json": "9568e0f81e90cf78c8bcd8a81899f77e5b85360a688e9d2253345254b71ad22e",
+        "/tmp/aeron-hot-order-remainder-20261024-binary.py": "255083e49b2dc58f3f1b48e60bba26f7551991b402edf6f91c3e12dea525db5d",
+        "/tmp/aeron-order-price-audit-20261024-control.json": "2630d49a0866f0e2d420425b7f0ca4b8af74eda3b2b43eaa12a0fb16b0dbe34f",
+        "/tmp/aeron-order-price-audit-20261024-inventory.py": "50a289de6feee8185b0091b87a3ee80db9129b73332215a6a3899d75c301e262",
+        "/tmp/aeron-order-price-audit-20261024-classrefs.json": "8c2de83dc3769c56ab8a645d37ba6545fa26a3b8ddad9bd6dacd5f66f177aa5b",
+        "/tmp/aeron-order-price-audit-20261024-sites.json": "8dcd235fc09e98fc8acadc27f6ffcbd1cca52a9cae96e8dee1dd99e875aab01f",
+        "/tmp/aeron-order-price-audit-20261024-classrefs.py": "c9da0a4d97d16deb561e7bf17883ea95e2a8e593946bd5e464210ace9cfecda6",
+        "/tmp/aeron-order-price-audit-20261024-followup.py": "7551e00f72e63c670e2a9558a69fff37217c14ce9406f5e11e38dd5df1888fcf",
+        "/tmp/aeron-order-price-audit-20261024-followup.json": "fe7f21bec46ef129cc6bbea7bebe7bb7923d76b5c09c475a063b6a87916cc14f",
+        "/tmp/__pycache__/aeron-order-price-audit-20261024-inventory.cpython-311.pyc": "0cdead4962407809878560fbe1f72a962aac263fd390b66e713df8d23f0b5c3e",
+        "/tmp/__pycache__/aeron-order-price-audit-20261024-classrefs.cpython-311.pyc": "143f4dd20af5a617c93fe26289f7b351adaad775b39afee3479a459ed66a4f7d"
       },
       "errors": [],
       "no_task_services_started": true

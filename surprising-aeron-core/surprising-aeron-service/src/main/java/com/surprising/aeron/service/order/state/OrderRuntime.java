@@ -60,10 +60,6 @@ public final class OrderRuntime {
     @Accessors(fluent = true, chain = false)
     @Getter
     private long executedQuantitySteps;
-    /** 仍未成交的数量步数，撤销后也可保留未成交数量。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long remainingQuantitySteps;
     /** 是否只允许减少已有持仓。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -244,7 +240,6 @@ public final class OrderRuntime {
         this.matchingPriceTicks = matchingPriceTicks;
         this.quantitySteps = quantitySteps;
         this.executedQuantitySteps = executedQuantitySteps;
-        this.remainingQuantitySteps = remainingQuantitySteps;
         this.reduceOnly = reduceOnly;
         this.marginMode = marginMode;
         this.positionSide = positionSide;
@@ -470,6 +465,11 @@ public final class OrderRuntime {
                 canceled ? CoreOrderStatus.CANCELED : CoreOrderStatus.OPEN, 1);
     }
 
+    /** 返回总量减累计成交量的历史未成交数量，撤销后仍保留；不另存副本。 */
+    public long remainingQuantitySteps() {
+        return Math.subtractExact(quantitySteps, executedQuantitySteps);
+    }
+
     /**
      * 名称沿用 canceled，但实际返回 status.terminal：已成交、已拒绝或其他终态也会返回 true。
      */
@@ -481,7 +481,7 @@ public final class OrderRuntime {
     public OrderRuntime snapshot() {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
                 priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps,
-                remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce,
+                remainingQuantitySteps(), reduceOnly, marginMode, positionSide, orderType, timeInForce,
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition,
                 status, revision, false);
@@ -508,7 +508,7 @@ public final class OrderRuntime {
      */
     public void requireFrozenMatcherInput(long userId) {
         if (mutable || this.userId != userId || orderId <= 0 || instrument == null
-                || remainingQuantitySteps <= 0 || matchingPriceTicks <= 0)
+                || remainingQuantitySteps() <= 0 || matchingPriceTicks <= 0)
             throw new IllegalArgumentException("matcher requires a frozen order with remaining quantity for this user");
     }
 
@@ -548,7 +548,6 @@ public final class OrderRuntime {
         target.makerFeeRatePpm = makerFeeRatePpm;
         target.takerFeeRatePpm = takerFeeRatePpm;
         target.executedQuantitySteps = executedQuantitySteps;
-        target.remainingQuantitySteps = remainingQuantitySteps;
         target.cumulativeFeeUnits = cumulativeFeeUnits;
         target.executedValueHigh = executedValueHigh;
         target.executedValueLow = executedValueLow;
@@ -660,7 +659,7 @@ public final class OrderRuntime {
         target.orderId = intent.orderId(); target.productLine = product; target.userId = userId;
         target.symbolId = symbolId; target.instrument = intent.instrument(); target.side = intent.side();
         target.priceTicks = intent.limitPriceTicks(); target.matchingPriceTicks = intent.matchingPriceTicks();
-        target.quantitySteps = target.remainingQuantitySteps = intent.quantitySteps();
+        target.quantitySteps = intent.quantitySteps();
         target.executedQuantitySteps = target.cumulativeFeeUnits = target.executedValueHigh = target.executedValueLow = 0;
         target.reduceOnly = intent.reduceOnly(); target.marginMode = intent.marginMode(); target.positionSide = intent.positionSide();
         target.orderType = intent.orderType(); target.timeInForce = intent.timeInForce(); target.postOnly = intent.postOnly();
@@ -725,7 +724,7 @@ public final class OrderRuntime {
      */
     private OrderRuntime mutableCopy() {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
-                priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
+                priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps(),
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
                 makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis,
                 clusterPosition, status, revision);
@@ -761,7 +760,6 @@ public final class OrderRuntime {
             throw new IllegalStateException("invalid published order state");
         }
         executedQuantitySteps = executed;
-        remainingQuantitySteps = remaining;
         cumulativeFeeUnits = cumulativeFee;
         executedValueHigh = valueHigh;
         executedValueLow = valueLow;
@@ -791,7 +789,6 @@ public final class OrderRuntime {
             throw new IllegalArgumentException("invalid runtime order execution");
         }
         executedQuantitySteps = executed;
-        remainingQuantitySteps = remaining;
         cumulativeFeeUnits = Math.addExact(cumulativeFeeUnits, feeUnits);
         if (commitTimestamp >= 0) {
             if (createdAtEpochMillis == 0) createdAtEpochMillis = commitTimestamp;
@@ -811,7 +808,7 @@ public final class OrderRuntime {
      */
     public void applyStatusInPlace(CoreOrderStatus nextStatus, long nextRevision,
                             long commitTimestamp, long commitPosition) {
-        applyFillInPlace(executedQuantitySteps, remainingQuantitySteps, 0,
+        applyFillInPlace(executedQuantitySteps, remainingQuantitySteps(), 0,
                 nextStatus, nextRevision, commitTimestamp, commitPosition);
     }
 
@@ -906,7 +903,7 @@ public final class OrderRuntime {
      * @param nextRevision 本次推进到的正数订单版本
      */
     public OrderRuntime withStatus(CoreOrderStatus nextStatus, long nextRevision) {
-        return withExecution(executedQuantitySteps, remainingQuantitySteps, nextStatus, nextRevision);
+        return withExecution(executedQuantitySteps, remainingQuantitySteps(), nextStatus, nextRevision);
     }
 
     /**
@@ -918,7 +915,7 @@ public final class OrderRuntime {
      */
     public OrderRuntime withStatus(CoreOrderStatus nextStatus, long nextRevision,
                             long commitTimestamp, long commitPosition) {
-        return withFill(executedQuantitySteps, remainingQuantitySteps, 0, nextStatus, nextRevision,
+        return withFill(executedQuantitySteps, remainingQuantitySteps(), 0, nextStatus, nextRevision,
                 commitTimestamp, commitPosition);
     }
 
@@ -930,7 +927,7 @@ public final class OrderRuntime {
     public OrderRuntime withCommitMetadata(long timestamp, long position) {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
                 priceTicks, matchingPriceTicks, quantitySteps, executedQuantitySteps,
-                remainingQuantitySteps, reduceOnly, marginMode, positionSide, orderType, timeInForce,
+                remainingQuantitySteps(), reduceOnly, marginMode, positionSide, orderType, timeInForce,
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis == 0 ? timestamp : createdAtEpochMillis,
                 timestamp, position, status, revision);
@@ -948,7 +945,7 @@ public final class OrderRuntime {
                 && instrument == value.instrument && priceTicks == value.priceTicks
                 && matchingPriceTicks == value.matchingPriceTicks && quantitySteps == value.quantitySteps
                 && executedQuantitySteps == value.executedQuantitySteps
-                && remainingQuantitySteps == value.remainingQuantitySteps && reduceOnly == value.reduceOnly
+                && reduceOnly == value.reduceOnly
                 && postOnly == value.postOnly && makerFeeRatePpm == value.makerFeeRatePpm
                 && takerFeeRatePpm == value.takerFeeRatePpm && cumulativeFeeUnits == value.cumulativeFeeUnits
                 && executedValueHigh == value.executedValueHigh && executedValueLow == value.executedValueLow
@@ -966,7 +963,7 @@ public final class OrderRuntime {
     @Override
     public int hashCode() {
         return Objects.hash(orderId, productLine, userId, symbolId, System.identityHashCode(instrument), side, priceTicks,
-                matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps,
+                matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps(),
                 reduceOnly, marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId,
                 commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis,
                 updatedAtEpochMillis, clusterPosition, status, revision);
@@ -981,7 +978,7 @@ public final class OrderRuntime {
                 + ", symbolId=" + symbolId + ", instrument=" + instrument + ", side=" + side
                 + ", priceTicks=" + priceTicks + ", matchingPriceTicks=" + matchingPriceTicks
                 + ", quantitySteps=" + quantitySteps + ", executedQuantitySteps=" + executedQuantitySteps
-                + ", remainingQuantitySteps=" + remainingQuantitySteps + ", status=" + status
+                + ", remainingQuantitySteps=" + remainingQuantitySteps() + ", status=" + status
                 + ", revision=" + revision + "]";
     }
 }
