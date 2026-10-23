@@ -35,7 +35,7 @@ import java.util.Map;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/** 把已解码的交易状态装回可变运行时的恢复入口。按原身份表还原用户、余额、预留、持仓、财库、风险及订单，再绑定并重建业务索引和账户哈希；完成后清除本次装载变化并释放线程归属，交给后续运行线程接管。这里只恢复内存，不负责读取快照字节或启动 Cluster。 构造约定：工具类仅提供恢复转换，不创建实例。 */
+/** 把已解码的交易状态装回可变运行时的恢复入口。按原身份表还原用户、余额、预留、持仓、财库、风险及订单，再创建并绑定已完成重建的业务索引，重建账户哈希；完成后清除本次装载变化并释放线程归属，交给后续运行线程接管。这里只恢复内存，不负责读取快照字节或启动 Cluster。 构造约定：工具类仅提供恢复转换，不创建实例。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeStateProjector {
 
@@ -160,7 +160,7 @@ public final class RuntimeStateProjector {
         // 按币对和账户 Lane 查持仓用户的可重建索引。
         PositionUserIndex positionUserIndex = new PositionUserIndex(source, identities, topology);
         // 按币对汇总未平仓数量的可重建索引。
-        OpenInterestIndex openInterestIndex = new OpenInterestIndex(source, identities);
+        OpenInterestIndex openInterestIndex = new OpenInterestIndex(source);
         // 待触发订单及触发条件的可重建索引。
         TriggerOrderIndex triggerOrderIndex = new TriggerOrderIndex(source);
         // 算法订单查询与推进使用的可重建索引。
@@ -173,12 +173,11 @@ public final class RuntimeStateProjector {
         ActiveOrderIndex activeOrderIndex = new ActiveOrderIndex(source, identities);
         // 供自动减仓查找持仓候选的可重建索引。
         AdlPositionIndex adlPositionIndex = new AdlPositionIndex(source, identities);
-        // 上述原有业务索引的组合，绑定原运行时后再统一重建。
+        // 各索引已在构造时完成恢复，组合后直接绑定原运行时。
         RuntimeFactIndexes factIndexes = new RuntimeFactIndexes(
                 positionUserIndex, openInterestIndex, triggerOrderIndex, algoOrderIndex,
                 liquidationIndex, cancelAllAfterIndex, activeOrderIndex, adlPositionIndex);
         runtime.bindFactIndexes(factIndexes, identities);
-        factIndexes.rebuild(source, identities);
         runtime.rebuildAccountLaneHashes();
         runtime.clearChangedKeys();
         runtime.releaseOwnerForHandoff();

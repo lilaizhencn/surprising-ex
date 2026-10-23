@@ -1077,7 +1077,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param commandId 逻辑命令 UUID
      * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
      * @param sequence 预先分配的证据分片业务序号
      * @param matcherShardId 业务证据分片号，负一表示控制分片
      * @param result 当前原生或普通撮合结果，方法签名决定具体类型
@@ -1086,7 +1085,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long aeronTimestamp,
             long sequence,
             int matcherShardId,
             CoreMatchingResult result) {
@@ -1102,8 +1100,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             throw new IllegalStateException("native matcher result crossed its evidence partition");
         // 控制证据可串联不同订单簿，native sequence 仍必须在原生引擎自己的序列内严格递增。
         CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
-                aeronTimestamp, sequence,
-                matcherShardId, nativeShard, result);
+                sequence, matcherShardId, nativeShard, result);
         poisonIfFatal(bound);
         return bound;
     }
@@ -1392,7 +1389,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(timestamp);
         try {
-            return bindMatcherEvidence(coreSequence, commandId, logicalOrderId, timestamp,
+            return bindMatcherEvidence(coreSequence, commandId, logicalOrderId,
                     matcherEvidence.nextSequence(-1), -1, cancelRoutedBatch(orders));
         } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
             matcherFailure.compareAndSet(null, failure);
@@ -1432,7 +1429,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public CoreMatchingResult completeControlCancellations(long coreSequence, java.util.UUID commandId,
             long logicalOrderId, long timestamp, List<CancellationOrder> orders, List<CoreMatchingResult> results) {
         validateCommandEvidence(coreSequence, commandId, logicalOrderId, timestamp);
-        return bindMatcherEvidence(coreSequence, commandId, logicalOrderId, timestamp,
+        return bindMatcherEvidence(coreSequence, commandId, logicalOrderId,
                 matcherEvidence.nextSequence(-1), -1, aggregateRoutedCancellationResults(orders, results));
     }
 

@@ -324,8 +324,7 @@ class DeterministicExchangeCoreAdapterTest {
                     new DeterministicExchangeCoreAdapter.CancellationOrder(2, 7, "1"),
                     new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
             assertThat(result.accepted()).isFalse();
-            assertThat(result.successfulPrefixCount()).isEqualTo(1);
-            assertThat(result.matcherStateChanged()).isTrue();
+            assertThat(result.outcome()).isEqualTo(MatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
             assertThat(result.cancellations()).extracting(CoreCancellationResult::resultCode)
                     .containsExactly("SUCCESS", "MATCHING_UNKNOWN_ORDER_ID", "NOT_SUBMITTED");
             assertThat(cancelDirect(adapter, 5, new java.util.UUID(7, 5), 1000, 7, 3, "1").accepted()).isTrue();
@@ -351,7 +350,6 @@ class DeterministicExchangeCoreAdapterTest {
             target.recordDirectPreCancellation(1);
             adapter.placeDirect(adapter.matcherShardId("1"), 3, id, 1000, 7, command, target);
             assertThat(target.accepted()).isFalse();
-            assertThat(target.matcherStateChanged()).isTrue();
             assertThat(target.plan().preCancellationCount()).isEqualTo(1);
             assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
         }
@@ -387,10 +385,10 @@ class DeterministicExchangeCoreAdapterTest {
         // 仅用于分片序号验证的新证据账本。
         var ledger = new MatcherEvidenceLedger(com.surprising.aeron.config.LaneTopology.productionDefault());
         // 首个直接命令回执，或当前时间复用测试的第一条回执。
-        var first = ledger.bind(1, new java.util.UUID(0, 1), 101, 1000,
+        var first = ledger.bind(1, new java.util.UUID(0, 1), 101,
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 1));
         // 时间复用场景的第二条直接命令回执。
-        var second = ledger.bind(2, new java.util.UUID(0, 2), 102, 1001,
+        var second = ledger.bind(2, new java.util.UUID(0, 2), 102,
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
         assertThat(first.nativeMatcherSequence()).isEqualTo(1);
         assertThat(second.nativeMatcherSequence()).isEqualTo(2);
@@ -403,9 +401,9 @@ class DeterministicExchangeCoreAdapterTest {
     void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
         // 仅用于分片序号验证的新证据账本。
         var ledger = new MatcherEvidenceLedger(com.surprising.aeron.config.LaneTopology.productionDefault());
-        ledger.bind(2, new java.util.UUID(0, 2), 202, 1001,
+        ledger.bind(2, new java.util.UUID(0, 2), 202,
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
-        assertThatThrownBy(() -> ledger.bind(1, new java.util.UUID(0, 1), 201, 1000,
+        assertThatThrownBy(() -> ledger.bind(1, new java.util.UUID(0, 1), 201,
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 1)))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("native sequence is not strictly increasing");
     }

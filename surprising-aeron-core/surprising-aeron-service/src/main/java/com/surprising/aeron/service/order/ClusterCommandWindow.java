@@ -21,22 +21,6 @@ public final class ClusterCommandWindow {
             PlaceOrderBatchCommand.MAX_ORDERS, CancelOrderBatchCommand.MAX_ORDERS);
 
 
-    /**
-     * 入口依赖原因，按精确订单和同用户旧命令区分；ACCOUNT 不代表所有同 Lane 用户相互冲突。
-     */
-    public enum Conflict {
-        /** 当前没有需要退休的依赖前缀。 */
-        NONE,
-        /** 需要先退休引用同一订单的旧命令前缀。 */
-        ORDER,
-        /** 同一用户的旧命令形成更长依赖前缀。 */
-        ACCOUNT
-    }
-
-    /**  最近计算的当前候选阻塞原因。 返回最近一次冲突计算的原因，resetCandidate 和下一次计算会重置。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private Conflict conflict = Conflict.NONE;
     /** 固定环形条目数组，各条目持有可交换复用的解码槽。 */
     private final Entry[] entries;
     /** 容量减一，用于物理下标环绕。 */
@@ -116,7 +100,7 @@ public final class ClusterCommandWindow {
     }
 
     /**
-     * 设置下一入口用户并清掉候选路由及冲突标记；保留已解码请求，便于阻塞队首重试不重复解码。
+     * 设置下一入口用户并清掉候选路由；保留已解码请求，便于阻塞队首重试不重复解码。
      * @param userId 下一候选提交用户号
      */
     public void resetCandidate(long userId) {
@@ -125,7 +109,6 @@ public final class ClusterCommandWindow {
         candidateMatcherShard = -1;
         candidateRouted = false;
         routedSource = null;
-        conflict = Conflict.NONE;
     }
 
     /**
@@ -160,15 +143,14 @@ public final class ClusterCommandWindow {
     public long routeUserLaneBit() { return candidateRouted ? candidateUserLaneBit : 0; }
 
     /**
-     * 重新计算必须退休的依赖前缀，非零即表示当前入口需要等待，同时更新 conflict。
+     * 重新计算必须退休的依赖前缀，非零即表示当前入口需要等待。
      */
     public boolean conflicts() { return conflictingPrefixSize() != 0; }
 
     /**
-     * 计算撤单精确订单依赖前缀，再比较同 userId 最近命令的位置；用户前缀更长才标 ACCOUNT，否则有订单依赖则标 ORDER。不同用户即使路由同一 Lane，也不会仅凭 Lane 位在这里互斥。
+     * 计算撤单精确订单依赖前缀，再取与同 userId 最近命令前缀的较大值。不同用户即使路由同一 Lane，也不会仅凭 Lane 位在这里互斥。
      */
     public int conflictingPrefixSize() {
-        conflict = Conflict.NONE;
         if (size == 0) return 0;
         // 由撤单精确订单依赖确定的前缀长度。
         int exactPrefix = exactOrderPrefix(0);
@@ -181,12 +163,10 @@ public final class ClusterCommandWindow {
                 // 覆盖该用户旧命令所需退休的前缀长度。
                 int userPrefix = (int) (userAbsSeq - headAbsSeq + 1L);
                 if (userPrefix > exactPrefix) {
-                    conflict = Conflict.ACCOUNT;
                     return userPrefix;
                 }
             }
         }
-        if (exactPrefix != 0) conflict = Conflict.ORDER;
         return exactPrefix;
     }
 

@@ -38,7 +38,7 @@ public class PositionIndexAllocationBenchmark {
         int symbol = identities.symbolId("1"), asset = identities.assetId("USDT");
         source = new PositionRuntime(7, symbol, asset, CoreMarginMode.CROSS, CorePositionSide.NET,
                 instrument, 2, 100, 200, 0, 20);
-        openInterest = new OpenInterestIndex(state, identities);
+        openInterest = new OpenInterestIndex(state);
         adl = new AdlPositionIndex(state, identities);
         indexes = new RuntimeFactIndexes(new PositionUserIndex(state, identities), openInterest,
                 new TriggerOrderIndex(state), new AlgoOrderIndex(state), new LiquidationIndex(state),

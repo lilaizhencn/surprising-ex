@@ -173,16 +173,6 @@ final class PendingCommandIdIndex {
     }
 
     /**
-     * 逐半部比较指定物理位置的 UUID，不检查 UUID 非空或下标范围；当前主要查询路径直接内联同样比较。
-     * @param index 需要比较 UUID 的物理位置
-     * @param commandId 要定位的命令 UUID
-     */
-    private boolean same(int index, UUID commandId) {
-        return mostSignificantBits[index] == commandId.getMostSignificantBits()
-                && leastSignificantBits[index] == commandId.getLeastSignificantBits();
-    }
-
-    /**
      * 对 UUID 两半执行固定混合，再用容量掩码得到起点，不是密码摘要。
      * @param most UUID 高六十四位
      * @param least UUID 低六十四位

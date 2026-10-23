@@ -36,6 +36,21 @@ HTTP 接入、价格生产、生命周期调度和外部查询投影由其他服
 两轮字段清理均仅执行 `mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dmaven.test.skip=true compile`，
 相关模块编译通过；未执行测试、交易流程、快照恢复或性能验证。
 
+恢复索引由 `RuntimeStateProjector` 创建并绑定到 `TradingAccountRuntime`，八个索引各在构造时完成重建。
+`TradingCoreRuntime` 从已绑定的 `RuntimeFactIndexes` 借用同一组实例，不再创建第二套索引或重复重建；
+独立调用 Projector 也保留完整索引。OI 重建直接读取冷持仓的币对和数量，不再传入未使用的身份表或创建中间持仓索引值。
+命令窗口仅计算依赖前缀，不再保存无人读取的冲突原因；解码读取器仅保存已解码字段，输入环也不再传递无人消费的入队观测时间。
+撮合结果保留撤单事实、前缀参数校验和 `outcome()` 分类，移除重复前缀计数、状态标记及时间戳字段和闲置读取接口。
+对应六个无调用私有方法及 OI 重复转换入口一并删除；基准夹具和测试源码同步调整，验证范围仍为编译，不据此宣称交易或恢复验证通过。
+本轮使用 HotSpot JDK 27 执行以下命令，14 个相关模块及必要依赖干净编译通过，包含测试源码编译：
+
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks \
+    -am -DskipTests clean test-compile
+```
+
+未执行测试、交易流程、快照恢复、JMH 或 JFR；没有创建新的临时报告或运行服务。
+
 先读本文的启动和业务步骤，再进入对应源码。更完整的模块架构、配置表、启动命令、
 各业务时序和快照恢复见 [Aeron 总 README](../README.md)。下面的编号表示阅读顺序，
 不表示增加线程、队列或提交阶段；同一公共类可能被多条业务复用。

@@ -57,7 +57,7 @@ class LedgerPositionPublicationTest {
         // 本用例真实账本接管的持仓用户索引
         var users = new PositionUserIndex(initial, ids);
         // 本用例真实账本接管的未平仓量索引
-        var oi = new OpenInterestIndex(initial, ids);
+        var oi = new OpenInterestIndex(initial);
         // 本用例真实账本接管的 ADL 持仓索引
         var adl = new AdlPositionIndex(initial, ids);
         try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var runtime = RuntimeStateProjector.project(initial, ids)) {
@@ -116,7 +116,7 @@ class LedgerPositionPublicationTest {
         // 本用例真实账本接管的持仓用户索引
         var users = new PositionUserIndex(initial, ids);
         // 本用例真实账本接管的未平仓量索引
-        var oi = new OpenInterestIndex(initial, ids);
+        var oi = new OpenInterestIndex(initial);
         // 本用例真实账本接管的 ADL 持仓索引
         var adl = new AdlPositionIndex(initial, ids);
         // 本用例各派生索引共用的事实应用入口

@@ -450,6 +450,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
         factIndexes = java.util.Objects.requireNonNull(indexes);
         indexIdentities = java.util.Objects.requireNonNull(identities);
     }
+
+    /** 借用恢复时已经绑定的同一组索引，Core 不再重新创建并替换。 */
+    RuntimeFactIndexes factIndexes() {
+        assertOwner();
+        if (factIndexes == null) throw new IllegalStateException("position indexes are not bound");
+        return factIndexes;
+    }
     /**
      * 在 Owner 上查强平的路由元数据；尚未绑定事实索引时返回空。
      * @param id 本次查询或发布的业务实体身份

@@ -98,7 +98,6 @@ final class MatcherEvidenceLedger {
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandId 原命令非空 UUID
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳；bind 保存，当前直接发布的原语重载不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -108,13 +107,12 @@ final class MatcherEvidenceLedger {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long aeronTimestamp,
             long sequence,
             int matcherShardId, int nativeMatcherShardId,
             CoreMatchingResult result) {
         if (commandId == null) throw new IllegalArgumentException("matcher evidence is required");
         return bind(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, aeronTimestamp, sequence, matcherShardId, nativeMatcherShardId, result);
+                orderId, sequence, matcherShardId, nativeMatcherShardId, result);
     }
 
     /**
@@ -123,7 +121,6 @@ final class MatcherEvidenceLedger {
      * @param commandIdMsb 原命令 UUID 高六十四位
      * @param commandIdLsb 原命令 UUID 低六十四位
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳；bind 保存，当前直接发布的原语重载不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -133,7 +130,6 @@ final class MatcherEvidenceLedger {
             long coreSequence,
             long commandIdMsb, long commandIdLsb,
             long orderId,
-            long aeronTimestamp,
             long sequence,
             int matcherShardId, int nativeMatcherShardId,
             CoreMatchingResult result) {
@@ -149,7 +145,7 @@ final class MatcherEvidenceLedger {
         advanceStrictly(shardSequences, matcherIndex, sequence,
                 "matcher shard sequence is not strictly increasing");
         return result.bindEvidenceInPlace(coreSequence, commandIdMsb, commandIdLsb, orderId,
-                nativeSequence, sequence, aeronTimestamp, matcherShardId);
+                nativeSequence, sequence, matcherShardId);
     }
 
     /**
@@ -157,7 +153,7 @@ final class MatcherEvidenceLedger {
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandId 原命令非空 UUID
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳；bind 保存，当前直接发布的原语重载不读取
+     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -180,7 +176,7 @@ final class MatcherEvidenceLedger {
      * @param commandIdMsb 原命令 UUID 高六十四位
      * @param commandIdLsb 原命令 UUID 低六十四位
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳；bind 保存，当前直接发布的原语重载不读取
+     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -215,7 +211,7 @@ final class MatcherEvidenceLedger {
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandId 原命令非空 UUID
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳；bind 保存，当前直接发布的原语重载不读取
+     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -240,7 +236,7 @@ final class MatcherEvidenceLedger {
      * @param commandIdMsb 原命令 UUID 高六十四位
      * @param commandIdLsb 原命令 UUID 低六十四位
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳；bind 保存，当前直接发布的原语重载不读取
+     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -275,7 +271,7 @@ final class MatcherEvidenceLedger {
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandId 原命令非空 UUID
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳；bind 保存，当前直接发布的原语重载不读取
+     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
@@ -299,7 +295,7 @@ final class MatcherEvidenceLedger {
      * @param commandIdMsb 原命令 UUID 高六十四位
      * @param commandIdLsb 原命令 UUID 低六十四位
      * @param orderId 该事实关联的订单编号
-     * @param aeronTimestamp Cluster 业务时间戳；bind 保存，当前直接发布的原语重载不读取
+     * @param aeronTimestamp Cluster 业务时间戳，当前直接发布入口不读取
      * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
      * @param matcherShardId 业务证据所属分片，控制命令使用负一
      * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同

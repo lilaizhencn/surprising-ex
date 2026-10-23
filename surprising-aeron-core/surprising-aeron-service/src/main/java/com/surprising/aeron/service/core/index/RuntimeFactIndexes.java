@@ -14,26 +14,44 @@ import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.position.RuntimePositionIndexValue;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
+import lombok.Getter;
+import lombok.experimental.Accessors;
 
 /**
  * 把账户已发布变化应用到现有派生索引的入口。Owner 维护订单及条件任务轻量路由，持仓用户、未平仓量及 ADL 业务索引可绑定给 System Ledger；不另存账户正文，不把各索引更新包装成自动事务。
  */
 public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIndexConsumer {
     /** 现有标的到持仓用户的派生索引，可绑定业务线程。 */
+    @Getter
+    @Accessors(fluent = true, chain = false)
     private final PositionUserIndex positionUsers;
     /** 现有标的未平仓量索引，可绑定业务线程。 */
+    @Getter
+    @Accessors(fluent = true, chain = false)
     private final OpenInterestIndex openInterest;
     /** Owner 的触发单路由和价格候选索引。 */
+    @Getter
+    @Accessors(fluent = true, chain = false)
     private final TriggerOrderIndex triggers;
     /** Owner 的算法单身份与调度索引。 */
+    @Getter
+    @Accessors(fluent = true, chain = false)
     private final AlgoOrderIndex algos;
     /** Owner 的强平轻量路由及未结束集合。 */
+    @Getter
+    @Accessors(fluent = true, chain = false)
     private final LiquidationIndex liquidations;
     /** Owner 的延时全撤计时索引。 */
+    @Getter
+    @Accessors(fluent = true, chain = false)
     private final CancelAllAfterIndex timers;
     /** Owner 的 OPEN 订单轻量路由。 */
+    @Getter
+    @Accessors(fluent = true, chain = false)
     private final ActiveOrderIndex activeOrders;
     /** 现有 ADL 持仓索引，可变单元提供更新前事实，可绑定业务线程。 */
+    @Getter
+    @Accessors(fluent = true, chain = false)
     private final AdlPositionIndex adlPositions;
     /** 仅 applyCurrent 回调期间有效的临时身份表引用，同时防止重入。 */
     private RuntimeIdentityRegistry activeIdentities;
@@ -384,7 +402,7 @@ public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIn
      */
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
         positionUsers.rebuild(state, identities);
-        openInterest.rebuild(state, identities);
+        openInterest.rebuild(state);
         triggers.rebuild(state);
         algos.rebuild(state);
         liquidations.rebuild(state);

@@ -34,14 +34,6 @@ public interface MatchingResult {
      */
     List<CoreCancellationResult> cancellations();
     /**
-     * 返回批量控制撤单在首个失败前已经成功的连续前缀数量。
-     */
-    int successfulPrefixCount();
-    /**
-     * 返回适配器显式登记的状态变化标记，主要用于已执行撤单前缀；原生成功结果也可能保留 false，不能单靠此标记判断订单簿是否变化。
-     */
-    boolean matcherStateChanged();
-    /**
      * 返回已分类的接受、拒绝、已执行前缀或致命分歧状态，供后续账户处理选择正确边界。
      */
     Outcome outcome();

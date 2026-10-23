@@ -231,7 +231,7 @@ class RuntimeChangedIndexCommitTest {
         // 由初始冷状态构造的持仓用户索引
         PositionUserIndex positionUsers = new PositionUserIndex(state, identities);
         // 由初始冷状态构造的未平仓量索引
-        OpenInterestIndex openInterest = new OpenInterestIndex(state, identities);
+        OpenInterestIndex openInterest = new OpenInterestIndex(state);
         // 由初始冷状态构造的触发单索引
         TriggerOrderIndex triggers = new TriggerOrderIndex(state);
         // 由初始冷状态构造的算法单索引

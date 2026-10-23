@@ -90,11 +90,10 @@ public final class OwnerIngressRing {
      * @param timestamp 本条复制日志的业务时间
      * @param position 本条复制日志位置
      * @param action 可空框架动作，普通业务条目不传动作
-     * @param enqueuedNanos 已有入队观测时间，未记录可传零
      * @param fingerprint 与原请求对应的可空指纹
      */
     public boolean offer(CoreMessage command, long sessionId, long timestamp, long position,
-                  Runnable action, long enqueuedNanos, CommandFingerprint fingerprint) {
+                  Runnable action, CommandFingerprint fingerprint) {
         // 当前请求的有效载荷字节数，动作条目为零
         int bytes = command == null ? 0 : command.payloadLength();
         if (bytes > MAX_BYTES) throw new IllegalStateException("command exceeds ingress byte budget");
@@ -117,7 +116,7 @@ public final class OwnerIngressRing {
         Entry entry = entries[(int) currentProduced & MASK];
         entry.command = command; entry.sessionId = sessionId;
         entry.timestamp = timestamp; entry.position = position;
-        entry.action = action; entry.enqueuedNanos = enqueuedNanos; entry.fingerprint = fingerprint;
+        entry.action = action; entry.fingerprint = fingerprint;
         producedBytes = currentProducedBytes + bytes;
         producedEntries = currentProduced + 1;
         return true;
@@ -210,9 +209,8 @@ public final class OwnerIngressRing {
         /**
          * timestamp：原复制日志业务时间。
          * position：原复制日志位置。
-         * enqueuedNanos：可选入队纳秒观测时间，零表示未记录，不参与交易裁决。
          */
-        long timestamp, position, enqueuedNanos;
+        long timestamp, position;
         /**  要在 Owner 执行的框架动作，普通命令通常为空。 借看当前条目的框架动作，业务命令通常为 null。 */
         @Accessors(fluent = true, chain = false)
         @Getter
@@ -238,7 +236,7 @@ public final class OwnerIngressRing {
         private void clear() {
             command = null; fingerprint = null; action = null; ownerObserved = false;
             sessionId = NO_SESSION_ID;
-            timestamp = position = enqueuedNanos = 0;
+            timestamp = position = 0;
         }
 
     /**

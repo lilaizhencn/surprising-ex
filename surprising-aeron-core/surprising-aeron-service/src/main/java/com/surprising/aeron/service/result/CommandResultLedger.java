@@ -384,18 +384,6 @@ public final class CommandResultLedger {
     }
 
     /**
-     * 将可空保护 UUID 转成两段数值再查最旧记录；空值使用两段 Long.MIN_VALUE 哨兵。
-     * @param protectedId 可空的受保护命令 UUID，空时使用固定哨兵
-     */
-    private int oldestSlot(UUID protectedId) {
-        // 空保护 ID 转换后的高位哨兵或实际 UUID 高位
-        long protectedMost = protectedId == null ? Long.MIN_VALUE : protectedId.getMostSignificantBits();
-        // 空保护 ID 转换后的低位哨兵或实际 UUID 低位
-        long protectedLeast = protectedId == null ? Long.MIN_VALUE : protectedId.getLeastSignificantBits();
-        return oldestSlot(protectedMost, protectedLeast);
-    }
-
-    /**
      * 归还被淘汰项的账本字节引用，标记保留队列空洞，并搬移哈希探测链填洞；搬移时同步保留位置，最后把记录对象归还预建池。本方法不单独扣 commandResultBytes，调用方先扣。
      * @param slot 结果哈希表中的槽号
      */

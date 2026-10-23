@@ -1397,7 +1397,7 @@ class RuntimeCommitRecoveryTest {
                 Map.entry("position-user", indexSnapshot(
                         new com.surprising.aeron.service.core.index.PositionUserIndex(core, identities))),
                 Map.entry("open-interest", indexSnapshot(
-                        new com.surprising.aeron.service.core.index.OpenInterestIndex(core, identities))),
+                        new com.surprising.aeron.service.core.index.OpenInterestIndex(core))),
                 Map.entry("trigger", indexSnapshot(
                         new com.surprising.aeron.service.core.index.TriggerOrderIndex(core))),
                 Map.entry("algo", indexSnapshot(

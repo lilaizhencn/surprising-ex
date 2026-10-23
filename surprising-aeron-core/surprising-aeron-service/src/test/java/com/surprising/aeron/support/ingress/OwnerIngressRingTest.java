@@ -51,7 +51,6 @@ class OwnerIngressRingTest {
                 assertThat(entry.sessionId).isEqualTo(i);
                 assertThat(entry.timestamp).isEqualTo(i + 10L);
                 assertThat(entry.position).isEqualTo(i + 20L);
-                assertThat(entry.enqueuedNanos).isEqualTo(i + 30L);
                 assertThat(entry.ownerObserved).isFalse();
                 entry.ownerObserved = true;
                 ring.remove();
@@ -66,7 +65,7 @@ class OwnerIngressRingTest {
                 // 当前序号是否应交入空请求的框架动作
                 boolean isBoundary = i % 7 == 0;
                 while (!ring.offer(isBoundary ? null : commands[i & 1], i, i + 10L, i + 20L,
-                        isBoundary ? boundary : null, i + 30L, isBoundary ? null : fingerprints[i & 1])) {
+                        isBoundary ? boundary : null, isBoundary ? null : fingerprints[i & 1])) {
                     if (consumed.isDone()) consumed.get();
                     assertThat(System.nanoTime()).isLessThan(deadline);
                     Thread.onSpinWait();
@@ -93,14 +92,13 @@ class OwnerIngressRingTest {
         var command = CoreMessage.decoderSlot();
         assertThat(command.acquireDecoderSlot()).isTrue();
         command.decoderPayloadBuffer(8);
-        assertThat(ring.offer(command, 0, 11, 22, null, 33, null)).isTrue();
+        assertThat(ring.offer(command, 0, 11, 22, null, null)).isTrue();
         // 当前借看的输入条目，移除后必须视为可复用
         var entry = ring.first();
         assertThat(entry.command).isSameAs(command);
         assertThat(entry.sessionId).isZero();
         assertThat(entry.timestamp).isEqualTo(11);
         assertThat(entry.position).isEqualTo(22);
-        assertThat(entry.enqueuedNanos).isEqualTo(33);
         ring.remove();
         assertThat(command.acquireDecoderSlot()).isFalse();
         assertThat(entry.command).isNull();
@@ -120,7 +118,7 @@ class OwnerIngressRingTest {
         var command = CoreMessage.decoderSlot();
         assertThat(command.acquireDecoderSlot()).isTrue();
         command.decoderPayloadBuffer(8);
-        ring.offer(command, -1, 1, 2, null, 0, null);
+        ring.offer(command, -1, 1, 2, null, null);
         ring.discard(); ring.discard();
         assertThat(command.acquireDecoderSlot()).isTrue();
         command.releaseDecoderSlot();
@@ -145,15 +143,15 @@ class OwnerIngressRingTest {
             var ring = owner.ingress();
             // 位于动作边界之前的余额命令
             var first = probe(1); /* 位于动作边界之后的余额命令 */ var second = probe(2);
-            ring.offer(first, 0, 10, 100, null, 0, CommandFingerprint.of(first));
+            ring.offer(first, 0, 10, 100, null, CommandFingerprint.of(first));
             // 作为输入条目交接的框架动作，本测试按场景验证是否需要显式执行
             Runnable boundary = () -> {
                 owner.finishCommands();
                 assertThat(responses).containsExactly(first.header().commandId());
                 assertThat(owner.state().appliedCommandCount()).isEqualTo(1);
             };
-            ring.offer(null, -1, 0, 0, boundary, 0, null);
-            ring.offer(second, 0, 20, 200, null, 0, CommandFingerprint.of(second));
+            ring.offer(null, -1, 0, 0, boundary, null);
+            ring.offer(second, 0, 20, 200, null, CommandFingerprint.of(second));
             owner.finishCommands();
             assertThat(ring.first().action).isSameAs(boundary);
             assertThat(ring.size()).isEqualTo(2);

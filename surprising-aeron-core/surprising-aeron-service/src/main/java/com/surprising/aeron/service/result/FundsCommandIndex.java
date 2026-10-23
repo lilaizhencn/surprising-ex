@@ -219,14 +219,6 @@ public final class FundsCommandIndex implements AutoCloseable {
     }
 
     /**
-     * 从非空 UUID 提取两段数值，复用固定字节键编码。
-     * @param id 资金命令 UUID，按读取或写入入口分别处理空值
-     */
-    private static byte[] key(UUID id) {
-        return key(id.getMostSignificantBits(), id.getLeastSignificantBits());
-    }
-
-    /**
      * 首次关闭先置关闭标记，按顺序释放数据库及配置资源，再逆序删除仅本实例创建的目录。删除 IOException 包装成 UncheckedIOException；较早资源关闭抛错时不保证后续步骤已执行。
      */
     @Override

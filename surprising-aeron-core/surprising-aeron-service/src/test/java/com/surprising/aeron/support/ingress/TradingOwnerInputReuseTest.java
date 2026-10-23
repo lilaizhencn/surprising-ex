@@ -111,8 +111,8 @@ class TradingOwnerInputReuseTest {
         assertThat(input.retainedBytes()).isEqualTo(OwnerIngressRing.MAX_BYTES);
         input.discard();
         for (/* 当前填槽或清槽的循环下标 */ int i = 0; i < OwnerIngressRing.CAPACITY; i++)
-            assertThat(input.offer(probe(i + 2), -1, i, i, null, 0, null)).isTrue();
-        assertThat(input.offer(probe(99_999), -1, 0, 0, null, 0, null)).isFalse();
+            assertThat(input.offer(probe(i + 2), -1, i, i, null, null)).isTrue();
+        assertThat(input.offer(probe(99_999), -1, 0, 0, null, null)).isFalse();
         input.discard(); egress.clear();
     }
 
@@ -167,7 +167,7 @@ class TradingOwnerInputReuseTest {
             var command = CoreMessage.decoderSlot();
             assertThat(command.acquireDecoderSlot()).isTrue();
             command.decoderPayloadBuffer(8);
-            assertThat(input(loop).offer(command, -1, 1, 2, null, 0, null)).isTrue();
+            assertThat(input(loop).offer(command, -1, 1, 2, null, null)).isTrue();
             loop.terminate();
             assertThat(input(loop).size()).isZero();
             assertThat(command.acquireDecoderSlot()).isTrue();

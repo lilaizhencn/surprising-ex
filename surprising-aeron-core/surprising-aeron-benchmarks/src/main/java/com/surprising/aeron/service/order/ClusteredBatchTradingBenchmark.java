@@ -1080,7 +1080,7 @@ public class ClusteredBatchTradingBenchmark {
         private void enqueueCommittedCommand(long sessionId, CoreMessage command, long timestamp, long position,
                                              com.surprising.aeron.protocol.CommandFingerprint fingerprint) {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-            while (!service.ingress().offer(command, sessionId, timestamp, position, null, 0, fingerprint)) {
+            while (!service.ingress().offer(command, sessionId, timestamp, position, null, fingerprint)) {
                 if (System.nanoTime() >= deadline) throw new IllegalStateException("owner input did not advance");
                 service.pollCommands();
             }

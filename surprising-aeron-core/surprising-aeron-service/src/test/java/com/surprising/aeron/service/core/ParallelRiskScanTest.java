@@ -57,7 +57,7 @@ class ParallelRiskScanTest {
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(source, ids, TOPOLOGY);
-            runtime.bindFactIndexes(new RuntimeFactIndexes(index, new OpenInterestIndex(source, ids),
+            runtime.bindFactIndexes(new RuntimeFactIndexes(index, new OpenInterestIndex(source),
                     new com.surprising.aeron.service.core.index.TriggerOrderIndex(source),
                     new com.surprising.aeron.service.core.index.AlgoOrderIndex(source),
                     new com.surprising.aeron.service.core.index.LiquidationIndex(source),

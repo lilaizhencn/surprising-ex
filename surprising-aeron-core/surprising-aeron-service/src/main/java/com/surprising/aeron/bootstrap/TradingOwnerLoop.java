@@ -156,7 +156,7 @@ public final class TradingOwnerLoop implements Runnable {
     }
 
     /**
-     * 交接一条已复制业务命令，保留会话、业务时间、日志位置和指纹；本入口不单独记录入队纳秒时间。
+     * 交接一条已复制业务命令，保留会话、业务时间、日志位置和指纹。
      * @param command 借给 Owner 的已复制命令；框架动作入队时为 null
      * @param sessionId 原会话 ID；无网络目标时使用 NO_SESSION_ID
      * @param timestamp 来自复制日志的业务时间
@@ -165,21 +165,7 @@ public final class TradingOwnerLoop implements Runnable {
      */
     public void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                         CommandFingerprint fingerprint) {
-        enqueue(command, sessionId, timestamp, position, 0L, fingerprint);
-    }
-
-    /**
-     * 在普通命令交接中额外保留已有入队纳秒观测值，继续使用默认输入等待期限。
-     * @param command 借给 Owner 的已复制命令；框架动作入队时为 null
-     * @param sessionId 原会话 ID；无网络目标时使用 NO_SESSION_ID
-     * @param timestamp 来自复制日志的业务时间
-     * @param position 来自复制日志的位置
-     * @param enqueuedNanos 调用方已有的入队观测时间，零表示未记录
-     * @param fingerprint 已解码请求的内容指纹，供原幂等边界使用
-     */
-    void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
-                 long enqueuedNanos, CommandFingerprint fingerprint) {
-        enqueue(command, sessionId, timestamp, position, null, enqueuedNanos, fingerprint, DEADLINE_NS);
+        enqueue(command, sessionId, timestamp, position, null, fingerprint, DEADLINE_NS);
     }
 
     /**
@@ -312,14 +298,13 @@ public final class TradingOwnerLoop implements Runnable {
      * @param timestamp 来自复制日志的业务时间
      * @param position 来自复制日志的位置
      * @param action 要在 Owner 线程执行的框架动作
-     * @param enqueuedNanos 调用方已有的入队观测时间，零表示未记录
      * @param fingerprint 已解码请求的内容指纹，供原幂等边界使用
      * @param timeoutNanos 当前入队或动作等待阶段的纳秒预算
      */
     private void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
-                         Runnable action, long enqueuedNanos, CommandFingerprint fingerprint, long timeoutNanos) {
+                         Runnable action, CommandFingerprint fingerprint, long timeoutNanos) {
         checkFailure();
-        if (input.offer(command, sessionId, timestamp, position, action, enqueuedNanos, fingerprint)) {
+        if (input.offer(command, sessionId, timestamp, position, action, fingerprint)) {
             ownerIdle.signal();
             return;
         }
@@ -332,7 +317,7 @@ public final class TradingOwnerLoop implements Runnable {
         while (true) {
             awaitProgress(deadline);
             checkFailure();
-            if (input.offer(command, sessionId, timestamp, position, action, enqueuedNanos, fingerprint)) {
+            if (input.offer(command, sessionId, timestamp, position, action, fingerprint)) {
                 ownerIdle.signal();
                 return;
             }
@@ -381,7 +366,7 @@ public final class TradingOwnerLoop implements Runnable {
                 completion.completeExceptionally(fatal);
                 throw fatal;
             }
-        }, 0, null, timeoutNanos);
+        }, null, timeoutNanos);
         // 当前阶段单独计算的等待截止时间
         long deadline = System.nanoTime() + timeoutNanos;
         while (!completion.isDone()) awaitProgress(deadline);

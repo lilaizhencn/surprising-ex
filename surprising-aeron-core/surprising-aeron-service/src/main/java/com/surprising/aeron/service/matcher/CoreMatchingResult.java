@@ -31,14 +31,6 @@ public final class CoreMatchingResult implements MatchingResult {
     @Accessors(fluent = true, chain = false)
     @Getter
     private final List<CoreCancellationResult> cancellations;
-    /**  传入的连续成功撤单数量，构造时只检查不超过列表大小。 返回批量控制撤单在首个失败前已经成功的连续前缀数量。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private final int successfulPrefixCount;
-    /**  适配器显式登记的前缀状态变化标记，不等于所有原生订单簿变化的观测值。 返回适配器显式登记的状态变化标记，主要用于已执行撤单前缀；原生成功结果也可能保留 false，不能单靠此标记判断订单簿是否变化。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private final boolean matcherStateChanged;
     /**  构造时按结果码、接受与前缀标记确定的业务分类。 返回已分类的接受、拒绝、已执行前缀或致命分歧状态，供后续账户处理选择正确边界。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -69,10 +61,6 @@ public final class CoreMatchingResult implements MatchingResult {
     @Accessors(fluent = true, chain = false)
     @Getter
     private long nativeMatcherSequence;
-    /**  绑定证据时保存的 Cluster 时间戳。 返回绑定时保存的 Cluster 业务时间戳。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private long nativeAeronTimestamp;
     /**  本回执所属业务证据分片，控制分片为负一。 返回证据所属 Matcher 分片，控制分片使用负一。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -100,7 +88,7 @@ public final class CoreMatchingResult implements MatchingResult {
     }
 
     /**
-     * 保存撤单列表和成功前缀，显式状态变化标记默认 false，其余身份尚未绑定。
+     * 保存撤单列表并校验成功前缀范围，分类时默认没有显式状态变化，其余身份尚未绑定。
      * @param accepted 引擎是否接受当前请求
      * @param resultCode 非空撮合结果码文本
      * @param cancellations 本次有序撤单结果列表
@@ -140,7 +128,7 @@ public final class CoreMatchingResult implements MatchingResult {
      * @param nativeOrderId 关联订单编号，未绑定或控制结果可为零
      * @param nativeSequence 原生 exchange-core 序号，零允许稍后从原生结果取得
      * @param nativeMatcherSequence 业务证据分片发布序号
-     * @param nativeAeronTimestamp Cluster 业务时间戳
+     * @param nativeAeronTimestamp 需校验为非负的 Cluster 业务时间戳，不保留副本
      * @param nativeMatcherShardId 业务证据分片编号，控制分片为负一
      * @param nativeMatcherResult 可空的原生结果引用
      * @param matcherEvents 后续账户处理使用的原生事件列表引用
@@ -170,8 +158,6 @@ public final class CoreMatchingResult implements MatchingResult {
         this.accepted = accepted;
         this.resultCode = resultCode;
         this.cancellations = immutable(cancellations);
-        this.successfulPrefixCount = successfulPrefixCount;
-        this.matcherStateChanged = matcherStateChanged;
         this.outcome = classify(accepted, resultCode, matcherStateChanged);
         this.nativeCoreSequence = nativeCoreSequence;
         this.nativeCommandIdMostSignificantBits = nativeCommandIdMostSignificantBits;
@@ -179,7 +165,6 @@ public final class CoreMatchingResult implements MatchingResult {
         this.nativeOrderId = nativeOrderId;
         this.nativeSequenceValue = nativeSequence;
         this.nativeMatcherSequence = nativeMatcherSequence;
-        this.nativeAeronTimestamp = nativeAeronTimestamp;
         this.nativeMatcherShardId = nativeMatcherShardId;
         this.nativeMatcherResult = nativeMatcherResult;
         this.matcherEvents = matcherEvents;
@@ -191,45 +176,21 @@ public final class CoreMatchingResult implements MatchingResult {
      * @param result 非空 exchange-core 原生结果
      */
     static CoreMatchingResult fromNative(MatcherResult result) {
-        return new CoreMatchingResult(result, 0, 0, 0, 0, 0, 0, 0, -1);
+        return new CoreMatchingResult(result);
     }
 
     /**
-     * 从非空原生结果创建回执，只有 SUCCESS 或 ACCEPTED 算接受；直接保留原生事件和行情，显式状态变化标记为 false，再检查身份标量。
+     * 从非空原生结果创建尚未绑定身份的回执，只有 SUCCESS 或 ACCEPTED 算接受；直接保留原生事件和行情，按没有显式状态变化分类。
      * @param result 非空 exchange-core 原生结果
-     * @param coreSequence 要保存或补齐的 Core 命令序号
-     * @param commandIdMostSignificantBits 待绑定命令 UUID 高六十四位
-     * @param commandIdLeastSignificantBits 待绑定命令 UUID 低六十四位
-     * @param orderId 要绑定的普通订单编号
-     * @param nativeSequence 原生 exchange-core 序号，零允许稍后从原生结果取得
-     * @param matcherSequence 要绑定的业务分片证据序号
-     * @param aeronTimestamp 要绑定的 Cluster 时间戳
-     * @param matcherShardId 要绑定的业务证据分片编号
      */
-    private CoreMatchingResult(MatcherResult result, long coreSequence,
-                                long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
-                                long orderId, long nativeSequence,
-                                long matcherSequence, long aeronTimestamp, int matcherShardId) {
+    private CoreMatchingResult(MatcherResult result) {
         nativeMatcherResult = Objects.requireNonNull(result, "matcher result");
         accepted = result.resultCode() == CommandResultCode.SUCCESS
                 || result.resultCode() == CommandResultCode.ACCEPTED;
         resultCode = result.resultCode().name();
         cancellations = List.of();
-        successfulPrefixCount = 0;
-        matcherStateChanged = false;
         outcome = classify(accepted, resultCode, false);
-        if (coreSequence < 0 || orderId < 0 || nativeSequence < 0
-                || matcherSequence < 0 || aeronTimestamp < 0 || matcherShardId < -1) {
-            throw new IllegalArgumentException("invalid native command identity");
-        }
-        nativeCoreSequence = coreSequence;
-        nativeCommandIdMostSignificantBits = commandIdMostSignificantBits;
-        nativeCommandIdLeastSignificantBits = commandIdLeastSignificantBits;
-        nativeOrderId = orderId;
-        nativeSequenceValue = nativeSequence;
-        nativeMatcherSequence = matcherSequence;
-        nativeAeronTimestamp = aeronTimestamp;
-        nativeMatcherShardId = matcherShardId;
+        nativeMatcherShardId = -1;
         matcherEvents = Objects.requireNonNull(result.events(), "matcher events");
         marketData = Objects.requireNonNull(result.marketData(), "matcher market data");
     }
@@ -242,20 +203,17 @@ public final class CoreMatchingResult implements MatchingResult {
      * @param orderId 要绑定的普通订单编号
      * @param nativeSequence 原生 exchange-core 序号，零允许稍后从原生结果取得
      * @param matcherSequence 要绑定的业务分片证据序号
-     * @param aeronTimestamp 要绑定的 Cluster 时间戳
      * @param matcherShardId 要绑定的业务证据分片编号
      */
     CoreMatchingResult bindEvidenceInPlace(
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
-            long orderId, long nativeSequence, long matcherSequence,
-            long aeronTimestamp, int matcherShardId) {
+            long orderId, long nativeSequence, long matcherSequence, int matcherShardId) {
         nativeCoreSequence = coreSequence;
         nativeCommandIdMostSignificantBits = commandIdMostSignificantBits;
         nativeCommandIdLeastSignificantBits = commandIdLeastSignificantBits;
         nativeOrderId = orderId;
         nativeSequenceValue = nativeSequence;
         nativeMatcherSequence = matcherSequence;
-        nativeAeronTimestamp = aeronTimestamp;
         nativeMatcherShardId = matcherShardId;
         return this;
     }

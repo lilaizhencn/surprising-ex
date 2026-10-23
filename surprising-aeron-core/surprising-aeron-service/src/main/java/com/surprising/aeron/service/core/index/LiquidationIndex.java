@@ -155,17 +155,6 @@ public final class LiquidationIndex {
     }
 
     /**
-     * 从冷强平状态还原旧分组，移除该路由及其未结束集合成员。
-     * @param value 需要判断未结束、增加或移除的强平状态/原路由
-     */
-    private void remove(CoreLiquidationState value) {
-        // 从冷强平值生成的用户、标的及持仓方向分组键
-        LiquidationKey key = new LiquidationKey(value.userId(), value.instrumentId(), value.positionSide());
-        keysById.remove(value.liquidationId());
-        remove(value.liquidationId(), key);
-    }
-
-    /**
      * 从全局和指定分组移除 ID，分组变空时删键。
      * @param liquidationId 需要新增、更新或移除的强平业务 ID
      * @param key 用户、标的文本及持仓方向组成的原分组键

@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core.index;
 
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.position.RuntimePositionIndexValue;
 import java.util.Collections;
@@ -41,15 +40,6 @@ public final class OpenInterestIndex {
      */
     public OpenInterestIndex(TradingCoreState state) {
         rebuild(state);
-    }
-
-    /**
-     * 通过带身份表的构造签名重建多空总量，当前仍按外部合约编号聚合。
-     * @param state 用于初次构建或恢复重建的完整业务状态
-     * @param identities 当前重建签名保留的身份表参数；此实现按外部合约编号聚合，不使用它
-     */
-    public OpenInterestIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        rebuild(state, identities);
     }
 
     /**
@@ -160,71 +150,14 @@ public final class OpenInterestIndex {
     }
 
     /**
-     * 清空后从业务持仓提取精简索引值再重建；当前按用户和外部合约编号计算，不使用传入身份表。
-     * @param state 用于初次构建或恢复重建的完整业务状态
-     * @param identities 当前重建签名保留的身份表参数；此实现按外部合约编号聚合，不使用它
-     */
-    public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        assertBusinessOwner();
-        totals.clear();
-        state.users().values().forEach(/* 业务状态中当前遍历的用户，恢复时从其所有持仓累加总量。 */ user -> user.positions().forEach((/* 用户持仓映射的原业务键，本次数量聚合不需要这个键。 */ key, /* 本轮恢复遍历的业务持仓，按带方向数量贡献多头或空头绝对量。 */ position) -> {
-            // 为当前业务持仓提取的精简字段，后续只使用其中合约和数量贡献。
-            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
-            add(indexed);
-        }));
-    }
-
-    /**
      * 把一条业务持仓的非零数量贡献加入所属合约的多头或空头绝对总量。
-     * @param position 需要增加或移除数量贡献的业务持仓或精简索引值
+     * @param position 需要增加数量贡献的业务持仓
      */
     private void add(CorePositionState position) {
         // 当前单仓的带方向数量，0 对总量没有贡献。
         long quantity = position.signedQuantitySteps();
         if (quantity == 0) return;
         adjust(position.instrumentId(), longQuantity(quantity), shortQuantity(quantity));
-    }
-
-    /**
-     * 从所属合约总量中扣掉这一业务持仓的贡献，空仓不需要调整。
-     * @param position 需要增加或移除数量贡献的业务持仓或精简索引值
-     */
-    private void remove(CorePositionState position) {
-        // 当前单仓的带方向数量，0 对总量没有贡献。
-        long quantity = position.signedQuantitySteps();
-        if (quantity == 0) return;
-        adjust(position.instrumentId(), -longQuantity(quantity), -shortQuantity(quantity));
-    }
-
-    /**
-     * 把精简索引值交统一数量更新方法，选择增加贡献。
-     * @param position 需要增加或移除数量贡献的业务持仓或精简索引值
-     */
-    private void add(RuntimePositionIndexValue position) {
-        update(position, true);
-    }
-
-    /**
-     * 把精简索引值交统一数量更新方法，选择移除原贡献。
-     * @param position 需要增加或移除数量贡献的业务持仓或精简索引值
-     */
-    private void remove(RuntimePositionIndexValue position) {
-        update(position, false);
-    }
-
-    /**
-     * 按增删方向把非零持仓换成多头和空头绝对数量差额，再统一调整对应合约累计值。
-     * @param position 需要增加或移除数量贡献的业务持仓或精简索引值
-     * @param add true 增加当前持仓贡献，false 从原总量中扣除
-     */
-    private void update(RuntimePositionIndexValue position, boolean add) {
-        // 当前单仓的带方向数量，0 对总量没有贡献。
-        long quantity = position.signedQuantitySteps();
-        if (quantity == 0) return;
-        // 增加贡献取 1，删除贡献取负 1，分别乘到多空绝对数量上。
-        long direction = add ? 1 : -1;
-        adjust(position.instrumentId(), Math.multiplyExact(longQuantity(quantity), direction),
-                Math.multiplyExact(shortQuantity(quantity), direction));
     }
 
     /**

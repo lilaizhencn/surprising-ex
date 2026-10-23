@@ -124,7 +124,7 @@ class CorePreflightLaneQueryTest {
                 var resolved = CoreOrderDecisionResolver.resolve(cold, identities, 1, valid, TIME);
                 // 冷运行时结合实际 OI 和挂单汇总算出的两步只减仓预留金额。
                 long expected = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
-                        new OpenInterestIndex(before, identities).openInterestSteps("1"), cold.admissionOrders(1, resolved.symbolId()));
+                        new OpenInterestIndex(before).openInterestSteps("1"), cold.admissionOrders(1, resolved.symbolId()));
                 try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                     assertThat(query(core, 1, place(304, CoreOrderSide.SELL, 110, 3, true, "close-oversized")).resultCode())
                             .isEqualTo(CoreResultCode.REDUCE_ONLY_CAPACITY_EXCEEDED);

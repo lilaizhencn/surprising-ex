@@ -946,7 +946,15 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.identities = new RuntimeIdentityRegistry(topology);
         this.runtimeState = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.project(
                 snapshotState, identities, topology, configuration);
-        this.activeOrderIndex = new ActiveOrderIndex(snapshotState, identities);
+        this.factIndexes = runtimeState.factIndexes();
+        this.positionUserIndex = factIndexes.positionUsers();
+        this.openInterestIndex = factIndexes.openInterest();
+        this.triggerOrderIndex = factIndexes.triggers();
+        this.algoOrderIndex = factIndexes.algos();
+        this.liquidationIndex = factIndexes.liquidations();
+        this.cancelAllAfterIndex = factIndexes.timers();
+        this.activeOrderIndex = factIndexes.activeOrders();
+        this.adlPositionIndex = factIndexes.adlPositions();
         this.matchingAdapter = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter(topology, false, configuration)
                 : new DeterministicExchangeCoreAdapter(snapshotState, snapshotState.orders().values().stream().filter(/* 从恢复状态筛出的订单，仅 OPEN 订单交给 Matcher 重建 */ order -> order.status() == com.surprising.aeron.model.CoreOrderStatus.OPEN).toList(),
@@ -970,21 +978,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
         } else {
             snapshots.snapshotEncoder(snapshotEncoder);
         }
-        this.positionUserIndex = new PositionUserIndex(snapshotState, identities, topology);
-        this.openInterestIndex = new OpenInterestIndex(snapshotState, identities);
-        this.triggerOrderIndex = new TriggerOrderIndex(snapshotState);
-        this.algoOrderIndex = new AlgoOrderIndex(snapshotState);
-        this.liquidationIndex = new LiquidationIndex(snapshotState);
-        this.cancelAllAfterIndex = new CancelAllAfterIndex(snapshotState);
-        this.adlPositionIndex = new AdlPositionIndex(snapshotState, identities);
-        this.factIndexes = new com.surprising.aeron.service.core.index.RuntimeFactIndexes(
-                positionUserIndex, openInterestIndex, triggerOrderIndex, algoOrderIndex,
-                liquidationIndex, cancelAllAfterIndex, activeOrderIndex, adlPositionIndex);
-        runtimeState.bindFactIndexes(factIndexes, identities);
         this.runtimeState.restoreFeePolicies(restoredFeePolicies);
         this.runtimeState.restorePendingTransfers(restoredPendingTransfers);
         commits.publication.initialize(snapshotState.revision(), projectionSequence);
-        this.factIndexes.rebuild(snapshotState, identities);
         runtimeState.releaseOwnerForHandoff();
         identities.releaseOwnerForHandoff();
     }

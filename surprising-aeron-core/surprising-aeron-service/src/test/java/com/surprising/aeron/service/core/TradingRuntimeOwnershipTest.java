@@ -18,6 +18,17 @@ class TradingRuntimeOwnershipTest {
     @EnumSource(ProductLine.class)
     void rejectedForeignCloseDoesNotPoisonTheOwnerLifecycle(ProductLine product) throws Exception {
         try (/* 当前测试自动关闭的真实运行时 */ var runtime = new TradingCoreRuntime(product)) {
+            // Core 与账户运行时共享恢复时装配的同一组索引，避免重新绑定第二套状态。
+            var indexes = runtime.runtimeState().factIndexes();
+            assertThat(runtime.factIndexes).isSameAs(indexes);
+            assertThat(runtime.positionUserIndex()).isSameAs(indexes.positionUsers());
+            assertThat(runtime.openInterestIndex()).isSameAs(indexes.openInterest());
+            assertThat(runtime.triggerOrderIndex()).isSameAs(indexes.triggers());
+            assertThat(runtime.algoOrderIndex()).isSameAs(indexes.algos());
+            assertThat(runtime.liquidationIndex()).isSameAs(indexes.liquidations());
+            assertThat(runtime.cancelAllAfterIndex).isSameAs(indexes.timers());
+            assertThat(runtime.activeOrderIndex()).isSameAs(indexes.activeOrders());
+            assertThat(runtime.adlPositionIndex()).isSameAs(indexes.adlPositions());
             runtime.activate();
             // 错误线程调用前保存的业务状态哈希
             long initialHash = runtime.stateHash();

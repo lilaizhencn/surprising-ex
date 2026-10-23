@@ -232,10 +232,6 @@ public final class CoreMessageFlyweightDecoder {
     /** 同一个解码器反复使用的头部读取视图；字段随 wrap 更新，不能当作跨帧不可变值。wrap 失败不保证此前或部分字段保持原样。 构造约定：建立尚未绑定帧的读取器，必须成功 wrap 后再读取其字段。 */
     @NoArgsConstructor
     public static final class DirectMessageReader {
-        /**  最近一次成功 wrap 的原始帧缓冲，读取器只借用它。 借出最近一次成功绑定的原缓冲，不复制帧字节。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter
-        private DirectBuffer buffer;
         /**  当前帧在原缓冲中的起始字节偏移。 读取当前帧的缓冲起始偏移。 */
         @Accessors(fluent = true, chain = false)
         @Getter
@@ -315,7 +311,7 @@ public final class CoreMessageFlyweightDecoder {
         private long correlationId;
 
         /**
-         * 先检查缓冲范围、魔数、版本和头长度，再按小端读取头字段及载荷长度；要求整帧长度精确匹配，成功后保存原缓冲视图。不在此校验业务载荷或执行交易。
+         * 先检查缓冲范围、魔数、版本和头长度，再按小端读取头字段及载荷长度；要求整帧长度精确匹配，只保存解码字段及载荷偏移。不在此校验业务载荷或执行交易。
          * @param buffer 包含当前完整 Core 帧的原输入缓冲
          * @param offset 帧在缓冲中的起始字节偏移
          * @param length 当前完整帧长度
@@ -377,7 +373,6 @@ public final class CoreMessageFlyweightDecoder {
                 throw new ProtocolException("invalid payload length: " + payloadLength);
             }
 
-            this.buffer = buffer;
             this.offset = offset;
             this.length = length;
             this.payloadOffset = offset + headerLength;

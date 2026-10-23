@@ -70,7 +70,7 @@ class TriggerOrderIndexTest {
             triggers.apply(901, trigger(901, 7, 100));
             triggers.apply(902, trigger(902, second, 100));
             runtime.bindFactIndexes(new RuntimeFactIndexes(new PositionUserIndex(initial, identities),
-                    new OpenInterestIndex(initial, identities), triggers,
+                    new OpenInterestIndex(initial), triggers,
                     new com.surprising.aeron.service.core.index.AlgoOrderIndex(initial),
                     new com.surprising.aeron.service.core.index.LiquidationIndex(initial),
                     new com.surprising.aeron.service.core.index.CancelAllAfterIndex(initial),

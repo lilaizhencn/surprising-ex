@@ -939,18 +939,6 @@ public final class MatcherSettlementEvent implements
         return java.util.List.of();
     }
     /**
-     * 此 MatchingResult 视图固定返回零，直达成功撤单前缀另存于事件和计划，不用此计数表达。
-     */
-    @Override public int successfulPrefixCount() {
-        return 0;
-    }
-    /**
-     * 返回本视图保留的拒绝后仍有成功撤单等部分变化标记；它不是所有成功成交状态变化的总开关。
-     */
-    @Override public boolean matcherStateChanged() {
-        return directNativeStateChanged;
-    }
-    /**
      * 按部分变化和接受标记分类：post-only 拒绝保留已知前缀，其他未能确认的部分变化视为致命分歧；无部分变化时返回已应用或未变化拒绝。
      */
     @Override public com.surprising.aeron.service.matcher.MatchingResult.Outcome outcome() {
