@@ -223,8 +223,8 @@ public final class RuntimeTriggerOrderStateTransitions {
         // 按编号读取的原条件单，只有满足本入口的状态条件才继续转换。
         CoreTriggerOrderState current = require(runtime, triggerOrderId);
         if (!current.status().open() || current.triggerType() != CoreTriggerOrderType.TRAILING_STOP) return false;
-        runtime.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
-                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.instrumentId(),
+        runtime.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(),
+                current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(),
                 current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
                 current.activationPriceTicks(), current.callbackRatePpm(), highestPriceTicks, lowestPriceTicks,
@@ -396,8 +396,8 @@ public final class RuntimeTriggerOrderStateTransitions {
                                                     CoreTriggerOrderStatus status, long placedOrderId,
                                                     long triggerSequence, long triggeredPriceTicks,
                                                     String rejectReason, long updatedAt) {
-        return new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(), current.userId(),
-                current.clientTriggerOrderId(), current.ocoGroupId(), current.instrumentId(), current.instrument(), current.side(),
+        return new CoreTriggerOrderState(current.triggerOrderId(), current.userId(),
+                current.clientTriggerOrderId(), current.ocoGroupId(), current.instrument(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
                 current.activationPriceTicks(), current.callbackRatePpm(), current.highestPriceTicks(),
                 current.lowestPriceTicks(), current.activatedAtEpochMillis(), current.orderType(),

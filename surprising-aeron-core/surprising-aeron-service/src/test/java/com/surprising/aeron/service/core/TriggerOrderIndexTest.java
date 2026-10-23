@@ -34,6 +34,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 触发派生索引与账户所有权测试。覆盖倒序查询、价格候选分页、追踪/OCO/到期更新、跨 Lane 提交与变更回执、回滚及替换快照；索引用例直接构造状态，没有经过完整触发单准入或真实 Matcher 成交。
  */
 class TriggerOrderIndexTest {
+    private static final com.surprising.aeron.service.instrument.CoreInstrument SPOT_INSTRUMENT =
+            com.surprising.aeron.service.instrument.CoreInstrument.from(ProductLine.SPOT,
+                    CoreStateTestFixtures.instrument(ProductLine.SPOT, "1", "BTC", "USDT", "USDT"));
+
     /**
      * 加入一万七千个 ID，确认倒序范围可直接从十开始并包含十到一，且对返回只读视图 clear 会失败；这不是吞吐基准。
      */
@@ -191,14 +195,14 @@ class TriggerOrderIndexTest {
     }
 
     /**
-     * 构造标记为现货的待触发买单供索引和发布测试，借用共享正向永续标的一外壳，仅依赖该外壳身份，不代表完整产品准入已经通过。
+     * 构造绑定真实现货标的一的待触发买单供索引和发布测试，不代表完整产品准入已经通过。
      * @param id 测试触发单或变更回调的业务 ID
      * @param user 测试触发单所属用户
      * @param price 普通触发阈值或本次候选查询的实际价格 tick
      */
     private static CoreTriggerOrderState trigger(long id, long user, long price) {
-        return new CoreTriggerOrderState(id, ProductLine.SPOT, user, "published-" + id, "",
-                "1", CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.BUY,
+        return new CoreTriggerOrderState(id, user, "published-" + id, "",
+                SPOT_INSTRUMENT, CoreOrderSide.BUY,
                 CoreTriggerOrderType.STOP_LOSS,
                 CoreTriggerCondition.GREATER_OR_EQUAL, price, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
@@ -214,8 +218,8 @@ class TriggerOrderIndexTest {
         // 本轮三百条同阈值候选的冷状态有序映射
         Map<Long, CoreTriggerOrderState> triggers = new java.util.TreeMap<>();
         for (/* 当前逐个加入索引或候选映射的触发 ID */ long id = 1; id <= 300; id++) {
-            triggers.put(id, new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "client-" + id, "",
-                    "1", CoreStateTestFixtures.runtimeInstrument(), CoreOrderSide.SELL,
+            triggers.put(id, new CoreTriggerOrderState(id, 7, "client-" + id, "",
+                    SPOT_INSTRUMENT, CoreOrderSide.SELL,
                     CoreTriggerOrderType.TAKE_PROFIT,
                     CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0,
                     CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS,
@@ -422,14 +426,14 @@ class TriggerOrderIndexTest {
         var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(ProductLine.SPOT,
                 new com.surprising.aeron.protocol.RegisterInstrumentCommand(
                         instrumentId, "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0));
-        return new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "indexed-" + id, oco, instrumentId,
+        return new CoreTriggerOrderState(id, 7, "indexed-" + id, oco,
                 instrument, CoreOrderSide.BUY, CoreTriggerOrderType.STOP_LOSS, condition, price, 0, 0, 0, 0, 0,
                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
                 CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", expiry, 0, 1, 1, 1);
     }
 
     /**
-     * 构造标记为现货的追踪待触发单，直接指定激活价、回调率及已记高低价和激活时间；同样借用共享标的外壳，只供索引条件测试。
+     * 构造标记为现货的追踪待触发单，直接指定激活价、回调率及已记高低价和激活时间；绑定同一现货标的，只供索引条件测试。
      * @param id 测试触发单或变更回调的业务 ID
      * @param side 追踪子单买卖方向，决定使用高点回落还是低点反弹
      * @param activationPrice 追踪激活价格，零表示无额外激活价
@@ -440,8 +444,7 @@ class TriggerOrderIndexTest {
      */
     private static CoreTriggerOrderState trailing(long id, CoreOrderSide side, long activationPrice,
                                                   long callbackRate, long highest, long lowest, long activatedAt) {
-        return new CoreTriggerOrderState(id, ProductLine.SPOT, 7, "client-" + id, "", "1",
-                CoreStateTestFixtures.runtimeInstrument(), side,
+        return new CoreTriggerOrderState(id, 7, "client-" + id, "", SPOT_INSTRUMENT, side,
                 CoreTriggerOrderType.TRAILING_STOP, CoreTriggerCondition.GREATER_OR_EQUAL, 0,
                 activationPrice, callbackRate, highest, lowest, activatedAt, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 1, CoreMarginMode.CROSS, CorePositionSide.NET,

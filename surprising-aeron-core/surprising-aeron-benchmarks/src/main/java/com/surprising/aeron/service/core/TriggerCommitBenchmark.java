@@ -83,8 +83,8 @@ public class TriggerCommitBenchmark {
         try {
             for (int i = 0; i < users.size(); i++) {
                 long id = triggerIds.get(i);
-                var trigger = new CoreTriggerOrderState(id, ProductLine.SPOT, users.get(i),
-                        "trigger-" + id, "", "1", instrument, CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
+                var trigger = new CoreTriggerOrderState(id, users.get(i),
+                        "trigger-" + id, "", instrument, CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
                         CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1, 1, 1);
