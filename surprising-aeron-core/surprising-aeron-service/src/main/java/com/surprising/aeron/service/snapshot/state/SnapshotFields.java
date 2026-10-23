@@ -136,12 +136,6 @@ final class SnapshotFields {
             return ByteBuffer.wrap(value).order(ByteOrder.LITTLE_ENDIAN).getLong();
         }
         /**
-         * 字段缺失时使用调用方明确给出的历史默认值；字段存在仍按八字节数值严格读取，不吞掉错误类型。
-         * @param id 当前记录中的正数业务字段编号
-         * @param defaultValue 字段缺失时明确采用的数值默认值
-         */
-        long numberOr(int id, long defaultValue) { return fields.containsKey(id) ? number(id) : defaultValue; }
-        /**
          * 读取 long 后精确转 int，越界由 Math.toIntExact 抛 ArithmeticException。
          * @param id 当前记录中的正数业务字段编号
          */

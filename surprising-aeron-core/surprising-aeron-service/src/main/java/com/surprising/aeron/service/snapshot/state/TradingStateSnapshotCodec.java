@@ -34,18 +34,16 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * 交易状态的独立持久化格式。新快照外层版本三十九，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，三十九版另以根字段十二声明最低业务读取修订，未知合法字段按长度跳过而不参与当前恢复。
- * 构造约定：工具类不创建实例；当前写版本三十九，历史布局不再接受。
+ * 交易状态的独立持久化格式。新快照外层版本四十一，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
+ * 构造约定：工具类不创建实例；当前写版本四十一，历史布局不再接受。
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
-    /** 本编码器新写入的外层快照布局版本三十九。 */
-    private static final int VERSION = 40;
-    /** 当前支持的最高业务读取修订四，与外层布局版本分开管理。 */
-    private static final int READER_REVISION = 4;
+    /** 本编码器新写入的外层快照布局版本四十一。 */
+    private static final int VERSION = 41;
 
     /**
-     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十头。根字段十二是最低业务读取修订：数量步长需二、非默认订单保护需三，算法退休量或待关联子单需四；不把 Java 类名或当前接口 DTO 当作磁盘结构。
+     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十一头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
      * @param value 本方法要持久化的对应业务值，字段和顺序由固定编号定义
      */
     public static byte[] encode(TradingCoreState value) {
@@ -61,47 +59,23 @@ public final class TradingStateSnapshotCodec {
                 .bytes(8, writeMap(value.leverages(), TradingStateSnapshotCodec::writeCoreLeverageKey, /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> new SnapshotFields.Writer().number(1, item).encode()))
                 .bytes(9, writeValues(value.algoOrders(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
                 .list(10, value.cancelAllAfterTimers().values(), TradingStateSnapshotCodec::writeCoreCancelAllAfterState)
-                .list(11, value.triggerOrders().values(), /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> writeCoreTriggerOrderStateView(item.view()))
-                .number(12, value.algoOrders().values().stream().anyMatch(/* 当前算法父单，检查是否存在需要读取修订四才能理解的退休量或待关联子单。 */ v -> v.retiredExecutedQuantitySteps() != 0 || v.pendingClosedChildId() != 0)
-                        ? 4 : determineInstrumentVersion(value.instruments().values())).encode();
+                .list(11, value.triggerOrders().values(), /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> writeCoreTriggerOrderStateView(item.view())).encode();
         return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(VERSION).put(fields).array();
     }
 
     /**
-     * 按实际币对能力决定最低业务读取修订，非默认订单保护立即要求三，否则存在非单位数量步长要求二，其余要求一；这不是外层快照版本号。
-     * @param instruments 要检查实际数量步长和订单保护能力的注册币对集合
-     */
-    private static int determineInstrumentVersion(Collection<CoreInstrument> instruments) {
-        // 已经检查过的币对中，是否出现一个数量步长不等于一的配置。
-        boolean hasNonUnitStep = false;
-        for (CoreInstrument /* 当前正在检查能力要求或按触发单引用取得的注册币对。 */ instrument : instruments) {
-            if (!instrument.orderProtection().equals(com.surprising.aeron.protocol.CoreOrderProtection.initial())) {
-                return 3;
-            }
-            if (instrument.quantityStepUnits() != 1) {
-                hasNonUnitStep = true;
-            }
-        }
-        return hasNonUnitStep ? 2 : 1;
-    }
-
-    /**
-     * 先拒绝非当前外层版本，再检查最低读取修订及产品线，再恢复用户、订单、币对、风险、财库等。触发单必须引用已恢复币对；三十九版解析中的协议错误原样抛出，其他运行时构造或算术错误包装为带原因的 ProtocolException。
+     * 先拒绝非当前外层版本，再核对产品线，再恢复用户、订单、币对、风险、财库等。触发单必须引用已恢复币对；当前布局解析中的协议错误原样抛出，其他运行时构造或算术错误包装为带原因的 ProtocolException。
      * @param encoded 本方法所读的独立字段记录；decode 入口还包含外层版本头
      * @param expectedProductLine 调用方当前实例所属产品线，必须与快照一致
      */
     public static TradingCoreState decode(byte[] encoded, ProductLine expectedProductLine) {
         if (encoded == null || encoded.length < 4) throw new ProtocolException("truncated trading snapshot");
-        // 快照最外层布局版本，区别于根字段十二的最低业务读取修订。
+        // 快照布局的唯一版本；不兼容变更必须更新版本，编号十二保留不复用。
         int version = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt();
         if (version != VERSION) throw new ProtocolException("unsupported trading snapshot version: " + version);
         try {
             // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
             var r = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, 4, encoded.length));
-            // 快照声明的最低业务读取修订，必须在本读取器支持范围内。
-            int minimumReader = r.integer(12);
-            if (minimumReader < 1 || minimumReader > READER_REVISION)
-                throw new ProtocolException("trading snapshot requires reader version: " + minimumReader);
             // 快照声明且必须与调用方期望一致的独立产品线。
             ProductLine product = SnapshotEnumCodes.readProductLine(r.integer(1));
             if (product != expectedProductLine) throw new ProtocolException("trading snapshot product line mismatch");
@@ -417,7 +391,7 @@ public final class TradingStateSnapshotCodec {
                 r.number(4), // 4：远期参考价格
                 r.number(5), // 5：参考价格序号
                 r.number(6), // 6：参考价格生成时刻，毫秒
-                r.numberOr(7, 0)); // 7：最近成交价
+                r.number(7)); // 7：最近成交价
     }
 
     /**
@@ -1049,9 +1023,9 @@ public final class TradingStateSnapshotCodec {
                 r.bool(25), // 25：币对是否支持只减仓标记
                 r.integer(26), // 26：币对允许的订单类型位图
                 r.integer(27), // 27：币对允许的订单有效方式位图
-                r.numberOr(28, 1L), // 已发布历史快照的数量步长为一，字段缺失时明确沿用。
-                new com.surprising.aeron.protocol.CoreOrderProtection(r.numberOr(29, 10_000), r.numberOr(30, 5_000),
-                        r.numberOr(31, 0) != 0, r.numberOr(32, 50_000), r.numberOr(33, 5_000)));
+                r.number(28), // 当前布局必须保存显式数量步长。
+                new com.surprising.aeron.protocol.CoreOrderProtection(r.number(29), r.number(30),
+                        r.number(31) != 0, r.number(32), r.number(33)));
     }
 
     /**

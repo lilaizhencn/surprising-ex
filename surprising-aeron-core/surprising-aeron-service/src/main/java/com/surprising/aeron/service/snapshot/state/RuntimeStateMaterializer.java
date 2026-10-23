@@ -237,20 +237,5 @@ public final class RuntimeStateMaterializer {
                 fundingProgress, lifecycleProgress);
     }
 
-    /**
-     * 使用已解析的币对名称复制订单业务字段，保留原请求价、撮合保护价、成交值、费用、时间和修订号；本方法本身不等待账户写入完成。
-     * @param value 要转换的已稳定运行时业务值，调用方负责相应读取边界
-     * @param instrumentId 已经解析的订单币对名称
-     */
-    public static CoreOrderState orderSnapshot(OrderRuntime value, String instrumentId) {
-        if (value == null || instrumentId == null) throw new IllegalArgumentException("runtime order is required");
-        return new CoreOrderState(value.orderId(), value.productLine(), value.userId(),
-                instrumentId, value.side(), value.priceTicks(),
-                value.matchingPriceTicks(), value.quantitySteps(), value.executedQuantitySteps(),
-                value.remainingQuantitySteps(), value.reduceOnly(), value.marginMode(), value.positionSide(),
-                value.orderType(), value.timeInForce(), value.postOnly(), value.clientOrderId(), value.commandId(),
-                value.makerFeeRatePpm(), value.takerFeeRatePpm(), value.cumulativeFeeUnits(), value.executedValueHigh(), value.executedValueLow(), value.createdAtEpochMillis(),
-                value.updatedAtEpochMillis(), value.clusterPosition(), value.status(), value.revision());
-    }
 
 }

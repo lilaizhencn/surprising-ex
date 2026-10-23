@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "A31–A46清理并编译验证；后续再扫A47的4个私有残留亦已清理。累计44项已解决、3项候选，完整业务字段/约束消费者审查尚未完成。",
+    "checkpoint": "累计47项已解决、2项候选（A11/A26）；A25及后续A48/A49已编译验证。公开静态入口新筛出15个待人工审查的方法，完整业务字段/约束消费者审查尚未完成。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -2056,7 +2056,7 @@
     },
     {
       "id": "A25",
-      "status": "candidate",
+      "status": "resolved",
       "topic": "严格外层版本之外再维护最低读取能力版本与扫描",
       "operations": [],
       "fields": [
@@ -2088,7 +2088,13 @@
       ],
       "next": "先统一格式版本策略；若每次不兼容变更都提升外层版本，可去掉字段及两次能力扫描；若保留同版本演进则需保留。",
       "evidence_basis_commit": "8a7fd3217f91dc004e7f73f58def263ca4427924",
-      "current_review_note": "01bdca24f外层现为39，仍严格只读当前版并保留根字段12的最低读取能力；本轮不更改其候选结论。"
+      "current_review_note": "当前v41统一用严格外层版本表达不兼容变更，根字段12和最低读取能力扫描已删除；用户已确认无需读取旧数据。",
+      "analysis_status": "confirmed",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "fourth_cleanup_round",
+        "change": "外层版本统一升至41并拒绝非当前版，删除根字段12、READER_REVISION和两处能力扫描；已保留的历史字段编号不复用。"
+      }
     },
     {
       "id": "A26",
@@ -2759,7 +2765,8 @@
         "state": "implemented_compile_verified",
         "round": "third_cleanup_round",
         "change": "删除8个无调用物化器转换入口；真实materialize/materializeTreasury及String标的订单导出保留。"
-      }
+      },
+      "followup_correction": "String标的的orderSnapshot重载原有引用来自同轮删除的身份表重载；后续精确签名扫描确认其也已失去调用方，在A49一并删除。"
     },
     {
       "id": "A36",
@@ -3615,6 +3622,61 @@
         "round": "third_cleanup_round",
         "change": "删除4个私有残留方法；再次扫描未发现其他无引用私有方法或非填充未读取私有字段，扫描结果不代表每个字段均有不可替代的业务用途。"
       }
+    },
+    {
+      "id": "A48",
+      "status": "resolved",
+      "analysis_status": "confirmed",
+      "topic": "严格当前快照布局仍给7个必写字段补历史默认值",
+      "evidence_basis_commit": "cd713eb5495cef198c3d47eb1a212c4534bf014a",
+      "fields": [
+        "标记价最近成交价字段7",
+        "标的数量步长28",
+        "标的订单保护29..33",
+        "SnapshotFields.Reader.numberOr"
+      ],
+      "evidence": [
+        "当前写入器始终保存这7个字段；外层版本校验在恢复业务字段之前已拒绝其他布局。",
+        "历史默认值仍允许当前版本的残缺记录静默变成单位数量步长或初始保护规则，当前生产者没有此类缺字段记录。"
+      ],
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "fourth_cleanup_round",
+        "change": "当前v41对7个字段使用必填数值读取，删除历史补值辅助；缺最近成交价用例改为拒绝，数量步长用例验证实际恢复值。"
+      }
+    },
+    {
+      "id": "A49",
+      "status": "resolved",
+      "analysis_status": "confirmed",
+      "topic": "再次扫描发现快照转换的3个链式死入口",
+      "evidence_basis_commit": "cd713eb5495cef198c3d47eb1a212c4534bf014a",
+      "methods": [
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "orderSnapshot",
+          "descriptor": "(Lcom/surprising/aeron/service/order/state/OrderRuntime;Ljava/lang/String;)Lcom/surprising/aeron/model/CoreOrderState;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/SnapshotEnumCodes",
+          "method": "encode",
+          "descriptor": "(Lcom/surprising/instrument/api/model/ContractType;)I"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/SnapshotEnumCodes",
+          "method": "readContractType",
+          "descriptor": "(I)Lcom/surprising/instrument/api/model/ContractType;"
+        }
+      ],
+      "evidence": [
+        "生产及测试classfile都未引用这些精确方法签名。",
+        "身份表订单转换及快照合约类型字段已在上一轮删除，因此这3个下游转换不再有实际来源；独立CoreInstrument和现用订单物化保留。"
+      ],
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "round": "fourth_cleanup_round",
+        "change": "删除3个链式死转换；保留真实materialize订单导出和其他业务枚举编码。"
+      }
     }
   ],
   "preserve_verified_purposes": [
@@ -3632,9 +3694,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "继续逐业务核对命令字段、约束及最终快照的实际消费；当前静态零引用扫描只是可证实死代码的下界。",
-    "A11查询一致性、A25严格布局版本与最低读取修订、A26现货风险参数仍保留候选，逐个核对实际语义后处理。",
-    "下一轮继续检查公开但只被测试调用或已无调用的入口，以及可由权威事实推导的重复字段；不得删掉资金公式、Owner/Lane所有权和恢复一致性边界。"
+    "逐项核对fourth_cleanup_round.next_static_method_scan的15个方法；属于死代码时继续清理并只编译相关模块。",
+    "继续A11查询一致性和A26现货风险参数下游消费者核查。",
+    "完整字段和业务约束审查仍在继续，不把零引用扫描等同于所有状态均有独立业务必要性。"
   ],
   "rejected_false_positives": [
     {
@@ -5445,6 +5507,211 @@
       "edges": 151720,
       "status": "up_to_date",
       "removed_positionKey_callers": 0
+    }
+  },
+  "fourth_cleanup_round": {
+    "source_basis_commit": "cd713eb5495cef198c3d47eb1a212c4534bf014a",
+    "resolved_ids": [
+      "A25",
+      "A48",
+      "A49"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 47,
+      "confirmed": 0,
+      "candidate": 2
+    },
+    "snapshot_version": 41,
+    "format_policy": "仅当前外层布局；不兼容变化提升版本，不额外维护最低读取能力或历史字段默认值。",
+    "verification": {
+      "clean_command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools -am -DskipTests clean test-compile",
+      "final_command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools -am -DskipTests test-compile",
+      "clean_exit_code": 0,
+      "final_exit_code": 0,
+      "result": "BUILD SUCCESS",
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-aeron-tools",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-maker",
+        "surprising-realtime-api",
+        "surprising-price-provider",
+        "surprising-aeron-benchmarks"
+      ],
+      "final_duration": "33.684 s",
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "unverified": [
+        "运行中的交易和做市资金链路",
+        "正常/拒绝/异常行为",
+        "真实日志及快照恢复",
+        "数据库和前端集成",
+        "性能"
+      ]
+    },
+    "static_checks": {
+      "removed_method_definitions": [
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+          "method": "determineInstrumentVersion",
+          "removed": true,
+          "descriptor_constraint": "all overloads"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/SnapshotFields$Reader",
+          "method": "numberOr",
+          "removed": true,
+          "descriptor_constraint": "all overloads"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/SnapshotEnumCodes",
+          "method": "readContractType",
+          "removed": true,
+          "descriptor_constraint": "all overloads"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/SnapshotEnumCodes",
+          "method": "encode",
+          "removed": true,
+          "descriptor_constraint": "ContractType parameter only"
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "method": "orderSnapshot",
+          "removed": true,
+          "descriptor_constraint": "all overloads"
+        }
+      ],
+      "minimum_reader_and_7_historical_defaults_removed": true,
+      "java_sources_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java": "48075d6c56ed5eb15500e80698cc5a68e74a092215380d4a437ae9be2fa027ac",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/SnapshotEnumCodes.java": "93f222f30b653453fccfec5b98c1715d5ffbe42b42e90b37551543717e35f07a",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/SnapshotFields.java": "994a72f5e36009ed0532fa55c7e10053a6c764668533aee89bb77e0e3dceaafb",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "be0cec5cf8c6d3f82d03625a94e0f63fe65feed0b381dfe7a6dfa8f94c1498ec",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreSpotAssetUnitsTest.java": "53bd364a66802d639224b2ef4ddf6b731d69291c3a68663d16105f3ff0524900",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/snapshot/state/SnapshotFieldEvolutionTest.java": "e5aba74fbcfebda31ffc5c1d8b68410bb61f2d65474838f5981df73cd29bb7a1"
+      }
+    },
+    "next_static_method_scan": {
+      "class_files": 4023,
+      "unreferenced_static_prefilter_count": 41,
+      "excluded_compiler_or_jvm_methods": 26,
+      "manual_review_candidates": [
+        {
+          "owner": "com/surprising/aeron/service/order/state/RuntimeOrderStateTransitions",
+          "method": "reject",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;JJJ)V",
+          "flags": 8
+        },
+        {
+          "owner": "com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions",
+          "method": "upsert",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;JLcom/surprising/aeron/protocol/CoreTriggerOrderStateView;)V",
+          "flags": 9
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec",
+          "method": "isSectioned",
+          "descriptor": "([B)Z",
+          "flags": 9
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec",
+          "method": "encode",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingCoreRuntime;Lcom/surprising/aeron/service/matcher/MatcherSnapshot;JJJJ)Lcom/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec$SectionedSnapshot;",
+          "flags": 9
+        },
+        {
+          "owner": "com/surprising/aeron/service/snapshot/SectionedCoreSnapshotWriter",
+          "method": "encode",
+          "descriptor": "(Lcom/surprising/aeron/service/snapshot/CoreSnapshotImage;)Lcom/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec$SectionedSnapshot;",
+          "flags": 9
+        },
+        {
+          "owner": "com/surprising/aeron/service/result/CommandResultLedger$StoredResult",
+          "method": "owned",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CommandFingerprint;Lcom/surprising/aeron/protocol/ResponseStatus;Lcom/surprising/aeron/protocol/CoreResultCode;J[B)Lcom/surprising/aeron/service/result/CommandResultLedger$StoredResult;",
+          "flags": 8
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+          "method": "positionIdentityKey",
+          "descriptor": "(JLjava/lang/String;)J",
+          "flags": 8
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "method": "validate",
+          "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;)V",
+          "flags": 8
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/MatcherSettlementPlan",
+          "method": "build",
+          "descriptor": "(JJJ[JLcom/surprising/aeron/service/matcher/MatchingResult;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/settlement/MatcherSettlementPlan;",
+          "flags": 9
+        },
+        {
+          "owner": "com/surprising/aeron/service/matcher/CoreMatchingResult",
+          "method": "concatenateEvents",
+          "descriptor": "(Ljava/util/List;Ljava/util/List;)Ljava/util/List;",
+          "flags": 8
+        },
+        {
+          "owner": "com/surprising/aeron/service/account/DerivativeAccountCommandProcessor",
+          "method": "updateAccountLeverage",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/model/CoreLeverageKey;IJ)Z",
+          "flags": 8
+        },
+        {
+          "owner": "com/surprising/aeron/service/treasury/RuntimeFundsDelta",
+          "method": "from",
+          "descriptor": "(Ljava/util/List;)Lcom/surprising/aeron/service/treasury/RuntimeFundsDelta;",
+          "flags": 8
+        },
+        {
+          "owner": "com/surprising/aeron/service/query/state/RuntimeOperationalQueryService",
+          "method": "triggerOrders",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Ljava/lang/Iterable;JLjava/lang/String;Lcom/surprising/aeron/protocol/CoreTriggerOrderStatus;JJZI)Ljava/util/List;",
+          "flags": 9
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeRiskStateTransitions",
+          "method": "replaceScan",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Lcom/surprising/aeron/model/CoreRiskState$RiskScan;)V",
+          "flags": 9
+        },
+        {
+          "owner": "com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor",
+          "method": "syncScanProgress",
+          "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+          "flags": 9
+        }
+      ],
+      "status": "prefilter_only_not_confirmed_dead_code",
+      "next": "按具体签名检查15个入口的源码、重载、反射和配置；不根据零静态引用直接删除。"
+    },
+    "temporary_resources": {
+      "status": "removed_after_evidence_archived",
+      "removed_files": [
+        "/tmp/aeron-snapshot-followup-compile.log",
+        "/tmp/aeron-snapshot-followup.py",
+        "/tmp/aeron-snapshot-followup-final-compile.log",
+        "/tmp/aeron-public-audit.py",
+        "/tmp/aeron-public-audit.json"
+      ],
+      "services_started": false
     }
   }
 }

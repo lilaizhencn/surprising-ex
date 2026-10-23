@@ -40,20 +40,11 @@ class CoreSpotAssetUnitsTest {
                     List.of(new CoreRiskLimitBracket(1, 0, 1_000_000_000_000_000L, 1_000_000, 1_000_000, 1_000_000)),
                     1, true, true, false, 0b11, 0b1111, 100_000);
             apply(runtime, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(registration));
-            // 本次冷交易状态快照编码字节，检查格式及最低读者字段
+            // 非单位数量步长必须按当前布局完整保存，恢复值不得静默降为单位步长。
             byte[] encoded = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(runtime.tradingState());
-            // 以小端读取快照字段的 ByteBuffer 游标
-            var fields = java.nio.ByteBuffer.wrap(encoded).order(java.nio.ByteOrder.LITTLE_ENDIAN);
-            assertThat(fields.getInt()).isEqualTo(38);
-            // 快照字段十二记录的最低读者能力值，非单位资产计账场景应为二
-            long minimumReader = 0;
-            while (fields.hasRemaining()) {
-                // 本次读取的快照字段编号
-                int fieldId = fields.getInt(); /* 当前字段有效载荷长度，用于跳到下一个字段 */ int length = fields.getInt(); /* 当前快照字段结束位置，读取后按此继续扫描 */ int end = fields.position() + length;
-                if (fieldId == 12) minimumReader = fields.getLong();
-                fields.position(end);
-            }
-            assertThat(minimumReader).as("old readers must refuse non-unit asset accounting").isEqualTo(2);
+            var restored = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.decode(encoded, ProductLine.SPOT);
+            assertThat(restored.instruments().get(registration.instrumentId()).quantityStepUnits())
+                    .isEqualTo(registration.quantityStepUnits());
             fund(runtime, 101, "USDT", 100_000_000_000L);
             fund(runtime, 202, "BTC", 1_000_000L);
             place(runtime, 202, 1, CoreOrderSide.SELL, fragmented ? 1 : 5, 500_000, CoreTimeInForce.GTC);

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 验证字段编号快照的演进规则：字段重排和未知可选字段不影响状态，必填缺失、错误内容、过高读取需求及损坏记录必须拒绝；历史新增可选成交价字段缺失时明确取零。覆盖这些代表性结构，不启动运行时或 Cluster。
+ * 验证字段编号快照的演进规则：字段重排和未知可选字段不影响状态，必填缺失、错误内容、错误布局版本及损坏记录必须拒绝；当前布局缺少成交价字段时明确拒绝。覆盖这些代表性结构，不启动运行时或 Cluster。
  */
 class SnapshotFieldEvolutionTest {
     /**
@@ -27,7 +27,7 @@ class SnapshotFieldEvolutionTest {
         Collections.reverse(fields);
         fields.add(new SnapshotFields.Writer().text(900, "future optional business metadata").encode());
         // 局部字段结构改变后的记录或带头快照字节。
-        byte[] changed = joinWithVersion(fields);
+        byte[] changed = joinWithVersion(encoded, fields);
         assertThat(TradingStateSnapshotCodec.decode(changed, state.productLine())).isEqualTo(state);
         assertThat(TradingStateSnapshotCodec.decode(changed, state.productLine()).businessStateHash())
                 .isEqualTo(state.businessStateHash());
@@ -47,31 +47,29 @@ class SnapshotFieldEvolutionTest {
             var fields = split(Arrays.copyOfRange(encoded, 4, encoded.length));
             fields.removeIf(/* 当前检查或复制的一条完整字段字节，包含编号与长度头。 */ field -> id(field) == 2);
             if (wrongType) fields.add(new SnapshotFields.Writer().text(2, "not a revision").encode());
-            assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(fields), state.productLine()))
+            assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(encoded, fields), state.productLine()))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("snapshot field");
         }
     }
 
-    /**
-     * 把根字段十二的最低读取需求改为五，要求解码器明确按读取版本不足拒绝。
-     */
+    /** 不兼容的旧布局和未来布局都必须在读取业务字段前被拒绝。 */
     @Test
-    void incompatibleBusinessRequirementsAreNotSilentlyIgnored() {
-        // 当前编码器生成的带版本头快照字节。
+    void unsupportedLayoutVersionsAreRejected() {
         byte[] encoded = TradingStateSnapshotCodec.encode(TradingCoreState.empty(ProductLine.SPOT));
-        // 去掉版本头后拆出的完整字段片段列表，后续重排、移除或添加。
-        var fields = split(Arrays.copyOfRange(encoded, 4, encoded.length));
-        fields.removeIf(/* 当前检查或复制的一条完整字段字节，包含编号与长度头。 */ field -> id(field) == 12);
-        fields.add(new SnapshotFields.Writer().number(12, 5).encode());
-        assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(fields), ProductLine.SPOT))
-                .isInstanceOf(ProtocolException.class).hasMessageContaining("requires reader version");
+        int version = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt();
+        for (int other : new int[] {version - 1, version + 1}) {
+            byte[] changed = encoded.clone();
+            ByteBuffer.wrap(changed).order(ByteOrder.LITTLE_ENDIAN).putInt(other);
+            assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(changed, ProductLine.SPOT))
+                    .isInstanceOf(ProtocolException.class).hasMessageContaining("unsupported trading snapshot version");
+        }
     }
 
     /**
-     * 构造最近成交价为零的标记价状态，逐层移除其字段七，再要求恢复值、最近成交价零默认及业务哈希全部保持一致。
+     * 构造最近成交价为零的标记价状态，逐层移除其字段七，再要求明确拒绝不完整记录。
      */
     @Test
-    void missingNewOptionalFieldUsesExplicitHistoricalDefault() {
+    void missingLastPriceFieldIsRejected() {
         // 用于提供空用户、订单、币对和财库的基础现货状态。
         var empty = TradingCoreState.empty(ProductLine.SPOT);
         // 本用例固定最近成交价为零的币对标记价记录。
@@ -99,11 +97,8 @@ class SnapshotFieldEvolutionTest {
                     return ByteBuffer.allocate(4 + updated.length).order(ByteOrder.LITTLE_ENDIAN)
                             .putInt(updated.length).put(updated).array();
                 })));
-        // 从缺少新可选字段的变换快照解码出的业务状态。
-        var restored = TradingStateSnapshotCodec.decode(joinWithVersion(split(changed)), ProductLine.SPOT);
-        assertThat(restored).isEqualTo(state);
-        assertThat(restored.riskState().markPrices().get("1").lastPriceTicks()).isZero();
-        assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
+        assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(joinWithVersion(encoded, split(changed)), ProductLine.SPOT))
+                .isInstanceOf(ProtocolException.class).hasMessageContaining("snapshot field");
     }
 
     /**
@@ -174,12 +169,13 @@ class SnapshotFieldEvolutionTest {
         return fields;
     }
     /**
-     * 按列表当前顺序拼接完整字段，并加固定版本三十八头；只供当前格式测试使用，不自动推导或升级版本。
+     * 按列表当前顺序拼接完整字段，沿用被修改快照的原版本头。
+     * @param original 被修改的原快照，保留其四字节版本头
      * @param fields 需要按当前顺序拼回快照的完整单字段字节列表
      */
-    private static byte[] joinWithVersion(List<byte[]> fields) {
+    private static byte[] joinWithVersion(byte[] original, List<byte[]> fields) {
         // 拆分记录或拼接新版本头时使用的小端字节缓冲。
         var buffer = ByteBuffer.allocate(4 + fields.stream().mapToInt(/* 参与计算拼接总长度的一段完整字段字节。 */ a -> a.length).sum()).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(39); fields.forEach(buffer::put); return buffer.array();
+        buffer.put(original, 0, Integer.BYTES); fields.forEach(buffer::put); return buffer.array();
     }
 }

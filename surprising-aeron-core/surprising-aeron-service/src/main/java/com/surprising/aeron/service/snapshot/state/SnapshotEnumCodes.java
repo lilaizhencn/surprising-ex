@@ -423,35 +423,6 @@ public final class SnapshotEnumCodes {
         };
     }
     /**
-     * 把合约类型写成固定持久化编号：SPOT=0、LINEAR_PERPETUAL=1、INVERSE_PERPETUAL=2、LINEAR_DELIVERY=3、INVERSE_DELIVERY=4、VANILLA_OPTION=5。不使用 Java 枚举声明顺序。
-     * @param value 本次要持久化的合约类型枚举值
-     */
-    public static int encode(ContractType value) {
-        return switch (value) {
-            case SPOT -> 0;
-            case LINEAR_PERPETUAL -> 1;
-            case INVERSE_PERPETUAL -> 2;
-            case LINEAR_DELIVERY -> 3;
-            case INVERSE_DELIVERY -> 4;
-            case VANILLA_OPTION -> 5;
-        };
-    }
-    /**
-     * 把固定编号恢复为合约类型：SPOT=0、LINEAR_PERPETUAL=1、INVERSE_PERPETUAL=2、LINEAR_DELIVERY=3、INVERSE_DELIVERY=4、VANILLA_OPTION=5；未定义编号抛出 ProtocolException，不猜测默认业务值。
-     * @param value 快照读取的合约类型固定编号
-     */
-    static ContractType readContractType(int value) {
-        return switch (value) {
-            case 0 -> ContractType.SPOT;
-            case 1 -> ContractType.LINEAR_PERPETUAL;
-            case 2 -> ContractType.INVERSE_PERPETUAL;
-            case 3 -> ContractType.LINEAR_DELIVERY;
-            case 4 -> ContractType.INVERSE_DELIVERY;
-            case 5 -> ContractType.VANILLA_OPTION;
-            default -> throw new ProtocolException("unknown persisted ContractType code: " + value);
-        };
-    }
-    /**
      * 把期权方向写成固定持久化编号：CALL=0、PUT=1。不使用 Java 枚举声明顺序。
      * @param value 本次要持久化的期权方向枚举值
      */
