@@ -14,6 +14,10 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 - `surprising-gateway` 中的 订单业务包：统一订单和止盈止损条件单入口 provider。
 - `surprising-realtime-provider`：成交导出、K 线和实时查询投影；盘口查询由 gateway 调用 Core。
 
+## 算法单间隔
+
+`PlaceAlgoOrderRequest.intervalSeconds`只属于TWAP，要求1–86400秒并继续满足网关配置范围及执行时长约束。ICEBERG请求可省略间隔，提供的值不参与业务且在绑定时清除；其响应间隔为0，表示不适用。总时长和每片数量继续独立保留。Web和移动端已同步请求、解析与展示；本轮只完成相关编译，未运行交互或交易测试。
+
 ## long 定点数模型
 
 订单入口不使用 `BigDecimal`。API、数据库、Kafka command 都使用 long：

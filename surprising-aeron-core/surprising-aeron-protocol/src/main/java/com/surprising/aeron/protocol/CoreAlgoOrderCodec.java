@@ -7,8 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CoreAlgoOrderCodec {
-    private static final int VERSION = 1;
-    private static final int COMMAND_VERSION = 3;
+    private static final int VERSION = 2;
+    private static final int COMMAND_VERSION = 4;
     private static final int MAX_TEXT_BYTES = 256;
     private static final int FIXED_ITEM_BYTES =
             Long.BYTES * 16 + Integer.BYTES * 8 + Byte.BYTES * 2;
@@ -17,7 +17,8 @@ public final class CoreAlgoOrderCodec {
 
     public static byte[] encodeCommand(CoreAlgoOrderCommand command) {
         int length = switch (command) {
-            case CoreAlgoOrderCommand.Create value -> Integer.BYTES * 7 + Long.BYTES * 7 + 2
+            case CoreAlgoOrderCommand.Create value -> Integer.BYTES * 7 + Long.BYTES * 6 + 2
+                    + (value.algoTypeCode() == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? 0 : Long.BYTES)
                     + textLength(value.clientAlgoOrderId()) + textLength(value.instrumentId());
             case CoreAlgoOrderCommand.Update value -> Integer.BYTES * 3 + Long.BYTES * 7
                     + textLength(value.rejectReason());
@@ -30,8 +31,9 @@ public final class CoreAlgoOrderCodec {
                 CoreStateQueryCodec.putText(buffer, value.clientAlgoOrderId(), true, MAX_TEXT_BYTES);
                 CoreStateQueryCodec.putText(buffer, value.instrumentId(), true, MAX_TEXT_BYTES);
                 buffer.putInt(value.algoTypeCode()).putInt(value.side().wireCode())
-                        .putLong(value.priceTicks()).putLong(value.quantitySteps()).putLong(value.childQuantitySteps())
-                        .putLong(value.intervalSeconds()).putLong(value.durationSeconds())
+                        .putLong(value.priceTicks()).putLong(value.quantitySteps()).putLong(value.childQuantitySteps());
+                if (value.algoTypeCode() != CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) buffer.putLong(value.intervalSeconds());
+                buffer.putLong(value.durationSeconds())
                         .putInt(value.marginMode().wireCode()).putInt(value.positionSide().wireCode())
                         .put((byte) (value.reduceOnly() ? 1 : 0)).put((byte) (value.postOnly() ? 1 : 0))
                         .putInt(value.timeInForce().wireCode()).putLong(value.startAtEpochMillis());
@@ -51,11 +53,7 @@ public final class CoreAlgoOrderCodec {
         Reader reader = new Reader(payload);
         if (reader.intValue() != COMMAND_VERSION) throw new ProtocolException("unsupported algo command version");
         CoreAlgoOrderCommand value = switch (reader.intValue()) {
-            case 1 -> new CoreAlgoOrderCommand.Create(reader.longValue(), reader.text(), reader.text(),
-                    reader.intValue(), CoreOrderSide.fromWireCode(reader.intValue()), reader.longValue(),
-                    reader.longValue(), reader.longValue(), reader.longValue(), reader.longValue(),
-                    CoreMarginMode.fromWireCode(reader.intValue()), CorePositionSide.fromWireCode(reader.intValue()),
-                    reader.bool(), reader.bool(), CoreTimeInForce.fromWireCode(reader.intValue()), reader.longValue());
+            case 1 -> readCreate(reader);
             case 2 -> new CoreAlgoOrderCommand.Update(reader.longValue(), reader.longValue(), reader.intValue(),
                     reader.longValue(), reader.text(), reader.longValue(), reader.longValue(), reader.longValue(),
                     reader.longValue());
@@ -63,6 +61,19 @@ public final class CoreAlgoOrderCodec {
         };
         reader.consumed();
         return value;
+    }
+
+    private static CoreAlgoOrderCommand.Create readCreate(Reader reader) {
+        long id = reader.longValue();
+        String clientId = reader.text(), instrumentId = reader.text();
+        int type = reader.intValue();
+        CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
+        long price = reader.longValue(), quantity = reader.longValue(), childQuantity = reader.longValue();
+        long interval = type == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? 0 : reader.longValue();
+        return new CoreAlgoOrderCommand.Create(id, clientId, instrumentId, type, side, price, quantity,
+                childQuantity, interval, reader.longValue(), CoreMarginMode.fromWireCode(reader.intValue()),
+                CorePositionSide.fromWireCode(reader.intValue()), reader.bool(), reader.bool(),
+                CoreTimeInForce.fromWireCode(reader.intValue()), reader.longValue());
     }
 
     public static byte[] encode(CoreAlgoOrderView value) {
@@ -118,7 +129,8 @@ public final class CoreAlgoOrderCodec {
 
     private static int encodedItemLength(CoreAlgoOrderView value) {
         if (value == null) throw new IllegalArgumentException("algo order is required");
-        int length = FIXED_ITEM_BYTES;
+        int length = FIXED_ITEM_BYTES
+                - (value.algoTypeCode() == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? Long.BYTES : 0);
         length = Math.addExact(length, textLength(value.clientAlgoOrderId()));
         length = Math.addExact(length, textLength(value.instrumentId()));
         length = Math.addExact(length, textLength(value.rejectReason()));
@@ -143,8 +155,9 @@ public final class CoreAlgoOrderCodec {
         CoreStateQueryCodec.putText(buffer, value.clientAlgoOrderId(), true, MAX_TEXT_BYTES);
         CoreStateQueryCodec.putText(buffer, value.instrumentId(), true, MAX_TEXT_BYTES);
         buffer.putInt(value.algoTypeCode()).putInt(value.side().wireCode())
-                .putLong(value.priceTicks()).putLong(value.quantitySteps()).putLong(value.childQuantitySteps())
-                .putLong(value.intervalSeconds()).putLong(value.durationSeconds())
+                .putLong(value.priceTicks()).putLong(value.quantitySteps()).putLong(value.childQuantitySteps());
+        if (value.algoTypeCode() != CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) buffer.putLong(value.intervalSeconds());
+        buffer.putLong(value.durationSeconds())
                 .putInt(value.marginMode().wireCode()).putInt(value.positionSide().wireCode())
                 .put((byte) (value.reduceOnly() ? 1 : 0)).put((byte) (value.postOnly() ? 1 : 0))
                 .putInt(value.timeInForce().wireCode())
@@ -165,7 +178,8 @@ public final class CoreAlgoOrderCodec {
         long id = reader.longValue(), userId = reader.longValue(); String clientId = reader.text(), instrumentId = reader.text();
         int type = reader.intValue(); CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
         long price = reader.longValue(), quantity = reader.longValue(), childQuantity = reader.longValue();
-        long interval = reader.longValue(), duration = reader.longValue();
+        long interval = type == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? 0 : reader.longValue();
+        long duration = reader.longValue();
         CoreMarginMode margin = CoreMarginMode.fromWireCode(reader.intValue());
         CorePositionSide position = CorePositionSide.fromWireCode(reader.intValue());
         boolean reduce = reader.bool(), post = reader.bool(); CoreTimeInForce tif = CoreTimeInForce.fromWireCode(reader.intValue());

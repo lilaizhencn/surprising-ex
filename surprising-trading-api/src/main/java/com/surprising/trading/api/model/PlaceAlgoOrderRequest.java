@@ -17,7 +17,7 @@ public record PlaceAlgoOrderRequest(
         @Min(0) long priceTicks,
         @Positive long quantitySteps,
         @Positive long childQuantitySteps,
-        @Min(1) @Max(86_400) long intervalSeconds,
+        long intervalSeconds,
         @Min(1) @Max(86_400) long durationSeconds,
         MarginMode marginMode,
         PositionSide positionSide,
@@ -27,6 +27,9 @@ public record PlaceAlgoOrderRequest(
         Instant startAt) {
 
     public PlaceAlgoOrderRequest {
+        if (algoType == AlgoOrderType.ICEBERG) intervalSeconds = 0;
+        else if (algoType == AlgoOrderType.TWAP && (intervalSeconds < 1 || intervalSeconds > 86_400))
+            throw new IllegalArgumentException("TWAP intervalSeconds must be in [1, 86400]");
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
     }

@@ -13,11 +13,13 @@ public record CoreAlgoOrderView(
         long executedQuantitySteps, long activeQuantitySteps, int activeChildOrderCount) {
 
     public CoreAlgoOrderView {
+        if (algoTypeCode == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) intervalSeconds = 0;
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
         rejectReason = rejectReason == null ? "" : rejectReason;
         childOrderIds = List.copyOf(childOrderIds);
         if (algoOrderId <= 0 || userId <= 0 || instrumentId == null || instrumentId.isBlank() || algoTypeCode < 0
-                || side == null || quantitySteps <= 0 || childQuantitySteps <= 0 || intervalSeconds <= 0
+                || side == null || quantitySteps <= 0 || childQuantitySteps <= 0
+                || algoTypeCode != CoreAlgoOrderCommand.ICEBERG_TYPE_CODE && intervalSeconds <= 0
                 || durationSeconds <= 0 || marginMode == null || positionSide == null || timeInForce == null
                 || statusCode < 0 || startAtEpochMillis <= 0 || createdAtEpochMillis <= 0
                 || updatedAtEpochMillis <= 0 || revision < 0 || executedQuantitySteps < 0

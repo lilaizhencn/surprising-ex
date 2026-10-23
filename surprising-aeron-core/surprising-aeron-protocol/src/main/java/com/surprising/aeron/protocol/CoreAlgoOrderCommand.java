@@ -2,6 +2,7 @@ package com.surprising.aeron.protocol;
 
 /** 算法单新建意图与生命周期增量；账户归属由命令头提供。 */
 public sealed interface CoreAlgoOrderCommand {
+    int ICEBERG_TYPE_CODE = 1;
     long algoOrderId();
 
     record Create(long algoOrderId, String clientAlgoOrderId, String instrumentId, int algoTypeCode,
@@ -10,9 +11,11 @@ public sealed interface CoreAlgoOrderCommand {
                   CorePositionSide positionSide, boolean reduceOnly, boolean postOnly,
                   CoreTimeInForce timeInForce, long startAtEpochMillis) implements CoreAlgoOrderCommand {
         public Create {
+            if (algoTypeCode == ICEBERG_TYPE_CODE) intervalSeconds = 0;
             clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
             if (algoOrderId <= 0 || instrumentId == null || instrumentId.isBlank() || algoTypeCode < 0
-                    || side == null || quantitySteps <= 0 || childQuantitySteps <= 0 || intervalSeconds <= 0
+                    || side == null || quantitySteps <= 0 || childQuantitySteps <= 0
+                    || algoTypeCode != ICEBERG_TYPE_CODE && intervalSeconds <= 0
                     || durationSeconds <= 0 || marginMode == null || positionSide == null
                     || timeInForce == null || startAtEpochMillis < 0) {
                 throw new IllegalArgumentException("invalid algo order creation");

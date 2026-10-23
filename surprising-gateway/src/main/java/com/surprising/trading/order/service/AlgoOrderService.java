@@ -339,14 +339,14 @@ public class AlgoOrderService {
                 || request.childQuantitySteps() > request.quantitySteps()) {
             throw new IllegalArgumentException("quantitySteps and childQuantitySteps are invalid");
         }
-        validateRange(request.intervalSeconds(), properties.getAlgo().getMinIntervalSeconds(),
-                properties.getAlgo().getMaxIntervalSeconds(), "intervalSeconds");
         validateRange(request.durationSeconds(), properties.getAlgo().getMinDurationSeconds(),
                 properties.getAlgo().getMaxDurationSeconds(), "durationSeconds");
-        if (request.durationSeconds() < request.intervalSeconds()) {
-            throw new IllegalArgumentException("durationSeconds must be >= intervalSeconds");
-        }
         if (request.algoType() == AlgoOrderType.TWAP) {
+            validateRange(request.intervalSeconds(), properties.getAlgo().getMinIntervalSeconds(),
+                    properties.getAlgo().getMaxIntervalSeconds(), "intervalSeconds");
+            if (request.durationSeconds() < request.intervalSeconds()) {
+                throw new IllegalArgumentException("durationSeconds must be >= intervalSeconds");
+            }
             long maxSlices = (request.durationSeconds() + request.intervalSeconds() - 1L)
                     / request.intervalSeconds();
             long minChild = request.quantitySteps() / maxSlices

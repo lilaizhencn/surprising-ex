@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 49;
+    private static final int VERSION = 50;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -555,7 +555,7 @@ public final class TradingStateSnapshotCodec {
      * @param value 当前要写入的算法父单业务值
      */
     private static byte[] writeCoreAlgoOrderState(CoreAlgoOrderState value) {
-        return new SnapshotFields.Writer()
+        var writer = new SnapshotFields.Writer()
                 .number(1, value.algoOrderId()) // 1：算法父单编号
                 .number(2, value.userId()) // 2：所属用户编号
                 .text(3, value.clientAlgoOrderId()) // 3：客户指定的算法单编号
@@ -564,9 +564,10 @@ public final class TradingStateSnapshotCodec {
                 .number(6, SnapshotEnumCodes.encode(value.side())) // 6：买入或卖出方向
                 .number(7, value.priceTicks()) // 7：原请求订单价格
                 .number(8, value.quantitySteps()) // 8：订单原请求数量
-                .number(9, value.childQuantitySteps()) // 9：算法单每个子单的数量
-                .number(10, value.intervalSeconds()) // 10：算法单相邻切片间隔，秒
-                .number(11, value.durationSeconds()) // 11：算法单总执行时长，秒
+                .number(9, value.childQuantitySteps()); // 9：算法单每个子单的数量
+        if (value.algoTypeCode() != CoreAlgoOrderCommand.ICEBERG_TYPE_CODE)
+            writer.number(10, value.intervalSeconds()); // 10：仅定时间隔算法保存切片间隔，秒
+        return writer.number(11, value.durationSeconds()) // 11：算法单总执行时长，秒
                 .number(12, SnapshotEnumCodes.encode(value.marginMode())) // 12：全仓或逐仓保证金模式
                 .number(13, SnapshotEnumCodes.encode(value.positionSide())) // 13：净持仓、多仓或空仓方向
                 .bool(14, value.reduceOnly()) // 14：是否只允许减少已有持仓
@@ -593,17 +594,19 @@ public final class TradingStateSnapshotCodec {
     private static CoreAlgoOrderState readCoreAlgoOrderState(byte[] encoded) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
+        int algoType = r.integer(5);
         return new CoreAlgoOrderState(
                 r.number(1), // 1：算法父单编号
                 r.number(2), // 2：所属用户编号
                 r.text(3), // 3：客户指定的算法单编号
                 r.text(4), // 4：币对或合约业务编号
-                r.integer(5), // 5：算法单类型编号
+                algoType, // 5：算法单类型编号
                 SnapshotEnumCodes.readCoreOrderSide(r.integer(6)), // 6：买入或卖出方向
                 r.number(7), // 7：原请求订单价格
                 r.number(8), // 8：订单原请求数量
                 r.number(9), // 9：算法单每个子单的数量
-                r.number(10), // 10：算法单相邻切片间隔，秒
+                algoType == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE
+                        ? 0 : r.number(10), // 10：ICEBERG没有切片间隔字段
                 r.number(11), // 11：算法单总执行时长，秒
                 SnapshotEnumCodes.readCoreMarginMode(r.integer(12)), // 12：全仓或逐仓保证金模式
                 SnapshotEnumCodes.readCorePositionSide(r.integer(13)), // 13：净持仓、多仓或空仓方向

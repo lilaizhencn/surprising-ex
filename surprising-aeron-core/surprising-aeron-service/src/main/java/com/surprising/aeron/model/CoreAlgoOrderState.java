@@ -1,5 +1,6 @@
 package com.surprising.aeron.model;
 
+import com.surprising.aeron.protocol.CoreAlgoOrderCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -108,12 +109,15 @@ public record CoreAlgoOrderState(
      * 补齐可空文本、复制子单列表，并校验母单数量、执行时长、时间、历史进度及每个子单编号。
      */
     public CoreAlgoOrderState {
+        if (algoTypeCode == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) intervalSeconds = 0;
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
         instrumentId = OrderReservation.requireInstrumentId(instrumentId);
         rejectReason = rejectReason == null ? "" : rejectReason;
         childOrderIds = List.copyOf(childOrderIds);
         if (algoOrderId <= 0 || userId <= 0 || algoTypeCode < 0 || side == null || quantitySteps <= 0
-                || childQuantitySteps <= 0 || intervalSeconds <= 0 || durationSeconds <= 0 || marginMode == null
+                || childQuantitySteps <= 0
+                || algoTypeCode != CoreAlgoOrderCommand.ICEBERG_TYPE_CODE && intervalSeconds <= 0
+                || durationSeconds <= 0 || marginMode == null
                 || positionSide == null || timeInForce == null || statusCode < 0 || startAtEpochMillis <= 0
                 || createdAtEpochMillis <= 0 || updatedAtEpochMillis <= 0 || revision < 0
                 || retiredExecutedQuantitySteps < 0 || retiredExecutedQuantitySteps > quantitySteps || pendingClosedChildId < 0) {
