@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第二十二轮：普通订单请求价冷/热副本及快照字段6删除，两无调用热构造删除；17模块干净编译通过。累计96项解决，A98一项确认，A11一项候选。Core16/registerV10/snapshot49，全量审查继续。",
+    "checkpoint": "第二十三轮：Core算法列表复制后的null与Gateway规范化TWAP/postOnly两处不可达分支删除，service5/gateway12模块编译通过。累计98项解决，A11/A100两项候选。Core16/registerV10/snapshot49，全量审查继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -5905,8 +5905,8 @@
     },
     {
       "id": "A98",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "算法母单已复制为非空元素列表后重复检查子单编号null",
       "fields": [
         "CoreAlgoOrderState构造的value == null分支"
@@ -5919,8 +5919,57 @@
           "purpose": "List.copyOf已先拒绝null列表或null元素，随后遍历中的value == null无法成立；正数编号、母单数量与退休累计进度边界仍有实际作用。"
         }
       ],
+      "business_code_changed": true,
+      "proposed_cleanup": "删后置不可达null分支，保留List.copyOf不可变捕获和空值拒绝、正数子单编号及全部真实业务约束；继续检查对应运行态与协议路径。",
+      "resolved_in_round": "twenty_third_cleanup_round",
+      "implementation": "仅删除List.copyOf后的value == null后置分支；列表不可变捕获和空元素拒绝、正数子单编号及其余全部字段/约束保留。"
+    },
+    {
+      "id": "A99",
+      "status": "resolved",
+      "analysis_status": "resolved",
+      "topic": "算法单规范化中TWAP且postOnly判断不可达",
+      "fields": [
+        "AlgoOrderService.normalize的TWAP && postOnly拒绝分支"
+      ],
+      "evidence_basis_commit": "c724383793490e33d29ced39a47f8182ee0fe2d4",
+      "evidence": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "anchor": "boolean postOnly = request.algoType() == AlgoOrderType.ICEBERG",
+          "purpose": "postOnly只在ICEBERG时可为true，因此紧随其后的TWAP && postOnly永远为false；删除死分支不改变原请求规范化结果或真实接受/拒绝行为。"
+        }
+      ],
+      "business_code_changed": true,
+      "resolved_in_round": "twenty_third_cleanup_round",
+      "implementation": "删不可达拒绝；原postOnly与TIF规范化、所有其他参数检查及创建/执行逻辑保持不变。"
+    },
+    {
+      "id": "A100",
+      "status": "candidate",
+      "analysis_status": "candidate",
+      "topic": "ICEBERG仍携带并约束其执行不读取的intervalSeconds",
+      "fields": [
+        "ICEBERG的intervalSeconds创建参数",
+        "ICEBERG的intervalSeconds范围与duration>=interval约束",
+        "CoreAlgoOrderCommand.Create.intervalSeconds",
+        "CoreAlgoOrderState及算法快照字段10"
+      ],
+      "evidence_basis_commit": "c724383793490e33d29ced39a47f8182ee0fe2d4",
+      "evidence": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "anchor": "private Instant nextSliceAt(AlgoOrderRecord record, Instant now)",
+          "purpose": "TWAP使用record.intervalSeconds，ICEBERG使用properties.algo.scanDelayMs；normalize却对两类都要求interval范围及duration>=interval，create原样传入Cluster并在快照字段10保存。"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "anchor": ".number(10, value.intervalSeconds())",
+          "purpose": "当前快照对所有算法类型都保存间隔；这不能单独证明ICEBERG业务有消费，仍需核对查询/投影、前端字段和所有生产者。"
+        }
+      ],
       "business_code_changed": false,
-      "proposed_cleanup": "删后置不可达null分支，保留List.copyOf不可变捕获和空值拒绝、正数子单编号及全部真实业务约束；继续检查对应运行态与协议路径。"
+      "proposed_cleanup": "沿类型核对间隔真正用途和API/页面契约；若ICEBERG无实际用途，仅对TWAP保留输入/约束及命令/快照槽，其他类型不存虚拟值。不得机械派生TWAP子单数量：它可大于按时长/间隔计算的最小值，且时长有独立终止作用。"
     }
   ],
   "preserve_verified_purposes": [
@@ -5938,9 +5987,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "清理A98并继续检查算法订单和倒计时全撤操作中的字段、实际约束及持久化用途。",
-    "A11查询一致性边界保留。",
-    "全部业务字段/约束审查和运行功能/恢复验证仍未完成，只编译相关模块。"
+    "A100从创建请求到Cluster、查询投影和前端审查ICEBERG间隔及无用约束，保留TWAP实际计划参数。",
+    "A11查询一致性边界保留；继续倒计时全撤及其他操作字段/约束扫描。",
+    "全量业务字段和运行功能/恢复审查尚未完成；只编译相关模块。"
   ],
   "rejected_false_positives": [
     {
@@ -6237,24 +6286,22 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "0429dc8ede1f792687e36d03848b12fd717b7661",
+    "source_basis_commit": "c724383793490e33d29ced39a47f8182ee0fe2d4",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A95",
-      "A97"
+      "A98",
+      "A99"
     ],
-    "new_confirmed_ids": [
-      "A98"
-    ],
+    "new_confirmed_ids": [],
     "candidate_ids": [
-      "A11"
+      "A11",
+      "A100"
     ],
     "counts": {
-      "resolved": 96,
-      "candidate": 1,
-      "confirmed": 1
+      "resolved": 98,
+      "candidate": 2
     },
-    "evidence": "twenty_second_cleanup_round",
+    "evidence": "twenty_third_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -19178,6 +19225,159 @@
         "/tmp/aeron-order-request-price-20261024-followup-refs.json": "b5d26209803061ccec6501053e889444945523c979398c2b78fccade9674622c",
         "/tmp/aeron-order-request-price-20261024-binary.py": "ab6fc685812f44d05beaf3e32be80d1c31b8a13a930d9e6d40059254736f420b",
         "/tmp/__pycache__/aeron-order-request-price-20261024-edit.cpython-311.pyc": "3a5d7cfaa0ad895760c4cb5744b72cd448e7dfa095127d58dd7c14ee4381c694"
+      },
+      "errors": [],
+      "no_task_services_started": true
+    }
+  },
+  "twenty_third_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "c724383793490e33d29ced39a47f8182ee0fe2d4",
+    "resolved_ids": [
+      "A98",
+      "A99"
+    ],
+    "new_candidate_ids": [
+      "A100"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 98,
+      "candidate": 2
+    },
+    "flow": "母单不可变子列表仍在原构造捕获，空值在复制时拒绝、正数编号继续校验；Gateway沿原算法类型计算postOnly/TIF，删除后置不可达分支。命令到状态、子单、退休累计进度、快照和API布局不变。",
+    "implementation": {
+      "removed_unreachable_conditions": 2,
+      "fields_changed": 0,
+      "test_sources_changed": false,
+      "new_test_classes": 0,
+      "wire_or_snapshot_layout_changed": false,
+      "public_api_or_acceptance_behavior_changed": false,
+      "constructor_or_method_signatures_changed": false
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 49,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4
+    },
+    "verification": {
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "disk_available_before_build": "185GiB",
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "test_sources_changed": false,
+      "unverified": [
+        "测试实际执行",
+        "真实交易正常/拒绝/异常路径",
+        "做市/资金/持仓/终态和资金守恒运行核对",
+        "Cluster日志/快照恢复运行",
+        "真实查询、数据库和前端交互",
+        "性能"
+      ],
+      "service": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "15.827 s",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service"
+        ],
+        "log_sha256": "1372915cc7e3fe7737ba5068cf232ddfea7fd0003e09c5346afe3662a0a264ae"
+      },
+      "gateway": {
+        "command": "mvn -pl surprising-gateway -am -DskipTests test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "23.857 s",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-realtime-api",
+          "surprising-derivatives-lifecycle-api",
+          "surprising-gateway"
+        ],
+        "log_sha256": "a47afcc466e3f131e8e8be450ff7d499de0a0b35ac42aed68f1dad8e41148fd9"
+      }
+    },
+    "static_verification": {
+      "core": {
+        "status": "passed",
+        "source_basis_commit": "c724383793490e33d29ced39a47f8182ee0fe2d4",
+        "only_removed_unreachable_null_check": true,
+        "immutable_capture_and_null_rejection_retained": true,
+        "positive_child_id_guard_retained": true,
+        "all_fields_constructors_methods_and_other_guards_unchanged": true,
+        "source_sha256": "77b5367046516c8a8b192651524d91ad2216f6c0ffb8d802203bdea6ad343a01",
+        "java_business_execution": false
+      },
+      "gateway": {
+        "status": "passed",
+        "only_removed_unreachable_twap_check": true,
+        "post_only_normalization_unchanged": true,
+        "all_other_statements_unchanged": true,
+        "source_sha256": "874b3bb1098fb0b0de3d9086b100a89f70f4d02619e59d00c087132063aed260",
+        "java_business_execution": false
+      }
+    },
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreAlgoOrderState.java": "77b5367046516c8a8b192651524d91ad2216f6c0ffb8d802203bdea6ad343a01",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java": "874b3bb1098fb0b0de3d9086b100a89f70f4d02619e59d00c087132063aed260"
+    },
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "37180bd21779ec4f816c8008a579a9c5134a8af0462df4e0f4ce657ea3a6b0b6",
+      "surprising-gateway/README.md": "3536aa6cfba0fc5b36ae6fbe6e5f1d3bf0bf3304e003bb14a36ee16a6884c3aa"
+    },
+    "followup_analysis": {
+      "candidate": "A100:ICEBERG的interval目前不参与nextSliceAt，但仍有额外限制、命令及快照字段10。需审查API/页面/投影后再清理，当前不改。",
+      "preserved_twap": "子单数量可高于按duration/interval计算的最小值，执行时长有独立到期终止作用，三者不能直接等价推导。",
+      "preserved_progress": "retiredExecutedQuantitySteps和pendingClosedChildId在子单回收及先结束后补链中有真实消费。",
+      "source_hashes": {
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java": "874b3bb1098fb0b0de3d9086b100a89f70f4d02619e59d00c087132063aed260",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java": "3ac83b85b25a0c3c120a930a2898c31c6576349f193b578d12f370e6d9333900",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreAlgoOrderCommand.java": "39f2e962ccb119e36f04bfc375ebad95546606e6eae3b74f00f9d3abcea28d88",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeAlgoOrderStateTransitions.java": "3dfc0b3ee5ef80f7ea573f6d08a7ddb8edd2f3c49cf0aef93414eefcb40a3a5b",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "3794b8646e3a0fd0a43b376d63d013c519fe921ca6ca4b5f656568937c0b6e48"
+      },
+      "java_business_execution": false
+    },
+    "graph_verification": {
+      "command": "codegraph sync -q; codegraph status",
+      "exit_code": 0,
+      "status": "up_to_date",
+      "files": 2241,
+      "nodes": 52634,
+      "edges": 147883,
+      "mcp_tools_available": false
+    },
+    "remaining_scope": [
+      "A100从创建请求到Cluster、查询投影和前端审查ICEBERG间隔及无用约束，保留TWAP实际计划参数。",
+      "A11查询一致性边界保留；继续倒计时全撤及其他操作字段/约束扫描。",
+      "全量业务字段和运行功能/恢复审查尚未完成；只编译相关模块。"
+    ],
+    "temporary_resources": {
+      "status": "removed_after_archival",
+      "owned_file_hashes": {
+        "/tmp/aeron-algo-null-guard-20261024-graph.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/aeron-algo-null-guard-20261024-gateway-static.json": "540a5ae93ac3160e7b954339048030495ae8c34c880c7a6ccd7d8a572d009a87",
+        "/tmp/aeron-algo-null-guard-20261024-gateway-build.log": "a47afcc466e3f131e8e8be450ff7d499de0a0b35ac42aed68f1dad8e41148fd9",
+        "/tmp/aeron-algo-null-guard-20261024-static.json": "738b6e44a0916e72e98394c6e09339a2e990a3a07389a3f2476817c02e6d49b6",
+        "/tmp/aeron-algo-null-guard-20261024-build.log": "1372915cc7e3fe7737ba5068cf232ddfea7fd0003e09c5346afe3662a0a264ae"
       },
       "errors": [],
       "no_task_services_started": true

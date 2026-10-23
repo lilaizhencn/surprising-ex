@@ -122,7 +122,7 @@ public record CoreAlgoOrderState(
         for (/* 当前检查的子单编号在列表中的下标。 */ int i = 0; i < childOrderIds.size(); i++) {
             // 本轮读取的子单编号，必须存在且为正数。
             Long value = childOrderIds.get(i);
-            if (value == null || value <= 0) {
+            if (value <= 0) {
                 throw new IllegalArgumentException("invalid algo order state");
             }
         }

@@ -360,9 +360,6 @@ public class AlgoOrderService {
         TimeInForce tif = normalizeTimeInForce(request);
         boolean postOnly = request.algoType() == AlgoOrderType.ICEBERG
                 && (request.postOnly() || tif == TimeInForce.GTX);
-        if (request.algoType() == AlgoOrderType.TWAP && postOnly) {
-            throw new IllegalArgumentException("TWAP does not support postOnly");
-        }
         String clientAlgoOrderId = emptyToNull(request.clientAlgoOrderId());
         if (clientAlgoOrderId == null) {
             throw new IllegalArgumentException("clientAlgoOrderId is required");

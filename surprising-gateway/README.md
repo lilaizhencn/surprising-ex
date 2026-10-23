@@ -43,6 +43,9 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 见 [查询验证记录](../docs/validation/public-realtime-query-20261019.json)。维护、恢复与交易预检控制
 协议仍保留。算法委托用户查询已于 2026-10-20 迁入 realtime 提交投影，后台触发单等专用查询仍需单独梳理；见 [算法委托查询](../docs/algo-read-projection.md)。
 
+算法委托规范化删除不可达的TWAP/postOnly拒绝：postOnly仍只在ICEBERG下按原规则计算，原TIF、数量及范围校验保留。Core算法母单也删除列表不可变复制后重复的null判断，空值仍由原List.copyOf拒绝。
+本轮只运行`mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests test-compile`与`mvn -pl surprising-gateway -am -DskipTests test-compile`，分别5/12个相关模块通过；未运行测试或服务。ICEBERG切片间隔的命令/快照和界面用途仍在审查，详见[Aeron字段审计](../surprising-aeron-core/surprising-aeron-service/validation/command-data-audit-20261023.json)。
+
 ## 用户安全与设备限制
 
 `AuthService` 在登录、二次验证、刷新令牌和签发会话时校验当前账户的设备 ID 与客户端 IP。Web 客户端以 `X-Device-Id` 发送浏览器安装 ID；`GatewayRefreshSessionRepository` 将它保存在 `gateway_refresh_sessions.device_id`。历史会话没有设备 ID 时仍可按会话踢出。`ClientIpResolver` 仅信任配置的代理地址发送的转发头。部署新 Gateway 前，应先执行 `init.sql` 中 `gateway_refresh_sessions.device_id` 和 `gateway_user_access_blocks` 的增量 DDL，并配置可信代理 IP 列表。
