@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本四十二。 */
-    private static final int VERSION = 44;
+    private static final int VERSION = 45;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十二头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -937,23 +937,23 @@ public final class TradingStateSnapshotCodec {
         SnapshotFields.Writer writer = new SnapshotFields.Writer()
                 .text(1, value.instrumentId())
                 .text(3, value.baseAsset()).text(4, value.quoteAsset()).text(5, value.settleAsset())
-                .number(6, value.notionalMultiplierUnits()).number(7, value.priceTickUnits())
+                .number(6, value.notionalMultiplierUnits())
                 .number(11, value.makerFeeRatePpm()).number(12, value.takerFeeRatePpm())
                 .bytes(21, writeCoreInstrumentMaintenance(value.maintenance()))
                 .number(22, SnapshotEnumCodes.encode(value.instrumentStatus()))
                 .bool(23, value.marketOrderEnabled()).bool(24, value.postOnlyEnabled()).bool(25, value.reduceOnlyEnabled())
-                .number(26, value.supportedOrderTypeMask()).number(27, value.supportedTimeInForceMask())
-                .number(29, value.orderProtection().marketMaxSlippagePpm())
-                .number(30, value.orderProtection().marketMaxMarkAgeMs())
-                .number(31, value.orderProtection().limitPriceProtectionEnabled() ? 1 : 0)
-                .number(32, value.orderProtection().limitPriceBandPpm())
-                .number(33, value.orderProtection().limitPriceMaxMarkAgeMs());
-        if (value.contractType().isInverse()) writer.number(8, value.settleScaleUnits());
+                .number(26, value.supportedOrderTypeMask()).number(27, value.supportedTimeInForceMask());
+        if (value.contractType().isInverse())
+            writer.number(7, value.priceTickUnits()).number(8, value.settleScaleUnits());
         if (productLine.isDeliveryProduct()) writer.number(13, value.expiryEpochMillis());
         if (productLine.isOptionProduct())
             writer.number(14, SnapshotEnumCodes.encode(value.optionType())).number(15, value.strikePriceTicks());
         if (!productLine.isDerivative()) writer.number(28, value.quantityStepUnits());
-        if (value.riskLimits() != null) {
+        if (productLine.isDerivative()) {
+            var protection = value.orderProtection();
+            writer.number(29, protection.marketMaxSlippagePpm()).number(30, protection.marketMaxMarkAgeMs())
+                    .number(31, protection.limitPriceProtectionEnabled() ? 1 : 0)
+                    .number(32, protection.limitPriceBandPpm()).number(33, protection.limitPriceMaxMarkAgeMs());
             var risk = value.riskLimits();
             writer.number(9, risk.initialMarginRatePpm())
                     .number(17, risk.maxPositionNotionalUnits())
@@ -972,7 +972,7 @@ public final class TradingStateSnapshotCodec {
                 r.number(9), productLine.isOptionProduct() ? 0 : r.number(16), r.number(17), r.number(18), r.number(19),
                 r.list(20, item -> readCoreRiskLimitBracket(item, productLine))) : null;
         return new CoreInstrument(r.text(1), contractType,
-                r.text(3), r.text(4), r.text(5), r.number(6), r.number(7),
+                r.text(3), r.text(4), r.text(5), r.number(6), contractType.isInverse() ? r.number(7) : 1,
                 contractType.isInverse() ? r.number(8) : 1, risk,
                 r.number(11), r.number(12), productLine.isDeliveryProduct() ? r.number(13) : 0,
                 productLine.isOptionProduct() ? SnapshotEnumCodes.readOptionType(r.integer(14)) : null,
@@ -980,8 +980,8 @@ public final class TradingStateSnapshotCodec {
                 readCoreInstrumentMaintenance(r.bytes(21)), SnapshotEnumCodes.readInstrumentStatus(r.integer(22)),
                 r.bool(23), r.bool(24), r.bool(25), r.integer(26), r.integer(27),
                 productLine.isDerivative() ? 1 : r.number(28),
-                new com.surprising.aeron.protocol.CoreOrderProtection(r.number(29), r.number(30),
-                        r.number(31) != 0, r.number(32), r.number(33)));
+                productLine.isDerivative() ? new com.surprising.aeron.protocol.CoreOrderProtection(r.number(29), r.number(30),
+                        r.number(31) != 0, r.number(32), r.number(33)) : null);
     }
 
 

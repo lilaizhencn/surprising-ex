@@ -46,7 +46,7 @@ public final class CoreInstrument {
      * @param quoteAsset 报价资产代码，完整构造时规范化且要求与基础资产不同
      * @param settleAsset 结算资产代码，完整构造时规范化
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
-     * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
+     * @param priceTickUnits 反向金额换算的真实价格单位，其他产品不使用此副本
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
      * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
@@ -75,7 +75,7 @@ public final class CoreInstrument {
      * @param quoteAsset 报价资产代码，完整构造时规范化且要求与基础资产不同
      * @param settleAsset 结算资产代码，完整构造时规范化
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
-     * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
+     * @param priceTickUnits 反向金额换算的真实价格单位，其他产品不使用此副本
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
      * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
@@ -106,14 +106,14 @@ public final class CoreInstrument {
     }
 
     /**
-     * 接收显式数量步长，订单保护使用初始规则，继续交给完整构造校验。
+     * 接收显式数量步长，衍生品订单保护使用初始规则，继续交给完整构造校验。
      * @param instrumentId 协议使用的规范数字标的 ID 文本，内部另保存解析后的整数身份
      * @param contractType 现货、正反向永续或交割、期权中的具体合约类型
      * @param baseAsset 基础资产代码，完整构造时规范为大写资产名
      * @param quoteAsset 报价资产代码，完整构造时规范化且要求与基础资产不同
      * @param settleAsset 结算资产代码，完整构造时规范化
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
-     * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
+     * @param priceTickUnits 反向金额换算的真实价格单位，其他产品不使用此副本
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
      * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
@@ -141,7 +141,8 @@ public final class CoreInstrument {
                 instrumentId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits,
                 settleScaleUnits, riskLimits, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType,
                 strikePriceTicks, maintenance, instrumentStatus, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled,
-                supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, CoreOrderProtection.initial());
+                supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits,
+                contractType == ContractType.SPOT ? null : CoreOrderProtection.initial());
     }
 
     /**
@@ -152,7 +153,7 @@ public final class CoreInstrument {
      * @param quoteAsset 报价资产代码，完整构造时规范化且要求与基础资产不同
      * @param settleAsset 结算资产代码，完整构造时规范化
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
-     * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
+     * @param priceTickUnits 反向金额换算的真实价格单位，其他产品不使用此副本
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
      * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
@@ -168,7 +169,7 @@ public final class CoreInstrument {
      * @param supportedOrderTypeMask 允许的订单类型位集，第 wireCode 减一位表示该类型
      * @param supportedTimeInForceMask 允许的有效期位集，第 wireCode 减一位表示该有效期
      * @param quantityStepUnits 每个数量步对应的资产整数数量，必须为正
-     * @param orderProtection 订单价格和数量保护规则，必须非空
+     * @param orderProtection 衍生品订单保护规则；现货不使用
      */
     public CoreInstrument(
             String instrumentId, ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
@@ -199,7 +200,7 @@ public final class CoreInstrument {
      * @param quoteAsset 报价资产代码，完整构造时规范化且要求与基础资产不同
      * @param settleAsset 结算资产代码，完整构造时规范化
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
-     * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
+     * @param priceTickUnits 反向金额换算的真实价格单位，其他产品不使用此副本
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
      * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
@@ -274,11 +275,11 @@ public final class CoreInstrument {
      */
     public long notionalMultiplierUnits() { return configuration.notionalMultiplierUnits(); }
     /**
-     * 返回每个价格 tick 对应的整数价格单位。
+     * 返回反向换算使用的真实价格单位；其他产品使用固定单位一。
      */
     public long priceTickUnits() { return configuration.priceTickUnits(); }
     /**
-     * 返回当前不可变订单保护规则。
+     * 返回衍生品不可变订单保护规则，现货为空。
      */
     public CoreOrderProtection orderProtection() { return configuration.orderProtection(); }
     /**
@@ -548,7 +549,7 @@ public final class CoreInstrument {
      * @param quoteAsset 报价资产代码；由 CoreInstrument 完整构造路径规范化并检查不同于基础资产
      * @param settleAsset 结算资产代码；由 CoreInstrument 完整构造路径规范化
      * @param notionalMultiplierUnits 每份数量对应的名义金额乘数，使用合约计算约定的整数单位
-     * @param priceTickUnits 每个价格 tick 对应的整数价格单位，供合约金额换算使用
+     * @param priceTickUnits 反向金额换算的真实价格单位，其他产品不使用此副本
      * @param settleScaleUnits 合约金额换算到结算资产整数单位时使用的精度比例
      * @param riskLimits 衍生品风险配置；现货必须为空
      * @param makerFeeRatePpm 挂单成交费率，按百万分之一保存，负数表示返佣
@@ -563,7 +564,7 @@ public final class CoreInstrument {
      * @param supportedOrderTypeMask 允许的订单类型位集，第 wireCode 减一位表示该类型
      * @param supportedTimeInForceMask 允许的有效期位集，第 wireCode 减一位表示该有效期
      * @param quantityStepUnits 每个数量步对应的资产整数数量，必须为正
-     * @param orderProtection 订单价格和数量保护规则，必须非空
+     * @param orderProtection 衍生品订单保护规则；现货为空
      */
     public record Configuration(
             ContractType contractType, String baseAsset, String quoteAsset, String settleAsset,
@@ -573,16 +574,20 @@ public final class CoreInstrument {
             boolean postOnlyEnabled, boolean reduceOnlyEnabled, int supportedOrderTypeMask,
             int supportedTimeInForceMask, long quantityStepUnits, CoreOrderProtection orderProtection) {
         /**
-         * 要求保护规则和业务状态非空，并校验风险配置只属于衍生品；完整业务参数约束由协议及 CoreInstrument 的构造校验负责。
+         * 规范化不适用参数，并校验当前产品的风险和保护规则；完整业务约束由 CoreInstrument 构造校验负责。
          */
         public Configuration {
-            Objects.requireNonNull(orderProtection, "orderProtection");
             Objects.requireNonNull(contractType, "contractType");
+            orderProtection = contractType == ContractType.SPOT ? null
+                    : Objects.requireNonNull(orderProtection, "orderProtection");
             if ((contractType == ContractType.SPOT) != (riskLimits == null))
                 throw new IllegalArgumentException("risk limits are required only for derivative instruments");
             if (riskLimits != null) riskLimits = riskLimits.forProduct(contractType.productLine());
             if (contractType != ContractType.SPOT) quantityStepUnits = 1;
-            if (!contractType.isInverse()) settleScaleUnits = 1;
+            if (!contractType.isInverse()) {
+                priceTickUnits = 1;
+                settleScaleUnits = 1;
+            }
             if (!contractType.isDelivery() && !contractType.isOption()) expiryEpochMillis = 0;
             if (!contractType.isOption()) {
                 optionType = null;

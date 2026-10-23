@@ -118,9 +118,10 @@ class SnapshotFieldEvolutionTest {
                             100_000, 50_000, option ? 1_200_000 : -77))) : null;
             var instrument = com.surprising.aeron.service.instrument.CoreInstrument.from(line,
                     new com.surprising.aeron.protocol.RegisterInstrumentCommand("1", "BTC", "USDT", "USDT",
-                            1, 1, inverse ? 100 : -99, risk, 0, 0,
+                            1, inverse ? 3 : -99, inverse ? 100 : -99, risk, 0, 0,
                             line.isDeliveryProduct() ? 2_000 : -99, option ? 0 : -99, option ? 100 : -99,
-                            1, true, true, true, 3, 15, line.isDerivative() ? -99 : 7));
+                            1, true, true, true, 3, 15, line.isDerivative() ? -99 : 7,
+                            new com.surprising.aeron.protocol.CoreOrderProtection(20_000, 8_000, true, 30_000, 4_000)));
             var empty = TradingCoreState.empty(line);
             var state = new TradingCoreState(line, 0, empty.users(), empty.orders(),
                     Map.of("1", instrument), empty.riskState(), empty.treasuryState());
@@ -130,8 +131,8 @@ class SnapshotFieldEvolutionTest {
             assertThat(entries).hasSize(1);
             var fields = split(entries.getFirst()).stream().map(SnapshotFieldEvolutionTest::id).toList();
             assertThat(fields).doesNotContain(2, 10);
-            if (inverse) assertThat(fields).contains(8);
-            else assertThat(fields).doesNotContain(8);
+            if (inverse) assertThat(fields).contains(7, 8);
+            else assertThat(fields).doesNotContain(7, 8);
             if (line.isDeliveryProduct()) assertThat(fields).contains(13);
             else assertThat(fields).doesNotContain(13);
             if (option) assertThat(fields).contains(14, 15);
@@ -139,7 +140,8 @@ class SnapshotFieldEvolutionTest {
             if (!line.isDerivative()) assertThat(fields).contains(28);
             else assertThat(fields).doesNotContain(28);
             if (line.isDerivative()) {
-                assertThat(fields).contains(9, 17, 18, 19, 20);
+                assertThat(fields).contains(9, 17, 18, 19, 20, 29, 30, 31, 32, 33);
+                assertThat(instrument.orderProtection()).isNotNull();
                 if (option) assertThat(fields).doesNotContain(16);
                 else assertThat(fields).contains(16);
                 var brackets = new SnapshotFields.Reader(entries.getFirst()).list(20, bytes -> bytes);
@@ -148,7 +150,8 @@ class SnapshotFieldEvolutionTest {
                             .containsExactlyElementsOf(option ? List.of(3, 5, 6, 7) : List.of(3, 4, 5, 6));
                 }
             } else {
-                assertThat(fields).doesNotContain(9, 16, 17, 18, 19, 20);
+                assertThat(fields).doesNotContain(9, 16, 17, 18, 19, 20, 29, 30, 31, 32, 33);
+                assertThat(instrument.orderProtection()).isNull();
             }
             var restored = TradingStateSnapshotCodec.decode(encoded, line);
             assertThat(restored).isEqualTo(state);

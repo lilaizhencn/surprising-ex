@@ -28,14 +28,21 @@ class InstrumentCoreSyncServiceTest {
                     new com.surprising.aeron.client.CoreCommandOutcome.Terminal(runtime.apply(new CoreMessage(
                             CoreMessageHeader.command(call.getArgument(0), call.getArgument(1), line,
                                     CommandSource.OPERATIONS, 993, 1, 0, 1_700_000_000_001L, 1), call.getArgument(3)))));
-            cache.replace(line, List.of(row(line, 1, InstrumentStatus.DRAFT)),
+            var draft = row(line, 1, InstrumentStatus.DRAFT);
+            when(draft.priceTickUnits()).thenReturn(10L);
+            cache.replace(line, List.of(draft),
                     java.util.Map.of("BTC", 100_000_000L, "USDT", 100_000_000L));
             var service = new InstrumentCoreSyncService(cache, gateway, properties);
             service.reconcile();
             assertThat(service.state("1", line).state()).isEqualTo("APPLIED");
-            assertThat(runtime.tradingState().instruments().get("1").instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
+            var registered = runtime.tradingState().instruments().get("1");
+            assertThat(registered.instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
+            assertThat(registered.priceTickUnits()).isEqualTo(draft.contractType().isInverse() ? 10 : 1);
+            if (line.isOptionProduct()) assertThat(registered.strikePriceTicks()).isEqualTo(10);
+            if (line.isDerivative()) assertThat(registered.orderProtection()).isEqualTo(properties.getRisk().protection());
+            else assertThat(registered.orderProtection()).isNull();
             try (var restored = TradingCoreRuntime.fromSnapshot(line, runtime.snapshot(42))) {
-                assertThat(restored.tradingState().instruments().get("1").instrumentStatus()).isEqualTo(InstrumentStatus.DRAFT);
+                assertThat(restored.tradingState().instruments().get("1")).isEqualTo(registered);
             }
         }
     }

@@ -10,7 +10,7 @@ import java.util.List;
 public final class TradingCommandCodec {
 
     private static final int PLACE_ORDER_VERSION = 4;
-    private static final int INSTRUMENT_MARKER = 0x49525639;
+    private static final int INSTRUMENT_MARKER = 0x49523130;
     private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
     private static final int TRANSFER_FUNDS_VERSION = 2;
 
@@ -575,23 +575,26 @@ public final class TradingCommandCodec {
         if (spot != (command.riskLimits() == null))
             throw new IllegalArgumentException("risk limits are required only for derivative instruments");
         CoreInstrumentRiskLimits risk = spot ? null : command.riskLimits().forProduct(productLine);
+        CoreOrderProtection protection = spot ? null
+                : java.util.Objects.requireNonNull(command.orderProtection(), "orderProtection");
         byte[] instrumentId = text(command.instrumentId());
         byte[] base = text(command.baseAsset());
         byte[] quote = text(command.quoteAsset());
         byte[] settle = text(command.settleAsset());
         int riskBytes = spot ? 0 : Long.BYTES * (option ? 4 : 5) + Integer.BYTES
                 + risk.riskLimitBrackets().size() * Long.BYTES * 4;
-        int productBytes = (inverse ? Long.BYTES : 0) + (expiring ? Long.BYTES : 0)
-                + (option ? Integer.BYTES + Long.BYTES : 0) + (spot ? Long.BYTES : 0);
+        int productBytes = (inverse ? Long.BYTES * 2 : 0) + (expiring ? Long.BYTES : 0)
+                + (option ? Integer.BYTES + Long.BYTES : 0)
+                + (spot ? Long.BYTES : Long.BYTES * 4 + Byte.BYTES);
         ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES * 4 + instrumentId.length + base.length + quote.length
-                        + settle.length + Integer.BYTES * 4 + Long.BYTES * 8 + Byte.BYTES * 4 + productBytes + riskBytes)
+                        + settle.length + Integer.BYTES * 4 + Long.BYTES * 3 + Byte.BYTES * 3 + productBytes + riskBytes)
                 .order(ByteOrder.LITTLE_ENDIAN)
                 .putShort((short) instrumentId.length).put(instrumentId)
                 .putShort((short) base.length).put(base)
                 .putShort((short) quote.length).put(quote)
                 .putShort((short) settle.length).put(settle)
-                .putLong(command.notionalMultiplierUnits()).putLong(command.priceTickUnits());
-        if (inverse) buffer.putLong(command.settleScaleUnits());
+                .putLong(command.notionalMultiplierUnits());
+        if (inverse) buffer.putLong(command.priceTickUnits()).putLong(command.settleScaleUnits());
         buffer.putLong(command.makerFeeRatePpm()).putLong(command.takerFeeRatePpm());
         if (expiring) buffer.putLong(command.expiryEpochMillis());
         if (option) buffer.putInt(command.optionTypeCode()).putLong(command.strikePriceTicks());
@@ -614,11 +617,11 @@ public final class TradingCommandCodec {
                 .put((byte) (command.reduceOnlyEnabled() ? 1 : 0))
                 .putInt(command.supportedOrderTypeMask()).putInt(command.supportedTimeInForceMask());
         if (spot) buffer.putLong(command.quantityStepUnits());
-        buffer.putLong(command.orderProtection().marketMaxSlippagePpm())
-                .putLong(command.orderProtection().marketMaxMarkAgeMs())
-                .put((byte) (command.orderProtection().limitPriceProtectionEnabled() ? 1 : 0))
-                .putLong(command.orderProtection().limitPriceBandPpm())
-                .putLong(command.orderProtection().limitPriceMaxMarkAgeMs());
+        if (!spot) {
+            buffer.putLong(protection.marketMaxSlippagePpm()).putLong(protection.marketMaxMarkAgeMs())
+                    .put((byte) (protection.limitPriceProtectionEnabled() ? 1 : 0))
+                    .putLong(protection.limitPriceBandPpm()).putLong(protection.limitPriceMaxMarkAgeMs());
+        }
         return buffer.array();
     }
 
@@ -637,10 +640,10 @@ public final class TradingCommandCodec {
         String base = readText(buffer);
         String quote = readText(buffer);
         String settle = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * (4 + (inverse ? 1 : 0) + (expiring ? 1 : 0) + (option ? 1 : 0))
+        requireRemaining(buffer, Long.BYTES * (3 + (inverse ? 2 : 0) + (expiring ? 1 : 0) + (option ? 1 : 0))
                 + Integer.BYTES * (option ? 2 : 1));
         long multiplier = buffer.getLong();
-        long priceTick = buffer.getLong();
+        long priceTick = inverse ? buffer.getLong() : 1;
         long settleScale = inverse ? buffer.getLong() : 1;
         long makerFee = buffer.getLong();
         long takerFee = buffer.getLong();
@@ -671,7 +674,8 @@ public final class TradingCommandCodec {
             risk = new CoreInstrumentRiskLimits(initialMargin, maxLeverage, maxPosition, openInterestRate,
                     openInterestFloor, brackets).forProduct(productLine);
         }
-        requireRemaining(buffer, Integer.BYTES * 3 + Byte.BYTES * 4 + Long.BYTES * (spot ? 5 : 4));
+        requireRemaining(buffer, Integer.BYTES * 3 + Byte.BYTES * 3
+                + (spot ? Long.BYTES : Long.BYTES * 4 + Byte.BYTES));
         int statusCode = buffer.getInt();
         boolean marketOrderEnabled = readBoolean(buffer);
         boolean postOnlyEnabled = readBoolean(buffer);
@@ -679,7 +683,7 @@ public final class TradingCommandCodec {
         int supportedOrderTypeMask = buffer.getInt();
         int supportedTimeInForceMask = buffer.getInt();
         long quantityStepUnits = spot ? buffer.getLong() : 1;
-        CoreOrderProtection orderProtection = new CoreOrderProtection(buffer.getLong(), buffer.getLong(),
+        CoreOrderProtection orderProtection = spot ? null : new CoreOrderProtection(buffer.getLong(), buffer.getLong(),
                 readBoolean(buffer), buffer.getLong(), buffer.getLong());
         RegisterInstrumentCommand command = new RegisterInstrumentCommand(instrumentId, base, quote, settle,
                 multiplier, priceTick, settleScale, risk, makerFee, takerFee, expiry, optionType, strike,

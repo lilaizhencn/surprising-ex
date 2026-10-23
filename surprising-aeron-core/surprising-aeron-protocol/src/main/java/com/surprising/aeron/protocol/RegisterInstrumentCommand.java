@@ -25,11 +25,9 @@ public record RegisterInstrumentCommand(
         CoreOrderProtection orderProtection) {
 
     public RegisterInstrumentCommand {
-        java.util.Objects.requireNonNull(orderProtection, "orderProtection");
         com.surprising.product.api.utils.InstrumentIds.parse(instrumentId);
         if (baseAsset == null || baseAsset.isBlank() || quoteAsset == null || quoteAsset.isBlank()
                 || settleAsset == null || settleAsset.isBlank() || notionalMultiplierUnits <= 0
-                || priceTickUnits <= 0
                 || Math.absExact(makerFeeRatePpm) > 1_000_000 || Math.absExact(takerFeeRatePpm) > 1_000_000
                 || instrumentStatusCode < 0 || instrumentStatusCode > 5
                 || supportedOrderTypeMask <= 0 || (supportedOrderTypeMask & ~0b11) != 0
@@ -49,7 +47,8 @@ public record RegisterInstrumentCommand(
                 instrumentId, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits,
                 settleScaleUnits, riskLimits, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode,
                 strikePriceTicks, instrumentStatusCode, marketOrderEnabled, postOnlyEnabled, reduceOnlyEnabled,
-                supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits, CoreOrderProtection.initial());
+                supportedOrderTypeMask, supportedTimeInForceMask, quantityStepUnits,
+                riskLimits == null ? null : CoreOrderProtection.initial());
     }
 
     public RegisterInstrumentCommand(

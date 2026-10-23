@@ -22,21 +22,23 @@ class TradingCommandCodecTest {
                     1_000_000, 0, 1_000_000, List.of(new CoreRiskLimitBracket(
                     1_000_000, option ? -88 : 10_000_000, 100_000, 50_000, option ? 1_200_000 : -77)));
             var expectedRisk = spot ? null : rawRisk.forProduct(line);
-            var canonical = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 2, 3,
+            var canonical = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 2, inverse ? 3 : 1,
                     inverse ? 100 : 1, expectedRisk, -10, 20, line.isDeliveryProduct() ? 2_000 : 0,
                     option ? 0 : -1, option ? 100 : 0, 1, true, true, true, 3, 15, spot ? 7 : 1);
-            var unusedInputs = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 2, 3,
+            var unusedInputs = new RegisterInstrumentCommand("1", "BTC", "USDT", "USDT", 2, inverse ? 3 : -99,
                     inverse ? 100 : -99, rawRisk, -10, 20, line.isDeliveryProduct() ? 2_000 : -99,
-                    option ? 0 : -99, option ? 100 : -99, 1, true, true, true, 3, 15, spot ? 7 : -99);
+                    option ? 0 : -99, option ? 100 : -99, 1, true, true, true, 3, 15, spot ? 7 : -99,
+                    spot ? new CoreOrderProtection(20_000, 8_000, true, 30_000, 4_000) : canonical.orderProtection());
             byte[] encoded = TradingCommandCodec.encodeRegisterInstrument(canonical, line);
             assertThat(TradingCommandCodec.encodeRegisterInstrument(unusedInputs, line)).isEqualTo(encoded);
             assertThat(TradingCommandCodec.decodeRegisterInstrument(encoded, line)).isEqualTo(canonical);
             int expectedBytes = switch (line) {
-                case SPOT -> 112;
-                case LINEAR_PERPETUAL -> 180;
-                case INVERSE_PERPETUAL, LINEAR_DELIVERY -> 188;
+                case SPOT -> 71;
+                case LINEAR_PERPETUAL -> 172;
+                case INVERSE_PERPETUAL -> 188;
+                case LINEAR_DELIVERY -> 180;
                 case INVERSE_DELIVERY -> 196;
-                case OPTION -> 192;
+                case OPTION -> 184;
             };
             assertThat(encoded).hasSize(expectedBytes);
         }
@@ -413,7 +415,7 @@ class TradingCommandCodecTest {
         assertThat(TradingCommandCodec.decodeRegisterInstrument(spotBytes, ProductLine.SPOT)).isEqualTo(spot);
         assertThat(TradingCommandCodec.decodeRegisterInstrument(derivativeBytes, ProductLine.LINEAR_PERPETUAL))
                 .isEqualTo(derivative);
-        assertThat(derivativeBytes.length - spotBytes.length).isEqualTo(68);
+        assertThat(derivativeBytes.length - spotBytes.length).isEqualTo(101);
         assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(spotBytes, ProductLine.LINEAR_PERPETUAL))
                 .isInstanceOf(RuntimeException.class);
         assertThatThrownBy(() -> TradingCommandCodec.decodeRegisterInstrument(derivativeBytes, ProductLine.SPOT))

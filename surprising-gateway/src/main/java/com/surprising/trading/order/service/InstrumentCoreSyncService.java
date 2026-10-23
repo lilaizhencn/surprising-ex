@@ -100,7 +100,8 @@ public class InstrumentCoreSyncService {
         long settleScale=value.contractType().isInverse()
                 ?cache.scale(line,value.settleAsset()).orElseThrow(
                         ()->new IllegalStateException("settlement asset scale is missing")):1L;
-        return command(value,settleScale, properties.getRisk().protection());
+        return command(value,settleScale,
+                value.contractType() == ContractType.SPOT ? null : properties.getRisk().protection());
     }
 
     private static RegisterInstrumentCommand command(InstrumentResponse value,long settleScale, CoreOrderProtection protection) {
@@ -134,13 +135,14 @@ public class InstrumentCoreSyncService {
                                         b.maintenanceMarginRatePpm(), option?b.optionMarginFactorPpm():0)).toList());
         return new RegisterInstrumentCommand(
                 Integer.toString(value.instrumentId()), value.baseAsset(), value.quoteAsset(), value.settleAsset(),
-                value.notionalMultiplierUnits(), value.priceTickUnits(), settleScale, riskLimits,
+                value.notionalMultiplierUnits(), value.contractType().isInverse()?value.priceTickUnits():1L,
+                settleScale, riskLimits,
                 value.makerFeeRatePpm(), value.takerFeeRatePpm(),
                 (value.contractType().isDelivery() || option) && value.expiryTime()!=null?value.expiryTime().toEpochMilli():0,
                 option && value.optionType()!=null?value.optionType().ordinal():-1, strike, value.status().ordinal(),
                 value.marketOrderEnabled(), value.postOnlyEnabled(), value.reduceOnlyEnabled(), supportedOrderTypes,
                 supportedTimeInForce, value.contractType() == ContractType.SPOT ? value.quantityStepUnits() : 1L,
-                protection);
+                value.contractType() == ContractType.SPOT ? null : protection);
     }
 
     private static String error(RuntimeException failure) {
