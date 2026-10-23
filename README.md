@@ -17,6 +17,8 @@ Product line identity controls routing and keeps instruments, accounts, trading 
 
 ## Architecture
 
+构建基线：HotSpot JDK 27、Spring Boot 4.1.2、Spring Cloud 2025.1.4；框架版本统一由 `surprising-parent/pom.xml` 管理。
+
 产品线定义、topic 命名、币对契约和共享合约公式统一由
 [`surprising-instrument-api`](surprising-instrument-api/README.md) 提供。
 开发分层与约束见 [AGENTS.md](AGENTS.md)；性能优化和压测前必须读取
