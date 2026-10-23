@@ -108,7 +108,7 @@ class SnapshotFieldEvolutionTest {
     }
 
     @Test
-    void instrumentRiskFieldsFollowProductLine() {
+    void instrumentAndMarketFieldsFollowProductLine() {
         for (ProductLine line : ProductLine.values()) {
             boolean option = line.isOptionProduct();
             boolean inverse = line == ProductLine.INVERSE_PERPETUAL || line == ProductLine.INVERSE_DELIVERY;
@@ -123,8 +123,15 @@ class SnapshotFieldEvolutionTest {
                             1, true, true, true, 3, 15, line.isDerivative() ? -99 : 7,
                             new com.surprising.aeron.protocol.CoreOrderProtection(20_000, 8_000, true, 30_000, 4_000)));
             var empty = TradingCoreState.empty(line);
+            var runtimeMark = new com.surprising.aeron.service.market.MarkPriceRuntime(
+                    instrument.instrumentIdValue(), instrument, 100, 99, option ? 98 : -99, 1, 1_000, 97);
+            assertThat(runtimeMark.forwardPriceTicks()).isEqualTo(option ? 98 : 0);
+            var mark = new com.surprising.aeron.model.CoreMarkPriceState("1", 100, 99,
+                    runtimeMark.forwardPriceTicks(), 1, 1_000, 97);
+            var riskState = new com.surprising.aeron.model.CoreRiskState(Map.of("1", mark), Map.of(),
+                    Map.of(), Map.of(), 1, empty.riskState().scanControl());
             var state = new TradingCoreState(line, 0, empty.users(), empty.orders(),
-                    Map.of("1", instrument), empty.riskState(), empty.treasuryState());
+                    Map.of("1", instrument), riskState, empty.treasuryState());
             byte[] encoded = TradingStateSnapshotCodec.encode(state);
             var root = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, 4, encoded.length));
             var entries = new SnapshotFields.Reader(root.bytes(5)).list(1, bytes -> bytes);
@@ -153,8 +160,14 @@ class SnapshotFieldEvolutionTest {
                 assertThat(fields).doesNotContain(9, 16, 17, 18, 19, 20, 29, 30, 31, 32, 33);
                 assertThat(instrument.orderProtection()).isNull();
             }
+            var riskFields = new SnapshotFields.Reader(root.bytes(6));
+            var marks = new SnapshotFields.Reader(riskFields.bytes(1)).list(1, bytes -> bytes);
+            var markFields = split(marks.getFirst()).stream().map(SnapshotFieldEvolutionTest::id).toList();
+            if (option) assertThat(markFields).containsExactly(1, 2, 3, 5, 6, 7, 4);
+            else assertThat(markFields).containsExactly(1, 2, 3, 5, 6, 7);
             var restored = TradingStateSnapshotCodec.decode(encoded, line);
             assertThat(restored).isEqualTo(state);
+            assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
             assertThat(restored.instruments().get("1").riskLimits()).isEqualTo(instrument.riskLimits());
         }
     }

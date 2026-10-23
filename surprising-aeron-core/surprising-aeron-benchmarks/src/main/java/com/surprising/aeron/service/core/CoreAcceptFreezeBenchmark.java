@@ -44,7 +44,7 @@ public final class CoreAcceptFreezeBenchmark {
                     TradingCommandCodec.encodeRegisterInstrument(instrument(), ProductLine.LINEAR_PERPETUAL));
             apply(state, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, kafkaSequence++, 2,
                     TradingCommandCodec.encodeApplyMarkPrice(
-                            new ApplyMarkPriceCommand(SYMBOL, 1_000, 1, 1_000)));
+                            new ApplyMarkPriceCommand(SYMBOL, 1_000, 1, 1_000), ProductLine.LINEAR_PERPETUAL));
             apply(state, CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, gatewaySequence++, 2,
                     TradingCommandCodec.encodeBalanceAdjustment(
                             new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", BALANCE_UNITS)));

@@ -59,7 +59,7 @@ class MergedBusinessHttpIntegrationTest {
             }
             var mark = core.command(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(SYMBOL, PRICE,
-                            System.currentTimeMillis(), System.currentTimeMillis())));
+                            System.currentTimeMillis(), System.currentTimeMillis()), com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
             assertThat(mark.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
             feed.scheduleAtFixedRate(() -> {

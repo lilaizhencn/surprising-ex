@@ -129,7 +129,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
     }
 
     private boolean sendAsync(MarkPriceEvent event) {
-        byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(toCommand(event));
+        byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(toCommand(event), event.productLine());
         UUID commandId = markPriceCommandId(event);
         if (inFlightByCommandId.putIfAbsent(commandId, event) != null) {
             return true;

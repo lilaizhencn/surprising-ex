@@ -41,7 +41,7 @@ class CoreFinancialLedgerProductionTest {
         try (/* 本轮真实交易入口，退出时关闭账户与账本资源 */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             register(core, core.productLine);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)), TIME);
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), core.productLine), TIME);
             balance(core, 1, "USDT", 110); balance(core, 2, "USDT", 10_000);
             trade(core, core.productLine, 10, 100);
             for (/* 额外挂入的48条买单下标，为风险续扫准备活动订单 */ int item = 0; item < 48; item++) applied(core, CoreMessageType.PLACE_ORDER, 2,
@@ -49,7 +49,7 @@ class CoreFinancialLedgerProductionTest {
                             80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC, false, "nested-risk-" + item)), TIME);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME)), TIME);
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME), core.productLine), TIME);
             // 按真实查询取得的强平工作页，要求仍有风险续步
             CoreLiquidationWorkView work;
             for (/* 本次工作查询与续扫次数，限制少于32次 */ int attempt = 0; ; attempt++) {
@@ -102,12 +102,12 @@ class CoreFinancialLedgerProductionTest {
         try (/* 本轮真实交易入口，退出时关闭账户与账本资源 */ var core = new TradingCoreRuntime(line)) {
             register(core, line);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)), TIME);
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), core.productLine), TIME);
             balance(core, 1, "USDT", 110);
             balance(core, 2, "USDT", 10_000);
             trade(core, line, 10, 100);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME)), TIME);
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME), core.productLine), TIME);
             for (/* 等待风险阶段完成的续扫轮次，要求少于20次 */ int polls = 0; core.runtimeState.firstRiskIncompleteScan() != null; polls++) {
                 assertThat(polls).isLessThan(20);
                 applied(core, CoreMessageType.CONTINUE_RISK_SCAN, 0,
@@ -167,7 +167,7 @@ class CoreFinancialLedgerProductionTest {
             for (long /* 本轮准备资金、成交或检查的测试用户 */ user : new long[]{1, 2}) balance(core, user, asset, 10_000);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(line.isOptionProduct() ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
-                            : new ApplyMarkPriceCommand("1", 100, 1, TIME)), TIME);
+                            : new ApplyMarkPriceCommand("1", 100, 1, TIME), line), TIME);
             trade(core, line, 2, line == ProductLine.OPTION ? 10 : 100);
             // 对固定标的1按价格120执行的结算命令
             var settlement = new SettleInstrumentCommand(901, "1", 120);

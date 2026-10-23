@@ -37,7 +37,7 @@ public class InstrumentPauseAdmissionBenchmark {
                 if (productLine.isDerivative()) requireApplied(state.apply(message(productLine,2,CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                 ? new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_002L)
-                                : new ApplyMarkPriceCommand("1",100,1,1_700_000_000_002L)))));
+                                : new ApplyMarkPriceCommand("1",100,1,1_700_000_000_002L), productLine))));
                 requireApplied(state.apply(message(productLine,3,CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,
                         CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("1",0,
                                 new CoreInstrumentMaintenance(1,CoreInstrumentMaintenance.Mode.HALTED,0))))));

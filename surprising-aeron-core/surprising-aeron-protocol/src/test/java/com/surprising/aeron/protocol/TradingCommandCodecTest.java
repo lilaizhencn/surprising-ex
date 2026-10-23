@@ -75,16 +75,24 @@ class TradingCommandCodecTest {
     }
 
     @Test
-    void markPriceRequiresTheCompleteCurrentLayout() {
-        var command = new ApplyMarkPriceCommand("1", 100, 99, 0, 1, 1_000, 0);
-        byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(command);
-        assertThat(TradingCommandCodec.decodeApplyMarkPrice(payload)).isEqualTo(command);
-        assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(
-                java.util.Arrays.copyOf(payload, payload.length - Long.BYTES)))
-                .isInstanceOf(ProtocolException.class);
-        assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(
-                java.util.Arrays.copyOf(payload, payload.length + Long.BYTES)))
-                .isInstanceOf(ProtocolException.class);
+    void markPriceRequiresOnlyTheCompleteLayoutOfItsProduct() {
+        for (ProductLine line : ProductLine.values()) {
+            boolean option = line.isOptionProduct();
+            var command = new ApplyMarkPriceCommand("1", 100, 99, option ? 98 : 0, 1, 1_000, 0);
+            byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(command, line);
+            assertThat(payload).hasSize(option ? 51 : 43);
+            assertThat(TradingCommandCodec.decodeApplyMarkPrice(payload, line)).isEqualTo(command);
+            if (!option) {
+                var unusedForward = new ApplyMarkPriceCommand("1", 100, 99, 777, 1, 1_000, 0);
+                assertThat(TradingCommandCodec.encodeApplyMarkPrice(unusedForward, line)).isEqualTo(payload);
+            }
+            assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(
+                    java.util.Arrays.copyOf(payload, payload.length - Long.BYTES), line))
+                    .isInstanceOf(ProtocolException.class);
+            assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(
+                    java.util.Arrays.copyOf(payload, payload.length + Long.BYTES), line))
+                    .isInstanceOf(ProtocolException.class);
+        }
     }
 
     @Test
@@ -292,11 +300,11 @@ class TradingCommandCodecTest {
         assertThat(TradingCommandCodec.decodeRegisterInstrument(
                 TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.LINEAR_PERPETUAL), ProductLine.LINEAR_PERPETUAL)).isEqualTo(instrument);
         assertThat(TradingCommandCodec.decodeApplyMarkPrice(
-                TradingCommandCodec.encodeApplyMarkPrice(markPrice))).isEqualTo(markPrice);
+                TradingCommandCodec.encodeApplyMarkPrice(markPrice, ProductLine.OPTION), ProductLine.OPTION)).isEqualTo(markPrice);
         byte[] archivedMark = java.util.Arrays.copyOf(
-                TradingCommandCodec.encodeApplyMarkPrice(markPrice),
-                TradingCommandCodec.encodeApplyMarkPrice(markPrice).length - Long.BYTES);
-        assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(archivedMark))
+                TradingCommandCodec.encodeApplyMarkPrice(markPrice, ProductLine.OPTION),
+                TradingCommandCodec.encodeApplyMarkPrice(markPrice, ProductLine.OPTION).length - Long.BYTES);
+        assertThatThrownBy(() -> TradingCommandCodec.decodeApplyMarkPrice(archivedMark, ProductLine.OPTION))
                 .isInstanceOf(ProtocolException.class);
         assertThat(TradingCommandCodec.decodeApplyFunding(
                 TradingCommandCodec.encodeApplyFunding(funding))).isEqualTo(funding);

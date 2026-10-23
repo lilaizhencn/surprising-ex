@@ -211,7 +211,7 @@ public final class LinearPerpetualSaturationWorkload {
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
                             TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                                     instrumentId, current.markPriceTicks(),
-                                    Math.incrementExact(current.priceSequence()), refreshTimestamp))));
+                                    Math.incrementExact(current.priceSequence()), refreshTimestamp), harness.state().productLine)));
                 }
                 nextMarkRefreshAt = Math.addExact(refreshTimestamp, MARK_REFRESH_INTERVAL_MILLIS);
             }

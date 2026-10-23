@@ -117,7 +117,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
         drain();
         send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                 ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
-                : new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                : new ApplyMarkPriceCommand("1", 100, 1, TIME), type.productLine()));
         drain();
         for (int i = 0; i < 256; i++)
             send(CoreMessageType.ADJUST_BALANCE, 1000 + i,

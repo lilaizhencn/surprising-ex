@@ -38,7 +38,7 @@ class AsyncFundingCommandTest {
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                             0, 0, 0, -1, 0), line)));
             applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME))));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), line)));
             for (/* 正在初始化余额并提交相向订单的用户编号。 */ long user = 1; user <= 8; user++) {
                 applied(state, message(line, CoreMessageType.ADJUST_BALANCE, user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 100_000))));
@@ -106,7 +106,7 @@ class AsyncFundingCommandTest {
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                             0, 0, 0, -1, 0), line)));
             applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME))));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), line)));
             for (/* 正在初始化余额并提交相向订单的用户编号。 */ long user = 1; user <= 8; user++) {
                 applied(state, message(line, CoreMessageType.ADJUST_BALANCE, user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 100_000))));

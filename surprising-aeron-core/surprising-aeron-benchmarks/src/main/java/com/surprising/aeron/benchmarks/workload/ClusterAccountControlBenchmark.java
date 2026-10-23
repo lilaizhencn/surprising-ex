@@ -52,7 +52,7 @@ public class ClusterAccountControlBenchmark {
         if (product.isDerivative()) {
             send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                     product == ProductLine.OPTION ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1, System.currentTimeMillis())
-                            : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis())));
+                            : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis()), product));
             for (boolean buy : new boolean[]{false, true}) send(CoreMessageType.PLACE_ORDER, buy ? POSITION_USER : MAKER,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(buy ? 9002 : 9001, SYMBOL,
                             buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, 100, 10, false, CoreMarginMode.ISOLATED,

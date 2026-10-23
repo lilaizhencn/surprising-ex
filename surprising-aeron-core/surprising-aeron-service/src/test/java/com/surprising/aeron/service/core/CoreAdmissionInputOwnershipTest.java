@@ -45,7 +45,7 @@ class CoreAdmissionInputOwnershipTest {
         try (/* 本场景自动关闭的真实交易 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument(core.productLine, mode), ProductLine.LINEAR_PERPETUAL));
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             applied(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
             // 市场 OI 索引内部字典的反射字段
@@ -126,7 +126,7 @@ class CoreAdmissionInputOwnershipTest {
             applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
                     TradingCommandCodec.encodeRegisterInstrument(instrument(core.productLine, "PROPORTIONAL"), ProductLine.LINEAR_PERPETUAL));
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             applied(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
             try {

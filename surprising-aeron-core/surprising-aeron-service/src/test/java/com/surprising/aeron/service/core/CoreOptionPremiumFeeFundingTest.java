@@ -40,7 +40,7 @@ class CoreOptionPremiumFeeFundingTest {
             for (long /* 当前初始化钱包或核对终态的用户编号。 */ user : List.of(101L, 202L)) apply(runtime, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", WALLET)));
             apply(runtime, CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("1", 10_000, 500_000, 505_000, 1, 1_700_000_000_000L)));
+                    new ApplyMarkPriceCommand("1", 10_000, 500_000, 505_000, 1, 1_700_000_000_000L), ProductLine.OPTION));
             place(runtime, 202, 1, CoreOrderSide.SELL, 10_010, CoreOrderType.LIMIT, false);
             place(runtime, 101, 2, CoreOrderSide.BUY, 0, CoreOrderType.MARKET, false);
             if (restoreBeforeClose) runtime = TradingCoreRuntime.fromSnapshot(ProductLine.OPTION, original.snapshot(71));

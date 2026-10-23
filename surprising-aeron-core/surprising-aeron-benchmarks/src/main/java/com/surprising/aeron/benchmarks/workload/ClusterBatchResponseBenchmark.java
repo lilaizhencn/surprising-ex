@@ -54,7 +54,7 @@ public class ClusterBatchResponseBenchmark {
                         type.isOption() ? 0 : -1, type.isOption() ? 100 : 0), product)).join());
         applied(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                 ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1, System.currentTimeMillis())
-                : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis()))).join());
+                : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis()), product)).join());
         for (int i = 0; i < USERS; i++) applied(send(CoreMessageType.ADJUST_BALANCE, user(i),
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, FUNDS))).join());
     }

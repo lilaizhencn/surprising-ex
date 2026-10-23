@@ -52,7 +52,7 @@ final class OperationalLifecycle implements AutoCloseable {
     private void price(String instrumentId,long value) {
         long seq=instrumentId.equals(ACTIVE)?++activeSequence:++riskSequence;
         endpoint.command(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(instrumentId,value,seq,GeneratedPriceClock.timestamp())));
+                new ApplyMarkPriceCommand(instrumentId,value,seq,GeneratedPriceClock.timestamp()), com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
     }
     private void place(long account,String instrumentId,CoreOrderSide side,long price,long quantity,
                        CoreTimeInForce tif,boolean reduceOnly) {

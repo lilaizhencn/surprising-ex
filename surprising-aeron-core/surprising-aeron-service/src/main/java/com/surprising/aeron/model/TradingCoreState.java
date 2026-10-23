@@ -345,7 +345,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, mark.instrumentId());
             hash = CoreStateHash.mix(hash, mark.markPriceTicks());
             hash = CoreStateHash.mix(hash, mark.indexPriceTicks());
-            hash = CoreStateHash.mix(hash, mark.forwardPriceTicks());
+            if (productLine.isOptionProduct()) hash = CoreStateHash.mix(hash, mark.forwardPriceTicks());
             hash = CoreStateHash.mix(hash, mark.priceSequence());
             hash = CoreStateHash.mix(hash, mark.generatedAtEpochMillis());
             if (mark.lastPriceTicks() > 0) hash = CoreStateHash.mix(hash, mark.lastPriceTicks());

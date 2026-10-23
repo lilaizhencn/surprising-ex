@@ -141,7 +141,7 @@ class CoreMaintenanceTest {
             var type=ContractType.valueOf(line.contractTypeCode());
             applied(state,command(line,0,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                     ? new ApplyMarkPriceCommand("1",10_000,10_000,10_000,2,1_700_000_000_000L+sequence+1)
-                    : new ApplyMarkPriceCommand("1",10_000,2,1_700_000_000_000L+sequence+1))));
+                    : new ApplyMarkPriceCommand("1",10_000,2,1_700_000_000_000L+sequence+1), line)));
             applied(state,command(line,0,CoreMessageType.CONTINUE_RISK_SCAN,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(16))));
             assertThat(state.tradingState().riskState().liquidations()).isEmpty();
@@ -205,7 +205,7 @@ class CoreMaintenanceTest {
                         type.isOption()?100:0), line)));
         applied(state,command(line,1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                 ? new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_000L)
-                : new ApplyMarkPriceCommand("1",100,1,1_700_000_000_000L))));
+                : new ApplyMarkPriceCommand("1",100,1,1_700_000_000_000L), line)));
         applied(state,command(line,11,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(line==ProductLine.SPOT?"BTC":asset,20_000))));
         applied(state,command(line,22,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset,20_000))));
         return state;

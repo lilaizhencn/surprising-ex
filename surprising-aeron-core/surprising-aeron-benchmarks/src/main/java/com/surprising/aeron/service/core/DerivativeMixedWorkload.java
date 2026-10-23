@@ -97,7 +97,7 @@ public final class DerivativeMixedWorkload {
                                         ? new ApplyMarkPriceCommand(instrumentId, ENTRY_PRICE, ENTRY_PRICE,
                                         ENTRY_PRICE, 1, BASE_EPOCH_MILLIS)
                                         : new ApplyMarkPriceCommand(instrumentId, ENTRY_PRICE, 1,
-                                        BASE_EPOCH_MILLIS))));
+                                        BASE_EPOCH_MILLIS), productLine)));
             }
 
             List<Long> users = LinearPerpetualBenchmarkSupport.usersAcrossLanes(
@@ -221,7 +221,7 @@ public final class DerivativeMixedWorkload {
                                             ? new ApplyMarkPriceCommand(instrumentId, 99, ENTRY_PRICE,
                                             ENTRY_PRICE, sequence, target.nextCommandTimestamp())
                                             : new ApplyMarkPriceCommand(instrumentId, 99, sequence,
-                                            target.nextCommandTimestamp()))));
+                                            target.nextCommandTimestamp()), source.productLine())));
                 }
                 if (!source.productLine().isFundingProduct()) return;
                 if (target.state().tradingState().treasuryState().fundingSettlement(instrumentId)

@@ -47,7 +47,7 @@ class RealtimeTerminalEmissionTest {
                 if(line!=ProductLine.SPOT)send(state,line,CoreMessageType.APPLY_MARK_PRICE,0,
                         TradingCommandCodec.encodeApplyMarkPrice(line==ProductLine.OPTION
                                 ?new ApplyMarkPriceCommand("1",100,100,100,1,TIME)
-                                :new ApplyMarkPriceCommand("1",100,1,TIME)),null,null,"setup");
+                                :new ApplyMarkPriceCommand("1",100,1,TIME), line),null,null,"setup");
                 // 只用于本功能轨迹的有界实时字节缓存
                 var outbox=new RealtimeOutbox(1024,1_048_576);
                 // 接入原运行时的实时捕获器

@@ -45,7 +45,7 @@ class CommittedOptionExerciseReplayTest {
                                         100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                                 0, 0, TIME+10_000, type.ordinal(), 100), ProductLine.OPTION));
-                apply(replay,CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1",10,100,105,1,TIME)));
+                apply(replay,CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1",10,100,105,1,TIME), ProductLine.OPTION));
                 for(/* 当前初始化的卖方一或买方二 */ long user=1;user<=2;user++) {
                     apply(replay,CoreMessageType.ADJUST_BALANCE,user,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",100_000)));
                     apply(replay,CoreMessageType.PLACE_ORDER,user,TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100+user,"1",user==1?CoreOrderSide.SELL:CoreOrderSide.BUY,10,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"exercise-"+user)));

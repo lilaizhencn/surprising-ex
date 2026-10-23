@@ -40,7 +40,7 @@ public class LifecyclePaginationBenchmark {
             h.execute(h.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(option
                             ? new ApplyMarkPriceCommand("43", 100, 100, 100, 1, h.nextCommandTimestamp())
-                            : new ApplyMarkPriceCommand("43", 100, 1, h.nextCommandTimestamp()))));
+                            : new ApplyMarkPriceCommand("43", 100, 1, h.nextCommandTimestamp()), type.productLine())));
             h.adjust(999, asset, 1_000_000_000);
             order(h, 999, CoreOrderSide.SELL, 100, 256);
             for (long user = 1000; user < 1256; user++) {
@@ -85,7 +85,7 @@ public class LifecyclePaginationBenchmark {
                 if (restoreEachPage) assertFundingPositionFence();
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "43", 200, 2, harness.nextCommandTimestamp()))));
+                                "43", 200, 2, harness.nextCommandTimestamp()), productLine)));
             }
             if (restoreEachPage) {
                 var checkpoint = harness.snapshotTemplate(4);

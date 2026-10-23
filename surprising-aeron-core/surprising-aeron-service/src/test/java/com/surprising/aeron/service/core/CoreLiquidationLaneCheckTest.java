@@ -72,7 +72,7 @@ class CoreLiquidationLaneCheckTest {
             // 价格更新前捕获的旧批强平输入，刷新价格后应全部判为过期。
             var stale = ExecuteLiquidationBatchCommand.fromWork(work(core), 0, 0);
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 2, 3, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 2, 3, TIME), core.productLine));
             // 执行过期或失效强平前的业务状态，后续比较账户、订单与账本不变。
             var before = core.tradingState();
             // 该笔或该批强平的最终响应，稍后解码处理数量和失效动作数。
@@ -149,7 +149,7 @@ class CoreLiquidationLaneCheckTest {
             // 从真实强平工作中选出的目标动作，用来构造指定用户或单笔旧价格执行。
             var action = ExecuteLiquidationBatchCommand.fromWork(work(core), 0, 0).actions().getFirst();
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 2, 3, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 2, 3, TIME), core.productLine));
             // 执行过期或失效强平前的业务状态，后续比较账户、订单与账本不变。
             var before = core.tradingState();
             // 按旧动作的价格版本和执行价构造的单笔强平命令。
@@ -184,7 +184,7 @@ class CoreLiquidationLaneCheckTest {
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             for (long /* 当前准备或撤销挂单的测试用户，资金守恒汇总时表示当前累计的账户。 */ user : new long[]{1, 2, 7}) applied(core, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10_000 : 110)));
             place(core, 2, 100, CoreOrderSide.SELL, 100, 20, false);
@@ -194,7 +194,7 @@ class CoreLiquidationLaneCheckTest {
                     place(core, user, 200 + user * 10 + index, CoreOrderSide.SELL, 110, 1, true);
             }
             applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME), ProductLine.LINEAR_PERPETUAL));
             for (/* 准备阶段继续风险扫描的命令次数，限制最多二十次以暴露扫描不推进。 */ int polls = 0; core.runtimeState.firstRiskIncompleteScan() != null; polls++) {
                 assertThat(polls).isLessThan(20);
                 applied(core, CoreMessageType.CONTINUE_RISK_SCAN, 0,

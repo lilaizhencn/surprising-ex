@@ -92,7 +92,7 @@ class TradingCoreOwnerTest {
                     TradingCommandCodec.encodeRegisterInstrument(register, line)));
             onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, 2, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(
-                            new com.surprising.aeron.protocol.ApplyMarkPriceCommand("1", 100, 1, 1_000))));
+                            new com.surprising.aeron.protocol.ApplyMarkPriceCommand("1", 100, 1, 1_000), line)));
             for (/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ int user = 1; user <= 2; user++) {
                 onSessionMessage(service, responses, command(line, CoreMessageType.ADJUST_BALANCE, 2 + user, user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
@@ -567,7 +567,7 @@ class TradingCoreOwnerTest {
                             10_000, 10_000, 0, -1, 0), line)));
             onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, sequence++, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(
-                            new com.surprising.aeron.protocol.ApplyMarkPriceCommand(symbol, 100, 1, 1_000))));
+                            new com.surprising.aeron.protocol.ApplyMarkPriceCommand(symbol, 100, 1, 1_000), line)));
         }
         for (/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ int user = 1; user <= 4; user++) {
             onSessionMessage(service, responses, command(line, CoreMessageType.ADJUST_BALANCE, sequence++, user,
@@ -625,7 +625,7 @@ class TradingCoreOwnerTest {
                             10_000, 10_000, 0, -1, 0), line)));
             onSessionMessage(service, responses, command(line, CoreMessageType.APPLY_MARK_PRICE, 2, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(
-                            new com.surprising.aeron.protocol.ApplyMarkPriceCommand("1", 100, 1, 1_000))));
+                            new com.surprising.aeron.protocol.ApplyMarkPriceCommand("1", 100, 1, 1_000), line)));
             for (/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ int user = 1; user <= 2; user++) {
                 onSessionMessage(service, responses, command(line, CoreMessageType.ADJUST_BALANCE, 2 + user, user,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));

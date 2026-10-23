@@ -591,7 +591,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             var response = clients.command(CoreMessageType.APPLY_MARK_PRICE,
                     stableId("mark-price:" + worker + ':' + cycle), firstUser(Math.floorMod(worker, pairCount)),
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            instrumentId, PRICE_TICKS + (cycle & 1L), sequence, System.currentTimeMillis())));
+                            instrumentId, PRICE_TICKS + (cycle & 1L), sequence, System.currentTimeMillis()), productLine));
             record(response, System.nanoTime() - started, measured);
         }
     }
@@ -643,7 +643,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         return markGates[index].refresh(System.currentTimeMillis(), now -> {
             long sequence = nextPriceSequence.incrementAndGet();
             return commandAsync(CoreMessageType.APPLY_MARK_PRICE, stableId("feed:" + seed + ':' + sequence), 1,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, PRICE_TICKS, sequence, now)))
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, PRICE_TICKS, sequence, now), productLine))
                     .thenAccept(response -> {
                         if (response.commandStatus() != ResponseStatus.APPLIED) throw new IllegalStateException("mark rejected " + response.resultCode());
                         if (measured) marketDataCommands.incrementAndGet();

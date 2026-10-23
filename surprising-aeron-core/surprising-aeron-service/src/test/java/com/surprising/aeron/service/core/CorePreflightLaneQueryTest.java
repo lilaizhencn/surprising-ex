@@ -203,7 +203,7 @@ class CorePreflightLaneQueryTest {
                     TradingCommandCodec.encodeRegisterInstrument(instrument(line, 100_000), line));
             if (line != ProductLine.SPOT) command(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(line.isOptionProduct() ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
-                            : new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                            : new ApplyMarkPriceCommand("1", 100, 1, TIME), line));
             // 当前产品准备余额所用资产，反向为 BTC，其他产品为 USDT。
             String asset = line == ProductLine.INVERSE_PERPETUAL || line == ProductLine.INVERSE_DELIVERY ? "BTC" : "USDT";
             for (long /* 本轮准备余额的测试用户，依次为 1 和 7。 */ user : new long[]{1, 7}) command(core, CoreMessageType.ADJUST_BALANCE, user,

@@ -332,7 +332,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void publishPrice(int i, long value, long generatedAt) {
         mark[i]=value;markTime[i]=generatedAt;
         send(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(instrumentId(i),value,++markSequence[i],markTime[i])),1,null);
+                new ApplyMarkPriceCommand(instrumentId(i),value,++markSequence[i],markTime[i]), com.surprising.product.api.ProductLine.LINEAR_PERPETUAL),1,null);
     }
     private long place(int i,long user,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
         refresh(i);long id=nextOrder();

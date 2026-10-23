@@ -639,7 +639,7 @@ public final class LinearPerpetualBenchmarkSupport {
         Harness harness = Harness.restore(template);
         CoreMessage mark = harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS)));
+                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS), harness.productLine()));
         return new Scenario() {
             @Override
             public long run() {
@@ -692,7 +692,7 @@ public final class LinearPerpetualBenchmarkSupport {
         Harness harness = Harness.restore(template);
         CoreMessage mark = harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, 99, 2, BASE_EPOCH_MILLIS + 1)));
+                        new ApplyMarkPriceCommand(SYMBOL, 99, 2, BASE_EPOCH_MILLIS + 1), harness.productLine()));
         return new Scenario() {
             @Override
             public long run() {
@@ -730,7 +730,7 @@ public final class LinearPerpetualBenchmarkSupport {
                 order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE, 10, CoreTimeInForce.GTC)));
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS))));
+                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS), harness.productLine())));
         while (!harness.state.tradingState().riskState().scan().complete()) {
             int maxUsers = harness.state.tradingState().riskState().scanControl().scanBatchSize();
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
@@ -777,7 +777,7 @@ public final class LinearPerpetualBenchmarkSupport {
         }
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS + 1))));
+                        new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS + 1), harness.productLine())));
         while (!harness.state.runtimeRiskScanComplete(SYMBOL)) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
@@ -818,7 +818,7 @@ public final class LinearPerpetualBenchmarkSupport {
         Harness harness = positionedUsers(accountLanes, liquidationUsers);
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, 1, 2, BASE_EPOCH_MILLIS + 1))));
+                        new ApplyMarkPriceCommand(SYMBOL, 1, 2, BASE_EPOCH_MILLIS + 1), harness.productLine())));
         while (!harness.state.runtimeRiskScanComplete(SYMBOL)) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
@@ -1076,7 +1076,7 @@ public final class LinearPerpetualBenchmarkSupport {
                 TradingCommandCodec.encodeRegisterInstrument(instrument(), harness.productLine())));
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand(SYMBOL, ENTRY_PRICE, 1, BASE_EPOCH_MILLIS))));
+                        new ApplyMarkPriceCommand(SYMBOL, ENTRY_PRICE, 1, BASE_EPOCH_MILLIS), harness.productLine())));
         return harness;
     }
 
@@ -1199,7 +1199,7 @@ public final class LinearPerpetualBenchmarkSupport {
                 execute(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId,
                                 mark.markPriceTicks(),
-                                Math.incrementExact(mark.priceSequence()), now))));
+                                Math.incrementExact(mark.priceSequence()), now), productLine())));
             }
         }
 
@@ -1209,7 +1209,7 @@ public final class LinearPerpetualBenchmarkSupport {
             if (mark == null) throw new IllegalStateException("workload mark price is missing: " + instrumentId);
             submit(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId,
-                            mark.markPriceTicks(), Math.incrementExact(mark.priceSequence()), now))));
+                            mark.markPriceTicks(), Math.incrementExact(mark.priceSequence()), now), productLine())));
         }
 
         public void beginBusinessLatencies(int targetOperationsPerSecond) {

@@ -115,7 +115,7 @@ public class InProcessTradingAllocationBenchmark {
                             0, 0, 0, -1, 0);
             control(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(instrument, ProductLine.LINEAR_PERPETUAL));
             control(CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
         }
         for (long user : new long[]{7, 8}) control(CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", INITIAL_BALANCE)));

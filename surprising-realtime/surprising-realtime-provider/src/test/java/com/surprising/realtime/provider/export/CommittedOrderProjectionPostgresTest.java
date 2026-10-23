@@ -119,7 +119,7 @@ class CommittedOrderProjectionPostgresTest {
             for(long user:new long[]{7,8})frames.addAll(replayed(replay,++seq,CoreMessageType.ADJUST_BALANCE,user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1000000))));
             frames.addAll(replayed(replay,++seq,CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("604",100,100,100,1,1700000000000L))));
+                    new ApplyMarkPriceCommand("604",100,100,100,1,1700000000000L), line)));
             for(boolean maker:new boolean[]{true,false})frames.addAll(replayed(replay,++seq,CoreMessageType.PLACE_ORDER,maker?7:8,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(maker?201:202,"604",maker?CoreOrderSide.SELL:CoreOrderSide.BUY,
                             100,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,maker?"maker":"taker"))));

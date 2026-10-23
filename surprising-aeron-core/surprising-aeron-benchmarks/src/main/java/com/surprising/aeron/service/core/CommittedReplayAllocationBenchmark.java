@@ -35,7 +35,7 @@ public class CommittedReplayAllocationBenchmark {
         for (long user : new long[]{7, 8}) send(CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000_000_000_000L)));
         send(CoreMessageType.APPLY_MARK_PRICE, 0,
-                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("604", 100, 1, TIME)));
+                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("604", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
     }
     @Benchmark public long makerTakerFill() {
         place(7, CoreOrderSide.SELL);

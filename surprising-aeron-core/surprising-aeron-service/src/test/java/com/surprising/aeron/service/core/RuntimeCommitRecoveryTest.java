@@ -434,7 +434,7 @@ class RuntimeCommitRecoveryTest {
                                     0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL)),
                     kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(
-                                    new ApplyMarkPriceCommand("1", 100, 1, 1_000))),
+                                    new ApplyMarkPriceCommand("1", 100, 1, 1_000), ProductLine.LINEAR_PERPETUAL)),
                     command(1, 1, CoreMessageType.ADJUST_BALANCE, balance(110)),
                     command(2, 2, CoreMessageType.ADJUST_BALANCE, balance(1_000)),
                     command(3, 3, CoreMessageType.ADJUST_BALANCE, balance(100)),
@@ -455,7 +455,7 @@ class RuntimeCommitRecoveryTest {
                                     new ApplyFundingCommand(901, "1", 1_000))),
                     kafkaCommand(2, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(
-                                    new ApplyMarkPriceCommand("1", 1, 2, 2_000)))));
+                                    new ApplyMarkPriceCommand("1", 1, 2, 2_000), ProductLine.LINEAR_PERPETUAL))));
             assertThat(uninterrupted.state().tradingState().treasuryState().fundingSettlements()).isNotEmpty();
             // 本测试运营来源当前继续使用的原序号
             long operationsSequence = 3;
@@ -702,7 +702,7 @@ class RuntimeCommitRecoveryTest {
                         0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL)));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("1", 100, 1, 1_000))));
+                        new ApplyMarkPriceCommand("1", 100, 1, 1_000), ProductLine.LINEAR_PERPETUAL)));
         apply(state, command(1, 11, CoreMessageType.ADJUST_BALANCE, balance(2_000)));
         apply(state, command(2, 22, CoreMessageType.ADJUST_BALANCE, balance(2_000)));
         apply(state, command(3, 11, CoreMessageType.PLACE_ORDER,
@@ -725,7 +725,7 @@ class RuntimeCommitRecoveryTest {
                         10_000, 20_000, 0, -1, 0), ProductLine.LINEAR_PERPETUAL)));
         apply(state, kafkaCommand(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("1", 100, 1, 1_000))));
+                        new ApplyMarkPriceCommand("1", 100, 1, 1_000), ProductLine.LINEAR_PERPETUAL)));
         apply(state, command(1, 2001, CoreMessageType.ADJUST_BALANCE, balance(2_000)));
         apply(state, command(2, 1001, CoreMessageType.ADJUST_BALANCE, balance(2_000)));
         apply(state, command(3, 2001, CoreMessageType.PLACE_ORDER,
@@ -929,7 +929,7 @@ class RuntimeCommitRecoveryTest {
                 command(15, 55, CoreMessageType.PLACE_ORDER, place(502, CoreOrderSide.BUY, 100, 10, false)),
                 kafkaCommand(2, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(
-                                new ApplyMarkPriceCommand("1", 80, 2, 2_000))));
+                                new ApplyMarkPriceCommand("1", 80, 2, 2_000), state.productLine)));
         setup.forEach(/* 当前待提交的原协议消息 */ command -> {
 
             responses.add(response(apply(state, command)));

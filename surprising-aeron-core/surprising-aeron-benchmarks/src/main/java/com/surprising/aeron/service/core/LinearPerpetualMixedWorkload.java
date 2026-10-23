@@ -127,7 +127,7 @@ public final class LinearPerpetualMixedWorkload {
                         CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(
                                 new ApplyMarkPriceCommand(instrumentId, ENTRY_PRICE, 1,
-                                        harness.nextCommandTimestamp()))));
+                                        harness.nextCommandTimestamp()), harness.state().productLine)));
             }
 
             int infrastructureUsers = Math.addExact(Math.multiplyExact(symbolCount, 3), 1);
@@ -213,7 +213,7 @@ public final class LinearPerpetualMixedWorkload {
                     CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                             symbols.get(liquidationSymbolIndex), LIQUIDATION_MARK, 2,
-                            harness.nextCommandTimestamp()))));
+                            harness.nextCommandTimestamp()), harness.state().productLine)));
             while (!harness.state().runtimeRiskScanComplete()) {
                 harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                         TradingCommandCodec.encodeContinueRiskScan(
@@ -722,7 +722,7 @@ public final class LinearPerpetualMixedWorkload {
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand(instrumentId, markPrice, priceSequence,
-                                harness.nextCommandTimestamp()))));
+                                harness.nextCommandTimestamp()), harness.state().productLine)));
         while (completeHeavyCycles && !harness.state().runtimeRiskScanComplete()) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(
@@ -760,7 +760,7 @@ public final class LinearPerpetualMixedWorkload {
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                         instrumentId, markPrice, priceSequence,
-                        harness.nextCommandTimestamp()))));
+                        harness.nextCommandTimestamp()), harness.state().productLine)));
     }
 
     private static void executeTriggerLifecycle(Harness harness, Template template, int index) {

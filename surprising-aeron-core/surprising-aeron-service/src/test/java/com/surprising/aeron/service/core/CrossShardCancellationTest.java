@@ -184,7 +184,7 @@ class CrossShardCancellationTest {
      */
     private CoreMessage mark(String instrumentId, long price, long revision) {
         return command(CoreMessageType.APPLY_MARK_PRICE, 0,
-                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, price, revision, TIME)));
+                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(instrumentId, price, revision, TIME), com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
     }
     /**
      * 同步查询线性永续执行用途的强平工作，最多一百项并限制响应字节，解码协议结果。

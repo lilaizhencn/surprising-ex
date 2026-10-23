@@ -6,7 +6,7 @@ import java.nio.ByteOrder;
 public final class CoreProtocol {
 
     public static final int MAGIC = 0x53584558;
-    public static final int SCHEMA_VERSION = 15;
+    public static final int SCHEMA_VERSION = 16;
     public static final int HEADER_LENGTH = 72;
     public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 32;
     public static final int CLUSTER_MAX_MESSAGE_LENGTH = 2 * 1024 * 1024;

@@ -72,7 +72,7 @@ class CoreSelfTradePrefixTest {
                 if (line != ProductLine.SPOT || marketTaker) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                 ? new ApplyMarkPriceCommand(symbol, 100, 100, 100, 1, TIME)
-                                : new ApplyMarkPriceCommand(symbol, 100, 1, TIME))));
+                                : new ApplyMarkPriceCommand(symbol, 100, 1, TIME), line)));
             }
             for (long /* 当前入账、下单或核对资金的用户 */ user : new long[]{7, 8}) for (String /* 当前初始化的 BTC、ETH 或 USDT 资产 */ asset : new String[]{"BTC", "ETH", "USDT"})
                 applied(core, message(core, CoreMessageType.ADJUST_BALANCE, user,
@@ -150,7 +150,7 @@ class CoreSelfTradePrefixTest {
             if (line != ProductLine.SPOT) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                             ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
-                            : new ApplyMarkPriceCommand("1", 100, 1, TIME))));
+                            : new ApplyMarkPriceCommand("1", 100, 1, TIME), line)));
             // 从八开始寻找与 maker 不同 Lane 的用户候选
             // 原挂卖单的用户七
             long maker = 7, candidate = 8;

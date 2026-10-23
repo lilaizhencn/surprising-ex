@@ -558,7 +558,7 @@ public class ClusteredBatchTradingBenchmark {
                 for (String instrumentId : startupSymbols) apply(CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                 ? new ApplyMarkPriceCommand(instrumentId, 100, 100, 100, 1, 1_700_000_000_000L)
-                                : new ApplyMarkPriceCommand(instrumentId, 100, 1, 1_700_000_000_000L)));
+                                : new ApplyMarkPriceCommand(instrumentId, 100, 1, 1_700_000_000_000L), type.productLine()));
             }
             for (int user = 0; user <= 256; user++) {
                 apply(CoreMessageType.ADJUST_BALANCE, 1_000 + user,
@@ -653,7 +653,7 @@ public class ClusteredBatchTradingBenchmark {
                             ? new ApplyMarkPriceCommand("10", 100, 100, 100,
                                     priceSequence, 1_700_000_000_000L)
                             : new ApplyMarkPriceCommand("10", 100,
-                                    priceSequence, 1_700_000_000_000L))));
+                                    priceSequence, 1_700_000_000_000L), productLine)));
             drain();
             int rounds = 0;
             do {

@@ -129,7 +129,7 @@ class MultiProductGatewayHttpIntegrationTest {
                 var core = cores.get(market.line());
                 awaitCoreInstrument(core, market);
                 var mark = core.command(CoreMessageType.APPLY_MARK_PRICE,UUID.randomUUID(),0,
-                        TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(market.id(),market.price(),500_000,market.line()==ProductLine.OPTION?500_000:0,System.currentTimeMillis(),System.currentTimeMillis())));
+                        TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(market.id(),market.price(),500_000,market.line()==ProductLine.OPTION?500_000:0,System.currentTimeMillis(),System.currentTimeMillis()), market.line()));
                 assertThat(mark.commandStatus()).as(mark.toString()).isEqualTo(ResponseStatus.APPLIED);
                 awaitOrderReadiness(user,market);
                 var before = combined(core,user,maker);

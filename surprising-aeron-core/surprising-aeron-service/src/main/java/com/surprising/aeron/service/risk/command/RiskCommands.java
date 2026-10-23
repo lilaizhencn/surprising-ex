@@ -30,7 +30,7 @@ public final class RiskCommands {
      */
     public void executeApplyMarkPrice(CoreMessage message) {
         // 解码得到的标记价、价格序列及报价时间
-        var command = TradingCommandCodec.decodeApplyMarkPrice(message.payloadUnsafe());
+        var command = TradingCommandCodec.decodeApplyMarkPrice(message.payloadUnsafe(), message.header().productLine());
         // 更新标记价前记录的未完成扫描数量，用于本次诊断日志
         int pendingBefore = owner.pendingRiskScanCount();
         // 本轮扫描开始的单调时钟时间，仅用于耗时观测

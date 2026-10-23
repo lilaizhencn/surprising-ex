@@ -89,7 +89,7 @@ public final class SmallControlReproMain {
         String instrumentId = "29";
         command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId), PRODUCT));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
+                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis()), PRODUCT));
         for (long user : new long[]{1001, 1002}) command(CoreMessageType.ADJUST_BALANCE, user,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
         for (int i = 0; i < 8; i++) {
@@ -178,7 +178,7 @@ public final class SmallControlReproMain {
         long user = 1001 + index * 2L, maker = user + 1, base = 3001 + index * 10L;
         command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId), PRODUCT));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
+                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis()), PRODUCT));
         for (long account : new long[]{user, maker}) command(CoreMessageType.ADJUST_BALANCE, account,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
         order(user, instrumentId, base, CoreOrderSide.SELL, 1);
@@ -222,7 +222,7 @@ public final class SmallControlReproMain {
         long maker = 1001 + index * 2L, user = maker + 1, triggerId = 9001 + index;
         command(CoreMessageType.REGISTER_INSTRUMENT, 1, TradingCommandCodec.encodeRegisterInstrument(instrument(instrumentId), PRODUCT));
         command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())));
+                new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis()), PRODUCT));
         for (long account : new long[]{maker, user}) command(CoreMessageType.ADJUST_BALANCE, account,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
         order(maker, instrumentId, 2001 + index * 10, CoreOrderSide.SELL, 10);
@@ -242,7 +242,7 @@ public final class SmallControlReproMain {
         command(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodePlacement(sibling));
         if (scan) {
             command(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand(instrumentId, 100, 2, System.currentTimeMillis())));
+                    new ApplyMarkPriceCommand(instrumentId, 100, 2, System.currentTimeMillis()), PRODUCT));
             // Risk and trigger pages share the real continuation budget. Query terminal state only at this boundary.
             boolean complete = false;
             for (int page = 0; page < 64; page++) {

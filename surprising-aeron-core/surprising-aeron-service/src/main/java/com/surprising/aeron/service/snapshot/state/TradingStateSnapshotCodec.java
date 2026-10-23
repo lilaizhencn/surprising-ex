@@ -39,11 +39,11 @@ import lombok.NoArgsConstructor;
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
-    /** 本编码器新写入的外层快照布局版本四十二。 */
-    private static final int VERSION = 45;
+    /** 本编码器新写入的外层快照布局版本。 */
+    private static final int VERSION = 46;
 
     /**
-     * 把交易状态各业务表和独立记录写成编号字段，外层加小端版本四十二头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
+     * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
      * @param value 本方法要持久化的对应业务值，字段和顺序由固定编号定义
      */
     public static byte[] encode(TradingCoreState value) {
@@ -54,7 +54,7 @@ public final class TradingStateSnapshotCodec {
                 .bytes(3, writeValues(value.users(), TradingStateSnapshotCodec::writeCoreUserState))
                 .bytes(4, writeValues(value.orders(), TradingStateSnapshotCodec::writeCoreOrderState))
                 .bytes(5, writeValues(value.instruments(), item -> writeCoreInstrument(item, value.productLine())))
-                .bytes(6, writeCoreRiskState(value.riskState()))
+                .bytes(6, writeCoreRiskState(value.riskState(), value.productLine()))
                 .bytes(7, writeCoreTreasuryState(value.treasuryState()))
                 .bytes(8, writeMap(value.leverages(), TradingStateSnapshotCodec::writeCoreLeverageKey, /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> new SnapshotFields.Writer().number(1, item).encode()))
                 .bytes(9, writeValues(value.algoOrders(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
@@ -100,7 +100,7 @@ public final class TradingStateSnapshotCodec {
                 putUnique(triggers, view.triggerOrderId(), CoreTriggerOrderState.from(view, instrument));
             }
             return new TradingCoreState(product, r.number(2), users, orders, instruments,
-                    readCoreRiskState(r.bytes(6)), readCoreTreasuryState(r.bytes(7)),
+                    readCoreRiskState(r.bytes(6), product), readCoreTreasuryState(r.bytes(7)),
                     readMap(r.bytes(8), TradingStateSnapshotCodec::readCoreLeverageKey, /* 当前杠杆值字段记录字节，字段一保存杠杆数值。 */ item -> new SnapshotFields.Reader(item).number(1)),
                     readValues(r.bytes(9), TradingStateSnapshotCodec::readCoreAlgoOrderState, CoreAlgoOrderState::algoOrderId), timers, triggers);
         } catch (/* 协议异常直接抛出，其他运行时异常在外层转换时作为原原因保留。 */ ProtocolException invalid) { throw invalid; }
@@ -366,29 +366,29 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号写入币对参考价格，保存标记价、指数价、远期价、价格序号、生成时间及最近成交价；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的币对参考价格业务值
      */
-    private static byte[] writeCoreMarkPriceState(CoreMarkPriceState value) {
-        return new SnapshotFields.Writer()
+    private static byte[] writeCoreMarkPriceState(CoreMarkPriceState value, ProductLine productLine) {
+        var writer = new SnapshotFields.Writer()
                 .text(1, value.instrumentId()) // 1：币对或合约业务编号
                 .number(2, value.markPriceTicks()) // 2：标记价格
                 .number(3, value.indexPriceTicks()) // 3：指数参考价格
-                .number(4, value.forwardPriceTicks()) // 4：远期参考价格
                 .number(5, value.priceSequence()) // 5：参考价格序号
                 .number(6, value.generatedAtEpochMillis()) // 6：参考价格生成时刻，毫秒
-                .number(7, value.lastPriceTicks()) // 7：最近成交价
-                .encode();
+                .number(7, value.lastPriceTicks()); // 7：最近成交价
+        if (productLine.isOptionProduct()) writer.number(4, value.forwardPriceTicks());
+        return writer.encode();
     }
     /**
-     * 按固定字段恢复标记价及参考价；最近成交价字段七缺失时明确使用历史值零，字段存在时仍要求八字节数值。
+     * 按当前产品恢复标记、指数及最新价；只有期权读取远期价字段四，实际字段均要求完整数值。
      * @param encoded 当前币对参考价格的独立字段记录字节
      */
-    private static CoreMarkPriceState readCoreMarkPriceState(byte[] encoded) {
+    private static CoreMarkPriceState readCoreMarkPriceState(byte[] encoded, ProductLine productLine) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
         return new CoreMarkPriceState(
                 r.text(1), // 1：币对或合约业务编号
                 r.number(2), // 2：标记价格
                 r.number(3), // 3：指数参考价格
-                r.number(4), // 4：远期参考价格
+                productLine.isOptionProduct() ? r.number(4) : 0, // 4：期权远期参考价格
                 r.number(5), // 5：参考价格序号
                 r.number(6), // 6：参考价格生成时刻，毫秒
                 r.number(7)); // 7：最近成交价
@@ -989,9 +989,9 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号写入风险业务状态，保存参考价格、账户风险、强平记录、扫描进度及扫描控制和行情修订；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的风险业务状态业务值
      */
-    private static byte[] writeCoreRiskState(CoreRiskState value) {
+    private static byte[] writeCoreRiskState(CoreRiskState value, ProductLine productLine) {
         return new SnapshotFields.Writer()
-                .bytes(1, writeValues(value.markPrices(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreMarkPriceState(item))) // 1：按币对保存的标记价与参考价
+                .bytes(1, writeValues(value.markPrices(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreMarkPriceState(item, productLine))) // 1：按币对保存的标记价与参考价
                 .bytes(2, writeValues(value.snapshots(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreRiskSnapshot(item))) // 2：按用户币对方向保存的风险估值快照
                 .bytes(3, writeValues(value.liquidations(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeCoreLiquidationState(item))) // 3：按强平编号保存的计划与处理记录
                 .bytes(4, writeValues(value.scans(), /* 当前嵌套列表或业务表中的一条值，按所属字段的专用记录写入。 */ item -> writeRiskScan(item))) // 4：各币对未完成的风险和触发扫描记录
@@ -1004,11 +1004,11 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号读取并构造风险业务状态，恢复参考价格、账户风险、强平记录、扫描进度及扫描控制和行情修订；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前风险业务状态的独立字段记录字节
      */
-    private static CoreRiskState readCoreRiskState(byte[] encoded) {
+    private static CoreRiskState readCoreRiskState(byte[] encoded, ProductLine productLine) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
         return new CoreRiskState(
-                readValues(r.bytes(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreMarkPriceState(item), CoreMarkPriceState::instrumentId), // 1：按币对保存的标记价与参考价
+                readValues(r.bytes(1), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreMarkPriceState(item, productLine), CoreMarkPriceState::instrumentId), // 1：按币对保存的标记价与参考价
                 readValues(r.bytes(2), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreRiskSnapshot(item), CoreRiskSnapshot::key), // 2：按用户币对方向保存的风险估值快照
                 readValues(r.bytes(3), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readCoreLiquidationState(item), CoreLiquidationState::liquidationId), // 3：按强平编号保存的计划与处理记录
                 readValues(r.bytes(4), /* 当前嵌套列表或 Map 值的记录字节，按所属字段的专用读取器解析。 */ item -> readRiskScan(item), RiskScan::instrumentId), // 4：各币对未完成的风险和触发扫描记录

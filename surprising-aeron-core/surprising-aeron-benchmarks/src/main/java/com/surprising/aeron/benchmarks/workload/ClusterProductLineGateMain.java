@@ -92,7 +92,7 @@ public final class ClusterProductLineGateMain {
         applied(1, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
                 productLine == ProductLine.OPTION
                         ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1, System.currentTimeMillis())
-                        : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis())));
+                        : new ApplyMarkPriceCommand(SYMBOL, 100, 1, System.currentTimeMillis()), productLine));
         executeDerivative();
     }
 
@@ -157,7 +157,7 @@ public final class ClusterProductLineGateMain {
         long priceSequence = 2;
         applied(1, CoreMessageType.APPLY_MARK_PRICE,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        SYMBOL, markPrice, priceSequence, System.currentTimeMillis())));
+                        SYMBOL, markPrice, priceSequence, System.currentTimeMillis()), productLine));
         var work = executionWork();
         int scanBudget = com.surprising.aeron.protocol.CoreRiskScanControlCodec.decodeView(
                 query(CoreMessageType.RISK_SCAN_CONTROL_QUERY, 0, new byte[0])).scanBatchSize();

@@ -62,7 +62,7 @@ class ClusterCommandPipelineTest {
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                             ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
-                            : new ApplyMarkPriceCommand("1", 100, 1, TIME))));
+                            : new ApplyMarkPriceCommand("1", 100, 1, TIME), product)));
             // 第一组主动成交用户，选到与 maker 不同账户 Lane
             // 第二组主动用户，随后发送待测批次
             // 第二组被动成交用户编号
@@ -141,7 +141,7 @@ class ClusterCommandPipelineTest {
                                 trigger.positionSide(), trigger.expiresAtEpochMillis(), trigger.priceSource()))));
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 100,
-                            product == ProductLine.OPTION ? 100 : 0, 2, TIME))));
+                            product == ProductLine.OPTION ? 100 : 0, 2, TIME), product)));
             live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
             System.err.println("DEBUG RESPONSES: " + live.responses.stream().map(/* 当前待检查状态或结果码的 Core 响应 */ r -> r.commandStatus() + ":" + r.resultCode()).toList());
@@ -1745,7 +1745,7 @@ class ClusterCommandPipelineTest {
                         live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                                 TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                         ? new ApplyMarkPriceCommand(instrumentId, 100, 100, 100, 1, TIME)
-                                        : new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME))),
+                                        : new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME), product)),
                         live.message(CoreMessageType.ADJUST_BALANCE, user,
                                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000))));
                 live.applyAll(setup); serial.applyAll(setup);
@@ -2927,7 +2927,7 @@ class ClusterCommandPipelineTest {
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
                             ? new ApplyMarkPriceCommand("1", 100, 100, 100, 2, TIME + 1000)
-                            : new ApplyMarkPriceCommand("1", 100, 2, TIME + 1000))));
+                            : new ApplyMarkPriceCommand("1", 100, 2, TIME + 1000), product)));
             // 是否已经实际遇到跨命令 OCO 续页，恢复分支还会在此边界重放
             boolean resumed = false;
             for (/* 单用户预算触发续扫的次数下标，最多一百轮 */ int n = 0; n < 100 && runtime.firstIncompleteRiskScan() != null; n++) {
@@ -2983,7 +2983,7 @@ class ClusterCommandPipelineTest {
         live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(option
                         ? new ApplyMarkPriceCommand("1", 100, 100, 100, 2, TIME)
-                        : new ApplyMarkPriceCommand("1", 100, 2, TIME))));
+                        : new ApplyMarkPriceCommand("1", 100, 2, TIME), live.product)));
         for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < 100 && live.service.state().runtimeState().firstIncompleteRiskScan() != null; i++) {
             live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(budget))));
@@ -3079,7 +3079,7 @@ class ClusterCommandPipelineTest {
      */
     private static void applyPriceAndFinishTriggerScan(Fixture live, ApplyMarkPriceCommand command) {
         live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
-                TradingCommandCodec.encodeApplyMarkPrice(command)));
+                TradingCommandCodec.encodeApplyMarkPrice(command, live.product)));
         for (/* 当前初始化、查找候选或重复轮询的循环下标 */ int i = 0; i < 100 && live.service.state().runtimeState().firstIncompleteRiskScan() != null; i++) {
             live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(1))));
@@ -3175,7 +3175,7 @@ class ClusterCommandPipelineTest {
                 commands.add(message(CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                 ? new ApplyMarkPriceCommand(instrumentId, 100, 100, 100, 1, TIME)
-                                : new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME))));
+                                : new ApplyMarkPriceCommand(instrumentId, 100, 1, TIME), type.productLine())));
             }
             for (long /* 当前需要加资、下单或查条件单的用户编号 */ user : new long[]{11, disjointUser(11)})
                 commands.add(message(CoreMessageType.ADJUST_BALANCE, user,

@@ -71,14 +71,14 @@ public final class ClusterDerivativeSmokeMain {
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000))));
                 applied(client, command(productLine, sourceId + 2_000_000, seed, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "1", 100, seed, System.currentTimeMillis()))));
+                                "1", 100, seed, System.currentTimeMillis()), productLine)));
                 applied(client, command(productLine, sourceId, seed + 2, shortUser, CoreMessageType.PLACE_ORDER,
                         derivativeOrder(sellOrder, CoreOrderSide.SELL)));
                 applied(client, command(productLine, sourceId, seed + 3, longUser, CoreMessageType.PLACE_ORDER,
                         derivativeOrder(buyOrder, CoreOrderSide.BUY)));
                 applied(client, command(productLine, sourceId, seed + 4, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "1", 100, seed + 1, System.currentTimeMillis()))));
+                                "1", 100, seed + 1, System.currentTimeMillis()), productLine)));
                 applied(client, command(productLine, sourceId, seed + 5, 1, CoreMessageType.APPLY_FUNDING,
                         TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
                                 settlementId, "1", 10_000))));

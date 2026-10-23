@@ -86,7 +86,7 @@ public final class CorePerpetualEndToEndBenchmark {
         apply(state, sequences, CoreMessageType.REGISTER_INSTRUMENT, CommandSource.OPERATIONS, 0,
                 TradingCommandCodec.encodeRegisterInstrument(instrument(), ProductLine.LINEAR_PERPETUAL));
         apply(state, sequences, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
-                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(SYMBOL, 1_000, 1, 1_000)));
+                TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(SYMBOL, 1_000, 1, 1_000), ProductLine.LINEAR_PERPETUAL));
         importFeePolicy(state, sequences, 1, MAKER_USER_ID);
         importFeePolicy(state, sequences, 2, TAKER_USER_ID);
         adjust(state, sequences, MAKER_USER_ID);

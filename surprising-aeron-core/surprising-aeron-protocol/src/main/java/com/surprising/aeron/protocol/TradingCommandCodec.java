@@ -694,21 +694,29 @@ public final class TradingCommandCodec {
     }
 
 
-    public static byte[] encodeApplyMarkPrice(ApplyMarkPriceCommand command) {
+    /** 当前产品决定是否携带期权远期价；指数价和最新价供条件单触发。 */
+    public static byte[] encodeApplyMarkPrice(ApplyMarkPriceCommand command,
+            com.surprising.product.api.ProductLine productLine) {
+        java.util.Objects.requireNonNull(productLine, "productLine");
+        boolean option = productLine.isOptionProduct();
         byte[] instrumentId = text(command.instrumentId());
-        return ByteBuffer.allocate(Short.BYTES + instrumentId.length + Long.BYTES * 6)
+        ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES + instrumentId.length + Long.BYTES * (option ? 6 : 5))
                 .order(ByteOrder.LITTLE_ENDIAN).putShort((short) instrumentId.length).put(instrumentId)
-                .putLong(command.markPriceTicks())
-                .putLong(command.indexPriceTicks()).putLong(command.forwardPriceTicks())
-                .putLong(command.priceSequence()).putLong(command.generatedAtEpochMillis())
+                .putLong(command.markPriceTicks()).putLong(command.indexPriceTicks());
+        if (option) buffer.putLong(command.forwardPriceTicks());
+        return buffer.putLong(command.priceSequence()).putLong(command.generatedAtEpochMillis())
                 .putLong(command.lastPriceTicks()).array();
     }
 
-    public static ApplyMarkPriceCommand decodeApplyMarkPrice(byte[] payload) {
+    public static ApplyMarkPriceCommand decodeApplyMarkPrice(byte[] payload,
+            com.surprising.product.api.ProductLine productLine) {
+        if (productLine == null) throw new ProtocolException("mark price product line is required");
+        boolean option = productLine.isOptionProduct();
         ByteBuffer buffer = readable(payload);
         String instrumentId = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 6);
-        long mark = buffer.getLong(), index = buffer.getLong(), forward = buffer.getLong();
+        requireRemaining(buffer, Long.BYTES * (option ? 6 : 5));
+        long mark = buffer.getLong(), index = buffer.getLong();
+        long forward = option ? buffer.getLong() : 0;
         long sequence = buffer.getLong(), generatedAt = buffer.getLong();
         long last = buffer.getLong();
         ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(instrumentId, mark, index, forward,

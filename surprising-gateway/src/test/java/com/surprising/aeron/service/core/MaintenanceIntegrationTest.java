@@ -189,7 +189,7 @@ class MaintenanceIntegrationTest {
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(111,CoreOrderSide.SELL,false)));
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             submit(0,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("1",10_000,2,1_700_000_000_100L)));
+                    new ApplyMarkPriceCommand("1",10_000,2,1_700_000_000_100L), com.surprising.product.api.ProductLine.LINEAR_PERPETUAL));
             submit(0,CoreMessageType.CONTINUE_RISK_SCAN,TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(16)));
             assertThat(state.tradingState().riskState().liquidations()).isNotEmpty();
             var task=fixture.service.create("1",new MaintenanceCommand(UUID.randomUUID(),"1",0,MaintenanceCommand.Mode.SETTLEMENT,120,"wait for liquidation"));
@@ -316,7 +316,7 @@ class MaintenanceIntegrationTest {
                         java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                 0, 0, type.isDelivery()||type.isOption()?2_000_000_000_000L:0, type.isOption()?0:-1,
                 type.isOption()?100:0), product));
-        submit(1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()?new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_000L):new ApplyMarkPriceCommand("1",100,1,1_700_000_000_000L)));
+        submit(1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()?new ApplyMarkPriceCommand("1",100,100,100,1,1_700_000_000_000L):new ApplyMarkPriceCommand("1",100,1,1_700_000_000_000L), product));
         submit(11,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(line==ProductLine.SPOT?"BTC":asset,20_000)));
         submit(22,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset,20_000)));
         return new Fixture();

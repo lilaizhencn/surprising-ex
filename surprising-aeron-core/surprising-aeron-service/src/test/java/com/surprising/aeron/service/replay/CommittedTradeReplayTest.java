@@ -64,7 +64,7 @@ class CommittedTradeReplayTest {
             for (long /* 当前循环需要备资的用户 ID */ user : new long[]{7, 8}) send(replay, line, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000_000)));
             send(replay, line, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("604", 100, 100, 100, 1, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("604", 100, 100, 100, 1, TIME), line));
             place(replay, line, 7, 201, CoreOrderSide.SELL);
             place(replay, line, 8, 202, CoreOrderSide.BUY);
             // 最大 long ID 的期权待触发止盈记录
@@ -333,7 +333,7 @@ class CommittedTradeReplayTest {
             if (line != ProductLine.SPOT) send(replay, line, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(line == ProductLine.OPTION
                             ? new ApplyMarkPriceCommand("604", 100, 100, 100, 1, TIME)
-                            : new ApplyMarkPriceCommand("604", 100, 1, TIME)));
+                            : new ApplyMarkPriceCommand("604", 100, 1, TIME), line));
             // 第一次挂单产生的订单事实
             var resting = place(replay, line, 7, 201, CoreOrderSide.SELL);
             assertThat(replay.commandResult()).satisfies(/* 当前最终命令收据，用来核对用户、客户身份及结果码 */ result -> {

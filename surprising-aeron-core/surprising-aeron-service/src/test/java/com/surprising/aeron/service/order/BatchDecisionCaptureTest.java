@@ -70,7 +70,7 @@ class BatchDecisionCaptureTest {
      */
     private void mark(TradingCoreRuntime core, String symbol, long price, long version) {
         applied(core, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol, price, version, TIME)));
+                new ApplyMarkPriceCommand(symbol, price, version, TIME), core.runtimeState().productLine()));
     }
 
     /**

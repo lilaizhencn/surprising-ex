@@ -32,7 +32,7 @@ class CoreMatcherLedgerTest {
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.ADJUST_BALANCE, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
             applied(state, CoreMessageType.PLACE_ORDER, 1001, TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.BUY, 99, 1)));
@@ -71,7 +71,7 @@ class CoreMatcherLedgerTest {
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             10_000, 10_000, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             for (long /* 本轮测试用户，用于注入余额或最终核对其预留已清空。 */ user : new long[]{1001, 1002}) applied(state, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
             assertThat(state.runtimeState.systemLedgerStarted()).isTrue();
@@ -112,7 +112,7 @@ class CoreMatcherLedgerTest {
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             applied(state, CoreMessageType.ADJUST_BALANCE, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
             try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {

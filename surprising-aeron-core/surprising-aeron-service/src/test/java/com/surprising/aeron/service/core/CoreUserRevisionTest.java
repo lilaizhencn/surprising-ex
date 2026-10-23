@@ -52,7 +52,7 @@ class CoreUserRevisionTest {
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             0, 0, 0, -1, 0), ProductLine.LINEAR_PERPETUAL));
             send(core, CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("1", 100, 1, TIME)));
+                    new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             for (long /* 本轮被入账或下单的用户七或八 */ user : new long[]{7, 8}) {
                 send(core, CoreMessageType.ADJUST_BALANCE, user, TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand("USDT", BALANCE)));

@@ -41,7 +41,7 @@ public class SettlementSolvencyBenchmark {
             h.execute(h.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(option
                             ? new ApplyMarkPriceCommand("41", 100, 100, 100, 1, h.nextCommandTimestamp())
-                            : new ApplyMarkPriceCommand("41", 100, 1, h.nextCommandTimestamp()))));
+                            : new ApplyMarkPriceCommand("41", 100, 1, h.nextCommandTimestamp()), type.productLine())));
             h.adjust(999, asset, 1_000_000_000L);
             order(h, 999, CoreOrderSide.BUY, 256, CoreMarginMode.CROSS);
             for (long user = 1000; user < 1256; user++) {

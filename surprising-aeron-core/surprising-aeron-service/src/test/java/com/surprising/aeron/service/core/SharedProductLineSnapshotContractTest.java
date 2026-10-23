@@ -70,7 +70,7 @@ class SharedProductLineSnapshotContractTest {
                                         ? new ApplyMarkPriceCommand(SYMBOL, 100, 100, 100, 1,
                                         1_700_000_000_000L)
                                         : new ApplyMarkPriceCommand(SYMBOL, 100, 1,
-                                        1_700_000_000_000L)))));
+                                        1_700_000_000_000L), productLine))));
                 assertThat(original.tradingState().riskState().markPrices().get(SYMBOL).markPriceTicks())
                         .isEqualTo(100);
             }

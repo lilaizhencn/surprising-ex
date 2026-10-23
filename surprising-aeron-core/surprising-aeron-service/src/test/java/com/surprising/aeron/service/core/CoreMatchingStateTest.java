@@ -1352,7 +1352,7 @@ class CoreMatchingStateTest {
                 1_000, 2), TradingCommandCodec.encodeApplyMarkPrice(
                         type.isOption()
                                 ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, 1_000)
-                                : new ApplyMarkPriceCommand("1", 100, 1, 1_000)));
+                                : new ApplyMarkPriceCommand("1", 100, 1, 1_000), productLine));
         assertThat(submit(state, mark).status()).isEqualTo(ResponseStatus.APPLIED);
     }
 

@@ -8,7 +8,7 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
  * @param instrument 这份行情对应的币对配置引用，包含合约类型与价格金额精度
  * @param markPriceTicks 风险估值使用的标记价格，单位为价格 tick
  * @param indexPriceTicks 标的指数价格 tick，0 表示这份记录没有提供该价格
- * @param forwardPriceTicks 与期权到期日对应的远期价格 tick，0 表示没有提供
+ * @param forwardPriceTicks 期权同到期远期价格 tick，其他产品固定为 0
  * @param priceSequence 行情的单调序号，用来识别扫描和估值采用的是哪一版价格
  * @param generatedAtEpochMillis 行情来源生成这份价格的 Unix 毫秒时间戳
  * @param lastPriceTicks 最新成交价格 tick，0 表示这份行情没有提供最新成交价
@@ -22,7 +22,7 @@ public record MarkPriceRuntime(int symbolId, CoreInstrument instrument, long mar
      * @param instrument 这份行情对应的币对配置引用，包含合约类型与价格金额精度
      * @param markPriceTicks 风险估值使用的标记价格，单位为价格 tick
      * @param indexPriceTicks 标的指数价格 tick，0 表示这份记录没有提供该价格
-     * @param forwardPriceTicks 与期权到期日对应的远期价格 tick，0 表示没有提供
+     * @param forwardPriceTicks 期权同到期远期价格 tick，其他产品固定为 0
      * @param priceSequence 行情的单调序号，用来识别扫描和估值采用的是哪一版价格
      * @param generatedAtEpochMillis 行情来源生成这份价格的 Unix 毫秒时间戳
      */
@@ -36,6 +36,7 @@ public record MarkPriceRuntime(int symbolId, CoreInstrument instrument, long mar
      * 要求币对整数编号非负、配置引用存在，标记价、价格序号和生成时间为正；指数价、远期价及最新成交价允许用 0 表示未提供。
      */
     public MarkPriceRuntime {
+        if (instrument != null && !instrument.contractType().isOption()) forwardPriceTicks = 0;
         if (symbolId < 0 || instrument == null || markPriceTicks <= 0
                 || indexPriceTicks < 0 || forwardPriceTicks < 0 || lastPriceTicks < 0 || priceSequence <= 0
                 || generatedAtEpochMillis <= 0) {

@@ -187,7 +187,7 @@ class RiskBatchBudgetTest {
             // 仅功能测试将编号放到边界；通过随后正常的行情命令提交为恢复基线。
             state.runtimeState.setNextLiquidationId(Long.MAX_VALUE);
             applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 80, 2, TIME))));
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 80, 2, TIME), line)));
             // 编号边界已经通过正常行情提交后的业务检查点，溢出拒绝应完整回滚到它。
             var before = state.tradingState();
             // 尝试在编号上界产生强平计划的风险续扫命令。
@@ -249,14 +249,14 @@ class RiskBatchBudgetTest {
                                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cancel-" + user + "-" + n))));
             }
             applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("1", 1, 2, TIME))));
+                    new ApplyMarkPriceCommand("1", 1, 2, TIME), line)));
             while (work(state, line).riskScanPending()) applied(state, command(line, CoreMessageType.CONTINUE_RISK_SCAN,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
             assertThat(work(state, line).actions()).hasSize(2);
             // 行情刷新之前取得的强平批动作，随后执行应全部计为失效。
             var stale=ExecuteLiquidationBatchCommand.fromWork(work(state,line),0,0);
             applied(state,command(line,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("1",2,3,TIME))));
+                    new ApplyMarkPriceCommand("1",2,3,TIME), line)));
             // 执行前的资金检查量，风险场景用资金哈希，强平场景用含保险及亏空的资金总额。
             long funds=liquidationFunds(state);
             // 执行过期动作前的用户业务状态，结束后余额及持仓事实必须保持相同。
@@ -315,7 +315,7 @@ class RiskBatchBudgetTest {
                                 CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cancel-" + user + "-" + n))));
             }
             applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
-                    new ApplyMarkPriceCommand("1", 1, 2, TIME))));
+                    new ApplyMarkPriceCommand("1", 1, 2, TIME), line)));
             while (work(state, line).riskScanPending()) applied(state, command(line, CoreMessageType.CONTINUE_RISK_SCAN,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
             assertThat(work(state, line).actions()).hasSize(2);
@@ -446,7 +446,7 @@ class RiskBatchBudgetTest {
     private CoreMessage mark(ProductLine line,String instrumentId,long priceSequence) {
         return command(line,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(
                 line==ProductLine.OPTION ? new ApplyMarkPriceCommand(instrumentId,100,100,100,priceSequence,TIME)
-                        :new ApplyMarkPriceCommand(instrumentId,100,priceSequence,TIME)));
+                        :new ApplyMarkPriceCommand(instrumentId,100,priceSequence,TIME), line));
     }
     /**
      * 以系统级用户范围 0 构造查询或命令消息，复用带明确用户参数的入口。

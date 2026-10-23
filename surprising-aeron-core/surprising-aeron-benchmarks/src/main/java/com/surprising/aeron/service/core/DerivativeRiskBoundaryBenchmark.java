@@ -109,7 +109,7 @@ public class DerivativeRiskBoundaryBenchmark {
                             ? new ApplyMarkPriceCommand(instrumentId, price, 100, 100,
                             ++sequence, harness.nextCommandTimestamp())
                             : new ApplyMarkPriceCommand(instrumentId, price,
-                            ++sequence, harness.nextCommandTimestamp()))));
+                            ++sequence, harness.nextCommandTimestamp()), productLine)));
         }
 
         private void drainRisk() {

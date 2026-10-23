@@ -1033,7 +1033,7 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.apply(command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.APPLY_MARK_PRICE,
                     UUID.randomUUID(), 2, TradingCommandCodec.encodeApplyMarkPrice(
-                            new ApplyMarkPriceCommand("1", 1_000, 1, 1_000)))).status())
+                            new ApplyMarkPriceCommand("1", 1_000, 1, 1_000), ProductLine.LINEAR_PERPETUAL))).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             // 初始化永续账户报价币余额的原消息
             var adjust = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.ADJUST_BALANCE,
@@ -2626,7 +2626,7 @@ class CoreOrderedOrderBatchTest {
         assertThat(CoreTestCompletion.applyAsynchronously(state, new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
                 UUID.randomUUID(), ProductLine.LINEAR_PERPETUAL, CommandSource.KAFKA_INPUT_BRIDGE,
                 89, 1, 0, 1_000, 2), TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("1", 1_000, 1, 1_000)))).status())
+                        new ApplyMarkPriceCommand("1", 1_000, 1, 1_000), ProductLine.LINEAR_PERPETUAL))).status())
                 .isEqualTo(ResponseStatus.APPLIED);
     }
 

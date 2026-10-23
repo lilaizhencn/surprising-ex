@@ -51,7 +51,7 @@ class ProductRecoveryLifecycleTest {
                     UUID.randomUUID(), product, CommandSource.OPERATIONS, 992, 1, 1,
                     1_700_000_000_000L, 99), TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                     ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, 1_700_000_000_000L)
-                    : new ApplyMarkPriceCommand("1", 100, 1, 1_700_000_000_000L))));
+                    : new ApplyMarkPriceCommand("1", 100, 1, 1_700_000_000_000L), product)));
             apply(live, command(product, 2, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(
                             product == ProductLine.SPOT ? "BTC" : asset, product == ProductLine.SPOT ? 20 : 20_000))));
@@ -172,7 +172,7 @@ class ProductRecoveryLifecycleTest {
                     CoreMessage price = command(product, 14, 1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                     ? new ApplyMarkPriceCommand("1", 120, 120, 120, 2, 1_700_000_000_013L)
-                                    : new ApplyMarkPriceCommand("1", 120, 2, 1_700_000_000_013L)));
+                                    : new ApplyMarkPriceCommand("1", 120, 2, 1_700_000_000_013L), product));
                     apply(live, price);
                     apply(afterPendingTrigger, price);
                     // 明确执行止盈腿的触发命令，要求同时取消其 OCO 另一腿。

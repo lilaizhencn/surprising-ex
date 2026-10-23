@@ -101,7 +101,7 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
                         ? new ApplyMarkPriceCommand(instrumentId, 100, 100, 100, 1, System.currentTimeMillis())
-                        : new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis())),
+                        : new ApplyMarkPriceCommand(instrumentId, 100, 1, System.currentTimeMillis()), productLine),
                 "mark:initial");
         for (int pair = 0; pair < pairs; pair++) {
             long shortUser = shortUser(pair);
@@ -122,13 +122,13 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private void liquidationStorm() {
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        instrumentId, 100, 2, System.currentTimeMillis())),
+                        instrumentId, 100, 2, System.currentTimeMillis()), productLine),
                 "mark:normal");
         long markPrice = productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80;
         long started = System.nanoTime();
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        instrumentId, markPrice, 3, System.currentTimeMillis())),
+                        instrumentId, markPrice, 3, System.currentTimeMillis()), productLine),
                 "mark:shock");
         var work = CoreLiquidationWorkCodec.decodeWork(query(
                 CoreMessageType.LIQUIDATION_WORK_QUERY, 0, CoreLiquidationWorkCodec.encodeQuery(productLine,

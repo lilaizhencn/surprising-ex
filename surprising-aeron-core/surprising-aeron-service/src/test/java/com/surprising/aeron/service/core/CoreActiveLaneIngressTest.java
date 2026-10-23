@@ -44,7 +44,7 @@ class CoreActiveLaneIngressTest {
             if (line != ProductLine.SPOT) applied(core, message(core, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(line.isOptionProduct()
                             ? new ApplyMarkPriceCommand("1", 100, 100, 100, 1, TIME)
-                            : new ApplyMarkPriceCommand("1", 100, 1, TIME))));
+                            : new ApplyMarkPriceCommand("1", 100, 1, TIME), line)));
             // 要通过命令应用的第二版费率配置
             var fee = new UpsertFeePolicyCommand(51, 2, 1, "1", 300, 700, 0, true, TIME, 0);
             assertThatThrownBy(() -> core.runtimeState.upsertFeePolicy(fee))

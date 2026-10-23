@@ -61,7 +61,7 @@ public class ClusterDirectSettlementBenchmark {
                             type.isOption() ? 100 : 0), product)).join());
             applied(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                     ? new ApplyMarkPriceCommand(instrumentId(index), 100, 100, 100, 1, now)
-                    : new ApplyMarkPriceCommand(instrumentId(index), 100, 1, now))).join());
+                    : new ApplyMarkPriceCommand(instrumentId(index), 100, 1, now), product)).join());
             for (int side = 0; side < 2; side++) {
                 applied(send(CoreMessageType.ADJUST_BALANCE, user(index, side), TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand(settle, CASH))).join());
@@ -107,7 +107,7 @@ public class ClusterDirectSettlementBenchmark {
                     prices.add(send(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
                             product == ProductLine.OPTION
                                     ? new ApplyMarkPriceCommand(instrumentId(index), 100, 100, 100, markSequence, now)
-                                    : new ApplyMarkPriceCommand(instrumentId(index), 100, markSequence, now))));
+                                    : new ApplyMarkPriceCommand(instrumentId(index), 100, markSequence, now), product)));
                     accepted++;
                 }
                 // Market freshness is a financial prerequisite; orders themselves remain asynchronous.

@@ -1506,15 +1506,6 @@ public final class AccountLaneState {
     }
 
     /**
-     * 保存结算次数、累计纳秒与最大纳秒的值记录；本类当前 writeMetrics 只输出操作次数，并不读取此记录。
-     * @param operations 结算操作次数
-     * @param totalLatencyNanos 累计结算耗时，单位为纳秒
-     * @param maxLatencyNanos 观察到的最大结算耗时，单位为纳秒
-     */
-    record MatcherSettlementMetrics(long operations, long totalLatencyNanos, long maxLatencyNanos) {
-    }
-
-    /**
      * 把一个 long 从低字节到高字节混入哈希，乘法按 long 自然溢出，不用于金额运算。
      * @param hash 混入当前值之前的哈希累积值
      * @param value 按八个字节混入的 long 值
