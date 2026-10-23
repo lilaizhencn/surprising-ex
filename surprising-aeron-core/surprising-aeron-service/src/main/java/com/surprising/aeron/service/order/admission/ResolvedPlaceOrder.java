@@ -19,7 +19,7 @@ public class ResolvedPlaceOrder {
     @Accessors(fluent = true, chain = false)
     @Getter
     private CoreInstrument instrument;
-    /** 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配。 */
+    /** 币对已经准备好的非负运行时稠密编号。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private int symbolId;
@@ -66,7 +66,7 @@ public class ResolvedPlaceOrder {
      * 校验并保存完整订单决策输入，包括指数、远期价格及冻结资产与费率。
      * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
      * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配
+     * @param symbolId 币对已经准备好的非负运行时稠密编号
      * @param matchingPriceTicks 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界
      * @param reservationPriceTicks 计算预留金额采用的价格刻度，可能比撮合边界更保守
      * @param markPriceTicks 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界
@@ -91,7 +91,7 @@ public class ResolvedPlaceOrder {
      * 为不单独提供指数和远期价格的调用方创建已决策输入，两项额外价格均置为 0。
      * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
      * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配
+     * @param symbolId 币对已经准备好的非负运行时稠密编号
      * @param matchingPriceTicks 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界
      * @param reservationPriceTicks 计算预留金额采用的价格刻度，可能比撮合边界更保守
      * @param markPriceTicks 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界
@@ -112,7 +112,7 @@ public class ResolvedPlaceOrder {
      * 先清理上一次决策，再绑定当前意图、路由、价格、预留资产和费率，允许池化对象用于下一次决策。
      * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
      * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配
+     * @param symbolId 币对已经准备好的非负运行时稠密编号
      * @param matchingPriceTicks 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界
      * @param reservationPriceTicks 计算预留金额采用的价格刻度，可能比撮合边界更保守
      * @param markPriceTicks 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界
@@ -144,7 +144,7 @@ public class ResolvedPlaceOrder {
      * 只允许初始化一次完整决策；若路由已先绑定，必须保持相同意图、币对对象和稠密编号，再校验价格与费率并发布已决策标记。
      * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
      * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配
+     * @param symbolId 币对已经准备好的非负运行时稠密编号
      * @param matchingPriceTicks 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界
      * @param reservationPriceTicks 计算预留金额采用的价格刻度，可能比撮合边界更保守
      * @param markPriceTicks 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界
@@ -160,7 +160,7 @@ public class ResolvedPlaceOrder {
             long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
             long indexPriceTicks, long forwardPriceTicks, ReservationKind reservationKind,
             String reservationAsset, long makerFeeRatePpm, long takerFeeRatePpm) {
-        if (resolved || intent == null || instrument == null || symbolId < -1
+        if (resolved || intent == null || instrument == null || symbolId < 0
                 || (this.intent != null && (this.intent != intent || this.instrument != instrument || this.symbolId != symbolId))
                 || matchingPriceTicks <= 0 || reservationPriceTicks <= 0
                 || markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
@@ -189,10 +189,10 @@ public class ResolvedPlaceOrder {
      * 先绑定订单意图和币对路由，确认两者币对编号一致；后续 Lane 只能补决策字段，不能换掉路由身份。
      * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
      * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配
+     * @param symbolId 币对已经准备好的非负运行时稠密编号
      */
     public final void initializeOrderIntent(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId) {
-        if (this.intent != null || intent == null || instrument == null || symbolId < -1
+        if (this.intent != null || intent == null || instrument == null || symbolId < 0
                 || !intent.instrumentId().equals(instrument.instrumentId()))
             throw new IllegalArgumentException("invalid order routing input");
         this.intent = intent;

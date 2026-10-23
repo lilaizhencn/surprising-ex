@@ -1,8 +1,6 @@
 package com.surprising.aeron.service.order.admission;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.model.CoreMarkPriceState;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -12,7 +10,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.state.OrderReservation;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -111,7 +108,7 @@ public final class CoreOrderDecisionResolver {
     /**
      * 当前命令可借用的币对、价格、费率表及账本结算事实。它保存引用而非账户副本；普通 context 使用原币对，queryContext 会单独捕获查询配置并重绑同一价格事实。
      * @param instrument 本次订单绑定的规范币对或查询捕获副本，须与价格事实身份一致
-     * @param symbolId 币对的运行时稠密编号，冷业务状态决策允许为 -1
+     * @param symbolId 币对已经准备好的非负运行时稠密编号
      * @param mark 本次决策采用的标记、指数和远期价格事实，现货可为空
      * @param policies 按用户及币对选择费率的策略表，未命中时使用币对默认费率
      * @param clusterTimestamp 本命令的集群业务时间，供到期、价格鲜度及费率有效期检查使用
@@ -199,7 +196,7 @@ public final class CoreOrderDecisionResolver {
      * 统一执行运行态规则：校验币对与到期、市场单价格格式、标记价身份及鲜度、限价保护带，决定撮合价和预留价，按用户费率覆盖或币对默认费率写入决策对象。
      * @param target 可复用的决策目标，null 时创建新 ResolvedPlaceOrder
      * @param instrument 本次订单绑定的规范币对或查询捕获副本，须与价格事实身份一致
-     * @param symbolId 币对的运行时稠密编号，冷业务状态决策允许为 -1
+     * @param symbolId 币对已经准备好的非负运行时稠密编号
      * @param mark 本次决策采用的标记、指数和远期价格事实，现货可为空
      * @param policies 按用户及币对选择费率的策略表，未命中时使用币对默认费率
      * @param userId 下单用户编号，用于决策时选择用户费率，必须符合对应入口的用户约束
@@ -265,55 +262,6 @@ public final class CoreOrderDecisionResolver {
                 markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
                 makerFee, takerFee);
         return target;
-    }
-
-    /**
-     * 直接按冷业务状态的币对默认费率和已有价格生成决策，稠密编号使用 -1；此入口没有集群时间，不执行运行态的价格鲜度和到期时间判断。
-     * @param state 已物化的冷业务状态，此入口不读取活动账户或当前系统时间
-     * @param intent 尚待决策的原始订单意图，包含方向、数量、限价和订单类型
-     */
-    public static ResolvedPlaceOrder resolve(TradingCoreState state, PlaceOrderCommand intent) {
-        if (state == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
-        // 按永久编号取得的本次币对配置，缺失时不能继续解析订单。
-        CoreInstrument instrument = state.instruments().get(OrderReservation.requireInstrumentId(intent.instrumentId()));
-        if (instrument == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        instrument.requireOrderEnabled(intent);
-        // 当前是否为现货，决定市场价格格式、估值输入和冻结资产类别。
-        boolean spot = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT;
-        if (spot && intent.orderType() == CoreOrderType.MARKET && intent.limitPriceTicks() <= 0)
-            throw new CoreStateRejectedException("INVALID_COMMAND", "spot market order requires a protection bound");
-        if (!spot && intent.orderType() == CoreOrderType.MARKET && intent.limitPriceTicks() != 0)
-            throw new CoreStateRejectedException("INVALID_COMMAND", "derivative market order price must be zero");
-        // 冷业务状态保存的标记价，衍生品缺失时拒绝，现货不需要。
-        CoreMarkPriceState mark = spot ? null : state.riskState().markPrices().get(instrument.instrumentId());
-        if (!spot && mark == null) {
-            throw new CoreStateRejectedException("MARK_PRICE_MISSING", "current instrument mark price is required");
-        }
-        // 衍生品使用标记价，现货使用订单记录中的价格边界，不伪造衍生品价格事实。
-        long markPriceTicks = spot ? intent.limitPriceTicks() : mark.markPriceTicks();
-        // 本次决策的指数价格，现货不使用而保存 0。
-        long indexPriceTicks = spot ? 0 : mark.indexPriceTicks();
-        // 本次决策的远期价格，现货不使用而保存 0。
-        long forwardPriceTicks = spot ? 0 : mark.forwardPriceTicks();
-        // 限价或现货沿用订单边界，衍生品市价按方向和允许滑点生成保护价。
-        long matchingPriceTicks = spot || intent.orderType() == CoreOrderType.LIMIT
-                ? intent.limitPriceTicks() : protectedPrice(intent.side(), markPriceTicks, instrument.orderProtection().marketMaxSlippagePpm());
-        requireLimitPriceBand(intent, instrument, markPriceTicks);
-        // 按产品资金公式选择的预留计算价格，与实际送入 Matcher 的边界分开保存。
-        long reservationPriceTicks = reservationPrice(intent, instrument, markPriceTicks, matchingPriceTicks);
-        // 现货冻结资产，衍生品冻结保证金，不能混用冻结类别。
-        ReservationKind reservationKind = instrument.contractType()
-                == com.surprising.instrument.api.model.ContractType.SPOT
-                ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
-        // 衍生品的结算资产，或现货买单的报价资产、卖单的基础资产。
-        String reservationAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN
-                ? instrument.settleAsset()
-                : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
-        return new ResolvedPlaceOrder(intent, instrument, -1, matchingPriceTicks, reservationPriceTicks,
-                markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
-                instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm());
     }
 
     /**

@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.order.state;
 
-import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
@@ -68,13 +67,6 @@ public final class RuntimeTestStateTransitions {
      * 创建无独立业务状态的测试推进器，每次操作另投影自己的运行时。
      */
     public RuntimeTestStateTransitions() {
-    }
-
-    /**
-     * 沿用接收拓扑的测试调用契约，但当前实现不使用该参数，运行态仍由每次投影入口创建。
-     * @param ignored 沿用测试构造签名的 Lane 拓扑参数，当前实现不读取它
-     */
-    public RuntimeTestStateTransitions(LaneTopology ignored) {
     }
 
     /**
@@ -183,50 +175,34 @@ public final class RuntimeTestStateTransitions {
     }
 
     /**
-     * 给原始下单意图分配测试随机命令 UUID，OI 使用零，再进入完整下单辅助入口；构造的活动索引参数当前未在该入口读取。
-     * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
-     * @param userId 当前测试命令或风险查询使用的用户编号
-     * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
+     * 把动作时间固定在夹具已有行情的生成时刻；无行情时使用固定测试时间1，缺价仍由正式规则拒绝。
+     * 使用真实运行时决策、账户准入和冻结写入，不读取系统时钟，也不绕过到期、行情鲜度或费率规则。
      */
     public TradingCoreState placeOrder(TradingCoreState before, long userId, PlaceOrderCommand command) {
-        return placeOrder(before, userId, command, UUID.randomUUID(), 0, new ActiveOrderIndex(before));
+        var mark = before.riskState().markPrices().get(command.instrumentId());
+        long decisionTimestamp = mark == null ? 1 : mark.generatedAtEpochMillis();
+        UUID commandId = UUID.randomUUID();
+        return mutate(before, (runtime, identities) -> {
+            ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(
+                    runtime, identities, userId, command, decisionTimestamp);
+            long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
+                    resolved, 0, runtime.admissionOrders(userId, identities.symbolId(resolved.instrumentId())));
+            RuntimeOrderStateTransitions.place(runtime, identities, userId, resolved, commandId, required);
+        });
     }
 
     /**
-     * 对已经决策的订单计算预留并调用原账户写入；实际挂单汇总取自冷运行时，不使用本方法另构造的活动索引局部值。
+     * 对已经决策的订单读取运行时挂单汇总，计算预留并调用原账户写入。
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param userId 当前测试命令或风险查询使用的用户编号
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      */
     public TradingCoreState placeOrder(TradingCoreState before, long userId, ResolvedPlaceOrder command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> {
-            // 当前已解析下单夹具构造但未使用的活动索引，实际准入读取运行时挂单汇总。
-            ActiveOrderIndex activeOrders = new ActiveOrderIndex(before);
             // 生产账户准入根据本单和原运行态挂单算出的应预留金额。
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
                     command, 0, runtime.admissionOrders(userId, identities.symbolId(command.instrumentId())));
             RuntimeOrderStateTransitions.place(runtime, identities, userId, command, UUID.randomUUID(), required);
-        });
-    }
-
-    /**
-     * 先用冷业务状态决策入口解析原意图，再按给定 OI 和运行态挂单汇总检查预留，调用账户写入；它不执行带集群时间的在线价格鲜度检查。
-     * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
-     * @param userId 当前测试命令或风险查询使用的用户编号
-     * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
-     * @param commandId 测试订单归属的业务命令 UUID
-     * @param openInterestSteps 下单风险检查采用的固定 OI 数量步数
-     * @param activeOrders 沿用夹具签名的活动订单索引，当前下单实现未读取它，实际准入使用 runtime.admissionOrders
-     */
-    public TradingCoreState placeOrder(TradingCoreState before, long userId, PlaceOrderCommand command,
-                                UUID commandId, long openInterestSteps, ActiveOrderIndex activeOrders) {
-        return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> {
-            // 由冷业务状态决策入口解析的订单，未执行在线集群时间鲜度校验。
-            ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(before, command);
-            // 生产账户准入根据本单和原运行态挂单算出的应预留金额。
-            long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
-                    resolved, openInterestSteps, runtime.admissionOrders(userId, identities.symbolId(resolved.instrumentId())));
-            RuntimeOrderStateTransitions.place(runtime, identities, userId, resolved, commandId, required);
         });
     }
 

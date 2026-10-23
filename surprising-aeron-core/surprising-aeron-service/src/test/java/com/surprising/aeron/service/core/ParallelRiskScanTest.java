@@ -193,7 +193,7 @@ class ParallelRiskScanTest {
     @Test
     void closingAProfitablePositionBetweenPagesMustNotCountItsProfitTwice() {
         // 按同一 Lane 拓扑准备账户和合约业务状态的测试状态转换辅助器。
-        var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
+        var reducer = new RuntimeTestStateTransitions();
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
                 new RegisterInstrumentCommand(
@@ -253,7 +253,7 @@ class ParallelRiskScanTest {
     @Test
     void anotherSymbolsPriceChangeInvalidatesPartialPortfolioEvenAfterSnapshot() {
         // 按同一 Lane 拓扑准备账户和合约业务状态的测试状态转换辅助器。
-        var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
+        var reducer = new RuntimeTestStateTransitions();
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = reducer.registerInstrument(source(CoreMarginMode.CROSS, 1),
                 new RegisterInstrumentCommand(
@@ -371,7 +371,7 @@ class ParallelRiskScanTest {
      */
     private static TradingCoreState source(CoreMarginMode margin, int usersPerLane) {
         // 按同一 Lane 拓扑准备账户和合约业务状态的测试状态转换辅助器。
-        var reducer = new RuntimeTestStateTransitions(TOPOLOGY);
+        var reducer = new RuntimeTestStateTransitions();
         // 逐步注册合约、充值并加入测试账户持仓的初始业务状态。
         var state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 new RegisterInstrumentCommand(

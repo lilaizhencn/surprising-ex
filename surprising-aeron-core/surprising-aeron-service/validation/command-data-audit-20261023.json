@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第十九轮：A90四个冷冻结转换及私有复制构造清理并通过17模块干净编译；累计89项解决，A91/A92两项确认，A11一项候选。Core16/registerV10/snapshot48，全量审查继续。",
+    "checkpoint": "第二十轮：A91–A94重复冷决策和无用测试约束/参数清理，17模块干净及最终增量编译通过；累计93项解决，A11/A95两项候选。Core16/registerV10/snapshot48，全量审查继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -5745,8 +5745,8 @@
     },
     {
       "id": "A91",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "下单决策保留仅供测试的冷状态解析分支和未分配身份模式",
       "fields": [
         "CoreOrderDecisionResolver.resolve(TradingCoreState,PlaceOrderCommand)",
@@ -5765,13 +5765,15 @@
           "purpose": "辅助下单已先投影到runtime，却又用原冷状态重复决策；应核对场景后改走已有真实决策上下文。"
         }
       ],
-      "business_code_changed": false,
-      "proposed_cleanup": "迁移该测试辅助入口并删除冷决策分支；审查symbolId=-1与相关重复身份传参的实际消费者。必须给测试明确、有效的时间/行情/费率上下文，不能为使测试继续构造而放松线上到期、鲜度或费用约束；运行时resolve、预检和触发下单路径保留。"
+      "business_code_changed": true,
+      "proposed_cleanup": "迁移该测试辅助入口并删除冷决策分支；审查symbolId=-1与相关重复身份传参的实际消费者。必须给测试明确、有效的时间/行情/费率上下文，不能为使测试继续构造而放松线上到期、鲜度或费用约束；运行时resolve、预检和触发下单路径保留。",
+      "resolved_in_round": "twentieth_cleanup_round",
+      "implementation": "删除测试专用冷决策，辅助入口投影后调用已有运行时resolve；动作时间取夹具已有行情生成时间，无行情为固定1，保留正式到期/鲜度/费用规则。ResolvedPlaceOrder两个绑定入口不再允许-1，唯一显式负编号夹具使用实际首个币对稠密编号0。"
     },
     {
       "id": "A92",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "测试下单辅助入口构造和传递无人使用的活动订单索引",
       "fields": [
         "RuntimeTestStateTransitions.placeOrder完整重载activeOrders形参",
@@ -5786,8 +5788,73 @@
           "purpose": "该重载使用runtime.admissionOrders取得真实准入汇总，不读取传入索引；已决策重载的局部索引也从不读取。其他生命周期/成交夹具的同名索引有用途，不一并删除。"
         }
       ],
+      "business_code_changed": true,
+      "proposed_cleanup": "删去这一下单形参和两处冗余索引创建并迁移调用；仅清理此作用域，保留其他实际使用的生命周期或成交索引参数。",
+      "resolved_in_round": "twentieth_cleanup_round",
+      "implementation": "删掉无人读取的索引形参、两处索引创建及无独立外部调用的六参转发重载；UUID仍只生成一次，原OI零与runtime.admissionOrders准入保留，其他索引用途不变。"
+    },
+    {
+      "id": "A93",
+      "status": "resolved",
+      "analysis_status": "resolved",
+      "topic": "测试运行时辅助构造保留完全不读取的拓扑参数",
+      "fields": [
+        "RuntimeTestStateTransitions(LaneTopology ignored)",
+        "ParallelRiskScanTest三处辅助构造"
+      ],
+      "evidence_basis_commit": "d88bbe4b5b3e6620dd57151538516da69a6f36f2",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java",
+          "anchor": "public RuntimeTestStateTransitions(LaneTopology ignored)",
+          "purpose": "构造体为空；精确构造描述符只有ParallelRiskScanTest三处消费者，实际拓扑仍由原投影/运行时初始化使用。"
+        }
+      ],
+      "business_code_changed": true,
+      "resolved_in_round": "twentieth_cleanup_round",
+      "implementation": "删除空拓扑构造和无用import，三处改为已有无参构造；实际拓扑与全部断言不变。"
+    },
+    {
+      "id": "A94",
+      "status": "resolved",
+      "analysis_status": "resolved",
+      "topic": "业务规则原始订单夹具保留三个从不读取的金额参数",
+      "fields": [
+        "RuntimeStateBusinessRulesTest.order的kind/asset/reservedUnits",
+        "18处调用的无效实参"
+      ],
+      "evidence_basis_commit": "d88bbe4b5b3e6620dd57151538516da69a6f36f2",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest.java",
+          "anchor": "private static PlaceOrderCommand order(",
+          "purpose": "辅助体固定构造标的一、价格十、数量十的LIMIT GTC意图，仅读取id和side；18处被删实参只有常量、枚举或局部值读取，无副作用。显式feeOrder/resolved夹具的实际费用与预留参数仍保留。"
+        }
+      ],
+      "business_code_changed": true,
+      "resolved_in_round": "twentieth_cleanup_round",
+      "implementation": "删三个未读取的形参和18处调用实参，保留原id/side表达式、固定意图体及业务断言。"
+    },
+    {
+      "id": "A95",
+      "status": "candidate",
+      "analysis_status": "candidate",
+      "topic": "普通订单原请求价与撮合价可能重复保存，尚需核对控制单与全生命周期",
+      "fields": [
+        "CoreOrderState.priceTicks/matchingPriceTicks",
+        "OrderRuntime原请求价格与撮合价格",
+        "TradingStateSnapshotCodec订单字段6/7"
+      ],
+      "evidence_basis_commit": "d88bbe4b5b3e6620dd57151538516da69a6f36f2",
+      "evidence": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java",
+          "anchor": "long matchingPriceTicks = spot || intent.orderType() == CoreOrderType.LIMIT",
+          "purpose": "普通限价与现货撮合价等于意图价，衍生品市价意图价为0而撮合价为保护价；不能据此推断内部控制/强平/结算订单也满足同一关系。"
+        }
+      ],
       "business_code_changed": false,
-      "proposed_cleanup": "删去这一下单形参和两处冗余索引创建并迁移调用；仅清理此作用域，保留其他实际使用的生命周期或成交索引参数。"
+      "proposed_cleanup": "逐一审查所有构造、热更新/改单、内部控制订单、查询/实时展示、哈希和恢复。只有证明现有有效状态全部可等价推导后，才删除重复存储及快照槽，不放宽原价格保护或冻结价格。"
     }
   ],
   "preserve_verified_purposes": [
@@ -5805,10 +5872,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "清理A91测试专用冷下单决策，先核对并给出真实决策上下文，保留线上到期/鲜度/费用规则。",
-    "清理A92测试placeOrder的无用活动索引形参和两处构造；保留其他确有用途的索引。",
-    "postOnly与TIF先保留现有契约和改单语义；继续检查业务字段，不按表面关系直接派生。",
-    "保持A11一致性边界；仅编译相关模块，不运行测试、服务和性能。"
+    "沿A95核对原请求价与撮合价，覆盖内部控制、更新、展示和恢复，证明等价前保留字段。",
+    "保持A11查询一致性和已有资金/顺序/恢复边界。",
+    "继续下一轮业务字段与约束扫描；只编译相关模块，不运行测试、服务或性能。"
   ],
   "rejected_false_positives": [
     {
@@ -6105,24 +6171,24 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "9e0168e27d7852a9e49ed2cfbeeac4ef2e7be780",
+    "source_basis_commit": "d88bbe4b5b3e6620dd57151538516da69a6f36f2",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A90"
-    ],
-    "new_confirmed_ids": [
       "A91",
-      "A92"
+      "A92",
+      "A93",
+      "A94"
     ],
+    "new_confirmed_ids": [],
     "candidate_ids": [
-      "A11"
+      "A11",
+      "A95"
     ],
     "counts": {
-      "resolved": 89,
-      "candidate": 1,
-      "confirmed": 2
+      "resolved": 93,
+      "candidate": 2
     },
-    "evidence": "nineteenth_cleanup_round",
+    "evidence": "twentieth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -18118,6 +18184,291 @@
         "/tmp/aeron-cold-reservation-api-20261024-state-files.txt": "302f9183e39b3d8f90bc5350fb4079b8b8737e20c65478b00c1f164fa76be8df",
         "/tmp/aeron-cold-reservation-api-20261024-static.json": "07c30bbb0042a96a350f82e7c6baa7e9b5fbdef474ec2922a0fe5d88f88998dd",
         "/tmp/aeron-cold-reservation-api-20261024-static.py": "21c3d45fb20f712976b055ccc21a3045ecd56d14f6a88ae6852dc3f960c509b6"
+      },
+      "errors": [],
+      "no_task_services_started": true
+    }
+  },
+  "twentieth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "d88bbe4b5b3e6620dd57151538516da69a6f36f2",
+    "resolved_ids": [
+      "A91",
+      "A92",
+      "A93",
+      "A94"
+    ],
+    "new_confirmed_ids": [],
+    "new_candidate_ids": [
+      "A95"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 93,
+      "candidate": 2
+    },
+    "flow": "原始意图测试夹具投影账户及身份后，使用现有运行时决策、账户准入和原冻结写入；线上命令到落地的业务路径不改。冷状态不再实现另一套订单价格和资产决策。",
+    "implementation": {
+      "removed_cold_decision_entries": 1,
+      "removed_negative_resolved_identity_mode": true,
+      "removed_unused_fixture_index_creations": 2,
+      "removed_unused_full_fixture_overloads": 1,
+      "removed_noop_topology_constructors": 1,
+      "migrated_topology_constructor_calls": 3,
+      "removed_ignored_order_helper_parameters": 3,
+      "migrated_order_helper_calls": 18,
+      "retained_resolved_order_fields": 13,
+      "new_types_interfaces_registries": 0,
+      "new_test_classes": 0,
+      "wire_or_snapshot_layout_changed": false
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 48,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4
+    },
+    "verification": {
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "disk_available_before_build": "186GiB",
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "test_source_changes": "原始下单夹具统一真实决策入口；只迁移空构造和无效实参，业务断言保留。",
+      "unverified": [
+        "测试实际执行",
+        "真实交易正常/拒绝/异常路径",
+        "做市/资金/持仓/终态和资金守恒运行核对",
+        "Cluster日志/快照恢复运行",
+        "真实查询、数据库和前端交互",
+        "性能"
+      ],
+      "clean": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "55.389 s",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-aeron-tools",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-maker",
+          "surprising-realtime-api",
+          "surprising-price-provider",
+          "surprising-aeron-benchmarks",
+          "surprising-derivatives-lifecycle-api",
+          "surprising-realtime-provider",
+          "surprising-gateway"
+        ],
+        "log_sha256": "97cc5280cd2e0a6c6d3fae4dc54ccfb83f905eae9419d7729f474bb873c66b56"
+      },
+      "final_incremental": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests test-compile",
+        "exit_code": 0,
+        "result": "BUILD SUCCESS",
+        "duration": "24.790 s",
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-aeron-tools",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-maker",
+          "surprising-realtime-api",
+          "surprising-price-provider",
+          "surprising-aeron-benchmarks",
+          "surprising-derivatives-lifecycle-api",
+          "surprising-realtime-provider",
+          "surprising-gateway"
+        ],
+        "log_sha256": "55a8fda13d8667e3edf9eb73ded84a4a35114fe36bc90bf0a434aba091936722"
+      }
+    },
+    "static_verification": {
+      "status": "passed",
+      "removed_cold_decision_entry": true,
+      "removed_cold_identity_mode": true,
+      "removed_fixture_index_parameter": 1,
+      "removed_unused_index_creations": 2,
+      "removed_unused_full_fixture_overload": true,
+      "removed_noop_topology_constructor": true,
+      "migrated_topology_constructor_calls": 3,
+      "removed_ignored_order_parameters": 3,
+      "migrated_order_calls": 18,
+      "retained_order_helper_body_and_inputs": true,
+      "fixture_time_review": {
+        "raw_helper_consumer_files": 6,
+        "direct_price_time_sites": 42,
+        "known_fixture_times": [
+          1,
+          1000,
+          1700000000000,
+          1700000000001
+        ],
+        "delivery_option_expiry": 2000000000000,
+        "pricing_age_at_fixture_action": 0,
+        "missing_market_and_spot_fixture_time": 1,
+        "guard_policy": "不读取系统时钟，不取最小到期时间、不钳制或跳过任何线上校验。",
+        "fees": "投影新运行时初始feePolicies为FeePolicyBook.EMPTY，冷状态无费用政策字段，仍选币对默认费率；显式费率/错误预留夹具继续走原已决策重载。"
+      },
+      "unchanged_business_sources": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java",
+          "sha256": "7e70feec8237ccdbda11bc1cab2da2092165909c0c03ff2d3420415d35bd592b"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeOrderStateTransitions.java",
+          "sha256": "469daedf7b9d0e2d84677f1cb7d06df90a84972c8bdb932713f05a1d939b083f"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java",
+          "sha256": "421171cd30f8d70c6ee5656652df42c1352b41c2c96eff73625b2d420ac46a9f"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "sha256": "65ea1aa2d73da6182537acefb7779388712fee258f45b69e6b5597539a7fab9a"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "sha256": "a5a63a36b819c014e17bf841e0369ba97256f5f3692e36d24130962f6f866832"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java",
+          "sha256": "f81aa3d05365ab6173cde1c05378e14d5822101d08c90f249919ec9783c7f22e"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java",
+          "sha256": "4c01c819b8718034ee17cac2326973f50166092626c5cc55e76dce41c1c0db77"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreStateTestFixtures.java",
+          "sha256": "37b8fcfead1936f77b42276a89cd95f716745b55a5871849067de06e8e9bb1a1"
+        }
+      ],
+      "java_business_execution": false
+    },
+    "binary_post_verification": {
+      "status": "passed",
+      "removed_cold_resolve_refs": 0,
+      "removed_fixture_topology_constructor_refs": 0,
+      "removed_fixture_index_overload_refs": 0,
+      "remaining_fixture_constructor_arities": [
+        0
+      ],
+      "remaining_fixture_place_overload_arities": [
+        3,
+        3
+      ],
+      "ignored_order_helper_arity_after": 2,
+      "resolved_order_instance_fields": 13,
+      "live_resolve_references": [
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+          "name": "resolve",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;JLcom/surprising/aeron/protocol/PlaceOrderCommand;J)Lcom/surprising/aeron/service/order/admission/ResolvedPlaceOrder;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreOrderDecisionResolverTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePreflightLaneQueryTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingCoreRuntime.class"
+          ]
+        },
+        {
+          "kind": 10,
+          "owner": "com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver",
+          "name": "resolve",
+          "descriptor": "(Lcom/surprising/aeron/service/order/admission/CoreOrderDecisionResolver$Context;JLcom/surprising/aeron/protocol/PlaceOrderCommand;)Lcom/surprising/aeron/service/order/admission/ResolvedPlaceOrder;",
+          "files": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreOrderDecisionResolverTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/trigger/command/TriggerOrderCommands$TriggerExecutionContinuation.class",
+            "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/CoreQueryService$PreflightQuery.class"
+          ]
+        }
+      ],
+      "java_business_execution": false,
+      "fresh_reactor_class_counts": {
+        "classes": 3004,
+        "test-classes": 860
+      }
+    },
+    "followup_analysis": {
+      "fresh_reactor_class_counts": {
+        "classes": 3004,
+        "test-classes": 860
+      },
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java": "5750206b0cb167171b38977c85bbe44ba2160606a2e5d337401b6437335b0e34",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java": "a5a63a36b819c014e17bf841e0369ba97256f5f3692e36d24130962f6f866832",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java": "18f82b3deaae458185007fdd7534fee596e8953c209454d637b5e275bc9357a5",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreOrderState.java": "16a3d3823f30e3b17260e1db0f3c8d14b54114e929b05c78a5b4936794ecee4b",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "65ea1aa2d73da6182537acefb7779388712fee258f45b69e6b5597539a7fab9a"
+      },
+      "candidate": "普通解析中，限价与现货匹配价等于意图价；衍生品市价意图价为0，匹配价由保护价决定。请求价可能由撮合价、产品和订单类型推导；尚未核对内部控制订单、所有热更新/构造、恢复与外部展示，暂不删除字段。",
+      "evidence": "CoreOrderDecisionResolver.resolveValues的matchingPriceTicks赋值；preparedOrder同时保存limitPriceTicks/matchingPriceTicks；快照字段6/7分别持久化。",
+      "java_business_execution": false
+    },
+    "graph_verification": {
+      "command": "codegraph sync -q; codegraph status",
+      "exit_code": 0,
+      "status": "up_to_date",
+      "files": 2241,
+      "nodes": 52635,
+      "edges": 151067,
+      "mcp_tools_available": false
+    },
+    "remaining_scope": [
+      "A95普通订单请求价与撮合价全生命周期消费和派生证明。",
+      "A11查询一致性边界保留，其他字段/约束和运行恢复仍需继续审查。"
+    ],
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java": "5750206b0cb167171b38977c85bbe44ba2160606a2e5d337401b6437335b0e34",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/ResolvedPlaceOrder.java": "e6417cacb8ef62168452808fe25494b00283ec336fc4a559fc855da2bae2c208",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/ParallelRiskScanTest.java": "e0c6d6db8dfda763cc0401286afc9c4ba3e84ff2ca2781367c74cc226dd71a52",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest.java": "22610f624fa1a6005b49bbbd7d09b2d6c1275128624008b2ffa380fcdf5c5eb3",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java": "9764a77ed346066091a27808ed8d2757519b44fc31c871ea6c8383eae9ae770a"
+    },
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "53d5b3c167492396f42c3cff252bf0c9180e2b4ce9ac671fb7cf632160c39b9b"
+    },
+    "temporary_resources": {
+      "status": "removed_after_archival",
+      "owned_file_hashes": {
+        "/tmp/aeron-decision-cleanup-20261024-followup.json": "0ec912a1af7123efd2221492baddc284851044b3552545c1b04edc81b9a28a8a",
+        "/tmp/aeron-decision-cleanup-20261024-callers.py": "8f9ee960260bf20d21abd876c7a0e4cbbcb3b40169cc56675d10021cf865d72b",
+        "/tmp/aeron-decision-cleanup-20261024-binary.json": "79f3104771cbb835191fae229100eddec32a4ad57817555da6afd615a6ba7fa8",
+        "/tmp/aeron-decision-cleanup-20261024-fixture-dates.json": "edb6d1434fb4a0ccbfe7d040485e034e8e9892fc169bb459a677246d43c294a8",
+        "/tmp/aeron-decision-cleanup-20261024-resolved-sites.json": "ef02a25f8102a1323b4431e462f48005e3e69bdd78bf90d01d921070a8b67059",
+        "/tmp/aeron-decision-cleanup-20261024-graph.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/tmp/aeron-decision-cleanup-20261024-callers-after.json": "5d6ab082405e3d3c173bdf7ed418fbf95476bdc74213255d58978b0060defaf9",
+        "/tmp/aeron-decision-cleanup-20261024-inventory.py": "ae8a1341cd98ceb7e72ed680fc5c7543a020144506a8608d45e0a34ac85643de",
+        "/tmp/aeron-decision-cleanup-20261024-final-build.log": "55a8fda13d8667e3edf9eb73ded84a4a35114fe36bc90bf0a434aba091936722",
+        "/tmp/aeron-decision-cleanup-20261024-edit.py": "faf1c94ccd37fb9a843933730df238bb60d1fc14d5e919b487fe53e0b694fce8",
+        "/tmp/aeron-decision-cleanup-20261024-after.py": "c932f84d5dafb350a378dff5fe9f6a1f6dddcdec0f3b360881159ecf04df4d93",
+        "/tmp/aeron-decision-cleanup-20261024-static.py": "771eb3b43a01f42abf86abfa226d584d72ed0de02630078d7e59d54ba7138a77",
+        "/tmp/aeron-decision-cleanup-20261024-static.json": "3cb9cc242078ba4124756b1abd2c3d0fd35d5ac8e44aa02ada4810bee406ef39",
+        "/tmp/aeron-decision-cleanup-20261024-build.log": "97cc5280cd2e0a6c6d3fae4dc54ccfb83f905eae9419d7729f474bb873c66b56",
+        "/tmp/aeron-decision-cleanup-20261024-context-sites.json": "d4238aeae5aa2352f20f7c23f815d4f1c42e601cf9704a90b773f52d23ee7e80",
+        "/tmp/aeron-decision-cleanup-20261024-sites.json": "49796fcc48b55602747b9fa570774e8c3dbab765b184c09bcf37cd676a733a03",
+        "/tmp/aeron-decision-cleanup-20261024-fixture-dates.py": "e067630070704229a3175b7121a9a2e3cbf2432dee36da7a30afcb87a8d13156",
+        "/tmp/aeron-decision-cleanup-20261024-unused-order-sites.json": "f8c2a13cab87364860a4985dceedb1cc79807a8fd8840d585eee43e606bfc4e3",
+        "/tmp/aeron-decision-cleanup-20261024-callers-before.json": "0173fe06e76f40593cc367f1d28ff398af6608992a9b56c663629cf0491d8f35",
+        "/tmp/__pycache__/aeron-decision-cleanup-20261024-inventory.cpython-311.pyc": "ea27794072ebfe4eb8e03bb67b511470b79290209fc61c8124bc2d358c627346"
       },
       "errors": [],
       "no_task_services_started": true

@@ -65,7 +65,7 @@ class RuntimeStateBusinessRulesTest {
 
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = reducer.placeOrder(funded, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 3_000));
+                order(1, CoreOrderSide.BUY));
         // 已撤单且剩余预留解冻后的冷状态
         TradingCoreState canceled = reducer.cancelOrder(placed, 101, new CancelOrderCommand(1));
 
@@ -87,11 +87,11 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState funded = funded(ProductLine.SPOT, "BTC", 20);
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = reducer.placeOrder(funded, 101,
-                order(2, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET, "BTC", 10));
+                order(2, CoreOrderSide.SELL));
 
         assertBalance(placed, "BTC", 10, 10);
         // 本用例需要拒绝的委托意图，错误预留类型或资产另由 resolved 显式附加
-        PlaceOrderCommand invalid = order(3, CoreOrderSide.SELL, ReservationKind.SPOT_ASSET, "USDT", 5);
+        PlaceOrderCommand invalid = order(3, CoreOrderSide.SELL);
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
                 resolved(funded, invalid, ReservationKind.SPOT_ASSET, "USDT", 0, 0)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -112,15 +112,13 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState funded = funded(productLine, settleAsset, 10_000);
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = reducer.placeOrder(funded, 101,
-                order(10 + productLine.ordinal(), CoreOrderSide.BUY,
-                        ReservationKind.DERIVATIVE_MARGIN, settleAsset, 2_000));
+                order(10 + productLine.ordinal(), CoreOrderSide.BUY));
 
         assertThat(placed.user(101).totalUnits(settleAsset)).isEqualTo(10_000);
         assertThat(placed.user(101).balances().get(settleAsset).lockedUnits()).isPositive();
         assertThat(placed.user(101).balances().get(settleAsset).lockedUnits()).isLessThan(2_000);
         // 本用例需要拒绝的委托意图，错误预留类型或资产另由 resolved 显式附加
-        PlaceOrderCommand invalid = order(100 + productLine.ordinal(), CoreOrderSide.BUY,
-                ReservationKind.SPOT_ASSET, settleAsset, 2_000);
+        PlaceOrderCommand invalid = order(100 + productLine.ordinal(), CoreOrderSide.BUY);
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
                 resolved(funded, invalid, ReservationKind.SPOT_ASSET, settleAsset, 0, 0)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -163,7 +161,7 @@ class RuntimeStateBusinessRulesTest {
         long initialHash = funded.businessStateHash();
 
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 2_000)))
+                order(1, CoreOrderSide.BUY)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 本次预期的业务拒绝异常，用稳定代码核对拒绝原因 */ exception -> assertThat(exception.code()).isEqualTo("INSUFFICIENT_AVAILABLE_BALANCE"));
         assertThat(funded.businessStateHash()).isEqualTo(initialHash);
@@ -173,9 +171,9 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState sufficientlyFunded = funded(ProductLine.SPOT, "USDT", 1_000);
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = reducer.placeOrder(sufficientlyFunded, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 400));
+                order(1, CoreOrderSide.BUY));
         assertThatThrownBy(() -> reducer.placeOrder(placed, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 400)))
+                order(1, CoreOrderSide.BUY)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 本次预期的业务拒绝异常，用稳定代码核对拒绝原因 */ exception -> assertThat(exception.code()).isEqualTo("DUPLICATE_ORDER_ID"));
         assertBalance(placed, "USDT", 900, 100);
@@ -188,7 +186,7 @@ class RuntimeStateBusinessRulesTest {
     void repeatedCancelDoesNotReleaseTwice() {
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = reducer.placeOrder(funded(ProductLine.SPOT, "USDT", 1_000), 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 400));
+                order(1, CoreOrderSide.BUY));
         // 第一次撤单并释放预留后的冷状态
         TradingCoreState firstCancel = reducer.cancelOrder(placed, 101, new CancelOrderCommand(1));
         // 相同订单再次撤单后的冷状态，不应重复释放资金
@@ -207,7 +205,7 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState funded = funded(ProductLine.SPOT, "USDT", 1_000);
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = reducer.placeOrder(funded, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.SPOT_ASSET, "USDT", 0));
+                order(1, CoreOrderSide.BUY));
         assertBalance(placed, "USDT", 900, 100);
     }
 
@@ -365,9 +363,9 @@ class RuntimeStateBusinessRulesTest {
         state = reducer.adjustBalance(state, 101, new BalanceAdjustmentCommand("USDT", 1_000));
         state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand("USDT", 1_000));
         state = reducer.placeOrder(state, 202,
-                order(2, CoreOrderSide.SELL, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+                order(2, CoreOrderSide.SELL));
         state = reducer.placeOrder(state, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+                order(1, CoreOrderSide.BUY));
         state = reducer.applyMatches(state, 1, "BTC", "USDT",
                 List.of(trade(2, 202, 10, 10, true, true)));
 
@@ -415,7 +413,7 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState state = derivativeWithRiskPolicy(150, 1_000, 10_000_000L, 150, 10_000_000L);
         state = reducer.adjustBalance(state, 101, new BalanceAdjustmentCommand("USDT", 10_000));
         state = reducer.placeOrder(state, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+                order(1, CoreOrderSide.BUY));
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = state;
 
@@ -437,7 +435,7 @@ class RuntimeStateBusinessRulesTest {
         // 给比例额度用例注资后的只读捕获引用，供异常断言闭包使用
         TradingCoreState fundedFloorLimited = floorLimited;
         assertThatThrownBy(() -> reducer.placeOrder(fundedFloorLimited, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0)))
+                order(1, CoreOrderSide.BUY)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 本次预期的业务拒绝异常，用稳定代码核对拒绝原因 */ exception -> assertThat(exception.code()).isEqualTo("OPEN_INTEREST_LIMIT_EXCEEDED"));
 
@@ -449,7 +447,7 @@ class RuntimeStateBusinessRulesTest {
         // 给档位杠杆用例注资后的只读捕获引用，供异常断言闭包使用
         TradingCoreState fundedLeverageLimited = leverageLimited;
         assertThatThrownBy(() -> reducer.placeOrder(fundedLeverageLimited, 101,
-                order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0)))
+                order(1, CoreOrderSide.BUY)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 本次预期的业务拒绝异常，用稳定代码核对拒绝原因 */ exception -> assertThat(exception.code()).isEqualTo("LEVERAGE_EXCEEDS_RISK_BRACKET"));
     }
@@ -666,7 +664,7 @@ class RuntimeStateBusinessRulesTest {
         }
         // 已有持仓上又挂新单的冷状态，必须先撤单才允许该杠杆重计
         TradingCoreState withOrder = reducer.placeOrder(leveragePosition(ProductLine.LINEAR_PERPETUAL), 101,
-                order(3, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0));
+                order(3, CoreOrderSide.BUY));
         // 显式允许已有持仓重计的全仓两倍目标杠杆命令
         var command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000, true);
         assertThatThrownBy(() -> reducer.updateLeverage(withOrder, 101, command)).hasMessageContaining("cancel open orders");
@@ -690,8 +688,8 @@ class RuntimeStateBusinessRulesTest {
         // 本用例按注资、挂单和成交顺序推进的冷状态
         TradingCoreState state = funded(line, asset, 10_000);
         state = reducer.adjustBalance(state, 202, new BalanceAdjustmentCommand(asset, 10_000));
-        state = reducer.placeOrder(state, 202, order(2, CoreOrderSide.SELL, ReservationKind.DERIVATIVE_MARGIN, asset, 0));
-        state = reducer.placeOrder(state, 101, order(1, CoreOrderSide.BUY, ReservationKind.DERIVATIVE_MARGIN, asset, 0));
+        state = reducer.placeOrder(state, 202, order(2, CoreOrderSide.SELL));
+        state = reducer.placeOrder(state, 101, order(1, CoreOrderSide.BUY));
         return reducer.applyMatches(state, 1, "BTC", "USDT", List.of(trade(2, 202, 10, 10, true, true)));
     }
 
@@ -800,19 +798,13 @@ class RuntimeStateBusinessRulesTest {
     }
 
     /**
-     * 只构造标的一、价格十、数量十的全仓净仓限价 GTC 意图；kind、asset 和 reservedUnits 在本辅助中没有读取，冻结规则由后续准入计算。
+     * 构造标的一、价格十、数量十的全仓净仓限价GTC意图；冻结资产和金额由后续准入计算。
      * @param orderId 本次测试委托的订单 ID
      * @param side 本次测试委托的买卖方向
-     * @param kind 本辅助当前不读取的预留类型入参，实际类型由后续准入决定
-     * @param asset 本辅助当前不读取的预留资产入参，实际资产由后续准入决定
-     * @param reservedUnits 保留的测试入参，本 order 辅助当前不读取，实际冻结由核心按意图计算
      */
     private static PlaceOrderCommand order(
             long orderId,
-            CoreOrderSide side,
-            ReservationKind kind,
-            String asset,
-            long reservedUnits) {
+            CoreOrderSide side) {
         return new PlaceOrderCommand(orderId, "1", side, 10, 10, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "");
     }
 
@@ -821,7 +813,7 @@ class RuntimeStateBusinessRulesTest {
      * @param state 用于查标的或检查用户余额的当前冷状态
      * @param orderId 本次测试委托的订单 ID
      * @param side 本次测试委托的买卖方向
-     * @param kind 显式准入结果采用的预留类型；仅 order 辅助不读取此参数
+     * @param kind 显式准入结果采用的预留类型
      * @param asset 本次明确指定的注资、预留或断言资产
      * @param makerFeeRatePpm 需要固定在本订单准入结果中的挂单费率，单位为百万分之一
      * @param takerFeeRatePpm 需要固定在本订单准入结果中的吃单费率，单位为百万分之一
@@ -843,10 +835,10 @@ class RuntimeStateBusinessRulesTest {
     }
 
     /**
-     * 从冷状态查意图所属标的，用限价固定参考价格并附上指定预留与费率；内部 symbolId 使用负一，让测试路径按既有规则解析。
+     * 从冷状态查意图所属标的，用限价固定参考价格并附上指定预留与费率；该夹具只有标的一，使用其首次注册后的稠密编号0。
      * @param state 用于查标的或检查用户余额的当前冷状态
      * @param intent 已构造的下单意图，提供标的和价格数量
-     * @param kind 显式准入结果采用的预留类型；仅 order 辅助不读取此参数
+     * @param kind 显式准入结果采用的预留类型
      * @param asset 本次明确指定的注资、预留或断言资产
      * @param makerFeeRatePpm 需要固定在本订单准入结果中的挂单费率，单位为百万分之一
      * @param takerFeeRatePpm 需要固定在本订单准入结果中的吃单费率，单位为百万分之一
@@ -856,7 +848,7 @@ class RuntimeStateBusinessRulesTest {
             long makerFeeRatePpm, long takerFeeRatePpm) {
         // 意图所属的已有标的，供显式准入结果使用
         CoreInstrument instrument = state.instruments().get(intent.instrumentId());
-        return new ResolvedPlaceOrder(intent, instrument, -1, intent.limitPriceTicks(), intent.limitPriceTicks(),
+        return new ResolvedPlaceOrder(intent, instrument, 0, intent.limitPriceTicks(), intent.limitPriceTicks(),
                 intent.limitPriceTicks(), kind, asset, makerFeeRatePpm, takerFeeRatePpm);
     }
 
