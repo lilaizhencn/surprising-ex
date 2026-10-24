@@ -1832,14 +1832,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean workersStopped() { return laneLifecycle.workersStopped(); }
 
     /**
-     * 终态处理返回的资金数量及资产身份；这里只携带结果，不再执行一次释放。
-     * @param units 本次终态处理返回的整数资金数量
-     * @param assetId 该资金数量对应的资产内部身份
-     */
-    record TerminalRelease(long units, int assetId) {
-    }
-
-    /**
      * 订单转为终态时一并交出的订单与预留引用；不单独表示整条命令已经有序提交。
      * @param order 终态处理交出的订单引用
      * @param reservation 该订单配套的可空预留引用，沿用原处理分支含义
@@ -6512,8 +6504,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         OrderRuntime order = order(orderId);
         if (order == null) throw new IllegalArgumentException("runtime order is not terminal: " + orderId);
         accountRollback.captureUserBefore(order.userId());
-        // 所属账户返回的释放数量和资产身份，外层据此判断是否登记变化
-        TerminalRelease release = onLane(order.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
+        // 所属账户只返回是否发生释放，金额和资产仍在 Lane 内处理
+        boolean releasedFunds = onLane(order.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
             // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
             ReservationRuntime reservation = lane.reservation(orderId);
             if (reservation == null || !order.canceled()) {
@@ -6521,7 +6513,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             // 该预留当前全部剩余冻结量，零时不再产生余额释放
             long releaseUnits = reservation.reservedUnits();
-            if (releaseUnits == 0) return new TerminalRelease(0, reservation.assetId());
+            if (releaseUnits == 0) return false;
             // 本次所属用户的原资产余额映射，用于按预留资产取得余额
             IntObjectHashMap<BalanceRuntime> balances = lane.userBalances(order.userId());
             // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
@@ -6535,9 +6527,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
             lane.storeReservation(orderId, released.laneValue());
             publishReservation(orderId, released);
             accountRollback.captureBalanceAfter(lane, order.userId(), reservation.assetId());
-            return new TerminalRelease(releaseUnits, reservation.assetId());
+            return true;
         });
-        if (release.units() == 0) return;
+        if (!releasedFunds) return;
         if (currentLaneCommandScope() == null) {
             markReservationChanged(orderId);
             markUserChanged(order.userId());

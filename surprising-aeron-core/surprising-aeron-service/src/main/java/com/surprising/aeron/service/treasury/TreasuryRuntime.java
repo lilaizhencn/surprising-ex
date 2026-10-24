@@ -829,11 +829,11 @@ public final class TreasuryRuntime {
     }
 
     /** 到期结算的固定价格、撤单/用户游标及本页保险需求。 */
-    public record LifecycleProgressRuntime(long settlementId, CoreInstrument instrument, long settlementPriceTicks,
+    public record LifecycleProgressRuntime(long settlementId, long settlementPriceTicks,
             boolean ordersComplete, long nextCursorOrderId, long nextCursorUserId,
             long requiredInsuranceUnits) {
         public LifecycleProgressRuntime {
-            if (settlementId <= 0 || instrument == null || settlementPriceTicks < 0
+            if (settlementId <= 0 || settlementPriceTicks < 0
                     || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
                     || nextCursorOrderId < 0 || nextCursorUserId < 0
                     || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)) {

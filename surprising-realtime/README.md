@@ -556,7 +556,9 @@ Web lint/build 和 147 项测试通过；Flutter analyze 无问题、126 项测�
 
 ### 逐项批量撤单回执（2026-10-19）
 
-提交回放增加有界 `cancel_batch_results`，保存原批次的 index/orderId/success/code，供两端确认部分失败和继续未发送批次。正常导出与订单/回执/水位同事务；历史回补仅能补充 NULL，非空事实冲突则回滚，不复制订单状态。先执行 `20261019-cancel-batch-results.sql`，再更新 realtime 并按需使用全新的独立 `.command-repair` checkpoint 回补历史，最后更新 gateway/Web/client。原 checkpoint 不回溯旧回执，不重置 live 断点、不重发 Kafka；详见 [查询和发布契约](../docs/realtime-command-results.md#现货批量撤单与固定目标恢复2026-10-19)。
+提交回放提供有界 `cancel_batch_results`，保存原批次的 index/orderId/success/code，供两端确认部分失败和继续未发送批次。正常导出与订单/回执/水位同事务；同一回执的完整明细必须一致，缺失或不同明细均按事实冲突处理并回滚。普通非批撤命令的空明细仍合法。系统尚未使用，不保留旧记录缺明细时的 NULL 补写、批内空值替换或比较豁免。
+
+`CommittedCommandResultRepair` 仍可用独立 `.command-repair` checkpoint 从已提交日志重建当前回执投影，不写订单水位、不重发 Kafka 或在线交易命令。交割现金页只携带产品、业务时间、结算命令和真实现金变化；日志位置与检查点由原导出流程管理，不再放入页对象重复保存。
 
 ### 交割现金流水与有限回补（2026-10-20）
 

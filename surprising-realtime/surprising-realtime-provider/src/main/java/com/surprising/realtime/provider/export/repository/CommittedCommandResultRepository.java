@@ -11,7 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import static com.surprising.realtime.provider.export.utils.CommittedCommandResults.requireSameResult;
 
-/** 仅访问core_command_result_projection，保留不可变回执校验和受锁保护的取消明细补全。 */
+/** 仅访问core_command_result_projection，写入当前回执并在行锁内核对完整事实，冲突交原事务回滚。 */
 @Repository
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
 public class CommittedCommandResultRepository {
@@ -56,11 +56,6 @@ public class CommittedCommandResultRepository {
         for (var receipt : stored) {
             var expected = receipts.get(receipt.commandId());
             requireSameResult(expected, receipt);
-            // Old rows may lack the newly introduced item facts. Only committed replay
-            // may enrich NULL, under the same row lock; existing facts are immutable.
-            if (receipt.cancelResults().isEmpty() && !expected.cancelResults().isEmpty())
-                jdbc.update("UPDATE core_command_result_projection SET cancel_batch_results=?::jsonb WHERE product_line=? AND command_id=? AND cancel_batch_results IS NULL",
-                        json.writeValueAsString(expected.cancelResults()), product.name(), receipt.commandId());
         }
     }
     private List<com.surprising.aeron.service.replay.CommittedTradeReplay.CancelBatchItem> cancelItems(String raw) {

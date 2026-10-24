@@ -123,108 +123,6 @@ public final class MatcherSettlementPlan {
     }
 
     /**
-     * 核对已准入订单、规范币对及 MatchingResult 的 Core 序号和 taker 编号，再按订单剩余量构建直达事实，不读取其他线程账户表。
-     * @param sequence 当前事实的 Core 序号
-     * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
-     * @param instrument 当前事实的规范币对对象，必须与订单输入一致
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     */
-    void buildDirect(long sequence, OrderRuntime taker, CoreInstrument instrument,
-                     MatchingResult result, TradingAccountRuntime runtime) {
-        if (taker == null || instrument == null || result == null
-                || result.nativeCoreSequence() != sequence
-                || result.nativeOrderId() != taker.orderId()
-                || instrument != taker.instrument())
-            throw new IllegalArgumentException("invalid direct matcher fact");
-        buildDirect(sequence, taker.orderId(), taker.userId(), taker.side(), taker.symbolId(),
-                taker.instrument(), taker.remainingQuantitySteps(), taker, result, runtime);
-    }
-
-    /**
-     * 用普通下单的不可变准入输入核对结果证据，以准入数量构建直达事实，不创建脱离 Lane 的运行时订单副本。
-     * @param sequence 当前事实的 Core 序号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
-     * @param instrument 当前事实的规范币对对象，必须与订单输入一致
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     */
-    void buildDirect(long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrument instrument,
-                     MatchingResult result, TradingAccountRuntime runtime) {
-        if (userId <= 0 || taker == null || instrument == null || result == null
-                || result.nativeCoreSequence() != sequence
-                || result.nativeOrderId() != taker.orderId()
-                || instrument != taker.instrument())
-            throw new IllegalArgumentException("invalid direct matcher fact");
-        buildDirect(sequence, taker.orderId(), userId, taker.side(), taker.symbolId(),
-                taker.instrument(), taker.quantitySteps(), null, result, runtime);
-    }
-
-    /**
-     * 重置本代计划，校验成交价格、数量和 maker 身份，累计扣减 taker 剩余量，合并订单身份及 Lane 路由；记录已成功的前置撤单并准备深度成交索引，构建临时去重集合在 finally 清空。
-     * @param sequence 当前事实的 Core 序号
-     * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param side 主动订单或待核对订单的预期买卖方向
-     * @param symbolId 主动订单的币对稠密编号
-     * @param takerInstrument 主动订单输入中保存的规范币对对象
-     * @param remainingQuantity 本代主动订单可供累计成交的数量上限
-     * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     */
-    private void buildDirect(long sequence, long orderId, long userId,
-                             com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,
-                             CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker, MatchingResult result,
-                             TradingAccountRuntime runtime) {
-        clearReferences();
-        coreSequence = sequence; admittedTaker = taker;
-        directTakerSide = side;
-        directTakerSymbolId = symbolId;
-        directTakerInstrument = takerInstrument;
-        takerOrderId = orderId; activeUserId = userId;
-        takerLaneId = runtime.topology().accountLaneId(activeUserId);
-        requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
-        matcherEvents = result.matcherEvents();
-        // 容纳本代主动订单、maker 及撤单身份所需的数组容量。
-        int capacity = Math.addExact(matcherEvents.size(), Math.addExact(result.cancellations().size(), 1));
-        if (orderIds.length < capacity) orderIds = new long[Math.max(capacity, orderIds.length * 2)];
-        // 本计划独占复用的原语订单去重集合，构建结束即清空。
-        LongHashSet keys = directOrderKeys;
-        try {
-            orderCount = addUnique(keys, orderIds, 0, takerOrderId);
-            // 主动订单按已遍历成交逐项扣减后的待成交数量。
-            long remaining = remainingQuantity;
-            for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < matcherEvents.size(); index++) {
-                // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
-                MatcherEvent event = matcherEvents.get(index);
-                if (event == null) throw new IllegalArgumentException("missing matcher event");
-                if (event.eventType() != MatcherEventType.TRADE) continue;
-                if (event.price() <= 0 || event.size() <= 0 || event.matchedOrderId() <= 0
-                        || event.matchedOrderUid() <= 0 || event.matchedOrderUid() == activeUserId)
-                    throw new IllegalStateException("invalid direct fill identity or quantity");
-                remaining = Math.subtractExact(remaining, event.size());
-                if (remaining < 0) throw new IllegalStateException("fill exceeds admitted taker quantity");
-                orderCount = addUnique(keys, orderIds, orderCount, event.matchedOrderId());
-                requiredLaneMask |= runtime.topology().accountLaneMask(event.matchedOrderUid());
-                tradeCount++;
-            }
-            // 前置撤单归本次提交账户，已在准入时授权；这里只把实际接受的编号计入变化。
-            // 当前结果携带的撤单项列表。
-            var cancellations = result.cancellations();
-            for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < cancellations.size(); index++) {
-                // 当前检查的单笔撤单结果。
-                var cancellation = cancellations.get(index);
-                if (cancellation.accepted())
-                    orderCount = addUnique(keys, orderIds, orderCount, cancellation.orderId());
-            }
-            rejectTaker(!result.accepted());
-            indexLaneEvents(runtime);
-        } finally { keys.clear(); }
-    }
-
-    /**
      * 由已准入运行时订单及原生 MatcherResult 构建直达计划，按订单剩余量校验成交；命令序号等外层证据由事件边界核对。
      * @param sequence 当前事实的 Core 序号
      * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
@@ -392,30 +290,6 @@ public final class MatcherSettlementPlan {
     private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
         return result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
                 || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
-    }
-
-    /**
-     * 为已经确认的准入拒绝保留序号、用户、订单与路由及传入事件引用，不创建订单后值；成交数和订单有效数均置零。
-     * @param sequence 当前事实的 Core 序号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
-     * @param laneMask 本拒绝事实仍需交回完成位的账户 Lane 位图
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     */
-    void prepareRejectedDirect(long sequence, long userId, long orderId, long laneMask,
-                               MatchingResult result) {
-        if (sequence <= 0 || userId <= 0 || orderId <= 0 || laneMask == 0 || result == null) {
-            throw new IllegalArgumentException("invalid rejected direct matcher fact");
-        }
-        clearReferences();
-        coreSequence = sequence;
-        takerOrderId = orderId;
-        activeUserId = userId;
-        requiredLaneMask = laneMask;
-        rejectedTaker = true;
-        matcherEvents = result.matcherEvents();
-        orderCount = 0;
-        tradeCount = 0;
     }
 
     /**
@@ -998,52 +872,6 @@ public final class MatcherSettlementPlan {
         preCancellationOrderIds = preCancellationStorage;
         preCancellationSize = orderIds.length;
         return this;
-    }
-
-    /**
-     * 按结果顺序保存已接受且已授权的前置撤单，默认不额外允许替换原单编号。
-     * @param cancellations Matcher 返回的逐订单撤单结果列表
-     * @param authorizedOrderIds 准入期已经授权 Matcher 撤销的订单编号列表
-     */
-    void preCancellationsFromResult(List<CoreCancellationResult> cancellations,
-                                     List<Long> authorizedOrderIds) {
-        preCancellationsFromResult(cancellations, authorizedOrderIds, 0);
-    }
-
-    /**
-     * 忽略拒绝撤单，对每个成功项核对授权列表或替换原单编号，再写入计划自有有效前缀；出现未授权成功撤单即失败。
-     * @param cancellations Matcher 返回的逐订单撤单结果列表
-     * @param authorizedOrderIds 准入期已经授权 Matcher 撤销的订单编号列表
-     * @param replacedOrderId 额外允许撤销的替换原单编号，零表示没有该特例
-     */
-    void preCancellationsFromResult(List<CoreCancellationResult> cancellations,
-                                   List<Long> authorizedOrderIds, long replacedOrderId) {
-        if (cancellations == null || authorizedOrderIds == null) {
-            throw new IllegalArgumentException("cancellation inputs are required");
-        }
-        // 本轮筛选或线性去重后保留的有效项数。
-        int count = 0;
-        // 授权列表是否支持直接读取原语编号的专用实现。
-        boolean primitiveAuthorized = authorizedOrderIds instanceof com.surprising.aeron.support.collection.ImmutableLongArrayList;
-        for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < cancellations.size(); index++) {
-            // 当前检查的单笔撤单结果。
-            CoreCancellationResult cancellation = cancellations.get(index);
-            if (!cancellation.accepted()) continue;
-            // 本次加入身份前缀或核对撤单授权的原语订单编号。
-            long orderId = cancellation.orderId();
-            // 当前成功撤单是否在准入授权列表内。
-            boolean authorized = primitiveAuthorized
-                    ? ((com.surprising.aeron.support.collection.ImmutableLongArrayList) authorizedOrderIds)
-                    .containsLong(orderId)
-                    : authorizedOrderIds.contains(orderId);
-            if (!authorized && orderId != replacedOrderId) {
-                throw new IllegalStateException("direct matcher cancelled an unauthorized order");
-            }
-            ensurePreCancellationCapacity(count + 1);
-            preCancellationStorage[count++] = orderId;
-        }
-        preCancellationOrderIds = count == 0 ? NO_ORDERS : preCancellationStorage;
-        preCancellationSize = count;
     }
 
     /**

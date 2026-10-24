@@ -113,12 +113,14 @@ public final class RuntimeStateProjector {
                                 progress.nextCursorUserId(), progress.markPriceTicks(), progress.priceSequence())));
         source.treasuryState().lifecycleSettlements().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 该币对已经完整完成的资金费或生命周期结算编号。 */ settlementId) ->
                 runtime.treasury().setLifecycleSettlement(identities.symbolId(instrumentId), settlementId));
-        source.treasuryState().lifecycleProgress().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 当前币对尚未完成的分页进度，连同固定计算参数及命令 UUID 恢复。 */ progress) ->
-                runtime.treasury().setLifecycleProgress(identities.symbolId(instrumentId),
-                        new TreasuryRuntime.LifecycleProgressRuntime(progress.settlementId(),
-                                requireInstrument(source, instrumentId), progress.settlementPriceTicks(),
-                                progress.ordersComplete(), progress.nextCursorOrderId(), progress.nextCursorUserId(),
-                                progress.requiredInsuranceUnits())));
+        source.treasuryState().lifecycleProgress().forEach((/* 当前结算进度所属币对名称。 */ instrumentId, /* 该币对固定计算参数及续页进度。 */ progress) -> {
+            requireInstrument(source, instrumentId);
+            runtime.treasury().setLifecycleProgress(identities.symbolId(instrumentId),
+                    new TreasuryRuntime.LifecycleProgressRuntime(progress.settlementId(),
+                            progress.settlementPriceTicks(),
+                            progress.ordersComplete(), progress.nextCursorOrderId(), progress.nextCursorUserId(),
+                            progress.requiredInsuranceUnits()));
+        });
         source.riskState().liquidations().forEach((/* 当前强平业务记录的编号。 */ liquidationId, /* 需要恢复状态、亏空、费用及撤单游标的强平记录。 */ liquidation) ->
                 runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
                         identities.symbolId(liquidation.instrumentId()), liquidation.marginMode(),

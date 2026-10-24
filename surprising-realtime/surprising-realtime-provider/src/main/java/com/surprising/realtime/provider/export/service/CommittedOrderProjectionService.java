@@ -339,7 +339,6 @@ public class CommittedOrderProjectionService {
             var prior = receipts.putIfAbsent(receipt.commandId(), receipt);
             if (prior != null) {
                 requireSameResult(prior, receipt);
-                if (prior.cancelResults().isEmpty() && !receipt.cancelResults().isEmpty()) receipts.put(receipt.commandId(), receipt);
             }
         }
         return receipts;

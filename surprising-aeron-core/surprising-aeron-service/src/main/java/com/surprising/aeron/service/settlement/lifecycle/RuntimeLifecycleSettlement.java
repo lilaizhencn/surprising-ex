@@ -88,7 +88,7 @@ public final class RuntimeLifecycleSettlement {
                 // 本次撤单之后保存的下一订单游标。
                 long nextCursor = page.nextCursorOrderId();
                 runtime.treasury().setLifecycleProgress(symbolId,
-                        new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), instrument,
+                        new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
                                 command.settlementPriceTicks(), false, nextCursor, 0, 0));
                 runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
                         selectedOrders.isEmpty() ? 1 : 2));
@@ -99,7 +99,7 @@ public final class RuntimeLifecycleSettlement {
         }
         // 既有进度中的位置字段；当前选页实现使用全局游标而不按此字段路由。
         // 按全局用户顺序选出的待结算页。
-        UserPage userPage = selectUsers(indexedUserIds, command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
+        UserIndexPage userPage = UserIndexPage.select(indexedUserIds, command.cursorUserId(), chunked ? command.maxUsers() : Integer.MAX_VALUE);
         // 本页选中的用户，不等于每个用户都存在有效持仓。
         List<Long> selectedUserIds = userPage.userIds();
         // 分页结算是否仍有后续用户。
@@ -127,8 +127,7 @@ public final class RuntimeLifecycleSettlement {
                 requiredInsurance = Math.addExact(requiredInsurance, plan.insurance());
         }
         if (requiredInsurance > runtime.treasury().insurance(assetId)) {
-            runtime.treasury().setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                    instrument, command.settlementPriceTicks(), true, 0, command.cursorUserId(), requiredInsurance));
+            runtime.treasury().setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, command.cursorUserId(), requiredInsurance));
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             return new CoreSettlementProgressView(command.settlementId(), false, true, 0,
                     command.cursorUserId(), selectedOrders.size(), 0, requiredInsurance);
@@ -153,7 +152,7 @@ public final class RuntimeLifecycleSettlement {
             runtime.treasury().setLifecycleSettlement(symbolId, command.settlementId());
         } else {
             runtime.treasury().setLifecycleProgress(symbolId,
-                    new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), instrument,
+                    new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
                             command.settlementPriceTicks(), true, 0, nextCursorUserId, 0));
         }
         runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
@@ -274,14 +273,6 @@ public final class RuntimeLifecycleSettlement {
             delta.addClearing(assetId, plan.clearing());
         }
         return delta;
-    }
-
-    /** 按全局用户索引选择一页，返回真实用户游标与完成标记。 */
-    static UserPage selectUsers(Iterable<Long> indexedUserIds, long startCursorUserId, int limit) {
-        // 命令游标按全局用户编号推进，与 Core 使用同一顺序；不按账户 Lane 单独分页。
-        // 索引选出的当前页及续页位置。
-        var page = UserIndexPage.select(indexedUserIds, startCursorUserId, limit);
-        return new UserPage(page.userIds(), page.nextCursorUserId(), page.complete());
     }
 
     /** 按币对的全局活动订单索引选页，校验每条订单路由并返回后续游标。 */
@@ -446,16 +437,6 @@ public final class RuntimeLifecycleSettlement {
                 || progress.nextCursorUserId() != command.cursorUserId())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
         }
-    }
-
-    /**
-     * 全局用户页的内容与后续位置。
-     * @param userIds 本页按全局索引顺序选出的用户列表
-     * @param nextCursorUserId 未读完时为本页最后用户编号，读完为零
-     * @param complete 本次分页是否已经读完后续记录
-     */
-    record UserPage(List<Long> userIds,
-                    long nextCursorUserId, boolean complete) {
     }
 
     /**

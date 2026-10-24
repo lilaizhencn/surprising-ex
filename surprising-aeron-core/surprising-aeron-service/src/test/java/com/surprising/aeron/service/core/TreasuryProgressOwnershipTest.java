@@ -248,6 +248,6 @@ class TreasuryProgressOwnershipTest {
      * @param settlementId 该测试进度记录对应的结算号
      */
     private static TreasuryRuntime.LifecycleProgressRuntime lifecycle(long settlementId) {
-        return new TreasuryRuntime.LifecycleProgressRuntime(settlementId, INSTRUMENT, 100, true, 0, 7, 0);
+        return new TreasuryRuntime.LifecycleProgressRuntime(settlementId, 100, true, 0, 7, 0);
     }
 }

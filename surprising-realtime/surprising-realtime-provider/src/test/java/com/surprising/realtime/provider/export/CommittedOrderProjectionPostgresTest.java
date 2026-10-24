@@ -251,19 +251,22 @@ class CommittedOrderProjectionPostgresTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_command_result_projection",Integer.class)).isEqualTo(3);
     }
 
-    @Test void cancelBatchFactsPersistAndEnrichOnlyMissingHistoricalDetails() {
+    @Test void cancelBatchFactsReplayExactlyAndRejectDifferentOrMissingDetails() {
         var receipt = batchResult(false);
         repository.persist(ProductLine.SPOT, List.of(), List.of(receipt), 10);
         assertThat(jdbc.queryForObject("SELECT jsonb_array_length(cancel_batch_results) FROM core_command_result_projection", Integer.class)).isEqualTo(2);
         repository.persist(ProductLine.SPOT, List.of(), List.of(receipt), 10);
-        jdbc.update("UPDATE core_command_result_projection SET cancel_batch_results=NULL");
-        repository.repairCommandResults(ProductLine.SPOT, List.of(receipt));
         assertThat(jdbc.queryForObject("SELECT cancel_batch_results->1->>'code' FROM core_command_result_projection", String.class)).isEqualTo("ORDER_NOT_FOUND");
         assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark WHERE product_line='SPOT'", Long.class)).isEqualTo(10);
         assertThatThrownBy(() -> repository.persist(ProductLine.SPOT, List.of(), List.of(batchResult(true)), 11))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("conflicting");
         assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark WHERE product_line='SPOT'", Long.class)).isEqualTo(10);
         assertThat(jdbc.queryForObject("SELECT cancel_batch_results->0->>'success' FROM core_command_result_projection", String.class)).isEqualTo("true");
+        jdbc.update("UPDATE core_command_result_projection SET cancel_batch_results=NULL");
+        assertThatThrownBy(() -> repository.repairCommandResults(ProductLine.SPOT, List.of(receipt)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("conflicting");
+        assertThat(jdbc.queryForObject("SELECT cancel_batch_results FROM core_command_result_projection", String.class)).isNull();
+        assertThat(jdbc.queryForObject("SELECT last_export_sequence FROM core_projection_watermark WHERE product_line='SPOT'", Long.class)).isEqualTo(10);
     }
 
     private static com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult batchResult(boolean conflict) {

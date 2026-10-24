@@ -1,5 +1,5 @@
 {
-  "status": "deeper_analysis_recorded_implementation_pending",
+  "status": "cleanup_implemented_deeper_audit_continues",
   "date": "2026-10-23",
   "objective": "逐业务操作检查 command 产生到 Cluster 日志、执行、账户/账本落地、快照恢复及下游导出的字段和约束，去除无用持久化数据。",
   "implementation_completed": {
@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第三十五轮仅分析：确认21个无调用内部方法、5组冗余中间结果/状态、批撤旧明细兼容分支及强平投影缺失生产链。A129财务事实保留；A141强平版本仍被风险响应读，A142成交/资金费版本列当前为空，均继续核对契约。累计124解决、11确认待处理、3候选、4保留；未改业务代码/编译/测试。",
+    "checkpoint": "第三十六轮：A131-A140完成；删除21个死方法、额外1个分页转发、2个冗余record类型共9个组件。15模块干净编译及当前realtime9模块复编通过；4020classfile旧方法/字段/类型引用零。累计134解决；A142两项投影版本列确认无消费待清理，A130投影生产链仍缺失，A11/A141保留候选。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -7163,11 +7163,11 @@
     },
     {
       "id": "A131",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "撮合结算计划保留6个已不可达的旧结果构建方法",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
@@ -7204,15 +7204,21 @@
         "prepareRejectedDirect(..., MatchingResult)",
         "preCancellationsFromResult(List,List)",
         "preCancellationsFromResult(List,List,long)"
-      ]
+      ],
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除6个不可达MatchingResult构建/拒绝/撤单方法；原生Matcher事实路径保持原代码。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A132",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "订单和预留对象各遗留2个无调用的复制/发布回写方法",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java",
@@ -7240,15 +7246,21 @@
         "copyForLane强制创建额外值；applyPublishedStateInPlace保留一套无人进入的身份/数量验证与字段回写流程。实际laneValue、publicationValue、applyFillInPlace、consumeInPlace等路径仍有职责。"
       ],
       "proposed_cleanup": "整体删除4个死方法及专用注释，保留实际Lane接管、发布租约、快照和资金/数量更新入口。",
-      "method_count": 4
+      "method_count": 4,
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除OrderRuntime/ReservationRuntime各2个无调用复制及发布回写方法。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A133",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "改单流程保留3个无调用重载及仅供它们使用的合成实现",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java",
@@ -7276,15 +7288,21 @@
         "CodeGraph显示replacementForAmend仅由这三个死入口调用，故整组4方法已无活跃入口；保留它们会使维护者误以为存在另一条旧单查找、参数解码、品种校验及改单合成路径。"
       ],
       "proposed_cleanup": "删除4个不可达方法及专用import；不改真实替换准入、原单撤销、缺省参数继承或Matcher提交链。",
-      "method_count": 4
+      "method_count": 4,
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除3个replacementFor重载和仅由它们调用的replacementForAmend。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A134",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "待撮合索引和队列对外暴露7个无调用内部转发/清空方法",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingCommandIdIndex.java",
@@ -7327,15 +7345,21 @@
         "PendingMatchingRing的claim/release/discard/contextAt只是转发槽池，均无调用；队列内部在既有入队/退休逻辑直接使用contexts，不能据此删除底层槽池或真实生命周期方法。"
       ],
       "proposed_cleanup": "删7个无人使用的内部入口，缩小可以绕过队列生命周期操作槽池的表面；保留正常入队、命令身份索引和退休处理。",
-      "method_count": 7
+      "method_count": 7,
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除PendingCommandIdIndex的UUID put/remove与clear，及PendingMatchingRing的4个无调用槽池转发。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A135",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "终态解冻返回多余TerminalRelease包装及未消费资产字段",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
@@ -7361,15 +7385,21 @@
       "fields": [
         "TerminalRelease.assetId",
         "TerminalRelease.units（收窄为布尔返回值后无需保存）"
-      ]
+      ],
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除TerminalRelease两组件包装，原Lane内完成相同释放和回滚捕获，仅返回是否发生释放。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A136",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "到期结算把已有用户页再次包装并携带无用游标",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java",
@@ -7401,15 +7431,21 @@
       "fields": [
         "RuntimeLifecycleSettlement.UserPage.nextCursorUserId"
       ],
-      "redundant_record_components": 3
+      "redundant_record_components": 3,
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除本地3组件UserPage及selectUsers转发；原两处消费者直接复用UserIndexPage，撤单未完成时不创建空页。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A137",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "到期结算运行时进度保存从不读取的CoreInstrument引用",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/TreasuryRuntime.java",
@@ -7435,15 +7471,21 @@
       "proposed_cleanup": "删除运行时进度配置引用及仅供该字段服务的传递/非空校验；恢复入口若还需验证标的存在，保留真实恢复不变量。",
       "fields": [
         "TreasuryRuntime.LifecycleProgressRuntime.instrument"
-      ]
+      ],
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "LifecycleProgressRuntime由7组件减为6组件，删除instrument引用与传递；恢复仍显式requireInstrument，再恢复固定价格、双游标和保险需求。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A138",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "只减仓容量结果重复保存可由输入唯一算出的已占用数量",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/position/PositionCloseCapacity.java",
@@ -7468,15 +7510,21 @@
       "proposed_cleanup": "先删除committedQuantitySteps这一无消费派生副本，把计算留为局部值并收窄构造校验；availableQuantitySteps是否也改为直接计算另按调用成本和可读性决定。",
       "fields": [
         "PositionCloseCapacity.committedQuantitySteps"
-      ]
+      ],
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "PositionCloseCapacity由5组件减为3组件，删除committed/available两个副本；保留availableQuantitySteps同名读取，以原精确减法和min从两项数量计算。容量拒绝与冲突选择不变。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A139",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "已提交交割现金页额外保存仅构造校验的复制日志位置",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java",
@@ -7501,15 +7549,21 @@
       "proposed_cleanup": "删除该内部页的位置副本和专用实参/校验，保留原日志头、外层导出序号、检查点和现金账本幂等键。",
       "fields": [
         "CommittedTradeReplay.CommittedDeliveryPage.clusterPosition"
-      ]
+      ],
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "CommittedDeliveryPage由5组件减为4组件，删除clusterPosition副本与专用正数校验；生产者及realtime夹具改用当前构造，外层检查点仍是权威位置。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A140",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "static_source_and_typed_reference_confirmed",
       "topic": "批撤回执仍为旧版缺少明细的记录提供兼容补写与比较豁免",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedCommandResultRepository.java",
@@ -7538,7 +7592,13 @@
         "当前已提交回放按原批撤请求生成逐项终态，普通非批撤命令的空明细仍是合法当前数据；不能删除所有NULL/空列表处理或整个恢复工具。"
       ],
       "proposed_cleanup": "删除只服务旧数据的NULL补写及空列表比较豁免；对当前同一回执明细做完整一致性比较，同步测试源与中文文档，只编译相关模块。",
-      "disposition": "remove_unneeded_old_data_compatibility"
+      "disposition": "remove_unneeded_old_data_compatibility",
+      "resolved_in_round": "thirty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除数据库NULL补写、批内空明细替换与比较豁免。完整明细严格equals；普通非批撤空明细仍合法。更新原Postgres源场景为重复一致、不同/缺失明细冲突及水位不推进；本轮仅编译源码。",
+        "tests_executed": false
+      }
     },
     {
       "id": "A141",
@@ -7581,8 +7641,8 @@
     },
     {
       "id": "A142",
-      "status": "candidate",
-      "analysis_status": "needs_full_projection_public_contract_trace",
+      "status": "confirmed",
+      "analysis_status": "confirmed_unused_current_projection_columns",
       "topic": "成交与资金费投影仍保留当前生产者不写、测试断言NULL的合约版本列",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
       "business_code_changed": false,
@@ -7616,18 +7676,50 @@
           "file": "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedFundingProjectionPostgresTest.java",
           "line": 58,
           "anchor": "assertThat(row.get(\"instrument_change_id\")).isNull();"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedFundingSettlementRepository.java",
+          "line": 20,
+          "anchor": "INSERT INTO core_funding_settlement_projection(product_line,settlement_id,export_sequence,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/repository/TradeProjectionRepository.java",
+          "line": 108,
+          "anchor": "var value = new AdminTradeResponse("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/repository/TradeProjectionRepository.java",
+          "line": 53,
+          "anchor": "var fill = new TradeFillResponse("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/gateway/provider/repository/PortfolioIncomeSpotPriceRepository.java",
+          "line": 21,
+          "anchor": "SELECT e.price_ticks,i.price_tick_units,q.scale_units,e.occurred_at_epoch_ms"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/funding/provider/repository/FundingSettlementProjectionRepository.java",
+          "line": 23,
+          "anchor": "SELECT settlement_id, instrument_id, funding_rate_ppm, total_long_payment_units,"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/funding/provider/repository/FundingRateRepository.java",
+          "line": 39,
+          "anchor": "SELECT p.instrument_id, p.export_sequence AS sequence, p.funding_rate_ppm,"
         }
       ],
       "evidence": [
-        "当前成交生产者的INSERT及重放事实校验都不包含instrument_change_id；初始化末尾专门DROP NOT NULL并说明已提交帧没有合约版本。",
-        "资金费DDL明确Core funding command没有instrument version，字段未知为NULL；两个投影测试分别断言这些列为NULL。",
-        "这不是已证明整仓所有版本字段无用；生命周期drain ack和标记价格等外部版本仍有实际写入。两张投影表需进一步核对SELECT *、模型映射和公开响应之后再删列。"
+        "当前成交及资金费生产者均不写instrument_change_id，测试断言NULL，Core命令/已提交帧不提供该旧版本事实。",
+        "已核对全仓这两张表的Java SQL入口：CommittedExecutionRepository的SELECT *仅映射当前ExecutionWrite；Gateway私人成交和管理搜索显式映射TradeFillResponse/AdminTradeResponse，现货估值只读取价格及单位；均不输出该列。",
+        "资金费最终结算及历史费率分别由FundingSettlementProjectionRepository/FundingRateRepository显式构造响应，不读取版本列。必要的冻结预测费率关联仍有实际作用，不删除。",
+        "这两张表的版本列可从当前DDL及对应旧DDL修补步骤清理；强平候选响应仍读取同名字段（A141），生命周期/标记价的版本亦有实际用途，不能全仓机械删除。"
       ],
-      "proposed_cleanup": "沿两张表实际查询和响应确认旧版本列是否应整体删除，消除当前DDL创建约束再放开的历史步骤；保留真实成交/资金费身份、精度和重放校验。",
+      "proposed_cleanup": "删除core_execution_projection/core_funding_settlement_projection两项无用列、为旧列放宽非空的DDL步骤，以及仅检查旧NULL列的测试断言；保持当前API响应、金融事实和SQL排序/水位/就绪关联不变。只做相关模块编译，不执行数据库。",
       "fields": [
         "core_execution_projection.instrument_change_id",
         "core_funding_settlement_projection.instrument_change_id"
-      ]
+      ],
+      "confirmed_in_round": "thirty_sixth_cleanup_round"
     }
   ],
   "preserve_verified_purposes": [
@@ -7645,10 +7737,10 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "先删除A131-A134的21个无调用内部方法，保留原生撮合事实、槽池生命周期和真实资金校验；只编译相关模块。",
-    "收窄A135-A139的中间结果/运行时状态；不新增包装类或Context，不改变Owner/Lane交接、全局续页与实际检查点。",
-    "按无需旧数据兼容约定处理A140；A141/A142先追踪当前查询响应契约，不直接删有读端的列。保留合法空批撤明细和真正恢复职责。",
-    "A130单独修复既有强平查询投影生产链，A129执行价/费率/实收费保留；A11在有明确一致性替代前不动。"
+    "清理A142：当前成交/资金费投影的两项无用版本列及只为它们存在的DDL/测试断言，当前公开查询形状不变；只编译相关模块，不执行SQL。",
+    "修复A130：沿既有已提交强平变化交接补齐投影生产链，保留实际执行价/费率/实收费；不新增在线Core查询fallback或逐命令全量复制。",
+    "A141强平版本字段仍被风险响应读取，先同步核对真实来源与必要契约；风险读端的marginMode也必须读取真实事实，不用固定CROSS。",
+    "A11在领导者读/提交水位/会话一致性没有等价替代前保留。继续扫描命令到恢复/查询的字段及人工约束，不能以编译推断运行验证。"
   ],
   "rejected_false_positives": [
     {
@@ -7723,7 +7815,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "round_completed_findings_recorded; overall_audit_in_progress",
+  "analysis_round_status": "cleanup_compile_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -7945,11 +8037,9 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-    "status": "analysis_only_findings_recorded",
-    "resolved_ids": [],
-    "confirmed_ids": [
-      "A130",
+    "source_basis_commit": "794de68bdac31e1fc9f41a3a79cf87df74924f25",
+    "status": "cleanup_verified_followup_analysis",
+    "resolved_ids": [
       "A131",
       "A132",
       "A133",
@@ -7961,10 +8051,13 @@
       "A139",
       "A140"
     ],
+    "confirmed_ids": [
+      "A130",
+      "A142"
+    ],
     "candidate_ids": [
       "A11",
-      "A141",
-      "A142"
+      "A141"
     ],
     "retained_ids": [
       "A105",
@@ -7973,12 +8066,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 124,
-      "candidate": 3,
+      "resolved": 134,
+      "candidate": 2,
       "retained": 4,
-      "confirmed": 11
+      "confirmed": 2
     },
-    "evidence": "thirty_fifth_analysis_round",
+    "evidence": "thirty_sixth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -29279,6 +29372,443 @@
       "business_source_diff": [],
       "git_diff_check": "passed",
       "tests_or_services_executed": false
+    }
+  },
+  "thirty_sixth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "794de68bdac31e1fc9f41a3a79cf87df74924f25",
+    "resolved_ids": [
+      "A131",
+      "A132",
+      "A133",
+      "A134",
+      "A135",
+      "A136",
+      "A137",
+      "A138",
+      "A139",
+      "A140"
+    ],
+    "reclassified_confirmed_id": "A142",
+    "counts_after_cleanup": {
+      "resolved": 134,
+      "candidate": 2,
+      "retained": 4,
+      "confirmed": 2
+    },
+    "business_flow": "原准入 -> Matcher原生事实 -> Account Lane/系统账本 -> Owner有序提交。删除没有入口的旧路径；跨线程访问、资金与序号所有权未新增阶段。",
+    "implementation": {
+      "A131": "删除6个不可达MatchingResult构建/拒绝/撤单方法；原生Matcher事实路径保持原代码。",
+      "A132": "删除OrderRuntime/ReservationRuntime各2个无调用复制及发布回写方法。",
+      "A133": "删除3个replacementFor重载和仅由它们调用的replacementForAmend。",
+      "A134": "删除PendingCommandIdIndex的UUID put/remove与clear，及PendingMatchingRing的4个无调用槽池转发。",
+      "A135": "删除TerminalRelease两组件包装，原Lane内完成相同释放和回滚捕获，仅返回是否发生释放。",
+      "A136": "删除本地3组件UserPage及selectUsers转发；原两处消费者直接复用UserIndexPage，撤单未完成时不创建空页。",
+      "A137": "LifecycleProgressRuntime由7组件减为6组件，删除instrument引用与传递；恢复仍显式requireInstrument，再恢复固定价格、双游标和保险需求。",
+      "A138": "PositionCloseCapacity由5组件减为3组件，删除committed/available两个副本；保留availableQuantitySteps同名读取，以原精确减法和min从两项数量计算。容量拒绝与冲突选择不变。",
+      "A139": "CommittedDeliveryPage由5组件减为4组件，删除clusterPosition副本与专用正数校验；生产者及realtime夹具改用当前构造，外层检查点仍是权威位置。",
+      "A140": "删除数据库NULL补写、批内空明细替换与比较豁免。完整明细严格equals；普通非批撤空明细仍合法。更新原Postgres源场景为重复一致、不同/缺失明细冲突及水位不推进；本轮仅编译源码。"
+    },
+    "removed_unused_methods": 21,
+    "additional_pure_forwarder_removed": "RuntimeLifecycleSettlement.selectUsers",
+    "removed_record_types": [
+      "TradingAccountRuntime.TerminalRelease",
+      "RuntimeLifecycleSettlement.UserPage"
+    ],
+    "removed_record_components": 9,
+    "record_components": {
+      "TerminalRelease": {
+        "before": 2,
+        "after": 0
+      },
+      "RuntimeLifecycleSettlement.UserPage": {
+        "before": 3,
+        "after": 0
+      },
+      "LifecycleProgressRuntime": {
+        "before": 7,
+        "after": 6
+      },
+      "PositionCloseCapacity": {
+        "before": 5,
+        "after": 3
+      },
+      "CommittedDeliveryPage": {
+        "before": 5,
+        "after": 4
+      }
+    },
+    "verification": {
+      "clean_compile": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "elapsed_seconds": 86.521,
+        "log_sha256": "71102059d58a0316e8cd1b2f3b509a95bace90baac98255d36d250fffa36c29c",
+        "tests_executed": false,
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-aeron-tools",
+          "surprising-trading-api",
+          "surprising-account-api",
+          "surprising-price-api",
+          "surprising-price-consumer",
+          "surprising-maker",
+          "surprising-realtime-api",
+          "surprising-price-provider",
+          "surprising-aeron-benchmarks",
+          "surprising-realtime-provider"
+        ],
+        "reactor_module_count": 15
+      },
+      "current_realtime_compile": {
+        "command": "mvn -pl surprising-realtime/surprising-realtime-provider -am -DskipTests test-compile",
+        "exit_code": 0,
+        "elapsed_seconds": 19.219,
+        "log_sha256": "406f008049920e46c6051334a24ebba6d887ebd0cb0d96187ec18c64e202956e",
+        "reason": "修正旧明细补全说明后重新编译当前realtime源码",
+        "tests_executed": false,
+        "reactor_modules": [
+          "Surprising Parent",
+          "surprising-instrument-api",
+          "surprising-aeron-protocol",
+          "surprising-aeron-client",
+          "surprising-aeron-service",
+          "surprising-trading-api",
+          "surprising-price-api",
+          "surprising-realtime-api",
+          "surprising-realtime-provider"
+        ],
+        "reactor_module_count": 9
+      },
+      "java": "HotSpot Corretto 27+33-FR",
+      "maven": "3.9.16",
+      "disk_available_before_build": "167 GiB",
+      "tests_executed": false,
+      "services_started": false,
+      "database_sql_executed": false
+    },
+    "static_verification": {
+      "classfiles_inspected": 4020,
+      "deleted_method_definitions": 0,
+      "deleted_member_references": 0,
+      "deleted_record_class_references": 0,
+      "remaining_record_instance_fields": {
+        "com/surprising/aeron/service/position/PositionCloseCapacity": [
+          "positionQuantitySteps",
+          "requestedQuantitySteps",
+          "newestFirst"
+        ],
+        "com/surprising/aeron/service/replay/CommittedTradeReplay$CommittedDeliveryPage": [
+          "product",
+          "occurredAt",
+          "command",
+          "cashFlows"
+        ],
+        "com/surprising/aeron/service/treasury/TreasuryRuntime$LifecycleProgressRuntime": [
+          "settlementId",
+          "settlementPriceTicks",
+          "ordersComplete",
+          "nextCursorOrderId",
+          "nextCursorUserId",
+          "requiredInsuranceUnits"
+        ]
+      },
+      "six_files_only_exact_deletions_and_unused_imports": true,
+      "protected_snapshot_and_spot_settlement_files_unchanged": [
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java"
+      ],
+      "java_classes_executed": false,
+      "git_diff_check": "passed"
+    },
+    "removed_method_inventory": [
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java",
+        "name": "replacementFor",
+        "start_line": 351,
+        "end_line": 364,
+        "signature": "PlaceOrderCommand (CoreMessage message, OrderRuntime order)",
+        "removed_sha256": "fce917cd941455bf9509b25ec3c127640230223f9ad9b0cdc138eb25e1564958",
+        "removed_lines": 20
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java",
+        "name": "replacementFor",
+        "start_line": 372,
+        "end_line": 381,
+        "signature": "PlaceOrderCommand (DecodedMatchingCommand decodedCommand,\n                                     CommandSlot.Operation operation, OrderRuntime order)",
+        "removed_sha256": "2e5ffc361751a7ca2a94ba659703f78def909de1da475ff4dd360e3bd3ab620e",
+        "removed_lines": 17
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java",
+        "name": "replacementFor",
+        "start_line": 388,
+        "end_line": 397,
+        "signature": "PlaceOrderCommand (CommandSlot pending, OrderRuntime order)",
+        "removed_sha256": "943af7ff72499cbf675d56dfe375725358ad356dd2290b8b00e0673326dac322",
+        "removed_lines": 16
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java",
+        "name": "replacementForAmend",
+        "start_line": 404,
+        "end_line": 424,
+        "signature": "PlaceOrderCommand (AmendOrderCommand command, OrderRuntime order)",
+        "removed_sha256": "345935c6d018b0691235da7f3cd9459f848878ba5265f0c830f544603f70c504",
+        "removed_lines": 27
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingCommandIdIndex.java",
+        "name": "put",
+        "start_line": 88,
+        "end_line": 91,
+        "signature": "void (UUID commandId, CommandSlot value)",
+        "removed_sha256": "791f37777e25c2ce39617b68626260e179d29b2ec55c0a59e09d57220d97b1d5",
+        "removed_lines": 10
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingCommandIdIndex.java",
+        "name": "remove",
+        "start_line": 117,
+        "end_line": 120,
+        "signature": "void (UUID commandId, CommandSlot expected)",
+        "removed_sha256": "caa3c27922cf0724324e31e8b4804bd43eb20b902cdb9f61de29659f2e682b07",
+        "removed_lines": 10
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingCommandIdIndex.java",
+        "name": "clear",
+        "start_line": 125,
+        "end_line": 130,
+        "signature": "void ()",
+        "removed_sha256": "4a30bc3bcc60fd9e36f6a55e849a0baa5d252d5dfbba05c6508462dc311b0332",
+        "removed_lines": 10
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java",
+        "name": "claim",
+        "start_line": 584,
+        "end_line": 584,
+        "signature": "CommandSlot (long sequence)",
+        "removed_sha256": "8f68c520bedb3442dab64f37fea30fb964626040a33e12ea868a7fcd51ea4260",
+        "removed_lines": 5
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java",
+        "name": "release",
+        "start_line": 589,
+        "end_line": 589,
+        "signature": "void (long sequence)",
+        "removed_sha256": "ee3ddf94cf2be8787b7714c7825878353347ea6d3fe1117e1c99eac6c872d597",
+        "removed_lines": 5
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java",
+        "name": "discard",
+        "start_line": 594,
+        "end_line": 594,
+        "signature": "void (long sequence)",
+        "removed_sha256": "d3652f0f4e238648ebd24864b2cc056be26505daef7f21e2e226ea82bd2a0b39",
+        "removed_lines": 5
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java",
+        "name": "contextAt",
+        "start_line": 607,
+        "end_line": 607,
+        "signature": "CommandSlot (int slot)",
+        "removed_sha256": "14a015185cd4460612fc4400078328d40d5b707564aab92a408d8693c695fdfb",
+        "removed_lines": 5
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/ReservationRuntime.java",
+        "name": "copyForLane",
+        "start_line": 185,
+        "end_line": 188,
+        "signature": "ReservationRuntime ()",
+        "removed_sha256": "b0170748e9ec887a8f6916863f763afc0c48acf6473ce95dce8765a0d1b3db10",
+        "removed_lines": 8
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/ReservationRuntime.java",
+        "name": "applyPublishedStateInPlace",
+        "start_line": 201,
+        "end_line": 208,
+        "signature": "void (ReservationRuntime source, long released, long consumed)",
+        "removed_sha256": "373b4c07441eaf8864e02da1af61ec1f4b5cf0eb8187ea1b3c4851b76a92d9d9",
+        "removed_lines": 15
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+        "name": "buildDirect",
+        "start_line": 133,
+        "end_line": 142,
+        "signature": "void (long sequence, OrderRuntime taker, CoreInstrument instrument,\n                     MatchingResult result, TradingAccountRuntime runtime)",
+        "removed_sha256": "d74a24df792421973c8683f49d7299a10ae508ca29074a75b4f13a7dbeba507b",
+        "removed_lines": 19
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+        "name": "buildDirect",
+        "start_line": 153,
+        "end_line": 162,
+        "signature": "void (long sequence, long userId, ResolvedPlaceOrder taker, CoreInstrument instrument,\n                     MatchingResult result, TradingAccountRuntime runtime)",
+        "removed_sha256": "d8c4c7a16da2566b17fc2125881abfdd1f1868fdc4d309dba8c1aeeadd53223a",
+        "removed_lines": 20
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+        "name": "buildDirect",
+        "start_line": 177,
+        "end_line": 225,
+        "signature": "void (long sequence, long orderId, long userId,\n                             com.surprising.aeron.protocol.CoreOrderSide side, int symbolId,\n                             CoreInstrument takerInstrument, long remainingQuantity, OrderRuntime taker, MatchingResult result,\n                             TradingAccountRuntime runtime)",
+        "removed_sha256": "9f69b326bb9ef2a1a8041d0735ed704fa496b5b55838b5c67c17907ca371c207",
+        "removed_lines": 63
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+        "name": "prepareRejectedDirect",
+        "start_line": 405,
+        "end_line": 419,
+        "signature": "void (long sequence, long userId, long orderId, long laneMask,\n                               MatchingResult result)",
+        "removed_sha256": "5df96324692fe521056e00e43286d33c1b4f427ac6054f6dc7830067e68cc527",
+        "removed_lines": 24
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+        "name": "preCancellationsFromResult",
+        "start_line": 1008,
+        "end_line": 1011,
+        "signature": "void (List<CoreCancellationResult> cancellations,\n                                     List<Long> authorizedOrderIds)",
+        "removed_sha256": "e255736ce81fce94150b19d5dfcbec0dad5f21a194a550002746311d5e9d44b4",
+        "removed_lines": 10
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+        "name": "preCancellationsFromResult",
+        "start_line": 1019,
+        "end_line": 1047,
+        "signature": "void (List<CoreCancellationResult> cancellations,\n                                   List<Long> authorizedOrderIds, long replacedOrderId)",
+        "removed_sha256": "cda2dbfdeb2cdc5cb81273e3c55acb43f18b9238aeece101741a47d28ad7c6c9",
+        "removed_lines": 36
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java",
+        "name": "copyForLane",
+        "start_line": 629,
+        "end_line": 629,
+        "signature": "OrderRuntime ()",
+        "removed_sha256": "a00d7a9931a8c58831ea536d773e4beb4c3e08e3d8a97ac2716c8ff06042672d",
+        "removed_lines": 5
+      },
+      {
+        "file_path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java",
+        "name": "applyPublishedStateInPlace",
+        "start_line": 661,
+        "end_line": 680,
+        "signature": "void (OrderRuntime source, long executed, long remaining,\n                                    long cumulativeFee, long valueHigh, long valueLow, long createdAt, long updatedAt,\n                                    long position, CoreOrderStatus publishedStatus,\n                                    long publishedRevision)",
+        "removed_sha256": "ebbe9d6cf9c731d303b85bb1480811c7ab9ad339e19349d0e865f822ce508cc5",
+        "removed_lines": 35
+      }
+    ],
+    "changed_java_files": 19,
+    "main_java_files": 16,
+    "test_source_files": 3,
+    "source_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "dd6ec0397f3bdb6899f0d8c4da41241f27cc8349c2d20fc05f40f69591df5de9",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java": "bd36efb0e4218a741d89b30d273c6d6a4a4ec97cc9f83a85ce5efdac4bf95848",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java": "99085e7e1bb741b5438b6880c1cab45703c90f55734f2b8c29a880e9c5da4616",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingCommandIdIndex.java": "5a65d3c70c58f72f5c1cc9921196aac3761614852a826608c0d455dadbdc09ab",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java": "f71c03e10e0e1740f83604385da5c2a42623c102aee3fe796002265e07b4c7e4",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java": "56202e57e4ceb5b6f08f47d54ffa2eb109b8b9774989ba4e931d950ee8a619cc",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/ReservationRuntime.java": "87842cef87e4c53f0843c69efcae95c5521657c08bc0f779f2e2ac5a28dff542",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/position/PositionCloseCapacity.java": "ddb3326a5ca0c8aff4dc6c1b2668965ed8cd9618893a37506d4b738da00a4bd3",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java": "2e424ccb2293a1a3abe8d5b81f8eee39d36ac4003377b34b5a48ae10332886df",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java": "0201dcf45bfc990aa23d0d8cd1a4b8bceb09ce344731c649b9c017ad48db8614",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java": "87d37a358793f25b6f7cadda060f91dc4ce283bed3c9c5604e8c60580dca3b6b",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java": "f0997c1c1acb28a01e8359a68bf5219369a5950ec755a3e82088b9e8855ce6db",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java": "88079a4dcb515897cc6411a6e01a83f551deb06e97f95cf9bab1f4b2387fe724",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/TreasuryRuntime.java": "12161e0f5eb25f35d616f83a6b17c764ecb0c836a4dfc1300d309aff87ebe1e4",
+      "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TreasuryProgressOwnershipTest.java": "5542adfa7b3ed7ebfee28e942d1498243e79c9a8fcb98d7d11bcd6d247a03612",
+      "surprising-realtime/README.md": "8ce310982909672faa022eec0301afe66f966e5a514fb1d81ab13a8deb9d6ad0",
+      "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedCommandResultRepository.java": "8c5f099f9d3998aa5c1d6db3d5704b330b7f41639493113838774855ede2de6e",
+      "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedOrderProjectionService.java": "f8aa6ec37ff9fe98d56e8404344a252230388350e08d2d6337234dbaf2d0a855",
+      "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/utils/CommittedCommandResults.java": "e916444068a4dad82b87ea7b57326d68d2d9cb1258d1bae015a81fe0cc31725e",
+      "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedDeliveryProjectionPostgresTest.java": "fd3b095c64498838e21fd9d793bde60201c376e5551350e6f83003a15e974de9",
+      "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java": "ad7c92e08df354e8ae95ebff36c9b46a9a03cc03b6b3c36de07758040414ff64"
+    },
+    "versions_unchanged": {
+      "core_schema": 16,
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "retention": 4
+    },
+    "followup_analysis": {
+      "confirmed": [
+        "A130",
+        "A142"
+      ],
+      "candidate": [
+        "A11",
+        "A141"
+      ],
+      "A142": "核对了成交/资金费所有Java SQL读端及显式公开响应映射，两项旧版本列没有当前消费，下一轮可清理。",
+      "A130": "强平投影缺失生产链仍需修复，实际执行价/费率/实收费保留；修复时同时核对风险响应真实marginMode及版本来源。"
+    },
+    "limits": "只执行相关模块生产/测试源码编译和静态字节码/源码核对；未运行测试、交易、PostgreSQL、恢复或UI交互，不能据此宣称资金/恢复/投影运行场景已通过。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-runtime-cleanup-20261024",
+      "status": "removed_after_results_archived",
+      "remaining_current_round_resources": [],
+      "removed_files": [
+        {
+          "path": "/tmp/aeron-runtime-cleanup-20261024-build.json",
+          "bytes": 410,
+          "sha256": "ea1dbb0d96d4cce33420e832abd78233e5cb3018360ba0953f97ea8f08481596"
+        },
+        {
+          "path": "/tmp/aeron-runtime-cleanup-20261024-build.log",
+          "bytes": 32865,
+          "sha256": "71102059d58a0316e8cd1b2f3b509a95bace90baac98255d36d250fffa36c29c"
+        },
+        {
+          "path": "/tmp/aeron-runtime-cleanup-20261024-methods.json",
+          "bytes": 9510,
+          "sha256": "9c4a2dfb04c4936e0f0c9f455ee12f0f8031fc6ad74f9126f84be9271b61d910"
+        },
+        {
+          "path": "/tmp/aeron-runtime-cleanup-20261024-realtime-build.json",
+          "bytes": 340,
+          "sha256": "5a489c7d0fd56839294aa345589c6d1ba121ee9808d32fb2d4a1f7faa936efa6"
+        },
+        {
+          "path": "/tmp/aeron-runtime-cleanup-20261024-realtime-build.log",
+          "bytes": 16241,
+          "sha256": "406f008049920e46c6051334a24ebba6d887ebd0cb0d96187ec18c64e202956e"
+        },
+        {
+          "path": "/tmp/aeron-runtime-cleanup-20261024-record.py",
+          "bytes": 9926,
+          "sha256": "e7fda195d699d84a98b1090980b672e12af26e81a58013e35102232ed9a7b053"
+        },
+        {
+          "path": "/tmp/aeron-runtime-cleanup-20261024-verify.json",
+          "bytes": 1349,
+          "sha256": "4da0032816940dfb5a809dbd3c280b68b6a3bab4056ca6c6052c442269d3653c"
+        },
+        {
+          "path": "/tmp/aeron-runtime-cleanup-20261024-verify.py",
+          "bytes": 5250,
+          "sha256": "1ff7540c2a106a07d81458765374c2a063791831c55991b61e310545d6d50cda"
+        }
+      ]
     }
   }
 }

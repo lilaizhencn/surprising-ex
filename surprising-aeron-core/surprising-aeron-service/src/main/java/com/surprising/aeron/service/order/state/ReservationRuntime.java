@@ -180,32 +180,9 @@ public final class ReservationRuntime {
     }
 
     /**
-     * 无论当前标记如何，都创建新的可变 Lane 值并复制身份及金额。
-     */
-    ReservationRuntime copyForLane() {
-        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
-                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
-    }
-
-    /**
      * 可变值先复制快照，已有发布值直接返回，供原交接边界按只读契约使用。
      */
     public ReservationRuntime publicationValue() { return mutable ? snapshot() : this; }
-
-    /**
-     * 核对来源非空、订单和用户身份相同及新累计金额有效后，原位采用发布的释放和消耗计数；不改总额或身份。
-     * @param source 带相同订单及用户身份的发布来源，用来核对应用目标
-     * @param released 需要采用的新累计释放金额
-     * @param consumed 需要采用的新累计消耗金额
-     */
-    void applyPublishedStateInPlace(ReservationRuntime source, long released, long consumed) {
-        if (source == null || orderId != source.orderId || userId != source.userId
-                || released < 0 || consumed < 0 || Math.addExact(released, consumed) > totalReservedUnits) {
-            throw new IllegalStateException("invalid published reservation state");
-        }
-        releasedUnits = released;
-        consumedUnits = consumed;
-    }
 
     /**
      * 在所属 Lane 原位增加累计消耗，允许 0，负数或超过当前剩余额度立即拒绝。

@@ -81,16 +81,6 @@ final class PendingCommandIdIndex {
     }
 
     /**
-     * 检查 UUID 与槽引用非空后拆两半登记。
-     * @param commandId 要定位的命令 UUID
-     * @param value 需要登记或重插的非空命令槽引用
-     */
-    void put(UUID commandId, CommandSlot value) {
-        if (commandId == null || value == null) throw new IllegalArgumentException("command id and value are required");
-        put(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), value);
-    }
-
-    /**
      * 找到 UUID 后，仅在 expected 为空或与当前值按对象身份相同时删除；不匹配的旧请求不会移走另一个值。
      * @param most UUID 高六十四位
      * @param least UUID 低六十四位
@@ -107,26 +97,6 @@ final class PendingCommandIdIndex {
             }
             index = (index + 1) & mask;
         }
-    }
-
-    /**
-     * 空 UUID 不做事，否则拆两半并按可选预期引用删除。
-     * @param commandId 要定位的命令 UUID
-     * @param expected 删除时可选的预期对象引用，空值表示只按 UUID 删除
-     */
-    void remove(UUID commandId, CommandSlot expected) {
-        if (commandId == null) return;
-        remove(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), expected);
-    }
-
-    /**
-     * 清空值与 UUID 两半数组并归零条目数，复用原容量。
-     */
-    void clear() {
-        java.util.Arrays.fill(values, null);
-        java.util.Arrays.fill(mostSignificantBits, 0);
-        java.util.Arrays.fill(leastSignificantBits, 0);
-        size = 0;
     }
 
     /**

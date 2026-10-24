@@ -216,7 +216,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                     long amount = Math.subtractExact(total, before.totalUnits());
                     if (amount != 0) flows.add(new DeliveryCashFlow(before.userId(), before.asset(), amount, total));
                 }
-                if (!flows.isEmpty()) deliveryPage = new CommittedDeliveryPage(state.productLine(), logPosition, timestamp, delivery, flows);
+                if (!flows.isEmpty()) deliveryPage = new CommittedDeliveryPage(state.productLine(), timestamp, delivery, flows);
             }
             capture.commit(state.realtimeExportSequence());
             if (outbox.droppedBatches() != dropped || capture.failures() != failures)
@@ -559,19 +559,18 @@ public final class CommittedTradeReplay implements AutoCloseable {
     /**
      * 独立回放中当前有界交割页观察到的现金变化，列表复制后对外提供，不是在线账户状态副本。
      * @param product 当前回放或结果事实所属的独立产品线
-     * @param clusterPosition 事实所属的正复制日志位置
      * @param occurredAt 事实所属的正业务毫秒时间
      * @param command 本页已执行的交割结算命令，用户游标与现金项共用它的预算
      * @param cashFlows 本交割页非空且用户不重复的现金变化列表
      */
-    public record CommittedDeliveryPage(ProductLine product, long clusterPosition, long occurredAt,
+    public record CommittedDeliveryPage(ProductLine product, long occurredAt,
                                          SettleInstrumentCommand command, List<DeliveryCashFlow> cashFlows) {
         /**
-         * 复制现金项列表，校验交割产品、正日志位置和时间、非空命令及受本页用户预算约束的非空项数，并拒绝重复用户；只校验已有事实，不执行结算。
+         * 复制现金项列表，校验交割产品、正时间、非空命令及受本页用户预算约束的非空项数，并拒绝重复用户；只校验已有事实，不执行结算。
          */
         public CommittedDeliveryPage {
             cashFlows = List.copyOf(cashFlows);
-            if (product == null || !product.isDeliveryProduct() || clusterPosition <= 0 || occurredAt <= 0
+            if (product == null || !product.isDeliveryProduct() || occurredAt <= 0
                     || command == null || cashFlows.isEmpty() || cashFlows.size() > command.maxUsers())
                 throw new IllegalArgumentException("invalid committed delivery cash page");
             // 本交割页已出现用户集合，拒绝重复现金项

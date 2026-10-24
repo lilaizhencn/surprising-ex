@@ -624,11 +624,6 @@ public final class OrderRuntime {
     public OrderRuntime laneValue() { return mutable ? this : mutableCopy(); }
 
     /**
-     * 始终创建新的普通可变值供 Lane 接管，不继承原对象的命令槽或池标记。
-     */
-    OrderRuntime copyForLane() { return mutableCopy(); }
-
-    /**
      * 完整复制当前订单业务字段为新可变值，池归属、常驻冻结和退休设施不随之复制。
      */
     private OrderRuntime mutableCopy() {
@@ -643,41 +638,6 @@ public final class OrderRuntime {
      * 活动可变值先捕获快照，已有非可变交接值直接返回，沿用原发布租约。
      */
     public OrderRuntime publicationValue() { return mutable ? snapshot() : this; }
-
-    /**
-     * 核对订单编号、规范币对对象、数量守恒和基本提交元数据，再原位采用已发布的成交量、费用、累计值、时间、状态和版本。
-     * @param source 同一订单及规范币对身份的发布来源，用于核对原位更新目标
-     * @param executed 更新后的累计已成交数量步数
-     * @param remaining 更新后的剩余数量步数，两者精确和必须等于原始数量
-     * @param cumulativeFee 发布事实中已经累计好的手续费总额
-     * @param valueHigh 发布事实中累计成交值的高 64 位
-     * @param valueLow 发布事实中累计成交值的低 64 位
-     * @param createdAt 发布事实中的订单创建时间
-     * @param updatedAt 发布事实中的最近更新时间
-     * @param position 当前命令的集群日志位置
-     * @param publishedStatus 发布事实中的订单业务状态
-     * @param publishedRevision 发布事实中的正数订单版本
-     */
-    void applyPublishedStateInPlace(OrderRuntime source, long executed, long remaining,
-                                    long cumulativeFee, long valueHigh, long valueLow, long createdAt, long updatedAt,
-                                    long position, CoreOrderStatus publishedStatus,
-                                    long publishedRevision) {
-        if (source == null || orderId != source.orderId || instrument != source.instrument
-                || executed < 0 || remaining < 0 || Math.addExact(executed, remaining) != quantitySteps
-                || createdAt < 0 || updatedAt < createdAt || position < 0
-                || publishedStatus == null || publishedRevision <= 0) {
-            throw new IllegalStateException("invalid published order state");
-        }
-        executedQuantitySteps = executed;
-        cumulativeFeeUnits = cumulativeFee;
-        executedValueHigh = valueHigh;
-        executedValueLow = valueLow;
-        createdAtEpochMillis = createdAt;
-        updatedAtEpochMillis = updatedAt;
-        clusterPosition = position;
-        status = publishedStatus;
-        revision = publishedRevision;
-    }
 
     /**
      * 由所属 Lane 校验数量及基本提交参数后写入成交和剩余量，再精确累加手续费并推进状态版本；非负提交时间会同时补齐创建时间和更新日志位置，异常由原命令回滚边界处理。

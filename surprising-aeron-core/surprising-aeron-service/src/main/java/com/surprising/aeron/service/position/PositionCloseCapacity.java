@@ -14,15 +14,11 @@ import java.util.List;
  * 账户 Lane 对一份持仓可继续平仓数量的检查结果。已挂同方向平仓委托占用数量，其中只有只减仓订单进入可撤冲突列表；本对象只计算容量和冲突编号，不直接撤单或更改持仓。
  * @param positionQuantitySteps 目标持仓的绝对数量步数，无持仓时为 0
  * @param requestedQuantitySteps 现有同方向平仓委托剩余量合计，包含普通订单和只减仓订单，可能大于持仓绝对量
- * @param committedQuantitySteps 现有委托实际占用的平仓量，取委托请求合计与持仓绝对量的较小值
- * @param availableQuantitySteps 持仓绝对量扣掉已占用量后，还可供新只减仓委托使用的数量步数
  * @param newestFirst 只减仓冲突候选列表，按提交位置及同位置下订单编号从新到旧排列
  */
 public record PositionCloseCapacity(
         long positionQuantitySteps,
         long requestedQuantitySteps,
-        long committedQuantitySteps,
-        long availableQuantitySteps,
         List<Commitment> newestFirst) {
 
     /** 先按提交日志位置降序、再按订单编号降序，优先选最新的只减仓委托释放容量。 */
@@ -30,12 +26,10 @@ public record PositionCloseCapacity(
             .thenComparingLong(Commitment::orderId).reversed();
 
     /**
-     * 校验数量都非负，已承诺量加剩余量必须等于持仓绝对量；空冲突列表统一为空只读列表，非空列表沿用输入引用，不在这里复制。
+     * 校验两项数量非负及冲突列表非空；空列表统一为只读列表，非空列表沿用输入引用。
      */
     public PositionCloseCapacity {
         if (positionQuantitySteps < 0 || requestedQuantitySteps < 0
-                || committedQuantitySteps < 0 || availableQuantitySteps < 0
-                || Math.addExact(committedQuantitySteps, availableQuantitySteps) != positionQuantitySteps
                 || newestFirst == null) {
             throw new IllegalArgumentException("invalid position close capacity");
         }
@@ -87,8 +81,6 @@ public record PositionCloseCapacity(
         if (commitments != null && commitments.size() > 1) {
             commitments.sort(NEWEST_FIRST);
         }
-        // 实际被现有委托占掉的平仓容量，最多封顶到持仓绝对数量。
-        long committed = Math.min(positionQuantity, requestedQuantity);
         // 按最新优先整理的只减仓候选，零条和单条采用直接只读列表，多条沿用已排好序的列表。
         List<Commitment> sortedCommitments;
         if (commitments == null || commitments.isEmpty()) {
@@ -98,8 +90,12 @@ public record PositionCloseCapacity(
         } else {
             sortedCommitments = commitments;
         }
-        return new PositionCloseCapacity(positionQuantity, requestedQuantity, committed,
-                Math.subtractExact(positionQuantity, committed), sortedCommitments);
+        return new PositionCloseCapacity(positionQuantity, requestedQuantity, sortedCommitments);
+    }
+
+    /** 持仓量扣除现有平仓委托占用，超量委托时可用量为零。 */
+    public long availableQuantitySteps() {
+        return Math.subtractExact(positionQuantitySteps, Math.min(positionQuantitySteps, requestedQuantitySteps));
     }
 
     /**
@@ -108,7 +104,7 @@ public record PositionCloseCapacity(
      */
     public void require(long quantitySteps) {
         if (quantitySteps <= 0) throw new IllegalArgumentException("close quantity must be positive");
-        if (quantitySteps > availableQuantitySteps) {
+        if (quantitySteps > availableQuantitySteps()) {
             throw new CoreStateRejectedException("REDUCE_ONLY_CAPACITY_EXCEEDED",
                     "reduce-only open quantity exceeds position capacity");
         }

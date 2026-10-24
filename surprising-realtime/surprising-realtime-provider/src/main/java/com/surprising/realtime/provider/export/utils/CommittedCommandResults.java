@@ -12,8 +12,7 @@ public final class CommittedCommandResults {
                 || !Objects.equals(expected.instrumentId(), actual.instrumentId())
                 || expected.status() != actual.status() || expected.code() != actual.code()
                 || expected.appliedCommandCount() != actual.appliedCommandCount()
-                || (!expected.cancelResults().isEmpty() && !actual.cancelResults().isEmpty()
-                    && !expected.cancelResults().equals(actual.cancelResults())))
+                || !expected.cancelResults().equals(actual.cancelResults()))
             throw new IllegalStateException("conflicting committed command result");
     }
 }

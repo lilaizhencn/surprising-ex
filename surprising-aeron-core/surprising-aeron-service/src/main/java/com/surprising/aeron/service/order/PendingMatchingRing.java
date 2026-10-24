@@ -578,21 +578,6 @@ public final class PendingMatchingRing {
      */
     public boolean claimed(long sequence) { return contexts.claimed(sequence); }
     /**
-     * 只占用底层槽，不初始化命令或入队。
-     * @param sequence 当前命令的完整 Core 序号
-     */
-    CommandSlot claim(long sequence) { return contexts.claim(sequence); }
-    /**
-     * 按槽池的结果/Lane/路由条件回收占用槽，不维护本类链接，调用方先处理队列。
-     * @param sequence 当前命令的完整 Core 序号
-     */
-    void release(long sequence) { contexts.release(sequence); }
-    /**
-     * 不检查完成条件地回收底层槽，不维护全局或分片链接，仅供正确的终止/预备清理路径。
-     * @param sequence 当前命令的完整 Core 序号
-     */
-    void discard(long sequence) { contexts.discard(sequence); }
-    /**
      * 返回底层池全部占用数，包含未链接预备项。
      */
     public int inFlight() { return contexts.inFlight(); }
@@ -600,9 +585,4 @@ public final class PendingMatchingRing {
      * 返回底层池历史占用峰值，不只是已链接队列峰值。
      */
     public int highWaterMark() { return contexts.highWaterMark(); }
-    /**
-     * 按物理下标直接取底层槽，供内部链接数组配合使用。
-     * @param slot 当前物理槽下标
-     */
-    CommandSlot contextAt(int slot) { return contexts.contextAt(slot); }
 }

@@ -2,22 +2,17 @@ package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreLiquidationState;
-import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
-import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
-import com.surprising.aeron.service.order.state.OrderRuntime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -341,86 +336,6 @@ public final class CoreMatchingFlow {
         }
         owner.pendingMatching().required(sequence).publishMatchingCompletion(result);
         owner.pendingMatching().progressChanged();
-    }
-
-    /**
-     * 要求旧单及品种存在，从原消息解码 REPLACE 的新单或 AMEND 的可选修改字段，生成替换输入。
-     * @param message 当前完整 Core 命令
-     * @param order 当前旧订单的稳定读取引用
-     */
-    PlaceOrderCommand replacementFor(CoreMessage message, OrderRuntime order) {
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        // 当前路由或旧单对应的永久品种字符串。
-        String instrumentId = owner.runtimeOrderSymbol(order);
-        if (owner.runtimeState().instrument(instrumentId) == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        }
-        if (message.header().messageType() == CoreMessageType.REPLACE_ORDER) {
-            return TradingCommandCodec.decodeReplaceOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null).replacement();
-        }
-        // 当前操作对应的已解码输入或准备的固定 Matcher 函数，具体类型见声明。
-        var command = TradingCommandCodec.decodeAmendOrderInto(message.payloadUnsafe(), 0, message.payloadLength(), null);
-        return replacementForAmend(command, order);
-    }
-
-    /**
-     * 使用已有解码输入，校验旧单和品种后取 REPLACE 新单，其他传入操作走改单合成。
-     * @param decodedCommand 已经解码的命令输入
-     * @param operation 替换/改单等操作类别
-     * @param order 当前旧订单的稳定读取引用
-     */
-    PlaceOrderCommand replacementFor(DecodedMatchingCommand decodedCommand,
-                                     CommandSlot.Operation operation, OrderRuntime order) {
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        if (owner.runtimeState().instrument(owner.runtimeOrderSymbol(order)) == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        }
-        return operation == CommandSlot.Operation.REPLACE
-                ? decodedCommand.replaceOrder().replacement()
-                : replacementForAmend(decodedCommand.amendOrder(), order);
-    }
-
-    /**
-     * 从命令槽取替换或改单输入，替换先核旧单/品种，改单合成交下层检查。
-     * @param pending 本池仍在生命周期内的命令槽
-     * @param order 当前旧订单的稳定读取引用
-     */
-    PlaceOrderCommand replacementFor(CommandSlot pending, OrderRuntime order) {
-        if (pending.operation() == CommandSlot.Operation.REPLACE) {
-            if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-            if (owner.runtimeState().instrument(owner.runtimeOrderSymbol(order)) == null) {
-                throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-            }
-            return pending.decodedCommand().replaceOrder().replacement();
-        }
-        return replacementForAmend(pending.decodedCommand().amendOrder(), order);
-    }
-
-    /**
-     * 缺省价格沿旧展示价，缺省数量取旧剩余量，缺省有效期/只挂单沿旧值；其他身份方向沿旧单。新客户端键为空引用时使用空串，不继承旧键，再生成新订单号的替换输入。
-     * @param command 含可选修改字段的改单请求
-     * @param order 当前旧订单的稳定读取引用
-     */
-    PlaceOrderCommand replacementForAmend(AmendOrderCommand command, OrderRuntime order) {
-        if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        // 当前路由或旧单对应的永久品种字符串。
-        String instrumentId = owner.runtimeOrderSymbol(order);
-        if (owner.runtimeState().instrument(instrumentId) == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
-        }
-        // 改单有指定价则用新价，否则沿用旧展示价。
-        long priceTicks = command.hasPriceTicks() ? command.rawPriceTicks() : order.priceTicks();
-        // 改单有指定量则用新量，否则取旧剩余量。
-        long quantitySteps = command.hasQuantitySteps() ? command.rawQuantitySteps() : order.remainingQuantitySteps();
-        // 新指定或沿用旧单的有效期。
-        var timeInForce = command.timeInForce() == null ? order.timeInForce() : command.timeInForce();
-        // 新指定或沿用旧单的只挂单标记。
-        boolean postOnly = command.hasPostOnly() ? command.isPostOnly() : order.postOnly();
-        // 新客户端键，空引用按空串处理。
-        String clientOrderId = command.newClientOrderId() == null ? "" : command.newClientOrderId();
-        return new PlaceOrderCommand(command.replacementOrderId(), instrumentId,
-                order.side(), priceTicks, quantitySteps, order.reduceOnly(), order.marginMode(),
-                order.positionSide(), order.orderType(), timeInForce, postOnly, clientOrderId);
     }
 
     /**

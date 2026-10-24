@@ -3,6 +3,7 @@ package com.surprising.aeron.service.settlement.lifecycle;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
+import com.surprising.aeron.service.account.UserIndexPage;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
@@ -305,11 +306,13 @@ public final class RuntimeLifecycleSettlementContinuation {
          * 由账本线程读取用户索引并按账户 Lane 分组；账本未激活时由初始化路径内联调用。订单仍有下一页时不选择持仓用户，最后发布 usersReady 并唤醒 Owner。
          */
         private void selectAccountUsers() {
-            // 本次从活动订单或用户索引读取的页面。
-            RuntimeLifecycleSettlement.UserPage page = moreOrders
-                    ? new RuntimeLifecycleSettlement.UserPage(List.of(), 0, true)
-                    : RuntimeLifecycleSettlement.selectUsers(indexedUserIds, command.cursorUserId(), command.maxUsers());
-            selectedUserIds = page.userIds(); usersComplete = page.complete();
+            selectedUserIds = List.of();
+            usersComplete = true;
+            if (!moreOrders) {
+                UserIndexPage page = UserIndexPage.select(indexedUserIds, command.cursorUserId(), command.maxUsers());
+                selectedUserIds = page.userIds();
+                usersComplete = page.complete();
+            }
             for (long /* 本次账本选页得到的用户编号。 */ user : selectedUserIds) usersByLane[runtime.topology().accountLaneId(user)].add(user);
             userLaneMask = RuntimeLifecycleSettlement.laneMask(usersByLane);
             indexedUserIds = null;
@@ -512,8 +515,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          */
         @Override protected void applyLedger(TreasuryRuntime ledger) {
             if (financialPhase == FinancialPhase.ORDER_PROGRESS) {
-                ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                        instrument, command.settlementPriceTicks(), false, nextOrderCursor, 0, 0));
+                ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), false, nextOrderCursor, 0, 0));
                 return;
             }
             if (financialPhase == FinancialPhase.INSURANCE) {
@@ -530,8 +532,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                 if (!budgetSufficient) {
                     // 保险不足时原样保留的用户游标，不跳过尚未应用的用户页。
                     long cursor = command.cursorUserId();
-                    ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                            instrument, command.settlementPriceTicks(), true, 0, cursor, requiredInsurance));
+                    ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, cursor, requiredInsurance));
                 } else if (requiredInsurance != 0) {
                     ledger.setInsurance(assetId, Math.subtractExact(ledger.insurance(assetId), requiredInsurance),
                             ledger.insuranceDeficit(assetId));
@@ -544,8 +545,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             // 本用户页已读到索引末尾或为空，从而可登记整个结算完成。
             boolean complete = usersComplete || selectedUserIds.isEmpty();
             if (complete) ledger.setLifecycleSettlement(symbolId, command.settlementId());
-            else ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                    instrument, command.settlementPriceTicks(), true, 0, selectedUserIds.getLast(), 0));
+            else ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, selectedUserIds.getLast(), 0));
         }
 
         /**
