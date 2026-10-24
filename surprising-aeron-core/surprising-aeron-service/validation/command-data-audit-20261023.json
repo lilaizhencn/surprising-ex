@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第六十二轮删除1个无调用保险准备重载及Claim私有包装2字段，净减33行；原比例/余数和Lane/账本边界保留。18模块干净构建、108回归、六线真实HTTP/WS、两种永续保险补亏及10次Cluster恢复通过。189解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第六十三轮清理补亏冷包装、一次性输入/缓存、多资产差额搬运及源Lane位图，共7字段、1record，生产净减81行；18模块干净构建、136回归、六线实测、两种永续实际保险/ADL及12次Cluster恢复通过。193解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -10847,6 +10847,60 @@
       "business_code_changed": true,
       "resolved_in_round": "sixty_second_cleanup_round",
       "verification": "18模块干净构建、108相关回归、六线HTTP/WS、保险补亏及10次真实Cluster冷恢复；边界见round62-runtime-20261025.json。"
+    },
+    {
+      "id": "A195",
+      "status": "resolved",
+      "source_basis_commit": "10d11e6978839583eba72665dbfce18c5fb70fd6",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_third_cleanup_round",
+      "topic": "仅测试调用的冷保险resolve包装",
+      "fields_or_methods": [
+        "InsuranceAllocationPolicy.resolve(TradingAccountRuntime,RuntimeIdentityRegistry,Iterable,long)"
+      ],
+      "evidence": "4017份旧classfile只见CoreLifecycleStateTest调用，测试直接使用真实回执入口；旧入口定义/调用清除。",
+      "verification": "18模块干净构建、136回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复；范围见round63-runtime-20261025.json。"
+    },
+    {
+      "id": "A196",
+      "status": "resolved",
+      "source_basis_commit": "10d11e6978839583eba72665dbfce18c5fb70fd6",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_third_cleanup_round",
+      "topic": "账本内一次性保险输入和缓存",
+      "fields_or_methods": [
+        "InsuranceAllocationPolicy.ResolutionInputs",
+        "ResolutionWork.allocation",
+        "ResolutionWork.prepare的liquidation/allocation恒null参数"
+      ],
+      "evidence": "一次性4字段record无独立线程/恢复边界；源缺口与匹配回执引用同一不可变事实。合并收集/计算，保留前缀、排序和全部金融校验。",
+      "verification": "18模块干净构建、136回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复；范围见round63-runtime-20261025.json。"
+    },
+    {
+      "id": "A197",
+      "status": "resolved",
+      "source_basis_commit": "10d11e6978839583eba72665dbfce18c5fb70fd6",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_third_cleanup_round",
+      "topic": "单资产保险支付携带通用多资产差额",
+      "fields_or_methods": [
+        "ResolutionWork.treasuryDelta"
+      ],
+      "evidence": "仅同一资产保险与亏空同时减覆盖额；原setInsurance已一次捕获资产前值，原系统账本范围承担提交/回滚。",
+      "verification": "18模块干净构建、136回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复；范围见round63-runtime-20261025.json。"
+    },
+    {
+      "id": "A198",
+      "status": "resolved",
+      "source_basis_commit": "10d11e6978839583eba72665dbfce18c5fb70fd6",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_third_cleanup_round",
+      "topic": "源Lane位图重复缓存",
+      "fields_or_methods": [
+        "ResolutionWork.laneMask"
+      ],
+      "evidence": "仅由仍保留的sourceUserId和固定拓扑确定，读取/写回直接取得原位图，无新扫描或集合。",
+      "verification": "18模块干净构建、136回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复；范围见round63-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -10864,10 +10918,10 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "继续按业务操作检查命令产生、Lane/账本、提交/回滚、落盘、恢复和回放的实际消费，集中下一轮可证明冗余项。",
-    "每轮清理完成后先运行相关回归和六线顺序实测，通过后再开始下一轮。",
-    "A11仍候选，领导者读、提交水位和会话语义明确前不删QUERY路由。",
-    "本轮保险实际支付及ADL待办恢复已验证；自动ADL执行、定时调度与故障注入等边界见round62-runtime-20261025.json。"
+    "继续按业务操作追踪命令、Lane/账本、提交/回滚、落盘、恢复和回放的实际消费，集中下一轮可证明冗余项。",
+    "每轮清理完成后先验证相关回归和六线业务，通过后再开始下一轮。",
+    "A11仍候选；领导者读、提交水位及会话语义明确前不删除QUERY路由。",
+    "本轮已验证实际保险/ADL命令、拒绝、幂等和恢复；定时调度、自动止盈止损、UI、多节点及在途崩溃未测，见机器证据限制。"
   ],
   "rejected_false_positives": [
     {
@@ -10942,7 +10996,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A193_A194_cleaned_108_related_cases_six_live_products_ten_cold_recoveries_verified; overall_audit_in_progress",
+  "analysis_round_status": "A195_to_A198_cleaned_136_cases_six_live_products_actual_adl_twelve_cold_recoveries_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11164,11 +11218,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "2ac60ac6ebf10f8ba328eb7a0d96c029d99041bb",
-    "status": "insurance_wrappers_cleaned_and_runtime_verified",
+    "source_basis_commit": "10d11e6978839583eba72665dbfce18c5fb70fd6",
+    "status": "insurance_resolution_state_cleaned_and_actual_adl_verified",
     "resolved_ids": [
-      "A193",
-      "A194"
+      "A195",
+      "A196",
+      "A197",
+      "A198"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11181,11 +11237,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 189,
+      "resolved": 193,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "sixty_second_cleanup_round",
+    "evidence": "sixty_third_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44073,6 +44129,29 @@
     "cold_recoveries": 10,
     "counts": {
       "resolved": 189,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "sixty_third_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "10d11e6978839583eba72665dbfce18c5fb70fd6",
+    "resolved_ids": [
+      "A195",
+      "A196",
+      "A197",
+      "A198"
+    ],
+    "removed_instance_fields": 7,
+    "production_net_lines_removed": 81,
+    "report": "deep-code-cleanup-20261025-round63.md",
+    "evidence": "round63-runtime-20261025.json",
+    "unit_tests": 136,
+    "runtime_products": 6,
+    "cold_recoveries": 12,
+    "counts": {
+      "resolved": 193,
       "candidate": 1,
       "retained": 4
     },

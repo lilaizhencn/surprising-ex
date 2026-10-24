@@ -8,7 +8,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.treasury.InsuranceAllocationPolicy;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import lombok.AccessLevel;
@@ -19,7 +18,7 @@ import lombok.NoArgsConstructor;
 public final class RuntimeLiquidationResolution {
 
     /**
-     * 可回收的旧续步连同资金差额存储一起复用，否则新建，再准备本次索赔和补亏工作。
+     * 可回收的旧续步直接复用，否则新建，再准备本次索赔和补亏工作。
      * @param reuse 上次已经可回收的补亏续步，未提供或尚不可复用时新建
      * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
@@ -42,7 +41,7 @@ public final class RuntimeLiquidationResolution {
         // 本命令新建或复用的补亏续步，异步路径准备好后返回 Owner。
         ResolutionWork work = reuse == null || !reuse.reusable() ? new ResolutionWork() : reuse;
         work.sourceUserId = route.userId();
-        work.prepare(runtime, command, null, assetId, null);
+        work.prepare(runtime, command, assetId);
         work.prepareClaimReads(candidateIds, identities);
         return work;
     }
@@ -52,18 +51,12 @@ public final class RuntimeLiquidationResolution {
      */
     public static final class ResolutionWork extends SystemLedgerCommand
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
-        /** 账本处理本决议时复用的保险余额和亏空变化缓冲，每次准备命令先清空。 */
-        private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         /** 当前保险补亏或完成命令，成功结束时释放引用。 */
         private ResolveLiquidationCommand command;
         /** liquidation：源账户 Lane 捕获的待处理强平记录，账本根据它判断剩余亏空与阶段；nextLiquidation：账本根据实际覆盖额生成的新强平记录，随后交回源账户 Lane 写入。 */
         private LiquidationRuntime liquidation, nextLiquidation;
-        /** 同资产保险索赔的确定性分配输入，账本用它校验本笔是否轮到处理及覆盖额。 */
-        private InsuranceAllocationPolicy.ResolutionInputs allocation;
         /** 源合约结算资产整数编号，保险池、索赔和亏空必须使用同一资产。 */
         private int assetId;
-        /** 最终需要写入强平新状态的源账户 Lane 位集合。 */
-        private long laneMask;
         /** done：账本和源账户写入都完成后的标记，重复轮询直接返回完成；ledgerDispatched：本决议账本命令是否已经成功入队，防止重复扣保险余额；accountsDispatched：账本完成后是否已经派发源账户新状态写入。 */
         private boolean done, ledgerDispatched, accountsDispatched;
         /** 源强平路由中的用户编号，用于还未读取记录时定位所属 Lane。 */
@@ -80,22 +73,14 @@ public final class RuntimeLiquidationResolution {
         private int claimCount;
 
         /**
-         * 绑定本次补亏命令与源强平，预检查修订号容量、清空资金差额并重置账本及账户阶段；异步源记录尚未读取时用路由用户定位 Lane。
-         * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-         * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额
-         * @param liquidation 本命令要继续处理的强平记录，异步准备时可为空，随后由源账户 Lane 读取
-         * @param assetId 源强平结算资产的整数编号，保险和亏空总账都按该资产记账
-         * @param allocation 确定性保险分配的输入快照，异步路径先留空，等待账户回执后由账本准备
+         * 绑定本次命令，预检查修订号容量，重置读取、账本和源账户写入阶段；源强平由其所属 Lane 捕获。
          */
-        private void prepare(TradingAccountRuntime runtime, ResolveLiquidationCommand command,
-                LiquidationRuntime liquidation, int assetId, InsuranceAllocationPolicy.ResolutionInputs allocation) {
+        private void prepare(TradingAccountRuntime runtime, ResolveLiquidationCommand command, int assetId) {
             initializeLedgerCommand(runtime);
             runtime.requireRevisionCapacity();
-            this.command = command; this.liquidation = liquidation;
-            this.assetId = assetId; this.allocation = allocation;
-            laneMask = runtime.topology().accountLaneMask(liquidation == null ? sourceUserId : liquidation.userId());
-            nextLiquidation = null;
-            treasuryDelta.clear();
+            this.command = command;
+            this.assetId = assetId;
+            liquidation = nextLiquidation = null;
             done = ledgerDispatched = accountsDispatched = capturingClaims = false;
         }
 
@@ -107,7 +92,7 @@ public final class RuntimeLiquidationResolution {
         private void prepareClaimReads(Iterable<Long> candidateIds, RuntimeIdentityRegistry identities) {
             claimCount = 0;
             // 索赔读取阶段需要访问的所有账户 Lane 位集合，始终包含源强平的 Lane。
-            long readMask = laneMask;
+            long readMask = runtime.topology().accountLaneMask(sourceUserId);
             if (command.resolution() == ResolveLiquidationCommand.Resolution.INSURANCE) {
                 for (long /* 正在检查的候选强平编号，仅同资产且路由存在时加入本批读取。 */ id : candidateIds) {
                     // Owner 可读的候选或源强平路由，提供用户及合约信息以安排所属 Lane 读取。
@@ -138,8 +123,6 @@ public final class RuntimeLiquidationResolution {
          * @param ledger 当前账本线程持有的资金总账，只有在账本执行阶段应用资金差额
          */
         @Override protected void applyLedger(TreasuryRuntime ledger) {
-            if (command.resolution() == ResolveLiquidationCommand.Resolution.INSURANCE && allocation == null)
-                allocation = InsuranceAllocationPolicy.prepareResolution(claimReceipts, claimCount, liquidation, assetId);
             // 账本按本次保险覆盖额扣减后的剩余亏空，随后写入新的强平记录。
             long nextDeficit = liquidation.deficitUnits();
             // 账本验证后决定的新阶段：亏空归零可完成，否则进入待 ADL。
@@ -151,19 +134,21 @@ public final class RuntimeLiquidationResolution {
                     if (command.coveredUnits() > liquidation.deficitUnits())
                         throw new CoreStateRejectedException("INSURANCE_COVER_EXCEEDS_DEFICIT", "insurance coverage must be within liquidation deficit");
                     // 保险分配规则给出的本笔处理优先级和期望覆盖额，命令声明必须与它一致。
-                    InsuranceAllocationPolicy.Resolution result = InsuranceAllocationPolicy.resolve(allocation, ledger);
+                    InsuranceAllocationPolicy.Resolution result = InsuranceAllocationPolicy.resolve(
+                            claimReceipts, claimCount, liquidation.liquidationId(), assetId, ledger);
                     if (!result.next()) throw new CoreStateRejectedException("INSURANCE_RESOLUTION_ORDER_MISMATCH",
                             "insurance claims must resolve in deterministic priority order");
                     if (command.coveredUnits() != result.expectedCoverage())
                         throw new CoreStateRejectedException("INSURANCE_ALLOCATION_MISMATCH", "insurance coverage does not match deterministic allocation");
                     if (command.coveredUnits() > ledger.insurance(assetId))
                         throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "insurance fund balance is insufficient");
-                    if (command.coveredUnits() != 0) {
-                        treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
-                        treasuryDelta.addDeficit(assetId, Math.negateExact(command.coveredUnits()));
-                    }
                     nextDeficit = Math.subtractExact(nextDeficit, command.coveredUnits());
                     nextStatus = nextDeficit == 0 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
+                    if (command.coveredUnits() != 0) {
+                        ledger.setInsurance(assetId,
+                                Math.subtractExact(ledger.insurance(assetId), command.coveredUnits()),
+                                Math.subtractExact(ledger.insuranceDeficit(assetId), command.coveredUnits()));
+                    }
                 }
                 case ADL -> throw new CoreStateRejectedException("INVALID_COMMAND", "ADL resolution requires atomic target deleveraging");
                 case COMPLETED -> {
@@ -174,7 +159,6 @@ public final class RuntimeLiquidationResolution {
                 }
                 default -> throw new IllegalStateException("unknown liquidation resolution");
             }
-            treasuryDelta.apply(ledger);
             // 本次源强平记录，复制其他执行事实，只替换剩余亏空和处理状态。
             LiquidationRuntime current = liquidation;
             nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(), current.symbolId(),
@@ -221,7 +205,7 @@ public final class RuntimeLiquidationResolution {
             }
             if (!ledgerCommandCompleted()) return false;
             if (!accountsDispatched) {
-                runtime.dispatchControlLanes(laneMask, this);
+                runtime.dispatchControlLanes(runtime.topology().accountLaneMask(sourceUserId), this);
                 accountsDispatched = true;
             }
             if (!runtime.pollControlLanes()) return false;
@@ -236,7 +220,6 @@ public final class RuntimeLiquidationResolution {
             if (done) return;
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
             java.util.Arrays.fill(claimReceipts, 0, claimCount, null);
-            allocation = null;
             liquidation = nextLiquidation = null;
             command = null;
             done = true;

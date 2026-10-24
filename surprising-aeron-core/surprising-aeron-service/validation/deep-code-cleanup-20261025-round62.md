@@ -5,7 +5,7 @@
 保险查询由账户Lane读取自己持有的强平事实，账本按结算资产分组和基金余额计算推荐额；实际补亏在原ResolutionWork中收集Lane回执，账本验证确定性优先级和覆盖额，再由源Lane更新强平阶段。该所有权和回滚流程保留。
 
 - A193：删除无调用的prepareResolution(runtime, identities, candidateIds, target, assetId)重载；保留实际工作使用的回执数组重载。先通过CodeGraph定位，再用4018份classfile中的完整所属类/方法/描述符区分同名重载，删除项没有调用；反射/配置字面量未发现相关入口。
-- A194：删除私有Claim record及liquidation/instrumentId两个字段。各列表直接保存同一LiquidationRuntime引用；规范合约名直接从其instrument取得，不再为每条索赔创建重复包装。AllocationInputs和ResolutionInputs继续承担实际线程交接职责。
+- A194：删除私有Claim record及liquidation/instrumentId两个字段。各列表直接保存同一LiquidationRuntime引用；规范合约名直接从其instrument取得，不再为每条索赔创建重复包装。该轮保留AllocationInputs和ResolutionInputs。后续第六十三轮核实：实际跨线程的是Lane回执与AllocationInputs；ResolutionInputs只在账本回调内创建和消费，已在该轮清理。原说明对两者用途的概括过宽，现予更正。
 
 合约身份解析要求规范正整数文本，与身份表反向名称相同。排序仍依次按触发价格序号、用户、合约名的字符串顺序、持仓方向ordinal、强平编号，未改为合约数字排序。状态/资产/配置身份过滤、候选重复规则和列表独占生命周期保留。两个真实分配计算方法在去除访问包装与类型替换后正文一致；BigInteger比例、整除、余数补一、覆盖上限及精确运算未改。
 

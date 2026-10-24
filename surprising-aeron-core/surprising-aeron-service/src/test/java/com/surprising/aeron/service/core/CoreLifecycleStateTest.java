@@ -29,6 +29,8 @@ import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.aeron.service.treasury.InsuranceAllocationPolicy;
+import com.surprising.aeron.service.treasury.TreasuryRuntime;
+import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.instrument.api.model.ContractType;
@@ -675,21 +677,42 @@ class CoreLifecycleStateTest {
         // 独立运行时投影或业务状态对照使用的身份表。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 用于核对反向编号列表分配结果的独立运行时。
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
-        // 故意反转的候选强平编号列表，用来检查输入次序不改变分配。
-        var reverseIds = new java.util.ArrayList<>(state.riskState().liquidations().keySet());
-        java.util.Collections.reverse(reverseIds);
-        // 对反向候选列表一次性求出的全部保险分配结果。
-        var allAllocations = InsuranceAllocationPolicy.allocations(runtime, identities, reverseIds);
-        for (long /* 当前要比较逐项保险覆盖结果的强平编号。 */ id : reverseIds) {
-            assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.resolve(runtime, identities, reverseIds, id).expectedCoverage())
-                    .isEqualTo(allAllocations.get(id))
-                    .isEqualTo(RuntimeTestStateTransitions.expectedInsuranceCoverage(state, id));
+        try (TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities)) {
+            // 故意反转的候选强平编号列表，用来检查输入次序不改变分配。
+            var reverseIds = new java.util.ArrayList<>(state.riskState().liquidations().keySet());
+            java.util.Collections.reverse(reverseIds);
+            int assetId = identities.assetId("USDT");
+            // 空槽和有效前缀之后的重复回执均不应参与分配。
+            LiquidationRuntime[] receipts = new LiquidationRuntime[reverseIds.size() + 2];
+            for (int index = 0; index < reverseIds.size(); index++) receipts[index + 1] = runtime.liquidation(reverseIds.get(index));
+            receipts[receipts.length - 1] = runtime.liquidation(firstUser.liquidationId());
+            int count = receipts.length - 1;
+            java.util.function.LongFunction<InsuranceAllocationPolicy.Resolution> resolution = id ->
+                    runtime.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.resolve(receipts, count, id, assetId, ledger));
+            // 对反向候选列表一次性求出的全部保险分配结果。
+            var allAllocations = InsuranceAllocationPolicy.allocations(runtime, identities, reverseIds);
+            for (long /* 当前要比较逐项保险覆盖结果的强平编号。 */ id : reverseIds) {
+                assertThat(resolution.apply(id).expectedCoverage())
+                        .isEqualTo(allAllocations.get(id))
+                        .isEqualTo(RuntimeTestStateTransitions.expectedInsuranceCoverage(state, id));
+            }
+            assertThat(resolution.apply(firstUser.liquidationId()).next())
+                    .isTrue();
+            assertThat(resolution.apply(secondUser.liquidationId()).next())
+                    .isFalse();
+
+            TreasuryRuntime fullBudget = new TreasuryRuntime();
+            fullBudget.setInsurance(assetId, 10_000, 0);
+            assertThat(Math.addExact(firstUser.deficitUnits(), secondUser.deficitUnits())).isLessThan(10_000);
+            assertThat(InsuranceAllocationPolicy.resolve(receipts, count, firstUser.liquidationId(), assetId, fullBudget))
+                    .isEqualTo(new InsuranceAllocationPolicy.Resolution(true, firstUser.deficitUnits()));
+            assertThat(InsuranceAllocationPolicy.resolve(receipts, count, secondUser.liquidationId(), assetId, fullBudget))
+                    .isEqualTo(new InsuranceAllocationPolicy.Resolution(false, secondUser.deficitUnits()));
+            assertThat(InsuranceAllocationPolicy.resolve(receipts, count, firstUser.liquidationId(), assetId, new TreasuryRuntime()))
+                    .isEqualTo(new InsuranceAllocationPolicy.Resolution(true, 0));
+            assertThat(InsuranceAllocationPolicy.resolve(receipts, count, Long.MAX_VALUE, assetId, fullBudget))
+                    .isEqualTo(new InsuranceAllocationPolicy.Resolution(false, 0));
         }
-        assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.resolve(runtime, identities, reverseIds, firstUser.liquidationId()).next())
-                .isTrue();
-        assertThat(com.surprising.aeron.service.treasury.InsuranceAllocationPolicy.resolve(runtime, identities, reverseIds, secondUser.liquidationId()).next())
-                .isFalse();
 
         assertThat(firstCoverage).isEqualTo(secondCoverage + 1);
         assertThat(firstCoverage + secondCoverage)
