@@ -3056,7 +3056,6 @@ CREATE TABLE IF NOT EXISTS core_execution_projection (
     taker_user_id BIGINT NOT NULL,
     maker_user_id BIGINT NOT NULL,
     instrument_id VARCHAR(64) NOT NULL,
-    instrument_change_id BIGINT NOT NULL,
     taker_side VARCHAR(8) NOT NULL,
     taker_fee_rate_ppm BIGINT NOT NULL,
     maker_fee_rate_ppm BIGINT NOT NULL,
@@ -3112,7 +3111,6 @@ CREATE TABLE IF NOT EXISTS core_funding_settlement_projection (
     settlement_id BIGINT NOT NULL,
     export_sequence BIGINT NOT NULL,
     instrument_id VARCHAR(64) NOT NULL,
-    instrument_change_id BIGINT, -- Core funding command has no instrument version; unknown is NULL.
     funding_rate_ppm BIGINT NOT NULL,
     command_status VARCHAR(32) NOT NULL,
     result_code VARCHAR(64) NOT NULL,
@@ -4739,8 +4737,6 @@ CREATE TABLE IF NOT EXISTS core_trigger_projection_initialization (
 ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS trade_id text NOT NULL;
 ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS taker_position_side varchar(16) NOT NULL;
 ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS maker_position_side varchar(16) NOT NULL;
--- The committed realtime frame carries order fee rates, not an instrument configuration version.
-ALTER TABLE core_execution_projection ALTER COLUMN instrument_change_id DROP NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_core_execution_projection_trade
     ON core_execution_projection(product_line,trade_id);
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_time

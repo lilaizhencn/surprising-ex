@@ -55,7 +55,6 @@ class CommittedFundingProjectionPostgresTest {
         assertThat(row.get("total_long_payment_units")).isEqualTo(-100L);
         assertThat(row.get("total_short_payment_units")).isEqualTo(100L);
         assertThat(row.get("position_count")).isEqualTo(2);
-        assertThat(row.get("instrument_change_id")).isNull();
         assertThat(row.get("export_sequence")).isEqualTo(8192L);
     }
 

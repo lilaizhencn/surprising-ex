@@ -560,6 +560,8 @@ Web lint/build 和 147 项测试通过；Flutter analyze 无问题、126 项测�
 
 `CommittedCommandResultRepair` 仍可用独立 `.command-repair` checkpoint 从已提交日志重建当前回执投影，不写订单水位、不重发 Kafka 或在线交易命令。交割现金页只携带产品、业务时间、结算命令和真实现金变化；日志位置与检查点由原导出流程管理，不再放入页对象重复保存。
 
+`core_execution_projection`与`core_funding_settlement_projection`删除没有当前生产来源和读模型消费的`instrument_change_id`列，当前初始化脚本及成交投影DDL同步清理。成交身份、价格数量、费用、资金费汇总、产品隔离及导出水位继续由原已提交事实提供，用户和管理查询返回字段不变。
+
 ### 交割现金流水与有限回补（2026-10-20）
 
 `CommittedTradeReplay` 在独立的已提交日志回放进程处理 SETTLE_INSTRUMENT 时，通过本地所有者查询读取同一全局用户游标页的结算资产余额，比较结算前后的可用加冻结总额。真实现金差额包括实际保险补偿；释放保证金不是收入，平价结算没有现金变动则不生成流水。不复制在线 Core 状态，不新增撮合或账户热路径阶段，不向在线 Core 发查询。

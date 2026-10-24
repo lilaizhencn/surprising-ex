@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第三十六轮：A131-A140完成；删除21个死方法、额外1个分页转发、2个冗余record类型共9个组件。15模块干净编译及当前realtime9模块复编通过；4020classfile旧方法/字段/类型引用零。累计134解决；A142两项投影版本列确认无消费待清理，A130投影生产链仍缺失，A11/A141保留候选。",
+    "checkpoint": "第三十七轮：A142两项无用成交/资金费版本列及专属DDL/NULL断言删除。相关14模块干净编译61.533秒，当前DDL字段集合与实际写入17/11列一致；没有生产Java改动或SQL执行。累计135解决，A130生产链缺口继续处理，原始历史时间不得用快照时间伪造，A11/A141仍为候选。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -7159,7 +7159,10 @@
         "真实公开强平历史及风险候选查询依赖该表；存在读模型链路缺口，不能把三项财务字段或整个读端直接当死代码删除。此结论针对当前仓库链路，未查询部署数据库。"
       ],
       "proposed_cleanup": "单独修复既有已提交强平事实到历史投影的生产链，并核对恢复/检查点与事务；复用原变化交接边界，不加在线Core查询fallback或逐命令全量扫描。",
-      "disposition": "repair_existing_business_projection"
+      "disposition": "repair_existing_business_projection",
+      "followup_in_round": "thirty_seventh_cleanup_round",
+      "required_next": "复用现有成交历史初始化模式：在原已提交回放中捕获不可变强平变化，写入原SQL事务；缺少就绪标记时用独立Archive重建覆盖原live前缀，再发布就绪。保持各产品隔离，失败不推进检查点。",
+      "timestamp_source_requirement": "强平冷/热记录不含每条记录的更新时间，不能用快照Cluster当前时间伪造历史eventTime。现有initializeExecutions先从Archive重建前缀再发布初始化标记，可复用这一已存在的恢复规则，保留原始日志时间，不为补历史日期向Core堆加无依据元数据。"
     },
     {
       "id": "A131",
@@ -7641,11 +7644,11 @@
     },
     {
       "id": "A142",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed_unused_current_projection_columns",
       "topic": "成交与资金费投影仍保留当前生产者不写、测试断言NULL的合约版本列",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "init.sql",
@@ -7719,7 +7722,14 @@
         "core_execution_projection.instrument_change_id",
         "core_funding_settlement_projection.instrument_change_id"
       ],
-      "confirmed_in_round": "thirty_sixth_cleanup_round"
+      "confirmed_in_round": "thirty_sixth_cleanup_round",
+      "resolved_in_round": "thirty_seventh_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除成交/资金费投影两项无用版本列；当前初始化及成交DDL不再为它们放宽非空，删除2条仅断言NULL的测试语句，生产Java/当前API返回字段不变。",
+        "tests_executed": false,
+        "database_sql_executed": false
+      }
     }
   ],
   "preserve_verified_purposes": [
@@ -7737,10 +7747,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "清理A142：当前成交/资金费投影的两项无用版本列及只为它们存在的DDL/测试断言，当前公开查询形状不变；只编译相关模块，不执行SQL。",
-    "修复A130：沿既有已提交强平变化交接补齐投影生产链，保留实际执行价/费率/实收费；不新增在线Core查询fallback或逐命令全量复制。",
-    "A141强平版本字段仍被风险响应读取，先同步核对真实来源与必要契约；风险读端的marginMode也必须读取真实事实，不用固定CROSS。",
-    "A11在领导者读/提交水位/会话一致性没有等价替代前保留。继续扫描命令到恢复/查询的字段及人工约束，不能以编译推断运行验证。"
+    "处理A130：沿已提交强平变化交接补齐原SQL事务内投影；复用initializeExecutions已有Archive前缀重建与就绪标记规则，保存原命令业务时间，失败不前移检查点。",
+    "A141强平候选响应仍读取旧版本字段，随生产链核对实际来源及当前契约；风险读端marginMode必须使用真实事实，不用固定CROSS。",
+    "A11维持现有领导者/提交水位/会话一致性边界。继续检查命令、执行、状态、恢复与查询的每个字段，保留真实金融事实及有实际职责的线程/事务边界。"
   ],
   "rejected_false_positives": [
     {
@@ -8037,23 +8046,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "794de68bdac31e1fc9f41a3a79cf87df74924f25",
+    "source_basis_commit": "ddd098459b0d6faaebb5456545f7aa07b1d5bb84",
     "status": "cleanup_verified_followup_analysis",
     "resolved_ids": [
-      "A131",
-      "A132",
-      "A133",
-      "A134",
-      "A135",
-      "A136",
-      "A137",
-      "A138",
-      "A139",
-      "A140"
+      "A142"
     ],
     "confirmed_ids": [
-      "A130",
-      "A142"
+      "A130"
     ],
     "candidate_ids": [
       "A11",
@@ -8066,12 +8065,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 134,
+      "resolved": 135,
       "candidate": 2,
       "retained": 4,
-      "confirmed": 2
+      "confirmed": 1
     },
-    "evidence": "thirty_sixth_cleanup_round",
+    "evidence": "thirty_seventh_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -29807,6 +29806,209 @@
           "path": "/tmp/aeron-runtime-cleanup-20261024-verify.py",
           "bytes": 5250,
           "sha256": "1ff7540c2a106a07d81458765374c2a063791831c55991b61e310545d6d50cda"
+        }
+      ]
+    }
+  },
+  "thirty_seventh_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "ddd098459b0d6faaebb5456545f7aa07b1d5bb84",
+    "resolved_ids": [
+      "A142"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 135,
+      "candidate": 2,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "removed_columns": [
+      "core_execution_projection.instrument_change_id",
+      "core_funding_settlement_projection.instrument_change_id"
+    ],
+    "implementation": [
+      "当前init.sql删除两项没有来源或查询消费的版本列。",
+      "当前init.sql与20261020-execution-read-projection.sql删除仅为旧成交版本列DROP NOT NULL的步骤和附属说明。",
+      "删除两条只检查旧字段为NULL的测试语句，保留实际成交/费率/资金费流水、顺序、幂等与汇总源场景。",
+      "同步两模块中文README，当前API响应与生产Java实现保持原样。"
+    ],
+    "verification": {
+      "command": "mvn -pl surprising-realtime/surprising-realtime-provider,surprising-gateway,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 61.533,
+      "log_sha256": "f45405fb26b5b33651561d2acecb6597b83cf1db8733f53b3d23feee489c75d0",
+      "tests_executed": false,
+      "database_sql_executed": false,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-realtime-api",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-derivatives-lifecycle",
+        "surprising-realtime-provider",
+        "surprising-gateway"
+      ],
+      "reactor_module_count": 14
+    },
+    "static_verification": {
+      "schema_and_producer_column_sets": {
+        "core_execution_projection": {
+          "current_columns": [
+            "product_line",
+            "export_sequence",
+            "execution_index",
+            "taker_order_id",
+            "maker_order_id",
+            "taker_user_id",
+            "maker_user_id",
+            "instrument_id",
+            "taker_side",
+            "taker_fee_rate_ppm",
+            "maker_fee_rate_ppm",
+            "price_ticks",
+            "quantity_steps",
+            "occurred_at_epoch_ms",
+            "trade_id",
+            "taker_position_side",
+            "maker_position_side"
+          ],
+          "producer_insert_columns": [
+            "product_line",
+            "trade_id",
+            "export_sequence",
+            "execution_index",
+            "taker_order_id",
+            "maker_order_id",
+            "taker_user_id",
+            "maker_user_id",
+            "instrument_id",
+            "taker_side",
+            "taker_position_side",
+            "maker_position_side",
+            "taker_fee_rate_ppm",
+            "maker_fee_rate_ppm",
+            "price_ticks",
+            "quantity_steps",
+            "occurred_at_epoch_ms"
+          ],
+          "same_column_set": true
+        },
+        "core_funding_settlement_projection": {
+          "current_columns": [
+            "product_line",
+            "settlement_id",
+            "export_sequence",
+            "instrument_id",
+            "funding_rate_ppm",
+            "command_status",
+            "result_code",
+            "total_long_payment_units",
+            "total_short_payment_units",
+            "position_count",
+            "occurred_at_epoch_ms"
+          ],
+          "producer_insert_columns": [
+            "product_line",
+            "settlement_id",
+            "export_sequence",
+            "instrument_id",
+            "funding_rate_ppm",
+            "command_status",
+            "result_code",
+            "total_long_payment_units",
+            "total_short_payment_units",
+            "position_count",
+            "occurred_at_epoch_ms"
+          ],
+          "same_column_set": true
+        }
+      },
+      "old_column_ddl_relaxation_absent": true,
+      "production_java_changed": false,
+      "schema_execution": false,
+      "database_sql_executed": false,
+      "source_hashes": {
+        "deployment/migrations/20261020-execution-read-projection.sql": "dadb32252e3567c1422ddda5a5845bc070fe4be06c5aefc02ad75d8a20982d48",
+        "init.sql": "5a43c66798df44ee4897cdbc6eda0d6821a1e9e300ac61d1e631ddf7a19ec964",
+        "surprising-aeron-core/surprising-aeron-service/README.md": "32f5e9b6e24bacb3541a97e538625d99c5b63d27bb67c6e990c099186c2f1292",
+        "surprising-realtime/README.md": "ab864d99c01d2b471cd10c91bc91ca143054b2784ed5cfed36327d09099317b2",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedFundingProjectionPostgresTest.java": "8ef110e4f1fc1e4c728d8e94b652373184329f83b91599ade60bc02d849ba3e4",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java": "db77dc9702c8b26fa68ac48825b26f304e9c0f2275f71ad69aa0566ab5d27098"
+      },
+      "git_diff_check": "passed"
+    },
+    "followup_analysis": {
+      "id": "A130",
+      "next_action": "复用现有成交历史初始化模式：在原已提交回放中捕获不可变强平变化，写入原SQL事务；缺少就绪标记时用独立Archive重建覆盖原live前缀，再发布就绪。保持各产品隔离，失败不推进检查点。",
+      "snapshot_time_constraint": "强平冷/热记录不含每条记录的更新时间，不能用快照Cluster当前时间伪造历史eventTime。现有initializeExecutions先从Archive重建前缀再发布初始化标记，可复用这一已存在的恢复规则，保留原始日志时间，不为补历史日期向Core堆加无依据元数据。",
+      "snapshot_scope_constraint": "TradingCoreRuntime.tradingState在既有快照/账户读取边界获取完整冷视图；liquidationsForSnapshot只在调用方已有读取边界时合并Lane快照。不得从Owner跨线程直接读取活动账户，也不在逐命令路径做全量状态复制。",
+      "source_references": [
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java",
+          "line": 102,
+          "anchor": "private void initializeExecutions("
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java",
+          "line": 217,
+          "anchor": "if (mode == ExportMode.LIVE) initializeExecutions(checkpoint, running);"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+          "line": 2129,
+          "anchor": "public TradingCoreState tradingState()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 7346,
+          "anchor": "public LongObjectHashMap<LiquidationRuntime> liquidationsForSnapshot()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreLiquidationState.java",
+          "line": 24,
+          "anchor": "public record CoreLiquidationState("
+        }
+      ]
+    },
+    "versions_unchanged": {
+      "core_schema": 16,
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "retention": 4
+    },
+    "limits": "仅HotSpot JDK27相关14模块干净生产/测试源码编译及静态DDL/写入列集合核对；未执行SQL、迁移、PostgreSQL、测试、服务、真实交易或恢复。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-projection-columns-20261024",
+      "status": "removed_after_results_archived",
+      "remaining_current_round_resources": [],
+      "removed_files": [
+        {
+          "path": "/tmp/aeron-projection-columns-20261024-build.json",
+          "bytes": 396,
+          "sha256": "2e52c7a78a3d5acf72e1e4a5ce6d063422b4c3578071f77b9ac3c57312126a41"
+        },
+        {
+          "path": "/tmp/aeron-projection-columns-20261024-build.log",
+          "bytes": 31348,
+          "sha256": "f45405fb26b5b33651561d2acecb6597b83cf1db8733f53b3d23feee489c75d0"
+        },
+        {
+          "path": "/tmp/aeron-projection-columns-20261024-record.py",
+          "bytes": 6363,
+          "sha256": "19b4f10ba5686d3496c3f4d8a9c7f927af670a920a862bbce3a558d7d07e9b72"
+        },
+        {
+          "path": "/tmp/aeron-projection-columns-20261024-static.json",
+          "bytes": 2939,
+          "sha256": "72dcf940ead485638ec84a9ea1c5ec13d6903af36277cc2169076552a4833553"
         }
       ]
     }

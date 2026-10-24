@@ -4,8 +4,6 @@
 ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS trade_id text NOT NULL;
 ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS taker_position_side varchar(16) NOT NULL;
 ALTER TABLE core_execution_projection ADD COLUMN IF NOT EXISTS maker_position_side varchar(16) NOT NULL;
--- The committed realtime frame carries order fee rates, not an instrument configuration version.
-ALTER TABLE core_execution_projection ALTER COLUMN instrument_change_id DROP NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_core_execution_projection_trade
     ON core_execution_projection(product_line,trade_id);
 CREATE INDEX IF NOT EXISTS idx_core_execution_projection_time

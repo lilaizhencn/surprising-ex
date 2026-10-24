@@ -154,7 +154,6 @@ class CommittedOrderProjectionPostgresTest {
         }
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection", Integer.class)).isEqualTo(6);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM core_order_projection", Integer.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM core_execution_projection WHERE instrument_change_id IS NOT NULL", Integer.class)).isZero();
     }
 
     @Test void executionConflictAndMissingLegCannotAdvanceTheOrderWatermark() {
