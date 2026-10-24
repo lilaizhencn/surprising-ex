@@ -169,3 +169,9 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 金额单位和64位ID可用十进制JSON字符串传递，绑定到原有long/Long及ID列表后保持精确。应用YAML关闭 `spring.jackson.deserialization.accept-float-as-int`，小数数值、非整数字符串和超出目标整数范围的值在绑定时拒绝，不截断或饱和；未新增wire模型或改变请求路径。
 
 共享生命周期API的Feign/Spring Web依赖为optional，模型注解保留；实际生命周期应用显式依赖Web/OpenFeign starter，纯模型消费者不引入HTTP框架。
+
+### 强平查询的已提交事实（2026-10-24）
+
+强平历史及风险候选读取realtime从已提交Archive生成的`core_liquidation_projection`。候选保证金模式取存储事实，当前风险补充信息同时按合约、持仓腿和保证金模式匹配；删除无Core来源的`instrumentChangeId`及三个无人调用的默认产品构造入口。Web/Client没有该候选版本字段的调用方，其持仓和试单接口中另有实际用途的版本字段不改动。
+
+查询与`core_liquidation_projection_initialization`在同一SQL快照关联，区分尚未就绪和真实空页；未就绪/读取异常以原HTTP入口返回503。使用realtime-api既有`ReadViewUnavailableException`表达读取状态，HTTP状态转换仍由本模块controller负责。公开强平费率、执行价及实收费继续来自已提交事实。按当前约定只做相关模块编译，没有执行数据库或UI交互验证。

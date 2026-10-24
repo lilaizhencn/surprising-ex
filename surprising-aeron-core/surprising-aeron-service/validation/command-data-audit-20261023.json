@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第三十七轮：A142两项无用成交/资金费版本列及专属DDL/NULL断言删除。相关14模块干净编译61.533秒，当前DDL字段集合与实际写入17/11列一致；没有生产Java改动或SQL执行。累计135解决，A130生产链缺口继续处理，原始历史时间不得用快照时间伪造，A11/A141仍为候选。",
+    "checkpoint": "第三十八轮：A130强平已提交生产链补齐；A141旧版本及3构造入口删除；A144两项SQL/DTO无消费副本删除；A145客户端身份/单位/错误修复。相关18模块及最终14模块干净源码编译、Flutter应用和测试入口kernel编译通过，未运行测试/SQL/服务/UI。累计139解决；新增A143未知风险值/快照身份混用，A11仍候选，整体审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -7117,16 +7117,64 @@
       },
       "verification_limit": "静态Getter和字面量预筛，不是字段可删结论；未运行数据库或真实强平/保险/ADL。",
       "retained_in_round": "thirty_fifth_analysis_round",
-      "retained_purpose": "实际执行价、执行费率和实收费属于既有强平历史查询契约；当前生产链缺口拆为A130，不能把链路未接通等同于财务事实无用。"
+      "retained_purpose": "实际执行价、执行费率和实收费属于既有强平历史查询契约；当前生产链缺口拆为A130，不能把链路未接通等同于财务事实无用。",
+      "followup_in_round": "thirty_eighth_cleanup_round",
+      "current_projection_consumer": "A130现已补齐：CommittedLiquidationRepository真实写入保存后的执行价、执行费率和实收费，历史查询沿原API输出；仅完成编译，未运行财务场景。"
     },
     {
       "id": "A130",
-      "status": "confirmed",
-      "analysis_status": "static_source_and_typed_reference_confirmed",
+      "status": "resolved",
+      "analysis_status": "implemented_compile_verified_runtime_not_executed",
       "topic": "强平历史投影存在读端但当前已提交导出链缺少生产者",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 6866,
+          "anchor": "realtimeCapture.liquidation(value)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/realtime/state/RealtimeStateCapture.java",
+          "line": 51,
+          "anchor": "public record LiquidationChange"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java",
+          "line": 66,
+          "anchor": "capture.liquidationObserver(liquidationChanges::add)"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java",
+          "line": 123,
+          "anchor": "private void initializeLiquidations("
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedOrderProjectionService.java",
+          "line": 252,
+          "anchor": "liquidationRows.persist(product, liquidationChanges)"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.java",
+          "line": 37,
+          "anchor": "INSERT INTO core_liquidation_projection"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/repository/CoreLiquidationProjectionRepository.java",
+          "line": 99,
+          "anchor": "LEFT JOIN LATERAL"
+        }
+      ],
+      "evidence": [
+        "已提交回放仅收集TRADE/ORDER/EXECUTION/TRIGGER帧和独立算法、资金费、交割及现金事实；强平变化只交事实索引，没有投影捕获。",
+        "导出批次和现有投影事务均无强平行或对应写入repository。全仓表字面量仅见DDL、索引、三处生产SELECT和测试INSERT；建表函数/触发器及动态SQL也无强平行写入。METADATA实际只编码用户修订和持仓模式。",
+        "真实公开强平历史及风险候选查询依赖该表；存在读模型链路缺口，不能把三项财务字段或整个读端直接当死代码删除。此结论针对当前仓库链路，未查询部署数据库。"
+      ],
+      "proposed_cleanup": "单独修复既有已提交强平事实到历史投影的生产链，并核对恢复/检查点与事务；复用原变化交接边界，不加在线Core查询fallback或逐命令全量扫描。",
+      "disposition": "repair_existing_business_projection",
+      "followup_in_round": "thirty_seventh_cleanup_round",
+      "timestamp_source_requirement": "强平冷/热记录不含每条记录的更新时间，不能用快照Cluster当前时间伪造历史eventTime。现有initializeExecutions先从Archive重建前缀再发布初始化标记，可复用这一已存在的恢复规则，保留原始日志时间，不为补历史日期向Core堆加无依据元数据。",
+      "historical_source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java",
           "line": 232,
@@ -7153,16 +7201,16 @@
           "anchor": "CREATE TABLE IF NOT EXISTS core_liquidation_projection"
         }
       ],
-      "evidence": [
-        "已提交回放仅收集TRADE/ORDER/EXECUTION/TRIGGER帧和独立算法、资金费、交割及现金事实；强平变化只交事实索引，没有投影捕获。",
-        "导出批次和现有投影事务均无强平行或对应写入repository。全仓表字面量仅见DDL、索引、三处生产SELECT和测试INSERT；建表函数/触发器及动态SQL也无强平行写入。METADATA实际只编码用户修订和持仓模式。",
-        "真实公开强平历史及风险候选查询依赖该表；存在读模型链路缺口，不能把三项财务字段或整个读端直接当死代码删除。此结论针对当前仓库链路，未查询部署数据库。"
-      ],
-      "proposed_cleanup": "单独修复既有已提交强平事实到历史投影的生产链，并核对恢复/检查点与事务；复用原变化交接边界，不加在线Core查询fallback或逐命令全量扫描。",
-      "disposition": "repair_existing_business_projection",
-      "followup_in_round": "thirty_seventh_cleanup_round",
-      "required_next": "复用现有成交历史初始化模式：在原已提交回放中捕获不可变强平变化，写入原SQL事务；缺少就绪标记时用独立Archive重建覆盖原live前缀，再发布就绪。保持各产品隔离，失败不推进检查点。",
-      "timestamp_source_requirement": "强平冷/热记录不含每条记录的更新时间，不能用快照Cluster当前时间伪造历史eventTime。现有initializeExecutions先从Archive重建前缀再发布初始化标记，可复用这一已存在的恢复规则，保留原始日志时间，不为补历史日期向Core堆加无依据元数据。"
+      "resolved_in_round": "thirty_eighth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "原Owner/Lane变化边界捕获不可变强平后值、原日志位置和原业务时间；独立回放按命令收集，写入原订单/回执/水位事务。相同日志位置核对事实，较旧重放不能覆盖新值，失败不前移检查点。Archive前缀重建完成才发布单产品就绪；读端同SQL快照区分未就绪与真实空页。",
+        "cluster_or_snapshot_fields_added": false,
+        "new_realtime_frame_kind": false,
+        "new_threads": false,
+        "tests_executed": false,
+        "database_sql_executed": false
+      }
     },
     {
       "id": "A131",
@@ -7605,12 +7653,43 @@
     },
     {
       "id": "A141",
-      "status": "candidate",
-      "analysis_status": "needs_existing_risk_response_contract_trace",
+      "status": "resolved",
+      "analysis_status": "implemented_compile_verified_runtime_not_executed",
       "topic": "强平投影合约版本列无当前Core来源，但仍被风险查询响应读取",
       "source_basis_commit": "a202fff71d6466caad4e3b2d745dc61a74ba4921",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "init.sql",
+          "line": 3153,
+          "anchor": "CREATE TABLE IF NOT EXISTS core_liquidation_projection ("
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/LiquidationCandidateResponse.java",
+          "line": 7,
+          "anchor": "public record LiquidationCandidateResponse("
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java",
+          "line": 53,
+          "anchor": "MarginMode.valueOf(rs.getString(\"margin_mode\"))"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java",
+          "line": 138,
+          "anchor": "value.marginMode().name().equals(candidate.marginMode().name())"
+        }
+      ],
+      "evidence": [
+        "强平投影DDL要求instrument_change_id非空，当前Core品种状态不再提供旧版本编号。",
+        "CoreRiskLiquidationProjectionRepository.find实际SELECT并读取该列，传给LiquidationCandidateResponse；因此不能按无人读列删除，必须继续追踪业务及前端查询契约。",
+        "强平历史查询的另外两处SELECT不读取该列；测试位置INSERT填固定1，不能以该固定值代替真实业务来源。"
+      ],
+      "proposed_cleanup": "随A130核对风险候选响应的版本字段是否属于已移除Core版本模型的残留；确认实际消费者并同步契约后再决定，禁止直接删列或伪造版本。",
+      "fields": [
+        "core_liquidation_projection.instrument_change_id"
+      ],
+      "historical_source_references": [
         {
           "file": "init.sql",
           "line": 3155,
@@ -7632,15 +7711,13 @@
           "anchor": "PositionSide.valueOf(rs.getString(\"position_side\")), rs.getLong(\"instrument_change_id\"),"
         }
       ],
-      "evidence": [
-        "强平投影DDL要求instrument_change_id非空，当前Core品种状态不再提供旧版本编号。",
-        "CoreRiskLiquidationProjectionRepository.find实际SELECT并读取该列，传给LiquidationCandidateResponse；因此不能按无人读列删除，必须继续追踪业务及前端查询契约。",
-        "强平历史查询的另外两处SELECT不读取该列；测试位置INSERT填固定1，不能以该固定值代替真实业务来源。"
-      ],
-      "proposed_cleanup": "随A130核对风险候选响应的版本字段是否属于已移除Core版本模型的残留；确认实际消费者并同步契约后再决定，禁止直接删列或伪造版本。",
-      "fields": [
-        "core_liquidation_projection.instrument_change_id"
-      ]
+      "resolved_in_round": "thirty_eighth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除强平DDL/候选响应旧instrumentChangeId及3个无人调用的默认产品构造入口。候选16到15字段；保证金模式取真实行，风险补充按模式/合约/持仓腿匹配。Web/Client没有候选版本字段调用方；其他业务真正使用的版本保留。",
+        "tests_executed": false,
+        "database_sql_executed": false
+      }
     },
     {
       "id": "A142",
@@ -7730,6 +7807,146 @@
         "tests_executed": false,
         "database_sql_executed": false
       }
+    },
+    {
+      "id": "A143",
+      "status": "confirmed",
+      "analysis_status": "static_unknown_data_and_identity_alias_confirmed",
+      "topic": "风险候选无当前快照时将未知风险指标填零，并以强平ID代替快照ID",
+      "source_basis_commit": "ab7a4c022fb00b6a71d8739f973cbf472288ef04",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java",
+          "line": 52,
+          "anchor": "rs.getLong(\"liquidation_id\"), rs.getLong(\"liquidation_id\")"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java",
+          "line": 56,
+          "anchor": "0L, 0L, 0L, 0L, mapStatus"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java",
+          "line": 140,
+          "anchor": "if (risk == null) return candidate;"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java",
+          "line": 141,
+          "anchor": "candidate.candidateId(), risk.priceSequence()"
+        }
+      ],
+      "evidence": [
+        "SQL没有风险快照，Repository仍为4个primitive风险指标填0，并把liquidation_id重复赋给snapshotId。",
+        "RiskService仅在当前Core风险快照存在时替换为priceSequence及实际指标，否则原样返回；同名snapshotId因此混用两种身份，未知指标也不能与真实零值区分。",
+        "风险值有实际业务表达作用，不能为消除未知值机械删除或给Cluster增加副本；当前快照与历史候选的时点语义也需核对。"
+      ],
+      "required_next": "追踪各HTTP/Feign及Web/Client消费者，明确当前风险补充的时点与缺失语义；去除伪造ID和未知零值，保留真正有用的指标及正确读取边界。",
+      "verification_limit": "按用户约定仅相关Java生产/测试源码与Flutter应用/测试入口kernel编译，未执行任何测试、SQL、迁移、数据库、Archive/Cluster、交易服务、应用、UI交互或性能场景；不能据此声称资金/恢复/界面运行验证通过。"
+    },
+    {
+      "id": "A144",
+      "status": "resolved",
+      "analysis_status": "independent_projection_consumers_absent_then_removed",
+      "topic": "强平SQL和内部查询DTO复制了没有读端用途的触发序号和亏空",
+      "source_basis_commit": "ab7a4c022fb00b6a71d8739f973cbf472288ef04",
+      "business_code_changed": true,
+      "source_references": [
+        {
+          "file": "init.sql",
+          "line": 3153,
+          "anchor": "CREATE TABLE IF NOT EXISTS core_liquidation_projection ("
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/model/CoreLiquidationProjection.java",
+          "line": 7,
+          "anchor": "public record CoreLiquidationProjection("
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/repository/CoreLiquidationProjectionRepository.java",
+          "line": 31,
+          "anchor": "SELECT liquidation_id, user_id, instrument_id, asset, margin_mode, position_side,"
+        },
+        {
+          "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.java",
+          "line": 37,
+          "anchor": "INSERT INTO core_liquidation_projection"
+        }
+      ],
+      "evidence": {
+        "removed_sql_columns": [
+          "trigger_price_sequence",
+          "deficit_units"
+        ],
+        "pre_removal_typed_getter_callers": {
+          "triggerPriceSequence": [],
+          "deficitUnits": []
+        },
+        "exact_model_owner": "com/surprising/liquidation/provider/model/CoreLiquidationProjection",
+        "internal_read_model_components_before": 15,
+        "internal_read_model_components_after": 13,
+        "core_trigger_price_sequence_and_deficit_preserved": true,
+        "reason": "历史服务不消费这两项SQL副本；同名insurance模型和Core状态仍有真实续步、补亏、ADL及恢复用途。"
+      },
+      "resolved_in_round": "thirty_eighth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "当前DDL、查询映射和内部DTO一并删除2项无用副本，新增生产者只写15项有查询或幂等顺序用途的字段。",
+        "tests_executed": false,
+        "database_sql_executed": false
+      }
+    },
+    {
+      "id": "A145",
+      "status": "resolved",
+      "analysis_status": "client_error_and_native_projection_contract_repaired",
+      "topic": "Client强平历史吞异常为空列表，并读取不存在的symbol及未换算数量",
+      "source_basis_commit": "ab7a4c022fb00b6a71d8739f973cbf472288ef04",
+      "business_code_changed": true,
+      "source_references": [
+        {
+          "repository": "../surprising-client",
+          "file": "lib/src/api.dart",
+          "sha256": "97470c455272529f7f80d93f8907c190369854a6ec03eb32f669efa38a259507"
+        },
+        {
+          "repository": "../surprising-client",
+          "file": "lib/src/app_state.dart",
+          "sha256": "c7d14c5b90e0bf1a81bf224f20ec9eecd3b71e9e488367d6e7d6dbcb1325ea3a"
+        },
+        {
+          "repository": "../surprising-client",
+          "file": "lib/src/models.dart",
+          "sha256": "f6b469c340d5165001a6c555a8b2e6a28705fc9c80759266aa68858f7fd69456"
+        },
+        {
+          "repository": "../surprising-client",
+          "file": "lib/src/trading/private_trading.dart",
+          "sha256": "79efa62539112e53cd6e84e47e62bc5f96efd1ac8c436ddd0528f3d72367bb91"
+        },
+        {
+          "repository": "../surprising-client",
+          "file": "test/liquidation_projection_test.dart",
+          "sha256": "e73cee598379e2fe71ed558f8b0175160b255a58f8f9ddd2a5de11c1b0b26193"
+        }
+      ],
+      "evidence": [
+        "读取失败、503及错误结构透传，不再假空页；使用原生liquidationOrderId/instrumentId并按64位整数解析。",
+        "按当前产品及标的ID查缓存的真实标的信息，复用数量单位转换；缺失资料明确呈现。",
+        "失败保留此前成功记录，错误待平行账户辅助读取结束后再设定，现有用户/产品/请求代次栅栏保留。"
+      ],
+      "resolved_in_round": "thirty_eighth_cleanup_round",
+      "resolution": {
+        "state": "implemented_kernel_compile_verified",
+        "client_commit": "89a12134d72edcfd509ee3ffca0a4f056aae0f70",
+        "client_ref": "origin/main",
+        "application_kernel_compile": true,
+        "test_entry_kernel_compile": true,
+        "tests_executed": false,
+        "applications_launched": false,
+        "ui_exercised": false
+      }
     }
   ],
   "preserve_verified_purposes": [
@@ -7747,9 +7964,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A130：沿已提交强平变化交接补齐原SQL事务内投影；复用initializeExecutions已有Archive前缀重建与就绪标记规则，保存原命令业务时间，失败不前移检查点。",
-    "A141强平候选响应仍读取旧版本字段，随生产链核对实际来源及当前契约；风险读端marginMode必须使用真实事实，不用固定CROSS。",
-    "A11维持现有领导者/提交水位/会话一致性边界。继续检查命令、执行、状态、恢复与查询的每个字段，保留真实金融事实及有实际职责的线程/事务边界。"
+    "处理A143：核对候选当前风险补充的时点与所有消费方，清除伪造snapshotId与未知零值，不把无意义副本加入Cluster。",
+    "继续沿各业务命令产生、Core执行、Lane交接、最终状态、快照/回放与SQL/API逐字段检查；资金、执行顺序、恢复和产品隔离优先。",
+    "A11保留现有领导者读取、提交水位和查询会话边界；没有等价一致性方案前不直接绕过Cluster查询通道。"
   ],
   "rejected_false_positives": [
     {
@@ -7824,7 +8041,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "cleanup_compile_verified; overall_audit_in_progress",
+  "analysis_round_status": "cleanup_compile_verified; runtime_verification_not_executed; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -8046,17 +8263,19 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "ddd098459b0d6faaebb5456545f7aa07b1d5bb84",
-    "status": "cleanup_verified_followup_analysis",
+    "source_basis_commit": "ab7a4c022fb00b6a71d8739f973cbf472288ef04",
+    "status": "cleanup_compile_verified_followup_confirmed",
     "resolved_ids": [
-      "A142"
+      "A130",
+      "A141",
+      "A144",
+      "A145"
     ],
     "confirmed_ids": [
-      "A130"
+      "A143"
     ],
     "candidate_ids": [
-      "A11",
-      "A141"
+      "A11"
     ],
     "retained_ids": [
       "A105",
@@ -8065,12 +8284,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 135,
-      "candidate": 2,
+      "resolved": 139,
+      "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "thirty_seventh_cleanup_round",
+    "evidence": "thirty_eighth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -9800,6 +10019,29 @@
         "A141",
         "A142"
       ]
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "ab7a4c022fb00b6a71d8739f973cbf472288ef04",
+      "status": "cleanup_compile_verified_followup_confirmed",
+      "evidence": "thirty_eighth_cleanup_round",
+      "resolved_ids": [
+        "A130",
+        "A141",
+        "A144",
+        "A145"
+      ],
+      "new_confirmed_ids": [
+        "A143"
+      ],
+      "counts": {
+        "resolved": 139,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "tests_executed": false,
+      "overall_audit_completed": false
     }
   ],
   "further_rejected_false_positives": [
@@ -30011,6 +30253,682 @@
           "sha256": "72dcf940ead485638ec84a9ea1c5ec13d6903af36277cc2169076552a4833553"
         }
       ]
+    }
+  },
+  "thirty_eighth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "ab7a4c022fb00b6a71d8739f973cbf472288ef04",
+    "resolved_ids": [
+      "A130",
+      "A141",
+      "A144",
+      "A145"
+    ],
+    "new_confirmed_ids": [
+      "A143"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 139,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "implementation": [
+      "在原Owner收齐Lane边界同步观察不可变强平后值；观察器只由独立回放注册，在线路径不产生额外强平帧/对象。",
+      "强平投影用cluster_position保存实际Archive位置，不与业务exportSequence混用；15列和15绑定完全一致。",
+      "强平写入使用原SQL事务，原命令时间保持不变；独立历史重建覆盖live前缀再发布产品就绪，不伪造快照日期或读取在线Core兜底。",
+      "查询就绪关联与结果同SQL快照读取，未就绪/读取失败/数据无法解析503；无记录的就绪查询才返回空页。",
+      "候选删除旧合约版本及3个多余构造入口，保证金模式取真实事实；SQL/内部DTO删除没有独立消费者的触发序号和亏空。",
+      "Client同步原生标的身份/数量单位/错误与已成功数据保留；删除旧ID兼容和吞异常空列表。"
+    ],
+    "new_code_purpose": {
+      "immutable_record": "LiquidationChange只包含实际不可变后值、原日志位置、原业务时间，用于持久化及重放幂等，不加入Core状态或协议。",
+      "replay_buffer_and_export_buffer": "前者保留本次apply已完成的变化，返回独立列表；后者保留未成功持久化的批次，只在sink成功后清理。",
+      "repositories": "CommittedLiquidationRepository只访问强平事实表；LiquidationInitializationRepository只访问就绪表，遵循单表repository分工。",
+      "initialization_state": "就绪表仅一个product_line键；回放位置仍归原独立checkpoint，未添加无消费时间/版本字段。"
+    },
+    "verification": {
+      "maven_attempts": [
+        {
+          "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-realtime/surprising-realtime-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway -am -DskipTests clean test-compile",
+          "exit_code": 1,
+          "elapsed_seconds": 41.146,
+          "log_sha256": "3fa5d3ecdf7eff3ee729dd08309b8cf4881f9b291c4dd8973aa5282369c2aaad",
+          "tests_executed": false,
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-aeron-service",
+            "surprising-aeron-tools",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-maker",
+            "surprising-realtime-api",
+            "surprising-price-provider",
+            "surprising-aeron-benchmarks",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-derivatives-lifecycle"
+          ],
+          "reactor_module_count": 16,
+          "database_sql_executed": false,
+          "failure_and_correction": "首次编译发现CoreInstrument无productLine()，已改为实际contractType与产品契约代码核对；后续三次编译通过。"
+        },
+        {
+          "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-realtime/surprising-realtime-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway -am -DskipTests clean test-compile",
+          "exit_code": 0,
+          "elapsed_seconds": 51.806,
+          "log_sha256": "629802ba33a0779d3258fd966d643dd81c6b023405290ff9c7b0f80add2e1434",
+          "tests_executed": false,
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-aeron-service",
+            "surprising-aeron-tools",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-maker",
+            "surprising-realtime-api",
+            "surprising-price-provider",
+            "surprising-aeron-benchmarks",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-derivatives-lifecycle",
+            "surprising-realtime-provider",
+            "surprising-gateway"
+          ],
+          "reactor_module_count": 18,
+          "database_sql_executed": false
+        },
+        {
+          "command": "mvn -pl surprising-realtime/surprising-realtime-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway -am -DskipTests clean test-compile",
+          "exit_code": 0,
+          "elapsed_seconds": 40.876,
+          "log_sha256": "c868c578fdb947389643d35e963f2234207edb60e756db7daa5c4f8848b43278",
+          "tests_executed": false,
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-aeron-service",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-realtime-api",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-derivatives-lifecycle",
+            "surprising-realtime-provider",
+            "surprising-gateway"
+          ],
+          "reactor_module_count": 14,
+          "database_sql_executed": false
+        },
+        {
+          "command": "mvn -pl surprising-realtime/surprising-realtime-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway -am -DskipTests clean test-compile",
+          "exit_code": 0,
+          "elapsed_seconds": 40.778,
+          "log_sha256": "3e93eadb090b886f95d88260faac6a4f89361944b9cbf1b2e7e3df89561c1537",
+          "tests_executed": false,
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-aeron-service",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-realtime-api",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-derivatives-lifecycle",
+            "surprising-realtime-provider",
+            "surprising-gateway"
+          ],
+          "reactor_module_count": 14,
+          "database_sql_executed": false
+        }
+      ],
+      "final_changed_java_compile_attempt": 4,
+      "core_benchmarks_and_tools_compile_attempt": 2,
+      "tests_executed": false,
+      "sql_executed": false,
+      "services_started": false,
+      "client_application": {
+        "command": "flutter build bundle --debug --no-pub --target-platform=darwin --asset-dir=/tmp/aeron-liquidation-projection-20261024-client-app",
+        "exit_code": 0,
+        "execution_evidence": "exec session 20728 returned exit_code 0",
+        "kernel_sha256": "3fb8c130c4225129ba13386ed082d43067a929ef378412b873797513bc08b023",
+        "kernel_bytes": 71894184,
+        "log_sha256": "67a6e3574d7a20b2ac7a7367c0997d383317ed574d65b0e2f2b60b00903ce89d",
+        "tests_executed": false,
+        "applications_launched": false,
+        "limitation": "Darwin kernel/bundle compilation only; no iOS/Android runtime or UI validation",
+        "compiler_warning": "objective_c native asset contains differing framework names across architectures; no native configuration changed",
+        "source_hashes": {
+          "README.md": "624b0fd3fdeb6d89a0c9edede2fa183fbf60aee37e76da3f99acaf5a3ae03da6",
+          "lib/src/api.dart": "97470c455272529f7f80d93f8907c190369854a6ec03eb32f669efa38a259507",
+          "lib/src/app_state.dart": "c7d14c5b90e0bf1a81bf224f20ec9eecd3b71e9e488367d6e7d6dbcb1325ea3a",
+          "lib/src/models.dart": "f6b469c340d5165001a6c555a8b2e6a28705fc9c80759266aa68858f7fd69456",
+          "lib/src/trading/private_trading.dart": "79efa62539112e53cd6e84e47e62bc5f96efd1ac8c436ddd0528f3d72367bb91",
+          "test/liquidation_projection_test.dart": "e73cee598379e2fe71ed558f8b0175160b255a58f8f9ddd2a5de11c1b0b26193"
+        }
+      },
+      "client_test_entry": {
+        "command": "flutter build bundle --debug --no-pub --target-platform=darwin --target=test/liquidation_projection_test.dart --asset-dir=/tmp/aeron-liquidation-projection-20261024-client-test",
+        "exit_code": 0,
+        "elapsed_seconds": 14.88,
+        "log_sha256": "67a6e3574d7a20b2ac7a7367c0997d383317ed574d65b0e2f2b60b00903ce89d",
+        "tests_executed": false,
+        "applications_launched": false,
+        "kernel_sha256": "392311ebae76c8629e0210530c6a44f72e58c22d0145f2f96c674c409343ac4b",
+        "kernel_bytes": 76189544
+      }
+    },
+    "static_verification": {
+      "ddl_columns": [
+        "product_line",
+        "liquidation_id",
+        "user_id",
+        "instrument_id",
+        "asset",
+        "margin_mode",
+        "position_side",
+        "signed_quantity_steps",
+        "close_quantity_steps",
+        "execution_price_ticks",
+        "liquidation_fee_rate_ppm",
+        "liquidation_fee_units",
+        "status",
+        "cluster_position",
+        "updated_at_epoch_ms"
+      ],
+      "writer_columns": [
+        "product_line",
+        "liquidation_id",
+        "user_id",
+        "instrument_id",
+        "asset",
+        "margin_mode",
+        "position_side",
+        "signed_quantity_steps",
+        "close_quantity_steps",
+        "execution_price_ticks",
+        "liquidation_fee_rate_ppm",
+        "liquidation_fee_units",
+        "status",
+        "cluster_position",
+        "updated_at_epoch_ms"
+      ],
+      "bound_values": 15,
+      "same_column_order": true,
+      "removed_projection_columns": [
+        "instrument_change_id",
+        "trigger_price_sequence",
+        "deficit_units"
+      ],
+      "core_financial_fields_preserved": [
+        "triggerPriceSequence",
+        "deficitUnits"
+      ],
+      "readiness_fields": [
+        "product_line"
+      ],
+      "protected_source_unchanged_count": 199,
+      "source_hashes": {
+        "init.sql": "e132ef8c4e6178d31b630c6ee8a79701ac64593976c4161cbda64fdcf4ab481f",
+        "surprising-aeron-core/surprising-aeron-service/README.md": "28816fbebe6f87366330b7be8a96328c8d62883168c7e3241e08bc32e329bd0e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java": "4599a499642dce2c3970040e9e4384de25837984df2ec5113af8f70bda1fb746",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/realtime/state/RealtimeStateCapture.java": "70222c38deb8af4f4226b08fb54214aa2fb9fd57c92791a5dcaedd473c865555",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java": "e30a61ce64ad99198cff1809ae77343044f975c01e3b73b3a28dda3dcd22e262",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CommittedLiquidationReplayTest.java": "58400b07855315ab29a9cd68616b8bce007f83201bc439c8bbe554e1067c07db",
+        "surprising-derivatives-lifecycle/README.md": "6ce65c595af10a3ab5f65a9eb76abe1303b30f254f2243d19fc9964bd6469f44",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/LiquidationCandidateResponse.java": "d49e7c69e555e21af666b484707671b5d638940db409f3b68f3714da469d06c7",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/pom.xml": "6d10c354ad992f4edfeaa51361deba878bd7f03ca647141551a54d96488c80cd",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/controller/AdminLiquidationController.java": "17f34a6459c56991fef937c4cf6ded5970de42f0e32a4505cee3d96badd882f3",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/controller/LiquidationController.java": "7cb62991ac60f72d7f7bbb9751820799dfe8762c3d4af6d95beb1ea43f210c45",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/model/CoreLiquidationProjection.java": "5cb25e4f2978f89bb3e95d50130211cb8c7888150a608ba045fcc85ef627443e",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/repository/CoreLiquidationProjectionRepository.java": "861ef290e16b6172d773e3c543773063fba85b07292225cec4c6af8802ad9bd1",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/controller/AdminRiskController.java": "9d61e5808790960fdc1531f373d429aa533b10e17dac5eed4a2a49d43960f84d",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/controller/RiskController.java": "906aa49c19629645a60c43641b340a60ea215a2c79df28a2a51382cf8c8bbbe2",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java": "096fb58a6b764fd854d42521326dcb94a7281ac5aeef47be0651a139eec771bf",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java": "898adfd11deb3bcc440771031e94d28f1baf9c05f216aec41d3e15b3d0de3ccb",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/RiskBoundaryPostgresTest.java": "fd07734a4444d4091a6cc0d0b5e8951c4b575a454b7eaa90ca51362581c652c7",
+        "surprising-realtime/README.md": "e59b57daac96009b2abad23389ac99be2a10751f352188b2475231b277e453da",
+        "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java": "c5c5dd4e132a4a4815c5e9c584d64f50701e55fe2072f27317733a9beafb1f6f",
+        "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.java": "b6ce640aab23d217472afbbb049b9edc6c66d5985d889365d89aa84c50f37e87",
+        "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/LiquidationInitializationRepository.java": "678e890680290312016d9668fb83f59982b3c728c4d536ea1262f63286aa3659",
+        "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedOrderProjectionService.java": "9784e8d9f3984e42dff16afd6ec4f61c0e79b611b717bc1211915e9656fa51f5",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedLiquidationProjectionPostgresTest.java": "0ac97a60c9cb86c265f449346f3c8f31f6ba47ae3f17b5ef08c1f25cf585b6f6",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedTradeExportIntegrationTest.java": "54e7923a365d80d4360b9d33175af2c1579b9c8aec211cd7ec910ca8b2cc2026",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ExportBatchTest.java": "e9ef4201c4e6360fe75671c7f076a902af9fddb029d7a1721386e06904503a28",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ProjectionTestFixtures.java": "3b54e35fd93c3022bdbe65fc38cd5e812e7aaed96ce8be004ca3e85df2c63351"
+      },
+      "changed_java_predates_final_compile_log": true,
+      "sql_executed": false,
+      "protected_source_hash_manifest_sha256": "5504a902748737d18102484536988e41278e473f1cb7769d4e6a960ac12c2b16",
+      "protected_source_scope": "199个protocol、Core冷状态、snapshot、liquidation、ADL及LiquidationRuntime源文件逐字节与本轮HEAD比较一致；未以业务测试执行代替。",
+      "git_diff_check": "passed after removing extra README EOF blank"
+    },
+    "typed_classfile_verification": {
+      "classfiles": 4025,
+      "typed_method_callers": {
+        "com/surprising/aeron/service/core/TradingAccountRuntime::visitChangedIndexes": [
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/index/RuntimeFactIndexes.class",
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TriggerOrderIndexTest.class",
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/change/CommittedIndexVisitTest.class"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture$LiquidationChange::logPosition": [
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CommittedLiquidationReplayTest.class",
+          "surprising-realtime/surprising-realtime-provider/target/classes/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.class"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture$LiquidationChange::occurredAt": [
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CommittedLiquidationReplayTest.class",
+          "surprising-realtime/surprising-realtime-provider/target/classes/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.class"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture$LiquidationChange::state": [
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CommittedLiquidationReplayTest.class",
+          "surprising-realtime/surprising-realtime-provider/target/classes/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.class"
+        ],
+        "com/surprising/aeron/service/risk/LiquidationRuntime::executionPriceTicks": [
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CommittedLiquidationReplayTest.class",
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class",
+          "surprising-realtime/surprising-realtime-provider/target/classes/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.class"
+        ],
+        "com/surprising/aeron/service/risk/LiquidationRuntime::liquidationFeeRatePpm": [
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CommittedLiquidationReplayTest.class",
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class",
+          "surprising-realtime/surprising-realtime-provider/target/classes/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.class"
+        ],
+        "com/surprising/aeron/service/risk/LiquidationRuntime::liquidationFeeUnits": [
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CommittedLiquidationReplayTest.class",
+          "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class",
+          "surprising-realtime/surprising-realtime-provider/target/classes/com/surprising/realtime/provider/export/repository/CommittedLiquidationRepository.class"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture::liquidation": [
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime.class"
+        ]
+      },
+      "method_descriptors": {
+        "com/surprising/aeron/service/core/TradingAccountRuntime::visitChangedIndexes": [
+          "(Lcom/surprising/aeron/service/core/TradingAccountRuntime$ChangedIndexConsumer;)V"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture$LiquidationChange::logPosition": [
+          "()J"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture$LiquidationChange::occurredAt": [
+          "()J"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture$LiquidationChange::state": [
+          "()Lcom/surprising/aeron/service/risk/LiquidationRuntime;"
+        ],
+        "com/surprising/aeron/service/risk/LiquidationRuntime::executionPriceTicks": [
+          "()J"
+        ],
+        "com/surprising/aeron/service/risk/LiquidationRuntime::liquidationFeeRatePpm": [
+          "()J"
+        ],
+        "com/surprising/aeron/service/risk/LiquidationRuntime::liquidationFeeUnits": [
+          "()J"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture::liquidation": [
+          "(Lcom/surprising/aeron/service/risk/LiquidationRuntime;)V"
+        ]
+      },
+      "record_instance_fields": {
+        "com/surprising/risk/api/model/LiquidationCandidateResponse": [
+          "candidateId",
+          "snapshotId",
+          "userId",
+          "instrumentId",
+          "marginMode",
+          "positionSide",
+          "accountType",
+          "settleAsset",
+          "signedQuantitySteps",
+          "markPriceTicks",
+          "equityUnits",
+          "maintenanceMarginUnits",
+          "marginRatioPpm",
+          "status",
+          "eventTime"
+        ],
+        "com/surprising/liquidation/provider/model/CoreLiquidationProjection": [
+          "liquidationId",
+          "userId",
+          "instrumentId",
+          "asset",
+          "marginMode",
+          "positionSide",
+          "signedQuantitySteps",
+          "closeQuantitySteps",
+          "executionPriceTicks",
+          "liquidationFeeRatePpm",
+          "liquidationFeeUnits",
+          "status",
+          "updatedAt"
+        ],
+        "com/surprising/aeron/service/core/TradingAccountRuntime": [
+          "ownerLeverageLookup",
+          "settlements",
+          "pendingReservations",
+          "productLine",
+          "revision",
+          "topology",
+          "accountLanes",
+          "laneUserScratch",
+          "laneLifecycle",
+          "configuration",
+          "accountAdmissionReadyShards",
+          "placeAdmissionReadyQueues",
+          "matcherSettlementReadyQueues",
+          "laneMutationResultsScratch",
+          "laneMutationResultsMask",
+          "accountLaneQueueHighWaterMarks",
+          "publishedLaneCommittedSlots",
+          "publishedLanePositionCounts",
+          "publishedPositions",
+          "dispatchedLaneCommitSequences",
+          "laneCommitEventPool",
+          "placeAdmissionEventPool",
+          "replacementAdmissionEventPool",
+          "placeBatchAdmissionEventPool",
+          "fusedExecutionActive",
+          "markPrices",
+          "riskScans",
+          "treasury",
+          "scratchTreasuryDelta",
+          "ledgerControl",
+          "instruments",
+          "cancelAllAfterTimers",
+          "feePolicies",
+          "matcherSettlementRemainingScratch",
+          "matcherSettlementOrderScratch",
+          "factIndexes",
+          "indexIdentities",
+          "riskPositionIdentities",
+          "laneDeltas",
+          "nextLiquidationId",
+          "marketRevision",
+          "riskScanControl",
+          "changedUsers",
+          "balancesChanged",
+          "changedOrders",
+          "changedReservations",
+          "changedPositions",
+          "changedLiquidations",
+          "changedMarkPrices",
+          "changedRiskSnapshots",
+          "changedRiskScans",
+          "changedLeverages",
+          "changedAlgoOrders",
+          "changedCancelAllAfterTimers",
+          "changedTriggerOrders",
+          "changedFeePolicies",
+          "accountRollback",
+          "orderBatchMutationScope",
+          "ownerLaneScope",
+          "ownerMatcherSettlementChangesScope",
+          "matcherSettlementChangesRing",
+          "freeMatcherSettlementChangeSlots",
+          "freeMatcherSettlementChangeCount",
+          "laneCancelEventPool",
+          "owner",
+          "retiredOwnerSequence",
+          "asynchronousCommandScope",
+          "controlLanes",
+          "expectedSettlementLanes",
+          "settlementReadyLanes",
+          "directSettlementReadyLanes",
+          "placeAdmissionReadyLanes",
+          "expectedSettlements",
+          "ownerCompletionSignal",
+          "realtimeCapture",
+          "coldFunds",
+          "controlFundsValidation"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture": [
+          "outbox",
+          "product",
+          "identities",
+          "orderProjectionOnly",
+          "liquidationObserver",
+          "sequence",
+          "timestamp",
+          "snapshotId",
+          "ordinal",
+          "failures",
+          "exportSequence",
+          "previousExportSequence"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture$LiquidationChange": [
+          "state",
+          "logPosition",
+          "occurredAt"
+        ],
+        "com/surprising/aeron/service/risk/LiquidationRuntime": [
+          "liquidationId",
+          "userId",
+          "symbolId",
+          "marginMode",
+          "positionSide",
+          "instrument",
+          "triggerPriceSequence",
+          "signedQuantitySteps",
+          "closeQuantitySteps",
+          "deficitUnits",
+          "executionPriceTicks",
+          "liquidationFeeRatePpm",
+          "liquidationFeeUnits",
+          "status",
+          "nextCancelOrderId"
+        ]
+      },
+      "constructors": {
+        "com/surprising/risk/api/model/LiquidationCandidateResponse": [
+          "(JJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Ljava/lang/String;Ljava/lang/String;JJJJJLcom/surprising/risk/api/model/LiquidationCandidateStatus;Ljava/time/Instant;)V"
+        ],
+        "com/surprising/liquidation/provider/model/CoreLiquidationProjection": [
+          "(JJLjava/lang/String;Ljava/lang/String;Lcom/surprising/aeron/protocol/CoreMarginMode;Lcom/surprising/aeron/protocol/CorePositionSide;JJJJJLjava/lang/String;Ljava/time/Instant;)V"
+        ],
+        "com/surprising/aeron/service/core/TradingAccountRuntime": [
+          "()V",
+          "(Lcom/surprising/aeron/config/LaneTopology;)V",
+          "(Lcom/surprising/aeron/config/LaneTopology;Lcom/surprising/aeron/config/CoreRuntimeConfiguration;)V"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture": [
+          "(Lcom/surprising/aeron/client/RealtimeOutbox;Lcom/surprising/product/api/ProductLine;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V"
+        ],
+        "com/surprising/aeron/service/realtime/state/RealtimeStateCapture$LiquidationChange": [
+          "(Lcom/surprising/aeron/service/risk/LiquidationRuntime;JJ)V"
+        ],
+        "com/surprising/aeron/service/risk/LiquidationRuntime": [
+          "(JJILcom/surprising/aeron/protocol/CoreMarginMode;Lcom/surprising/aeron/protocol/CorePositionSide;Lcom/surprising/aeron/service/instrument/CoreInstrument;JJJJJJJLcom/surprising/aeron/model/CoreLiquidationState$Status;J)V"
+        ]
+      },
+      "application_classes_executed": false
+    },
+    "compiled_test_source_scenarios": {
+      "core": [
+        "真实标的/余额/撮合产生强平计划",
+        "快照恢复后执行价/费率/实收费和原时点",
+        "重复命令与捕获不改变业务hash"
+      ],
+      "realtime": [
+        "同位置幂等、旧重放不能覆盖新事实、冲突回滚水位",
+        "产品隔离、原时间、修复不推进订单水位",
+        "相同导出序号的强平变化仍需flush，失败保留批次，修复不发Kafka"
+      ],
+      "lifecycle": [
+        "就绪空页与503区别",
+        "ISOLATED模式及当前DDL"
+      ],
+      "client": [
+        "大于2^53的原生身份",
+        "503/畸形响应与真实空页",
+        "失败保留记录及平行账户读取之后仍显示错误"
+      ],
+      "executed": false
+    },
+    "client": {
+      "repository": "../surprising-client",
+      "branch": "main",
+      "commit": "89a12134d72edcfd509ee3ffca0a4f056aae0f70",
+      "pushed_ref": "origin/main",
+      "remote_matches": true,
+      "working_tree_clean": true,
+      "web_changes_required": false,
+      "web_contract_review": "候选旧版本字段未找到Web/Client消费；已有持仓/试单版本有独立真实用途，保留。"
+    },
+    "versions_unchanged": {
+      "core_schema": 16,
+      "message_header_bytes": 72,
+      "register_instrument": 10,
+      "algo_command": 6,
+      "algo_view": 5,
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "retention": 4,
+      "cancel_timer_command": 5,
+      "cancel_timer_view": 3
+    },
+    "followup_analysis": {
+      "confirmed_id": "A143",
+      "candidate_id": "A11",
+      "overall_audit_completed": false,
+      "next": "先处理候选中未知值与伪造快照身份，再继续按命令产生、实际执行、落地及查询逐字段扫描；A11保持当前领导者/提交水位/会话边界。"
+    },
+    "limits": "按用户约定仅相关Java生产/测试源码与Flutter应用/测试入口kernel编译，未执行任何测试、SQL、迁移、数据库、Archive/Cluster、交易服务、应用、UI交互或性能场景；不能据此声称资金/恢复/界面运行验证通过。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-liquidation-projection-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-build-1.json",
+          "bytes": 504,
+          "sha256": "2409ee7382e07e902d73a2f04baf5a99936bb62d51acf52e93d879eb3fdb3adb"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-build-1.log",
+          "bytes": 37059,
+          "sha256": "3fa5d3ecdf7eff3ee729dd08309b8cf4881f9b291c4dd8973aa5282369c2aaad"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-build-2.json",
+          "bytes": 504,
+          "sha256": "f202b23515bb47a710dfc529e90e10d60af35ed2262108cce4794cbfa9ce6088"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-build-2.log",
+          "bytes": 40146,
+          "sha256": "629802ba33a0779d3258fd966d643dd81c6b023405290ff9c7b0f80add2e1434"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-build-3.json",
+          "bytes": 362,
+          "sha256": "bb485bfc325f3b0daab88480a044cdaf2aee08da4c08cc33eb2cb13fa9517673"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-build-3.log",
+          "bytes": 31348,
+          "sha256": "c868c578fdb947389643d35e963f2234207edb60e756db7daa5c4f8848b43278"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-build-4.json",
+          "bytes": 362,
+          "sha256": "24407e09f1f65aa30775e2776f7a519ab6094f070bed5e3ff12c415a4aa2f3d5"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-build-4.log",
+          "bytes": 31348,
+          "sha256": "3e93eadb090b886f95d88260faac6a4f89361944b9cbf1b2e7e3df89561c1537"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-bytecode.json",
+          "bytes": 12245,
+          "sha256": "0170e184f1d143995570fcb5e49d4c1f2b3730189b9aa1cac6b1e60d16a64c20"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-bytecode.py",
+          "bytes": 3365,
+          "sha256": "7de340ac9cc3807242fe32ce468b757fd26e372e6b38935b97c9acefcd9c5d38"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-client-app.json",
+          "bytes": 1349,
+          "sha256": "ac363e7758aa4efd7d2aae121924d1361e16f4e29f5b083ac33a81f355654a51"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-client-app.log",
+          "bytes": 360,
+          "sha256": "67a6e3574d7a20b2ac7a7367c0997d383317ed574d65b0e2f2b60b00903ce89d"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-client-test.json",
+          "bytes": 501,
+          "sha256": "c99f208a8060ad5db0726efb08f51d2f891161bf91b1caba50f47fb49f468e67"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-client-test.log",
+          "bytes": 360,
+          "sha256": "67a6e3574d7a20b2ac7a7367c0997d383317ed574d65b0e2f2b60b00903ce89d"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-record.py",
+          "bytes": 17441,
+          "sha256": "728571785a3f385e10870edff3fc27344473dbe131fe2df238075428a9450e97"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-static.json",
+          "bytes": 45336,
+          "sha256": "553f5761d3b38ff3afc8ab9ae7014c5c0f86baf49d67d420440a7af436260b53"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-unused-projection.json",
+          "bytes": 54,
+          "sha256": "2f800b0de08fec8d751bf2f9251cc4686157cf56d9ff172f782e617ee4ca8f76"
+        }
+      ],
+      "compiled_kernel_manifest": [
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-client-app/kernel_blob.bin",
+          "bytes": 71894184,
+          "sha256": "3fb8c130c4225129ba13386ed082d43067a929ef378412b873797513bc08b023"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-projection-20261024-client-test/kernel_blob.bin",
+          "bytes": 76189544,
+          "sha256": "392311ebae76c8629e0210530c6a44f72e58c22d0145f2f96c674c409343ac4b"
+        }
+      ],
+      "owned_asset_directories": [
+        "/tmp/aeron-liquidation-projection-20261024-client-app",
+        "/tmp/aeron-liquidation-projection-20261024-client-test"
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": [],
+      "removed_python_cache": []
     }
   }
 }

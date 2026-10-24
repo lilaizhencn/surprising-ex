@@ -49,6 +49,8 @@ class RiskBoundaryPostgresTest {
         jdbc = new JdbcTemplate(new DriverManagerDataSource(url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema, user, password));
         String init = Files.readString(Path.of("../..", "init.sql")); int start = init.indexOf("CREATE TABLE IF NOT EXISTS core_liquidation_projection (");
         jdbc.execute(init.substring(start, init.indexOf("\n);", start) + 3));
+        start = init.indexOf("CREATE TABLE IF NOT EXISTS core_liquidation_projection_initialization (");
+        jdbc.execute(init.substring(start, init.indexOf("\n);", start) + 3));
         configure(ProductLine.LINEAR_PERPETUAL);
     }
     @AfterEach void cleanup() { if (admin != null && schema != null) admin.execute("DROP SCHEMA " + schema + " CASCADE"); }
@@ -63,6 +65,21 @@ class RiskBoundaryPostgresTest {
         return Arrays.stream(ProductLine.values()).flatMap(line -> Arrays.stream(LiquidationCandidateStatus.values())
                 .flatMap(status -> Stream.of("asc", "desc").map(order -> Arguments.of(line, status, order))));
     }
+    @Test void uninitializedIsUnavailableAndReadyEmptyRemainsAnEmptyResult() throws Exception {
+        mvc.perform(get("/api/v1/admin/risk/liquidation-candidates").header("X-Admin-User-Id", "9"))
+                .andExpect(status().isServiceUnavailable());
+        jdbc.update("INSERT INTO core_liquidation_projection_initialization VALUES (?)", ProductLine.LINEAR_PERPETUAL.name());
+        assertThat(candidates(LiquidationCandidateStatus.NEW, "asc", null).get("candidates").size()).isZero();
+    }
+
+    @Test void candidateUsesStoredMarginModeAndDoesNotInventAnInstrumentVersion() throws Exception {
+        seed(ProductLine.LINEAR_PERPETUAL, LiquidationCandidateStatus.NEW);
+        jdbc.update("UPDATE core_liquidation_projection SET margin_mode='ISOLATED'");
+        var candidate = candidates(LiquidationCandidateStatus.NEW, "asc", null).get("candidates").get(0);
+        assertThat(candidate.get("marginMode").asString()).isEqualTo("ISOLATED");
+        assertThat(candidate.has("instrumentChangeId")).isFalse();
+    }
+
     @ParameterizedTest @MethodSource("pages")
     void nativeCandidateQueryKeepsProductsStatusesDirectionsAndLongIds(ProductLine line, LiquidationCandidateStatus status, String order) throws Exception {
         configure(line); seed(line, status); seed(ProductLine.values()[(line.ordinal() + 1) % ProductLine.values().length], status);
@@ -155,12 +172,13 @@ class RiskBoundaryPostgresTest {
         return new CoreRiskScanControlView(version,name,enabled,delay,batch,admin,reason,NOW);
     }
     private void seed(ProductLine line,LiquidationCandidateStatus status) {
+        jdbc.update("INSERT INTO core_liquidation_projection_initialization VALUES (?) ON CONFLICT DO NOTHING", line.name());
         long id=FIRST+line.ordinal()*10;
         for(int i=0;i<3;i++) {
             String state=status==LiquidationCandidateStatus.PROCESSING ? List.of("ORDERED","INSURANCE_REQUIRED","ADL_REQUIRED").get(i)
                     : status==LiquidationCandidateStatus.NEW ? "PLANNED" : status.name();
-            jdbc.update("INSERT INTO core_liquidation_projection VALUES(?,?,42,'1','USDT','CROSS','NET',1,1,1,1,1,1,0,0,?,1,?)",line.name(),id+i,state,NOW+i);
+            jdbc.update("INSERT INTO core_liquidation_projection VALUES(?,?,42,'1','USDT','CROSS','NET',1,1,1,0,0,?,1,?)",line.name(),id+i,state,NOW+i);
         }
-        jdbc.update("INSERT INTO core_liquidation_projection VALUES(?,?,42,'1','USDT','CROSS','NET',1,1,1,1,1,1,0,0,?,1,?)",line.name(),id+9,status==LiquidationCandidateStatus.NEW ? "CANCELED" : "PLANNED",NOW);
+        jdbc.update("INSERT INTO core_liquidation_projection VALUES(?,?,42,'1','USDT','CROSS','NET',1,1,1,0,0,?,1,?)",line.name(),id+9,status==LiquidationCandidateStatus.NEW ? "CANCELED" : "PLANNED",NOW);
     }
 }

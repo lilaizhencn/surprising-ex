@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.CoreTriggerOrderCodec;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.replay.CommittedTradeReplay;
 import com.surprising.aeron.service.replay.CommittedTradeReplay.CommittedCommandResult;
+import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.provider.export.model.CommittedProjectionRows.DeliveryLedgerEntry;
 import com.surprising.realtime.provider.export.model.CommittedProjectionRows.ExecutionWrite;
@@ -35,6 +36,8 @@ public class CommittedOrderProjectionService {
     private final CommittedOrderRepository orderRows;
     private final CommittedExecutionRepository executionRows;
     private final CommittedTriggerRepository triggerRows;
+    private final CommittedLiquidationRepository liquidationRows;
+    private final LiquidationInitializationRepository liquidationInitialization;
     private final CommittedCommandResultRepository receiptRows;
     private final ProjectionWatermarkRepository watermarks;
     private final ExecutionInitializationRepository executionInitialization;
@@ -54,6 +57,8 @@ public class CommittedOrderProjectionService {
             CommittedOrderRepository orderRows,
             CommittedExecutionRepository executionRows,
             CommittedTriggerRepository triggerRows,
+            CommittedLiquidationRepository liquidationRows,
+            LiquidationInitializationRepository liquidationInitialization,
             CommittedCommandResultRepository receiptRows,
             ProjectionWatermarkRepository watermarks,
             ExecutionInitializationRepository executionInitialization,
@@ -69,6 +74,8 @@ public class CommittedOrderProjectionService {
         this.orderRows = orderRows;
         this.executionRows = executionRows;
         this.triggerRows = triggerRows;
+        this.liquidationRows = liquidationRows;
+        this.liquidationInitialization = liquidationInitialization;
         this.receiptRows = receiptRows;
         this.watermarks = watermarks;
         this.executionInitialization = executionInitialization;
@@ -104,6 +111,15 @@ public class CommittedOrderProjectionService {
 
     public boolean executionsInitialized(ProductLine product) { return executionInitialization.initialized(product); }
     public void initializeExecutions(ProductLine product, long position) { executionInitialization.initialize(product, position); }
+
+    public boolean liquidationsInitialized(ProductLine product) { return liquidationInitialization.initialized(product); }
+    public void initializeLiquidations(ProductLine product) { liquidationInitialization.initialize(product); }
+
+    /** 原始 Archive 前缀重建，只写强平事实，不推进订单水位。 */
+    public void repairLiquidations(ProductLine product, List<LiquidationChange> changes) {
+        if (changes.isEmpty()) return;
+        transaction.executeWithoutResult(tx -> liquidationRows.persist(product, changes));
+    }
 
     /** Finite history repair writes executions only, without the normal order watermark. */
     public void repairExecutions(ProductLine product, List<RealtimeFrame> frames) {
@@ -222,10 +238,20 @@ public class CommittedOrderProjectionService {
     public void persist(ProductLine product, List<RealtimeFrame> orders,
                  List<CommittedCommandResult> commandResults, long exportSequence,
                  List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges) {
+        persist(product, orders, commandResults, exportSequence, algoChanges, List.of());
+    }
+
+    public void persist(ProductLine product, List<RealtimeFrame> orders,
+                 List<CommittedCommandResult> commandResults, long exportSequence,
+                 List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges,
+                 List<LiquidationChange> liquidationChanges) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");
         if (orders.isEmpty() && commandResults.isEmpty() && algoChanges.isEmpty()) {
             // Commands without order changes must still advance the visibility watermark.
-            transaction.executeWithoutResult(status -> watermarks.advanceWatermark(product, exportSequence));
+            transaction.executeWithoutResult(status -> {
+                liquidationRows.persist(product, liquidationChanges);
+                watermarks.advanceWatermark(product, exportSequence);
+            });
             return;
         }
         // Read each committed batch from the admin catalog. Disabled strategies still own
@@ -296,6 +322,7 @@ public class CommittedOrderProjectionService {
         transaction.executeWithoutResult(status -> {
             statistics.persist(product,commandResults);
             algos.persist(product, algoChanges, exportSequence);
+            liquidationRows.persist(product, liquidationChanges);
             receiptRows.persistCommandResults(product, receipts);
             executionRows.persistExecutions(product, fills);
             triggerRows.persistTriggers(product, triggers.values(), exportSequence);

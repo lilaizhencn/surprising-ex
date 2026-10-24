@@ -135,11 +135,12 @@ public class RiskService {
         CoreRiskSnapshotView risk = riskState(candidate.userId()).stream()
                 .filter(value -> value.instrumentId().equals(candidate.instrumentId()))
                 .filter(value -> value.positionSide().name().equals(candidate.positionSide().name()))
+                .filter(value -> value.marginMode().name().equals(candidate.marginMode().name()))
                 .findFirst().orElse(null);
         if (risk == null) return candidate;
         return new LiquidationCandidateResponse(candidate.candidateId(), risk.priceSequence(), candidate.userId(),
                 candidate.instrumentId(), MarginMode.valueOf(risk.marginMode().name()), candidate.positionSide(),
-                candidate.instrumentChangeId(), candidate.accountType(), risk.settleAsset(), risk.signedQuantitySteps(),
+                candidate.accountType(), risk.settleAsset(), risk.signedQuantitySteps(),
                 risk.markPriceTicks(), risk.equityUnits(), risk.maintenanceMarginUnits(), risk.marginRatioPpm(),
                 candidate.status(), candidate.eventTime());
     }

@@ -11,7 +11,6 @@ public record LiquidationCandidateResponse(
         String instrumentId,
         MarginMode marginMode,
         PositionSide positionSide,
-        long instrumentChangeId,
         String accountType,
         String settleAsset,
         long signedQuantitySteps,
@@ -26,65 +25,6 @@ public record LiquidationCandidateResponse(
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
         accountType = normalizeAccountType(accountType);
-    }
-
-    public LiquidationCandidateResponse(long candidateId,
-                                        long snapshotId,
-                                        long userId,
-                                        String instrumentId,
-                                        MarginMode marginMode,
-                                        PositionSide positionSide,
-                                        long instrumentChangeId,
-                                        String settleAsset,
-                                        long signedQuantitySteps,
-                                        long markPriceTicks,
-                                        long equityUnits,
-                                        long maintenanceMarginUnits,
-                                        long marginRatioPpm,
-                                        LiquidationCandidateStatus status,
-                                        Instant eventTime) {
-        this(candidateId, snapshotId, userId, instrumentId, marginMode, positionSide, instrumentChangeId,
-                "USDT_PERPETUAL", settleAsset, signedQuantitySteps, markPriceTicks, equityUnits,
-                maintenanceMarginUnits, marginRatioPpm, status, eventTime);
-    }
-
-    public LiquidationCandidateResponse(long candidateId,
-                                        long snapshotId,
-                                        long userId,
-                                        String instrumentId,
-                                        MarginMode marginMode,
-                                        long instrumentChangeId,
-                                        String settleAsset,
-                                        long signedQuantitySteps,
-                                        long markPriceTicks,
-                                        long equityUnits,
-                                        long maintenanceMarginUnits,
-                                        long marginRatioPpm,
-                                        LiquidationCandidateStatus status,
-                                        Instant eventTime) {
-        this(candidateId, snapshotId, userId, instrumentId, marginMode, PositionSide.NET, instrumentChangeId,
-                "USDT_PERPETUAL", settleAsset,
-                signedQuantitySteps, markPriceTicks, equityUnits, maintenanceMarginUnits, marginRatioPpm, status,
-                eventTime);
-    }
-
-    public LiquidationCandidateResponse(long candidateId,
-                                        long snapshotId,
-                                        long userId,
-                                        String instrumentId,
-                                        long instrumentChangeId,
-                                        String settleAsset,
-                                        long signedQuantitySteps,
-                                        long markPriceTicks,
-                                        long equityUnits,
-                                        long maintenanceMarginUnits,
-                                        long marginRatioPpm,
-                                        LiquidationCandidateStatus status,
-                                        Instant eventTime) {
-        this(candidateId, snapshotId, userId, instrumentId, MarginMode.CROSS, PositionSide.NET, instrumentChangeId,
-                "USDT_PERPETUAL", settleAsset,
-                signedQuantitySteps, markPriceTicks, equityUnits, maintenanceMarginUnits, marginRatioPpm, status,
-                eventTime);
     }
 
     private static String normalizeAccountType(String value) {

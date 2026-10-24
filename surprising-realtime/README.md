@@ -633,3 +633,15 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 接收器的坏帧、处理异常和传输失效暂停接收，由 router 自有工作线程清掉未完成快照/commit、待路由输入与旧发送积压，更新产品 sourceEpoch，再恢复接收；不会等待下一笔成交才把旧账户投影置为不可用。退休下游 Aeron image 使 gateway/price 同步失效各自旧基线，既有 snapshot/book 重试继续申请权威状态。恢复以故障版本确认，新的故障不能被旧确认覆盖。
 
 逐帧发送、排队与 Kafka 成交提交成功日志为有开关保护的 DEBUG，失败诊断限频，累计计数保留；没有据此声称吞吐或零分配改善。回归包含真实 Redis/Aeron 坏帧后即使没有后续 commit，原 READY read view 也必须失效。
+
+### 强平已提交投影（2026-10-24）
+
+`CommittedTradeReplay`在Owner完成原账户交接时接收不可变强平后值、原日志位置及业务时间，交给既有`ExportBatch`。`CommittedLiquidationRepository`仅写`core_liquidation_projection`；按日志位置更新最新状态，同位置逐字段核对身份、数量、执行价、费率、实收费、状态和时间。较旧重放不能覆盖较新事实，冲突使原订单/回执/水位事务回滚，检查点也不前移。
+
+强平历史初始化复用成交历史的Archive前缀重建流程，使用独立`.liquidation-repair`检查点，覆盖live前缀后才写产品就绪标记；不重发Kafka或在线交易命令，不用快照当前时间伪造历史日期。现货不会产生Core强平，直接发布空历史就绪。`core_liquidation_projection_initialization`只保存产品键，不重复保存回放检查点或没有消费者的时间字段。重建投影时应在同一数据库事务中清理对应产品的数据与就绪行，原live检查点保持不变。
+
+生命周期查询在同一SQL快照读取就绪标记与投影：未就绪、读取失败或无法解析数据返回503，已就绪无记录返回空页。风险候选使用原保证金模式，不返回无Core来源的`instrumentChangeId`。公开强平执行价、费率和实际收费保留，Cluster命令、快照及实时帧格式不变。本轮只编译相关生产/测试源码，未执行SQL、Archive或真实交易验证。
+
+强平投影不复制没有独立读端的`trigger_price_sequence`和`deficit_units`；Core中的真实续步/补亏事实及其快照保持原样，当前SQL写入15列均有查询或重放顺序用途。
+
+强平行用`cluster_position`明确保存原Archive日志位置，避免与订单投影的业务导出序号混淆。Client已同步当前标的字段和503错误处理；Flutter仅编译应用及测试入口kernel，没有启动应用或执行测试。

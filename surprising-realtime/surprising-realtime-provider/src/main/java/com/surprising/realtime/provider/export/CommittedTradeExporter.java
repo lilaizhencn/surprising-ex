@@ -2,6 +2,7 @@ package com.surprising.realtime.provider.export;
 
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.replay.CommittedTradeReplay;
+import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import com.surprising.realtime.api.PortfolioIncomePeriod;
 import com.surprising.realtime.provider.export.config.TradeExportProperties;
@@ -23,7 +24,7 @@ import org.apache.kafka.clients.producer.*;
 /** Single-threaded committed Archive replay; all replay state belongs to the calling export worker. */
 @Slf4j
 final class CommittedTradeExporter {
-    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR, EXECUTION_REPAIR, STATISTICS_REPAIR, PORTFOLIO_REPAIR }
+    enum ExportMode { LIVE, FUNDING_REPAIR, COMMAND_RESULT_REPAIR, DELIVERY_REPAIR, EXECUTION_REPAIR, LIQUIDATION_REPAIR, STATISTICS_REPAIR, PORTFOLIO_REPAIR }
     private final TradeExportProperties config;
     private final ProductLine product;
     private final String bootstrapServers;
@@ -114,6 +115,25 @@ final class CommittedTradeExporter {
         }
         // After SQL readiness commits, no historical replay checkpoint is needed. A future
         // deliberate table rebuild starts from the full Archive, retaining the live checkpoint.
+        Files.deleteIfExists(repair);
+        Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".lock"));
+        Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".next"));
+    }
+
+    private void initializeLiquidations(TradeExportCheckpoint checkpoint, java.util.concurrent.atomic.AtomicBoolean running) throws Exception {
+        Path repair = config.checkpoint().toAbsolutePath().resolveSibling(config.checkpoint().getFileName() + ".liquidation-repair");
+        if (!orders.liquidationsInitialized(product)) {
+            // 现货不产生强平事实，无需为一个空读模型重放全部现货历史。
+            if (product != ProductLine.SPOT && checkpoint.logPosition() > 0) {
+                var repairConfig = new TradeExportProperties(config.clusterDirectory(), config.aeronDirectory(), config.archiveControlChannel(),
+                        repair, config.clusterId(), config.kafkaConfig(), config.checkpointInterval(), config.retryInterval());
+                new CommittedTradeExporter(repairConfig, product, null, orders).run(running, ready -> {}, checkpoint.logPosition(), ExportMode.LIQUIDATION_REPAIR);
+                if (TradeExportCheckpoint.read(repair, product).logPosition() < checkpoint.logPosition())
+                    throw new IllegalStateException("liquidation history reconstruction incomplete");
+            }
+            if (!running.get() || Thread.currentThread().isInterrupted()) throw new IllegalStateException("liquidation history initialization stopped");
+            orders.initializeLiquidations(product);
+        }
         Files.deleteIfExists(repair);
         Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".lock"));
         Files.deleteIfExists(repair.resolveSibling(repair.getFileName() + ".next"));
@@ -215,6 +235,7 @@ final class CommittedTradeExporter {
                 throw new IllegalStateException("trade exporter checkpoint is already in use");
             TradeExportCheckpoint checkpoint = TradeExportCheckpoint.read(checkpointPath, product);
             if (mode == ExportMode.LIVE) initializeExecutions(checkpoint, running);
+            if (mode == ExportMode.LIVE) initializeLiquidations(checkpoint, running);
             if (mode == ExportMode.LIVE) initializeStatistics(checkpoint, running);
             if (mode == ExportMode.LIVE) initializePortfolio(checkpoint, running);
             try (var replay = new CommittedTradeReplay(product, checkpoint.snapshot());
@@ -272,7 +293,7 @@ final class CommittedTradeExporter {
                             orders.persistDelivery(replay.deliveryPage());
                         }
                         batch.add(changes,
-                                replay.commandResult(), replay.exportSequence(), System.nanoTime(), replay.algoChanges(), replay.balanceFlow());
+                                replay.commandResult(), replay.exportSequence(), System.nanoTime(), replay.algoChanges(), replay.balanceFlow(), replay.liquidationChanges());
                     }
                     delivered[0] = header.position();
                     if (System.nanoTime() >= nextCheckpoint[0]) {
@@ -414,6 +435,7 @@ final class CommittedTradeExporter {
         private final ArrayList<CommittedTradeReplay.CommittedCommandResult> commandResults = new ArrayList<>();
         private final ArrayList<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges = new ArrayList<>();
         private final ArrayList<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows = new ArrayList<>();
+        private final ArrayList<LiquidationChange> liquidationChanges = new ArrayList<>();
         private int messages;
         private long startedAt, flushedSequence = -1;
         private long maxDelayNanos = MAX_DELAY_NANOS;
@@ -447,16 +469,23 @@ final class CommittedTradeExporter {
         void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
                  long sequence, long now, List<com.surprising.aeron.protocol.CoreAlgoOrderView> algos,
                  CommittedTradeReplay.CommittedBalanceFlow balanceFlow) {
+            add(changes, commandResult, sequence, now, algos, balanceFlow, List.of());
+        }
+
+        void add(List<RealtimeFrame> changes, CommittedTradeReplay.CommittedCommandResult commandResult,
+                 long sequence, long now, List<com.surprising.aeron.protocol.CoreAlgoOrderView> algos,
+                 CommittedTradeReplay.CommittedBalanceFlow balanceFlow, List<LiquidationChange> liquidations) {
             if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
+            if (mode == ExportMode.LIVE || mode == ExportMode.LIQUIDATION_REPAIR) liquidationChanges.addAll(liquidations);
             if (mode == ExportMode.LIVE) algoChanges.addAll(algos);
             if ((mode == ExportMode.LIVE || mode == ExportMode.PORTFOLIO_REPAIR) && balanceFlow != null) balanceFlows.add(balanceFlow);
             if (messages++ == 0) startedAt = now;
-            if (commandResult != null && mode != ExportMode.EXECUTION_REPAIR) commandResults.add(commandResult);
+            if (commandResult != null && mode != ExportMode.EXECUTION_REPAIR && mode != ExportMode.LIQUIDATION_REPAIR) commandResults.add(commandResult);
             for (var change : mode == ExportMode.LIVE || mode == ExportMode.EXECUTION_REPAIR ? changes : List.<RealtimeFrame>of()) {
                 if (change.kind() == RealtimeFrame.Kind.TRADE && mode == ExportMode.LIVE) trades.add(change);
                 orderChanges.add(change);
             }
-            if (messages >= 256 || trades.size() + orderChanges.size() + algoChanges.size() >= 4096
+            if (messages >= 256 || trades.size() + orderChanges.size() + algoChanges.size() + liquidationChanges.size() >= 4096
                     || now - startedAt >= maxDelayNanos) flush(sequence);
         }
 
@@ -471,13 +500,14 @@ final class CommittedTradeExporter {
 
         void flush(long sequence) {
             if (mode == ExportMode.FUNDING_REPAIR || mode == ExportMode.DELIVERY_REPAIR) return;
-            if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty() || !algoChanges.isEmpty() || !balanceFlows.isEmpty()) {
+            if (sequence != flushedSequence || !orderChanges.isEmpty() || !trades.isEmpty() || !commandResults.isEmpty() || !algoChanges.isEmpty() || !balanceFlows.isEmpty() || !liquidationChanges.isEmpty()) {
                 if (mode == ExportMode.COMMAND_RESULT_REPAIR) orders.repairCommandResults(product, commandResults);
                 else if (mode == ExportMode.EXECUTION_REPAIR) orders.repairExecutions(product, orderChanges);
+                else if (mode == ExportMode.LIQUIDATION_REPAIR) orders.repairLiquidations(product, liquidationChanges);
                 else if (mode == ExportMode.STATISTICS_REPAIR) orders.statistics().repair(product,commandResults);
                 else if (mode == ExportMode.PORTFOLIO_REPAIR) orders.portfolio().persist(balanceFlows);
                 else {
-                    orders.persist(product, orderChanges, commandResults, sequence, algoChanges);
+                    orders.persist(product, orderChanges, commandResults, sequence, algoChanges, liquidationChanges);
                     if (!balanceFlows.isEmpty()) orders.portfolio().persist(balanceFlows);
                     sink.publish(trades);
                 }
@@ -485,6 +515,7 @@ final class CommittedTradeExporter {
                 flushedSequence = sequence;
             }
             algoChanges.clear();
+            liquidationChanges.clear();
             balanceFlows.clear();
             orderChanges.clear();
             commandResults.clear();

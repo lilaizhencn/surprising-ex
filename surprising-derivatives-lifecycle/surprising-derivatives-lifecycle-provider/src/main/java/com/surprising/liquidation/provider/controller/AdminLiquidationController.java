@@ -3,6 +3,7 @@ package com.surprising.liquidation.provider.controller;
 import com.surprising.liquidation.api.model.LiquidationOrderQueryResponse;
 import com.surprising.liquidation.provider.service.LiquidationService;
 import org.springframework.http.HttpStatus;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -31,6 +32,8 @@ public class AdminLiquidationController {
         requireAdmin(adminUserId);
         try {
             return liquidationService.orders(userId, limit, cursor, sort);
+        } catch (ReadViewUnavailableException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

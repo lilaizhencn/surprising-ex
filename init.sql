@@ -3158,20 +3158,22 @@ CREATE TABLE IF NOT EXISTS core_liquidation_projection (
     asset VARCHAR(20) NOT NULL,
     margin_mode VARCHAR(16) NOT NULL,
     position_side VARCHAR(16) NOT NULL,
-    instrument_change_id BIGINT NOT NULL,
-    trigger_price_sequence BIGINT NOT NULL,
     signed_quantity_steps BIGINT NOT NULL,
     close_quantity_steps BIGINT NOT NULL,
-    deficit_units BIGINT NOT NULL,
     execution_price_ticks BIGINT NOT NULL,
     liquidation_fee_rate_ppm BIGINT NOT NULL,
     liquidation_fee_units BIGINT NOT NULL,
     status VARCHAR(32) NOT NULL,
-    export_sequence BIGINT NOT NULL,
+    cluster_position BIGINT NOT NULL,
     updated_at_epoch_ms BIGINT NOT NULL,
     PRIMARY KEY (product_line, liquidation_id)
 );
 
+
+-- 已提交历史重建完成才发布产品就绪；重放位置由原独立检查点持有。
+CREATE TABLE IF NOT EXISTS core_liquidation_projection_initialization (
+    product_line VARCHAR(32) PRIMARY KEY
+);
 CREATE INDEX IF NOT EXISTS idx_core_liquidation_pending
     ON core_liquidation_projection (product_line, status, liquidation_id);
 

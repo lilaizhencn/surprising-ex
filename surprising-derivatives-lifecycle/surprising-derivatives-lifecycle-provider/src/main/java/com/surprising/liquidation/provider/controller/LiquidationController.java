@@ -6,6 +6,7 @@ import com.surprising.liquidation.provider.service.LiquidationRuntimeConfigServi
 import com.surprising.liquidation.provider.service.LiquidationService;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -31,6 +32,8 @@ public class LiquidationController {
                                                 @RequestParam(value = "limit", defaultValue = "100") int limit) {
         try {
             return liquidationService.orders(userId, limit);
+        } catch (ReadViewUnavailableException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -38,7 +41,13 @@ public class LiquidationController {
 
     @GetMapping(LiquidationApiPaths.BASE_PATH + "/orders/by-candidate")
     public LiquidationOrderQueryResponse ordersByCandidate(@RequestParam("candidateId") long candidateId) {
-        return liquidationService.ordersByCandidate(candidateId);
+        try {
+            return liquidationService.ordersByCandidate(candidateId);
+        } catch (ReadViewUnavailableException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
     }
 
     @GetMapping(LiquidationApiPaths.BASE_PATH + "/admin/runtime-config")

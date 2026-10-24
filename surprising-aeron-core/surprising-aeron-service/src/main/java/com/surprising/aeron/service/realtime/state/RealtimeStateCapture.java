@@ -10,6 +10,7 @@ import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
+import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import lombok.Getter;
@@ -40,6 +41,20 @@ public final class RealtimeStateCapture {
     @Accessors(fluent = true, chain = false)
     @Setter
     private boolean orderProjectionOnly;
+
+    /** 独立提交回放使用的同步观察器；在线实时捕获不注册，不创建强平投影对象。 */
+    @Accessors(fluent = true, chain = false)
+    @Setter
+    private java.util.function.Consumer<LiquidationChange> liquidationObserver;
+
+    /** 原已提交日志位置、业务时间和不可变强平后值，不复制账户状态。 */
+    public record LiquidationChange(LiquidationRuntime state, long logPosition, long occurredAt) {}
+
+    /** Owner 收齐 Lane 回执后交出本次变化，观察异常由原捕获失败边界处理。 */
+    public void liquidation(LiquidationRuntime value) {
+        if (active() && value != null && liquidationObserver != null)
+            liquidationObserver.accept(new LiquidationChange(value, sequence, timestamp));
+    }
 
     /**
      * 返回 outbox 当前是否处于捕获中，与 active 相同；不单独根据 orderProjectionOnly 判断。

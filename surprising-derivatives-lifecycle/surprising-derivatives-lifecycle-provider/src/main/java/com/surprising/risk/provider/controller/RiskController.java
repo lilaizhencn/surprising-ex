@@ -10,6 +10,7 @@ import com.surprising.risk.provider.service.RiskAeronGateway.RiskScanControlConf
 import java.util.Map;
 import com.surprising.risk.provider.model.RiskRuleModels.RiskRuleUpdateCommand;
 import org.springframework.http.HttpStatus;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -59,6 +60,8 @@ public class RiskController {
             @RequestParam(value = "limit", defaultValue = "100") int limit) {
         try {
             return riskService.liquidationCandidates(RiskRequestBinding.candidates(status, limit, null, null));
+        } catch (ReadViewUnavailableException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

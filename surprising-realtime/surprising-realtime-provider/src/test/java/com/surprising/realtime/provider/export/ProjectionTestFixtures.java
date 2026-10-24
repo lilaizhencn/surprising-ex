@@ -15,6 +15,8 @@ final class ProjectionTestFixtures {
                 new CommittedOrderRepository(jdbc),
                 new CommittedExecutionRepository(jdbc),
                 new CommittedTriggerRepository(jdbc),
+                new CommittedLiquidationRepository(jdbc),
+                new LiquidationInitializationRepository(jdbc),
                 new CommittedCommandResultRepository(jdbc),
                 new ProjectionWatermarkRepository(jdbc),
                 new ExecutionInitializationRepository(jdbc),

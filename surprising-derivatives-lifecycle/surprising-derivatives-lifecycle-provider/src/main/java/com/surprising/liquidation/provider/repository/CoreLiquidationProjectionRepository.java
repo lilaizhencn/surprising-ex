@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataAccessException;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -27,8 +29,8 @@ public class CoreLiquidationProjectionRepository {
         String direction = descending ? "DESC" : "ASC";
         StringBuilder sql = new StringBuilder("""
                 SELECT liquidation_id, user_id, instrument_id, asset, margin_mode, position_side,
-                       trigger_price_sequence, signed_quantity_steps, close_quantity_steps,
-                       deficit_units, execution_price_ticks, liquidation_fee_rate_ppm,
+                       signed_quantity_steps, close_quantity_steps,
+                       execution_price_ticks, liquidation_fee_rate_ppm,
                        liquidation_fee_units, status, updated_at_epoch_ms
                   FROM core_liquidation_projection
                  WHERE product_line = ?
@@ -50,13 +52,14 @@ public class CoreLiquidationProjectionRepository {
         sql.append(" ORDER BY updated_at_epoch_ms ").append(direction)
                 .append(", liquidation_id ").append(direction).append(" LIMIT ?");
         args.add(limit + 1);
-        List<CoreLiquidationProjection> fetched = jdbcTemplate.query(sql.toString(), (rs, rowNum) ->
+        List<CoreLiquidationProjection> fetched = readAssociated(productLine, sql.toString(),
+                "updated_at_epoch_ms " + direction + ",liquidation_id " + direction, (rs, rowNum) ->
                 new CoreLiquidationProjection(rs.getLong("liquidation_id"), rs.getLong("user_id"),
                         rs.getString("instrument_id"), rs.getString("asset"),
                         CoreMarginMode.valueOf(rs.getString("margin_mode")),
                         CorePositionSide.valueOf(rs.getString("position_side")),
-                        rs.getLong("trigger_price_sequence"), rs.getLong("signed_quantity_steps"),
-                        rs.getLong("close_quantity_steps"), rs.getLong("deficit_units"),
+                        rs.getLong("signed_quantity_steps"),
+                        rs.getLong("close_quantity_steps"),
                         rs.getLong("execution_price_ticks"), rs.getLong("liquidation_fee_rate_ppm"),
                         rs.getLong("liquidation_fee_units"), rs.getString("status"),
                         Instant.ofEpochMilli(rs.getLong("updated_at_epoch_ms"))), args.toArray());
@@ -68,22 +71,43 @@ public class CoreLiquidationProjectionRepository {
 
     public List<CoreLiquidationProjection> byLiquidationId(String productLine, long liquidationId) {
         if (liquidationId <= 0) throw new IllegalArgumentException("candidateId must be positive");
-        return jdbcTemplate.query("""
+        return readAssociated(productLine, """
                 SELECT liquidation_id, user_id, instrument_id, asset, margin_mode, position_side,
-                       trigger_price_sequence, signed_quantity_steps, close_quantity_steps,
-                       deficit_units, execution_price_ticks, liquidation_fee_rate_ppm,
+                       signed_quantity_steps, close_quantity_steps,
+                       execution_price_ticks, liquidation_fee_rate_ppm,
                        liquidation_fee_units, status, updated_at_epoch_ms
                   FROM core_liquidation_projection
                  WHERE product_line = ? AND liquidation_id = ?
-                """, (rs, rowNum) -> new CoreLiquidationProjection(rs.getLong("liquidation_id"),
+                """, "liquidation_id", (rs, rowNum) -> new CoreLiquidationProjection(rs.getLong("liquidation_id"),
                 rs.getLong("user_id"), rs.getString("instrument_id"), rs.getString("asset"),
                 CoreMarginMode.valueOf(rs.getString("margin_mode")),
                 CorePositionSide.valueOf(rs.getString("position_side")),
-                rs.getLong("trigger_price_sequence"), rs.getLong("signed_quantity_steps"),
-                rs.getLong("close_quantity_steps"), rs.getLong("deficit_units"),
+                rs.getLong("signed_quantity_steps"),
+                rs.getLong("close_quantity_steps"),
                 rs.getLong("execution_price_ticks"), rs.getLong("liquidation_fee_rate_ppm"),
                 rs.getLong("liquidation_fee_units"), rs.getString("status"),
                 Instant.ofEpochMilli(rs.getLong("updated_at_epoch_ms"))), productLine, liquidationId);
+    }
+
+    /** 就绪标记与结果在同一 SQL 快照读取，空页不能掩盖未初始化。 */
+    private List<CoreLiquidationProjection> readAssociated(String product, String sql, String orderBy,
+            org.springframework.jdbc.core.RowMapper<CoreLiquidationProjection> mapper, Object... values) {
+        var args = new ArrayList<Object>(); args.add(product); args.addAll(java.util.Arrays.asList(values));
+        String associated = """
+                SELECT initialized.__ready, projection_rows.*
+                  FROM (SELECT count(*)=1 AS __ready FROM core_liquidation_projection_initialization WHERE product_line=?) initialized
+                  LEFT JOIN LATERAL (
+                """ + sql + ") projection_rows ON initialized.__ready ORDER BY " + orderBy;
+        try {
+            return jdbcTemplate.query(associated, (rs, row) -> {
+                if (!rs.getBoolean("__ready")) throw new ReadViewUnavailableException("LIQUIDATION_READ_VIEW_NOT_READY");
+                return rs.getObject("liquidation_id") == null ? null : mapper.mapRow(rs, row);
+            }, args.toArray()).stream().filter(java.util.Objects::nonNull).toList();
+        } catch (DataAccessException failure) {
+            throw new ReadViewUnavailableException("LIQUIDATION_READ_VIEW_UNAVAILABLE", failure);
+        } catch (IllegalArgumentException invalid) {
+            throw new ReadViewUnavailableException("LIQUIDATION_READ_VIEW_INVALID", invalid);
+        }
     }
 
     private static boolean normalizeSort(String sort) {

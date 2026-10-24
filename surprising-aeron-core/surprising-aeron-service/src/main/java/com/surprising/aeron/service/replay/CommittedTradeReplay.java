@@ -3,6 +3,7 @@ package com.surprising.aeron.service.replay;
 import com.surprising.aeron.client.RealtimeOutbox;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.realtime.state.RealtimeStateCapture.LiquidationChange;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +45,10 @@ public final class CommittedTradeReplay implements AutoCloseable {
     @Accessors(fluent = true, chain = false)
     @Getter
     private List<CoreAlgoOrderView> algoChanges = List.of();
+    private final ArrayList<LiquidationChange> liquidationChanges = new ArrayList<>();
+
+    /** 当前 apply 已完成的强平变化；返回独立列表，下一条命令不会清掉调用方批次。 */
+    public List<LiquidationChange> liquidationChanges() { return List.copyOf(liquidationChanges); }
 
     /**
      * 创建指定产品线空运行时或从快照恢复，挂载只采集订单投影的实时捕获器与资金费观察器，再遍历已有算法父单重建子单路由。
@@ -58,6 +63,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
         state.assertClusterCallbackComplete();
         capture = state.attachRealtime(outbox);
         capture.orderProjectionOnly(true);
+        capture.liquidationObserver(liquidationChanges::add);
         state.funding().observeReplayPayments(/* 资金费观察器交来的本命令完成事实，暂存后统一生成分页 */ result -> fundingResult = result);
         forEachRetainedAlgo(/* 构造时遍历父单以重建路由的空消费者参数，不另外处理视图 */ ignored -> {});
     }
@@ -70,6 +76,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
      */
     public List<RealtimeFrame> apply(byte[] bytes, long timestamp, long logPosition) {
         algoChanges = List.of();
+        liquidationChanges.clear();
         fundingPage = null;
         deliveryPage = null;
         commandResult = null;

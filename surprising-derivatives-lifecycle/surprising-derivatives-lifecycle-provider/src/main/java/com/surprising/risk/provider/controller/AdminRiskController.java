@@ -7,6 +7,7 @@ import com.surprising.risk.provider.model.RiskRuleModels.RiskRuleUpdateCommand;
 import com.surprising.risk.provider.model.RiskRuleModels.RiskRulesResponse;
 import com.surprising.risk.provider.service.RiskAeronGateway.RiskScanControlConflictException;
 import org.springframework.http.HttpStatus;
+import com.surprising.realtime.api.exception.ReadViewUnavailableException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -58,6 +59,8 @@ public class AdminRiskController {
         requireAdmin(adminUserId);
         try {
             return riskService.liquidationCandidates(RiskRequestBinding.candidates(status, limit, cursor, sort));
+        } catch (ReadViewUnavailableException ex) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }

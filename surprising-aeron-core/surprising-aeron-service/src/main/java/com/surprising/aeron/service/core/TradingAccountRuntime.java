@@ -6835,7 +6835,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 遍历直接及保留 Lane 变化缓冲，向索引接收器交出本次变化。活动账本已负责持仓业务索引时跳过其重复应用；触发单实时捕获故障单独记录，索引回调异常仍传播。
+     * 遍历直接及保留 Lane 变化缓冲，向索引接收器交出本次变化。活动账本已负责持仓业务索引时跳过其重复应用；强平/触发单捕获故障单独记录，索引回调异常仍传播。
      * @param consumer 接收本次变化身份或索引值的回调
      */
     public void visitChangedIndexes(ChangedIndexConsumer consumer) {
@@ -6860,8 +6860,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 visitChangedPositionIndexes(consumer, preparedConsumer, changedPositions.laneBuffer(laneId));
             }
         }
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < changedLiquidations.size(); index++)
-            consumer.liquidation(changedLiquidations.keyAt(index), null, changedLiquidations.valueAt(index));
+        for (/* 本轮有效强平后值，Lane 已完成交接。 */ int index = 0; index < changedLiquidations.size(); index++) {
+            LiquidationRuntime value = changedLiquidations.valueAt(index);
+            if (realtimeCapture != null && realtimeCapture.active()) {
+                try { realtimeCapture.liquidation(value); }
+                catch (RuntimeException failure) { realtimeCapture.failed(); }
+            }
+            consumer.liquidation(changedLiquidations.keyAt(index), null, value);
+        }
         for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < changedAlgoOrders.size(); index++)
             consumer.algoOrder(changedAlgoOrders.keyAt(index), null, changedAlgoOrders.valueAt(index));
         for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < changedTriggerOrders.size(); index++) {
