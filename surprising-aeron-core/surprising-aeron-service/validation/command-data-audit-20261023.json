@@ -9813,6 +9813,445 @@
       "evidence": "A180删除后，当前行情只在previousProgress为空的首轮取得计算价格；续页只消费进度中已校验为正的markPriceTicks，无价格序号对比或其他计算依赖这份当前mark，但入口仍先无条件拒绝缺失当前行情。",
       "proposed_cleanup": "准备阶段先取已有进度，只有首轮读取并要求当前mark；续页直接使用原固定价格，保持首轮MARK_PRICE_NOT_FOUND拒绝及其错误优先级、旧结算号、费率/游标、配置身份和产品/维护守卫。增加相应场景源码并只编译相关模块。",
       "verification_limit": "本轮只确认约束生命周期及下一步范围，未改该判断；缺当前行情但有合法固定进度的续页场景尚未实现或执行。"
+    },
+    {
+      "id": "A182",
+      "status": "confirmed",
+      "topic": "响应构建器两个旧物化重载及无消费结果数访问器",
+      "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+      "analysis_round": "fifty_seventh_analysis_round",
+      "business_code_changed": false,
+      "analysis_status": "typed_callsite_and_source_review_confirmed_not_implemented",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultBuilder.java",
+          "line": 335,
+          "anchor": "void materializeResponseOrders(long... orderIds)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultBuilder.java",
+          "line": 358,
+          "anchor": "void materializeResponseOrders(long firstOrderId, long secondOrderId)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLedger.java",
+          "line": 54,
+          "anchor": "@Getter(value = AccessLevel.PACKAGE)"
+        }
+      ],
+      "fields_or_methods": [
+        {
+          "owner": "com/surprising/aeron/service/result/CommandResultBuilder",
+          "name": "materializeResponseOrders",
+          "descriptor": "([J)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/result/CommandResultBuilder",
+          "name": "materializeResponseOrders",
+          "descriptor": "(JJ)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/result/CommandResultLedger",
+          "name": "size",
+          "descriptor": "()I"
+        }
+      ],
+      "proposed_cleanup": "删除两个无调用重载及size()的Lombok getter注解；保留命令槽版本和真实计数。",
+      "verification_limit": "静态源码、CodeGraph及当前classfile核对；本轮未改业务源码，未重新构建或运行测试/服务，不把上一轮六线成绩当作未来删除后的验证。"
+    },
+    {
+      "id": "A183",
+      "status": "confirmed",
+      "topic": "账户运行时12个旧入口及2个仅供旧入口使用的下游方法",
+      "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+      "analysis_round": "fifty_seventh_analysis_round",
+      "business_code_changed": false,
+      "analysis_status": "typed_callsite_and_source_review_confirmed_not_implemented",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 1865,
+          "anchor": "stageLaneMutation(long coreSequence, long[] userIds)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 2796,
+          "anchor": "public LaneCancelEvent dispatchCancel("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 3717,
+          "anchor": "balancesForUser(long userId)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 3983,
+          "anchor": "leverageKeysForUser(long userId)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 4214,
+          "anchor": "positionKeysForUserAndSymbol(long userId, int symbolId)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 4291,
+          "anchor": "hasActiveLiquidationConflict("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 4323,
+          "anchor": "boolean hasLiquidationConflict("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 5846,
+          "anchor": "removeBalance("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 5974,
+          "anchor": "updateReservationInLane("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 6202,
+          "anchor": "removeMarkPrice("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 6242,
+          "anchor": "removeRiskScan("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 6757,
+          "anchor": "changedPositions()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+          "line": 7197,
+          "anchor": "currentPatchOrderBefore("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/RuntimeAccountRollback.java",
+          "line": 620,
+          "anchor": "currentOrderBefore("
+        }
+      ],
+      "fields_or_methods": [
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "stageLaneMutation",
+          "descriptor": "(J[J)J"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "dispatchCancel",
+          "descriptor": "(JJJJJ)Lcom/surprising/aeron/service/order/state/LaneCancelEvent;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "balancesForUser",
+          "descriptor": "(J)Lorg/eclipse/collections/impl/map/mutable/primitive/IntObjectHashMap;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "leverageKeysForUser",
+          "descriptor": "(J)Ljava/util/NavigableSet;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "positionKeysForUserAndSymbol",
+          "descriptor": "(JI)Ljava/util/NavigableSet;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "hasActiveLiquidationConflict",
+          "descriptor": "(JIJ)Z"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "hasLiquidationConflict",
+          "descriptor": "(JIJZ)Z"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "removeBalance",
+          "descriptor": "(JI)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "updateReservationInLane",
+          "descriptor": "(Lcom/surprising/aeron/service/account/AccountLaneState;JJJ)Lcom/surprising/aeron/service/order/state/ReservationRuntime;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "removeMarkPrice",
+          "descriptor": "(I)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "removeRiskScan",
+          "descriptor": "(I)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "changedPositions",
+          "descriptor": "()Lorg/eclipse/collections/impl/set/mutable/primitive/LongHashSet;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+          "name": "currentPatchOrderBefore",
+          "descriptor": "(J)Lcom/surprising/aeron/service/order/state/OrderRuntime;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/account/RuntimeAccountRollback",
+          "name": "currentOrderBefore",
+          "descriptor": "(J)Lcom/surprising/aeron/service/order/state/OrderRuntime;"
+        }
+      ],
+      "proposed_cleanup": "删除12个旧入口及仅被其调用的hasLiquidationConflict/currentOrderBefore；保留实际Lane方法、账户回滚记录和发布索引。",
+      "verification_limit": "静态源码、CodeGraph及当前classfile核对；本轮未改业务源码，未重新构建或运行测试/服务，不把上一轮六线成绩当作未来删除后的验证。"
+    },
+    {
+      "id": "A184",
+      "status": "confirmed",
+      "topic": "Core、触发及到期编排的5个无调用便捷入口",
+      "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+      "analysis_round": "fifty_seventh_analysis_round",
+      "business_code_changed": false,
+      "analysis_status": "typed_callsite_and_source_review_confirmed_not_implemented",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+          "line": 1733,
+          "anchor": "isMatchingPending(long msb, long lsb)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+          "line": 1741,
+          "anchor": "isMatchingPending(UUID commandId)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+          "line": 1951,
+          "anchor": "byte[] captureSnapshot("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+          "line": 690,
+          "anchor": "public void executeTriggerOrder(long triggerOrderId,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands.java",
+          "line": 95,
+          "anchor": "beginAsyncSettlement("
+        }
+      ],
+      "fields_or_methods": [
+        {
+          "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+          "name": "isMatchingPending",
+          "descriptor": "(JJ)Z"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+          "name": "isMatchingPending",
+          "descriptor": "(Ljava/util/UUID;)Z"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+          "name": "captureSnapshot",
+          "descriptor": "(JJJ)[B"
+        },
+        {
+          "owner": "com/surprising/aeron/service/trigger/command/TriggerOrderCommands",
+          "name": "executeTriggerOrder",
+          "descriptor": "(JJJJLjava/util/UUID;)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands",
+          "name": "beginAsyncSettlement",
+          "descriptor": "(Lcom/surprising/aeron/protocol/SettleInstrumentCommand;)Lcom/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork;"
+        }
+      ],
+      "proposed_cleanup": "删除列明5个旧入口；保留真实异步快照、SnapshotNotReadyException、带reuse和cancelOco的入口。",
+      "verification_limit": "静态源码、CodeGraph及当前classfile核对；本轮未改业务源码，未重新构建或运行测试/服务，不把上一轮六线成绩当作未来删除后的验证。"
+    },
+    {
+      "id": "A185",
+      "status": "confirmed",
+      "topic": "身份注册表3个无调用字符串查询/准备重载",
+      "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+      "analysis_round": "fifty_seventh_analysis_round",
+      "business_code_changed": false,
+      "analysis_status": "typed_callsite_and_source_review_confirmed_not_implemented",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java",
+          "line": 614,
+          "anchor": "long findPositionKeyValueInLane(AccountLaneState lane, long userId, String key)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java",
+          "line": 943,
+          "anchor": "long findPositionKeyValue(long userId, String positionKey)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java",
+          "line": 1101,
+          "anchor": "public long preparedPositionKey(AccountLaneState lane, long userId, String instrumentId, CorePositionSide side)"
+        }
+      ],
+      "fields_or_methods": [
+        {
+          "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+          "name": "findPositionKeyValueInLane",
+          "descriptor": "(Lcom/surprising/aeron/service/account/AccountLaneState;JLjava/lang/String;)J"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+          "name": "findPositionKeyValue",
+          "descriptor": "(JLjava/lang/String;)J"
+        },
+        {
+          "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+          "name": "preparedPositionKey",
+          "descriptor": "(Lcom/surprising/aeron/service/account/AccountLaneState;JLjava/lang/String;Lcom/surprising/aeron/protocol/CorePositionSide;)J"
+        }
+      ],
+      "proposed_cleanup": "只删除列明3个重载；保留真实持仓身份分配、反向核对和其他同名入口。",
+      "verification_limit": "静态源码、CodeGraph及当前classfile核对；本轮未改业务源码，未重新构建或运行测试/服务，不把上一轮六线成绩当作未来删除后的验证。"
+    },
+    {
+      "id": "A186",
+      "status": "confirmed",
+      "topic": "现货通用成交入口及4个辅助方法只服务测试",
+      "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+      "analysis_round": "fifty_seventh_analysis_round",
+      "business_code_changed": false,
+      "analysis_status": "typed_callsite_and_source_review_confirmed_not_implemented",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java",
+          "line": 36,
+          "anchor": "public static void applyRuntime("
+        }
+      ],
+      "fields_or_methods": [
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "name": "applyRuntime",
+          "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "name": "applyFill",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/order/state/OrderRuntime;JJZIILcom/surprising/aeron/service/treasury/RuntimeTreasuryDelta;)Lcom/surprising/aeron/service/order/state/OrderRuntime;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "name": "releaseTerminalReservation",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;J)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "name": "validateMatches",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/order/state/OrderRuntime;Ljava/util/List;)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+          "name": "requireOpen",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;J)Lcom/surprising/aeron/service/order/state/OrderRuntime;"
+        }
+      ],
+      "proposed_cleanup": "先迁移测试夹具用途和金融断言，再移出生产源码；保留实际applyLane及共享资金计算。",
+      "verification_limit": "静态源码、CodeGraph及当前classfile核对；本轮未改业务源码，未重新构建或运行测试/服务，不把上一轮六线成绩当作未来删除后的验证。"
+    },
+    {
+      "id": "A187",
+      "status": "confirmed",
+      "topic": "衍生品通用成交入口及5个辅助方法只服务测试",
+      "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+      "analysis_round": "fifty_seventh_analysis_round",
+      "business_code_changed": false,
+      "analysis_status": "typed_callsite_and_source_review_confirmed_not_implemented",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java",
+          "line": 32,
+          "anchor": "public static TradingAccountRuntime applyRuntime("
+        }
+      ],
+      "fields_or_methods": [
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+          "name": "applyRuntime",
+          "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+          "name": "validateAndPrepare",
+          "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+          "name": "validateMatches",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/order/state/OrderRuntime;Ljava/util/List;)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+          "name": "applyFill",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/order/state/OrderRuntime;JJZILcom/surprising/aeron/service/treasury/RuntimeTreasuryDelta;)V"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+          "name": "requireOpen",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;J)Lcom/surprising/aeron/service/order/state/OrderRuntime;"
+        },
+        {
+          "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+          "name": "terminal",
+          "descriptor": "(Lcom/surprising/aeron/service/order/state/OrderRuntime;)Lcom/surprising/aeron/service/order/state/OrderRuntime;"
+        }
+      ],
+      "proposed_cleanup": "先迁移测试夹具用途和金融断言，再移出生产源码；保留实际applyLane、持仓准备及共享资金计算。",
+      "verification_limit": "静态源码、CodeGraph及当前classfile核对；本轮未改业务源码，未重新构建或运行测试/服务，不把上一轮六线成绩当作未来删除后的验证。"
+    },
+    {
+      "id": "A188",
+      "status": "confirmed",
+      "topic": "公开快照摘要重复搬运无消费的globalFundsHash",
+      "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+      "analysis_round": "fifty_seventh_analysis_round",
+      "business_code_changed": false,
+      "analysis_status": "typed_callsite_and_source_review_confirmed_not_implemented",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/CoreSnapshotManifest.java",
+          "line": 34,
+          "anchor": "long globalFundsHash"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotParser.java",
+          "line": 340,
+          "anchor": "return new CoreSnapshotManifest("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotValidation.java",
+          "line": 92,
+          "anchor": "requireMatch(manifest.globalFundsHash()"
+        }
+      ],
+      "fields_or_methods": [
+        {
+          "owner": "com/surprising/aeron/service/snapshot/CoreSnapshotManifest",
+          "field": "globalFundsHash"
+        }
+      ],
+      "proposed_cleanup": "删除公开CoreSnapshotManifest的无消费摘要副本及相关构造检查/搬运；内部HeaderManifest和真实资金哈希落盘/恢复配对必须保留。",
+      "verification_limit": "静态源码、CodeGraph及当前classfile核对；本轮未改业务源码，未重新构建或运行测试/服务，不把上一轮六线成绩当作未来删除后的验证。"
     }
   ],
   "preserve_verified_purposes": [
@@ -9909,7 +10348,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "cleanup_compile_verified; followup_A181_resume_mark_constraint_confirmed; runtime_verification_not_executed; overall_audit_in_progress",
+  "analysis_round_status": "analysis_only_A182_to_A188_confirmed; A181_remains_confirmed; prior_six_product_runtime_verified; current_round_static_only; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -10131,13 +10570,26 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "9bdf0e5324d8a99259f26384a02a61564a1ac3ae",
-    "status": "snapshot_chain_cleanup_compile_verified_followup_resume_mark_constraint_confirmed",
-    "resolved_ids": [
-      "A180"
+    "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+    "status": "analysis_only_findings_recorded",
+    "new_confirmed_ids": [
+      "A182",
+      "A183",
+      "A184",
+      "A185",
+      "A186",
+      "A187",
+      "A188"
     ],
     "confirmed_ids": [
-      "A181"
+      "A181",
+      "A182",
+      "A183",
+      "A184",
+      "A185",
+      "A186",
+      "A187",
+      "A188"
     ],
     "candidate_ids": [
       "A11"
@@ -10152,10 +10604,13 @@
       "resolved": 175,
       "candidate": 1,
       "retained": 4,
-      "confirmed": 1
+      "confirmed": 8
     },
-    "evidence": "fifty_sixth_cleanup_round",
-    "overall_audit_completed": false
+    "evidence": "fifty_seventh_analysis_round",
+    "overall_audit_completed": false,
+    "business_code_changed": false,
+    "compilation_run": false,
+    "tests_run": false
   },
   "proposed_cleanup_batches": [
     {
@@ -12317,6 +12772,50 @@
       },
       "evidence": "fifty_fifth_cleanup_round",
       "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+      "status": "analysis_only_findings_recorded",
+      "new_confirmed_ids": [
+        "A182",
+        "A183",
+        "A184",
+        "A185",
+        "A186",
+        "A187",
+        "A188"
+      ],
+      "confirmed_ids": [
+        "A181",
+        "A182",
+        "A183",
+        "A184",
+        "A185",
+        "A186",
+        "A187",
+        "A188"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 175,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 8
+      },
+      "evidence": "fifty_seventh_analysis_round",
+      "overall_audit_completed": false,
+      "business_code_changed": false,
+      "compilation_run": false,
+      "tests_run": false
     }
   ],
   "further_rejected_false_positives": [
@@ -38550,6 +39049,655 @@
       ],
       "compiler_outputs_retained": true,
       "remaining_current_round_resources": []
+    }
+  },
+  "fifty_seventh_analysis_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "59a647a7c96126dac698cc7f3381616380ed0a52",
+    "business_code_changed": false,
+    "new_confirmed_ids": [
+      "A182",
+      "A183",
+      "A184",
+      "A185",
+      "A186",
+      "A187",
+      "A188"
+    ],
+    "confirmed_ids": [
+      "A181",
+      "A182",
+      "A183",
+      "A184",
+      "A185",
+      "A186",
+      "A187",
+      "A188"
+    ],
+    "counts_after_analysis": {
+      "resolved": 175,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 8
+    },
+    "report": "surprising-aeron-core/surprising-aeron-service/validation/deep-code-audit-20261024-round57.md",
+    "scope": "账户/命令编排旧入口、测试成交路径、快照摘要副本及资金费续页约束；继续按业务消费者审查。",
+    "previous_latest_analysis_round": {
+      "date": "2026-10-24",
+      "source_basis_commit": "9bdf0e5324d8a99259f26384a02a61564a1ac3ae",
+      "status": "snapshot_chain_cleanup_compile_verified_followup_resume_mark_constraint_confirmed",
+      "resolved_ids": [
+        "A180"
+      ],
+      "confirmed_ids": [
+        "A181"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 175,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "evidence": "fifty_sixth_cleanup_round",
+      "overall_audit_completed": false
+    },
+    "static_verification": {
+      "codegraph": "CLI index healthy/up-to-date; MCP tools unavailable; exact JVM owner+name+descriptor used for overloaded/dynamic Java edges",
+      "classfiles": 4016,
+      "classfile_major_versions": {
+        "71": 4016
+      },
+      "no_call_or_only_dead_callers_methods": 25,
+      "test_only_methods": 11,
+      "unconsumed_public_summary_fields": 1,
+      "core_production_reflective_method_lookup_sites_found": 0,
+      "selected_method_name_quoted_reflection_literals_found": 0,
+      "source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/RuntimeAccountRollback.java": "24e758124f2ccc8123738bd479951fc69858133832289e4ffa8bc6c83aec7d12",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java": "da61842a7aa56c47ccd231c14114b60c72e8cb4a75aef83437928c4b644b6496",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java": "85c5665370761a5c44edacaf19476073c766b8c24162df24568eb35452a31ed9",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java": "c659cb0ed39726cb477721ef2fbe6e5aa12cfb83edbd1c9a5fb619a75ae87d67",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java": "ebf34b04457c55b409f43ac0544c41c527198287e237477e1107b9cd004bb810",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultBuilder.java": "32b3f6f5603889c137c46988fa6b7de230b347a57829cf482bdcced898c689c7",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultLedger.java": "6bc64b01ac24bf647847c297ce90527adb41fcca2351a9c387f8657514988420",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java": "4c01c819b8718034ee17cac2326973f50166092626c5cc55e76dce41c1c0db77",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java": "f81aa3d05365ab6173cde1c05378e14d5822101d08c90f249919ec9783c7f22e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands.java": "472f6c5a092fe4c93e22aa8edca650239cb7f89754007ac08d3f40fbad023223",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/CoreSnapshotManifest.java": "e08cc481122530df467cfb2ecaedd752497d9ca65893c5374e53158370bb0177",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java": "3f7d7f124923723b3368e443ecc428fd6ff59ff5267cbc5f7a11f7cb7df985f9"
+      },
+      "typed_method_and_field_evidence": {
+        "A182": [
+          {
+            "owner": "com/surprising/aeron/service/result/CommandResultBuilder",
+            "method": "materializeResponseOrders",
+            "descriptor": "([J)V",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/result/CommandResultBuilder",
+            "method": "materializeResponseOrders",
+            "descriptor": "(JJ)V",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/result/CommandResultLedger",
+            "method": "size",
+            "descriptor": "()I",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          }
+        ],
+        "A183": [
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "stageLaneMutation",
+            "descriptor": "(J[J)J",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "dispatchCancel",
+            "descriptor": "(JJJJJ)Lcom/surprising/aeron/service/order/state/LaneCancelEvent;",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "balancesForUser",
+            "descriptor": "(J)Lorg/eclipse/collections/impl/map/mutable/primitive/IntObjectHashMap;",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "leverageKeysForUser",
+            "descriptor": "(J)Ljava/util/NavigableSet;",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "positionKeysForUserAndSymbol",
+            "descriptor": "(JI)Ljava/util/NavigableSet;",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "hasActiveLiquidationConflict",
+            "descriptor": "(JIJ)Z",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "hasLiquidationConflict",
+            "descriptor": "(JIJZ)Z",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+                "method": "hasActiveLiquidationConflict",
+                "descriptor": "(JIJ)Z",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "removeBalance",
+            "descriptor": "(JI)V",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "updateReservationInLane",
+            "descriptor": "(Lcom/surprising/aeron/service/account/AccountLaneState;JJJ)Lcom/surprising/aeron/service/order/state/ReservationRuntime;",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "removeMarkPrice",
+            "descriptor": "(I)V",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "removeRiskScan",
+            "descriptor": "(I)V",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "changedPositions",
+            "descriptor": "()Lorg/eclipse/collections/impl/set/mutable/primitive/LongHashSet;",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+            "method": "currentPatchOrderBefore",
+            "descriptor": "(J)Lcom/surprising/aeron/service/order/state/OrderRuntime;",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/account/RuntimeAccountRollback",
+            "method": "currentOrderBefore",
+            "descriptor": "(J)Lcom/surprising/aeron/service/order/state/OrderRuntime;",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/core/TradingAccountRuntime",
+                "method": "currentPatchOrderBefore",
+                "descriptor": "(J)Lcom/surprising/aeron/service/order/state/OrderRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingAccountRuntime.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          }
+        ],
+        "A184": [
+          {
+            "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+            "method": "isMatchingPending",
+            "descriptor": "(JJ)Z",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+                "method": "isMatchingPending",
+                "descriptor": "(Ljava/util/UUID;)Z",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/core/TradingCoreRuntime.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+            "method": "isMatchingPending",
+            "descriptor": "(Ljava/util/UUID;)Z",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/TradingCoreRuntime",
+            "method": "captureSnapshot",
+            "descriptor": "(JJJ)[B",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/trigger/command/TriggerOrderCommands",
+            "method": "executeTriggerOrder",
+            "descriptor": "(JJJJLjava/util/UUID;)V",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands",
+            "method": "beginAsyncSettlement",
+            "descriptor": "(Lcom/surprising/aeron/protocol/SettleInstrumentCommand;)Lcom/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork;",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          }
+        ],
+        "A185": [
+          {
+            "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+            "method": "findPositionKeyValueInLane",
+            "descriptor": "(Lcom/surprising/aeron/service/account/AccountLaneState;JLjava/lang/String;)J",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+            "method": "findPositionKeyValue",
+            "descriptor": "(JLjava/lang/String;)J",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry",
+            "method": "preparedPositionKey",
+            "descriptor": "(Lcom/surprising/aeron/service/account/AccountLaneState;JLjava/lang/String;Lcom/surprising/aeron/protocol/CorePositionSide;)J",
+            "incoming_instructions": [],
+            "outside_cleanup_group": []
+          }
+        ],
+        "A186": [
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+            "method": "applyRuntime",
+            "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions",
+                "method": "applySpotMatches",
+                "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.class",
+                "test": true
+              }
+            ],
+            "outside_cleanup_group": [
+              {
+                "owner": "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions",
+                "method": "applySpotMatches",
+                "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.class",
+                "test": true
+              }
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+            "method": "applyFill",
+            "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/order/state/OrderRuntime;JJZIILcom/surprising/aeron/service/treasury/RuntimeTreasuryDelta;)Lcom/surprising/aeron/service/order/state/OrderRuntime;",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+            "method": "releaseTerminalReservation",
+            "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;J)V",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+            "method": "validateMatches",
+            "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/order/state/OrderRuntime;Ljava/util/List;)V",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+            "method": "requireOpen",
+            "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;J)Lcom/surprising/aeron/service/order/state/OrderRuntime;",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor",
+                "method": "validateMatches",
+                "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/order/state/OrderRuntime;Ljava/util/List;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          }
+        ],
+        "A187": [
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+            "method": "applyRuntime",
+            "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions",
+                "method": "applyDerivativeMatches",
+                "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.class",
+                "test": true
+              },
+              {
+                "owner": "com/surprising/aeron/service/core/RuntimeDerivativeMatchFixture",
+                "method": "simulate",
+                "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeDerivativeMatchFixture.class",
+                "test": true
+              },
+              {
+                "owner": "com/surprising/aeron/service/core/RuntimeDerivativeMatchFixture",
+                "method": "applyTransition",
+                "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeDerivativeMatchFixture.class",
+                "test": true
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest",
+                "method": "persistentApplyMutatesProvidedRuntimeAndMatchesAuthoritativeReducer",
+                "descriptor": "()V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest.class",
+                "test": true
+              }
+            ],
+            "outside_cleanup_group": [
+              {
+                "owner": "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions",
+                "method": "applyDerivativeMatches",
+                "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.class",
+                "test": true
+              },
+              {
+                "owner": "com/surprising/aeron/service/core/RuntimeDerivativeMatchFixture",
+                "method": "simulate",
+                "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeDerivativeMatchFixture.class",
+                "test": true
+              },
+              {
+                "owner": "com/surprising/aeron/service/core/RuntimeDerivativeMatchFixture",
+                "method": "applyTransition",
+                "descriptor": "(Lcom/surprising/aeron/model/TradingCoreState;Lcom/surprising/aeron/model/TradingCoreState;JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeDerivativeMatchFixture.class",
+                "test": true
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest",
+                "method": "persistentApplyMutatesProvidedRuntimeAndMatchesAuthoritativeReducer",
+                "descriptor": "()V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest.class",
+                "test": true
+              }
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+            "method": "validateAndPrepare",
+            "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+            "method": "validateMatches",
+            "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/order/state/OrderRuntime;Ljava/util/List;)V",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "validateAndPrepare",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+            "method": "applyFill",
+            "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/order/state/OrderRuntime;JJZILcom/surprising/aeron/service/treasury/RuntimeTreasuryDelta;)V",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+            "method": "requireOpen",
+            "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;J)Lcom/surprising/aeron/service/order/state/OrderRuntime;",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "validateAndPrepare",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "validateAndPrepare",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              },
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "validateMatches",
+                "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/order/state/OrderRuntime;Ljava/util/List;)V",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          },
+          {
+            "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+            "method": "terminal",
+            "descriptor": "(Lcom/surprising/aeron/service/order/state/OrderRuntime;)Lcom/surprising/aeron/service/order/state/OrderRuntime;",
+            "incoming_instructions": [
+              {
+                "owner": "com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor",
+                "method": "applyRuntime",
+                "descriptor": "(JLjava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/core/TradingAccountRuntime;",
+                "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.class",
+                "test": false
+              }
+            ],
+            "outside_cleanup_group": []
+          }
+        ],
+        "A188": {
+          "owner": "com/surprising/aeron/service/snapshot/CoreSnapshotManifest",
+          "field": "globalFundsHash",
+          "external_getter_callers": [],
+          "preserve": "SectionedCoreSnapshotValidation.HeaderManifest.globalFundsHash and its funds-pairing check remain authoritative"
+        }
+      },
+      "scripts_sha256": {
+        "scan.py": "0f4f86aebfa5b5ddade293e0b9ccb12c89194d920b0c21ca355c41af90ddbc2c",
+        "confirm.py": "f1d81c6011215a52e4b18bf9f146b8d3c47d5d27537056ea34b61d15d3cd2f27"
+      },
+      "confirmed_data_sha256": "c3db3c44b0dddfb54fba6e4a9c1fc1741f2905573471d7769bec961300cf12aa",
+      "selected_method_handle_references_found": 0
+    },
+    "verification": {
+      "compilation_run": false,
+      "tests_run": false,
+      "services_started": false,
+      "performance_run": false,
+      "business_source_changed": false
+    },
+    "rejected_false_positives": [
+      "JFR MatcherPrefixFailure的9个字段由录制器读取",
+      "缓存行填充字段的布局用途",
+      "ReconciledOrder与批撤记录的record相等性",
+      "MatchingResult/订单源接口的动态派发读端",
+      "submittedAtEpochMillis的触发重试/撮合/离线回放读端",
+      "真正快照HeaderManifest.globalFundsHash的资金恢复配对",
+      "SnapshotNotReadyException的真实快照生命周期用途"
+    ],
+    "proposed_cleanup_order": [
+      [
+        "A182",
+        "A183",
+        "A184",
+        "A185"
+      ],
+      [
+        "A181",
+        "A188"
+      ],
+      [
+        "A186",
+        "A187"
+      ]
+    ],
+    "overall_audit_completed": false,
+    "temporary_resources": {
+      "directory": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/aeron-unused-audit-20261024-8m5fv8s5",
+      "status": "removed_after_archive_and_static_check",
+      "business_source_copies_created": false
     }
   }
 }
