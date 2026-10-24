@@ -8,12 +8,11 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CorePendingTransferCodec;
-import com.surprising.aeron.protocol.CorePendingTransferView;
+import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -64,10 +63,10 @@ class CoreTransferLaneLifecycleTest {
                         TradingCommandCodec.encodeTransferFunds(a))).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(apply(source, command(source, CoreMessageType.TRANSFER_OUT, second,
                         TradingCommandCodec.encodeTransferFunds(b))).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                assertThat(query(source, 256)).extracting(/* 当前分页结果或余额视图，按本断言读取业务身份及数值 */ v -> v.command().transferId()).containsExactly(91L, 92L);
-                assertThat(query(source, 1)).extracting(/* 当前分页结果或余额视图，按本断言读取业务身份及数值 */ v -> v.command().transferId()).containsExactly(91L);
-                assertThat(query(source, 1)).extracting(/* 当前分页结果或余额视图，按本断言读取业务身份及数值 */ v -> v.command().transferId()).containsExactly(92L);
-                assertThat(query(source, 1)).extracting(/* 当前分页结果或余额视图，按本断言读取业务身份及数值 */ v -> v.command().transferId()).containsExactly(91L);
+                assertThat(query(source, 256)).extracting(/* 当前分页结果或余额视图，按本断言读取业务身份及数值 */ v -> v.transferId()).containsExactly(91L, 92L);
+                assertThat(query(source, 1)).extracting(/* 当前分页结果或余额视图，按本断言读取业务身份及数值 */ v -> v.transferId()).containsExactly(91L);
+                assertThat(query(source, 1)).extracting(/* 当前分页结果或余额视图，按本断言读取业务身份及数值 */ v -> v.transferId()).containsExactly(92L);
+                assertThat(query(source, 1)).extracting(/* 当前分页结果或余额视图，按本断言读取业务身份及数值 */ v -> v.transferId()).containsExactly(91L);
                 assertThat(apply(source, command(source, CoreMessageType.TRANSFER_OUT, first,
                         TradingCommandCodec.encodeTransferFunds(transfer(product, destination, 91, first, 31)))).resultCode())
                         .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
@@ -170,7 +169,7 @@ class CoreTransferLaneLifecycleTest {
      * @param core 本次操作的实际交易运行时
      * @param limit 有限页最大条数
      */
-    private List<CorePendingTransferView> query(TradingCoreRuntime core, int limit) {
+    private List<TransferFundsCommand> query(TradingCoreRuntime core, int limit) {
         // 本测试刚分配的命令或查询身份
         long id = ++sequence;
         // 本次有限页查询原请求

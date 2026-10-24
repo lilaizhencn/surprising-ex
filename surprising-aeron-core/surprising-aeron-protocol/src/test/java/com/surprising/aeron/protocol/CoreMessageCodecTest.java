@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String CURRENT_GOLDEN = "584558531000020a000148007766554433221100ffeeddccbbaa998808000000000000002a00000000000000e90300000000000015cd5b070000000063000000000000000e0000000400555344540700000000000000";
+    private static final String CURRENT_GOLDEN = "584558531100020a000148007766554433221100ffeeddccbbaa998808000000000000002a00000000000000e90300000000000015cd5b070000000063000000000000000e0000000400555344540700000000000000";
 
     @Test
     void matchesCurrentSchemaGoldenMessage() {
@@ -30,7 +30,7 @@ class CoreMessageCodecTest {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
 
         assertThat(CommandFingerprint.of(message).toString())
-                .isEqualTo("16485fe71c62ab2af309b348873c7ad0dab20ea1f5e894b6b2852c0c65284eb6");
+                .isEqualTo("520a5ba05c00f3431a06d620ebe61f312e2b5182295b19c23a00a195aa57906c");
     }
 
     @Test
@@ -43,7 +43,7 @@ class CoreMessageCodecTest {
         assertThat(producerB.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(first)).isEqualTo(retained);
-        assertThat(retained.toString()).isEqualTo("16485fe71c62ab2af309b348873c7ad0dab20ea1f5e894b6b2852c0c65284eb6");
+        assertThat(retained.toString()).isEqualTo("520a5ba05c00f3431a06d620ebe61f312e2b5182295b19c23a00a195aa57906c");
     }
 
     @Test

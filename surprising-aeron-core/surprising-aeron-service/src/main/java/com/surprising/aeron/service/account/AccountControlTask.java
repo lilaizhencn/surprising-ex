@@ -4,7 +4,6 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
@@ -39,8 +38,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     private TradingAccountRuntime runtime;
     /** 余额、划转或持仓任务的目标用户；杠杆任务使用 leverageKey 中的用户。 */
     private long userId;
-    /** 需要读取返回值的账户 Lane 编号，供杠杆及持仓路径使用。 */
-    private int laneId;
     /** 余额或逐仓保证金调整预先算好的下一产品修订号。 */
     private long nextRevision;
     /** 本续步是否已由 Owner 收集并完成，或划转完成路径无需派发。 */
@@ -59,8 +56,8 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     // 划转任务输入与账户完成回执。
     /** 当前转出命令，Lane 处理完且 Owner 收集后解除引用。 */
     private TransferFundsCommand transferCommand;
-    /** Lane 是否实际新建待完成划转，用于决定 Owner 是否发布路由。 */
-    private boolean transferCreated;
+    /** Lane 的实际变化结果，供转出发布路由、杠杆和持仓模式发布使用；Owner 收齐回执后才读取。 */
+    private boolean changedOnLane;
     /** 完成划转任务要移除的划转编号。 */
     private long transferId;
     /** Lane 是否确实移除了对应待完成记录，Owner 据此核对路由一致性。 */
@@ -69,10 +66,8 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     // 杠杆任务输入。
     /** 用户、合约和保证金模式组成的杠杆业务键。 */
     private CoreLeverageKey leverageKey;
-    /** 本次目标杠杆，按百万分之一保存。 */
-    private long leveragePpm;
-    /** 是否走显式降低全仓杠杆并补保证金的路径。 */
-    private boolean repriceCrossMargin;
+    /** 原始不可变杠杆命令，包含目标杠杆及全仓重定价开关。 */
+    private UpdateLeverageCommand leverageCommand;
     /** 杠杆对应合约的稠密编号。 */
     private int symbolId;
 
@@ -91,21 +86,21 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
      * @param runtime 要派发并收集账户变化的交易运行时
      * @param identities 将业务资产、合约和持仓身份转为运行时键的字典
      * @param userId 本次控制命令操作的用户编号
-     * @param command 余额调整命令，包含资产与有符号变化金额
+     * @param asset 要调整的资产名称
+     * @param deltaUnits 有符号可用余额增减金额
      */
     public AccountControlTask prepareBalanceAdjustment(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                                      long userId, BalanceAdjustmentCommand command) {
-        if (runtime == null || identities == null || command == null || userId <= 0)
+                                                      long userId, String asset, long deltaUnits) {
+        if (runtime == null || identities == null || asset == null || asset.isBlank() || userId <= 0)
             throw new IllegalArgumentException("invalid account balance adjustment");
         runtime.assertOwner();
         clear();
         this.kind = KIND_BALANCE;
         this.runtime = runtime;
         this.userId = userId;
-        this.assetId = identities.assetId(AssetBalance.normalizeAsset(command.asset()));
-        this.deltaUnits = command.deltaUnits();
+        this.assetId = identities.assetId(AssetBalance.normalizeAsset(asset));
+        this.deltaUnits = deltaUnits;
         this.nextRevision = Math.incrementExact(runtime.revision());
-        this.completed = false;
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
         return this;
     }
@@ -135,8 +130,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         this.userId = userId;
         this.transferCommand = command;
         this.assetId = identities.assetId(command.asset());
-        this.transferCreated = false;
-        this.completed = false;
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
         return this;
     }
@@ -160,7 +153,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         this.runtime = runtime;
         this.userId = userId;
         this.transferId = transferId;
-        this.transferRemoved = false;
         this.completed = routed == 0;
         if (!this.completed) runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
         return this;
@@ -179,12 +171,9 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         this.kind = KIND_LEVERAGE;
         this.runtime = Objects.requireNonNull(runtime);
         this.leverageKey = DerivativeAccountCommandProcessor.leverageKey(runtime, identities, userId, command);
-        this.leveragePpm = command.leveragePpm();
-        this.repriceCrossMargin = command.repriceCrossMargin();
-        this.laneId = runtime.topology().accountLaneId(userId);
+        this.leverageCommand = command;
         this.symbolId = identities.symbolId(leverageKey.instrumentId());
-        this.completed = false;
-        runtime.dispatchControlLanes(1L << laneId, this);
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
         return this;
     }
 
@@ -204,9 +193,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         this.runtime = runtime;
         this.userId = userId;
         this.positionModeCommand = command;
-        this.laneId = runtime.topology().accountLaneId(userId);
-        this.completed = false;
-        runtime.dispatchControlLanes(1L << laneId, this);
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
         return this;
     }
 
@@ -225,10 +212,8 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         this.positionKey = DerivativeAccountCommandProcessor.positionMarginKey(runtime, identities, userId, command);
         this.userId = userId;
         this.positionMarginCommand = command;
-        this.laneId = runtime.topology().accountLaneId(userId);
         this.nextRevision = Math.incrementExact(runtime.revision());
-        this.completed = false;
-        runtime.dispatchControlLanes(1L << laneId, this);
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
         return this;
     }
 
@@ -239,19 +224,17 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         kind = 0;
         runtime = null;
         userId = 0;
-        laneId = 0;
         nextRevision = 0;
         completed = false;
         stateChanged = false;
         assetId = 0;
         deltaUnits = 0;
         transferCommand = null;
-        transferCreated = false;
+        changedOnLane = false;
         transferId = 0;
         transferRemoved = false;
         leverageKey = null;
-        leveragePpm = 0;
-        repriceCrossMargin = false;
+        leverageCommand = null;
         symbolId = 0;
         positionModeCommand = null;
         positionKey = 0;
@@ -259,7 +242,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     }
 
     /**
-     * 由已派发到的 Lane 执行当前种类的账户操作；余额和划转路径保存回执标记，杠杆或持仓路径返回控制结果，未准备的种类直接失败。
+     * 由已派发到的 Lane 执行当前种类的账户操作；余额和划转路径保存回执标记，杠杆和持仓路径也直接保存原始类型结果，邮箱只通知完成，未准备的种类直接失败。
      * @param ignoredLaneId 控制派发回调传入的 Lane 编号；目标和输入已在准备阶段保存，本实现不读取它
      */
     @Override public Object apply(int ignoredLaneId) {
@@ -270,13 +253,13 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
             }
             case KIND_TRANSFER_OUT -> {
                 // Lane 幂等检查后新建的待完成划转，null 表示相同命令已登记。
-                TransferRuntime transfer = RuntimeAccountStateTransitions.prepareTransferOut(runtime, userId, transferCommand);
+                TransferFundsCommand transfer = RuntimeAccountStateTransitions.prepareTransferOut(runtime, userId, transferCommand);
                 if (transfer != null) {
                     runtime.requireRevisionCapacity();
                     RuntimeAccountStateTransitions.debitTransferAccount(runtime, userId, assetId, transferCommand.amountUnits());
                     runtime.putPendingTransfer(transfer);
                     runtime.incrementCommandRevision();
-                    transferCreated = true;
+                    changedOnLane = true;
                 }
                 yield null;
             }
@@ -284,12 +267,19 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
                 transferRemoved = RuntimeAccountStateTransitions.completeTransfer(runtime, userId, transferId);
                 yield null;
             }
-            case KIND_LEVERAGE -> DerivativeAccountCommandProcessor.updateAccountLeverage(
-                    runtime, leverageKey, symbolId, leveragePpm, repriceCrossMargin);
-            case KIND_POSITION_MODE -> DerivativeAccountCommandProcessor.updateAccountPositionMode(
-                    runtime, userId, positionModeCommand);
-            case KIND_POSITION_MARGIN -> DerivativeAccountCommandProcessor.adjustAccountPositionMargin(
-                    runtime, userId, positionKey, positionMarginCommand);
+            case KIND_LEVERAGE -> {
+                changedOnLane = DerivativeAccountCommandProcessor.updateAccountLeverage(
+                        runtime, leverageKey, symbolId, leverageCommand.leveragePpm(), leverageCommand.repriceCrossMargin());
+                yield null;
+            }
+            case KIND_POSITION_MODE -> {
+                changedOnLane = DerivativeAccountCommandProcessor.updateAccountPositionMode(runtime, userId, positionModeCommand);
+                yield null;
+            }
+            case KIND_POSITION_MARGIN -> {
+                assetId = DerivativeAccountCommandProcessor.adjustAccountPositionMargin(runtime, userId, positionKey, positionMarginCommand);
+                yield null;
+            }
             default -> throw new IllegalStateException("unknown account control task kind: " + kind);
         };
     }
@@ -309,7 +299,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
             }
             case KIND_TRANSFER_OUT -> {
                 // 内联执行已在账户应用时登记路由；独立工作线程模式由 Owner 收到账户回执后发布。
-                if (transferCreated && runtime.accountLanesStarted())
+                if (changedOnLane && runtime.accountLanesStarted())
                     runtime.registerPendingTransferRoute(transferCommand.transferId(), userId);
                 transferCommand = null;
                 stateChanged = true;
@@ -320,23 +310,22 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
                 stateChanged = true;
             }
             case KIND_LEVERAGE -> {
-                if (Boolean.TRUE.equals(runtime.controlLaneResult(laneId))) {
-                    runtime.recordLeverageChange(leverageKey, leveragePpm);
+                if (changedOnLane) {
+                    runtime.recordLeverageChange(leverageKey, leverageCommand.leveragePpm());
                     runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
                     stateChanged = true;
                 }
             }
             case KIND_POSITION_MODE -> {
-                if (Boolean.TRUE.equals(runtime.controlLaneResult(laneId))) {
+                if (changedOnLane) {
                     runtime.markUserChanged(userId);
                     runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
                     stateChanged = true;
                 }
             }
             case KIND_POSITION_MARGIN -> {
-                // 逐仓保证金账户步骤返回的结算资产编号，Owner 用它记录用户资金变化。
-                int marginAssetId = (Integer) runtime.controlLaneResult(laneId);
-                runtime.recordUserSettlementChanges(userId, marginAssetId, positionKey);
+                // Lane 保存的结算资产编号仅在回执完成后由 Owner 用于发布。
+                runtime.recordUserSettlementChanges(userId, assetId, positionKey);
                 runtime.setMetadata(runtime.productLine(), nextRevision);
                 stateChanged = true;
             }

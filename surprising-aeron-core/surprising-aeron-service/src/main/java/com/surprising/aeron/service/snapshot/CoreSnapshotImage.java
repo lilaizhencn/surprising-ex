@@ -2,7 +2,7 @@ package com.surprising.aeron.service.snapshot;
 
 import com.surprising.aeron.model.CoreFeePolicyState;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.account.TransferRuntime;
+import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.matcher.MatcherSnapshot;
 import com.surprising.aeron.service.result.CommandResultLedger;
@@ -47,7 +47,7 @@ public record CoreSnapshotImage(
         Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
         Map<UUID, CommandResultLedger.StoredResult> commandResults,
         Map<Long, CoreFeePolicyState> feePolicies,
-        Map<Long, TransferRuntime> pendingTransfers,
+        Map<Long, TransferFundsCommand> pendingTransfers,
         byte[] terminalRetention,
         List<AccountLaneSnapshot> accountLanes) {
 

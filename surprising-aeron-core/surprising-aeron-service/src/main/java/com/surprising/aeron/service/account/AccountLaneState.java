@@ -1765,12 +1765,12 @@ public final class AccountLaneState {
      * 按划转编号读取本 Lane 的待完成划转状态。
      * @param key 划转编号
      */
-    public com.surprising.aeron.service.account.TransferRuntime pendingTransfer(long key) { return cold.pendingTransfers.get(key); }
+    public com.surprising.aeron.protocol.TransferFundsCommand pendingTransfer(long key) { return cold.pendingTransfers.get(key); }
     /**
      * 遍历本 Lane 待完成划转编号与状态，调用方须持有有效读取或写入作用域。
      * @param consumer 在当前 Lane 访问边界内消费遍历项的回调，不应修改正在遍历的容器
      */
-    public void forEachPendingTransfer(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<? super com.surprising.aeron.service.account.TransferRuntime> consumer) { cold.pendingTransfers.forEachKeyValue(consumer); }
+    public void forEachPendingTransfer(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<? super com.surprising.aeron.protocol.TransferFundsCommand> consumer) { cold.pendingTransfers.forEachKeyValue(consumer); }
     /**
      * 仅清空待完成划转表，不在此冲正余额或系统账本。
      */
@@ -1780,7 +1780,7 @@ public final class AccountLaneState {
      * @param key 划转编号
      * @param value 要保存的待完成划转记录
      */
-    public com.surprising.aeron.service.account.TransferRuntime storePendingTransfer(long key, com.surprising.aeron.service.account.TransferRuntime value) { return cold.pendingTransfers.put(key, value); }
+    public com.surprising.aeron.protocol.TransferFundsCommand storePendingTransfer(long key, com.surprising.aeron.protocol.TransferFundsCommand value) { return cold.pendingTransfers.put(key, value); }
     /**
      * 检查待完成划转表是否包含编号。
      * @param key 划转编号
@@ -1790,7 +1790,7 @@ public final class AccountLaneState {
      * 只移除并返回待完成划转状态，不冲正余额。
      * @param key 划转编号
      */
-    public com.surprising.aeron.service.account.TransferRuntime removePendingTransferValue(long key) { return cold.pendingTransfers.remove(key); }
+    public com.surprising.aeron.protocol.TransferFundsCommand removePendingTransferValue(long key) { return cold.pendingTransfers.remove(key); }
     /**
      * 仅清空杠杆值表，用户到杠杆键的索引由调用方配套处理。
      */
@@ -2100,7 +2100,7 @@ final class LaneColdState {
     final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<org.eclipse.collections.impl.set.mutable.primitive.LongHashSet> triggerIdsByUser =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     /** 按划转编号保存的尚待完成划转状态。 */
-    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<com.surprising.aeron.service.account.TransferRuntime> pendingTransfers =
+    final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
 
     /**

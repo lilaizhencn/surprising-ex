@@ -27,7 +27,7 @@ import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.ControlLaneDispatcher;
 import com.surprising.aeron.service.account.LaneBalancePatches;
 import com.surprising.aeron.service.account.RuntimeAccountRollback;
-import com.surprising.aeron.service.account.TransferRuntime;
+import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.account.UserRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.change.LaneCommitEvent;
@@ -4953,7 +4953,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 当前账户范围内读取本 Lane 划转；没有范围时只允许账户未启动的冷路径，通过财库路由定位用户，路由缺失返回空。
      * @param transferId 待完成划转的业务身份
      */
-    public TransferRuntime pendingTransfer(long transferId) {
+    public TransferFundsCommand pendingTransfer(long transferId) {
         assertOwner();
         // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountLaneState lane = currentLaneCommandScope();
@@ -4967,13 +4967,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 要求活动 Owner 已取得账户访问权，复制各 Lane 待完成划转引用并返回只读有序映射。
      */
-    public Map<Long, TransferRuntime> pendingTransfersSnapshot() {
+    public Map<Long, TransferFundsCommand> pendingTransfersSnapshot() {
         assertOwner();
         if (accountLanesStarted() && !ownerLaneAccess()) {
             throw new IllegalStateException("pending transfers snapshot requires owner lane access");
         }
         // 本次新建的汇总映射，按既有读取边界收集各账户内容
-        TreeMap<Long, TransferRuntime> values = new TreeMap<>();
+        TreeMap<Long, TransferFundsCommand> values = new TreeMap<>();
         for (/* 本轮正在处理或按用户路由选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLaneReadOnly(laneId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> { lane.forEachPendingTransfer(values::put); return null; });
         }
@@ -5012,13 +5012,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 只在账户未启动时按路由页读取划转，完成页边界后返回固定列表；活动查询交给账户 Lane。
      * @param limit 本次向财库请求的最大分页条数，具体范围由财库入口检查
      */
-    public List<TransferRuntime> pendingTransfers(int limit) {
+    public List<TransferFundsCommand> pendingTransfers(int limit) {
         assertOwner();
         if (accountLanesStarted()) throw new IllegalStateException("active transfer queries must run on Account Lanes");
         // 本次冷读取使用的路由页，读取结束后推进其最后 ID 边界
         PendingTransferRoutes page = pendingTransferRoutes(limit);
         // 本页逐项读取出的原划转引用列表，随后生成固定列表
-        var values = new java.util.ArrayList<TransferRuntime>(page.ids().length);
+        var values = new java.util.ArrayList<TransferFundsCommand>(page.ids().length);
         for (long /* 本轮正在恢复、读取或捕获的业务实体身份 */ id : page.ids()) values.add(pendingTransfer(id));
         completePendingTransferPage(page);
         return List.copyOf(values);
@@ -5028,7 +5028,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 要求账户已停止，校验映射容量、键值非空及划转身份一致，再清旧路由与账户值并逐项恢复。
      * @param restored 需要恢复的政策或待完成划转映射，按对应入口校验
      */
-    public void restorePendingTransfers(Map<Long, TransferRuntime> restored) {
+    public void restorePendingTransfers(Map<Long, TransferFundsCommand> restored) {
         assertOwner();
         if (accountLanesStarted()) throw new IllegalStateException("transfer restore requires stopped Account Lanes");
         if (restored == null || restored.size() > MAX_PENDING_TRANSFERS
@@ -5038,8 +5038,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         treasury.clearPendingTransfers();
         for (AccountLaneState /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane : accountLanes) lane.clearPendingTransferValues();
         restored.forEach((/* 本轮正在恢复、读取或捕获的业务实体身份 */ id, /* 恢复输入中当前划转值，按其用户分别登记财库路由和账户正文 */ transfer) -> {
-            treasury.restorePendingTransferRoute(id, transfer.userId());
-            accountLanes[topology.accountLaneId(transfer.userId())].storePendingTransfer(id, transfer);
+            treasury.restorePendingTransferRoute(id, transfer.sourceUserId());
+            accountLanes[topology.accountLaneId(transfer.sourceUserId())].storePendingTransfer(id, transfer);
         });
     }
 
@@ -5075,7 +5075,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 禁止订单批量交叉修改，在所属账户范围保存新划转；冷路径可按路由取得 Lane 并检查容量，活动路径要求账户范围，冷执行同时登记财库路由。
      * @param transfer 非空待完成划转业务值
      */
-    public void putPendingTransfer(TransferRuntime transfer) {
+    public void putPendingTransfer(TransferFundsCommand transfer) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("pending-transfer state");
         if (transfer == null) throw new IllegalArgumentException("pending transfer is required");
@@ -5085,12 +5085,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
             if (accountLanesStarted()) throw new IllegalStateException("active transfer writes require their Account Lane");
             if (!hasPendingTransferCapacity())
                 throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
-            lane = accountLanes[topology.accountLaneId(transfer.userId())];
+            lane = accountLanes[topology.accountLaneId(transfer.sourceUserId())];
         }
-        if (lane.laneId() != topology.accountLaneId(transfer.userId()) || lane.hasPendingTransfer(transfer.transferId()))
+        if (lane.laneId() != topology.accountLaneId(transfer.sourceUserId()) || lane.hasPendingTransfer(transfer.transferId()))
             throw new IllegalArgumentException("pending transfer already exists or reached the wrong Lane");
         lane.storePendingTransfer(transfer.transferId(), transfer);
-        if (!accountLanesStarted()) registerPendingTransferRoute(transfer.transferId(), transfer.userId());
+        if (!accountLanesStarted()) registerPendingTransferRoute(transfer.transferId(), transfer.sourceUserId());
     }
 
     /**
@@ -5113,9 +5113,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         if (lane.laneId() != topology.accountLaneId(userId)) throw new IllegalStateException("transfer completion crossed Account Lane");
         // 当前 Lane 的原划转值，存在时核对所属用户再删除
-        TransferRuntime current = lane.pendingTransfer(transferId);
+        TransferFundsCommand current = lane.pendingTransfer(transferId);
         if (current == null) return false;
-        if (current.userId() != userId) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
+        if (current.sourceUserId() != userId) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
         requireRevisionCapacity();
         lane.removePendingTransferValue(transferId);
         if (!accountLanesStarted()) completePendingTransferRoute(transferId, userId);

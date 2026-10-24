@@ -1,12 +1,10 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.service.account.AccountControlTask;
-import com.surprising.aeron.service.account.RuntimeAccountStateTransitions;
-import com.surprising.aeron.service.account.TransferRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
@@ -24,12 +22,12 @@ class TransferLaneCapacityTest {
         // 本例冷投影与账户任务共用的身份表
         var identities = new RuntimeIdentityRegistry();
         try (/* 先冷准备再启动账户线程的原运行时 */ var runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.SPOT), identities)) {
-            RuntimeAccountStateTransitions.adjustBalance(runtime, identities, 7, new BalanceAdjustmentCommand("USDT", 100));
+            LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareBalanceAdjustment(runtime, identities, 7, "USDT", 100));
             // 预填第一项与后续相同重试共用的划转参数
             var first = command(1);
             // 直接冷填有限容量状态，再启动账户线程；本例没有快照恢复。
             for (/* 预填待完成记录的正值身份循环下标 */ int id = 1; id <= TradingAccountRuntime.MAX_PENDING_TRANSFERS; id++)
-                runtime.putPendingTransfer(new TransferRuntime(7, id == 1 ? first : command(id)));
+                runtime.putPendingTransfer(id == 1 ? first : command(id));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
             assertThat(runtime.hasPendingTransferCapacity()).isFalse();

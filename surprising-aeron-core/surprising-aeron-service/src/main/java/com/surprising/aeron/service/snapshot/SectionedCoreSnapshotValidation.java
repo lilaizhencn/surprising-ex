@@ -81,7 +81,7 @@ final class SectionedCoreSnapshotValidation {
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> pendingTransfers) {
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers) {
         requireMatch(manifest.productLine() == matcherSnapshot.productLine()
                 && manifest.productLine() == tradingState.productLine(), "product line");
         requireMatch(manifest.snapshotId() == matcherSnapshot.snapshotId(), "snapshot id");

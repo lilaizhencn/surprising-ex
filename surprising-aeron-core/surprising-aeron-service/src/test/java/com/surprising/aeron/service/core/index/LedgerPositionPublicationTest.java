@@ -67,7 +67,8 @@ class LedgerPositionPublicationTest {
         var oi = new OpenInterestIndex(initial);
         // 本用例真实账本接管的 ADL 持仓索引
         var adl = new AdlPositionIndex(initial, ids);
-        try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var runtime = RuntimeStateProjector.project(initial, ids)) {
+        try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var accountRuntime = RuntimeStateProjector.project(initial, ids)) {
+            var runtime = accountRuntime;
             runtime.bindFactIndexes(indexes(initial, ids, users, oi, adl), ids);
             // 用户七标的一净仓的已准备确定性身份键
             long key = ids.findPositionKeyValue(7, instrument, CorePositionSide.NET);
@@ -81,7 +82,7 @@ class LedgerPositionPublicationTest {
                         // 可选的本次资金费暂存账本命令，初始化时绑定原运行时
                         var command = /* 只用于验证控制范围资金费暂存回滚的账本命令，实例初始化时接入当前运行时。 */ new SystemLedgerCommand() {
                             // 实例创建时绑定当前运行时及账本控制范围，再允许派发。
-                            { initializeLedgerCommand(runtime); }
+                            { initializeLedgerCommand(accountRuntime); }
                             /**
                              * 把本次未发布控制范围的资金费暂存设为九，供随后验证回滚归零。
                              * @param ledger 本次控制命令可写的权威 Treasury 账本

@@ -98,7 +98,7 @@ public final class CoreQueryService {
         var query = new AccountQuery(id, owner.appliedCommandCount(), CoreMessageType.PENDING_TRANSFER_QUERY,
                 0, 0, null, page.laneMask(), null, null);
         query.transferPage = new PendingTransferQueryPage(page.ids(), page.users(),
-                new com.surprising.aeron.protocol.CorePendingTransferView[page.ids().length]);
+                new com.surprising.aeron.protocol.TransferFundsCommand[page.ids().length]);
         queryIds.put(message.header().commandId(), id);
         try {
             if (!owner.runtimeState().dispatchAccountQuery(page.laneMask(), query)) {
@@ -465,7 +465,7 @@ public final class CoreQueryService {
      * @param users 各业务记录所属的用户编号，用于决定由哪个账户 Lane 填结果
      * @param views 与编号逐项对齐的查询 DTO 槽，各 Lane 只填写自己拥有的记录
      */
-    private record PendingTransferQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.CorePendingTransferView[] views) { }
+    private record PendingTransferQueryPage(long[] ids, long[] users, com.surprising.aeron.protocol.TransferFundsCommand[] views) { }
 
     /**
      * 保留缺失实体的协议差异：用户或订单哈希返回成功且哈希为零，详情查询返回 ENTITY_NOT_FOUND。
@@ -584,9 +584,9 @@ public final class CoreQueryService {
                     if (owner.runtimeState().topology().accountLaneId(transferPage.users[index]) != lane.laneId()) continue;
                     // 所属 Lane 读出的待完成划转，用户身份必须与固定路由一致。
                     var value = owner.runtimeState().pendingTransfer(transferPage.ids[index]);
-                    if (value == null || value.userId() != transferPage.users[index])
+                    if (value == null || value.sourceUserId() != transferPage.users[index])
                         throw new IllegalArgumentException("pending transfer routing differs from Lane identity");
-                    transferPage.views[index] = new com.surprising.aeron.protocol.CorePendingTransferView(value.userId(), value.command());
+                    transferPage.views[index] = value;
                 }
                 return null;
             }

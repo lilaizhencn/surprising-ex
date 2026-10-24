@@ -17,9 +17,9 @@ class CommittedPortfolioFlowTest {
     private long sequence;
 
     /**
-     * 检查首入账一百有流水，同消息重试、同 UUID 改载荷冲突、零调整及余额不足拒绝都无流水；实际扣十后组合净资产九十。
+     * 检查首入账一百有流水，同消息重试、同 UUID 改载荷冲突、余额不足拒绝都无流水，零调整保留金额为零的审计事实；实际扣十后组合净资产九十。
      */
-    @Test void actualAdjustmentsExcludeRetriesConflictsZeroAndRejections() {
+    @Test void actualAdjustmentsKeepZeroAuditAndExcludeRetriesConflictsAndRejections() {
         try (/* 本轮现货已提交回放资源，退出自动关闭 */ var replay = new CommittedTradeReplay(ProductLine.SPOT, null)) {
             // 首笔入账一百的原消息字节，用作同 UUID 重试及载荷冲突对照
             byte[] first = adjust(replay, 100);
@@ -36,7 +36,9 @@ class CommittedPortfolioFlowTest {
             assertEquals(CoreResultCode.IDEMPOTENCY_CONFLICT, replay.commandResult().code());
             assertNull(replay.balanceFlow());
             adjust(replay, 0);
-            assertNull(replay.balanceFlow());
+            assertEquals("0", replay.balanceFlow().amountUnits());
+            assertEquals("100", replay.balanceFlow().balanceAfterUnits());
+            assertNull(replay.balanceFlow().transfer());
             adjust(replay, -101);
             assertEquals(ResponseStatus.REJECTED, replay.commandResult().status());
             assertNull(replay.balanceFlow());

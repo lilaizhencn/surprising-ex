@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
@@ -24,9 +25,7 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
-import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
@@ -553,8 +552,7 @@ class RuntimeStateBusinessRulesTest {
         var identities = new RuntimeIdentityRegistry();
         try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(withPosition, identities)) {
             for (long /* 超过可用、超过持仓保证金或取 long 极小负数的故意非法调整金额 */ rejected : new long[] {9_001, -1_001, Long.MIN_VALUE}) {
-                assertThatThrownBy(() -> DerivativeAccountCommandProcessor.adjustPositionMargin(runtime, identities, 101,
-                        new AdjustPositionMarginCommand("1", CorePositionSide.NET, rejected)))
+                assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountControlTask().preparePositionMarginAdjustment(runtime, identities, 101, new AdjustPositionMarginCommand("1", CorePositionSide.NET, rejected))))
                         .isInstanceOf(RuntimeException.class);
                 assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(withPosition);
             }
@@ -658,7 +656,7 @@ class RuntimeStateBusinessRulesTest {
         try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(before, identities)) {
             // 显式允许已有持仓重计的全仓两倍目标杠杆命令
             var command = new UpdateLeverageCommand("1", CoreMarginMode.CROSS, 2_000_000, true);
-            assertThatThrownBy(() -> DerivativeAccountCommandProcessor.updateLeverage(runtime, identities, 101, command))
+            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareLeverageChange(runtime, identities, 101, command)))
                     .hasMessageContaining("insufficient available funds");
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(before);
         }

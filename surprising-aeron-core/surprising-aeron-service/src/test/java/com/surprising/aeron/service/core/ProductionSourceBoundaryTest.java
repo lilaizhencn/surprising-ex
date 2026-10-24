@@ -48,10 +48,7 @@ class ProductionSourceBoundaryTest {
             assertThat(handler.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
             assertThat(handler.getConstructor(TradingCoreRuntime.class)).isNotNull();
         }
-        assertThat(java.util.Arrays.stream(DirectCommandSlot.class.getDeclaredClasses())
-                .flatMap(/* 当前待反射或读取源文件的类型；业务泛型检查中为待排除的正文类型名 */ type -> java.util.Arrays.stream(type.getDeclaredFields()))
-                .filter(/* 当前待核对类型或字段名的反射字段 */ field -> field.getName().equals("owner")))
-                .isNotEmpty().allSatisfy(/* 当前待核对类型或字段名的反射字段 */ field -> assertThat(field.getType()).isEqualTo(TradingCoreRuntime.class));
+        assertThat(DirectCommandSlot.class.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
         // 从当前目录向上找到的交易仓库根，找不到即测试失败
         Path root = Path.of("").toAbsolutePath();
         while (!Files.isDirectory(root.resolve("surprising-aeron-core"))) {

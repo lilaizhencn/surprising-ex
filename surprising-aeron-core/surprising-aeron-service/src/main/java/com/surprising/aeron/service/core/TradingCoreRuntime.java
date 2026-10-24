@@ -539,11 +539,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         message.payloadUnsafe());
                 if (runtimeState.asynchronousCommands())
                     return bookQueries.beginPendingTransferQuery(message, limit);
-                // 按限制读取并转换好的待完成划转视图
-                var transfers = runtimeState.pendingTransfers(limit).stream()
-                        .map(/* 当前待转换为协议视图的一条运行时划转 */ value -> new com.surprising.aeron.protocol.CorePendingTransferView(
-                                value.userId(), value.command()))
-                        .toList();
+                // 按限制读取的原待完成划转命令
+                var transfers = runtimeState.pendingTransfers(limit);
                 return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
                         com.surprising.aeron.protocol.CorePendingTransferCodec.encode(transfers));
             } catch (/* 本分支明确捕获的业务或输入异常，按对应协议码处理 */ IllegalArgumentException exception) {
@@ -827,7 +824,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> restoredFeePolicies,
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> restoredPendingTransfers,
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> restoredPendingTransfers,
             MatcherSnapshotCapture matcherSnapshotCapture,
             SnapshotEncoder snapshotEncoder) {
         this(productLine, appliedCommandCount, commandResults, lastSourceSequences, snapshotState,
@@ -864,7 +861,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> restoredFeePolicies,
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> restoredPendingTransfers,
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> restoredPendingTransfers,
             MatcherSnapshotCapture matcherSnapshotCapture,
             SnapshotEncoder snapshotEncoder,
             LaneTopology startupTopology, CoreRuntimeConfiguration configuration) {
@@ -941,7 +938,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> pendingTransfers) {
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers) {
         return prepareRestore(productLine, appliedCommandCount, commandResults, lastSourceSequences,
                 snapshotState, terminalRetention, matcherSnapshot, projectionSequence, feePolicies,
                 pendingTransfers, CoreRuntimeConfiguration.standalone());
@@ -951,7 +948,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             Map<UUID, StoredResult> commandResults, Map<SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState, TerminalStateRetention terminalRetention, MatcherSnapshot matcherSnapshot,
             long projectionSequence, Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> pendingTransfers,
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers,
             CoreRuntimeConfiguration configuration) {
         if (projectionSequence < 0 || appliedCommandCount < 0 || commandResults == null
                 || commandResults.size() > MAX_IDEMPOTENCY_RESULTS || lastSourceSequences == null
@@ -2219,7 +2216,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /**
      * 在必要的账户访问边界内取得运行时提供的待完成划转快照；等待最多五秒并在退出时归还访问边界。
      */
-    public Map<Long, com.surprising.aeron.service.account.TransferRuntime> pendingTransfers() {
+    public Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers() {
         // 当前是否需要由本方法取得账户访问边界；它不表示访问已经取得
         boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess();
         try {
@@ -2760,7 +2757,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public static long canonicalBusinessStateHash(
             long base,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> policies,
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> transfers) {
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> transfers) {
         // 费用政策映射的摘要，零表示无需混入该部分
         long feePolicyHash = computeFeePolicyHash(policies);
         if (feePolicyHash != 0) base = mix(base, feePolicyHash);
@@ -2774,14 +2771,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param transfers 待混入摘要的未完成划转映射，调用方保证稳定遍历顺序
      */
     static long computeTransferHash(
-            Map<Long, com.surprising.aeron.service.account.TransferRuntime> transfers) {
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> transfers) {
         if (transfers.isEmpty()) return 0;
         // 当前摘要累加值，按本方法规定的顺序混合或异或
         long digest = HASH_OFFSET_BASIS;
-        for (var /* 按调用方映射顺序遍历到的一笔未完成划转 */ transfer : transfers.values()) {
-            // 本笔未完成划转保存的原业务命令
-            var command = transfer.command();
-            digest = mix(digest, transfer.userId());
+        for (var /* 按调用方映射顺序遍历的原始未完成划转命令 */ command : transfers.values()) {
             digest = mix(digest, command.transferId());
             digest = mix(digest, command.sourceUserId());
             digest = mix(digest, command.targetUserId());

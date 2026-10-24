@@ -1,13 +1,12 @@
 package com.surprising.aeron.service.account.command;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 
 /**
- * 余额调整、转出、转入与完成划转的命令入口：解码请求并选择现有冷账户转换或异步控制槽。请求 UUID、长期资金身份及来源序号的去重由外层运行时和实际资金路径处理。
+ * 余额调整、转出、转入与完成划转的命令入口：解码请求并交给原账户控制槽。请求 UUID、长期资金身份及来源序号的去重由外层运行时和实际资金路径处理。
  */
 public final class BalanceTransferCommands {
     /** 持有当前资金命令上下文、账户运行时、控制槽和发布入口的交易 Owner。 */
@@ -28,16 +27,8 @@ public final class BalanceTransferCommands {
      */
     public void executeAdjustBalance(CoreMessage message) {
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
-        adjustBalance(message.header().userId(), TradingCommandCodec.decodeBalanceAdjustment(message.payloadUnsafe()));
-    }
-
-    /**
-     * 准备所属账户 Lane 的余额调整续步，提交发布由完成收集处理。
-     * @param userId 需要调整的账户用户身份
-     * @param command 已解码的资产及余额调整数量
-     */
-    private void adjustBalance(long userId, BalanceAdjustmentCommand command) {
-        owner.directCommand.deferBalanceAdjustment(userId, command);
+        var command = TradingCommandCodec.decodeBalanceAdjustment(message.payloadUnsafe());
+        owner.directCommand.deferBalanceAdjustment(message.header().userId(), command.asset(), command.deltaUnits());
     }
 
     /**
@@ -64,8 +55,7 @@ public final class BalanceTransferCommands {
         if (owner.runtimeState().productLine() != command.targetProductLine())
             throw new CoreStateRejectedException(
                     "PRODUCT_LINE_MISMATCH", "transfer target product line mismatch");
-        adjustBalance(message.header().userId(), new BalanceAdjustmentCommand(
-                command.asset(), command.amountUnits()));
+        owner.directCommand.deferBalanceAdjustment(message.header().userId(), command.asset(), command.amountUnits());
     }
 
     /**

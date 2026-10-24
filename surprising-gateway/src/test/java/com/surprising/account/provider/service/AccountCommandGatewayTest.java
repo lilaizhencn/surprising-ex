@@ -28,6 +28,20 @@ import org.junit.jupiter.api.Test;
 class AccountCommandGatewayTest {
 
     @Test
+    void pendingTransfersPreserveBothUsersAndAllPublicFields() {
+        var aeron = mock(AccountAeronGateway.class);
+        var command = new com.surprising.aeron.protocol.TransferFundsCommand(91, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                "SPOT", "USDT_PERPETUAL", "USDT", 37, "transfer-91", "allocation", 7, 8);
+        when(aeron.query(eq(CoreMessageType.PENDING_TRANSFER_QUERY), any(), any()))
+                .thenReturn(new CoreResponse(ResponseStatus.OK, 1,
+                        com.surprising.aeron.protocol.CorePendingTransferCodec.encode(List.of(command))));
+        var gateway = new AccountCommandGateway(properties(ProductLine.SPOT), aeron, mock(BalanceAdjustmentRepository.class));
+        assertThat(gateway.pendingTransfers(16)).containsExactly(new ProductTransferOperationRequest(91, 7,
+                ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL, AccountType.SPOT, AccountType.USDT_PERPETUAL,
+                "USDT", 37, "transfer-91", "allocation", 8));
+    }
+
+    @Test
     void productTransferUsesDedicatedAeronCommands() {
         AccountAeronGateway sourceAeron = mock(AccountAeronGateway.class);
         when(sourceAeron.command(any(), any(), eq(7L), any()))

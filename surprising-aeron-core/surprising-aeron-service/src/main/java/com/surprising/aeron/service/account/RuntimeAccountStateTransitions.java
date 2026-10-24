@@ -1,40 +1,14 @@
 package com.surprising.aeron.service.account;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
-import com.surprising.aeron.model.AssetBalance;
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/** 账户余额变更与待完成跨产品划转的业务步骤。同步入口组织身份校验和产品修订，账户内部步骤只改变所属用户；目标产品的入账与源产品完成确认分别由自己的命令执行。 构造约定：只提供余额和划转步骤，权威余额及待完成记录仍由运行时所属 Lane 保存。 */
+/** 账户余额变更与待完成跨产品划转的业务步骤。账户控制续步组织身份校验和产品修订，这里的账户步骤只改变所属用户；目标产品的入账与源产品完成确认分别由自己的命令执行。 构造约定：只提供余额和划转步骤，权威余额及待完成记录仍由运行时所属 Lane 保存。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimeAccountStateTransitions {
-
-    /**
-     * 校验输入及调用线程，规范化资产并预计算产品修订，再调整所属账户可用余额，最后发布元数据。
-     * @param runtime 本产品线的交易运行时
-     * @param identities 把业务资产解析为运行时资产编号的字典
-     * @param userId 本次余额或划转操作的账户用户编号
-     * @param command 包含业务资产及有符号变化金额的余额命令
-     */
-    public static void adjustBalance(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                              long userId, BalanceAdjustmentCommand command) {
-        if (runtime == null || identities == null || command == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime balance adjustment");
-        }
-        runtime.assertOwner();
-        // 经过规范化的资产业务名称。
-        String asset = AssetBalance.normalizeAsset(command.asset());
-        // 资产名称在运行时字典对应的整数键。
-        int assetId = identities.assetId(asset);
-        // 同步余额入口写入前预计算的下一产品修订号。
-        long nextRevision = Math.incrementExact(runtime.revision());
-        adjustAccountBalance(runtime, userId, assetId, command.deltaUnits());
-        runtime.setMetadata(runtime.productLine(), nextRevision);
-    }
 
     /**
      * 检查可用余额精确加法和用户版本，金额不能为负；不存在的用户或资产按初始状态创建，已有冻结金额保持不变，产品修订交给外层。
@@ -66,46 +40,24 @@ public final class RuntimeAccountStateTransitions {
     }
 
     /**
-     * 检查字典并准备幂等转出；相同已登记命令返回未新建，否则检查修订容量、扣可用余额、保存待完成划转并增加命令修订。
-     * @param runtime 本产品线的交易运行时
-     * @param identities 把业务资产解析为运行时资产编号的字典
-     * @param userId 本次余额或划转操作的账户用户编号
-     * @param command 需要登记源侧转出的完整划转命令
-     */
-    public static boolean transferOut(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                               long userId, TransferFundsCommand command) {
-        if (identities == null) throw new IllegalArgumentException("transfer identities are required");
-        // 通过幂等与来源校验准备的新待完成划转，null 表示同命令已登记。
-        TransferRuntime transfer = prepareTransferOut(runtime, userId, command);
-        if (transfer == null) return false;
-        // 资产名称在运行时字典对应的整数键。
-        int assetId = identities.assetId(command.asset());
-        runtime.requireRevisionCapacity();
-        debitTransferAccount(runtime, userId, assetId, command.amountUnits());
-        runtime.putPendingTransfer(transfer);
-        runtime.incrementCommandRevision();
-        return true;
-    }
-
-    /**
      * 核对源用户与产品，检查待完成记录完整命令一致性；幂等命中返回 null，未启动 Lane 的同步路径还检查容量，不读取余额。
      * @param runtime 本产品线的交易运行时
      * @param userId 本次余额或划转操作的账户用户编号
      * @param command 用于匹配已有待完成记录或新建记录的完整划转命令
      */
-    static TransferRuntime prepareTransferOut(TradingAccountRuntime runtime, long userId,
+    static TransferFundsCommand prepareTransferOut(TradingAccountRuntime runtime, long userId,
                                               TransferFundsCommand command) {
         validateTransferSource(runtime, userId, command);
         // 同划转编号的已有待完成记录，用户及整个命令必须一致。
-        TransferRuntime existing = runtime.pendingTransfer(command.transferId());
+        TransferFundsCommand existing = runtime.pendingTransfer(command.transferId());
         if (existing != null) {
-            if (existing.userId() != userId || !existing.command().equals(command))
+            if (!existing.equals(command))
                 throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer identity contains different data");
             return null;
         }
         if (!runtime.accountLanesStarted() && !runtime.hasPendingTransferCapacity())
             throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
-        return new TransferRuntime(userId, command);
+        return command;
     }
 
     /**
@@ -143,27 +95,6 @@ public final class RuntimeAccountStateTransitions {
         long nextAvailable = Math.subtractExact(balance.availableUnits(), amountUnits);
         runtime.setUserState(userId, userRevision, user.positionMode());
         runtime.replaceBalance(userId, assetId, nextAvailable, balance.lockedUnits());
-    }
-
-    /**
-     * 要求本用户和产品匹配划转目标，再以正向余额调整入账；重复命令防重由外层命令幂等边界承担。
-     * @param runtime 本产品线的交易运行时
-     * @param identities 把业务资产解析为运行时资产编号的字典
-     * @param userId 本次余额或划转操作的账户用户编号
-     * @param command 包含目标用户、目标产品线、资产与入账金额的划转命令
-     */
-    public static void transferIn(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                           long userId, TransferFundsCommand command) {
-        if (runtime == null || identities == null || command == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime transfer in");
-        }
-        runtime.assertOwner();
-        if (userId != command.targetUserId()) throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer recipient mismatch");
-        if (runtime.productLine() != command.targetProductLine()) {
-            throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer target product line mismatch");
-        }
-        adjustBalance(runtime, identities, userId,
-                new BalanceAdjustmentCommand(command.asset(), command.amountUnits()));
     }
 
     /**

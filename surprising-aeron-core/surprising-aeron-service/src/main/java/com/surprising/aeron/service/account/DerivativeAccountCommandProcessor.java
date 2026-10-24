@@ -20,28 +20,6 @@ import lombok.NoArgsConstructor;
 public final class DerivativeAccountCommandProcessor {
 
     /**
-     * 校验输入与衍生产品线，执行账户模式切换；只有确实切换时才增加产品修订号。
-     * @param runtime 处理当前用户所属产品线的交易运行时
-     * @param userId 需要改变账户设置或保证金的用户编号
-     * @param command 目标持仓模式命令
-     */
-    public static boolean updatePositionMode(TradingAccountRuntime runtime, long userId,
-                                             UpdatePositionModeCommand command) {
-        if (runtime == null || command == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime position mode update");
-        }
-        runtime.assertOwner();
-        if (!runtime.productLine().isDerivative()) {
-            throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
-                    "position mode requires derivative product line");
-        }
-        // 账户步骤是否实际改变设置，只有变化时同步入口才发布产品修订。
-        boolean changed = updateAccountPositionMode(runtime, userId, command);
-        if (changed) runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-        return changed;
-    }
-
-    /**
      * 目标模式相同直接返回未变化；有跨合约订单或持仓敞口则拒绝，否则预检查产品和用户修订容量后更新用户模式。
      * @param runtime 处理当前用户所属产品线的交易运行时
      * @param userId 需要改变账户设置或保证金的用户编号
@@ -62,25 +40,6 @@ public final class DerivativeAccountCommandProcessor {
         runtime.setUserState(userId, current == null ? 1 : Math.incrementExact(current.revision()),
                 command.positionMode());
         return true;
-    }
-
-    /**
-     * 解析并校验杠杆业务键，执行账户杠杆步骤，实际变化后才发布下一产品修订号。
-     * @param runtime 处理当前用户所属产品线的交易运行时
-     * @param identities 解析稠密合约及运行时持仓键的字典
-     * @param userId 需要改变账户设置或保证金的用户编号
-     * @param command 合约、模式、杠杆及重定价开关命令
-     */
-    public static boolean updateLeverage(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                         long userId, UpdateLeverageCommand command) {
-        if (runtime == null) throw new IllegalArgumentException("invalid runtime leverage update");
-        // 产品及合约校验后得到的杠杆业务键，或保证金路径解析出的持仓键。
-        CoreLeverageKey key = leverageKey(runtime, identities, userId, command);
-        // 账户步骤是否实际改变设置，只有变化时同步入口才发布产品修订。
-        boolean changed = updateAccountLeverage(runtime, key, identities.symbolId(key.instrumentId()),
-                command.leveragePpm(), command.repriceCrossMargin());
-        if (changed) runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-        return changed;
     }
 
     /**
@@ -239,23 +198,6 @@ public final class DerivativeAccountCommandProcessor {
         }
         runtime.putLeverage(key, leveragePpm);
         return true;
-    }
-
-    /**
-     * 解析逐仓持仓身份并预计算产品修订号，完成账户保证金调整后发布该修订。
-     * @param runtime 处理当前用户所属产品线的交易运行时
-     * @param identities 解析稠密合约及运行时持仓键的字典
-     * @param userId 需要改变账户设置或保证金的用户编号
-     * @param command 有符号逐仓保证金增减命令
-     */
-    public static void adjustPositionMargin(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                            long userId, AdjustPositionMarginCommand command) {
-        // 产品及合约校验后得到的杠杆业务键，或保证金路径解析出的持仓键。
-        long key = positionMarginKey(runtime, identities, userId, command);
-        // 同步保证金入口预先算好的下一产品修订号。
-        long nextRevision = Math.incrementExact(runtime.revision());
-        adjustAccountPositionMargin(runtime, userId, key, command);
-        runtime.setMetadata(runtime.productLine(), nextRevision);
     }
 
     /**

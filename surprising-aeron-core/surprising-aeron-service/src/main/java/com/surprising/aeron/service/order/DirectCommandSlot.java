@@ -2,7 +2,6 @@ package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreAlgoOrderCommand;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -340,11 +339,12 @@ public final class DirectCommandSlot {
     /**
      * 准备所属用户的余额调整账户任务，并安装固定轮询函数；账户确有变化才请求发布。
      * @param userId 操作所属账户用户
-     * @param command 本方法对应的原始或已解码业务命令，类型见声明
+     * @param asset 要调整的资产
+     * @param deltaUnits 有符号可用余额增减金额
      */
-    public void deferBalanceAdjustment(long userId, BalanceAdjustmentCommand command) {
+    public void deferBalanceAdjustment(long userId, String asset, long deltaUnits) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareBalanceAdjustment(owner.runtimeState(), owner.identities(), userId, command);
+        accountControl.prepareBalanceAdjustment(owner.runtimeState(), owner.identities(), userId, asset, deltaUnits);
         controlWork = accountControlWork;
     }
 

@@ -228,14 +228,25 @@ class TradingCommandCodecTest {
         assertThat(TradingCommandCodec.decodeCompleteTransfer(
                 TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(91L))))
                 .isEqualTo(new CompleteTransferCommand(91L));
-        CorePendingTransferView pending = new CorePendingTransferView(7L, transfer);
-        assertThat(CorePendingTransferCodec.decode(CorePendingTransferCodec.encode(java.util.List.of(pending))))
-                .containsExactly(pending);
+        assertThat(CorePendingTransferCodec.decode(CorePendingTransferCodec.encode(java.util.List.of(transfer))))
+                .containsExactly(transfer);
         assertThatThrownBy(() -> new TransferFundsCommand(92L, ProductLine.SPOT,
                 ProductLine.LINEAR_PERPETUAL, "USDT_PERPETUAL", "FUNDING", "USDT", 250L,
                 "transfer-92", "invalid route", 7L, 7L))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("does not match product line");
+    }
+
+    @Test
+    void rejectsTransferWithoutExplicitSenderAndRecipient() {
+        var transfer = new TransferFundsCommand(91, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                "SPOT", "USDT_PERPETUAL", "USDT", 37, "old-format", "", 7, 7);
+        byte[] current = TradingCommandCodec.encodeTransferFunds(transfer);
+        byte[] implicitUsers = new byte[current.length - 16];
+        java.nio.ByteBuffer.wrap(implicitUsers).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(1).putLong(91);
+        System.arraycopy(current, 28, implicitUsers, 12, current.length - 28);
+        assertThatThrownBy(() -> TradingCommandCodec.decodeTransferFunds(implicitUsers))
+                .isInstanceOf(ProtocolException.class);
     }
 
     @Test

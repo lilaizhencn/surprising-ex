@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ResponseStatus;
-import com.surprising.aeron.service.account.TransferRuntime;
+import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.matcher.MatcherSnapshot;
 import com.surprising.aeron.service.matcher.MatcherSnapshotCodec;
@@ -54,7 +54,7 @@ public final class SectionedCoreSnapshotParser {
         // 解码后的费率策略表，参与业务哈希配对。
         Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[5]);
         // 解码后的待完成划转表，参与业务哈希配对。
-        Map<Long, TransferRuntime> pendingTransfers = CoreTransferSnapshotCodec.decode(payloads[6]);
+        Map<Long, TransferFundsCommand> pendingTransfers = CoreTransferSnapshotCodec.decode(payloads[6]);
         // 总负载段数扣除九个固定段后的账户 Lane 数量。
         int laneSectionCount = payloads.length - SectionedCoreSnapshotCodec.BASE_SECTION_COUNT;
         if (laneSectionCount != matcherSnapshot.topology().accountLaneCount()) {
@@ -293,7 +293,7 @@ public final class SectionedCoreSnapshotParser {
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
             Map<Long, CoreFeePolicyState> feePolicies,
-            Map<Long, TransferRuntime> pendingTransfers,
+            Map<Long, TransferFundsCommand> pendingTransfers,
             TerminalStateRetention retention,
             List<AccountLaneSnapshot> accountLanes,
             HeaderManifest manifest,

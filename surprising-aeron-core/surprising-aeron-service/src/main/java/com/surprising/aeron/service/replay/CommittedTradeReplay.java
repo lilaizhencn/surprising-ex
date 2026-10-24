@@ -353,8 +353,8 @@ public final class CommittedTradeReplay implements AutoCloseable {
         // 组合快照需标记的待完成转账双方用户集合
         var pendingUsers = new HashSet<Long>();
         state.pendingTransfers().values().forEach(/* 当前解析的转账命令或待完成转账事实 */ transfer -> {
-            pendingUsers.add(transfer.command().sourceUserId());
-            pendingUsers.add(transfer.command().targetUserId());
+            pendingUsers.add(transfer.sourceUserId());
+            pendingUsers.add(transfer.targetUserId());
         });
         return CommittedPortfolioSnapshot.capture(state.tradingState(), state.currentClusterTimestamp(),
                 asOf, maximumMarkAgeMillis, pendingUsers);

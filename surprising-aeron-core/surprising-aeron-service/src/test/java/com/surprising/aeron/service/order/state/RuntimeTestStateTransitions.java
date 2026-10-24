@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.order.state;
 
+import com.surprising.aeron.service.core.LedgerControlTestSupport;
+import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.service.core.RuntimeDerivativeLiquidationFixture;
 
 import com.surprising.aeron.service.core.RuntimeLifecycleSettlementFixture;
@@ -31,8 +33,6 @@ import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
-import com.surprising.aeron.service.account.RuntimeAccountStateTransitions;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
@@ -101,7 +101,7 @@ public final class RuntimeTestStateTransitions {
      */
     public TradingCoreState adjustBalance(TradingCoreState before, long userId, BalanceAdjustmentCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                RuntimeAccountStateTransitions.adjustBalance(runtime, identities, userId, command));
+                LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareBalanceAdjustment(runtime, identities, userId, command.asset(), command.deltaUnits())));
     }
 
     /**
@@ -124,7 +124,7 @@ public final class RuntimeTestStateTransitions {
      */
     public TradingCoreState updatePositionMode(TradingCoreState before, long userId, UpdatePositionModeCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                DerivativeAccountCommandProcessor.updatePositionMode(runtime, userId, command));
+                LedgerControlTestSupport.await(runtime, new AccountControlTask().preparePositionModeChange(runtime, userId, command)));
     }
 
     /**
@@ -135,7 +135,7 @@ public final class RuntimeTestStateTransitions {
      */
     public TradingCoreState updateLeverage(TradingCoreState before, long userId, UpdateLeverageCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                DerivativeAccountCommandProcessor.updateLeverage(runtime, identities, userId, command));
+                LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareLeverageChange(runtime, identities, userId, command)));
     }
 
     /**
@@ -147,7 +147,7 @@ public final class RuntimeTestStateTransitions {
     public TradingCoreState adjustPositionMargin(TradingCoreState before, long userId,
                                           AdjustPositionMarginCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                DerivativeAccountCommandProcessor.adjustPositionMargin(runtime, identities, userId, command));
+                LedgerControlTestSupport.await(runtime, new AccountControlTask().preparePositionMarginAdjustment(runtime, identities, userId, command)));
     }
 
     /**

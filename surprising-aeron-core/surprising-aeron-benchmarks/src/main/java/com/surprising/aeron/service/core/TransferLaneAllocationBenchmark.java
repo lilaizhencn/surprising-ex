@@ -2,10 +2,8 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.service.account.AccountControlTask;
-import com.surprising.aeron.service.account.RuntimeAccountStateTransitions;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
@@ -28,8 +26,12 @@ public class TransferLaneAllocationBenchmark {
         identities = new RuntimeIdentityRegistry();
         runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.SPOT), identities,
                 new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256));
-        RuntimeAccountStateTransitions.adjustBalance(runtime, identities, 7,
-                new BalanceAdjustmentCommand("USDT", 1_000_000_000_000L));
+        task.prepareBalanceAdjustment(runtime, identities, 7, "USDT", 1_000_000_000_000L);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!task.poll()) {
+            if (System.nanoTime() >= deadline) throw new IllegalStateException("balance setup timed out");
+            Thread.onSpinWait();
+        }
         runtime.clearChangedKeys();
         runtime.startAccountLanes();
     }

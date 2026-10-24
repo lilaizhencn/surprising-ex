@@ -108,13 +108,11 @@ public class AccountCommandGateway {
         if (response.status() != com.surprising.aeron.protocol.ResponseStatus.OK) {
             throw new AccountStateUnavailableException("Aeron pending transfer query failed: " + response.resultCode());
         }
-        return CorePendingTransferCodec.decode(response.data()).stream().map(view -> {
-            TransferFundsCommand value = view.command();
-            return new ProductTransferOperationRequest(value.transferId(), view.userId(),
+        return CorePendingTransferCodec.decode(response.data()).stream().map(value ->
+            new ProductTransferOperationRequest(value.transferId(), value.sourceUserId(),
                     value.sourceProductLine(), value.targetProductLine(),
                     AccountType.valueOf(value.sourceAccountType()), AccountType.valueOf(value.targetAccountType()),
-                    value.asset(), value.amountUnits(), value.referenceId(), value.reason(), value.targetUserId());
-        }).toList();
+                    value.asset(), value.amountUnits(), value.referenceId(), value.reason(), value.targetUserId())).toList();
     }
 
     public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {

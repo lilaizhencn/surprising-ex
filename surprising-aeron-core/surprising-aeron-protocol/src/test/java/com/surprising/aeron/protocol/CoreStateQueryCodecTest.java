@@ -87,7 +87,10 @@ class CoreStateQueryCodecTest {
         CoreStateQueryCodec.writeOrderState(directOrder, order);
         assertThat(directUser.position()).isEqualTo(directUser.capacity());
         assertThat(directOrder.position()).isEqualTo(directOrder.capacity());
-        assertThat(directUser.array()).containsExactly(CoreStateQueryCodec.encodeUserState(user));
+        directUser.flip();
+        byte[] directUserBytes = new byte[directUser.remaining()];
+        directUser.get(directUserBytes);
+        assertThat(directUserBytes).containsExactly(CoreStateQueryCodec.encodeUserState(user));
         assertThat(directOrder.array()).containsExactly(CoreStateQueryCodec.encodeOrderState(order));
         assertThat(CoreStateQueryCodec.decodeClientOrderStateQuery(
                 CoreStateQueryCodec.encodeClientOrderStateQuery("client-71"))).isEqualTo("client-71");

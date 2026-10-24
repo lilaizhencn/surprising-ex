@@ -13,7 +13,7 @@ Owner借用同一组 `RuntimeFactIndexes`；固定路由只保存一份，恢复
 永续与交割分别使用现有产品规则，线性、反向和期权的资金公式及生命周期约束各自保留。
 Lombok只处理直接样板，校验、复制和状态转换显式实现，可变交易对象不用 `@Data`。
 
-当前Core schema为 **16**，注册命令V10、交易状态快照v55、分段快照v30、Matcher快照v10、终态保留v4。
+当前Core schema为 **17**，注册命令V10、交易状态快照v55、分段快照v30、Matcher快照v10、终态保留v4、待完成划转段v3。
 注册命令和不可变标的配置共用 `CoreInstrumentRiskLimits` 金融参数值，现货不创建风险配置，
 也不在命令或快照中保存保证金、杠杆、持仓限额、OI或虚拟风险档。衍生品保留真实限额和档位，
 维持保证金直接取实际风险档费率，删除标的级副本；资产单位、费用、价格保护和交易开关保留。
@@ -38,9 +38,13 @@ Lombok只处理直接样板，校验、复制和状态转换显式实现，可�
 39 项协议/Owner/收发回归、15 项快照测试及 12 项金融回归通过；两种永续另完成真实资金费/强平门禁及带持仓恢复，交割和期权覆盖到期结算、流水及持仓/冻结归零。
 实际命令、失败复验、结果与未测范围见[六产品线运行验收](validation/six-product-runtime-20261024.md)及[机器证据](validation/six-product-runtime-20261024.json)。
 
+第六十八轮已清理A214–A221：账户续步直接保存原始类型结果，划转原命令贯穿Lane、查询、快照与回放，删除两个包装类、六个非在线同步入口及一个纯转发方法；生产净减198行、6个实例字段。
+内部schema17、待完成划转段v3不再保存重复源用户；完整业务字段、幂等、冻结资金和恢复校验保留。18模块干净构建、完整1973例（1个Linux亲和性平台跳过）、PIPELINED131例、真实SQL5例/Gateway7例及六线顺序HTTP/WebSocket、24次Cluster冷恢复通过。
+见[第六十八轮清理与实测报告](validation/deep-code-cleanup-20261025-round68.md)及[机器证据](validation/round68-runtime-20261025.json)。当前216项解决、A11候选、4项保留，全量审计继续。
+
 第六十七轮已清理A211–A213：保险冷测试共用真实prepare/续步入口，删除仅测试使用的生产同步入口；批量强平直接引用原动作和共用费率，删除重建单笔命令及只在轮询内使用的请求列表字段，净减1字段。
 18模块干净构建、158个不同Core回归与PIPELINED补跑99例、六线顺序真实HTTP/WebSocket及12次Cluster恢复通过；永续实测改发真实批强平命令，保险/ADL及资金守恒复验通过。首次测试导入与独立空库准备失败均已修正并归档。
-见[第六十七轮清理与实测报告](validation/deep-code-cleanup-20261025-round67.md)及[机器证据](validation/round67-runtime-20261025.json)。当前208项解决、A11候选、4项保留，全量审计继续；未测范围见报告。
+见[第六十七轮清理与实测报告](validation/deep-code-cleanup-20261025-round67.md)及[机器证据](validation/round67-runtime-20261025.json)。该轮完成时208项解决、A11候选、4项保留，全量审计继续；未测范围见报告。
 
 第六十六轮已清理A206–A210：资金费与到期结算直接交接所需残差/清算金额，删除通用多资产差额、无类型回执复制及临时计划重复用户身份，净减3字段；原精确累计、保险预扣、分页、零金额结算与回滚保留。
 18模块干净构建、150个Core回归及PIPELINED补跑80例、六线依次真实HTTP/WebSocket和12次Cluster冷恢复通过；另修正反向保证金实测预期的二次舍入，3例边界回归通过，生产公式未改，失败与复验已归档。
@@ -76,7 +80,7 @@ Lombok只处理直接样板，校验、复制和状态转换显式实现，可�
 17个相关模块干净编译通过；修正旧快照偏移、索引读取、追踪行情及异步完成测试夹具后，合并首轮与复验共23类642个不同用例通过。本轮未重启服务，不替代独立HTTP/WebSocket验收。A181当时待清理，现已在第六十一轮解决。
 
 清理及逐字段证据见[命令与持久化数据审计](validation/command-data-audit-20261023.json)，
-当前累计208项已解决。撮合普通/池化结算回执不再复制无人消费的行情；原生事件、真实成功撤单前缀和命令证据保留。
+当前累计216项已解决。撮合普通/池化结算回执不再复制无人消费的行情；原生事件、真实成功撤单前缀和命令证据保留。
 第四十七轮分析的6组冗余及继续追踪的身份计数链已清理，见[本轮清理与编译证据](validation/deep-code-cleanup-20261024-round48.md)；原分析见[第四十七轮报告](validation/deep-code-audit-20261024-round47.md)。
 撮合结果和控制任务不再搬运无人消费的订单号副本；实际订单身份核对、结算计划和成功撤单前缀保留。
 Owner删除未接入生产的轮询缓存；身份版本连同Lane、单笔/批量准入及改单回执的4份分配计数、顺序批次与触发续步的2份身份令牌副本一并删除。
@@ -486,7 +490,7 @@ flowchart TD
 | 强平 | `MatchingCommandAdmission` / `CoreMatchingFlow` → `ExecutionCheck` / `CrossShardCancellationCoordinator` → [`LiquidationCommands`](src/main/java/com/surprising/aeron/service/liquidation/command/LiquidationCommands.java) → `RuntimeDerivativeLiquidationProcessor` | 先校验状态、价格和游标，分批撤单；撤单未完成时只提交进度，后续命令继续 |
 | 强平确认 / 保险 / ADL | `RuntimeLiquidationResolution`；`InsuranceFundCommands`；`AdlCommands` / `RuntimeAdlExecution` | 各有独立复制命令和幂等边界，并非每次强平都无条件执行 |
 | 资金费 / 交割 / 行权 | `PerpetualFundingCommands` / `RuntimePerpetualFundingProcessor`；`InstrumentSettlementCommands` / `RuntimeLifecycleSettlementContinuation` | 分页资金费与到期结算各保留游标；到期结算先完成撤单，再推进持仓和账本 |
-| 余额 / 划转 | `DirectCommandDispatcher` → `BalanceTransferCommands` → `RuntimeAccountStateTransitions` / `TransferRuntime` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
+| 余额 / 划转 | `DirectCommandDispatcher` → `BalanceTransferCommands` → `AccountControlTask` → `RuntimeAccountStateTransitions` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
 
 快照入口为 `AeronTradingClusterService.onTakeSnapshot` → `TradingOwnerLoop.captureSnapshotSections`
 → `CoreSnapshotLifecycle`。先排空快照边界前的命令，再捕获同一 fence 的账户、Matcher、账本、
@@ -782,9 +786,9 @@ Treasury，生产线程启动后非空财务 delta 不能由 Owner 应用。
 
 ### 划转生命周期与内部查询归属（2026-10-14）
 
-`AccountTransferOut` 把指令交给来源账户Lane，由Lane检查完整划转身份、扣减可用资金并保存 `TransferRuntime`。`AccountTransferCompletion` 在同一Lane移除身份。完整指令仅保存在 `LaneColdState.pendingTransfers`；Owner保留有界的 `transferId → userId` 路由、容量和公平分页游标，收到完成通知后更新路由，不做扣款或完整幂等比较。相同转出可在容量满时重试，已完成身份的再次完成不改变修订。
+`AccountControlTask` 把原始 `TransferFundsCommand` 交给来源账户Lane，由Lane检查完整划转身份、扣减可用资金并直接保存原命令；完成划转在同一Lane移除身份。源用户取命令中的 `sourceUserId`，查询和快照不再另存用户副本。完整指令仅保存在 `LaneColdState.pendingTransfers`；Owner保留有界的 `transferId → userId` 路由、容量和公平分页游标，收到完成通知后更新路由，不做扣款或完整幂等比较。相同转出可在容量满时重试，已完成身份的再次完成不改变修订。
 
-`PENDING_TRANSFER_QUERY` 是内部划转对账/重试查询：Owner选取至多256个路由ID，`CoreQueryService` 复用既有多Lane查询完成位，各Lane原位读取该页身份，最后完成的Lane编码响应。它不申请Owner账户访问权，也不持有长期业务镜像。查询分页只遍历本页ID，避免对131072条尾集合求size。冷初始化与序列化仍使用原划转协议结构，本轮按要求未执行快照/恢复场景。必要验证、入口边界首次失败及修复见 [划转Lane验证](../../docs/validation/lane-transfer-lifecycle-20261014.json)。
+`PENDING_TRANSFER_QUERY` 是内部划转对账/重试查询：Owner选取至多256个路由ID，`CoreQueryService` 复用既有多Lane查询完成位，各Lane原位读取该页身份，最后完成的Lane编码响应。它不申请Owner账户访问权，也不持有长期业务镜像。查询分页只遍历本页ID，避免对131072条尾集合求size。当前响应直接编码命令列表，不再创建查询包装；待完成划转段只读取v3。原划转Lane验证记录见 [划转Lane验证](../../docs/validation/lane-transfer-lifecycle-20261014.json)。
 
 
 ### 持仓索引输入与条目生命周期（2026-10-14）
@@ -908,7 +912,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 ### 指纹与提交访问的槽生命周期（2026-10-15）
 
-`AeronTradingClusterService` 显式使用 `CommandFingerprint.Calculator.ofBorrowed`：计算器把SHA-256摘要写入当前decoder槽自己的32字节单元，header/payload在该租约内保持不变。原 `of` API仍返回独立不可变值。原 `CommandResultLedger.StoredResult` 池在提交时把借入摘要复制到该记录自有的常驻单元，输入退出不会修改保留结果；对外 `fingerprint()` 返回独立值，内部重复比对直接读记录摘要，不逐次物化。固定canonical字段、32字节编码及划转v1/v2等价规则未变。
+`AeronTradingClusterService` 显式使用 `CommandFingerprint.Calculator.ofBorrowed`：计算器把SHA-256摘要写入当前decoder槽自己的32字节单元，header/payload在该租约内保持不变。原 `of` API仍返回独立不可变值。原 `CommandResultLedger.StoredResult` 池在提交时把借入摘要复制到该记录自有的常驻单元，输入退出不会修改保留结果；对外 `fingerprint()` 返回独立值，内部重复比对直接读记录摘要，不逐次物化。固定canonical字段和32字节编码保留；当前划转只读取显式收付款用户的命令版本，不再提供v1/v2等价兼容。
 
 `CoreMessage.matchingPendingResponse` 复用独立的待撮合元数据单元，覆盖普通、延后及批量入口；它与终态响应分开，不能在同一输入租约内改变序号。最后一个Header/出口读者退出后，指纹和两种响应单元一起清除。没有新增业务状态表、线程、队列或执行阶段。
 

@@ -76,7 +76,7 @@ class CoreConfigurationTest {
             try {
                 owner.start(cluster, null);
                 try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decodePassive(
-                        owner.captureSnapshot(1, 0), ProductLine.SPOT, runtimeConfiguration)) {
+                        owner.captureSnapshot(1, 0), ProductLine.SPOT, runtimeConfiguration, topology)) {
                     assertThat(restored.runtimeState().topology()).isEqualTo(topology);
                 }
             } finally {
@@ -124,26 +124,39 @@ class CoreConfigurationTest {
     }
 
     /**
-     * 每条产品线恢复时都使用快照里的拓扑，即使当前节点属性已变成非法值。
+     * 每条产品线恢复快照中的分片与路由种子，队列容量取显式部署拓扑，不重新读取节点属性。
      * @param product 本次恢复验证的独立产品线
      */
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void snapshotTopologyWinsOverCurrentNodeProperties(ProductLine product) {
+    void snapshotRoutingAndDeploymentCapacitiesAreRestoredExplicitly(ProductLine product) {
         // 显式传入的旧节点拓扑，账户与 Matcher 应同时使用它。
         var topology = new LaneTopology(2, 4, 42, 32, 64, 128);
+        var deployment = new LaneTopology(4, 8, 99, 64, 128, 256);
+        var expected = new LaneTopology(2, 4, 42, 64, 128, 256);
+        var configuration = CoreRuntimeConfiguration.standalone();
         // 暂存节点当前属性，确保测试结束后恢复，不影响其他产品线。
         String previous = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "3");
         try (/* 首次启动显式拓扑的独立运行时。 */ var original = new TradingCoreRuntime(product, topology)) {
             assertThat(original.runtimeState().topology()).isSameAs(topology);
             // 捕获真实 Matcher 与账户的配对快照，随后按该快照恢复。
+            com.surprising.aeron.service.order.CoreTestCompletion.applyAsynchronously(original,
+                    new com.surprising.aeron.protocol.CoreMessage(com.surprising.aeron.protocol.CoreMessageHeader.command(
+                            com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE, new java.util.UUID(1, 1), product,
+                            com.surprising.aeron.protocol.CommandSource.OPERATIONS, 1, 1, 7, 1, 1),
+                            com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(
+                                    new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 100))));
             byte[] snapshot = original.snapshot(101);
             try (/* 从快照恢复的独立运行时，不读取当前节点路由属性。 */
-                    var restored = TradingCoreRuntime.fromSnapshot(product, snapshot)) {
-                assertThat(restored.runtimeState().topology()).isEqualTo(topology);
-                assertThat(TradingCoreRuntime.inspectSnapshot(product, restored.snapshot(102)).topology())
-                        .isEqualTo(topology);
+                    var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decode(snapshot, product, configuration, deployment)) {
+                assertThat(restored.runtimeState().topology()).isEqualTo(expected);
+                assertThat(restored.stateHash()).isEqualTo(original.stateHash());
+                try (var again = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decode(
+                        restored.snapshot(102), product, configuration, deployment)) {
+                    assertThat(again.runtimeState().topology()).isEqualTo(expected);
+                    assertThat(again.stateHash()).isEqualTo(original.stateHash());
+                }
             }
         } finally {
             restoreProperty("surprising.aeron.account-lanes", previous);

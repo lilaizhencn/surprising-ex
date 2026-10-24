@@ -12,7 +12,6 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpsertFeePolicyCommand;
-import com.surprising.aeron.service.account.TransferRuntime;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -62,7 +61,7 @@ class CoreBusinessStateHashTest {
             // 独立构造的政策冷值对照映射
             var policies = Map.of(91L, CoreFeePolicyState.from(policy));
             // 两份独立构造的原待完成划转对照映射
-            var transfers = Map.of(101L, new TransferRuntime(first, a), 102L, new TransferRuntime(second, b));
+            var transfers = Map.of(101L, a, 102L, b);
             // 哈希规范要求按划转 ID 排序，不能依赖输入映射自身的遍历顺序。
             // 按划转业务 ID 升序的对照映射，避免原 map 遍历顺序影响预期
             var orderedTransfers = new java.util.TreeMap<>(transfers);
@@ -95,7 +94,7 @@ class CoreBusinessStateHashTest {
             long completedBase = core.tradingState().businessStateHash();
             // 完成首笔后只组合剩余第二笔划转得到的预期哈希
             long completedHash = TradingCoreRuntime.canonicalBusinessStateHash(completedBase, policies,
-                    Map.of(102L, new TransferRuntime(second, b)));
+                    Map.of(102L, b));
             assertThat(core.stateHash()).isEqualTo(completedHash).isNotEqualTo(expected);
             // 读取后继续完成业务写入，检查查询已经把账户所有权还给工作线程。
             apply(core, CoreMessageType.ADJUST_BALANCE, first,

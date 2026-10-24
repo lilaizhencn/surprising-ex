@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -31,7 +32,6 @@ import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
@@ -856,8 +856,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities)) {
-            assertThatThrownBy(() -> DerivativeAccountCommandProcessor.updateLeverage(
-                    runtime, identities, USER_ID, command))
+            assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareLeverageChange(runtime, identities, USER_ID, command)))
                     .isInstanceOfSatisfying(CoreStateRejectedException.class,
                             /* 本次预期的业务拒绝异常，用稳定业务代码核对原因 */ exception -> assertThat(exception.code())
                                     .isEqualTo("OPTION_LEVERAGE_UNSUPPORTED"));

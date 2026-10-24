@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第六十七轮清理仅测试使用的生产保险同步入口、批强平重建单笔命令及轮询临时请求字段，净减1字段；18模块干净构建、158不同回归与PIPELINED99例、六线实测、真实批强平/保险/ADL及12次恢复通过。208解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第六十八轮A214-A221：原始划转命令贯穿Lane/查询/快照/回放，账户续步去副本及装箱，删除六个非在线同步入口；净减6字段、2类和198行。18模块干净构建、完整1973例（1个Linux亲和性平台跳过）、PIPELINED131、SQL5/Gateway7、六线实测及24次恢复通过。216解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -11114,6 +11114,119 @@
       ],
       "evidence": "列表在一次轮询内完成构造并交原账户回调，没有跨轮询生产者；改局部变量，已选完动作后的轮询用共享空集合，删除字段与派发后空列表重置。",
       "verification": "18模块干净构建、158不同回归及PIPELINED99例、六线真实HTTP/WS、永续实际批强平/保险/ADL、12次Cluster恢复；见round67-runtime-20261025.json。"
+    },
+    {
+      "id": "A214",
+      "status": "resolved",
+      "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_eighth_cleanup_round",
+      "topic": "账户续步的 Lane 编号与装箱结果中转",
+      "fields_or_methods": [
+        "AccountControlTask.laneId",
+        "AccountControlTask.apply/poll"
+      ],
+      "evidence": "所属Lane已由派发位图确定；布尔变化写入原transferCreated字段改名changedOnLane，保证金资产编号写入原assetId。Owner仍在原release/acquire回执后读取，stateChanged发布标记单独保留。",
+      "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
+    },
+    {
+      "id": "A215",
+      "status": "resolved",
+      "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_eighth_cleanup_round",
+      "topic": "杠杆参数副本",
+      "fields_or_methods": [
+        "AccountControlTask.leveragePpm",
+        "AccountControlTask.repriceCrossMargin"
+      ],
+      "evidence": "两份标量改为引用原不可变UpdateLeverageCommand，净减1字段；实际杠杆键与合约编号保留。",
+      "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
+    },
+    {
+      "id": "A216",
+      "status": "resolved",
+      "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_eighth_cleanup_round",
+      "topic": "待完成划转运行时包装",
+      "fields_or_methods": [
+        "TransferRuntime"
+      ],
+      "evidence": "删除userId+command包装，Lane、运行时、快照接口、哈希与回放直接使用TransferFundsCommand；所属用户取sourceUserId，完整命令幂等比较保留。",
+      "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
+    },
+    {
+      "id": "A217",
+      "status": "resolved",
+      "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_eighth_cleanup_round",
+      "topic": "划转快照与哈希中的重复源用户",
+      "fields_or_methods": [
+        "CoreTransferSnapshotCodec field1",
+        "TradingCoreRuntime.computeTransferHash duplicate source mix"
+      ],
+      "evidence": "待完成划转段只读v3，省去重复数值字段1，每条少16字节；哈希每个原命令字段混入一次。容量、重复ID、版本与跨段配对检查保留。",
+      "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
+    },
+    {
+      "id": "A218",
+      "status": "resolved",
+      "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_eighth_cleanup_round",
+      "topic": "待完成查询包装和重复用户线字段",
+      "fields_or_methods": [
+        "CorePendingTransferView",
+        "CorePendingTransferCodec"
+      ],
+      "evidence": "查询直接编码原命令列表，每条少8字节；Core schema升17，Gateway从同一命令构造原公开请求，保留源/目标用户与其余公开字段。",
+      "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
+    },
+    {
+      "id": "A219",
+      "status": "resolved",
+      "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_eighth_cleanup_round",
+      "topic": "转入重建余额命令与纯转发",
+      "fields_or_methods": [
+        "BalanceTransferCommands.adjustBalance",
+        "executeTransferIn BalanceAdjustmentCommand allocation"
+      ],
+      "evidence": "余额续步只接收实际资产和增量，转入直接传金额；收款用户先于目标产品校验的拒绝顺序保留。",
+      "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
+    },
+    {
+      "id": "A220",
+      "status": "resolved",
+      "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_eighth_cleanup_round",
+      "topic": "非在线余额和划转同步入口",
+      "fields_or_methods": [
+        "RuntimeAccountStateTransitions.adjustBalance",
+        "RuntimeAccountStateTransitions.transferOut",
+        "RuntimeAccountStateTransitions.transferIn"
+      ],
+      "evidence": "当前classfile完整描述符证明调用来自冷测试及一次基准setup；删除3个生产同步入口，调用方共用原AccountControlTask，基准只改setup且未运行JMH。",
+      "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
+    },
+    {
+      "id": "A221",
+      "status": "resolved",
+      "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_eighth_cleanup_round",
+      "topic": "非在线衍生账户同步入口",
+      "fields_or_methods": [
+        "DerivativeAccountCommandProcessor.updatePositionMode",
+        "DerivativeAccountCommandProcessor.updateLeverage",
+        "DerivativeAccountCommandProcessor.adjustPositionMargin"
+      ],
+      "evidence": "删除3个仅冷测试调用的同步入口，测试改走原账户续步；保留实际账户计算、业务检查、修订及Owner发布。",
+      "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11209,7 +11322,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A211_to_A213_cleaned_158_distinct_cases_99_pipelined_six_live_products_twelve_cold_recoveries_verified; overall_audit_in_progress",
+  "analysis_round_status": "A214_to_A221_cleaned_full1973_one_platform_skip_pipelined131_SQL5_gateway7_six_live_products_24_cold_recoveries_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11431,12 +11544,17 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "e5189ff648d631df46b16a9ed3dd16bf8dc32354",
-    "status": "insurance_shared_entry_and_batch_original_actions_cleaned_and_verified",
+    "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+    "status": "account_control_and_original_transfer_commands_cleaned_and_verified",
     "resolved_ids": [
-      "A211",
-      "A212",
-      "A213"
+      "A214",
+      "A215",
+      "A216",
+      "A217",
+      "A218",
+      "A219",
+      "A220",
+      "A221"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11449,11 +11567,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 208,
+      "resolved": 216,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "sixty_seventh_cleanup_round",
+    "evidence": "sixty_eighth_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44460,6 +44578,56 @@
     "cold_recoveries": 12,
     "counts": {
       "resolved": 208,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "sixty_eighth_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
+    "resolved_ids": [
+      "A214",
+      "A215",
+      "A216",
+      "A217",
+      "A218",
+      "A219",
+      "A220",
+      "A221"
+    ],
+    "removed_instance_fields_net": 6,
+    "removed_classes": [
+      "TransferRuntime",
+      "CorePendingTransferView"
+    ],
+    "removed_sync_methods": [
+      "RuntimeAccountStateTransitions.adjustBalance",
+      "RuntimeAccountStateTransitions.transferOut",
+      "RuntimeAccountStateTransitions.transferIn",
+      "DerivativeAccountCommandProcessor.updatePositionMode",
+      "DerivativeAccountCommandProcessor.updateLeverage",
+      "DerivativeAccountCommandProcessor.adjustPositionMargin"
+    ],
+    "removed_private_forwarders": [
+      "BalanceTransferCommands.adjustBalance"
+    ],
+    "production_net_lines_removed": 198,
+    "report": "deep-code-cleanup-20261025-round68.md",
+    "evidence": "round68-runtime-20261025.json",
+    "full_reactor_test_cases": 1973,
+    "full_reactor_skipped_cases": 1,
+    "additional_pipelined_executions": 131,
+    "postgres_test_cases": 5,
+    "gateway_test_cases": 7,
+    "runtime_products": 6,
+    "cold_recoveries": 24,
+    "formats": {
+      "core_schema": 17,
+      "transfer_snapshot": 3
+    },
+    "counts": {
+      "resolved": 216,
       "candidate": 1,
       "retained": 4
     },

@@ -87,6 +87,7 @@ class CoreRiskLaneQueryTest {
             var adlIndex = new AdlPositionIndex(state, identities);
             // 按本轮结算资产算出的完整 ADL 候选参照列表，再分别核对全量与限一条查询。
             var adl = RuntimeRiskQueryService.adlCandidates(expected, identities, asset(line), adlIndex.positions(asset(line), Integer.MAX_VALUE), 10);
+            var beforeQueries = core.tradingState();
             core.activate();
             // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
             long handoff = core.runtimeState.laneHandoffEpoch();
@@ -107,7 +108,7 @@ class CoreRiskLaneQueryTest {
             assertThat(globalRisk).hasSize(5);
             assertThat(adl).hasSize(2);
             assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
-            assertThat(core.tradingState()).isEqualTo(state);
+            assertThat(core.tradingState()).isEqualTo(beforeQueries);
             core.assertClusterCallbackComplete();
         }
     }

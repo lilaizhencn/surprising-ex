@@ -42,7 +42,6 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.TransferFundsCommand;
-import com.surprising.aeron.service.account.TransferRuntime;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
@@ -79,11 +78,11 @@ class RuntimeCommitRecoveryTest {
     void multiplePendingTransfersKeepCanonicalOrderAcrossRestart() {
         try (/* 未中断的原运行时，或提供初始恢复快照的原运行时 */ var original = new TradingCoreRuntime(ProductLine.SPOT)) {
             // 按非排序 ID 构造的原待完成划转对照表
-            var transfers = new java.util.HashMap<Long, TransferRuntime>();
+            var transfers = new java.util.HashMap<Long, TransferFundsCommand>();
             for (long /* 当前遍历的原划转 ID 或快照段编号 */ id : new long[]{17, 1, 257, 9}) {
-                transfers.put(id, new TransferRuntime(1001, new TransferFundsCommand(id, ProductLine.SPOT,
+                transfers.put(id, new TransferFundsCommand(id, ProductLine.SPOT,
                         ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 25,
-                        "ordered-" + id, "recovery", 1001, 1001)));
+                        "ordered-" + id, "recovery", 1001, 1001));
             }
             original.runtimeState.restorePendingTransfers(transfers);
             // 当前对照业务哈希或按账户段累计的摘要
@@ -105,9 +104,9 @@ class RuntimeCommitRecoveryTest {
         CoreFeePolicyState feePolicy = new CoreFeePolicyState(
                 91, 3, 1001, "1", -25, 75, 2, true, 900, 2_000);
         // 与主状态一同恢复的原待完成跨产品划转
-        TransferRuntime transfer = new TransferRuntime(1001, new TransferFundsCommand(
+        TransferFundsCommand transfer = new TransferFundsCommand(
                 701, ProductLine.LINEAR_PERPETUAL, ProductLine.SPOT,
-                "USDT_PERPETUAL", "SPOT", "USDT", 125, "recovery-701", "snapshot parity", 1001L, 1001L));
+                "USDT_PERPETUAL", "SPOT", "USDT", 125, "recovery-701", "snapshot parity", 1001L, 1001L);
         try (/* 未中断的原运行时，或提供初始恢复快照的原运行时 */ TradingCoreRuntime original = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             original.runtimeState.restoreFeePolicies(Map.of(feePolicy.policyId(), feePolicy));
             original.runtimeState.restorePendingTransfers(Map.of(transfer.transferId(), transfer));

@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -13,7 +14,6 @@ import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.account.RuntimeAccountStateTransitions;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.RuntimeInstrumentStateTransitions;
@@ -42,11 +42,10 @@ class RuntimeStateTransitionsTest {
         var identities = new RuntimeIdentityRegistry();
         try (/* 从变更前状态投影的冷运行时，供直接转换和结果物化使用 */ var runtime = RuntimeStateProjector.project(before, identities)) {
             // 只为分页用例构造的五条待转记录，恢复后保留全部事实
-            var pending = new java.util.TreeMap<Long, com.surprising.aeron.service.account.TransferRuntime>();
+            var pending = new java.util.TreeMap<Long, com.surprising.aeron.protocol.TransferFundsCommand>();
             for (/* 当前生成的待转业务 ID，从一到五 */ long id = 1; id <= 5; id++) pending.put(id,
-                    new com.surprising.aeron.service.account.TransferRuntime(7,
-                            new TransferFundsCommand(id, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
-                                    "SPOT", "USDT_PERPETUAL", "USDT", 1, "r" + id, "", 7L, 7L)));
+                    new TransferFundsCommand(id, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                                    "SPOT", "USDT_PERPETUAL", "USDT", 1, "r" + id, "", 7L, 7L));
             runtime.restorePendingTransfers(pending);
             assertThat(runtime.pendingTransfers(2)).extracting(/* 分页中抽取业务 ID 的当前划转 */ t -> t.transferId()).containsExactly(1L, 2L);
             assertThat(runtime.pendingTransfers(2)).extracting(/* 分页中抽取业务 ID 的当前划转 */ t -> t.transferId()).containsExactly(3L, 4L);
@@ -74,10 +73,15 @@ class RuntimeStateTransitionsTest {
                 ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
                 "transfer-91", "product allocation", 7L, 7L);
 
-        assertThat(RuntimeAccountStateTransitions.transferOut(runtime, identities, 7L, transfer)).isTrue();
+        var task = new AccountControlTask();
+        LedgerControlTestSupport.await(runtime, task.prepareTransferOut(runtime, identities, 7L, transfer));
+        assertThat(task.stateChanged()).isTrue();
         assertThat(runtime.pendingTransfer(91L)).isNotNull();
         assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
-        assertThat(RuntimeAccountStateTransitions.transferOut(runtime, identities, 7L, transfer)).isFalse();
+        long beforeRetry = runtime.revision();
+        LedgerControlTestSupport.await(runtime, task.prepareTransferOut(runtime, identities, 7L, transfer));
+        assertThat(runtime.revision()).isEqualTo(beforeRetry);
+        assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
 
         assertThat(RuntimeAccountStateTransitions.completeTransfer(runtime, 7L, 91L)).isTrue();
         assertThat(runtime.pendingTransfer(91L)).isNull();
@@ -89,19 +93,20 @@ class RuntimeStateTransitionsTest {
      */
     @Test
     void transferInCreditsTargetRuntime() {
-        // 本次投影独用的整数身份表，与对应运行时成对使用
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
-        TradingAccountRuntime runtime = RuntimeStateProjector.project(
-                TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities);
-        // 同一用户七从现货向正向永续划转二百五十的请求，目标或源用例分别执行相应一步
-        TransferFundsCommand transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
-                ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
-                "transfer-91", "product allocation", 7L, 7L);
-
-        RuntimeAccountStateTransitions.transferIn(runtime, identities, 7L, transfer);
-
-        assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(250L);
+        var transfer = new TransferFundsCommand(91L, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
+                "SPOT", "USDT_PERPETUAL", "USDT", 250, "transfer-91", "product allocation", 7, 7);
+        try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            var message = new com.surprising.aeron.protocol.CoreMessage(
+                    com.surprising.aeron.protocol.CoreMessageHeader.command(
+                            com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN, new java.util.UUID(91, 1),
+                            ProductLine.LINEAR_PERPETUAL, com.surprising.aeron.protocol.CommandSource.OPERATIONS,
+                            1, 1, 7, 1, 1),
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeTransferFunds(transfer));
+            assertThat(com.surprising.aeron.service.order.CoreTestCompletion.applyAsynchronously(core, message).status())
+                    .isEqualTo(com.surprising.aeron.protocol.ResponseStatus.APPLIED);
+            assertThat(com.surprising.aeron.service.order.CoreTestCompletion.userState(core, 7).balances())
+                    .singleElement().satisfies(balance -> assertThat(balance.availableUnits()).isEqualTo(250L));
+        }
     }
 
     /**
@@ -123,7 +128,7 @@ class RuntimeStateTransitionsTest {
             // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
             TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-            RuntimeAccountStateTransitions.adjustBalance(runtime, identities, 7, command);
+            LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareBalanceAdjustment(runtime, identities, 7, command.asset(), command.deltaUnits()));
 
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .as(productLine.name())
@@ -144,8 +149,7 @@ class RuntimeStateTransitionsTest {
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThatThrownBy(() -> RuntimeAccountStateTransitions.adjustBalance(
-                runtime, identities, 7, new BalanceAdjustmentCommand("USDT", -11)))
+        assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, new AccountControlTask().prepareBalanceAdjustment(runtime, identities, 7, "USDT", -11)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(before);
     }
@@ -211,10 +215,13 @@ class RuntimeStateTransitionsTest {
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThat(DerivativeAccountCommandProcessor.updatePositionMode(runtime, 7, command)).isTrue();
+        var task = new AccountControlTask();
+        LedgerControlTestSupport.await(runtime, task.preparePositionModeChange(runtime, 7, command));
+        assertThat(task.stateChanged()).isTrue();
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
-        assertThat(DerivativeAccountCommandProcessor.updatePositionMode(runtime, 7, command)).isFalse();
+        LedgerControlTestSupport.await(runtime, task.preparePositionModeChange(runtime, 7, command));
+        assertThat(task.stateChanged()).isFalse();
     }
 
     /**
@@ -242,7 +249,9 @@ class RuntimeStateTransitionsTest {
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThat(DerivativeAccountCommandProcessor.updateLeverage(runtime, identities, 7, command)).isTrue();
+        var task = new AccountControlTask();
+        LedgerControlTestSupport.await(runtime, task.prepareLeverageChange(runtime, identities, 7, command));
+        assertThat(task.stateChanged()).isTrue();
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
     }
