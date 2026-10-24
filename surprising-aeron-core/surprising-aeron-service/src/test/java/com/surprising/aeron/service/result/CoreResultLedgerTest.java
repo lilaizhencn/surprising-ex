@@ -10,6 +10,7 @@ import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport;
+import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
 import java.lang.reflect.Method;
 import java.util.Arrays;
@@ -180,14 +181,15 @@ class CoreResultLedgerTest {
         try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             // 条数淘汰场景中最早应用并随后查询的命令 UUID
             UUID firstCommandId = UUID.randomUUID();
-            state.apply(checkpoint(firstCommandId, 1, 1));
+            assertThat(CoreTestCompletion.applyAsynchronously(state, checkpoint(firstCommandId, 1, 1)).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
             for (/* 当前写入或应用的探针序号 */ int sequence = 2; sequence <= TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
-                assertThat(state.apply(checkpoint(UUID.randomUUID(), sequence, 1)).status())
+                assertThat(CoreTestCompletion.applyAsynchronously(state, checkpoint(UUID.randomUUID(), sequence, 1)).status())
                         .isEqualTo(ResponseStatus.APPLIED);
             }
 
             // 本次查到的记录或只读查询响应，按场景断言元数据
-            CoreResponse result = state.apply(commandResultQuery(firstCommandId));
+            CoreResponse result = CoreTestCompletion.querySynchronously(state, commandResultQuery(firstCommandId));
 
             assertThat(result.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(result.resultCode()).isEqualTo(CoreResultCode.fromRejectionCode(

@@ -680,19 +680,6 @@ public final class TriggerOrderCommands {
     }
 
     /**
-     * 显式参数的同步入口，默认在认领当前触发单前处理同组撤销。
-     * @param triggerOrderId 当前触发单业务 ID
-     * @param triggerSequence 本次执行或认领要求匹配的行情价格序列
-     * @param triggeredPriceTicks 本次认领时所选来源的实际价格 tick
-     * @param triggeredAtEpochMillis 本次触发的业务毫秒时间戳
-     * @param commandId 原请求或自动扫描合成的命令 UUID，沿用到子单准入和撮合
-     */
-    public void executeTriggerOrder(long triggerOrderId, long triggerSequence, long triggeredPriceTicks,
-                                     long triggeredAtEpochMillis, UUID commandId) {
-        executeTriggerOrder(triggerOrderId, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId, true);
-    }
-
-    /**
      * 同步执行先核对可执行条件、可选撤 OCO 并认领，再构造子单及核对身份，冻结准入成功后排入原撮合链。只有 reserve 调用中的业务拒绝在这里转成触发失败；前面的身份检查及技术异常继续交外层处理。排入撮合不代表子单已成交。
      * @param triggerOrderId 当前触发单业务 ID
      * @param triggerSequence 本次执行或认领要求匹配的行情价格序列

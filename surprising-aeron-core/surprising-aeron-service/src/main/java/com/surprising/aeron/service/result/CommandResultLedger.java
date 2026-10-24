@@ -49,9 +49,7 @@ public final class CommandResultLedger {
     private int retentionHead;
     /** 保留循环队列的下一追加绝对位置。 */
     private int retentionTail;
-    /**  当前哈希表内保留结果数。 返回当前保留结果数，不是系统累计执行命令数。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
+    /** 当前哈希表内保留结果数，用于条数限制和槽位管理。 */
     private int size;
     /** 当前保留结果的协议总字节，不按池数组容量累计。 */
     private long commandResultBytes;

@@ -22,7 +22,6 @@ import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.account.UserRuntime;
-import com.surprising.aeron.service.core.RuntimeDerivativeMatchFixture;
 import com.surprising.aeron.service.core.RuntimeStateParityChecker;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -72,7 +71,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
         // applyRuntime 返回的同一运行时引用，用于核对原位应用契约。
-        TradingAccountRuntime applied = RuntimeDerivativeMatchProcessor.applyRuntime(
+        TradingAccountRuntime applied = RuntimeDerivativeMatchFixture.applyRuntime(
                 11, matches, runtime, identities);
 
         assertThat(applied).isSameAs(runtime);

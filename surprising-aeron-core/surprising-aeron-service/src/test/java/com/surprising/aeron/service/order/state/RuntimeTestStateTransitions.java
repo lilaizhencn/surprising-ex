@@ -41,8 +41,8 @@ import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.query.state.RuntimeRiskQueryService;
 import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
-import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchProcessor;
-import com.surprising.aeron.service.settlement.RuntimeSpotMatchProcessor;
+import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchFixture;
+import com.surprising.aeron.service.settlement.RuntimeSpotMatchFixture;
 import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlement;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -551,7 +551,7 @@ public final class RuntimeTestStateTransitions {
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid spot match apply");
         }
-        RuntimeSpotMatchProcessor.applyRuntime(takerOrderId, matches, runtime, identities);
+        RuntimeSpotMatchFixture.applyRuntime(takerOrderId, matches, runtime, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
@@ -562,7 +562,7 @@ public final class RuntimeTestStateTransitions {
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid perpetual match apply");
         }
-        return RuntimeDerivativeMatchProcessor.applyRuntime(takerOrderId, matches, runtime, identities);
+        return RuntimeDerivativeMatchFixture.applyRuntime(takerOrderId, matches, runtime, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */

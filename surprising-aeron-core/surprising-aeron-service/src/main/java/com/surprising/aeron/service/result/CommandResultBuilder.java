@@ -329,54 +329,6 @@ public final class CommandResultBuilder {
     }
 
     /**
-     * 按空、单条和多条 ID 分别准备借用订单源，只加入实际存在的订单，保持输入顺序，不在此去重。
-     * @param orderIds 按指定顺序准备响应的订单 ID 列表或可变参数
-     */
-    void materializeResponseOrders(long... orderIds) {
-        commandOrderSources.clear();
-        if (orderIds.length == 1) {
-            materializeResponseOrder(orderIds[0]);
-            return;
-        }
-        if (orderIds.length > 1) {
-            commandSingleOrder = null;
-            for (long /* 当前需要尝试读取并加入响应的订单 ID */ orderId : orderIds) {
-                // 本轮借用的现存订单或撤单条目，空项按当前入口规则跳过
-                OrderRuntime order = owner.responseOrder(orderId);
-                if (order != null) commandOrderSources.add(order, owner.runtimeOrderSymbol(order));
-            }
-            return;
-        }
-        commandSingleOrder = null;
-    }
-
-    /**
-     * 两个订单 ID 的固定参数入口，按实际存在数量选择单订单引用或两个复用源，避免为这次调用建立可变参数数组。
-     * @param firstOrderId 原单或双订单响应中的第一个 ID
-     * @param secondOrderId 新单或双订单响应中的第二个 ID
-     */
-    void materializeResponseOrders(long firstOrderId, long secondOrderId) {
-        commandOrderSources.clear();
-        // 按第一个 ID 查到的可空订单
-        OrderRuntime first = owner.responseOrder(firstOrderId);
-        // 按第二个 ID 查到的可空订单
-        OrderRuntime second = owner.responseOrder(secondOrderId);
-        if (first == null) {
-            if (second == null) {
-                commandSingleOrder = null;
-            } else {
-                commandSingleOrder = second;
-            }
-        } else if (second == null) {
-            commandSingleOrder = first;
-        } else {
-            commandSingleOrder = null;
-            commandOrderSources.add(first, owner.runtimeOrderSymbol(first));
-            commandOrderSources.add(second, owner.runtimeOrderSymbol(second));
-        }
-    }
-
-    /**
      * 清多订单源列表，再按 ID 借用一个可空订单作为当前单订单响应源。
      * @param orderId 本次需要收集或编码的订单 ID
      */

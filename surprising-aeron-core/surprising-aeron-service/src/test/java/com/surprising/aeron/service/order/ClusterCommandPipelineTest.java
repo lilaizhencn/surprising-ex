@@ -2893,7 +2893,7 @@ class ClusterCommandPipelineTest {
             long maker = 11, user = disjointUser(maker);
             live.apply(live.place(maker, "1", 501, 100, 10, CoreOrderSide.SELL));
             live.apply(live.place(user, "1", 502, 100, 10, CoreOrderSide.BUY));
-            for (long /* 当前被登记或检查的条件单编号 */ id : new long[]{8990, 9001, 9002, 9003, 9004, 9005, 9010}) {
+            for (long /* 当前被登记或检查的条件单编号 */ id : new long[]{9010, 8990, 9001, 9002, 9003, 9004, 9005}) {
                 // 当前条件单是否为追踪止损场景
                 // 当前条件单是否为预期在新命令时间过期的那一条
                 boolean expired = id == 8990, trailing = id == 9010;
@@ -2902,7 +2902,7 @@ class ClusterCommandPipelineTest {
                         expired || trailing ? "" : "scan-oco", "1", CoreOrderSide.SELL,
                         trailing ? CoreTriggerOrderType.TRAILING_STOP : CoreTriggerOrderType.TAKE_PROFIT,
                         CoreTriggerCondition.GREATER_OR_EQUAL, expired ? 90 : id == 9001 ? 100 : 200,
-                        0, trailing ? 100_000 : 0, trailing ? 120 : 0, 0, 0,
+                        0, trailing ? 100_000 : 0, 0, 0, 0,
                         CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", expired ? TIME + 500 : 0, 0, 0, 0, 1, 0, 0);
@@ -2915,6 +2915,16 @@ class ClusterCommandPipelineTest {
                                 trigger.priceTicks(), trigger.quantitySteps(), trigger.marginMode(),
                                 trigger.positionSide(), trigger.expiresAtEpochMillis(), trigger.priceSource()))));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                if (trailing) {
+                    // 创建命令不携带追踪水位；先由真实行情扫描记录最高价，再登记 OCO 各腿。
+                    live.sequence += 100;
+                    applyPriceAndFinishTriggerScan(live, new ApplyMarkPriceCommand("1", 120, 120,
+                            product == ProductLine.OPTION ? 120 : 0, 2, TIME + 100, 0));
+                    assertThat(CoreTestCompletion.triggerState(live.service.state(), user, id).status())
+                            .isEqualTo(CoreTriggerOrderStatus.PENDING);
+                    assertThat(CoreTestCompletion.triggerState(live.service.state(), user, id).highestPriceTicks())
+                            .isEqualTo(120);
+                }
             }
             // 当前 Core 中所属账户及风险扫描的权威运行时
             var runtime = live.service.state().runtimeState();
@@ -2926,8 +2936,8 @@ class ClusterCommandPipelineTest {
             live.sequence += 1000; // 后续命令时间越过条件单有效期及新标记价时间。
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
-                            ? new ApplyMarkPriceCommand("1", 100, 100, 100, 2, TIME + 1000)
-                            : new ApplyMarkPriceCommand("1", 100, 2, TIME + 1000), product)));
+                            ? new ApplyMarkPriceCommand("1", 100, 100, 100, 3, TIME + 1000)
+                            : new ApplyMarkPriceCommand("1", 100, 3, TIME + 1000), product)));
             // 是否已经实际遇到跨命令 OCO 续页，恢复分支还会在此边界重放
             boolean resumed = false;
             for (/* 单用户预算触发续扫的次数下标，最多一百轮 */ int n = 0; n < 100 && runtime.firstIncompleteRiskScan() != null; n++) {
@@ -2966,7 +2976,7 @@ class ClusterCommandPipelineTest {
                 assertThat(CoreTestCompletion.triggerState(live.service.state(), user, id).status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9010).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9010).highestPriceTicks()).isEqualTo(120);
-            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9010).activatedAtEpochMillis()).isEqualTo(TIME + 1000);
+            assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9010).activatedAtEpochMillis()).isEqualTo(TIME + 100);
             assertThat(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(live.service.state().tradingState()))
                     .isEqualTo(funds);
         }

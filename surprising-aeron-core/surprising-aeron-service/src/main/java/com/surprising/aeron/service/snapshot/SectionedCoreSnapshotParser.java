@@ -341,7 +341,7 @@ public final class SectionedCoreSnapshotParser {
                     manifest.snapshotId(), manifest.clusterTimestamp(),
                     manifest.clusterPosition(), appliedCommandCount, matcherSnapshot.matcherSequence(),
                     manifest.businessStateHash(), matcherSnapshot.engineStateHash(),
-                    manifest.sourceSequenceDigest(), matcherSnapshot.topology(), manifest.globalFundsHash(), checksum);
+                    manifest.sourceSequenceDigest(), matcherSnapshot.topology(), checksum);
         }
 
         /**

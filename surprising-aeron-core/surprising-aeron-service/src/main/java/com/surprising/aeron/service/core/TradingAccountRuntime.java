@@ -1858,23 +1858,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 从原始用户数组收集正身份并同步等待 Lane 提交，返回实际提交掩码。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
-     */
-    public long stageLaneMutation(long coreSequence, long[] userIds) {
-        assertOwner();
-        if (coreSequence <= 0 || userIds == null) {
-            throw new IllegalArgumentException("invalid lane apply");
-        }
-        clearLaneUserScratch();
-        for (long /* 本轮读出的用户身份，按对应入口过滤或路由 */ userId : userIds) {
-            if (userId > 0) addLaneUser(userId);
-        }
-        return stageLaneMutationFromScratch(coreSequence);
-    }
-
-    /**
      * 从原始用户数组收集目标 Lane，派发提交事件并交给调用方后续收集。
      * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
@@ -2783,19 +2766,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         } finally {
             releaseMatcherSettlementChanges(changes);
         }
-    }
-
-    /**
-     * 为单笔账户撤单补上空的身份表参数，再走统一撤单派发。
-     * @param coreSequence 原命令或当前收集结果关联的 Core 序号
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param orderId 本次需要读取、登记或撤销的订单实体 ID
-     * @param commitTimestamp 原提交业务时间，随账户变化保留
-     * @param commitClusterPosition 原提交复制日志位置，随账户变化保留
-     */
-    public LaneCancelEvent dispatchCancel(
-            long coreSequence, long userId, long orderId, long commitTimestamp, long commitClusterPosition) {
-        return dispatchCancel(coreSequence, userId, orderId, commitTimestamp, commitClusterPosition, null);
     }
 
     /**
@@ -3711,15 +3681,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 在用户所属 Lane 的有效范围内复制其资产余额表。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     */
-    public IntObjectHashMap<BalanceRuntime> balancesForUser(long userId) {
-        assertOwner();
-        return onLane(userId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> balancesForUser(lane, userId));
-    }
-
-    /**
      * 核对账户所有权后复制该用户的资产映射和可变余额对象；原表为空引用时返回空。
      * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
      * @param userId 业务所属用户身份，按本产品线固定拓扑路由
@@ -3977,15 +3938,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 在所属账户范围内取得用户杠杆键的有序只读副本。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     */
-    public NavigableSet<CoreLeverageKey> leverageKeysForUser(long userId) {
-        assertOwner();
-        return onLane(userId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> leverageKeysForUser(lane, userId));
-    }
-
-    /**
      * 校验账户归属后复制并排序杠杆业务键，返回只读集合；没有索引时复用空集合。
      * @param lane 已经定位的账户 Lane 引用，访问与借用范围由对应入口核对
      * @param userId 业务所属用户身份，按本产品线固定拓扑路由
@@ -4207,24 +4159,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 在所属账户范围内把该用户该标的的持仓键转换为只读有序集合，没有键时复用空集合。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param symbolId 本产品线标的内部身份
-     */
-    public NavigableSet<Long> positionKeysForUserAndSymbol(long userId, int symbolId) {
-        assertOwner();
-        return onLane(userId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> {
-            // 该标的按用户分组的原始持仓键列表索引
-            LongObjectHashMap<org.eclipse.collections.impl.list.mutable.primitive.LongArrayList> byUser =
-                    lane.symbolPositionKeys(symbolId);
-            // 该用户该标的的原始持仓键列表，随后转换为只读有序集合
-            org.eclipse.collections.impl.list.mutable.primitive.LongArrayList keys = byUser == null ? null : byUser.get(userId);
-            return (keys == null || keys.isEmpty()) ? Collections.emptyNavigableSet()
-                    : Collections.unmodifiableNavigableSet(toSortedSet(keys));
-        });
-    }
-
-    /**
      * 要求当前已经进入该用户 Lane 范围，借出原始持仓键列表；只能在范围退出前使用，缺失时返回共享空列表。
      * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      * @param symbolId 本产品线标的内部身份
@@ -4283,16 +4217,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 按用户和标的检查除指定身份外是否还有 PLANNED 或 ORDERED 强平，不把其他债务阶段加入此分类。
-     * @param userId 要筛选的用户身份，零沿用全部用户检查
-     * @param symbolId 要筛选的内部标的身份，负值沿用全部标的检查
-     * @param excludedLiquidationId 本次冲突检查需要排除的强平身份
-     */
-    public boolean hasActiveLiquidationConflict(long userId, int symbolId, long excludedLiquidationId) {
-        return hasLiquidationConflict(userId,symbolId,excludedLiquidationId,false);
-    }
-
-    /**
      * 供 Core 配置边界检查尚未结束的强平：禁止在账户命令范围内调用，优先查询已绑定事实索引；缺少索引时要求账户读取权限并检查所有 Lane，标的内部身份为负表示全部标的。
      * @param instrumentId 与配置检查配套的对外标的 ID，全部标的查询会传空给事实索引
      * @param symbolId 要筛选的内部标的身份，负值表示全部标的
@@ -4309,37 +4233,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                     (symbolId < 0 || value.symbolId() == symbolId)
                     && value.status() != CoreLiquidationState.Status.COMPLETED
                     && value.status() != CoreLiquidationState.Status.CANCELED)) return true;
-        }
-        return false;
-    }
-
-    /**
-     * 按用户、标的和排除身份逐 Lane 检查强平。默认只看计划或已下单阶段，启用债务选项则包含其他未完成且未取消状态；用户零表示全部用户，负标的表示全部标的。
-     * @param userId 要筛选的用户身份，零表示全部用户
-     * @param symbolId 要筛选的内部标的身份，负值表示全部标的
-     * @param excludedLiquidationId 本次冲突检查需要排除的强平身份
-     * @param includeDebt 是否把计划和已下单之外的其他未完成且未取消阶段也计入冲突
-     */
-    boolean hasLiquidationConflict(long userId, int symbolId, long excludedLiquidationId, boolean includeDebt) {
-        assertOwner();
-        for (/* 本轮按用户路由或从掩码选出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if (userId != 0 && laneId != topology.accountLaneId(userId)) continue;
-            // 当前 Lane 是否存在符合用户、标的、阶段和排除身份条件的强平
-            boolean conflict = onLane(laneId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> {
-                for (LiquidationRuntime /* 当前遍历的强平状态，按本次冲突分类进行筛选 */ liquidation : lane.liquidationValuesForRead()) {
-                    if (liquidation.liquidationId() != excludedLiquidationId
-                            && (liquidation.status() == CoreLiquidationState.Status.PLANNED
-                            || liquidation.status() == CoreLiquidationState.Status.ORDERED
-                            || includeDebt && liquidation.status() != CoreLiquidationState.Status.COMPLETED
-                                && liquidation.status() != CoreLiquidationState.Status.CANCELED)
-                            && (userId == 0 || liquidation.userId() == userId)
-                            && (symbolId < 0 || liquidation.symbolId() == symbolId)) {
-                        return Boolean.TRUE;
-                    }
-                }
-                return Boolean.FALSE;
-            });
-            if (conflict) return true;
         }
         return false;
     }
@@ -5839,28 +5732,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 保存用户和余额前值，在所属 Lane 删除已有资产余额，捕获删除后值并登记用户与余额变化。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param assetId 本产品线资产内部身份
-     */
-    public void removeBalance(long userId, int assetId) {
-        assertOwner();
-        onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            accountRollback.captureUserBefore(userId);
-            accountRollback.captureBalanceBefore(userId, assetId);
-            // 该用户原资产余额表，缺失时按当前写入分支建立或拒绝
-            IntObjectHashMap<BalanceRuntime> userBalances = lane.userBalances(userId);
-            if (userBalances == null || userBalances.remove(assetId) == null) {
-                throw new IllegalArgumentException("runtime balance is not registered: " + userId + '/' + assetId);
-            }
-            accountRollback.captureBalanceAfter(lane, userId, assetId);
-            return null;
-        });
-        markBalancesChanged();
-        markUserChanged(userId);
-    }
-
-    /**
      * 在所属 Lane 创建或原地更新持仓；根据非零暴露及标的变化维护活动持仓索引，最后交出本次持仓值。
      * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
      * @param positionKey 持仓内部身份键
@@ -5962,18 +5833,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 commitTimestamp, commitPosition);
         publishOrder(lane, orderId, order);
         return order;
-    }
-
-    /**
-     * 以默认发布变化的方式更新预留已消耗和已释放累计值。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param nextConsumed 预留新的累计消耗数量
-     * @param nextReleased 预留新的累计释放数量，不得小于已有累计值
-     */
-    public ReservationRuntime updateReservationInLane(AccountLaneState lane, long orderId, long nextConsumed, long nextReleased) {
-        lane.assertOwner();
-        return updateReservationInLane(lane, orderId, nextConsumed, nextReleased, true);
     }
 
     /**
@@ -6196,17 +6055,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 在允许范围内删除标记价，同时保留标的变化身份以发布删除。
-     * @param symbolId 本产品线标的内部身份
-     */
-    public void removeMarkPrice(int symbolId) {
-        assertOwner();
-        rejectUnsupportedOrderBatchMutation("mark-price state");
-        markPrices.remove(symbolId);
-        changedMarkPrices.add(symbolId);
-    }
-
-    /**
      * 保存已有风险快照前值并在所属 Lane 删除，交接持仓是否也已缺失的索引信息；实体缺失时仍按当前范围登记删除或清身份保留。
      * @param positionKey 持仓内部身份键
      */
@@ -6233,17 +6081,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         if (currentLaneCommandScope() == null && previous == null) changedRiskSnapshots.put(positionKey, null);
         if (previous != null) markUserChanged(previous.userId());
-    }
-
-    /**
-     * 在允许范围内删除标的风险扫描，并保留变化身份。
-     * @param symbolId 本产品线标的内部身份
-     */
-    public void removeRiskScan(int symbolId) {
-        assertOwner();
-        rejectUnsupportedOrderBatchMutation("risk-scan state");
-        riskScans.remove(symbolId);
-        changedRiskScans.add(symbolId);
     }
 
     /**
@@ -6752,17 +6589,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 从持仓变化缓冲复制键集合，包含删除键。
-     */
-    public LongHashSet changedPositions() {
-        assertOwner();
-        // 本次要返回的持仓变化键副本，删除键同样保留
-        LongHashSet keys = new LongHashSet();
-        changedPositions.forEach((/* 本次变化或退休检查涉及的持仓内部键 */ positionKey, /* 遍历变化键时不需要的业务值，删除项身份同样保留 */ ignored) -> keys.add(positionKey));
-        return keys;
-    }
-
-    /**
      * 借出当前持仓变化键的原始迭代器，消费期间保留变化缓冲有效。
      */
     public org.eclipse.collections.api.iterator.LongIterator changedPositionIterator() {
@@ -7188,14 +7014,6 @@ appendBalanceFundsDelta(patches, target);
      */
     public PositionRuntime currentPatchPositionBefore(long positionKey) {
         return accountRollback.currentPositionBefore(positionKey);
-    }
-
-    /**
-     * 借出当前命令回滚补丁保存的订单前值。
-     * @param orderId 本次操作关联的订单实体 ID
-     */
-    public OrderRuntime currentPatchOrderBefore(long orderId) {
-        return accountRollback.currentOrderBefore(orderId);
     }
 
     /**

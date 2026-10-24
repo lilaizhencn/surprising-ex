@@ -16,7 +16,6 @@ import com.surprising.product.api.ProductLine;
  * @param engineStateHash Matcher 引擎模块汇总出的 int 哈希
  * @param sourceSequenceDigest 各消息来源已消费序号的汇总摘要
  * @param topology 快照保存的 Matcher 与账户 Lane 路由拓扑
- * @param globalFundsHash 头部保存的全局资金哈希
  * @param checksum 快照封套及非页尾段的 CRC32C 数值，以 long 承载
  */
 public record CoreSnapshotManifest(
@@ -31,16 +30,15 @@ public record CoreSnapshotManifest(
         int engineStateHash,
         long sourceSequenceDigest,
         LaneTopology topology,
-        long globalFundsHash,
         long checksum) {
 
     /**
-     * 要求产品线/拓扑非空、版本为正、时间及序号非负，资金哈希非零且校验值非负。此构造器允许快照号为零，也没有单独要求业务哈希非零；真实字节格式的更严检查在解析流程执行。
+     * 要求产品线/拓扑非空、版本为正、时间及序号非负、校验值非负。此构造器允许快照号为零，也没有单独要求业务哈希非零；真实字节格式和资金哈希检查在解析流程执行。
      */
     public CoreSnapshotManifest {
         if (productLine == null || schemaVersion <= 0 || snapshotId < 0 || appliedCommandCount < 0 || clusterTimestamp < 0 || clusterPosition < 0
                 || matcherSequence < 0
-                || topology == null || globalFundsHash == 0
+                || topology == null
                 || checksum < 0) {
             throw new IllegalArgumentException("invalid core snapshot manifest");
         }

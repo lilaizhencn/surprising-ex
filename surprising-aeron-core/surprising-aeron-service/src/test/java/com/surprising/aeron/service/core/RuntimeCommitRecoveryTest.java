@@ -289,9 +289,9 @@ class RuntimeCommitRecoveryTest {
             corruptChecksum[SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
                     + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 20] ^= 1;
             // 改全局业务哈希并重写外层 CRC 的坏快照
-            byte[] corruptBusinessHash = mutateLongInSection(snapshot, 1, 101, 1);
+            byte[] corruptBusinessHash = mutateLongInSection(snapshot, 1, Byte.BYTES + 7 * Long.BYTES, 1);
             // 改投影序号并重写外层 CRC 的坏快照
-            byte[] corruptProjectionSequence = mutateLongInSection(snapshot, 1, 61, 1);
+            byte[] corruptProjectionSequence = mutateLongInSection(snapshot, 1, Byte.BYTES + 2 * Long.BYTES, 1);
             // 改 Matcher 内层载荷且只维护外层 CRC 的坏快照
             byte[] corruptMatcherPayload = mutateLongInSection(snapshot, 4, Long.BYTES, 1);
 
@@ -1385,15 +1385,16 @@ class RuntimeCommitRecoveryTest {
      * @param state 本测试当前交易运行时或冷状态，沿其原所有权读取
      */
     private static Map<String, Map<String, Object>> allIndexSnapshots(TradingCoreRuntime state) throws Exception {
+        var indexes = state.factIndexes;
         return Map.ofEntries(
-                Map.entry("position-user", indexSnapshot(field(state, "positionUserIndex"))),
-                Map.entry("open-interest", indexSnapshot(field(state, "openInterestIndex"))),
-                Map.entry("trigger", indexSnapshot(field(state, "triggerOrderIndex"))),
-                Map.entry("algo", indexSnapshot(field(state, "algoOrderIndex"))),
-                Map.entry("liquidation", indexSnapshot(field(state, "liquidationIndex"))),
-                Map.entry("timer", indexSnapshot(field(state, "cancelAllAfterIndex"))),
-                Map.entry("active-order", indexSnapshot(field(state, "activeOrderIndex"))),
-                Map.entry("adl-position", indexSnapshot(field(state, "adlPositionIndex"))));
+                Map.entry("position-user", indexSnapshot(indexes.positionUsers())),
+                Map.entry("open-interest", indexSnapshot(indexes.openInterest())),
+                Map.entry("trigger", indexSnapshot(indexes.triggers())),
+                Map.entry("algo", indexSnapshot(indexes.algos())),
+                Map.entry("liquidation", indexSnapshot(indexes.liquidations())),
+                Map.entry("timer", indexSnapshot(indexes.timers())),
+                Map.entry("active-order", indexSnapshot(indexes.activeOrders())),
+                Map.entry("adl-position", indexSnapshot(indexes.adlPositions())));
     }
 
     /**
@@ -1654,6 +1655,8 @@ class RuntimeCommitRecoveryTest {
             // 目标载荷或原响应在输入缓冲中的字节起点
             int offset = buffer.position();
             if (id == sectionId) {
+                if (payloadOffset < 0 || payloadOffset > length - Long.BYTES)
+                    throw new AssertionError("mutation exceeds snapshot section: " + sectionId);
                 buffer.putLong(offset + payloadOffset, Math.addExact(buffer.getLong(offset + payloadOffset), delta));
                 rewriteChecksum(mutated);
                 return mutated;
@@ -1719,7 +1722,7 @@ class RuntimeCommitRecoveryTest {
             // 当前段载荷在完整快照中的字节起点
             int payloadOffset = buffer.position();
             if (sectionId == 1) {
-                buffer.putLong(payloadOffset + 77, digest);
+                buffer.putLong(payloadOffset + Byte.BYTES + 4 * Long.BYTES, digest);
                 rewriteChecksum(mutated);
                 return mutated;
             }

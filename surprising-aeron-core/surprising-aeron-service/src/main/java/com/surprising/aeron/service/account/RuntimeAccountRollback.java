@@ -614,17 +614,6 @@ public final class RuntimeAccountRollback {
     }
 
     /**
-     * 优先返回已捕获订单前值，共享不存在记录返回 null；尚未捕获时才读取当前运行时订单。
-     * @param orderId 需要捕获或查找前值的订单编号
-     */
-    public OrderRuntime currentOrderBefore(long orderId) {
-        state.assertOwner();
-        // 跨 Lane 查找到的订单前值记录，null 才表示尚未捕获。
-        PatchOrderBefore captured = capturedOrderBefore(orderId);
-        return captured == null ? state.order(orderId) : captured.value();
-    }
-
-    /**
      * 订单回滚记录，分别保存命令前值与可恢复的原权威引用；二者在原位元数据变更时通过冻结快照分离。
      * @param value 订单命令前的值，null 表示原订单不存在，元数据原位变更前可替换为冻结快照
      * @param pending 捕获时此订单是否属于尚待完成的准入

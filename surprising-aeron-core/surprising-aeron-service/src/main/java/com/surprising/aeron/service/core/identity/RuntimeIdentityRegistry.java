@@ -587,7 +587,6 @@ public final class RuntimeIdentityRegistry {
         return preparedKey < 0 ? Math.negateExact(preparedKey) : preparedKey;
     }
 
-
     /**
      * 核对所属 Lane 后按用户和原持仓名查身份；无结果返回空，不分配。
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
@@ -603,18 +602,6 @@ public final class RuntimeIdentityRegistry {
         lookup.key = key;
         try { return positionKeys.get(lookup); }
         finally { lookup.key = null; }
-    }
-
-    /**
-     * 沿用 Lane 持仓名查询，把未命中的空值转为零。
-     * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
-     * @param userId 该身份所属用户
-     * @param key 用户原持仓名文本
-     */
-    long findPositionKeyValueInLane(AccountLaneState lane, long userId, String key) {
-        // 原持仓名查到的可空身份键，空值转换为零
-        Long value = findPositionKeyInLane(lane, userId, key);
-        return value == null ? 0 : value;
     }
 
     /**
@@ -936,17 +923,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * 把 Owner 持仓名查询的未命中转换为零。
-     * @param userId 该身份所属用户
-     * @param positionKey 要只读查询的用户原持仓名
-     */
-    long findPositionKeyValue(long userId, String positionKey) {
-        // Owner 原持仓名查询得到的可空身份键，空值转换为零
-        Long value = findPositionKey(userId, positionKey);
-        return value == null ? 0 : value;
-    }
-
-    /**
      * 要求合约和方向存在，从合约取标的后只读查询已有持仓键。
      * @param userId 该身份所属用户
      * @param instrument 提供永久标的文本的合约配置
@@ -1087,26 +1063,6 @@ public final class RuntimeIdentityRegistry {
         // 本次反向表查到或发布的持仓身份项
         PositionEntry entry = positionEntry(lane, key);
         if (entry == null || !entry.matches(userId, order.instrument().instrumentId(), order.positionSide()))
-            throw new IllegalStateException("position identity was not prepared by the Sequencer");
-        return key;
-    }
-
-    /**
-     * 核对 Lane 和用户归属，再按标的、方向读取已准备持仓身份；缺失时报错。
-     * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
-     * @param userId 该身份所属用户
-     * @param instrumentId 永久数字标的身份；整数重载直接给数值，文本重载使用规范数字文本
-     * @param side 净仓、多头或空头持仓方向
-     */
-    public long preparedPositionKey(AccountLaneState lane, long userId, String instrumentId, CorePositionSide side) {
-        lane.assertOwner();
-        if (lane.laneId() != clientTopology.accountLaneId(userId))
-            throw new IllegalStateException("position identity crossed account Lane");
-        // 当前用户身份的确定性长整数键
-        long key = positionIdentityKey(userId, instrumentId, side);
-        // 本次反向表查到或发布的持仓身份项
-        PositionEntry entry = positionEntry(lane, key);
-        if (entry == null || !entry.matches(userId, instrumentId, side))
             throw new IllegalStateException("position identity was not prepared by the Sequencer");
         return key;
     }

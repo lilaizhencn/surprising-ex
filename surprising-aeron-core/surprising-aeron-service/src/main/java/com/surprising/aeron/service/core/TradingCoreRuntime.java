@@ -1726,23 +1726,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 按 UUID 两个原始长整数判断命令是否仍在撮合队列中。
-     * @param msb 命令 UUID 的高 64 位
-     * @param lsb 命令 UUID 的低 64 位
-     */
-    boolean isMatchingPending(long msb, long lsb) {
-        return pendingMatching.findByCommandId(msb, lsb) != null;
-    }
-
-    /**
-     * 按可空 UUID 判断是否仍有在途撮合；空身份返回假。
-     * @param commandId 要探测的可空命令 UUID，空时返回假
-     */
-    boolean isMatchingPending(UUID commandId) {
-        return commandId != null && isMatchingPending(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
-    }
-
-    /**
      * 按 UUID 两个原始长整数查在途撮合序号；未找到返回零。
      * @param msb 命令 UUID 的高 64 位
      * @param lsb 命令 UUID 的低 64 位
@@ -1940,20 +1923,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     public long stateHash() {
         return currentBusinessStateHash();
-    }
-
-    /**
-     * 只尝试一次分块快照收集；已经就绪就返回结果，尚未就绪时释放本次未编码栅栏并抛出等待异常，不在此循环等待。
-     * @param clusterTimestamp 本命令原复制日志业务时间
-     * @param clusterPosition 本命令原复制日志位置
-     * @param nowNanos 用于快照等待预算的当前单调纳秒时间
-     */
-    byte[] captureSnapshot(long clusterTimestamp, long clusterPosition, long nowNanos) {
-        // 本次单轮收集到的可空分块快照
-        byte[] snapshot = snapshots.pollSnapshot(clusterTimestamp, clusterPosition, nowNanos);
-        if (snapshot != null) return snapshot;
-        if (snapshots.snapshotFence() != null && snapshots.snapshotFence().encodedSnapshot() == null) snapshots.releaseSnapshotFence();
-        throw new SnapshotNotReadyException();
     }
 
     /**
