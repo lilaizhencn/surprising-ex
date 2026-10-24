@@ -14,10 +14,9 @@ import org.springframework.core.env.Environment;
 @Configuration(proxyBeanMethods = false)
 public class LifecycleInfrastructureConfiguration {
     @Bean
-    public LiquidationProperties liquidationProperties(Environment environment, RiskProperties risk) {
+    public LiquidationProperties liquidationProperties(RiskProperties risk) {
         var properties = new LiquidationProperties();
         properties.setProductLine(risk.getProductLine());
-        Binder.get(environment).bind("surprising.liquidation.aeron", Bindable.ofInstance(properties.getAeron()));
         return properties;
     }
 

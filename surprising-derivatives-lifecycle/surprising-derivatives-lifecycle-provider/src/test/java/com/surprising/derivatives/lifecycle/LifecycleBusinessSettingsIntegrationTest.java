@@ -32,11 +32,10 @@ class LifecycleBusinessSettingsIntegrationTest {
         var risk = new RiskProperties(); risk.setProductLine(line);
         var env = new MockEnvironment().withProperty("surprising.liquidation.execution.enabled", "false")
                 .withProperty("surprising.insurance.coverage.batch-size", "9999")
-                .withProperty("surprising.funding.calculation.publish-delay-ms", "999999")
-                .withProperty("surprising.liquidation.aeron.client-connections", "3");
+                .withProperty("surprising.funding.calculation.publish-delay-ms", "999999");
         var infra = new LifecycleInfrastructureConfiguration();
-        var liquidation = infra.liquidationProperties(env, risk);
-        assertThat(liquidation.getAeron().getClientConnections()).isEqualTo(3);
+        var liquidation = infra.liquidationProperties(risk);
+        assertThat(liquidation.getProductLine()).isEqualTo(line);
         var insurance = infra.insuranceProperties(env, risk);
         var adl = infra.adlProperties(risk);
         var funding = new FundingConfiguration().fundingProperties(env, risk);

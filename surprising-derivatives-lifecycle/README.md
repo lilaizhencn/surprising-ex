@@ -98,7 +98,7 @@ risk、funding、保险和 ADL 继续读同一份缓存，产品线校验、事�
 `surprising.liquidation.aeron` 的 hostnames/egress-hostname/response-timeout、
 固定按 ProductLine 生成却仍暴露 setter 的 funding-rate-topic / insurance group-id / liquidation-fee-events-topic，
 以及本进程没有 Feign 调用者的 `surprising.clients.derivatives-lifecycle.base-url`。
-强平的 `aeron.client-connections` 仍作为本地异步提交宽度使用，保留；真实共享连接参数取 risk.aeron。
+强平已使用原生批量命令，旧本地异步扇出及 `surprising.liquidation.aeron.client-connections` 已删除；真实共享连接参数仍取 risk.aeron。
 保险消费并发、资金费调度/协调租约、数据库迁移及标记价新鲜度配置均保留。
 
 本轮 lifecycle 34 项测试全部通过，含五产品完整组件配置与共享快照实际更新；gateway 537 通过、34 外部环境测试跳过。
@@ -179,3 +179,5 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 候选的`snapshotId`与`markPriceTicks/equityUnits/maintenanceMarginUnits/marginRatioPpm`只表示查询时的Core风险补充值，不表示历史候选发生时的风险。没有匹配快照时为null（JSON配置也可能省略该键），不会用强平ID或固定0冒充；真实零权益仍返回0。候选自身的保证金模式、资产、原持仓数量和时间始终取已提交投影。响应不再补默认全仓、NET或固定产品类型；删除从未生产或消费、携带15字段及旧版本约束的`LiquidationCandidateEvent`。现有账户/持仓风险事件有Kafka读端，继续保留。
 
 强平历史响应删除没有来源且始终填0的`bankruptcyPriceTicks`，从16项字段减为15项；删除4个无人调用的短构造及默认CROSS/NET兜底，唯一完整映射直接传入已提交的保证金模式和持仓腿。实际执行价、执行费率、实收费及历史数量保留。Web/Client没有读取破产价的调用方，当前页面无需字段替换。本项只做相关模块编译，未执行查询或交易场景。
+
+强平提交只保留`LiquidationService.processWork → LiquidationAeronGateway.executeBatch → EXECUTE_LIQUIDATION_BATCH`原生路径；删除无业务调用的单条同步执行、Future扇出、原子计数和递归续页，以及仅服务旧扇出的本地Aeron配置、绑定与范围约束。产品线由共享risk配置传入，不再在YAML重复声明无人读取的强平产品键。实际连接池、超时和连接数仍由`RiskProperties.Aeron`及`DerivativesAeronClient`管理；Gateway没有自有连接，空`close`钩子一并删除。风险扫描、批量游标与命令ID规则保留。只编译相关模块，未执行测试或实际交易。

@@ -8,30 +8,16 @@ import com.surprising.product.api.ProductLine;
 public class LiquidationProperties {
 
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-    private Aeron aeron = new Aeron();
     private volatile Coordinator coordinator = new Coordinator();
     private volatile Execution execution = new Execution();
 
     public void setProductLine(ProductLine value) {
         productLine = value == null ? ProductLine.LINEAR_PERPETUAL : value;
     }
-    public void setAeron(Aeron value) { aeron = value == null ? new Aeron() : value; }
     public void setCoordinator(Coordinator value) {
         coordinator = value == null ? new Coordinator() : value;
     }
     public void setExecution(Execution value) { execution = value == null ? new Execution() : value; }
-
-    @Getter
-    public static class Aeron {
-        // Local fan-out width; the shared connection itself is configured by surprising.risk.aeron.
-        private int clientConnections = 2;
-        public void setClientConnections(int value) {
-            if (value < 1 || value > 64) {
-                throw new IllegalArgumentException("aeron.client-connections must be in [1,64]");
-            }
-            clientConnections = value;
-        }
-    }
 
     @Getter
     public static class Coordinator {
