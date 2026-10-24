@@ -33,6 +33,10 @@ class ConditionalOrderSchedulingIndexTest {
         assertThat(index.query(0, "", 0, 10)).containsExactly(2L, 1L, 3L);
         assertThat(index.query(7, "10000", 100, 10)).containsExactly(1L);
         assertThat(index.query(8, "2147483647", 0, 10)).isEmpty();
+        assertThat(index.query(99, "", 0, 10)).isEmpty();
+        assertThat(index.query(0, "123", 0, 10)).isEmpty();
+        assertThat(index.query(99, "10000", 0, 10)).isEmpty();
+        assertThat(index.query(7, "123", 0, 10)).isEmpty();
         assertThat(index.query(0, "10000", 50, 1)).containsExactly(2L);
         assertThat(index.value(3).instrumentId()).isEqualTo(Integer.MAX_VALUE);
         index.apply(1, algo(1, 7, "2147483647", 25));

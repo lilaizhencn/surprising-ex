@@ -91,7 +91,7 @@ public final class AlgoOrderIndex {
                 ? 0 : InstrumentIds.parse(instrumentId);
         // 选中的用户、标的或全局调度桶
         NavigableSet<AlgoDueKey> candidates = candidateSet(userId, normalizedSymbol);
-        if (candidates == null) candidates = allDue;
+        if (candidates == null) return List.of();
         // 按截止时间截取的包含上界范围，零截止则用全桶
         NavigableSet<AlgoDueKey> dueCandidates = dueAtEpochMillis == 0
                 ? candidates
@@ -139,15 +139,17 @@ public final class AlgoOrderIndex {
     }
 
     /**
-     * 在用户桶与标的桶中选较小的非空引用，不构造交集；两者都没有时返回空，外层可能回退全局候选再逐路由过滤。
+     * 无筛选时使用全局桶；指定维度缺桶时返回空，否则选较小的候选桶，不构造交集。
      * @param userId 算法单所属用户，查询为零表示不按用户筛选
      * @param instrumentId 标的身份，文本入口使用规范数字 ID，路由及内部键保存整数
      */
     private NavigableSet<AlgoDueKey> candidateSet(long userId, int instrumentId) {
+        if (userId == 0 && instrumentId == 0) return allDue;
         // 指定用户的原调度桶，没有用户条件或桶不存在时为空
         NavigableSet<AlgoDueKey> userSet = userId == 0 ? null : idsByUser.get(userId);
         // 指定标的的原调度桶，没有标的条件或桶不存在时为空
         NavigableSet<AlgoDueKey> symbolSet = instrumentId == 0 ? null : idsBySymbol.get(instrumentId);
+        if ((userId != 0 && userSet == null) || (instrumentId != 0 && symbolSet == null)) return null;
         if (userSet == null) return symbolSet;
         if (symbolSet == null) return userSet;
         // 查询再用轻量路由过滤另一个条件，无须先生成用户和标的集合的交集。

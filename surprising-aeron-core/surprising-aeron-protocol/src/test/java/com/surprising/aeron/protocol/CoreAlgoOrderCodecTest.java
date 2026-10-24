@@ -10,13 +10,13 @@ class CoreAlgoOrderCodecTest {
         CoreAlgoOrderView value = new CoreAlgoOrderView(7, 11, "client-7", "1", 0,
                 CoreOrderSide.BUY, 0, 100, 25, 10, 40, CoreMarginMode.CROSS, CorePositionSide.NET,
                 false, CoreTimeInForce.IOC, 1, 91, "", 1, 2, 1, 2, 3,
-                List.of(91L), 25, 0, 0);
+                List.of(91L), 25, 0, 0, 92);
         assertThat(CoreAlgoOrderCodec.decode(CoreAlgoOrderCodec.encode(value))).isEqualTo(value);
         assertThat(CoreAlgoOrderCodec.decodeList(CoreAlgoOrderCodec.encodeList(List.of(value)))).containsExactly(value);
         CoreAlgoOrderView iceberg = new CoreAlgoOrderView(8, 11, "client-8", "1", 1,
                 CoreOrderSide.BUY, 100, 100, 25, Long.MIN_VALUE, 40, CoreMarginMode.CROSS, CorePositionSide.NET,
                 false, CoreTimeInForce.GTX, 1, 91, "", 1, 2, 1, 2, 3,
-                List.of(91L), 25, 0, 0);
+                List.of(91L), 25, 0, 0, 0);
         assertThat(iceberg.intervalSeconds()).isZero();
         assertThat(CoreAlgoOrderCodec.encode(value).length - CoreAlgoOrderCodec.encode(iceberg).length)
                 .isEqualTo(Long.BYTES - Integer.BYTES);

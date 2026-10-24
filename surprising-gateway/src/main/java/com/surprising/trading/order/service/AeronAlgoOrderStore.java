@@ -95,7 +95,8 @@ public class AeronAlgoOrderStore {
                 record.algoType(), record.side(), record.priceTicks(), record.quantitySteps(), record.childQuantitySteps(),
                 record.intervalSeconds(), record.durationSeconds(), record.marginMode(), record.positionSide(), record.reduceOnly(),
                 record.postOnly(), record.timeInForce(), record.status(), value.executedQuantitySteps(),
-                value.activeQuantitySteps(), value.childOrderIds().size(), record.currentOrderId(), record.rejectReason(),
+                value.activeQuantitySteps(), Math.addExact(value.childOrderIds().size(), value.pendingClosedChildId() == 0 ? 0 : 1),
+                record.currentOrderId(), record.rejectReason(),
                 record.startAt(), record.nextSliceAt(), record.createdAt(), record.updatedAt());
     }
 

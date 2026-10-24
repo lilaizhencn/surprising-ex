@@ -25,7 +25,7 @@ class AlgoOrderProjectionPostgresTest {
     private void ready(ProductLine line) {jdbc.update("INSERT INTO core_algo_projection_initialization(product_line,snapshot_log_position) VALUES (?,1)",line.name());}
     private void add(ProductLine line,long id,long user,String instrument,int status) {
         var value=new CoreAlgoOrderView(id,user,"client-"+id,instrument,0,CoreOrderSide.BUY,100,4,2,5,20,
-                CoreMarginMode.CROSS,CorePositionSide.NET,false,CoreTimeInForce.GTC,status,0,"",1000,6000,1000,1001,1,List.of(),1,1,0);
+                CoreMarginMode.CROSS,CorePositionSide.NET,false,CoreTimeInForce.GTC,status,0,"",1000,6000,1000,1001,1,List.of(),1,1,0, 0);
         jdbc.update("INSERT INTO core_algo_order_projection VALUES (?,?,?,?,?,?,?,?,?,?,?)",line.name(),id,user,value.clientAlgoOrderId(),instrument,status,1000,1001,1,2,CoreAlgoOrderCodec.encode(value));
     }
     @Test void exactParentReadsIncludeTerminalStatesAndRemainScopedAcrossEveryProduct() {

@@ -114,7 +114,7 @@ public final class RuntimeOperationalQueryService {
     }
 
     /**
-     * 在母单和累计子单扫描上限内，把退役子单成交量加上仍保留子单的成交量，统计有效子单剩余量和数量，再补入待处理关闭子单编号形成母单视图，最多返回一万条。
+     * 在母单和累计子单扫描上限内，汇总退役与仍保留子单的成交量和活动数量；已关联列表与待关联终态编号分别返回，最多一万条。
      * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
      * @param algoIds 要查看的算法母单编号集合，空编号会跳过
      */
@@ -149,21 +149,14 @@ public final class RuntimeOperationalQueryService {
                     activeCount++;
                 }
             }
-            // 对外展示的母单子单编号列表，必要时补上待处理的已关闭子单。
-            List<Long> children = state.childOrderIds();
-            if (state.pendingClosedChildId() != 0) {
-                // 为补入待处理关闭子单而临时复制的编号列表，随后转成只读列表。
-                var recovered = new ArrayList<Long>(children);
-                recovered.add(state.pendingClosedChildId());
-                children = List.copyOf(recovered);
-            }
             result.add(new CoreAlgoOrderView(state.algoOrderId(), state.userId(), state.clientAlgoOrderId(),
                     state.instrumentId(), state.algoTypeCode(), state.side(), state.priceTicks(), state.quantitySteps(),
                     state.childQuantitySteps(), state.intervalSeconds(), state.durationSeconds(), state.marginMode(),
                     state.positionSide(), state.reduceOnly(), state.timeInForce(), state.statusCode(),
                     state.currentOrderId(), state.rejectReason(), state.startAtEpochMillis(),
                     state.nextSliceAtEpochMillis(), state.createdAtEpochMillis(),
-                    state.updatedAtEpochMillis(), state.revision(), children, executed, active, activeCount));
+                    state.updatedAtEpochMillis(), state.revision(), state.childOrderIds(), executed, active,
+                    activeCount, state.pendingClosedChildId()));
             if (result.size() == MAX_QUERY_ENTITIES) break;
         }
         return List.copyOf(result);

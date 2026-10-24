@@ -795,7 +795,7 @@ class RuntimeStateBusinessRulesTest {
         return new com.surprising.aeron.protocol.CoreAlgoOrderView(id, userId, "algo-client", "1", 0,
                 CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
                 false, com.surprising.aeron.protocol.CoreTimeInForce.IOC, 0, 0, "",
-                1, 1, 1, revision, revision, children, 0, 0, 0);
+                1, 1, 1, revision, revision, children, 0, 0, 0, 0);
     }
 
     /**

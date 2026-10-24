@@ -15,8 +15,48 @@ import java.util.concurrent.atomic.*;
 import org.junit.jupiter.api.Test;
 
 class AlgoOrderCancellationTest {
+    @Test void linksARetiredChildBeforePlacingTheNextSliceWithoutAnOrdinaryOrderLookup() {
+        var fixture = new Fixture(List.of(), 1, 900);
+        assertThat(fixture.store.response(fixture.store.get(7, 701)).childOrderCount()).isEqualTo(1);
+        when(fixture.orders.placeAlgoChild(any())).thenAnswer(call -> {
+            var linked = fixture.store.get(7, 701);
+            assertThat(linked.childOrderIds()).containsExactly(900L);
+            assertThat(linked.pendingClosedChildId()).isZero();
+            assertThat(linked.executedQuantitySteps()).isEqualTo(1);
+            assertThat(linked.revision()).isEqualTo(2);
+            PlaceOrderRequest request = call.getArgument(0);
+            assertThat(request.clientOrderId()).isEqualTo("algo-701-1");
+            assertThat(request.quantitySteps()).isEqualTo(1);
+            fixture.childActive.set(true);
+            var child = mock(OrderResponse.class);
+            when(child.orderId()).thenReturn(901L);
+            when(child.status()).thenReturn(OrderStatus.ACCEPTED);
+            return child;
+        });
+        fixture.service.executeDue(fixture.store.record(fixture.store.get(7, 701)), java.time.Instant.now());
+        var current = fixture.store.get(7, 701);
+        assertThat(current.childOrderIds()).containsExactly(900L, 901L);
+        assertThat(current.pendingClosedChildId()).isZero();
+        assertThat(current.executedQuantitySteps()).isEqualTo(1);
+        assertThat(fixture.store.response(current).childOrderCount()).isEqualTo(2);
+        verify(fixture.gateway, never()).orderStateByClientOrderId(anyLong(), anyString());
+    }
+
+    @Test void cancellationLinksAPendingRetiredChildAndPreservesItsExecutionProgress() {
+        var fixture = new Fixture(List.of(), 1, 900);
+        var response = fixture.service.cancel(new CancelAlgoOrderRequest(7, 701));
+        assertThat(response.status()).isEqualTo(AlgoOrderStatus.CANCELED);
+        assertThat(response.executedQuantitySteps()).isEqualTo(1);
+        assertThat(response.childOrderCount()).isEqualTo(1);
+        assertThat(fixture.store.get(7, 701).childOrderIds()).containsExactly(900L);
+        assertThat(fixture.store.get(7, 701).pendingClosedChildId()).isZero();
+        verify(fixture.orders).cancel(new CancelOrderRequest(7, 900));
+        verify(fixture.orders, never()).placeAlgoChild(any());
+        verify(fixture.gateway, never()).orderStateByClientOrderId(anyLong(), anyString());
+    }
+
     @Test void discoversAnOpenChildWhosePlacementReplyWasLostBeforePlacingAnotherSlice() {
-        var fixture = new Fixture(List.of()); fixture.childActive.set(true);
+        var fixture = new Fixture(List.of(), 0, 0); fixture.childActive.set(true);
         var child = mock(CoreOrderStateView.class);
         when(child.userId()).thenReturn(7L); when(child.instrumentId()).thenReturn("1");
         when(child.clientOrderId()).thenReturn("algo-701-0"); when(child.orderId()).thenReturn(900L);
@@ -27,7 +67,7 @@ class AlgoOrderCancellationTest {
         verify(fixture.orders,never()).placeAlgoChild(any());
     }
     @Test void elapsedDurationCancelsTheActualChildBeforeTheParentBecomesTerminal() {
-        var fixture = new Fixture(List.of(900L)); fixture.childActive.set(true);
+        var fixture = new Fixture(List.of(900L), 0, 0); fixture.childActive.set(true);
         fixture.service.executeDue(fixture.store.record(fixture.store.get(7,701)),java.time.Instant.now().plusSeconds(31));
         assertThat(fixture.store.get(7,701).statusCode()).isEqualTo(AlgoOrderStatus.CANCELED.ordinal());
         assertThat(fixture.store.get(7,701).rejectReason()).isEqualTo("执行时长已结束");
@@ -37,7 +77,7 @@ class AlgoOrderCancellationTest {
     }
     @Test
     void cancellationWaitsForTheSchedulerToLinkItsInFlightChild() throws Exception {
-        var fixture = new Fixture(List.of());
+        var fixture = new Fixture(List.of(), 0, 0);
         var placing = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var cancelRead = new CountDownLatch(1);
@@ -82,7 +122,7 @@ class AlgoOrderCancellationTest {
 
     @Test
     void unknownChildCancellationCannotMarkTheParentCanceledAndCanBeRetried() {
-        var fixture = new Fixture(List.of(900L));
+        var fixture = new Fixture(List.of(900L), 0, 0);
         fixture.childActive.set(true);
         var failure = new IllegalStateException("child cancel result unknown");
         doThrow(failure).when(fixture.orders).cancel(any());
@@ -104,12 +144,12 @@ class AlgoOrderCancellationTest {
         final AlgoOrderService service;
         Runnable onRead = () -> {};
 
-        Fixture(List<Long> children) {
+        Fixture(List<Long> children, long executed, long pendingChild) {
             long now = System.currentTimeMillis();
             state = new AtomicReference<>(new CoreAlgoOrderView(701, 7, "cancel-701", "1", 1,
                     CoreOrderSide.BUY, 100, 2, 1, 1, 30, CoreMarginMode.CROSS, CorePositionSide.NET,
                     false, CoreTimeInForce.GTC, AlgoOrderStatus.RUNNING.ordinal(), 0, "",
-                    now, now, now, now, 1, children, 0, 0, 0));
+                    now, now, now, now, 1, children, executed, 0, 0, pendingChild));
             var properties = new TradingOrderProperties();
             properties.getKafka().setProductLine(ProductLine.SPOT);
             properties.getAlgo().setEnabled(true);
@@ -122,7 +162,7 @@ class AlgoOrderCancellationTest {
                         v.intervalSeconds(), v.durationSeconds(), v.marginMode(), v.positionSide(), v.reduceOnly(), v.timeInForce(), v.statusCode(), v.currentOrderId(), v.rejectReason(),
                         v.startAtEpochMillis(), v.nextSliceAtEpochMillis(),
                         v.createdAtEpochMillis(), v.updatedAtEpochMillis(), v.revision(), v.childOrderIds(),
-                        0, active ? 1 : 0, active ? 1 : 0);
+                        v.executedQuantitySteps(), active ? 1 : 0, active ? 1 : 0, v.pendingClosedChildId());
             });
             when(gateway.algoOrders(anyLong(), anyString(), anyLong(), anyInt()))
                     .thenAnswer(call -> List.of(state.get()));
@@ -145,7 +185,8 @@ class AlgoOrderCancellationTest {
                     v.intervalSeconds(), v.durationSeconds(), v.marginMode(), v.positionSide(), v.reduceOnly(), v.timeInForce(), update.statusCode(), update.currentOrderId(), update.rejectReason(),
                     v.startAtEpochMillis(), update.nextSliceAtEpochMillis(),
                     v.createdAtEpochMillis(), update.updatedAtEpochMillis(), update.expectedRevision() + 1, children,
-                    v.executedQuantitySteps(), v.activeQuantitySteps(), v.activeChildOrderCount()));
+                    v.executedQuantitySteps(), v.activeQuantitySteps(), v.activeChildOrderCount(),
+                    update.appendedChildOrderId() == v.pendingClosedChildId() ? 0 : v.pendingClosedChildId()));
         }
 
         void completeCancellation() {

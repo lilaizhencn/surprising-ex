@@ -302,14 +302,18 @@ public class AlgoOrderService {
     }
 
     private com.surprising.aeron.protocol.CoreAlgoOrderView recoverUnlinkedChild(com.surprising.aeron.protocol.CoreAlgoOrderView parent) {
-        var child = store.unlinkedChild(parent);
-        if (child == null) return parent;
-        String key = childClientOrderId(parent.algoOrderId(), parent.childOrderIds().size());
-        if (child.userId() != parent.userId() || !child.instrumentId().equals(parent.instrumentId())
-                || !key.equals(child.clientOrderId())) throw new IllegalStateException("algo child recovery identity mismatch");
+        long childOrderId = parent.pendingClosedChildId();
+        if (childOrderId == 0) {
+            var child = store.unlinkedChild(parent);
+            if (child == null) return parent;
+            String key = childClientOrderId(parent.algoOrderId(), parent.childOrderIds().size());
+            if (child.userId() != parent.userId() || !child.instrumentId().equals(parent.instrumentId())
+                    || !key.equals(child.clientOrderId())) throw new IllegalStateException("algo child recovery identity mismatch");
+            childOrderId = child.orderId();
+        }
         var record = store.record(parent);
         store.update(withStatus(record, record.status(), record.rejectReason(), record.nextSliceAt(),
-                Instant.now(), child.orderId()), parent.revision(), child.orderId());
+                Instant.now(), childOrderId), parent.revision(), childOrderId);
         return store.get(parent.userId(), parent.algoOrderId());
     }
 

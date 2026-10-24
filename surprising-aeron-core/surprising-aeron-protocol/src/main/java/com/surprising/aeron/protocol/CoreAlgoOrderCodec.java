@@ -7,11 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CoreAlgoOrderCodec {
-    private static final int VERSION = 4;
+    private static final int VERSION = 5;
     private static final int COMMAND_VERSION = 6;
     private static final int MAX_TEXT_BYTES = 256;
     private static final int FIXED_ITEM_BYTES =
-            Long.BYTES * 15 + Integer.BYTES * 8 + Byte.BYTES;
+            Long.BYTES * 16 + Integer.BYTES * 8 + Byte.BYTES;
 
     private CoreAlgoOrderCodec() { }
 
@@ -151,7 +151,7 @@ public final class CoreAlgoOrderCodec {
     private static void write(ByteBuffer buffer, CoreAlgoOrderView value) {
         writeFields(buffer, value);
         buffer.putLong(value.executedQuantitySteps()).putLong(value.activeQuantitySteps())
-                .putInt(value.activeChildOrderCount());
+                .putInt(value.activeChildOrderCount()).putLong(value.pendingClosedChildId());
     }
 
     private static void writeFields(ByteBuffer buffer, CoreAlgoOrderView value) {
@@ -197,7 +197,7 @@ public final class CoreAlgoOrderCodec {
         return new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
                 interval, duration, margin, position, reduce, tif, status, current, reason,
                 start, next, created, updated, revision, children, reader.longValue(),
-                reader.longValue(), reader.intValue());
+                reader.longValue(), reader.intValue(), reader.longValue());
     }
 
     public record Query(long userId, long algoOrderId, String instrumentId, long dueAtEpochMillis, int limit) {

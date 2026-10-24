@@ -210,17 +210,32 @@ class CommittedTradeReplayTest {
                     new PlaceOrderCommand(201,"604",CoreOrderSide.BUY,100,2,false,CoreMarginMode.CROSS,
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"algo-701-0")));
             assertThat(replay.algoChanges()).singleElement().satisfies(/* 当前算法父单视图，用来核对状态、修订、成交及活跃进度 */ v -> {
-                assertThat(v.executedQuantitySteps()).isEqualTo(2);assertThat(v.childOrderIds()).containsExactly(201L);
+                assertThat(v.executedQuantitySteps()).isEqualTo(2);
+                assertThat(v.childOrderIds()).isEmpty();
+                assertThat(v.pendingClosedChildId()).isEqualTo(201);
             });
             snapshot=replay.snapshot();
         }
         try (/* 本场景自动关闭的独立真实回放实例 */ var replay = new CommittedTradeReplay(ProductLine.SPOT,snapshot)) {
+            var retained = new ArrayList<CoreAlgoOrderView>();
+            replay.forEachRetainedAlgo(retained::add);
+            assertThat(retained).singleElement().satisfies(v -> {
+                assertThat(v.childOrderIds()).isEmpty();
+                assertThat(v.pendingClosedChildId()).isEqualTo(201);
+                assertThat(v.executedQuantitySteps()).isEqualTo(2);
+                assertThat(v.activeChildOrderCount()).isZero();
+            });
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(1,2,List.of(999L)), 999));
+            assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.REJECTED);
             send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(1,2,List.of(201L)), 201));
             assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(replay.algoChanges()).singleElement().satisfies(/* 当前算法父单视图，用来核对状态、修订、成交及活跃进度 */ v -> {
                 assertThat(v.childOrderIds()).containsExactly(201L);assertThat(v.executedQuantitySteps()).isEqualTo(2);
                 assertThat(v.activeQuantitySteps()).isZero();
+                assertThat(v.pendingClosedChildId()).isZero();
             });
+            send(replay,ProductLine.SPOT,CoreMessageType.UPSERT_ALGO_ORDER,7,encodeAlgo(algo(1,2,List.of(201L)), 201));
+            assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.REJECTED);
         }
     }
 
@@ -280,7 +295,7 @@ class CommittedTradeReplayTest {
     private CoreAlgoOrderView algo(int status,long revision,List<Long> children) {
         return new CoreAlgoOrderView(701,7,"algo-client-701","604",0,CoreOrderSide.BUY,100,4,2,5,20,
                 CoreMarginMode.CROSS,CorePositionSide.NET,false,CoreTimeInForce.GTC,status,
-                children.isEmpty()?0:children.getLast(),"",TIME,TIME+5000,TIME,TIME+revision,revision,children,0,0,0);
+                children.isEmpty()?0:children.getLast(),"",TIME,TIME+5000,TIME,TIME+revision,revision,children,0,0,0, 0);
     }
 
     /** 全组固定的业务毫秒基准时间，发送时按来源序号增加。 */

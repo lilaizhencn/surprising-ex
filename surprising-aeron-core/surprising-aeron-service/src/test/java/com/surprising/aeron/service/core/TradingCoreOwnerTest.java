@@ -884,7 +884,7 @@ class TradingCoreOwnerTest {
                 var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "1", 0,
                         CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
                         false, CoreTimeInForce.IOC, 0, 0, "",
-                        1, 1, 1, revision, revision, List.of(), 0, 0, 0);
+                        1, 1, 1, revision, revision, List.of(), 0, 0, 0, 0);
                 onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER,
                         revision, 1001, encodeAlgo(algo, 0)));
                 finishCommands(service);
@@ -899,7 +899,7 @@ class TradingCoreOwnerTest {
             var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "1", 0,
                     CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
                     false, CoreTimeInForce.IOC, 0, 0, "",
-                    1, 1, 1, 4, 4, List.of(), 0, 0, 0);
+                    1, 1, 1, 4, 4, List.of(), 0, 0, 0, 0);
             // 按本轮批下、批撤或批改编码的原载荷
             byte[] payload = encodeAlgo(next, 0);
             onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER, 4, 1001, payload));
