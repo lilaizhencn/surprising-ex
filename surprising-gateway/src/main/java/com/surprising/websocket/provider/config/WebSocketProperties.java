@@ -63,18 +63,6 @@ public class WebSocketProperties {
             return productLine.isFundingProduct();
         }
 
-        public String getOrderEventsTopic() {
-            return productTopics().orderEventsTopic();
-        }
-
-        public String getTriggerOrderEventsTopic() {
-            return productTopics().triggerOrderEventsTopic();
-        }
-
-        public String getPositionEventsTopic() {
-            return productTopics().accountPositionEventsTopic();
-        }
-
         private ProductTopicNames productTopics() {
             if (productLine == null) {
                 throw new IllegalStateException("websocket product line is required");

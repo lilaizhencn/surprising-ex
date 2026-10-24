@@ -371,28 +371,20 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
   确定稳定的业务 ID 和首次创建 command ID；进程重启、并发重试和时钟回拨不会分配新订单。
 - 普通订单的 `clientOrderId`、条件单的 `clientTriggerOrderId` 和算法单的 `clientAlgoOrderId` 均为必填业务键。
   首次创建时间由 Product Core 使用 Cluster 时间裁决并随快照恢复，Provider 不维护本地序列或时间 epoch。
-- 订单 Kafka 通知由本地事实状态同步发布；数据库投影不得反向驱动订单状态。
+- 订单与条件单状态由Core提交后通过原生Aeron帧发布；数据库投影不得反向驱动订单状态。
 - Core 的用户级 `clientTriggerOrderId` 索引和稳定 command 指纹保证同一用户条件单幂等；相同身份但不同业务载荷会 fail-closed。
 - `ocoGroupId` 用于把成对 TP/SL 条件单组成 one-cancels-other 互撤组；它是可选、按 `userId + instrumentId + marginMode` 隔离的字段，不替代 `clientTriggerOrderId`。
-- 订单事实事件由用户分区 WAL/RocksDB 提交后直接发送 Kafka；数据库投影只按用户修订号异步替换，数据库不可用不会回滚订单状态。
-- HTTP、账户结果、撮合结果和只减仓清理都必须先写入 `order.user.commands.v1`；订单节点之间不能直接
-  调用另一个节点的本地 WAL。结果 Topic 只用于同步等待，终态同时保存在用户分区结果库。
-- 交易事实事件由 Core 日志和产品线 Kafka 事件发布，交易数据库不再维护订单 Outbox。
+- HTTP命令进入Aeron Cluster，Matcher/账户Lane完成处理后由Owner按序提交；旧用户分区WAL/Kafka命令描述不作为当前订单入口。
+- SQL异步投影及已提交成交导出沿用各自事务/检查点，不能回滚在线Core资金事实；交易数据库不维护第二套订单Outbox。
 - Kafka producer 开启 `acks=all` 和 `enable.idempotence=true`。
-- 下游消费者需要按 `commandId/orderId` 幂等处理 command，按 `eventId` 幂等处理 event。
+- 命令按当前稳定身份与载荷指纹幂等；私有WebSocket按现有`version`和快照栅栏消费。
 
 ## Kafka 事件
 
-- `surprising.<product-segment>.order.commands.v1`：订单撮合命令，key = `instrumentId`。
-- `surprising.<product-segment>.order.events.v1`：订单入口事件，key = `instrumentId`。
-- `surprising.<product-segment>.core.events.v1`：预留的未来历史事件出口，当前部署不启用。
-- `surprising.<product-segment>.order.user.commands.v1`：订单用户分区单写入命令，key = `<PRODUCT_LINE>:<userId>`；
-  HTTP 下单/撤单、账户结果、撮合结果和算法状态更新都必须经过此 Topic。
-- `surprising.<product-segment>.order.user.command.results.v1`：订单用户命令终态，key = `<PRODUCT_LINE>:<userId>`；
-- `surprising.<product-segment>.order.state.events.v1`：订单用户完整状态压缩广播，key = `<PRODUCT_LINE>:<userId>`；
-  每个 HTTP 节点使用独立结果消费组，不能把结果 Topic 当成事实源。
-- `surprising.<product-segment>.match.trades.v1`、`orderbook.depth.v1`：预留的未来公共行情事件出口，当前不由交易 Core 发布。
+- `surprising.<product-segment>.match.trades.v1`：独立`CommittedTradeExporter`从已提交Archive重放的成交，由`ReliableTradeKafkaSink`按原事务/序号发布。
 - `surprising.<product-segment>.price.events.v1`：指数价和标记价统一流，`eventType` 区分分支，key = `instrumentId`。
+
+订单、条件单与私有成交报告使用原生ORDER/TRIGGER/EXECUTION帧。旧`OrderEvent`、`OrderEventType`、`TriggerOrderUpdatedEvent`及派生报告包装没有当前业务生产链，已与Kafka监听和topic元数据一起删除；真实普通订单、条件单REST响应和Core字段保留。本轮只编译相关模块，没有运行推送或交易测试。
 
 公共逐笔/盘口历史链路不读写可裁决数据库，也不能阻塞或回滚 Core 资金处理；重新接入时必须作为独立外围消费者。
 

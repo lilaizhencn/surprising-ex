@@ -12,13 +12,12 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import com.surprising.product.api.ProductLine;
-import com.surprising.trading.api.model.OrderEvent;
-import com.surprising.trading.api.model.OrderEventType;
-import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.realtime.api.RealtimeVersion;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.provider.config.WebSocketProperties;
 import java.time.Instant;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
@@ -101,11 +100,11 @@ class SubscriptionRegistryTest {
         registry.subscribe(user2002SameSymbol,
                 new SubscriptionTopic(WsChannel.ORDERS, "1", null, 2002L));
 
-        OrderEvent event = new OrderEvent(1L, 11L, 1001L, "1",
-                OrderEventType.ACCEPTED, OrderStatus.ACCEPTED, null,
-                Instant.parse("2026-07-01T00:00:00Z"));
+        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
+        var event = new RealtimeWebSocketBridge.VersionedEvent(RealtimeVersion.of(1, 0), "11",
+                Map.of("orderId", "11", "userId", 1001L, "instrumentId", "1", "status", "OPEN"));
         registry.publish(new SubscriptionTopic(WsChannel.ORDERS, "1", null, 1001L),
-                event, event.eventTime());
+                event, eventTime);
 
         ArgumentCaptor<String> symbolPayload = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> wildcardPayload = ArgumentCaptor.forClass(String.class);

@@ -56,14 +56,6 @@ public class AccountProperties {
         }
 
 
-        public String getOrderEventsTopic() {
-            return productTopics().orderEventsTopic();
-        }
-
-
-        public String getPositionEventsTopic() {
-            return productTopics().accountPositionEventsTopic();
-        }
 
 
         public String getOpenInterestEventsTopic() {
@@ -81,10 +73,6 @@ public class AccountProperties {
         }
 
 
-
-        public String getTriggerOrderEventsTopic() {
-            return productTopics().triggerOrderEventsTopic();
-        }
 
 
         public String getDeliverySettlementsTopic() {

@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第四十三轮：A150旧风险Kafka投递树、31字段事件和专属topic元数据删除，保留原生Core/Aeron风险更新及HTTP/快照/版本格式；514份受保护源码未变，相关14模块干净编译通过，无测试/推送/UI执行。累计145解决。A151旧订单/条件单/持仓私有Kafka及派生执行报告54字段待清理，需同步手工Kafka测试fixture并保留真实账户到期结算消费者。",
+    "checkpoint": "第四十四轮：A151旧订单/条件单/持仓私有Kafka及派生报告删除，连同无人读取的PositionCacheEvent共70包装字段和专属枚举/约束清理。六产品helper原20条断言保持，原生就绪和推送检查无条件，用户隔离fixture沿用VersionedEvent。18模块干净源码编译通过；无测试/服务/JMH执行。累计146解决。A152生产类中的测试专用默认产品构造入口待删，A11仍候选。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -8352,12 +8352,61 @@
     },
     {
       "id": "A151",
-      "status": "confirmed",
-      "analysis_status": "unproduced_legacy_private_order_trigger_position_fanout_confirmed",
+      "status": "resolved",
+      "analysis_status": "legacy_private_tree_removed_clean_compile_verified",
       "topic": "订单/条件单/持仓旧Kafka私有投递树及派生成交报告包装仍残留",
       "source_basis_commit": "a16f9b3d6e7011af62134a883b9514f23bb933a2",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 204,
+          "anchor": "case ORDER -> WsChannel.ORDERS"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 205,
+          "anchor": "case TRIGGER -> WsChannel.TRIGGER_ORDERS"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 206,
+          "anchor": "case POSITION -> WsChannel.POSITIONS"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 202,
+          "anchor": "case EXECUTION -> WsChannel.EXECUTION_REPORTS"
+        },
+        {
+          "file": "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductGatewayHttpIntegrationTest.java",
+          "line": 58,
+          "anchor": "private void exerciseSixProducts()"
+        },
+        {
+          "file": "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/SubscriptionRegistryTest.java",
+          "line": 104,
+          "anchor": "var event = new RealtimeWebSocketBridge.VersionedEvent"
+        }
+      ],
+      "evidence": {
+        "actual_source": "原生Bridge已处理ORDER/TRIGGER/POSITION/EXECUTION并发布对应频道及VersionedEvent，真实快照包含订单/持仓/条件单。",
+        "legacy_sources": "全仓构造/引用及topic命名核对：OrderEvent/TriggerOrderUpdatedEvent/PositionUpdatedEvent生产Java引用只有KafkaFanoutConsumer；ExecutionReportEvent仅由其fromOrderEvent派生。旧Kafka输入仅测试造数，未见当前业务发布者。",
+        "legacy_record_components": {
+          "surprising-trading-api/src/main/java/com/surprising/trading/api/model/OrderEvent.java": 8,
+          "surprising-trading-api/src/main/java/com/surprising/trading/api/model/TriggerOrderUpdatedEvent.java": 4,
+          "surprising-account-api/src/main/java/com/surprising/account/api/model/PositionUpdatedEvent.java": 19,
+          "surprising-gateway/src/main/java/com/surprising/websocket/api/model/ExecutionReportEvent.java": 23
+        },
+        "legacy_component_total": 54,
+        "other_references_to_handle": "SubscriptionRegistryTest用旧OrderEvent验证用户隔离；MultiProductGatewayHttpIntegrationTest在非native模式手工发旧OrderEvent，再等待executionReports。清理必须同步这些输入fixture，保持隔离、六产品和资金守恒断言，不能只删用例或削弱等待条件。",
+        "related_metadata": "WebSocketProperties和AccountProperties仍有三个旧topic getter；AccountProperties的其他Kafka配置不能整体删除。",
+        "actual_kafka_boundary_to_keep": "ExpiringContractSettlementConsumer的两个KafkaListener使用accountInstrumentLifecycleKafkaListenerContainerFactory处理到期结算；保留此真实消费者及工厂和相应部署/产品语义。",
+        "fields_to_keep": "Core真实订单/持仓/条件单、资金/成交事实，REST响应、原生快照及Web/Client版本化消费全部保留；仅清理旧包装/绑定。"
+      },
+      "proposed_cleanup": "沿旧三输入监听和派生execution包装成树删除，核对OrderEventType、PositionCacheEvent等专属后继是否有独立用途后处理；同步topic元数据及测试原生fixture，保持真实Kafka到期结算边界。",
+      "verification_limit": "本轮静态源码确认，无Kafka/Aeron或UI运行验证，此项尚未修改。",
+      "historical_source_references": [
         {
           "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
           "line": 211,
@@ -8394,23 +8443,64 @@
           "anchor": "case POSITION -> WsChannel.POSITIONS"
         }
       ],
-      "evidence": {
-        "actual_source": "原生Bridge已处理ORDER/TRIGGER/POSITION/EXECUTION并发布对应频道及VersionedEvent，真实快照包含订单/持仓/条件单。",
-        "legacy_sources": "全仓构造/引用及topic命名核对：OrderEvent/TriggerOrderUpdatedEvent/PositionUpdatedEvent生产Java引用只有KafkaFanoutConsumer；ExecutionReportEvent仅由其fromOrderEvent派生。旧Kafka输入仅测试造数，未见当前业务发布者。",
-        "legacy_record_components": {
-          "surprising-trading-api/src/main/java/com/surprising/trading/api/model/OrderEvent.java": 8,
-          "surprising-trading-api/src/main/java/com/surprising/trading/api/model/TriggerOrderUpdatedEvent.java": 4,
-          "surprising-account-api/src/main/java/com/surprising/account/api/model/PositionUpdatedEvent.java": 19,
-          "surprising-gateway/src/main/java/com/surprising/websocket/api/model/ExecutionReportEvent.java": 23
+      "resolved_in_round": "forty_fourth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "旧三Kafka私有输入、派生报告及topic/key/枚举处理成树删除。额外确认PositionCacheEvent只由无人读取的PositionUpdatedEvent.cacheEvent构造，一并删除16字段及修订/旧版本约束。共删除5个record的70字段及专属OrderEventType枚举，保留所有真实Core/REST/快照数据。",
+        "record_components_removed": 70,
+        "record_types_removed": 5,
+        "additional_enum_removed": "OrderEventType",
+        "test_fidelity": "六产品公共helper的20条assert语句规范化后与本轮HEAD完全一致；用户/做市两套就绪和推送等待改为无条件。删除手工Kafka撤单和重复旧模式入口，未新增跳过条件；原生用户隔离fixture用现有VersionedEvent。产品topic隔离用例转到实际公共price输入，未移除隔离校验。",
+        "tests_executed": false,
+        "services_started": false,
+        "sql_executed": false
+      }
+    },
+    {
+      "id": "A152",
+      "status": "confirmed",
+      "analysis_status": "production_class_test_only_constructor_and_fallback_factory_confirmed",
+      "topic": "Kafka公共行情消费者仍携带仅测试使用的三参构造和默认产品工厂",
+      "source_basis_commit": "9f23241051f74bb8d386c3121f4894d26c7ee783",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 50,
+          "anchor": "SubscriptionRegistry registry,"
         },
-        "legacy_component_total": 54,
-        "other_references_to_handle": "SubscriptionRegistryTest用旧OrderEvent验证用户隔离；MultiProductGatewayHttpIntegrationTest在非native模式手工发旧OrderEvent，再等待executionReports。清理必须同步这些输入fixture，保持隔离、六产品和资金守恒断言，不能只删用例或削弱等待条件。",
-        "related_metadata": "WebSocketProperties和AccountProperties仍有三个旧topic getter；AccountProperties的其他Kafka配置不能整体删除。",
-        "actual_kafka_boundary_to_keep": "ExpiringContractSettlementConsumer的两个KafkaListener使用accountInstrumentLifecycleKafkaListenerContainerFactory处理到期结算；保留此真实消费者及工厂和相应部署/产品语义。",
-        "fields_to_keep": "Core真实订单/持仓/条件单、资金/成交事实，REST响应、原生快照及Web/Client版本化消费全部保留；仅清理旧包装/绑定。"
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 52,
+          "anchor": "this(objectMapper, registry, candleUpdateCoalescer, defaultTestProperties());"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 66,
+          "anchor": "private static WebSocketProperties defaultTestProperties()"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 68,
+          "anchor": "properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL)"
+        }
+      ],
+      "evidence": {
+        "exact_external_constructor_calls": {
+          "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;Lcom/surprising/websocket/provider/config/WebSocketProperties;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class",
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTopicTest.class"
+          ],
+          "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+          ]
+        },
+        "test_only_descriptor": "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V",
+        "real_spring_constructor": "Autowired明确选择含WebSocketProperties的4参构造，3参只由KafkaFanoutConsumerTest调用；defaultTestProperties只为这个构造生成固定LINEAR_PERPETUAL配置。",
+        "boundary_to_keep": "保留部署绑定的显式产品属性和所有公共行情topic/key校验；测试直接提供自己的真实配置fixture，生产类不留测试专用默认产品入口。"
       },
-      "proposed_cleanup": "沿旧三输入监听和派生execution包装成树删除，核对OrderEventType、PositionCacheEvent等专属后继是否有独立用途后处理；同步topic元数据及测试原生fixture，保持真实Kafka到期结算边界。",
-      "verification_limit": "本轮静态源码确认，无Kafka/Aeron或UI运行验证，此项尚未修改。"
+      "proposed_cleanup": "删除3参构造和专属defaultTestProperties，生产类只保留单一显式依赖构造；现有单元测试传入配置，保持价格/资金费及产品隔离场景。",
+      "verification_limit": "当前源码和4015份classfile的构造调用确认，尚未修改此项。"
     }
   ],
   "preserve_verified_purposes": [
@@ -8428,9 +8518,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A151旧私有Kafka包装与topic树，同步多产品HTTP和用户隔离测试的原生输入fixture；保留真实资金/持仓/终态断言与实际到期结算Kafka边界。",
-    "继续逐业务操作核对命令、执行、持久化和恢复/查询字段的独立用途，区分副本与真实财务事实。",
-    "A11继续保持现有领导者读、提交水位与会话边界。"
+    "解决A152测试专用生产构造及默认产品工厂，让消费者只接收显式配置依赖，保留公共行情/资金费/产品隔离测试场景。",
+    "继续逐业务核对命令到Core状态、持久化、恢复与API读端的字段/约束用途，保留真实线程、资金和到期结算边界。",
+    "A11保持当前领导者读、提交水位及会话约束。"
   ],
   "rejected_false_positives": [
     {
@@ -8727,13 +8817,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "a16f9b3d6e7011af62134a883b9514f23bb933a2",
+    "source_basis_commit": "9f23241051f74bb8d386c3121f4894d26c7ee783",
     "status": "cleanup_compile_verified_followup_confirmed",
     "resolved_ids": [
-      "A150"
+      "A151"
     ],
     "confirmed_ids": [
-      "A151"
+      "A152"
     ],
     "candidate_ids": [
       "A11"
@@ -8745,12 +8835,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 145,
+      "resolved": 146,
       "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "forty_third_cleanup_round",
+    "evidence": "forty_fourth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -10598,6 +10688,26 @@
       ],
       "counts": {
         "resolved": 145,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "tests_executed": false,
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "9f23241051f74bb8d386c3121f4894d26c7ee783",
+      "status": "cleanup_compile_verified_followup_confirmed",
+      "evidence": "forty_fourth_cleanup_round",
+      "resolved_ids": [
+        "A151"
+      ],
+      "new_confirmed_ids": [
+        "A152"
+      ],
+      "counts": {
+        "resolved": 146,
         "candidate": 1,
         "retained": 4,
         "confirmed": 1
@@ -32443,6 +32553,301 @@
           "path": "/tmp/aeron-risk-kafka-20261024-static.json",
           "bytes": 3473,
           "sha256": "7e941fb411ab681aa2a7b9f23e930b222bb2824efd8be0a011f31b6928c7f0c6"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "forty_fourth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "9f23241051f74bb8d386c3121f4894d26c7ee783",
+    "resolved_ids": [
+      "A151"
+    ],
+    "new_confirmed_ids": [
+      "A152"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 146,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "previous_goal_turn_classification": "progress: a16f9b3d6/9f2324105 pushed, affected clean source compilations completed and A151 branch ownership established",
+    "implementation": [
+      "删除订单/条件单/持仓三个旧KafkaListener、三个topic路由与专属持仓key/派生执行报告/枚举转换方法。",
+      "删除WebSocketProperties、AccountProperties及ProductTopicNames中三个旧topic元数据与对应旧topic测试断言。",
+      "删除OrderEvent(8)、TriggerOrderUpdatedEvent(4)、PositionUpdatedEvent(19)、PositionCacheEvent(16)、ExecutionReportEvent(23)及专属OrderEventType枚举，共70字段和无实际作用的旧版本/修订/默认模式约束。",
+      "六产品集成测试统一实际Core输入，保留原20条helper断言、增加原生检查的无条件执行；只去掉手工Kafka模拟、重复模式入口与开关，不降低覆盖要求。",
+      "用户隔离测试复用已有VersionedEvent；原旧私有topic隔离用例改为仍实际使用的公共price入口，保留真实产品隔离检查。",
+      "中文README同步原生消息/持仓链路，清除旧WAL/Kafka强制入口、持仓topic和eventId约束说明。"
+    ],
+    "verification": {
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 51.907,
+      "log_sha256": "5d3e855ac61582c9d083673c9a47e77a16104e246f5eaa20fce37aac5fa0f59f",
+      "source_hashes": {
+        "surprising-account-api/README.md": "0cf9904227cc858a472466f92589c5573ea3957fbe2adf75b48156305bd61438",
+        "surprising-aeron-core/surprising-aeron-service/README.md": "c32becf8e65669a11bb9ab64c37c04d200a1a074a92fb3bbdebb275d8a711c37",
+        "surprising-gateway/README-websocket.md": "9ad52dc78ea6e474c1c72c912391c0f9a69463a609e3e5ec8543468cffd7bb65",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountProperties.java": "840ffcf5524c66d11a1bc95fe702c9ea8f7702228ce5f36753b3a1b6933b3e1e",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/config/WebSocketProperties.java": "68e84561e8306fed0e22f33109f0faaf17446f1f050690ef61891c361c20ba4a",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java": "c43dda0344736ba5eb1a5026cde108ac62f6d5ee7906ee10fffc2091cbd51639",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/config/AccountKafkaConfigurationTest.java": "995b2a71e207e2e2c96ad10c68e07dad5ef89a864ede8d8d26dfa6e7e215bc07",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductGatewayHttpIntegrationTest.java": "27f2568ffcc4be8d3d9dd2e84735980cc269b0b2c7e95bc29a11d211c7a14c7d",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/config/WebSocketPropertiesTest.java": "0133248637bdf88f233ee9343af801bf41d08e7f312ed4606c769559c5c685d8",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.java": "3dd2f582c47598612d12e322a7c882a86cbb3dc23319751e12ec245de0b9e810",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTopicTest.java": "7e41bf94f09e87cab1b7c4c8863f8c4a670b572a1115e6fa0221856f9538ffd7",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/SubscriptionRegistryTest.java": "83f1c1a267d4173c1aa9512c319519a5ca753fb512dc7dd8abb294db15bb841f",
+        "surprising-instrument-api/src/main/java/com/surprising/product/api/utils/ProductTopicNames.java": "c598932b8a352d8820181cb2eceec7c5557f60f4cca8725705cb5bab530533c9",
+        "surprising-instrument-api/src/test/java/com/surprising/product/api/ProductTopicNamesTest.java": "a27528a1e8c254320736da2c38b785bd05d744780a41dcc3fc70762a9353dc72",
+        "surprising-trading-api/README.md": "653331164eb14b230586777e848b2a38e36888b63a74f3f73a681f2f261cc593"
+      },
+      "tests_executed": false,
+      "sql_executed": false,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-aeron-tools",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-maker",
+        "surprising-realtime-api",
+        "surprising-price-provider",
+        "surprising-aeron-benchmarks",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-derivatives-lifecycle",
+        "surprising-realtime-provider",
+        "surprising-gateway"
+      ],
+      "reactor_module_count": 18
+    },
+    "static_verification": {
+      "classfiles": 4015,
+      "removed_models_and_topic_references": {
+        "com/surprising/trading/api/model/OrderEvent": [],
+        "com.surprising.trading.api.model.OrderEvent": [],
+        "com/surprising/trading/api/model/OrderEventType": [],
+        "com.surprising.trading.api.model.OrderEventType": [],
+        "com/surprising/trading/api/model/TriggerOrderUpdatedEvent": [],
+        "com.surprising.trading.api.model.TriggerOrderUpdatedEvent": [],
+        "com/surprising/account/api/model/PositionUpdatedEvent": [],
+        "com.surprising.account.api.model.PositionUpdatedEvent": [],
+        "com/surprising/account/api/model/PositionCacheEvent": [],
+        "com.surprising.account.api.model.PositionCacheEvent": [],
+        "com/surprising/websocket/api/model/ExecutionReportEvent": [],
+        "com.surprising.websocket.api.model.ExecutionReportEvent": [],
+        "orderEventsTopic": [],
+        "triggerOrderEventsTopic": [],
+        "accountPositionEventsTopic": [],
+        "getOrderEventsTopic": [],
+        "getTriggerOrderEventsTopic": [],
+        "getPositionEventsTopic": []
+      },
+      "legacy_component_total": 70,
+      "multi_product_financial_and_isolation_assertion_sequence_unchanged": true,
+      "multi_product_helper_assertions": 20,
+      "native_user_and_maker_readiness_and_delivery_now_unconditional": true,
+      "no_additional_test_environment_gate": true,
+      "kafka_consumer_external_constructor_calls": {
+        "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;Lcom/surprising/websocket/provider/config/WebSocketProperties;)V": [
+          "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class",
+          "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTopicTest.class"
+        ],
+        "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V": [
+          "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+        ]
+      },
+      "test_only_three_argument_constructor": "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V",
+      "protected_core_protocol_read_view_bridge_registry_settlement_and_sql_sources_unchanged": 514,
+      "protected_scope_digest": "87ff25729fb0f6c01d9a7fb087f548e2f438a9aa6fce72f4337fff469cace43b",
+      "source_hashes": {
+        "surprising-account-api/README.md": "0cf9904227cc858a472466f92589c5573ea3957fbe2adf75b48156305bd61438",
+        "surprising-aeron-core/surprising-aeron-service/README.md": "c32becf8e65669a11bb9ab64c37c04d200a1a074a92fb3bbdebb275d8a711c37",
+        "surprising-gateway/README-websocket.md": "9ad52dc78ea6e474c1c72c912391c0f9a69463a609e3e5ec8543468cffd7bb65",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountProperties.java": "840ffcf5524c66d11a1bc95fe702c9ea8f7702228ce5f36753b3a1b6933b3e1e",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/config/WebSocketProperties.java": "68e84561e8306fed0e22f33109f0faaf17446f1f050690ef61891c361c20ba4a",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java": "c43dda0344736ba5eb1a5026cde108ac62f6d5ee7906ee10fffc2091cbd51639",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/config/AccountKafkaConfigurationTest.java": "995b2a71e207e2e2c96ad10c68e07dad5ef89a864ede8d8d26dfa6e7e215bc07",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductGatewayHttpIntegrationTest.java": "27f2568ffcc4be8d3d9dd2e84735980cc269b0b2c7e95bc29a11d211c7a14c7d",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/config/WebSocketPropertiesTest.java": "0133248637bdf88f233ee9343af801bf41d08e7f312ed4606c769559c5c685d8",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.java": "3dd2f582c47598612d12e322a7c882a86cbb3dc23319751e12ec245de0b9e810",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTopicTest.java": "7e41bf94f09e87cab1b7c4c8863f8c4a670b572a1115e6fa0221856f9538ffd7",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/SubscriptionRegistryTest.java": "83f1c1a267d4173c1aa9512c319519a5ca753fb512dc7dd8abb294db15bb841f",
+        "surprising-instrument-api/src/main/java/com/surprising/product/api/utils/ProductTopicNames.java": "c598932b8a352d8820181cb2eceec7c5557f60f4cca8725705cb5bab530533c9",
+        "surprising-instrument-api/src/test/java/com/surprising/product/api/ProductTopicNamesTest.java": "a27528a1e8c254320736da2c38b785bd05d744780a41dcc3fc70762a9353dc72",
+        "surprising-trading-api/README.md": "653331164eb14b230586777e848b2a38e36888b63a74f3f73a681f2f261cc593"
+      },
+      "deleted_source_models": {
+        "surprising-trading-api/src/main/java/com/surprising/trading/api/model/OrderEvent.java": {
+          "owner": "com/surprising/trading/api/model/OrderEvent",
+          "sha256": "54ce4ec0283cd7e2037a2635fdd8d8ea645df6676c5492a071057e6243de6364",
+          "components": 8
+        },
+        "surprising-trading-api/src/main/java/com/surprising/trading/api/model/OrderEventType.java": {
+          "owner": "com/surprising/trading/api/model/OrderEventType",
+          "sha256": "28cc69f0117411420362dedbcb105acd18b97cc795f43b933401133fff2bb612",
+          "components": 0
+        },
+        "surprising-trading-api/src/main/java/com/surprising/trading/api/model/TriggerOrderUpdatedEvent.java": {
+          "owner": "com/surprising/trading/api/model/TriggerOrderUpdatedEvent",
+          "sha256": "fe41432fac5c3c83e1b44a5b5c108f33185bc379c33e7dbd722f73c5fba35b99",
+          "components": 4
+        },
+        "surprising-account-api/src/main/java/com/surprising/account/api/model/PositionUpdatedEvent.java": {
+          "owner": "com/surprising/account/api/model/PositionUpdatedEvent",
+          "sha256": "74dfd7341c022ac8d00ac4e21286e3f336e9556413d8b4a79aaa0a5782170757",
+          "components": 19
+        },
+        "surprising-account-api/src/main/java/com/surprising/account/api/model/PositionCacheEvent.java": {
+          "owner": "com/surprising/account/api/model/PositionCacheEvent",
+          "sha256": "eca09464e0e00d7a5792ddf170e270dc908305ae6ac2cdada73e6071d1aa5505",
+          "components": 16
+        },
+        "surprising-gateway/src/main/java/com/surprising/websocket/api/model/ExecutionReportEvent.java": {
+          "owner": "com/surprising/websocket/api/model/ExecutionReportEvent",
+          "sha256": "2c7b46c887dd49f062c515ef7fcfda5bdc12650df899f2e93224644a7308f5d5",
+          "components": 23
+        }
+      },
+      "tests_executed": false,
+      "applications_started": false,
+      "remaining_shared_trading_account_contract_and_formula_sources_unchanged": 84,
+      "shared_contract_hash_manifest_sha256": "b2469f607a79e68ec4f6a6d4ae98bc058e13fce77a33ca5a90c659cc3c063827",
+      "frontend_native_consumer_hashes_unchanged": {
+        "../surprising-client/lib/src/realtime_state.dart": "6cee839d552451cbe64d29cda0ae622e603b0ffa7ee7defa602e8f8265843c33",
+        "../surprising-client/lib/src/account_projection.dart": "0388dce5923d0895581f1c7e4e1ed0000abbbe6ff9414e652ac764b6f3b60338",
+        "../surprising-ex-web/src/realtime.ts": "ca9fb796b020a7f27b10c3f6298216cdc35ff89aa50dedb6b4a48e5fb9b2912f",
+        "../surprising-ex-web/src/hooks/useRealtimeAssets.ts": "f71aa40a1b6d9b7409c2750cc64e23673f4014714c99691003c953a049dad765"
+      },
+      "git_diff_check": "passed"
+    },
+    "removed_models_precheck": {
+      "classfiles": 4021,
+      "source_models": {
+        "surprising-trading-api/src/main/java/com/surprising/trading/api/model/OrderEvent.java": {
+          "owner": "com/surprising/trading/api/model/OrderEvent",
+          "sha256": "54ce4ec0283cd7e2037a2635fdd8d8ea645df6676c5492a071057e6243de6364",
+          "components": 8
+        },
+        "surprising-trading-api/src/main/java/com/surprising/trading/api/model/OrderEventType.java": {
+          "owner": "com/surprising/trading/api/model/OrderEventType",
+          "sha256": "28cc69f0117411420362dedbcb105acd18b97cc795f43b933401133fff2bb612",
+          "components": 0
+        },
+        "surprising-trading-api/src/main/java/com/surprising/trading/api/model/TriggerOrderUpdatedEvent.java": {
+          "owner": "com/surprising/trading/api/model/TriggerOrderUpdatedEvent",
+          "sha256": "fe41432fac5c3c83e1b44a5b5c108f33185bc379c33e7dbd722f73c5fba35b99",
+          "components": 4
+        },
+        "surprising-account-api/src/main/java/com/surprising/account/api/model/PositionUpdatedEvent.java": {
+          "owner": "com/surprising/account/api/model/PositionUpdatedEvent",
+          "sha256": "74dfd7341c022ac8d00ac4e21286e3f336e9556413d8b4a79aaa0a5782170757",
+          "components": 19
+        },
+        "surprising-account-api/src/main/java/com/surprising/account/api/model/PositionCacheEvent.java": {
+          "owner": "com/surprising/account/api/model/PositionCacheEvent",
+          "sha256": "eca09464e0e00d7a5792ddf170e270dc908305ae6ac2cdada73e6071d1aa5505",
+          "components": 16
+        },
+        "surprising-gateway/src/main/java/com/surprising/websocket/api/model/ExecutionReportEvent.java": {
+          "owner": "com/surprising/websocket/api/model/ExecutionReportEvent",
+          "sha256": "2c7b46c887dd49f062c515ef7fcfda5bdc12650df899f2e93224644a7308f5d5",
+          "components": 23
+        }
+      },
+      "constructor_references": {
+        "com/surprising/trading/api/model/OrderEvent::<init>": {
+          "(JJJLjava/lang/String;Lcom/surprising/trading/api/model/OrderEventType;Lcom/surprising/trading/api/model/OrderStatus;Ljava/lang/String;Ljava/time/Instant;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/gateway/provider/product/MultiProductGatewayHttpIntegrationTest.class",
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class",
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/SubscriptionRegistryTest.class"
+          ]
+        },
+        "com/surprising/trading/api/model/TriggerOrderUpdatedEvent::<init>": {
+          "(JLcom/surprising/product/api/ProductLine;Lcom/surprising/trading/api/model/TriggerOrderResponse;Ljava/time/Instant;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+          ]
+        },
+        "com/surprising/account/api/model/PositionUpdatedEvent::<init>": {
+          "(IJJLcom/surprising/product/api/ProductLine;JJLjava/lang/String;JLcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;JJJJLjava/lang/String;JLjava/time/Instant;Ljava/time/Instant;Ljava/time/Instant;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+          ]
+        },
+        "com/surprising/websocket/api/model/ExecutionReportEvent::<init>": {
+          "(Ljava/lang/String;JLjava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Boolean;Ljava/lang/String;Ljava/time/Instant;)V": [
+            "surprising-gateway/target/classes/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.class"
+          ]
+        },
+        "com/surprising/account/api/model/PositionCacheEvent::<init>": {
+          "(JLcom/surprising/product/api/ProductLine;JLjava/lang/String;Ljava/lang/Long;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;JJJJLjava/lang/String;JLjava/time/Instant;Ljava/time/Instant;J)V": [
+            "surprising-account-api/target/classes/com/surprising/account/api/model/PositionUpdatedEvent.class"
+          ]
+        }
+      },
+      "position_updated_cache_factory_external_calls": {}
+    },
+    "preserved_boundaries": [
+      "514份Core/协议/读视图/桥接/订阅/实际到期结算/SQL源码未变",
+      "84份剩余账户/交易共享契约和公式源码未变",
+      "Web/Client四份当前原生消费源码未变",
+      "Matcher到Lane到Owner顺序、资金/预占/持仓、终态、快照及恢复格式未改",
+      "实际ExpiringContractSettlementConsumer与AccountKafkaConfiguration保留"
+    ],
+    "versions_unchanged": {
+      "core_schema": 16,
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "retention": 4
+    },
+    "followup_analysis": {
+      "confirmed_id": "A152",
+      "candidate_id": "A11",
+      "rejected_false_positive": "ExecuteLiquidationBatchCommand.fromWork在maxRiskScanUsers==0时主动丢弃查询riskScanContinuation，未把无效查询游标存入执行命令；不能据此机械删有实际Core消费的组合命令字段。",
+      "overall_audit_completed": false
+    },
+    "limits": "仅HotSpot JDK27相关18模块clean test-compile，包含工具/benchmark的源码编译；未执行测试、压测/JMH、SQL、服务、Kafka/Aeron、交易、恢复或UI。静态断言与源码保持不能代替运行验证。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-private-kafka-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-private-kafka-20261024-build.json",
+          "bytes": 2972,
+          "sha256": "4fed3175874b231f3bdac0545dd9cf59d0f148f147e9473b684f768e94a7077e"
+        },
+        {
+          "path": "/tmp/aeron-private-kafka-20261024-build.log",
+          "bytes": 40146,
+          "sha256": "5d3e855ac61582c9d083673c9a47e77a16104e246f5eaa20fce37aac5fa0f59f"
+        },
+        {
+          "path": "/tmp/aeron-private-kafka-20261024-edit.py",
+          "bytes": 8129,
+          "sha256": "5f9e95bbaefcb1a8b65e5a9495b23a0a5e3cf93c7164e63c04932b5a83f8828f"
+        },
+        {
+          "path": "/tmp/aeron-private-kafka-20261024-pre.json",
+          "bytes": 10262,
+          "sha256": "1aa749868d57f0bcaa12d39528d8feaca325d8fc672ed908234ba5b632be8f24"
+        },
+        {
+          "path": "/tmp/aeron-private-kafka-20261024-record.py",
+          "bytes": 9591,
+          "sha256": "cf631a48ec9ebccfab06101402eb8769a052b46483fe2fa15691f13b15e0e643"
+        },
+        {
+          "path": "/tmp/aeron-private-kafka-20261024-static.json",
+          "bytes": 7547,
+          "sha256": "76d740ea5f8604c79885b85660536394849ce7d766cfac998865778d4310741e"
         }
       ],
       "compiler_outputs_retained": true,

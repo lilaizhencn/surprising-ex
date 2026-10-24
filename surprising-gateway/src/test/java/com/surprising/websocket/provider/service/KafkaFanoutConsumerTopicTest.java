@@ -25,11 +25,6 @@ class KafkaFanoutConsumerTopicTest {
         assertThat(consumer.priceEventsTopic()).isEqualTo("surprising.inverse-delivery.price.events.v1");
         assertThat(consumer.fundingRateListenerEnabled()).isFalse();
         assertThat(consumer.fundingRateTopic()).isEqualTo("surprising.inverse-delivery.funding.rate.v1");
-        assertThat(consumer.orderEventsTopic()).isEqualTo("surprising.inverse-delivery.order.events.v1");
-        assertThat(consumer.triggerOrderEventsTopic())
-                .isEqualTo("surprising.inverse-delivery.trigger-order.events.v1");
-        assertThat(consumer.positionEventsTopic())
-                .isEqualTo("surprising.inverse-delivery.account.position.events.v1");
     }
 
     @Test

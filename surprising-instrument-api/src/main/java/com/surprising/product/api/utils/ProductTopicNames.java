@@ -24,14 +24,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("order.commands");
     }
 
-    public String orderEventsTopic() {
-        return topic("order.events");
-    }
-
-    public String triggerOrderEventsTopic() {
-        return topic("trigger-order.events");
-    }
-
     public String matchTradesTopic() {
         return topic("match.trades");
     }
@@ -74,10 +66,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
     /** 产品线隔离的用户杠杆配置事件 Topic。 */
     public String leverageSettingEventsTopic() {
         return topic("leverage.setting.events");
-    }
-
-    public String accountPositionEventsTopic() {
-        return topic("account.position.events");
     }
 
     /** 产品线隔离的未平仓量分片快照事件 Topic。 */

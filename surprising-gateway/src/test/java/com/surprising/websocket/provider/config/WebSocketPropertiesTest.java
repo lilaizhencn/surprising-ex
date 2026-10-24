@@ -15,8 +15,6 @@ class WebSocketPropertiesTest {
 
         assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-linear-perp-websocket-v1-node-a");
         assertThat(properties.getKafka().getCandleTopic()).isEqualTo("surprising.linear-perp.candle.events.v1");
-        assertThat(properties.getKafka().getTriggerOrderEventsTopic())
-                .isEqualTo("surprising.linear-perp.trigger-order.events.v1");
     }
 
     @Test
@@ -34,12 +32,6 @@ class WebSocketPropertiesTest {
         assertThat(properties.getKafka().isFundingRateTopicEnabled()).isFalse();
         assertThat(properties.getKafka().getFundingRateTopic())
                 .isEqualTo("surprising.linear-delivery.funding.rate.v1");
-        assertThat(properties.getKafka().getOrderEventsTopic())
-                .isEqualTo("surprising.linear-delivery.order.events.v1");
-        assertThat(properties.getKafka().getTriggerOrderEventsTopic())
-                .isEqualTo("surprising.linear-delivery.trigger-order.events.v1");
-        assertThat(properties.getKafka().getPositionEventsTopic())
-                .isEqualTo("surprising.linear-delivery.account.position.events.v1");
     }
 
     @Test

@@ -76,12 +76,6 @@ class AccountKafkaConfigurationTest {
         assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-linear-perp-account-v1");
         assertThat(properties.getKafka().getOrderCommandsTopic())
                 .isEqualTo("surprising.linear-perp.order.commands.v1");
-        assertThat(properties.getKafka().getOrderEventsTopic())
-                .isEqualTo("surprising.linear-perp.order.events.v1");
-        assertThat(properties.getKafka().getPositionEventsTopic())
-                .isEqualTo("surprising.linear-perp.account.position.events.v1");
-        assertThat(properties.getKafka().getTriggerOrderEventsTopic())
-                .isEqualTo("surprising.linear-perp.trigger-order.events.v1");
         assertThat(properties.getKafka().getLiquidationFeeEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.liquidation-fee.events.v1");
         assertThat(properties.getKafka().getDeliverySettlementsTopic())
@@ -99,12 +93,6 @@ class AccountKafkaConfigurationTest {
                 .isEqualTo("surprising-linear-perp-account-v1");
         assertThat(properties.getKafka().getOrderCommandsTopic())
                 .isEqualTo("surprising.linear-perp.order.commands.v1");
-        assertThat(properties.getKafka().getOrderEventsTopic())
-                .isEqualTo("surprising.linear-perp.order.events.v1");
-        assertThat(properties.getKafka().getPositionEventsTopic())
-                .isEqualTo("surprising.linear-perp.account.position.events.v1");
-        assertThat(properties.getKafka().getTriggerOrderEventsTopic())
-                .isEqualTo("surprising.linear-perp.trigger-order.events.v1");
         assertThat(properties.getKafka().getLiquidationFeeEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.liquidation-fee.events.v1");
         assertThat(properties.getKafka().isDeliverySettlementsTopicEnabled()).isFalse();

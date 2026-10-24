@@ -51,18 +51,11 @@ class MultiProductGatewayHttpIntegrationTest {
         quotes.start();
     }
     @AfterAll static void stopQuoteFixture() { if(quotes!=null)quotes.stop(0); }
-    @org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable(named = "MULTI_PRODUCT_GATEWAY_IT_REALTIME", matches = "true")
     @Test void sixProductsTradeTransferAndPushThroughOneGateway() throws Exception {
-        exerciseSixProducts(false);
+        exerciseSixProducts();
     }
 
-    @Test
-    @EnabledIfEnvironmentVariable(named = "MULTI_PRODUCT_GATEWAY_IT_ROUTED", matches = "true")
-    void sixRealCoresRouteTheirExecutionsThroughOneGatewaySocket() throws Exception {
-        exerciseSixProducts(true);
-    }
-
-    private void exerciseSixProducts(boolean coreRealtime) throws Exception {
+    private void exerciseSixProducts() throws Exception {
         assertThat(get("/api/v1/runtime", null).path("productLines").size()).isEqualTo(6);
         assertThat(get("/actuator/health/readiness", null).path("status").asString()).isEqualTo("UP");
         User user = register("trader"), maker = register("maker");
@@ -105,22 +98,20 @@ class MultiProductGatewayHttpIntegrationTest {
         var feedFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         var socket = new FeedSocket();
         var makerSocket = new FeedSocket();
-        String publicChannel = coreRealtime ? "trades" : "mark";
         try (var prices = new KafkaProducer<String,String>(settings); var feed = Executors.newSingleThreadScheduledExecutor()) {
             for (var market : markets) cores.put(market.line(),new AeronClientPool("multi-product-it",market.line(),List.of("127.0.0.1"),"127.0.0.1",Duration.ofSeconds(5),1));
             socket.connect(user);
-            if (coreRealtime) makerSocket.connect(maker);
+            makerSocket.connect(maker);
             for (var market : markets) {
-                socket.subscribe(publicChannel,market);
+                socket.subscribe("trades",market);
                 socket.subscribe("executionReports",market);
-                if (coreRealtime) makerSocket.subscribe("executionReports",market);
+                makerSocket.subscribe("executionReports",market);
             }
             socket.awaitSubscriptions(12);
-            if (coreRealtime) {
-                makerSocket.awaitSubscriptions(6);
-                socket.awaitReadySnapshots();
-                makerSocket.awaitReadySnapshots();
-            }
+            makerSocket.awaitSubscriptions(6);
+            socket.awaitReadySnapshots();
+            makerSocket.awaitReadySnapshots();
+
             feed.scheduleAtFixedRate(() -> {
                 try { for (var market : markets) prices.send(new ProducerRecord<>(ProductTopicNames.of(market.line()).priceEventsTopic(),market.id(),priceEvent(market))).get(5,TimeUnit.SECONDS); }
                 catch (Throwable failure) { feedFailure.compareAndSet(null,failure); }
@@ -142,14 +133,7 @@ class MultiProductGatewayHttpIntegrationTest {
                 long restingId = resting.path("prospectiveOrderIds").get(0).asLong();
                 var canceled = command(user,market,"/cancel",Map.of("userId",user.id(),"instrumentId",market.id(),"orderId",restingId));
                 assertThat(canceled.path("result").path("status").asString()).isEqualTo("CANCELED");
-                if (!coreRealtime) {
-                    // Kafka 模式从真实撤单回执构造输入；完整 Aeron 模式只消费 Core 产生的事件。
-                    var orderEvent = new com.surprising.trading.api.model.OrderEvent(System.currentTimeMillis(),restingId,
-                            user.id(),market.id(),com.surprising.trading.api.model.OrderEventType.CANCELED,
-                            com.surprising.trading.api.model.OrderStatus.CANCELED,"multi QA",Instant.now());
-                    prices.send(new ProducerRecord<>(ProductTopicNames.of(market.line()).orderEventsTopic(),market.id(),
-                            json.writeValueAsString(orderEvent))).get(5,TimeUnit.SECONDS);
-                }
+
                 command(maker,market,"",order(maker,market,"BUY",market.price(),market.line()!=ProductLine.SPOT));
                 command(user,market,"",order(user,market,"SELL",market.price(),market.line()!=ProductLine.SPOT));
                 for (var actor : List.of(user,maker)) {
@@ -161,19 +145,17 @@ class MultiProductGatewayHttpIntegrationTest {
                 assertThat(combined(core,user,maker)).as("funds conservation "+market.line()).isEqualTo(before);
                 System.out.println("MULTI_GATEWAY_TRADE_PASS productLine="+market.line()+" fundsDifference=0");
             }
-            socket.awaitProducts(publicChannel,EnumSet.allOf(ProductLine.class));
+            socket.awaitProducts("trades",EnumSet.allOf(ProductLine.class));
             socket.awaitProducts("executionReports",EnumSet.allOf(ProductLine.class));
-            if (coreRealtime) {
-                makerSocket.awaitProducts("executionReports", EnumSet.allOf(ProductLine.class));
-                assertThat(socket.events).filteredOn(event -> "executionReports".equals(event.path("channel").asString()))
-                        .allMatch(event -> event.path("userId").asLong() == user.id());
-                assertThat(makerSocket.events).allMatch(event -> event.path("userId").asLong() == maker.id());
-                assertThat(makerSocket.errors).isEmpty();
-            }
+            makerSocket.awaitProducts("executionReports", EnumSet.allOf(ProductLine.class));
+            assertThat(socket.events).filteredOn(event -> "executionReports".equals(event.path("channel").asString()))
+                    .allMatch(event -> event.path("userId").asLong() == user.id());
+            assertThat(makerSocket.events).allMatch(event -> event.path("userId").asLong() == maker.id());
+            assertThat(makerSocket.errors).isEmpty();
+
             assertThat(feedFailure.get()).isNull();
             assertThat(socket.errors).isEmpty();
-            System.out.println("MULTI_GATEWAY_WEBSOCKET_PASS products=6 sockets=1 source="
-                    + (coreRealtime ? "CORE_ROUTER" : "KAFKA_FIXTURE"));
+            System.out.println("MULTI_GATEWAY_WEBSOCKET_PASS products=6 socketsPerUser=1 users=2 source=CORE_ROUTER");
             feed.shutdownNow();
         } finally {
             socket.close();

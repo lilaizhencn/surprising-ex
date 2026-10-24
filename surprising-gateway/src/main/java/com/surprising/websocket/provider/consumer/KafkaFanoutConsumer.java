@@ -6,7 +6,6 @@ import com.surprising.websocket.provider.service.SubscriptionRegistry;
 import com.surprising.websocket.provider.model.TimedPayload;
 
 import lombok.extern.slf4j.Slf4j;
-import com.surprising.account.api.model.PositionUpdatedEvent;
 import com.surprising.candlestick.api.model.CandleUpdatedEvent;
 import com.surprising.product.api.ProductLine;
 import com.surprising.price.api.model.IndexPriceEvent;
@@ -16,9 +15,6 @@ import com.surprising.price.api.model.PriceEventType;
 import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
-import com.surprising.trading.api.model.OrderEvent;
-import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
-import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
 import com.surprising.websocket.api.model.WsChannel;
 import com.surprising.websocket.provider.config.WebSocketProperties;
@@ -38,8 +34,7 @@ import tools.jackson.databind.ObjectMapper;
  * Consumes domain events and pushes them only to clients connected to this node.
  *
  * <p>Each WebSocket node intentionally uses its own Kafka consumer group. Public market data must
- * reach every node for local fanout; private account/order/position events are filtered again by
- * authenticated user subscriptions before leaving the process.</p>
+ * reach every node for local fanout. Private state is delivered by RealtimeWebSocketBridge.</p>
  */
 @Component
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="surprising.realtime.enabled",havingValue="false",matchIfMissing=true)
@@ -204,61 +199,6 @@ public class KafkaFanoutConsumer {
         }
     }
 
-    @KafkaListener(
-            topics = "#{__listener.orderEventsTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
-    public void onOrderEvent(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), orderEventsTopic(), "order event");
-            OrderEvent event = objectMapper.readValue(record.value(), OrderEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "order event");
-            registry.publish(topic(WsChannel.ORDERS, event.instrumentId(), event.userId()), event, event.eventTime());
-            publishExecutionReport(fromOrderEvent(event));
-        } catch (Exception ex) {
-            log.error("Failed to fanout order event: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout order event", ex);
-        }
-    }
-
-    @KafkaListener(
-            topics = "#{__listener.triggerOrderEventsTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
-    public void onTriggerOrderEvent(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), triggerOrderEventsTopic(), "trigger order event");
-            TriggerOrderUpdatedEvent event = objectMapper.readValue(record.value(), TriggerOrderUpdatedEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(
-                    record.key(), event.order().instrumentId(), "trigger order event");
-            if (event.productLine() != properties.getKafka().getProductLine()) {
-                throw new ProductTopicMismatchException("trigger order event product line must match websocket node: "
-                        + "expected=" + properties.getKafka().getProductLine() + " actual=" + event.productLine());
-            }
-            registry.publish(topic(WsChannel.TRIGGER_ORDERS, event.order().instrumentId(), event.order().userId()),
-                    event, event.eventTime());
-        } catch (Exception ex) {
-            log.error("Failed to fanout trigger order event: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout trigger order event", ex);
-        }
-    }
-
-    @KafkaListener(
-            topics = "#{__listener.positionEventsTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
-    public void onPosition(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), positionEventsTopic(), "position update");
-            PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
-            requireMatchingPositionKey(record.key(), event);
-            registry.publish(topic(WsChannel.POSITIONS, event.instrumentId(), event.userId()), event, event.eventTime());
-        } catch (Exception ex) {
-            log.error("Failed to fanout position update: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout position update", ex);
-        }
-    }
-
     public String groupId() {
         return properties.getKafka().getGroupId();
     }
@@ -279,37 +219,11 @@ public class KafkaFanoutConsumer {
         return properties.getKafka().isFundingRateTopicEnabled();
     }
 
-    public String orderEventsTopic() {
-        return properties.getKafka().getOrderEventsTopic();
-    }
-
-    public String triggerOrderEventsTopic() {
-        return properties.getKafka().getTriggerOrderEventsTopic();
-    }
-
-    public String positionEventsTopic() {
-        return properties.getKafka().getPositionEventsTopic();
-    }
-
-    private void requireMatchingPositionKey(String recordKey, PositionUpdatedEvent event) {
-        if (event.productLine() != properties.getKafka().getProductLine()) {
-            throw new IllegalArgumentException("position update product line must match WebSocket provider");
-        }
-        if (!event.partitionKey().equals(recordKey)) {
-            throw new IllegalArgumentException("position update Kafka key must be " + event.partitionKey());
-        }
-    }
-
     private void requireCurrentProductTopic(String topic, String expectedTopic, String streamName) {
         if (!expectedTopic.equals(topic)) {
             throw new ProductTopicMismatchException(streamName + " topic must match current product line: expected="
                     + expectedTopic + " actual=" + topic);
         }
-    }
-
-    private void publishExecutionReport(ExecutionReportEvent report) {
-        registry.publish(topic(WsChannel.EXECUTION_REPORTS, report.instrumentId(), report.userId()),
-                report, report.eventTime());
     }
 
     private SubscriptionTopic topic(WsChannel channel, String instrumentId, Long userId) {
@@ -324,37 +238,6 @@ public class KafkaFanoutConsumer {
         private ProductTopicMismatchException(String message) {
             super(message);
         }
-    }
-
-    private ExecutionReportEvent fromOrderEvent(OrderEvent event) {
-        return new ExecutionReportEvent(
-                "ORDER_EVENT",
-                event.userId(),
-                event.instrumentId(),
-                event.orderId(),
-                null,
-                null,
-                null,
-                null,
-                null,
-                name(event.eventType()),
-                null,
-                name(event.status()),
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                event.reason(),
-                event.eventTime());
-    }
-
-    private String name(Enum<?> value) {
-        return value == null ? null : value.name();
     }
 
     private void addBatch(Map<SubscriptionTopic, List<TimedPayload>> grouped,

@@ -16,8 +16,6 @@ class ProductTopicNamesTest {
 
         assertThat(spot.orderCommandsTopic()).isEqualTo("surprising.spot.order.commands.v1");
         assertThat(linear.orderCommandsTopic()).isEqualTo("surprising.linear-perp.order.commands.v1");
-        assertThat(linear.triggerOrderEventsTopic())
-                .isEqualTo("surprising.linear-perp.trigger-order.events.v1");
         assertThat(inverse.matchTradesTopic()).isEqualTo("surprising.inverse-perp.match.trades.v1");
         assertThat(linear.priceEventsTopic()).isEqualTo("surprising.linear-perp.price.events.v1");
         assertThat(linear.bookTickerTopic()).isEqualTo("surprising.linear-perp.book.ticker.v1");
@@ -28,8 +26,6 @@ class ProductTopicNamesTest {
         assertThat(linear.fundingRateTopic()).isEqualTo("surprising.linear-perp.funding.rate.v1");
         assertThat(linear.coreEventsTopic()).isEqualTo("surprising.linear-perp.core.events.v1");
         assertThat(spot.instrumentEventsTopic()).isEqualTo(ProductTopicNames.INSTRUMENT_EVENTS_TOPIC);
-        assertThat(linear.accountPositionEventsTopic())
-                .isEqualTo("surprising.linear-perp.account.position.events.v1");
         assertThat(linear.accountOpenInterestEventsTopic())
                 .isEqualTo("surprising.linear-perp.account.open-interest.events.v1");
         assertThat(linear.accountLiquidationFeeEventsTopic())

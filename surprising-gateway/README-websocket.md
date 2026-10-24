@@ -53,10 +53,10 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 | `index` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=INDEX_PRICE`) |
 | `mark` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=MARK_PRICE`) |
 | `funding` | 是 | `symbol` | `surprising.linear-perp.funding.rate.v1` |
-| `orders` | 否 | 可选 `symbol` | `surprising.linear-perp.order.events.v1` |
-| `triggerOrders` | 否 | 可选 `symbol` | `surprising.linear-perp.trigger-order.events.v1` |
-| `executionReports` | 否 | 可选 `symbol` | `surprising.linear-perp.order.events.v1` |
-| `positions` | 否 | 可选 `symbol` | `surprising.linear-perp.account.position.events.v1` |
+| `orders` | 否 | 可选 `symbol` | Core `ORDER` 帧，经 Aeron 桥接 |
+| `triggerOrders` | 否 | 可选 `symbol` | Core `TRIGGER` 帧，经 Aeron 桥接 |
+| `executionReports` | 否 | 可选 `symbol` | Core `EXECUTION` 帧，经 Aeron 桥接 |
+| `positions` | 否 | 可选 `symbol` | Core `POSITION` 帧，经 Aeron 桥接 |
 | `positionRisk` | 否 | 可选 `symbol` | Core `RISK` 帧，经 Aeron 桥接 |
 | `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | 同一 Core `RISK` 帧，经 Aeron 桥接 |
 
@@ -64,33 +64,32 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 
 风险更新由启用的`RealtimeWebSocketBridge`发布现有`VersionedEvent(version, entityId, value)`，快照仍包含`positionRisks`，客户端按原版本栅栏维护风险实体。旧Kafka账户/持仓风险事件没有当前生产者，已删除监听器、31字段事件模型及专属topic配置；关闭原生实时通道不会切换到旧风险Kafka投递。风险HTTP查询及真实Core风险值保留。本轮只编译相关模块，未运行推送或UI场景。
 
-`triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
+私有增量沿用`VersionedEvent(version, entityId, value)`。`triggerOrders`的`value`是Core条件单视图列表；客户端保留`PENDING`/`TRIGGERING`，终态移除，并按原版本栅栏处理重复/乱序。重连后先建立现有用户快照。旧订单、条件单、持仓Kafka事件及派生成交报告已删除，没有当前生产者的topic入口、旧版本/修订约束和Redis持仓包装一并清理；Core金融字段及REST模型保留。
 
 ## 持仓推送链路
 
-本机六 JAR 联调中，gateway 的 `RealtimeWebSocketBridge` 按 EXECUTION 和 TRADE 实际二进制帧长度解码；这两类帧不携带 `instrumentChangeId`，不能在解码头部多读 8 字节。修复后 `/ws/v1` 的 `trades`、`executionReports` 与 `accountState` 均随真实撮合更新。客户端订阅后仍应先拉相应 REST 快照，WS 用于后续增量。
+`RealtimeWebSocketBridge`按EXECUTION和TRADE实际二进制帧长度解码；这两类帧不携带`instrumentChangeId`。六产品HTTP集成用例统一等待真实Core推送，保留做市/用户两套订阅、就绪快照、划转守恒、成交/撤单/平仓、预占释放及用户隔离断言，删除手工Kafka撤单事件和旧模式开关。本轮仅编译这些测试源码，没有运行用例。
 
 持仓只能在账户结算后推送：
 
 ```text
-matching trade
-  -> account 消费撮合成交
-  -> account 在一个 DB 事务里更新余额、保证金、PnL、手续费和持仓
-  -> Core Export / account ledger publisher 发送 POSITION_UPDATED 事件
-  -> account position publisher 发送 surprising.linear-perp.account.position.events.v1
-  -> websocket 节点消费事件，并推给匹配的私有订阅
+Matcher 原生成交事实
+  -> 账户 Lane 应用余额、预占、保证金、PnL、手续费和持仓
+  -> Owner 收齐交接并按序提交
+  -> Core 原生 POSITION 帧经 Aeron 路由
+  -> WebSocket 桥接发布版本化增量，用户快照仍从原生读视图建立
 ```
 
 这样前端不会看到从原始撮合结果推导出来、但账户状态还没落定的持仓。
 
-account outbox 是至少一次投递。客户端更新本地状态时应把 `eventId` 和 `tradeId` 当成去重/版本提示。
+客户端按现有`version`与快照栅栏处理重复、乱序和恢复；SQL历史投影不裁决在线持仓。
 
 `positions` 是账户持仓状态频道，不是实时 PnL 计算器。它在账户结算后推送签名数量、开仓均价、已实现盈亏和保证金模式。后端权威的未实现盈亏、权益、维持保证金和保证金率要订阅：
 
 - `positionRisk`：单持仓风险快照，包含 `markPriceTicks`、`notionalUnits`、`unrealizedPnlUnits`、`maintenanceMarginUnits`、`positionMarginUnits`、`marginRatioPpm` 和 `status`。
-- `accountRisk`：`userId + settleAsset` 维度账户风险快照，包含钱包余额、总未实现盈亏、权益、维持保证金、保证金率和状态。
+- `accountRisk`：同一原生持仓风险对象，发往该用户的通配订阅。汇总账户风险通过现有HTTP账户风险接口读取。
 
-前端可以把 `positions` 和公共 `mark` 更新组合起来做更高频的视觉插值，但和爆仓系统一致的权威值来自 risk-provider 的 `positionRisk` / `accountRisk` 事件。
+前端可以把`positions`与公共`mark`组合估值；原生风险值来自Core，生命周期HTTP查询按当前Core快照聚合。
 
 ## 用户状态和节点选择
 
@@ -136,7 +135,6 @@ surprising:
       group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
       concurrency: 2
       max-poll-records: 1000
-      position-events-topic: surprising.linear-perp.account.position.events.v1
     session:
       max-subscriptions: 200
       outbound-queue-capacity: 1000
