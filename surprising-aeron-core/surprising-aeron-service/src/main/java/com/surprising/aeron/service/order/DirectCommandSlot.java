@@ -546,7 +546,7 @@ public final class DirectCommandSlot {
     }
 
     /**
-     * 资金费工作完成后的 Owner 收集步骤，校验状态归属并整理进度和受影响用户。
+     * 资金费工作完成后的 Owner 收集步骤，整理进度和受影响用户。
      */
     private final class FundingControlContinuation implements BooleanSupplier {
         @Override public boolean getAsBoolean() {
@@ -554,9 +554,6 @@ public final class DirectCommandSlot {
             if (!work.poll()) return false;
             // 当前业务工作完成结果或所属 Lane 回执，具体类型见声明
             var result = work.result();
-            if (result.state() != owner.runtimeState()) {
-                throw new IllegalStateException("funding processor replaced authoritative runtime state");
-            }
             owner.requestCommitPublication();
             owner.resultBuilder.commandFundingProgress = result.progress();
             owner.resultBuilder.addChangedUsersFromFundingPayments(result.payments());

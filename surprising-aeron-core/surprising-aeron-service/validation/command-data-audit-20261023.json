@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第五十四轮解决A174–A176：强平步骤12字段减为4个原语回执，删除同次Lane临时输入和重复Lane/阶段；账户控制删除旧修订搬运及重复变化比较。共删除9个续步字段，最终5模块干净编译通过；171解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第五十五轮解决A177–A179：删除资金费列表别名及结果runtime副本/自检查，到期直接保存原UserIndexPage，净减3实例字段。5模块干净编译通过；174解决、A180快照价格序号链确认、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -9623,6 +9623,162 @@
         "implementation": "变化标记直接依据原true回执设置；删除该字段、两次比较和四个内部签名的参数，并迁移两个命令入口及一处测试。DirectCommandSlot和风险扫描的真实修订、余额/逐仓保证金下一修订预检保留。",
         "verification": "最终6份Java源码参与5模块干净编译退出0；该字段与四个旧描述符均无定义/引用；账户实际业务处理器逐字未改，测试断言未改。每种准备操作仅一个真实入口，没有恢复A160的填默认值转发。"
       }
+    },
+    {
+      "status": "resolved",
+      "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
+      "business_code_changed": true,
+      "analysis_round": "fifty_fifth_cleanup_round",
+      "resolved_in_round": "fifty_fifth_cleanup_round",
+      "analysis_status": "typed_business_consumer_audit_cleanup_source_and_compile_verified_runtime_not_executed",
+      "id": "A177",
+      "topic": "资金费工作重复保存用户页中同一个用户列表的字段别名",
+      "fields_or_methods": [
+        "FundingWork.selectedUserIds"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+          "line": 157,
+          "anchor": "private ImmutableLongArrayList selectedUserIds;",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+          "line": 236,
+          "anchor": "selectedUserIds = userPage.userIds();",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        }
+      ],
+      "evidence": "列表始终来自原userPage，单独字段只用于分组和计数；没有独立生命周期或业务修改。",
+      "resolution": {
+        "implementation": "删除别名字段及重置赋值，分组使用局部引用，原同步派发数量及页结果计数直接读userPage.userIds。",
+        "verification": "最终5模块干净编译退出0，字段定义/引用清零；原用户选择、Lane分组、屏障和资金费公式保留。"
+      }
+    },
+    {
+      "status": "resolved",
+      "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
+      "business_code_changed": true,
+      "analysis_round": "fifty_fifth_cleanup_round",
+      "resolved_in_round": "fifty_fifth_cleanup_round",
+      "analysis_status": "typed_business_consumer_audit_cleanup_source_and_compile_verified_runtime_not_executed",
+      "id": "A178",
+      "topic": "资金费结果回传原运行时只用于两处原对象检查和测试取值",
+      "fields_or_methods": [
+        "FundingResult.state",
+        "DirectCommandSlot.FundingControlContinuation中的state身份检查",
+        "PerpetualFundingCommands.complete中的state身份检查"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+          "line": 447,
+          "anchor": "public record FundingResult(TradingAccountRuntime state",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/DirectCommandSlot.java",
+          "line": 557,
+          "anchor": "if (result.state() != owner.runtimeState())",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/command/PerpetualFundingCommands.java",
+          "line": 71,
+          "anchor": "if (result.state() != owner.runtimeState())",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        }
+      ],
+      "evidence": "结果唯一构造点把工作自身runtime原样放入结果，生产state()消费只有入口/完成续步的两次对象同一检查；所有操作都已在传入运行时内完成，无状态替换。测试可以直接核对及续用原实例。",
+      "resolution": {
+        "implementation": "结果由3组件缩为payments/progress两组件，保留明细复制；删除两个自校验及state参数。测试直接读原运行时，扣款封顶场景显式保存原独立投影，资金与进度断言保留。",
+        "verification": "最终编译退出0；state定义/引用和旧三参构造消失，没有新增DTO/框架；测试只编译。"
+      }
+    },
+    {
+      "status": "resolved",
+      "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
+      "business_code_changed": true,
+      "analysis_round": "fifty_fifth_cleanup_round",
+      "resolved_in_round": "fifty_fifth_cleanup_round",
+      "analysis_status": "typed_business_consumer_audit_cleanup_source_and_compile_verified_runtime_not_executed",
+      "id": "A179",
+      "topic": "到期结算续步把已有用户页拆成列表和完成标记保存",
+      "fields_or_methods": [
+        "SettlementWork.selectedUserIds",
+        "SettlementWork.usersComplete"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java",
+          "line": 151,
+          "anchor": "private List<Long> selectedUserIds;",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java",
+          "line": 165,
+          "anchor": "private boolean usersComplete;",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java",
+          "line": 313,
+          "anchor": "selectedUserIds = page.userIds();",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        }
+      ],
+      "evidence": "两项都从UserIndexPage.select返回的同一不可变页取得，后续只读其成员、完成和末尾游标；UserIndexPage已提供这些数据。",
+      "resolution": {
+        "implementation": "使用一个原UserIndexPage引用替代两个字段，不复制列表；订单续页/完成/清理时为空并保持selectedUsers空列表行为，FINAL读取原页完成、数量和续页游标。",
+        "verification": "最终编译退出0，旧字段无残留；逐分支核对选页未发布、仅撤单、保险不足、FINAL、DONE及清理的读页条件。原选择器和财务阶段守卫保持，未运行场景。"
+      }
+    },
+    {
+      "id": "A180",
+      "status": "confirmed",
+      "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
+      "business_code_changed": false,
+      "analysis_round": "fifty_fifth_cleanup_round",
+      "analysis_status": "typed_business_consumers_and_snapshot_chain_confirmed_not_yet_removed",
+      "topic": "资金费固定价格序号仅在运行时/冷状态/快照/哈希中搬运，不参与收付或续页校验",
+      "fields_or_methods": [
+        "FundingWork.fundingPriceSequence",
+        "TreasuryRuntime.FundingProgressRuntime.priceSequence",
+        "CoreTreasuryState.FundingProgress.priceSequence",
+        "资金费快照字段7及价格序号正数约束",
+        "测试FundingProgressSnapshot.priceSequence"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+          "line": 145,
+          "anchor": "private long fundingMark, fundingPriceSequence;",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/TreasuryRuntime.java",
+          "line": 777,
+          "anchor": "long nextCursorUserId, long markPriceTicks, long priceSequence)",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/CoreTreasuryState.java",
+          "line": 289,
+          "anchor": "long nextCursorUserId, long markPriceTicks, long priceSequence)",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 827,
+          "anchor": ".number(7, value.priceSequence()) // 7：参考价格序号",
+          "reference_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6"
+        }
+      ],
+      "evidence": "当前4016 classfile精确类型引用显示：运行时getter仅供资金费工作复制、物化和测试快照构造，冷状态getter仅供哈希、快照写入和恢复；收付公式只用固定markPriceTicks。ApplyFundingCommand与CoreFundingProgressView无该字段。不是将序列化、哈希或getter使用认定为业务必要性。",
+      "proposed_cleanup": "删除整条资金费价格序号复制/存储链及两个正数约束，同步运行时/冷模型、快照写读、哈希、物化/投影、测试快照及构造调用，并更新相应快照版本；保留固定标记价、轮次、费率、游标和其他业务使用的行情序号。旧格式无需读取已获用户确认，不增加兼容入口。",
+      "verification_limit": "仅本轮深入分析及精确类型消费核对，A180尚未修改；需下一批处理快照格式和关联编译，不能声明已删持久化字段。"
     }
   ],
   "preserve_verified_purposes": [
@@ -9640,10 +9796,11 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "继续逐操作区分同次Lane调用内临时输入与真正跨线程的命令/结果；优先核对账户控制、资金费和生命周期续步，不为减少字段新增状态副本或包装框架。",
-    "继续核对命令、执行、提交、快照、SQL和查询字段/约束；跨线程回执、事务预校验、恢复进度和真实查询数据按消费证据保留。",
+    "优先处理A180资金费无业务消费者的价格序号：从工作、运行时/冷进度、哈希、快照写读、投影/物化到测试模型全部清理，更新必要快照版本并编译受影响模块；不保留旧格式读取入口。",
+    "保留实际固定标记价格、轮次、费率、游标，以及风险/强平/触发使用的行情序号；不要按同名字段全局删除。",
+    "继续核对各业务命令、Lane/账本、提交、快照、SQL及查询字段的实际消费者和约束目的。",
     "A11继续候选，明确领导者读、提交水位和会话语义前不删QUERY路由。",
-    "仍只编译相关模块，未运行测试、真实交易及恢复不得宣称通过。"
+    "仍只编译相关模块；未运行测试、真实交易及恢复不得宣称通过。"
   ],
   "rejected_false_positives": [
     {
@@ -9718,7 +9875,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "cleanup_compile_verified; followup_operation_input_lifetime_analysis_in_progress; runtime_verification_not_executed; overall_audit_in_progress",
+  "analysis_round_status": "cleanup_compile_verified; followup_A180_persisted_funding_sequence_confirmed; runtime_verification_not_executed; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -9940,14 +10097,16 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "fab06d36c450ecc8a77198a1f03193c5115d2345",
-    "status": "cleanup_compile_verified_followup_operation_input_lifetime_analysis_continues",
+    "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
+    "status": "cleanup_compile_verified_followup_funding_persisted_sequence_confirmed",
     "resolved_ids": [
-      "A174",
-      "A175",
-      "A176"
+      "A177",
+      "A178",
+      "A179"
     ],
-    "confirmed_ids": [],
+    "confirmed_ids": [
+      "A180"
+    ],
     "candidate_ids": [
       "A11"
     ],
@@ -9958,11 +10117,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 171,
+      "resolved": 174,
       "candidate": 1,
-      "retained": 4
+      "retained": 4,
+      "confirmed": 1
     },
-    "evidence": "fifty_fourth_cleanup_round",
+    "evidence": "fifty_fifth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -12067,6 +12227,33 @@
         "retained": 4
       },
       "evidence": "fifty_third_cleanup_round",
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "fab06d36c450ecc8a77198a1f03193c5115d2345",
+      "status": "cleanup_compile_verified_followup_operation_input_lifetime_analysis_continues",
+      "resolved_ids": [
+        "A174",
+        "A175",
+        "A176"
+      ],
+      "confirmed_ids": [],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 171,
+        "candidate": 1,
+        "retained": 4
+      },
+      "evidence": "fifty_fourth_cleanup_round",
       "overall_audit_completed": false
     }
   ],
@@ -37478,6 +37665,356 @@
           "path": "/tmp/aeron-liquidation-stage-cleanup-20261024-verify.py",
           "bytes": 9205,
           "sha256": "b806affa5f6786afbb08c99c261f40572479c42f2e030d5231cba4c43bdb1ad7"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "fifty_fifth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
+    "resolved_ids": [
+      "A177",
+      "A178",
+      "A179"
+    ],
+    "newly_found_and_resolved_ids": [
+      "A177",
+      "A178",
+      "A179"
+    ],
+    "new_confirmed_ids": [
+      "A180"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 174,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "report": "surprising-aeron-core/surprising-aeron-service/validation/deep-code-cleanup-20261024-round55.md",
+    "previous_goal_turn_classification": {
+      "classification": "progress",
+      "reason": "90ddbc0d7实际解决A174–A176，强平12字段减至4个原语回执，删除账户控制修订副本，最终5模块编译、证据归档并推送。"
+    },
+    "implementation": {
+      "old_fields_removed": 4,
+      "existing_page_reference_fields_added": 1,
+      "net_instance_fields_removed": 3,
+      "funding_result_components_before": 3,
+      "funding_result_components_after": 2,
+      "two_input_identity_self_checks_removed": true,
+      "two_unused_test_uuid_locals_removed": true,
+      "persisted_fields_changed": false,
+      "command_layout_changed": false,
+      "snapshot_layout_changed": false,
+      "http_contract_changed": false,
+      "new_state_copy_allocation_or_index_scan": false
+    },
+    "verification": {
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 22.032,
+      "source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java": "85cff790611e9c03c2b82e02581dd143adafe3a09686d5dabcd86b9a63002002",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/command/PerpetualFundingCommands.java": "3a448303ebab0122bef88d600f6cc0d3babe9851f78baeb259d06a998aa6f8b8",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/DirectCommandSlot.java": "b0412025c56bc22081140531800e36cd965d8d47414f361e90c4f678cdae19cd",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java": "8829345359a6c4d1c90e7a4235ab46d158b93fb481150075b4b4d7ed24c928d4",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLifecycleStateTest.java": "93c19bef0e64970b216ed0d16fb2f61354025e6bbdd054a42083198b9022ad73"
+      },
+      "log_sha256": "859e84b4b2273d374c1b352995f7b7c238f36584d0a38a5bd0a5505255c43384",
+      "tests_executed": false,
+      "sql_executed": false
+    },
+    "static_verification": {
+      "classfile_count": 4016,
+      "major_versions": {
+        "71": 4016
+      },
+      "compiled_java_source_count": 5,
+      "compiled_source_hashes_match": true,
+      "removed_four_old_field_definitions_and_references_absent": true,
+      "funding_result_two_components_and_old_constructor_absent": true,
+      "net_instance_field_reduction": 3,
+      "all_production_source_only_expected_transformations": true,
+      "funding_account_math_body_unchanged": true,
+      "lifecycle_financial_phases_insurance_and_guards_unchanged_except_page_access": true,
+      "user_page_selection_and_persisted_model_codecs_unchanged": true,
+      "page_lifecycle_audit": {
+        "more_orders": "userPage空，仅走ORDER_PROGRESS，账本及Owner均不读用户页；selectedUsers返回空列表。",
+        "user_final": "moreOrders为false时账本必定调用原UserIndexPage.select，FINAL读取前usersReady及账本/账户完成位已交接。",
+        "completed_or_cleared": "DONE无需执行FINAL，selectedUsers仍返回空列表。",
+        "cursor_equivalence": "UserIndexPage.select只有额外观察到后页时complete=false，nextCursor恒为已选最后用户；空页complete=true。"
+      },
+      "test_financial_assertions_and_same_runtime_continuation_preserved": true,
+      "two_unused_test_uuid_locals_removed": true,
+      "protected_source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/UserIndexPage.java": "99e6238f9e09e025f787fbaf9ae7c116042ba3d3f6eeaf4d5983a4571603f7fa",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/TreasuryRuntime.java": "fe145c966df0206003cd2f4f6723abbdf7da98a877855863b62fd809118da658",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/CoreTreasuryState.java": "901861562b9169c882d8b17888d2628585eec43e101c805f6a27ba719d7d72af",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "0050eb67729ce12504cb840bf04e51a801dde9173f792bddb582f321492f30ef",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "78decba533a6c585cf24f5d945a8edc55055af5aa0b1149c3d6c0cbf57d6c59d",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java": "147e02c999439765d6269f512de7e408e41329321d45ab3a05dfe4d22905b024",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java": "bed0a9d2c48e2c79fa05a33fe684f7c8a0f763bd35c75ec17c4d0e094423eb1f",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java": "25116726de6b68369f32e2feaa7d756d83f4d8c72b13b96a6b9b2be4cc9f1baa",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/RuntimeAccountRollback.java": "24e758124f2ccc8123738bd479951fc69858133832289e4ffa8bc6c83aec7d12",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java": "780a82d5608413a2ac8b566f93792e2e2e07020dc8fc970f1eec07e0d5cc6037",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java": "87d37a358793f25b6f7cadda060f91dc4ce283bed3c9c5604e8c60580dca3b6b"
+      },
+      "reactor_module_count": 5,
+      "tests_executed": false,
+      "runtime_recovery_verified": false,
+      "final_source_and_evidence_integrity_check_passed": true
+    },
+    "evidence": {
+      "source_basis_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java": "73b92931fdef42699d7910afaf9de5e016a5b92dd9ca63fccc7905e2cd1c6caa",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java": "f0997c1c1acb28a01e8359a68bf5219369a5950ec755a3e82088b9e8855ce6db",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/DirectCommandSlot.java": "e0efe36998cd796ec0c79a29cca3b006747583f4e230d08d52af80d657daff76",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/command/PerpetualFundingCommands.java": "b92fa98b2cd2fece0335c80aca54d4c7b2bbbcd258bba59e664ea64b158846a0",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLifecycleStateTest.java": "3811d521d492704726741b1274b4642b142caedf1e8fd1902128925cef9b5f48"
+      },
+      "funding_typed_refs_before": [
+        {
+          "caller": "com/surprising/aeron/service/order/DirectCommandSlot$FundingControlContinuation",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingResult",
+          "name": "state",
+          "descriptor": "()Lcom/surprising/aeron/service/core/TradingAccountRuntime;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingWork",
+          "name": "selectedUserIds",
+          "descriptor": "Lcom/surprising/aeron/support/collection/ImmutableLongArrayList;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingResult",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingResult",
+          "name": "state",
+          "descriptor": "Lcom/surprising/aeron/service/core/TradingAccountRuntime;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingWork",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingWork",
+          "name": "selectedUserIds",
+          "descriptor": "Lcom/surprising/aeron/support/collection/ImmutableLongArrayList;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingWork",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingResult",
+          "name": "<init>",
+          "descriptor": "(Lcom/surprising/aeron/service/core/TradingAccountRuntime;Ljava/util/List;Lcom/surprising/aeron/protocol/CoreFundingProgressView;)V"
+        },
+        {
+          "caller": "com/surprising/aeron/service/funding/command/PerpetualFundingCommands",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingResult",
+          "name": "state",
+          "descriptor": "()Lcom/surprising/aeron/service/core/TradingAccountRuntime;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/CoreLifecycleStateTest",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingResult",
+          "name": "state",
+          "descriptor": "()Lcom/surprising/aeron/service/core/TradingAccountRuntime;"
+        }
+      ],
+      "lifecycle_typed_refs_before": [
+        {
+          "caller": "com/surprising/aeron/service/order/CommandSlot$SettlementControlContinuation",
+          "owner": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork",
+          "name": "selectedUsers",
+          "descriptor": "()Ljava/util/List;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork",
+          "owner": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork",
+          "name": "selectedUserIds",
+          "descriptor": "Ljava/util/List;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork",
+          "owner": "com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation$SettlementWork",
+          "name": "usersComplete",
+          "descriptor": "Z"
+        }
+      ]
+    },
+    "followup_scan": {
+      "confirmed_ids": [
+        "A180"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "funding_sequence_typed_refs": [
+        {
+          "caller": "com/surprising/aeron/model/TradingCoreState",
+          "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+          "name": "priceSequence",
+          "descriptor": "()J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+          "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+          "name": "priceSequence",
+          "descriptor": "()J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+          "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+          "name": "priceSequence",
+          "descriptor": "()J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/snapshot/state/RuntimeStateProjector",
+          "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+          "name": "priceSequence",
+          "descriptor": "()J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+          "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+          "name": "priceSequence",
+          "descriptor": "J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+          "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+          "name": "priceSequence",
+          "descriptor": "J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor",
+          "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+          "name": "priceSequence",
+          "descriptor": "()J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot$FundingProgressSnapshot",
+          "owner": "com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot$FundingProgressSnapshot",
+          "name": "priceSequence",
+          "descriptor": "J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/RuntimeSnapshotBuilder",
+          "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+          "name": "priceSequence",
+          "descriptor": "()J"
+        }
+      ],
+      "preserved_purposes": [
+        "资金费固定标记价参与实际收付，必须保留。",
+        "资金费和到期的轮次、费率及双游标用于实际续页校验与恢复，必须保留。",
+        "usersReady/Queued及账户/账本完成标记用于安全发布、避免重复投递和重复结算，不能按布尔字段多删除。",
+        "到期用户页仍交给CommandSlot.SettlementControlContinuation消费，selectedUsers接口与借用生命周期保留。"
+      ],
+      "overall_audit_completed": false
+    },
+    "previous_latest_analysis_round": {
+      "date": "2026-10-24",
+      "source_basis_commit": "fab06d36c450ecc8a77198a1f03193c5115d2345",
+      "status": "cleanup_compile_verified_followup_operation_input_lifetime_analysis_continues",
+      "resolved_ids": [
+        "A174",
+        "A175",
+        "A176"
+      ],
+      "confirmed_ids": [],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 171,
+        "candidate": 1,
+        "retained": 4
+      },
+      "evidence": "fifty_fourth_cleanup_round",
+      "overall_audit_completed": false
+    },
+    "limits": "只执行5个相关模块生产/测试源码编译和静态核对；未运行测试、SQL、服务、Aeron/Kafka、交易、恢复、UI或性能工具，不声明全功能、资金恢复或性能通过。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-funding-lifecycle-cleanup-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-before.json",
+          "bytes": 180205,
+          "sha256": "f940629ea92bba44982c37f0410daa6254788816cf1a925702067928189666cc"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-build.json",
+          "bytes": 1361,
+          "sha256": "02b5da12e6630e4be8505b739cdac53ddbb55cc19b3880040f60ba7f43b4a454"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-build.log",
+          "bytes": 10443,
+          "sha256": "859e84b4b2273d374c1b352995f7b7c238f36584d0a38a5bd0a5505255c43384"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-build.py",
+          "bytes": 1114,
+          "sha256": "ff9bd4c2d470e4e308f93647c06668a29417a54d18c16bfe293ab4901bc820e3"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-classfiles.py",
+          "bytes": 1549,
+          "sha256": "ba83956ee271b3acf2d6b2d5487db7043cd3797bb8df7ef1a3de25023226b622"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-finalize.py",
+          "bytes": 1929,
+          "sha256": "7f805db7ad874069986ae5ec380032b25751f811352c0e796f903ad91e1db07a"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-funding-refs.json",
+          "bytes": 2316,
+          "sha256": "aad47d144def5849a83535b2ac603b843e881976964c4952203fb2f508b44242"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-lifecycle-refs.json",
+          "bytes": 913,
+          "sha256": "29c9b02587e3f3a0b8b664dc4de8c5184069d99fcb6bf4a745c3180473ba58f8"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-progress-sequence-scan.json",
+          "bytes": 2155,
+          "sha256": "bf563f8d2b7f6d8584cf2bd6552b8e86a7c7033994684faab08966e6c26cf693"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-record.py",
+          "bytes": 10568,
+          "sha256": "5580aebb39683131601f18e5715d618af84be6f901ee3c8e4ae62ba9f64124ee"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-static.json",
+          "bytes": 3621,
+          "sha256": "953716fbfecb4e5b482ef6340db665418b4178f787f1b4fbafbbf880676b3b2b"
+        },
+        {
+          "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-verify.py",
+          "bytes": 10958,
+          "sha256": "feeda8c13d9bcd428a927e8d48f7663124b1c089019ade0af02e37d1858da6c9"
         }
       ],
       "compiler_outputs_retained": true,

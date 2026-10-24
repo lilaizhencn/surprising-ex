@@ -32,7 +32,7 @@ public final class RuntimePerpetualFundingProcessor {
     /**
      * 仅在 System Ledger 未激活时准备并同步执行各 Lane 资金费，合并财库和结果。在线账本已激活时拒绝此入口，改由 FundingWork.poll 分次推进。
      * @param command 资金费结算编号、费率及用户分页参数
-     * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
+     * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
      * @param runtime 产品线和账户数据的原权威运行时
      * @param identities 币对及结算资产内部编号映射
      */
@@ -43,7 +43,7 @@ public final class RuntimePerpetualFundingProcessor {
         // 当前页同步资金费工作对象。
         FundingWork work = prepare(command, indexedUserIds, runtime, identities);
         // 同步执行各账户 Lane 后取得的回执数组。
-        Object[] results = runtime.executeLifecycleSettlements(work.laneMask, work.selectedUserIds.size(),
+        Object[] results = runtime.executeLifecycleSettlements(work.laneMask, work.userPage.userIds().size(),
                 work::applyLane);
         return work.finish(results);
     }
@@ -51,7 +51,7 @@ public final class RuntimePerpetualFundingProcessor {
     /**
      * 校验当前资金费请求并创建工作对象，尚不表示账户与账本已经结算完成。
      * @param command 资金费结算编号、费率及用户分页参数
-     * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
+     * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
      * @param runtime 产品线和账户数据的原权威运行时
      * @param identities 币对及结算资产内部编号映射
      */
@@ -64,7 +64,7 @@ public final class RuntimePerpetualFundingProcessor {
      * 在 Owner 上核对永续产品、币对维护状态、标记价、递增结算编号及分页参数。续页沿用进度中固定的标记价和序号，并要求同一币对配置对象、费率和游标；可回收对象优先重置复用。与到期结算不同，已完成的同编号资金费也会按过期编号拒绝。
      * @param reuse 可选旧工作对象，满足继承的 reusable 条件时复用
      * @param command 资金费结算编号、费率及用户分页参数
-     * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
+     * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
      * @param runtime 产品线和账户数据的原权威运行时
      * @param identities 币对及结算资产内部编号映射
      */
@@ -153,8 +153,6 @@ public final class RuntimePerpetualFundingProcessor {
         private boolean usersQueued;
         /** 复用的账本选页任务，调用时不读取接口传入的财库参数。 */
         private final SystemLedgerLane.Entry userInput = /* 账本选页接口传入的财库参数，此任务只读取用户索引。 */ ignored -> selectAccountUsers();
-        /** 本页按全局顺序选中的只读原语用户列表。 */
-        private ImmutableLongArrayList selectedUserIds;
         /** 本页含有用户的账户 Lane 位图。 */
         private long laneMask;
         /** 按实际账户归属划分的用户列表，重置保留容量。 */
@@ -184,7 +182,7 @@ public final class RuntimePerpetualFundingProcessor {
          * @param settleAssetId 结算资产内部编号
          * @param fundingMark 本轮固定标记价
          * @param fundingPriceSequence 该固定标记价的价格序号
-         * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
+         * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
          */
         private FundingWork(ApplyFundingCommand command, TradingAccountRuntime runtime,
                 CoreInstrument instrument, int symbolId, int settleAssetId, long fundingMark,
@@ -202,7 +200,7 @@ public final class RuntimePerpetualFundingProcessor {
          * @param settleAssetId 结算资产内部编号
          * @param fundingMark 本轮固定标记价
          * @param fundingPriceSequence 该固定标记价的价格序号
-         * @param indexedUserIds 按全局用户编号递增且不重复的索引来源；apply 允许空时用旧状态用户集合
+         * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
          */
         private FundingWork reset(ApplyFundingCommand command,
                 TradingAccountRuntime runtime, CoreInstrument instrument, int symbolId,
@@ -212,7 +210,7 @@ public final class RuntimePerpetualFundingProcessor {
             this.command = command;
             this.instrument = instrument; this.symbolId = symbolId; this.settleAssetId = settleAssetId;
             this.fundingMark = fundingMark; this.fundingPriceSequence = fundingPriceSequence;
-            this.indexedUserIds = indexedUserIds; userPage = null; selectedUserIds = null;
+            this.indexedUserIds = indexedUserIds; userPage = null;
             usersReady = usersQueued = false;
             if (usersByLane == null || usersByLane.length != runtime.topology().accountLaneCount()) {
                 usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
@@ -233,7 +231,7 @@ public final class RuntimePerpetualFundingProcessor {
          */
         private void selectAccountUsers() {
             userPage = UserIndexPage.select(indexedUserIds, command.cursorUserId(), command.maxUsers());
-            selectedUserIds = userPage.userIds();
+            ImmutableLongArrayList selectedUserIds = userPage.userIds();
             for (/* 本页原语用户列表的读取下标。 */ int index = 0; index < selectedUserIds.size(); index++) {
                 // 当前选中的全局用户编号。
                 long user = selectedUserIds.valueAt(index);
@@ -342,8 +340,8 @@ public final class RuntimePerpetualFundingProcessor {
             // 非分页或已读到用户末尾时，整轮资金费才可登记完成。
             boolean complete = userPage.complete();
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-            return new FundingResult(runtime, payments, new CoreFundingProgressView(command.settlementId(), complete,
-                    complete ? 0 : userPage.nextCursorUserId(), selectedUserIds.size()));
+            return new FundingResult(payments, new CoreFundingProgressView(command.settlementId(), complete,
+                    complete ? 0 : userPage.nextCursorUserId(), userPage.userIds().size()));
         }
     }
 
@@ -439,18 +437,17 @@ public final class RuntimePerpetualFundingProcessor {
     }
 
     /**
-     * 本页资金费结果：原运行时引用、只读明细副本及全局分页进度。列表固定不表示运行时也不可变。
-     * @param state 保留原身份的权威运行时引用，不是状态快照
+     * 本页资金费结果：只读明细副本及全局分页进度；账户与财库已在原运行时内应用。
      * @param payments 按用户和持仓记录的有符号实际收付明细，结果构造器会复制列表
      * @param progress 本页结束时是否整轮完成及下一用户游标
      */
-    public record FundingResult(TradingAccountRuntime state, List<CoreFundingPaymentView> payments,
+    public record FundingResult(List<CoreFundingPaymentView> payments,
                                 CoreFundingProgressView progress) {
         /**
-         * 要求原运行时、明细和进度非空，并复制明细列表形成只读结果；运行时对象本身仍为原可变权威状态。
+         * 要求明细和进度非空，并复制明细列表形成只读结果。
          */
         public FundingResult {
-            if (state == null || payments == null || progress == null) {
+            if (payments == null || progress == null) {
                 throw new IllegalArgumentException("invalid runtime funding result");
             }
             payments = List.copyOf(payments);
@@ -459,7 +456,7 @@ public final class RuntimePerpetualFundingProcessor {
 
     /**
      * 单个账户 Lane 的收付明细、实际余额变化用户和财库差额；Lane 完成后才交给 Owner 与账本消费。
-     * @param payments 按用户和持仓记录的有符号实际收付明细，结果构造器会复制列表
+     * @param payments 本 Lane 构建的实际收付明细，完成后不再修改
      * @param changedUserIds 实际发生非零余额变化并推进修订号的用户编号
      * @param treasuryDelta 实际账户资金变化的反向财库差额
      */

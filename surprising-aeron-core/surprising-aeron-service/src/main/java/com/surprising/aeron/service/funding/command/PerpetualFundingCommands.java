@@ -33,7 +33,7 @@ public final class PerpetualFundingCommands {
     }
 
     /**
-     * 解码资金费参数并取得全局游标之后的持仓用户索引；在线模式复用工作对象后交给 directCommand 轮询，回放模式同步结算、填写结果并通知观察者。clusterTimestamp 当前不参与资金费计算。
+     * 解码资金费参数并取得全局游标之后的持仓用户索引；在线模式复用工作对象后交给 directCommand 轮询，回放模式同步结算、填写结果并通知观察者。
      * @param message 已路由到本产品线的资金费命令及其 UUID
      */
     public void executeApplyFunding(CoreMessage message) {
@@ -64,13 +64,10 @@ public final class PerpetualFundingCommands {
     }
 
     /**
-     * 要求结果仍引用原权威运行时，再请求提交发布、保存资金费进度，并把收付明细涉及的用户加入结果变化集合。
+     * 请求提交发布、保存资金费进度，并把收付明细涉及的用户加入结果变化集合。
      * @param result 已经应用账户和财库的本页资金费结果
      */
     private void complete(RuntimePerpetualFundingProcessor.FundingResult result) {
-        if (result.state() != owner.runtimeState()) {
-            throw new IllegalStateException("funding processor replaced authoritative runtime state");
-        }
         owner.requestCommitPublication();
         owner.resultBuilder.commandFundingProgress = result.progress();
         owner.resultBuilder.addChangedUsersFromFundingPayments(result.payments());

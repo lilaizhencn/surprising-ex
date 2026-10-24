@@ -147,8 +147,8 @@ public final class RuntimeLifecycleSettlementContinuation {
         private List<CancellationOrder> selectedOrders;
         /** 本订单页后是否仍有活动订单，有则本页不结算持仓。 */
         private boolean moreOrders;
-        /** 账本选出的本页全局用户列表，发布 usersReady 后供 Owner 和 Lane 读取。 */
-        private List<Long> selectedUserIds;
+        /** 账本选出的全局用户页及续页信息；本页仅撤单或已完成时为空。 */
+        private UserIndexPage userPage;
         /** 等待账本消费的用户索引来源，完成选页后释放引用。 */
         private Iterable<Long> indexedUserIds;
         /** 用户页和分组已经准备好的跨线程发布标记，Owner 读取后才继续派发账户。 */
@@ -161,8 +161,6 @@ public final class RuntimeLifecycleSettlementContinuation {
         private final LongArrayList[] usersByLane;
         /** 账户侧撤单路由分组，具体列表按需分配并在后续页复用。 */
         private final ArrayList<CancellationOrder>[] ordersByLane;
-        /** 全局用户索引本页是否已经读到末尾，不等于账户已应用。 */
-        private boolean usersComplete;
         /** 本页含有待撤订单的账户 Lane 位图。 */
         private long orderLaneMask;
         /** 本页含有待检查用户的账户 Lane 位图。 */
@@ -227,11 +225,10 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.command = null;
             this.instrument = null; this.kernel = null;
             this.symbolId = this.assetId = 0; this.selectedOrders = List.of();
-            this.moreOrders = false; this.selectedUserIds = List.of();
+            this.moreOrders = false; this.userPage = null;
             this.usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
             for (/* 当前分组数组的 Lane 下标。 */ int lane = 0; lane < usersByLane.length; lane++) usersByLane[lane] = new LongArrayList();
             this.ordersByLane = (ArrayList<CancellationOrder>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
-            this.usersComplete = true;
             this.orderLaneMask = this.userLaneMask = 0; this.phase = Phase.DONE; this.result = result;
             this.dispatchedPhase = null;
         }
@@ -269,10 +266,9 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.command = command;
             this.instrument = instrument; this.kernel = kernel; this.symbolId = symbolId; this.assetId = assetId;
             this.selectedOrders = selectedOrders;
-            this.moreOrders = moreOrders; this.selectedUserIds = List.of();
+            this.moreOrders = moreOrders; this.userPage = null;
             this.indexedUserIds = indexedUserIds;
             usersReady = usersQueued = false;
-            this.usersComplete = false;
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> /* 当前 Lane 可复用的撤单列表，未分配时为空。 */ orders : ordersByLane) if (orders != null) orders.clear();
             for (CancellationOrder /* 本页要按用户路由归组的撤单记录。 */ order : selectedOrders) {
@@ -306,13 +302,9 @@ public final class RuntimeLifecycleSettlementContinuation {
          * 由账本线程读取用户索引并按账户 Lane 分组；账本未激活时由初始化路径内联调用。订单仍有下一页时不选择持仓用户，最后发布 usersReady 并唤醒 Owner。
          */
         private void selectAccountUsers() {
-            selectedUserIds = List.of();
-            usersComplete = true;
-            if (!moreOrders) {
-                UserIndexPage page = UserIndexPage.select(indexedUserIds, command.cursorUserId(), command.maxUsers());
-                selectedUserIds = page.userIds();
-                usersComplete = page.complete();
-            }
+            userPage = moreOrders ? null
+                    : UserIndexPage.select(indexedUserIds, command.cursorUserId(), command.maxUsers());
+            List<Long> selectedUserIds = userPage == null ? List.of() : userPage.userIds();
             for (long /* 本次账本选页得到的用户编号。 */ user : selectedUserIds) usersByLane[runtime.topology().accountLaneId(user)].add(user);
             userLaneMask = RuntimeLifecycleSettlement.laneMask(usersByLane);
             indexedUserIds = null;
@@ -327,7 +319,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          */
         public List<Long> selectedUsers() {
             if (!usersReady) throw new IllegalStateException("Ledger settlement routes are incomplete");
-            return selectedUserIds;
+            return userPage == null ? List.of() : userPage.userIds();
         }
 
         /**
@@ -340,8 +332,8 @@ public final class RuntimeLifecycleSettlementContinuation {
             initializeLedgerCommand(runtime);
             this.command = null;
             this.instrument = null; this.kernel = null; this.symbolId = this.assetId = 0;
-            this.selectedOrders = List.of(); this.selectedUserIds = List.of();
-            this.moreOrders = false; this.usersComplete = true; this.orderLaneMask = this.userLaneMask = 0;
+            this.selectedOrders = List.of(); this.userPage = null;
+            this.moreOrders = false; this.orderLaneMask = this.userLaneMask = 0;
             indexedUserIds = null; usersReady = true; usersQueued = false;
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> /* 当前 Lane 可复用的撤单列表，未分配时为空。 */ orders : ordersByLane) if (orders != null) orders.clear();
@@ -359,7 +351,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             if (usersQueued && !usersReady) return;
             indexedUserIds = null;
             command = null;  instrument = null; kernel = null;
-            selectedOrders = List.of(); selectedUserIds = List.of();
+            selectedOrders = List.of(); userPage = null;
             result = null; phase = Phase.DONE;
             dispatchedPhase = null;
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
@@ -456,9 +448,9 @@ public final class RuntimeLifecycleSettlementContinuation {
                                 nextOrderCursor, 0, selectedOrders.size(), 0);
                     else {
                         // 本用户页已读到索引末尾或为空，从而可登记整个结算完成。
-                        boolean complete = usersComplete || selectedUserIds.isEmpty();
+                        boolean complete = userPage.complete() || userPage.userIds().isEmpty();
                         result = new CoreSettlementProgressView(command.settlementId(), complete, true,
-                                0, complete ? 0 : selectedUserIds.getLast(), selectedOrders.size(), selectedUserIds.size());
+                                0, complete ? 0 : userPage.nextCursorUserId(), selectedOrders.size(), userPage.userIds().size());
                     }
                     phase = Phase.DONE;
                     return true;
@@ -543,9 +535,9 @@ public final class RuntimeLifecycleSettlementContinuation {
             for (RuntimeTreasuryDelta /* 某个账户 Lane 实际应用后交来的清算差额。 */ delta : financialResults) if (delta != null) treasuryDelta.merge(delta);
             treasuryDelta.apply(ledger);
             // 本用户页已读到索引末尾或为空，从而可登记整个结算完成。
-            boolean complete = usersComplete || selectedUserIds.isEmpty();
+            boolean complete = userPage.complete() || userPage.userIds().isEmpty();
             if (complete) ledger.setLifecycleSettlement(symbolId, command.settlementId());
-            else ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, selectedUserIds.getLast(), 0));
+            else ledger.setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.settlementPriceTicks(), true, 0, userPage.nextCursorUserId(), 0));
         }
 
         /**

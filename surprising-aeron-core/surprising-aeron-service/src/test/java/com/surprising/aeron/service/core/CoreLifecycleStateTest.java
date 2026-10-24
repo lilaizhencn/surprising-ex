@@ -224,7 +224,7 @@ class CoreLifecycleStateTest {
         TradingAccountRuntime netZeroRuntime = RuntimeStateProjector.project(netZero, netZeroIdentities);
         // 实际运行时资金费入口返回的等额收付结果。
         var netZeroActual = RuntimeTestStateTransitions.applyFundingRuntime(netZero, netZeroCommand, null, netZeroRuntime, netZeroIdentities);
-        RuntimeStateParityChecker.assertMatches(netZeroExpected.state(), netZeroIdentities, netZeroActual.state());
+        RuntimeStateParityChecker.assertMatches(netZeroExpected.state(), netZeroIdentities, netZeroRuntime);
         assertThat(netZeroActual.payments()).isEqualTo(netZeroExpected.payments());
         assertThat(netZeroActual.progress()).isEqualTo(netZeroExpected.progress());
 
@@ -239,15 +239,14 @@ class CoreLifecycleStateTest {
         RuntimeTestStateTransitions.FundingApplication cappedExpected = reducer.applyFundingWithFacts(capped, cappedCommand);
         // 扣款封顶运行时模拟及状态对照共用的身份表。
         RuntimeIdentityRegistry cappedIdentities = new RuntimeIdentityRegistry();
-        // 独立运行时模拟器返回的扣款封顶结果。
-        var cappedActual = RuntimePerpetualFundingFixture.simulate(capped, cappedCommand, null, cappedIdentities);
-        RuntimeStateParityChecker.assertMatches(cappedExpected.state(), cappedIdentities, cappedActual.state());
+        // 独立投影出的扣款封顶运行时及本页收付结果。
+        TradingAccountRuntime cappedRuntime = RuntimeStateProjector.project(capped, cappedIdentities);
+        var cappedActual = RuntimeTestStateTransitions.applyFundingRuntime(capped, cappedCommand, null, cappedRuntime, cappedIdentities);
+        RuntimeStateParityChecker.assertMatches(cappedExpected.state(), cappedIdentities, cappedRuntime);
         assertThat(cappedActual.payments()).isEqualTo(cappedExpected.payments());
 
         // 沿用等量反向持仓构造的分页资金费前置状态。
         TradingCoreState chunked = netZero;
-        // 第一页写进财库进度的固定命令 UUID。
-        UUID firstCommandId = UUID.fromString("00000000-0000-0000-0000-000000000101");
         // 当前资金费或到期结算首个用户页命令，用户游标为零且每页一人。
         ApplyFundingCommand firstCommand = new ApplyFundingCommand(103, "1", 10_000, 0, 1);
         // 辅助状态推进器得到的第一页期望状态、明细和游标。
@@ -257,17 +256,15 @@ class CoreLifecycleStateTest {
         RuntimeIdentityRegistry chunkedIdentities = new RuntimeIdentityRegistry();
         // 第一页建立并继续用于第二页的可变权威运行时。
         TradingAccountRuntime chunkedRuntime = RuntimeStateProjector.project(chunked, chunkedIdentities);
-        // 实际运行时第一页结果，后续继续使用其中原运行时引用。
+        // 实际运行时第一页结果，后续继续使用同一份chunkedRuntime。
         var firstActual = RuntimeTestStateTransitions.applyFundingRuntime(chunked, firstCommand, List.of(1L, 2L), chunkedRuntime, chunkedIdentities);
-        RuntimeStateParityChecker.assertMatches(firstExpected.state(), chunkedIdentities, firstActual.state());
+        RuntimeStateParityChecker.assertMatches(firstExpected.state(), chunkedIdentities, chunkedRuntime);
         assertThat(firstActual.payments()).isEqualTo(firstExpected.payments());
         assertThat(firstActual.progress()).isEqualTo(firstExpected.progress());
 
         // 当前状态经内存快照编码再解码得到的只读恢复值。
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(firstExpected.state()), ProductLine.LINEAR_PERPETUAL);
-        // 第二页不同于第一页的命令 UUID。
-        UUID secondCommandId = UUID.fromString("00000000-0000-0000-0000-000000000102");
         // 沿用同结算编号及第一页返回用户游标的续页命令。
         ApplyFundingCommand secondCommand = new ApplyFundingCommand(103, "1", 10_000, 1, 1);
         // 辅助状态推进器从恢复状态得到的第二页期望结果。
@@ -277,9 +274,9 @@ class CoreLifecycleStateTest {
         var secondActual = RuntimeTestStateTransitions.applyFundingRuntime(restored,
                 secondCommand,
                 List.of(1L, 2L),
-                firstActual.state(),
+                chunkedRuntime,
                 chunkedIdentities);
-        RuntimeStateParityChecker.assertMatches(secondExpected.state(), chunkedIdentities, secondActual.state());
+        RuntimeStateParityChecker.assertMatches(secondExpected.state(), chunkedIdentities, chunkedRuntime);
         assertThat(secondActual.payments()).isEqualTo(secondExpected.payments());
         assertThat(secondActual.progress()).isEqualTo(secondExpected.progress());
     }
