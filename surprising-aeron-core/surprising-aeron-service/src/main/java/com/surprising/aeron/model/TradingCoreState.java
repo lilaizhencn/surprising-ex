@@ -434,7 +434,6 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, progress.settlementId());
             hash = CoreStateHash.mix(hash, progress.fundingRatePpm());
             hash = CoreStateHash.mix(hash, progress.markPriceTicks());
-            hash = CoreStateHash.mix(hash, progress.priceSequence());
             hash = CoreStateHash.mix(hash, progress.nextCursorUserId());
         }
         hash = CoreStateHash.mix(hash, "treasuryLifecycleSettlement");

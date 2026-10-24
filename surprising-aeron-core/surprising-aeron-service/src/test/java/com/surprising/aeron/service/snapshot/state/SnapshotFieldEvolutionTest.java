@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
@@ -69,6 +70,34 @@ class SnapshotFieldEvolutionTest {
             assertThatThrownBy(() -> TradingStateSnapshotCodec.decode(changed, ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("unsupported trading snapshot version");
         }
+    }
+
+    /** 资金费快照只保存实际续页参数，恢复后四项值与业务哈希保持一致。 */
+    @Test
+    void fundingProgressStoresOnlySettlementRateCursorAndFixedPrice() {
+        var progress = new CoreTreasuryState.FundingProgress(11, 100, 41, 60_000);
+        var treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
+                Map.of("1", progress));
+        var empty = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        var state = new TradingCoreState(empty.productLine(), 0, empty.users(), empty.orders(),
+                empty.instruments(), empty.riskState(), treasury);
+        byte[] encoded = TradingStateSnapshotCodec.encode(state);
+        assertThat(ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt()).isEqualTo(55);
+        var root = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, Integer.BYTES, encoded.length));
+        var savedTreasury = new SnapshotFields.Reader(root.bytes(7));
+        var entries = new SnapshotFields.Reader(savedTreasury.bytes(10))
+                .list(1, SnapshotFields.Reader::new);
+        assertThat(entries).hasSize(1);
+        var entry = entries.getFirst();
+        assertThat(new SnapshotFields.Reader(entry.bytes(1)).text(1)).isEqualTo("1");
+        byte[] saved = entry.bytes(2);
+        assertThat(saved).hasSize(64);
+        assertThat(split(saved)).extracting(SnapshotFieldEvolutionTest::id)
+                .containsExactlyInAnyOrder(1, 2, 4, 6);
+        var restored = TradingStateSnapshotCodec.decode(encoded, state.productLine());
+        assertThat(restored.treasuryState().fundingProgress("1")).isEqualTo(progress);
+        assertThat(restored).isEqualTo(state);
+        assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
     }
 
     /**

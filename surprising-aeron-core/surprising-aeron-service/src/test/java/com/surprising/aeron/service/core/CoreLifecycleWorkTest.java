@@ -137,7 +137,7 @@ class CoreLifecycleWorkTest {
                 Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4);
         // 保存预设资金费用户游标和到期撤单游标的财库状态。
         CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of("1", new CoreTreasuryState.FundingProgress(11, 100, 41, 60_000, 9)),
+                Map.of("1", new CoreTreasuryState.FundingProgress(11, 100, 41, 60_000)),
                 Map.of("1", new CoreTreasuryState.LifecycleProgress(12, 60_000, false, 91, 0, 0)));
         // 用上述币对、风险及财库组装的旧交易状态，供恢复入口投影。
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,

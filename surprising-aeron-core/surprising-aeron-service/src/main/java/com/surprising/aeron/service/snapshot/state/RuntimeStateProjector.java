@@ -106,11 +106,11 @@ public final class RuntimeStateProjector {
                 runtime.treasury().setClearingPnl(identities.assetId(asset), units));
         source.treasuryState().fundingSettlements().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 该币对已经完整完成的资金费或生命周期结算编号。 */ settlementId) ->
                 runtime.treasury().setFundingSettlement(identities.symbolId(instrumentId), settlementId));
-        source.treasuryState().fundingProgress().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 当前币对尚未完成的分页进度，连同固定计算参数及命令 UUID 恢复。 */ progress) ->
+        source.treasuryState().fundingProgress().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 当前币对尚未完成的分页进度，连同固定计算参数恢复。 */ progress) ->
                 runtime.treasury().setFundingProgress(identities.symbolId(instrumentId),
                         new TreasuryRuntime.FundingProgressRuntime(progress.settlementId(),
                                 requireInstrument(source, instrumentId), progress.fundingRatePpm(),
-                                progress.nextCursorUserId(), progress.markPriceTicks(), progress.priceSequence())));
+                                progress.nextCursorUserId(), progress.markPriceTicks())));
         source.treasuryState().lifecycleSettlements().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 该币对已经完整完成的资金费或生命周期结算编号。 */ settlementId) ->
                 runtime.treasury().setLifecycleSettlement(identities.symbolId(instrumentId), settlementId));
         source.treasuryState().lifecycleProgress().forEach((/* 当前结算进度所属币对名称。 */ instrumentId, /* 该币对固定计算参数及续页进度。 */ progress) -> {

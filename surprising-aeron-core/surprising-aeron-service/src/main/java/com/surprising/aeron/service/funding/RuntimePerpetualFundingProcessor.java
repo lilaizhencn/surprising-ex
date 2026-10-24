@@ -61,7 +61,7 @@ public final class RuntimePerpetualFundingProcessor {
     }
 
     /**
-     * 在 Owner 上核对永续产品、币对维护状态、标记价、递增结算编号及分页参数。续页沿用进度中固定的标记价和序号，并要求同一币对配置对象、费率和游标；可回收对象优先重置复用。与到期结算不同，已完成的同编号资金费也会按过期编号拒绝。
+     * 在 Owner 上核对永续产品、币对维护状态、标记价、递增结算编号及分页参数。续页沿用进度中固定的标记价，并要求同一币对配置对象、费率和游标；可回收对象优先重置复用。与到期结算不同，已完成的同编号资金费也会按过期编号拒绝。
      * @param reuse 可选旧工作对象，满足继承的 reusable 条件时复用
      * @param command 资金费结算编号、费率及用户分页参数
      * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
@@ -107,8 +107,6 @@ public final class RuntimePerpetualFundingProcessor {
         TreasuryRuntime.FundingProgressRuntime previousProgress = runtime.treasury().fundingProgress(symbolId);
         // 首轮取当前标记价，续页取进度中原固定价。
         long fundingMark = previousProgress == null ? mark.markPriceTicks() : previousProgress.markPriceTicks();
-        // 与固定标记价配对的原价格序号。
-        long fundingPriceSequence = previousProgress == null ? mark.priceSequence() : previousProgress.priceSequence();
         if (previousProgress == null && command.cursorUserId() != 0) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
         }
@@ -120,9 +118,9 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         if (reuse == null || !reuse.reusable()) return new FundingWork(command, runtime, instrument, symbolId,
-                settleAssetId, fundingMark, fundingPriceSequence, indexedUserIds);
+                settleAssetId, fundingMark, indexedUserIds);
         return reuse.reset(command, runtime, instrument, symbolId, settleAssetId,
-                fundingMark, fundingPriceSequence, indexedUserIds);
+                fundingMark, indexedUserIds);
     }
 
     /**
@@ -138,11 +136,8 @@ public final class RuntimePerpetualFundingProcessor {
          * settleAssetId：结算资产内部编号。
          */
         private int symbolId, settleAssetId;
-        /**
-         * fundingMark：本轮固定标记价；续页采用已保存进度中的价格。
-         * fundingPriceSequence：固定标记价对应的价格序号，与续页进度一起保存。
-         */
-        private long fundingMark, fundingPriceSequence;
+        /** 本轮固定标记价；续页采用已保存进度中的价格。 */
+        private long fundingMark;
         /** 账本选出的全局用户页与后续游标。 */
         private UserIndexPage userPage;
         /** 等待账本选页的持仓用户索引来源，完成后释放引用。 */
@@ -181,14 +176,13 @@ public final class RuntimePerpetualFundingProcessor {
          * @param symbolId 币对内部编号
          * @param settleAssetId 结算资产内部编号
          * @param fundingMark 本轮固定标记价
-         * @param fundingPriceSequence 该固定标记价的价格序号
          * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
          */
         private FundingWork(ApplyFundingCommand command, TradingAccountRuntime runtime,
                 CoreInstrument instrument, int symbolId, int settleAssetId, long fundingMark,
-                long fundingPriceSequence, Iterable<Long> indexedUserIds) {
+                Iterable<Long> indexedUserIds) {
             reset(command, runtime, instrument, symbolId, settleAssetId,
-                    fundingMark, fundingPriceSequence, indexedUserIds);
+                    fundingMark, indexedUserIds);
         }
 
         /**
@@ -199,17 +193,16 @@ public final class RuntimePerpetualFundingProcessor {
          * @param symbolId 币对内部编号
          * @param settleAssetId 结算资产内部编号
          * @param fundingMark 本轮固定标记价
-         * @param fundingPriceSequence 该固定标记价的价格序号
          * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
          */
         private FundingWork reset(ApplyFundingCommand command,
                 TradingAccountRuntime runtime, CoreInstrument instrument, int symbolId,
-                int settleAssetId, long fundingMark, long fundingPriceSequence, Iterable<Long> indexedUserIds) {
+                int settleAssetId, long fundingMark, Iterable<Long> indexedUserIds) {
             if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns funding routes");
             initializeLedgerCommand(runtime);
             this.command = command;
             this.instrument = instrument; this.symbolId = symbolId; this.settleAssetId = settleAssetId;
-            this.fundingMark = fundingMark; this.fundingPriceSequence = fundingPriceSequence;
+            this.fundingMark = fundingMark;
             this.indexedUserIds = indexedUserIds; userPage = null;
             usersReady = usersQueued = false;
             if (usersByLane == null || usersByLane.length != runtime.topology().accountLaneCount()) {
@@ -329,7 +322,7 @@ public final class RuntimePerpetualFundingProcessor {
             treasuryDelta.apply(ledger);
             if (userPage.complete()) ledger.setFundingSettlement(symbolId, command.settlementId());
             else ledger.setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(command.settlementId(),
-                    instrument, command.fundingRatePpm(), userPage.nextCursorUserId(), fundingMark, fundingPriceSequence));
+                    instrument, command.fundingRatePpm(), userPage.nextCursorUserId(), fundingMark));
             payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));
         }
 

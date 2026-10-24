@@ -130,7 +130,7 @@ public final class RuntimeSnapshotBuilder {
         Map<Integer, TradingRuntimeSnapshot.FundingProgressSnapshot> fundingProgress = new TreeMap<>();
         state.treasury().fundingProgresses().forEachKeyValue((/* 当前行情、风控或生命周期进度对应的品种编号。 */ symbolId, /* 当前资金费或到期结算的运行进度，按对应集合逐字段投影。 */ progress) -> fundingProgress.put(symbolId,
                 new TradingRuntimeSnapshot.FundingProgressSnapshot(progress.settlementId(), progress.fundingRatePpm(),
-                        progress.nextCursorUserId(), progress.markPriceTicks(), progress.priceSequence())));
+                        progress.nextCursorUserId(), progress.markPriceTicks())));
         // 按品种保存的已完成到期/行权批次标记。
         Map<Integer, Long> lifecycleSettlements = new TreeMap<>();
         state.treasury().lifecycleSettlements().forEachKeyValue(lifecycleSettlements::put);

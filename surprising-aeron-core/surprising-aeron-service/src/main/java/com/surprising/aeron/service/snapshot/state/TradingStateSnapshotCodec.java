@@ -34,13 +34,13 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * 交易状态的独立持久化格式。新快照外层版本四十八，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
- * 构造约定：工具类不创建实例；当前写版本四十八，历史布局不再接受。
+ * 交易状态的独立持久化格式。新快照外层版本五十五，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
+ * 构造约定：工具类不创建实例；当前写版本五十五，历史布局不再接受。
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 54;
+    private static final int VERSION = 55;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -815,7 +815,7 @@ public final class TradingStateSnapshotCodec {
     }
 
     /**
-     * 按固定字段编号写入资金费续页进度，保存轮次、费率、用户游标、命令 UUID 和本轮固定标记价/序号；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
+     * 按固定字段编号写入资金费续页进度，只保存轮次、费率、用户游标和本轮固定标记价。
      * @param value 当前要写入的资金费续页进度业务值
      */
     private static byte[] writeFundingProgress(FundingProgress value) {
@@ -824,21 +824,19 @@ public final class TradingStateSnapshotCodec {
                 .number(2, value.fundingRatePpm()) // 2：本轮资金费率，百万分比
                 .number(4, value.nextCursorUserId()) // 4：资金费或到期结算下一页用户游标
                 .number(6, value.markPriceTicks()) // 6：标记价格
-                .number(7, value.priceSequence()) // 7：参考价格序号
                 .encode();
     }
     /**
-     * 按固定字段编号读取并构造资金费续页进度，恢复轮次、费率、用户游标、命令 UUID 和本轮固定标记价/序号；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
+     * 按固定字段编号读取资金费续页进度的轮次、费率、用户游标和固定标记价；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前资金费续页进度的独立字段记录字节
      */
     private static FundingProgress readFundingProgress(byte[] encoded) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
         return new FundingProgress(r.number(1), // 1：资金费或到期结算轮次编号
-                r.number(2), // 3：账户 Lane 的分页位置
-                r.number(4), // 5：原业务命令 UUID
-                r.number(6), // 6：标记价格
-                r.number(7)); // 7：参考价格序号
+                r.number(2), // 2：本轮资金费率，百万分比
+                r.number(4), // 4：下一页用户游标
+                r.number(6)); // 6：固定标记价格
     }
 
     /**

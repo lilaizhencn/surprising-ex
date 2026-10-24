@@ -284,12 +284,12 @@ public record CoreTreasuryState(
         }
     }
 
-    /** 资金费续页的固定费率、用户游标和价格证据。 */
+    /** 资金费续页的固定费率、用户游标和计算价格。 */
     public record FundingProgress(long settlementId, long fundingRatePpm,
-            long nextCursorUserId, long markPriceTicks, long priceSequence) {
+            long nextCursorUserId, long markPriceTicks) {
         public FundingProgress {
             if (settlementId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
-                    || nextCursorUserId < 0 || markPriceTicks <= 0 || priceSequence <= 0) {
+                    || nextCursorUserId < 0 || markPriceTicks <= 0) {
                 throw new IllegalArgumentException("invalid funding progress");
             }
         }

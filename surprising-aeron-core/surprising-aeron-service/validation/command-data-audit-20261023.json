@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第五十五轮解决A177–A179：删除资金费列表别名及结果runtime副本/自检查，到期直接保存原UserIndexPage，净减3实例字段。5模块干净编译通过；174解决、A180快照价格序号链确认、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第五十六轮整链删除A180资金费价格序号及正数约束：运行时/冷模型、工作、哈希、快照写读、物化/恢复和测试全部同步；交易快照v55。17模块干净编译通过；175解决、A181续页当前行情约束确认、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -9737,11 +9737,11 @@
     },
     {
       "id": "A180",
-      "status": "confirmed",
+      "status": "resolved",
       "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "analysis_round": "fifty_fifth_cleanup_round",
-      "analysis_status": "typed_business_consumers_and_snapshot_chain_confirmed_not_yet_removed",
+      "analysis_status": "entire_funding_sequence_storage_chain_removed_source_and_compile_verified_runtime_not_executed",
       "topic": "资金费固定价格序号仅在运行时/冷状态/快照/哈希中搬运，不参与收付或续页校验",
       "fields_or_methods": [
         "FundingWork.fundingPriceSequence",
@@ -9778,7 +9778,41 @@
       ],
       "evidence": "当前4016 classfile精确类型引用显示：运行时getter仅供资金费工作复制、物化和测试快照构造，冷状态getter仅供哈希、快照写入和恢复；收付公式只用固定markPriceTicks。ApplyFundingCommand与CoreFundingProgressView无该字段。不是将序列化、哈希或getter使用认定为业务必要性。",
       "proposed_cleanup": "删除整条资金费价格序号复制/存储链及两个正数约束，同步运行时/冷模型、快照写读、哈希、物化/投影、测试快照及构造调用，并更新相应快照版本；保留固定标记价、轮次、费率、游标和其他业务使用的行情序号。旧格式无需读取已获用户确认，不增加兼容入口。",
-      "verification_limit": "仅本轮深入分析及精确类型消费核对，A180尚未修改；需下一批处理快照格式和关联编译，不能声明已删持久化字段。"
+      "verification_limit": "仅本轮深入分析及精确类型消费核对，A180尚未修改；需下一批处理快照格式和关联编译，不能声明已删持久化字段。",
+      "resolved_in_round": "fifty_sixth_cleanup_round",
+      "resolution": {
+        "implementation": "删除FundingWork及运行时/冷进度、测试快照的4份价格序号，清理参数、构造、两个生产/一个测试正数约束、业务哈希、物化/投影和快照字段7；交易快照v55仅接受当前布局。固定价格、轮次、费率、游标及配置身份检查保留。",
+        "verification": "17个相关模块clean test-compile退出0，15份源码哈希匹配；4016 classfile无旧字段/访问器/三个旧构造签名。新增字段结构及回读/哈希用例只编译，未运行测试或恢复。"
+      }
+    },
+    {
+      "id": "A181",
+      "status": "confirmed",
+      "source_basis_commit": "9bdf0e5324d8a99259f26384a02a61564a1ac3ae",
+      "business_code_changed": false,
+      "analysis_round": "fifty_sixth_cleanup_round",
+      "analysis_status": "first_page_and_resume_price_lifetimes_distinguished_constraint_not_yet_removed",
+      "topic": "资金费续页只用已保存固定价格，却仍无条件要求当前行情存在",
+      "fields_or_methods": [
+        "RuntimePerpetualFundingProcessor.prepare的无条件markPrice读取/缺价拒绝"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+          "line": 92,
+          "anchor": "// 当前运行时标记价，即使续页使用原固定价也要求其存在。",
+          "reference_basis_commit": "9bdf0e5324d8a99259f26384a02a61564a1ac3ae"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+          "line": 109,
+          "anchor": "long fundingMark = previousProgress == null ? mark.markPriceTicks() : previousProgress.markPriceTicks();",
+          "reference_basis_commit": "9bdf0e5324d8a99259f26384a02a61564a1ac3ae"
+        }
+      ],
+      "evidence": "A180删除后，当前行情只在previousProgress为空的首轮取得计算价格；续页只消费进度中已校验为正的markPriceTicks，无价格序号对比或其他计算依赖这份当前mark，但入口仍先无条件拒绝缺失当前行情。",
+      "proposed_cleanup": "准备阶段先取已有进度，只有首轮读取并要求当前mark；续页直接使用原固定价格，保持首轮MARK_PRICE_NOT_FOUND拒绝及其错误优先级、旧结算号、费率/游标、配置身份和产品/维护守卫。增加相应场景源码并只编译相关模块。",
+      "verification_limit": "本轮只确认约束生命周期及下一步范围，未改该判断；缺当前行情但有合法固定进度的续页场景尚未实现或执行。"
     }
   ],
   "preserve_verified_purposes": [
@@ -9796,11 +9830,11 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "优先处理A180资金费无业务消费者的价格序号：从工作、运行时/冷进度、哈希、快照写读、投影/物化到测试模型全部清理，更新必要快照版本并编译受影响模块；不保留旧格式读取入口。",
-    "保留实际固定标记价格、轮次、费率、游标，以及风险/强平/触发使用的行情序号；不要按同名字段全局删除。",
-    "继续核对各业务命令、Lane/账本、提交、快照、SQL及查询字段的实际消费者和约束目的。",
+    "处理A181：资金费已有合法固定进度时不再要求当前mark存在，首轮仍读取并要求mark；保持原首轮拒绝优先级及其他续页匹配/资金守卫，补相应场景源码并只编译相关模块。",
+    "继续逐业务操作核对命令输入、Lane和账本状态、提交、快照、SQL及查询消费；同名行情序号按实际Owner/类型区分，不全局删除。",
+    "固定计算价格、轮次、费率、游标、幂等、溢出和恢复语义继续保留；旧日志/快照格式无需读取的用户确认持续有效，不增加兼容层。",
     "A11继续候选，明确领导者读、提交水位和会话语义前不删QUERY路由。",
-    "仍只编译相关模块；未运行测试、真实交易及恢复不得宣称通过。"
+    "只编译相关模块，未运行测试、交易及恢复不得宣称通过。"
   ],
   "rejected_false_positives": [
     {
@@ -9875,7 +9909,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "cleanup_compile_verified; followup_A180_persisted_funding_sequence_confirmed; runtime_verification_not_executed; overall_audit_in_progress",
+  "analysis_round_status": "cleanup_compile_verified; followup_A181_resume_mark_constraint_confirmed; runtime_verification_not_executed; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -10097,15 +10131,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
-    "status": "cleanup_compile_verified_followup_funding_persisted_sequence_confirmed",
+    "source_basis_commit": "9bdf0e5324d8a99259f26384a02a61564a1ac3ae",
+    "status": "snapshot_chain_cleanup_compile_verified_followup_resume_mark_constraint_confirmed",
     "resolved_ids": [
-      "A177",
-      "A178",
-      "A179"
+      "A180"
     ],
     "confirmed_ids": [
-      "A180"
+      "A181"
     ],
     "candidate_ids": [
       "A11"
@@ -10117,12 +10149,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 174,
+      "resolved": 175,
       "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "fifty_fifth_cleanup_round",
+    "evidence": "fifty_sixth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -12254,6 +12286,36 @@
         "retained": 4
       },
       "evidence": "fifty_fourth_cleanup_round",
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
+      "status": "cleanup_compile_verified_followup_funding_persisted_sequence_confirmed",
+      "resolved_ids": [
+        "A177",
+        "A178",
+        "A179"
+      ],
+      "confirmed_ids": [
+        "A180"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 174,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "evidence": "fifty_fifth_cleanup_round",
       "overall_audit_completed": false
     }
   ],
@@ -38015,6 +38077,475 @@
           "path": "/tmp/aeron-funding-lifecycle-cleanup-20261024-verify.py",
           "bytes": 10958,
           "sha256": "feeda8c13d9bcd428a927e8d48f7663124b1c089019ade0af02e37d1858da6c9"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "fifty_sixth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "9bdf0e5324d8a99259f26384a02a61564a1ac3ae",
+    "resolved_ids": [
+      "A180"
+    ],
+    "newly_found_and_resolved_ids": [],
+    "new_confirmed_ids": [
+      "A181"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 175,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "report": "surprising-aeron-core/surprising-aeron-service/validation/deep-code-cleanup-20261024-round56.md",
+    "previous_goal_turn_classification": {
+      "classification": "progress",
+      "reason": "9bdf0e532实际解决A177–A179并完成5模块编译和推送；继续发现A180快照价格序号没有业务消费，改变下一步为整链删除。"
+    },
+    "interruption_revalidation": "用户中断后git仅保留原两项工具删除，15份源码基线哈希全部匹配，未存在待接续Maven进程；随后继续实施。",
+    "implementation": {
+      "removed_fields": [
+        "FundingWork.fundingPriceSequence",
+        "FundingProgressRuntime.priceSequence",
+        "CoreTreasuryState.FundingProgress.priceSequence",
+        "测试FundingProgressSnapshot.priceSequence"
+      ],
+      "production_progress_components": {
+        "runtime_before": 6,
+        "runtime_after": 5,
+        "cold_before": 5,
+        "cold_after": 4
+      },
+      "snapshot_record_fields": [
+        1,
+        2,
+        4,
+        6
+      ],
+      "snapshot_version_before": 54,
+      "snapshot_version_after": 55,
+      "protocol_schema": 16,
+      "sectioned_envelope_version": 30,
+      "removed_numeric_constraints": {
+        "production": 2,
+        "test": 1
+      },
+      "business_hash_changed": true,
+      "persisted_layout_changed": true,
+      "command_layout_changed": false,
+      "http_contract_changed": false,
+      "legacy_reader_added": false,
+      "performance_claim": false
+    },
+    "verification": {
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 64.204,
+      "source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "42fa8716c15ba555658086a4a8308514361a05987aced5905a6a1cb292920848",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java": "ebf34b04457c55b409f43ac0544c41c527198287e237477e1107b9cd004bb810",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java": "5038d542444c3de58394e9504851557710a4500e8c96947bd8fe8bc977adc45d",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java": "b5d45f252feedcd8445a9257f2750f3abeac94e2d3b9b93fe7078548073c197d",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "57ab93f5e60f4cdfd558234a8186d398e8a230eaaabe567a89f32760c00849dc",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/CoreTreasuryState.java": "9bf07b2890b984c44eeba4bf602e87f9a08a47fc735bb973ca7aec994b7cd1ad",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/TreasuryRuntime.java": "b8e74039da49fb92ad8555ff73133e35cc4a26c5084d88cc2d31cae545c946d9",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/AdmissionSettlementFactTest.java": "bb51f5f4d04b01c82b040319d133c4c2b68dfcc15aec2162377cb7c6fac7a812",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLifecycleWorkTest.java": "6e6589de8f923ce49c4138f1392d9362bfbaec773a891a79dfd8f7c101ca05b4",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.java": "26d329e6a44afe3e8e217aef2e7cf59b2203120c7815e7cd1e1b791f1b3d3de8",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TreasuryProgressOwnershipTest.java": "ba9f4993802a7542f49f26ed02e9b1b6ae8ae473066e8651c28fb42d039d1a84",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/snapshot/state/SnapshotFieldEvolutionTest.java": "6e145541b006b08b2c4932fa0236de48f44f554ac2d283d7067b13a95f53e6b5",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot.java": "615a4556b005003957e12d340a09975db93854ec0367b3cc75f477a551fc2fab",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/treasury/RuntimeTreasuryDeltaTest.java": "9253dd9220810f6bcc4a2785c21d787884d109deee57295f77f93fd72b955bb1",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/treasury/SystemLedgerControlTest.java": "de341de80e3430b7591fa71e712f329a7093431ed71f7d5d67d42e5fe767a308"
+      },
+      "log_sha256": "7da2ccad810b186b607b10a06ab448cb743b450619fb186090b9efc198ba8077",
+      "tests_executed": false,
+      "sql_executed": false
+    },
+    "static_verification": {
+      "classfile_count": 4016,
+      "major_versions": {
+        "71": 4016
+      },
+      "compiled_java_source_count": 15,
+      "compiled_source_hashes_match": true,
+      "removed_work_field_and_three_record_fields_accessors_old_constructors_absent": true,
+      "remaining_record_fields": {
+        "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime": [
+          "settlementId",
+          "instrument",
+          "fundingRatePpm",
+          "nextCursorUserId",
+          "markPriceTicks"
+        ],
+        "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress": [
+          "settlementId",
+          "fundingRatePpm",
+          "nextCursorUserId",
+          "markPriceTicks"
+        ],
+        "com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot$FundingProgressSnapshot": [
+          "settlementId",
+          "fundingRatePpm",
+          "nextCursorUserId",
+          "markPriceTicks"
+        ]
+      },
+      "funding_math_body_unchanged": true,
+      "funding_and_treasury_only_expected_sequence_removal": true,
+      "other_business_state_hash_source_unchanged": true,
+      "projection_materialization_and_fixture_only_expected_removal": true,
+      "snapshot_fields_write_and_read": [
+        1,
+        2,
+        4,
+        6
+      ],
+      "snapshot_version": 55,
+      "strict_current_version_only": true,
+      "record_encoded_size_from_source": {
+        "before": 80,
+        "after": 64,
+        "bytes_removed": 16,
+        "basis": "SnapshotFields每项8字节字段头+8字节long；静态推导，未执行编码。"
+      },
+      "test_added": "fundingProgressStoresOnlySettlementRateCursorAndFixedPrice，仅编译；既有旧版本拒绝用例按当前版本减1覆盖v54。",
+      "protected_source_sha256": {
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreProtocol.java": "3742412429af89edd83cf406828118edf86d2041e779bc7932d7ac8992395dd0",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/ApplyFundingCommand.java": "7d6106a34aba3f3f313579ab7e5ad7dbda0a6678034475898c8ca2900b83cfd9",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreFundingProgressView.java": "af32fdfd022c46243d44e3e33ffdd9873e046e925d9e489f7dc2ea226bb2b94e",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/TradingCommandCodec.java": "2e51c631aa62353a5564ad44ebbd17cbce3ebdc612e708a919c3ed83bcbabf23",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java": "25116726de6b68369f32e2feaa7d756d83f4d8c72b13b96a6b9b2be4cc9f1baa",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/SnapshotFields.java": "994a72f5e36009ed0532fa55c7e10053a6c764668533aee89bb77e0e3dceaafb",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/market/MarkPriceRuntime.java": "4a24c48a09091d9c3d4d22c62c5d75a094a2bfaef6172f5390bfddce6a198d5c",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreMarkPriceState.java": "9528365b9a7a1f1263100147c8a9febc88f31506b55d31f6865af1bd02541d23",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java": "4636f2dc476e5551833ebd24f73e8b92a08ea59c0beb899cec98a93f505767f1",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java": "8f450dc97dd21aad6273e753a62938778997188be9a3d31dd996c2aff07caa87",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java": "e1896233bd89f42b9f86322a5ecff094d41b05d977a6d150cb1aea4b8127fcc7",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/RuntimeAccountRollback.java": "24e758124f2ccc8123738bd479951fc69858133832289e4ffa8bc6c83aec7d12",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java": "780a82d5608413a2ac8b566f93792e2e2e07020dc8fc970f1eec07e0d5cc6037"
+      },
+      "reactor_module_count": 17,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-aeron-tools",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-maker",
+        "surprising-realtime-api",
+        "surprising-price-provider",
+        "surprising-aeron-benchmarks",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-realtime-provider",
+        "surprising-gateway"
+      ],
+      "tests_executed": false,
+      "runtime_recovery_verified": false,
+      "final_source_and_evidence_integrity_check_passed": true
+    },
+    "evidence": {
+      "initial_typed_refs": {
+        "classfile_count": 4016,
+        "refs": [
+          {
+            "caller": "com/surprising/aeron/model/TradingCoreState",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "name": "priceSequence",
+            "descriptor": "()J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "name": "priceSequence",
+            "descriptor": "()J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "name": "<init>",
+            "descriptor": "(JJJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "priceSequence",
+            "descriptor": "()J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "name": "<init>",
+            "descriptor": "(JJJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/snapshot/state/RuntimeStateProjector",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "name": "priceSequence",
+            "descriptor": "()J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/snapshot/state/RuntimeStateProjector",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "<init>",
+            "descriptor": "(JLcom/surprising/aeron/service/instrument/CoreInstrument;JJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime.class",
+            "tag": 9,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "priceSequence",
+            "descriptor": "J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress.class",
+            "tag": 9,
+            "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "name": "priceSequence",
+            "descriptor": "J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "priceSequence",
+            "descriptor": "()J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingWork",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor$FundingWork.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "<init>",
+            "descriptor": "(JLcom/surprising/aeron/service/instrument/CoreInstrument;JJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot$FundingProgressSnapshot",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot$FundingProgressSnapshot.class",
+            "tag": 9,
+            "owner": "com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot$FundingProgressSnapshot",
+            "name": "priceSequence",
+            "descriptor": "J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/core/AdmissionSettlementFactTest",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/AdmissionSettlementFactTest.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "<init>",
+            "descriptor": "(JLcom/surprising/aeron/service/instrument/CoreInstrument;JJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/core/TreasuryProgressOwnershipTest",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TreasuryProgressOwnershipTest.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "<init>",
+            "descriptor": "(JLcom/surprising/aeron/service/instrument/CoreInstrument;JJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/core/CoreLifecycleWorkTest",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleWorkTest.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "name": "<init>",
+            "descriptor": "(JJJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/core/RuntimeSnapshotBuilder",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "priceSequence",
+            "descriptor": "()J"
+          },
+          {
+            "caller": "com/surprising/aeron/service/core/RuntimeSnapshotBuilder",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot$FundingProgressSnapshot",
+            "name": "<init>",
+            "descriptor": "(JJJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/treasury/SystemLedgerControlTest",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/treasury/SystemLedgerControlTest.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/TreasuryRuntime$FundingProgressRuntime",
+            "name": "<init>",
+            "descriptor": "(JLcom/surprising/aeron/service/instrument/CoreInstrument;JJJJ)V"
+          },
+          {
+            "caller": "com/surprising/aeron/service/treasury/RuntimeTreasuryDeltaTest",
+            "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/treasury/RuntimeTreasuryDeltaTest.class",
+            "tag": 10,
+            "owner": "com/surprising/aeron/service/treasury/CoreTreasuryState$FundingProgress",
+            "name": "<init>",
+            "descriptor": "(JJJJJ)V"
+          }
+        ]
+      },
+      "source_basis_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java": "85cff790611e9c03c2b82e02581dd143adafe3a09686d5dabcd86b9a63002002",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/TreasuryRuntime.java": "fe145c966df0206003cd2f4f6723abbdf7da98a877855863b62fd809118da658",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/CoreTreasuryState.java": "901861562b9169c882d8b17888d2628585eec43e101c805f6a27ba719d7d72af",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "0050eb67729ce12504cb840bf04e51a801dde9173f792bddb582f321492f30ef",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "78decba533a6c585cf24f5d945a8edc55055af5aa0b1149c3d6c0cbf57d6c59d",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java": "bed0a9d2c48e2c79fa05a33fe684f7c8a0f763bd35c75ec17c4d0e094423eb1f",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java": "147e02c999439765d6269f512de7e408e41329321d45ab3a05dfe4d22905b024",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot.java": "60e712e3249515058cefe6f919d10508648c91a283dd7ab9b940b942d2c2fb6b",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.java": "ae4c5dcdae35bad82ff85583f9416f3dc55133269db9fcf10cb9d2ca84692d77",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/AdmissionSettlementFactTest.java": "1e85cda9ec119acec4508a2c6c4f66fa65f97907e67d048a71e832ca6229eb87",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TreasuryProgressOwnershipTest.java": "5542adfa7b3ed7ebfee28e942d1498243e79c9a8fcb98d7d11bcd6d247a03612",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLifecycleWorkTest.java": "6566f550d20753cb6d0c41fb3735eaa832ce5f3eaf56ae10b65d1d37feb6df50",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/treasury/SystemLedgerControlTest.java": "3560c2ba4340310233f2216d3db5cb1cb1adff2b5acecaf91e49ca607698eaad",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/treasury/RuntimeTreasuryDeltaTest.java": "c8925c6ce9758ce79b32e1d643092719a739f12af63de553bcfc72d60b02dde5",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/snapshot/state/SnapshotFieldEvolutionTest.java": "1bb8135bbf4519875b2d5795af8309dc198df6073ea2ceb884fe2b86b7351839"
+      },
+      "service_reverse_dependents": {
+        "modules": [
+          "surprising-aeron-core/surprising-aeron-benchmarks",
+          "surprising-aeron-core/surprising-aeron-service",
+          "surprising-aeron-core/surprising-aeron-tools",
+          "surprising-gateway",
+          "surprising-realtime/surprising-realtime-provider"
+        ]
+      }
+    },
+    "followup_scan": {
+      "confirmed_ids": [
+        "A181"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "preserved_purposes": [
+        "固定markPriceTicks实际参与资金费计算且跨页固定，必须保留。",
+        "轮次、费率、用户游标和配置身份用于进度匹配与恢复，继续保留。",
+        "行情MarkPriceRuntime及风险、强平、触发价格序号有实际业务消费者，未改。",
+        "独立外壳v30描述段封套，内嵌交易负载v55自己检查版本，无需改变封套。"
+      ],
+      "overall_audit_completed": false
+    },
+    "previous_latest_analysis_round": {
+      "date": "2026-10-24",
+      "source_basis_commit": "90ddbc0d78e9d9062f335982834835eba95ef2d6",
+      "status": "cleanup_compile_verified_followup_funding_persisted_sequence_confirmed",
+      "resolved_ids": [
+        "A177",
+        "A178",
+        "A179"
+      ],
+      "confirmed_ids": [
+        "A180"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 174,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "evidence": "fifty_fifth_cleanup_round",
+      "overall_audit_completed": false
+    },
+    "limits": "17个相关模块仅生产/测试源码编译与静态核对；未运行测试、SQL、服务、Aeron/Kafka、交易、恢复、UI或性能工具，不声明全功能、资金恢复或性能通过。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-funding-sequence-cleanup-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-before-refs.json",
+          "bytes": 8293,
+          "sha256": "58370e1560c35a5eea90353a628fc990eef4ff4cdfc56bd2d237ffd167076c7f"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-before.json",
+          "bytes": 412994,
+          "sha256": "2a9fb825346649e9fa4a4e35d2dab82943e0f839c6b301f800219916de290824"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-build.json",
+          "bytes": 3526,
+          "sha256": "886c75ef90cdd153eb5521da883f6768026da45699d8e459f2ff319b3e7d94e7"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-build.log",
+          "bytes": 38151,
+          "sha256": "7da2ccad810b186b607b10a06ab448cb743b450619fb186090b9efc198ba8077"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-build.py",
+          "bytes": 1201,
+          "sha256": "47393c4aa9fa1df4dd0aaeaea58caf8febb212d9bf70fd8a3fbbe27657374802"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-classfiles.py",
+          "bytes": 1549,
+          "sha256": "ba83956ee271b3acf2d6b2d5487db7043cd3797bb8df7ef1a3de25023226b622"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-finalize.py",
+          "bytes": 1964,
+          "sha256": "6de7ea467aec45542026823ae8f527ce16c4347447fb024c5d5bc98b54daee65"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-module-dependents.json",
+          "bytes": 267,
+          "sha256": "81e83d2db60d1f3c27b081485fe80a6a4ac659af6249511c233641330b19bf03"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-record.py",
+          "bytes": 7953,
+          "sha256": "aa0d86a749851ccccc1b9abd6d5a5ebf6a464e7d6f36277e758fe1dd6854f14d"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-static.json",
+          "bytes": 4843,
+          "sha256": "c4452d54b8140bdb0809bf11b6ea78ee58b82047ab77eeaed4e8b1f1cf96cdca"
+        },
+        {
+          "path": "/tmp/aeron-funding-sequence-cleanup-20261024-verify.py",
+          "bytes": 10526,
+          "sha256": "6c4d58ba402a3fad5041d9c7e31e493740d0a47bb1a01a80d9fb944b96528fdc"
         }
       ],
       "compiler_outputs_retained": true,

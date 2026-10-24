@@ -222,7 +222,7 @@ public final class RuntimeStateMaterializer {
         Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
         ledger.fundingProgresses().forEachKeyValue((/* 资金费续页记录的内部币对编号。 */ id, /* 包含固定价格和用户游标的运行时资金费进度。 */ value) -> fundingProgress.put(
                 identities.instrumentId(id), new CoreTreasuryState.FundingProgress(value.settlementId(),
-                        value.fundingRatePpm(), value.nextCursorUserId(), value.markPriceTicks(), value.priceSequence())));
+                        value.fundingRatePpm(), value.nextCursorUserId(), value.markPriceTicks())));
         // 尚未完成生命周期结算的币对名称到进度导出表。
         Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
         ledger.lifecycleProgresses().forEachKeyValue((/* 生命周期结算续页记录的内部币对编号。 */ id, /* 包含双游标与保险需求的运行时结算进度。 */ value) -> lifecycleProgress.put(

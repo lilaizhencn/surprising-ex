@@ -240,7 +240,7 @@ class TreasuryProgressOwnershipTest {
      * @param settlementId 该测试进度记录对应的结算号
      */
     private static TreasuryRuntime.FundingProgressRuntime funding(long settlementId) {
-        return new TreasuryRuntime.FundingProgressRuntime(settlementId, INSTRUMENT, 100, 7, 100, 1);
+        return new TreasuryRuntime.FundingProgressRuntime(settlementId, INSTRUMENT, 100, 7, 100);
     }
 
     /**

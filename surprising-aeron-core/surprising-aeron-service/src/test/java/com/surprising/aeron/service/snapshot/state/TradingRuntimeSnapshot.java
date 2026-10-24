@@ -487,10 +487,9 @@ public record TradingRuntimeSnapshot(
     }
 
     /** 与生产续页状态一致的测试快照值。 */
-    public record FundingProgressSnapshot(long settlementId, long fundingRatePpm, long nextCursorUserId, long markPriceTicks,
-            long priceSequence) {
+    public record FundingProgressSnapshot(long settlementId, long fundingRatePpm, long nextCursorUserId, long markPriceTicks) {
         public FundingProgressSnapshot {
-            if (settlementId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000 || nextCursorUserId < 0 || markPriceTicks <= 0 || priceSequence <= 0)
+            if (settlementId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000 || nextCursorUserId < 0 || markPriceTicks <= 0)
                 throw new IllegalArgumentException("invalid snapshot progress");
         }
     }
