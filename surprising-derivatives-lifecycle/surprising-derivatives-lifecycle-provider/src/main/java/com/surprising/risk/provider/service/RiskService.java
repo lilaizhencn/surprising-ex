@@ -139,8 +139,8 @@ public class RiskService {
                 .findFirst().orElse(null);
         if (risk == null) return candidate;
         return new LiquidationCandidateResponse(candidate.candidateId(), risk.priceSequence(), candidate.userId(),
-                candidate.instrumentId(), MarginMode.valueOf(risk.marginMode().name()), candidate.positionSide(),
-                candidate.accountType(), risk.settleAsset(), risk.signedQuantitySteps(),
+                candidate.instrumentId(), candidate.marginMode(), candidate.positionSide(),
+                candidate.accountType(), candidate.settleAsset(), candidate.signedQuantitySteps(),
                 risk.markPriceTicks(), risk.equityUnits(), risk.maintenanceMarginUnits(), risk.marginRatioPpm(),
                 candidate.status(), candidate.eventTime());
     }

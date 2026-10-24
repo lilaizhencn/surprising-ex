@@ -49,11 +49,11 @@ public class CoreRiskLiquidationProjectionRepository {
                 if (!rs.getBoolean("__ready")) throw new ReadViewUnavailableException("LIQUIDATION_READ_VIEW_NOT_READY");
                 if (rs.getObject("liquidation_id") == null) return null;
                 return new LiquidationCandidateResponse(
-                rs.getLong("liquidation_id"), rs.getLong("liquidation_id"), rs.getLong("user_id"),
+                rs.getLong("liquidation_id"), null, rs.getLong("user_id"),
                 rs.getString("instrument_id"), MarginMode.valueOf(rs.getString("margin_mode")),
                 PositionSide.valueOf(rs.getString("position_side")),
                 productLine.accountTypeCode(), rs.getString("asset"), rs.getLong("signed_quantity_steps"),
-                0L, 0L, 0L, 0L, mapStatus(rs.getString("status")),
+                null, null, null, null, mapStatus(rs.getString("status")),
                 Instant.ofEpochMilli(rs.getLong("updated_at_epoch_ms")));
             }, productLine.name(), productLine.name(), cursor, limit).stream().filter(java.util.Objects::nonNull).toList();
         } catch (DataAccessException failure) {

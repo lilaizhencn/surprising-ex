@@ -202,6 +202,7 @@ gateway 中实现。后续财务运营模块必须配置独立数据源和独立
 
 风控、强平和 ADL 后台单表列表使用同一 `limit/cursor/sort` 响应约定。
 `/api/v1/admin/gateway/risk-admin/liquidation-candidates` 支持 `eventTime.desc`、`eventTime.asc`；
+候选的当前风险补充字段在缺少Core快照时为null或省略，不能按0或候选ID解释；历史数量和时间仍取已提交事实。
 `/api/v1/admin/gateway/liquidation-admin/orders` 和 `/api/v1/admin/gateway/adl/admin/events`
 支持 `createdAt.desc`、`createdAt.asc`；`/api/v1/admin/gateway/adl/admin/queue`
 使用实时排名游标 `priorityScorePpm.desc`。高风险账户聚合不再查询交易主库，后续由财务运营系统的独立数据库提供。

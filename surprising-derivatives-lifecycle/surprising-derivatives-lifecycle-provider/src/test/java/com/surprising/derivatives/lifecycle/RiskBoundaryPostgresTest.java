@@ -78,6 +78,33 @@ class RiskBoundaryPostgresTest {
         var candidate = candidates(LiquidationCandidateStatus.NEW, "asc", null).get("candidates").get(0);
         assertThat(candidate.get("marginMode").asString()).isEqualTo("ISOLATED");
         assertThat(candidate.has("instrumentChangeId")).isFalse();
+        for (String field : List.of("snapshotId", "markPriceTicks", "equityUnits", "maintenanceMarginUnits", "marginRatioPpm"))
+            assertThat(candidate.hasNonNull(field)).as("missing current risk: %s", field).isFalse();
+    }
+
+    @Test void currentRiskMetricsDoNotReplaceCommittedCandidateFacts() throws Exception {
+        seed(ProductLine.LINEAR_PERPETUAL, LiquidationCandidateStatus.NEW);
+        var risk = mock(CoreRiskSnapshotView.class);
+        when(risk.userId()).thenReturn(42L);
+        when(risk.instrumentId()).thenReturn("1");
+        when(risk.marginMode()).thenReturn(CoreMarginMode.CROSS);
+        when(risk.positionSide()).thenReturn(CorePositionSide.NET);
+        when(risk.priceSequence()).thenReturn(12L);
+        when(risk.markPriceTicks()).thenReturn(500L);
+        when(risk.equityUnits()).thenReturn(0L);
+        when(risk.maintenanceMarginUnits()).thenReturn(20L);
+        when(risk.marginRatioPpm()).thenReturn(1_000_000L);
+        when(core.riskState(42)).thenReturn(List.of(risk));
+        var candidate = candidates(LiquidationCandidateStatus.NEW, "asc", null).get("candidates").get(0);
+        assertThat(candidate.get("snapshotId").asLong()).isEqualTo(12);
+        assertThat(candidate.get("markPriceTicks").asLong()).isEqualTo(500);
+        assertThat(candidate.get("equityUnits").asLong()).isZero();
+        assertThat(candidate.get("maintenanceMarginUnits").asLong()).isEqualTo(20);
+        assertThat(candidate.get("marginRatioPpm").asLong()).isEqualTo(1_000_000);
+        assertThat(candidate.get("signedQuantitySteps").asLong()).isEqualTo(1);
+        assertThat(candidate.get("settleAsset").asString()).isEqualTo("USDT");
+        verify(risk, never()).signedQuantitySteps();
+        verify(risk, never()).settleAsset();
     }
 
     @ParameterizedTest @MethodSource("pages")

@@ -175,3 +175,5 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 强平历史及风险候选读取realtime从已提交Archive生成的`core_liquidation_projection`。候选保证金模式取存储事实，当前风险补充信息同时按合约、持仓腿和保证金模式匹配；删除无Core来源的`instrumentChangeId`及三个无人调用的默认产品构造入口。Web/Client没有该候选版本字段的调用方，其持仓和试单接口中另有实际用途的版本字段不改动。
 
 查询与`core_liquidation_projection_initialization`在同一SQL快照关联，区分尚未就绪和真实空页；未就绪/读取异常以原HTTP入口返回503。使用realtime-api既有`ReadViewUnavailableException`表达读取状态，HTTP状态转换仍由本模块controller负责。公开强平费率、执行价及实收费继续来自已提交事实。按当前约定只做相关模块编译，没有执行数据库或UI交互验证。
+
+候选的`snapshotId`与`markPriceTicks/equityUnits/maintenanceMarginUnits/marginRatioPpm`只表示查询时的Core风险补充值，不表示历史候选发生时的风险。没有匹配快照时为null（JSON配置也可能省略该键），不会用强平ID或固定0冒充；真实零权益仍返回0。候选自身的保证金模式、资产、原持仓数量和时间始终取已提交投影。响应不再补默认全仓、NET或固定产品类型；删除从未生产或消费、携带15字段及旧版本约束的`LiquidationCandidateEvent`。现有账户/持仓风险事件有Kafka读端，继续保留。

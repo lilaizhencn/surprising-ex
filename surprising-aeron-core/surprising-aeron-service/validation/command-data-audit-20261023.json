@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第三十八轮：A130强平已提交生产链补齐；A141旧版本及3构造入口删除；A144两项SQL/DTO无消费副本删除；A145客户端身份/单位/错误修复。相关18模块及最终14模块干净源码编译、Flutter应用和测试入口kernel编译通过，未运行测试/SQL/服务/UI。累计139解决；新增A143未知风险值/快照身份混用，A11仍候选，整体审计继续。",
+    "checkpoint": "第三十九轮：A143风险快照ID与4指标缺失改为空、保留真实零值，补充不覆盖历史候选数量/资产；删除响应默认产品及模式兜底。A146无生产消费的15字段旧事件及约束删除。相关14模块干净编译，测试fixture一行修正后11模块增量编译通过；无测试/SQL/UI执行。累计141解决，新增A147固定零破产价及4无调用构造待清理，A11仍候选。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -7810,12 +7810,45 @@
     },
     {
       "id": "A143",
-      "status": "confirmed",
-      "analysis_status": "static_unknown_data_and_identity_alias_confirmed",
+      "status": "resolved",
+      "analysis_status": "implemented_compile_verified_runtime_not_executed",
       "topic": "风险候选无当前快照时将未知风险指标填零，并以强平ID代替快照ID",
       "source_basis_commit": "ab7a4c022fb00b6a71d8739f973cbf472288ef04",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/LiquidationCandidateResponse.java",
+          "line": 10,
+          "anchor": "Long snapshotId"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/LiquidationCandidateResponse.java",
+          "line": 18,
+          "anchor": "Long markPriceTicks"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java",
+          "line": 52,
+          "anchor": "rs.getLong(\"liquidation_id\"), null"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java",
+          "line": 56,
+          "anchor": "null, null, null, null, mapStatus"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java",
+          "line": 143,
+          "anchor": "candidate.accountType(), candidate.settleAsset(), candidate.signedQuantitySteps()"
+        }
+      ],
+      "evidence": [
+        "SQL没有风险快照，Repository仍为4个primitive风险指标填0，并把liquidation_id重复赋给snapshotId。",
+        "RiskService仅在当前Core风险快照存在时替换为priceSequence及实际指标，否则原样返回；同名snapshotId因此混用两种身份，未知指标也不能与真实零值区分。",
+        "风险值有实际业务表达作用，不能为消除未知值机械删除或给Cluster增加副本；当前快照与历史候选的时点语义也需核对。"
+      ],
+      "verification_limit": "按用户约定仅相关Java生产/测试源码与Flutter应用/测试入口kernel编译，未执行任何测试、SQL、迁移、数据库、Archive/Cluster、交易服务、应用、UI交互或性能场景；不能据此声称资金/恢复/界面运行验证通过。",
+      "historical_source_references": [
         {
           "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java",
           "line": 52,
@@ -7837,13 +7870,15 @@
           "anchor": "candidate.candidateId(), risk.priceSequence()"
         }
       ],
-      "evidence": [
-        "SQL没有风险快照，Repository仍为4个primitive风险指标填0，并把liquidation_id重复赋给snapshotId。",
-        "RiskService仅在当前Core风险快照存在时替换为priceSequence及实际指标，否则原样返回；同名snapshotId因此混用两种身份，未知指标也不能与真实零值区分。",
-        "风险值有实际业务表达作用，不能为消除未知值机械删除或给Cluster增加副本；当前快照与历史候选的时点语义也需核对。"
-      ],
-      "required_next": "追踪各HTTP/Feign及Web/Client消费者，明确当前风险补充的时点与缺失语义；去除伪造ID和未知零值，保留真正有用的指标及正确读取边界。",
-      "verification_limit": "按用户约定仅相关Java生产/测试源码与Flutter应用/测试入口kernel编译，未执行任何测试、SQL、迁移、数据库、Archive/Cluster、交易服务、应用、UI交互或性能场景；不能据此声称资金/恢复/界面运行验证通过。"
+      "resolved_in_round": "thirty_ninth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "5项当前风险补充值改为Long且缺失时null，不再伪造snapshotId或未知零值。真实快照补充值及真实零权益保留；补充风险不覆盖候选原保证金模式、资产及数量。仅明确来源的响应不再补CROSS/NET/固定产品。",
+        "cluster_fields_added": false,
+        "tests_executed": false,
+        "sql_executed": false,
+        "current_risk_metrics_remain_available": true
+      }
     },
     {
       "id": "A144",
@@ -7947,6 +7982,73 @@
         "applications_launched": false,
         "ui_exercised": false
       }
+    },
+    {
+      "id": "A146",
+      "status": "resolved",
+      "analysis_status": "no_producer_consumer_or_typed_reference_then_removed",
+      "topic": "废弃LiquidationCandidateEvent仅自定义15字段及旧版本/修订约束，无生产消费链",
+      "source_basis_commit": "5f9ab8ae3e67d62a32d7d49b619f970fa3028900",
+      "business_code_changed": true,
+      "historical_source_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/LiquidationCandidateEvent.java",
+          "source_sha256": "220f57710ae73916755e8aba744a1ae29808559b7bdaf740bf9fc2519010f70c",
+          "record_components": 15
+        }
+      ],
+      "evidence": {
+        "pre_removal_classfiles": 4025,
+        "external_class_name_or_descriptor_references": [],
+        "post_removal_class_name_or_descriptor_references": [],
+        "source_reference_review": "全仓生产/测试Java、配置、SQL及Web/Client中没有该事件的构造、转换、注册、发布、消费或反射载入；自有定义及历史审计文字不算运行消费者。",
+        "other_risk_events": "RiskAccountUpdatedEvent与RiskPositionUpdatedEvent有Gateway KafkaFanoutConsumer实际消费，保留。"
+      },
+      "resolved_in_round": "thirty_ninth_cleanup_round",
+      "resolution": {
+        "state": "removed_clean_compile_verified",
+        "change": "删除整份15字段事件及其旧版本/修订校验；不新增替代事件、兼容层或默认值。",
+        "tests_executed": false
+      }
+    },
+    {
+      "id": "A147",
+      "status": "confirmed",
+      "analysis_status": "constant_producer_and_unused_constructor_descriptors_confirmed",
+      "topic": "强平历史响应固定填零的bankruptcyPriceTicks及4个无外部调用构造入口",
+      "source_basis_commit": "5f9ab8ae3e67d62a32d7d49b619f970fa3028900",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/liquidation/model/LiquidationOrderResponse.java",
+          "line": 18,
+          "anchor": "long bankruptcyPriceTicks,"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/liquidation/model/LiquidationOrderResponse.java",
+          "line": 31,
+          "anchor": "public LiquidationOrderResponse(long liquidationOrderId,"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationService.java",
+          "line": 130,
+          "anchor": "value.closeQuantitySteps(), 0, value.executionPriceTicks()"
+        }
+      ],
+      "evidence": {
+        "canonical_field_count": 16,
+        "declared_constructor_count": 5,
+        "externally_called_constructor_count": 1,
+        "externally_called_constructor_descriptors": {
+          "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Lcom/surprising/trading/api/model/OrderSide;JJJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V": [
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class"
+          ]
+        },
+        "bankruptcy_price_getter_external_calls": {},
+        "source_review": "实际生产者LiquidationService.response只用完整构造，破产价始终传0；全仓Java及Web/Client没有读取该字段。4个短构造只互相补CROSS/NET、零费率/价格，不是业务入口。此处固定0是bankruptcyPriceTicks，不是成交数量。"
+      },
+      "proposed_cleanup": "删除无来源无消费的bankruptcyPriceTicks、4个无调用构造及响应默认模式兜底；同步唯一生产映射和有必要的契约说明，只编译相关模块。保留真实执行价、费率、实际费用、历史数量及查询身份。",
+      "verification_limit": "本轮仅静态源码/4024份已编译classfile分析，此项尚未修改或运行。"
     }
   ],
   "preserve_verified_purposes": [
@@ -7964,9 +8066,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A143：核对候选当前风险补充的时点与所有消费方，清除伪造snapshotId与未知零值，不把无意义副本加入Cluster。",
-    "继续沿各业务命令产生、Core执行、Lane交接、最终状态、快照/回放与SQL/API逐字段检查；资金、执行顺序、恢复和产品隔离优先。",
-    "A11保留现有领导者读取、提交水位和查询会话边界；没有等价一致性方案前不直接绕过Cluster查询通道。"
+    "处理A147：删除强平历史响应固定0破产价及4个无调用构造/默认模式兜底，保留真实执行价、实收费和数量，编译相关模块。",
+    "继续按每个业务操作从命令产生、Core执行、Lane交接、最终持久化和恢复/查询检查，不能将缺少生产链等同于真实财务事实无用。",
+    "A11维持现有领导者读取、提交水位和查询会话边界；有等价一致性方案前不绕过Cluster。"
   ],
   "rejected_false_positives": [
     {
@@ -8263,16 +8365,14 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "ab7a4c022fb00b6a71d8739f973cbf472288ef04",
+    "source_basis_commit": "5f9ab8ae3e67d62a32d7d49b619f970fa3028900",
     "status": "cleanup_compile_verified_followup_confirmed",
     "resolved_ids": [
-      "A130",
-      "A141",
-      "A144",
-      "A145"
+      "A143",
+      "A146"
     ],
     "confirmed_ids": [
-      "A143"
+      "A147"
     ],
     "candidate_ids": [
       "A11"
@@ -8284,12 +8384,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 139,
+      "resolved": 141,
       "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "thirty_eighth_cleanup_round",
+    "evidence": "thirty_ninth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -10036,6 +10136,27 @@
       ],
       "counts": {
         "resolved": 139,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "tests_executed": false,
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "5f9ab8ae3e67d62a32d7d49b619f970fa3028900",
+      "status": "cleanup_compile_verified_followup_confirmed",
+      "evidence": "thirty_ninth_cleanup_round",
+      "resolved_ids": [
+        "A143",
+        "A146"
+      ],
+      "new_confirmed_ids": [
+        "A147"
+      ],
+      "counts": {
+        "resolved": 141,
         "candidate": 1,
         "retained": 4,
         "confirmed": 1
@@ -30929,6 +31050,235 @@
       "compiler_outputs_retained": true,
       "remaining_current_round_resources": [],
       "removed_python_cache": []
+    }
+  },
+  "thirty_ninth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "5f9ab8ae3e67d62a32d7d49b619f970fa3028900",
+    "resolved_ids": [
+      "A143",
+      "A146"
+    ],
+    "new_confirmed_ids": [
+      "A147"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 141,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "implementation": [
+      "当前风险补充缺失时明确为空，真实风险值及真实零值保留；不把强平ID当风险快照ID。",
+      "候选保证金模式、资产和原数量始终保持已提交事实；查询时的风险快照仅补充自身5个字段，不伪造历史。",
+      "响应删除无意义的默认保证金/持仓腿/固定产品转换。",
+      "删除完全没有生产者/消费者的15字段旧强平候选事件及旧版本、修订约束。",
+      "现有账户/持仓风险事件及其Kafka读端保留，真实资金与风险计算没有改动。"
+    ],
+    "verification": {
+      "maven_attempts": [
+        {
+          "command": "mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+          "exit_code": 0,
+          "elapsed_seconds": 88.219,
+          "log_sha256": "2c0d3cd7dfbc51c5aeafb334ba14aa77aaa06e848376da91311df664eeade9c7",
+          "source_hashes": {
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/LiquidationCandidateResponse.java": "23882e242b77e19c10ba18250333cdb6b769c928b8dfef73c640ab4cb1988cf0",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java": "9668cc850ebcd59022735d401b877f00596960a91ea6c7975de89b84d7370551",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java": "830b42e633c477583a72eb75e79f1b20e0ef19aa7f3cb1be66026a8558c8c81f",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/RiskBoundaryPostgresTest.java": "28c8a207ab6ab2afbc518bfca8c83a245c1890a04f2082aa95ca290135635288"
+          },
+          "tests_executed": false,
+          "sql_executed": false,
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-aeron-service",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-realtime-api",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-derivatives-lifecycle",
+            "surprising-realtime-provider",
+            "surprising-gateway"
+          ],
+          "reactor_module_count": 14
+        },
+        {
+          "command": "mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am -DskipTests test-compile",
+          "exit_code": 0,
+          "elapsed_seconds": 9.811,
+          "log_sha256": "94d7b11dbc1225aa8dd197cdbfcd3800bea828ae0a0c3068f4508291b22d9267",
+          "source_hashes": {
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/LiquidationCandidateResponse.java": "23882e242b77e19c10ba18250333cdb6b769c928b8dfef73c640ab4cb1988cf0",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java": "9668cc850ebcd59022735d401b877f00596960a91ea6c7975de89b84d7370551",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java": "830b42e633c477583a72eb75e79f1b20e0ef19aa7f3cb1be66026a8558c8c81f",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/RiskBoundaryPostgresTest.java": "bff20510555d03f60c507d988a5ca228846bbca9696653b14de6282f4fb38a56"
+          },
+          "tests_executed": false,
+          "sql_executed": false,
+          "reason": "静态复核补齐现有风险快照测试fixture的userId=42，仅测试源码一行变更。",
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-realtime-api",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-derivatives-lifecycle"
+          ],
+          "reactor_module_count": 11
+        }
+      ],
+      "tests_executed": false,
+      "sql_executed": false,
+      "services_started": false,
+      "test_source_scenarios_compiled": [
+        "无匹配风险快照时5项补充值不冒充0/强平ID",
+        "真实快照序号及4项风险值、真实零权益保留",
+        "当前风险补充不覆盖已提交数量/资产",
+        "原有各产品、状态、分页与边界场景仍可编译"
+      ],
+      "test_source_fixture_correction": "首次干净编译后静态复核补齐mock风险快照userId=42；仅此一行测试源码有变更，随后相关11模块test-compile通过。"
+    },
+    "static_verification": {
+      "classfiles": 4024,
+      "candidate_fields": {
+        "candidateId": "J",
+        "snapshotId": "Ljava/lang/Long;",
+        "userId": "J",
+        "instrumentId": "Ljava/lang/String;",
+        "marginMode": "Lcom/surprising/trading/api/model/MarginMode;",
+        "positionSide": "Lcom/surprising/trading/api/model/PositionSide;",
+        "accountType": "Ljava/lang/String;",
+        "settleAsset": "Ljava/lang/String;",
+        "signedQuantitySteps": "J",
+        "markPriceTicks": "Ljava/lang/Long;",
+        "equityUnits": "Ljava/lang/Long;",
+        "maintenanceMarginUnits": "Ljava/lang/Long;",
+        "marginRatioPpm": "Ljava/lang/Long;",
+        "status": "Lcom/surprising/risk/api/model/LiquidationCandidateStatus;",
+        "eventTime": "Ljava/time/Instant;"
+      },
+      "candidate_canonical_constructor": [
+        "(JLjava/lang/Long;JLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Ljava/lang/String;Ljava/lang/String;JLjava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Lcom/surprising/risk/api/model/LiquidationCandidateStatus;Ljava/time/Instant;)V"
+      ],
+      "deleted_event_class_or_descriptor_references": [],
+      "liquidation_order_declared_constructors": [
+        "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Lcom/surprising/trading/api/model/OrderSide;JJJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V",
+        "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/OrderSide;JLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V",
+        "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/OrderSide;JLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V",
+        "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/OrderSide;JJJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V",
+        "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/OrderSide;JJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V"
+      ],
+      "liquidation_order_external_calls": {
+        "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Lcom/surprising/trading/api/model/OrderSide;JJJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V": [
+          "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class"
+        ]
+      },
+      "liquidation_order_bankruptcy_price_getter_external_calls": {},
+      "optional_current_risk_fields": [
+        "snapshotId",
+        "markPriceTicks",
+        "equityUnits",
+        "maintenanceMarginUnits",
+        "marginRatioPpm"
+      ],
+      "protected_core_protocol_exporter_sql_sources_unchanged": 495,
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/README.md": "45b02499550563b90825d3be9650c32395e037d38bad2cbbda52741fcab116be",
+        "surprising-derivatives-lifecycle/README.md": "5dd71a2231cd003fe9630bfe144aa29581e325dfad1b1ae5742b144a1d32f658",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/LiquidationCandidateResponse.java": "23882e242b77e19c10ba18250333cdb6b769c928b8dfef73c640ab4cb1988cf0",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/repository/CoreRiskLiquidationProjectionRepository.java": "9668cc850ebcd59022735d401b877f00596960a91ea6c7975de89b84d7370551",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskService.java": "830b42e633c477583a72eb75e79f1b20e0ef19aa7f3cb1be66026a8558c8c81f",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/test/java/com/surprising/derivatives/lifecycle/RiskBoundaryPostgresTest.java": "bff20510555d03f60c507d988a5ca228846bbca9696653b14de6282f4fb38a56",
+        "surprising-gateway/README.md": "4402cfe0be4c1a95b4b699d4a13875dfd3c983fde580cd634dcf58dc9df2ea21"
+      },
+      "application_classes_executed": false,
+      "git_diff_check": "passed"
+    },
+    "removed_event_precheck": {
+      "classfiles": 4025,
+      "exact_owner": "com/surprising/risk/api/model/LiquidationCandidateEvent",
+      "external_class_name_or_descriptor_references": [],
+      "source_sha256": "220f57710ae73916755e8aba744a1ae29808559b7bdaf740bf9fc2519010f70c",
+      "record_components": 15,
+      "application_classes_executed": false
+    },
+    "frontends": {
+      "affected_candidate_consumers_found": false,
+      "web_or_client_source_changes": false,
+      "reviewed": "Web/Client均没有候选HTTP/Feign模型或字段消费者；Client对其他风险账户响应snapshotId的校验与本候选响应无关，保留。",
+      "interaction_exercised": false
+    },
+    "versions_unchanged": {
+      "core_schema": 16,
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "retention": 4
+    },
+    "followup_analysis": {
+      "confirmed_id": "A147",
+      "candidate_id": "A11",
+      "overall_audit_completed": false
+    },
+    "limits": "仅HotSpot JDK27相关14模块干净生产/测试源码编译，补齐测试fixture后11个相关模块增量test-compile；未执行任何测试、数据库/SQL、服务、Archive/Cluster、应用、UI交互或性能场景。不能据此宣称资金、恢复或交互验证通过。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-risk-candidate-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-risk-candidate-20261024-build.json",
+          "bytes": 1334,
+          "sha256": "51874d435abd9e59247cbc5cbf435b94dc4486a2226e05251310dada0240b669"
+        },
+        {
+          "path": "/tmp/aeron-risk-candidate-20261024-build.log",
+          "bytes": 31349,
+          "sha256": "2c0d3cd7dfbc51c5aeafb334ba14aa77aaa06e848376da91311df664eeade9c7"
+        },
+        {
+          "path": "/tmp/aeron-risk-candidate-20261024-pre.json",
+          "bytes": 310,
+          "sha256": "7aed6b74b43ebad213045814e2283caaaabaa03b52029feff8eeb79d75807666"
+        },
+        {
+          "path": "/tmp/aeron-risk-candidate-20261024-record.py",
+          "bytes": 10512,
+          "sha256": "3b7da41c8d4bf9c9f7463d186a1530f108d5df0ecbe035fc52928e8b98184e36"
+        },
+        {
+          "path": "/tmp/aeron-risk-candidate-20261024-static.json",
+          "bytes": 4415,
+          "sha256": "4faf393fdc4cd62a99ac721f653447eba16814100f87e5b36ebada6bd48b3357"
+        },
+        {
+          "path": "/tmp/aeron-risk-candidate-20261024-static.py",
+          "bytes": 4011,
+          "sha256": "d3047027cadef2befccb5d99526d2878b8e043ac876ab083f8fd8720a6228ed0"
+        },
+        {
+          "path": "/tmp/aeron-risk-candidate-20261024-test-source-build.json",
+          "bytes": 1369,
+          "sha256": "3085a8b2a39d0bc03755e5cf67ed4db46ef52d6e96422a51ff58809d735cfe4f"
+        },
+        {
+          "path": "/tmp/aeron-risk-candidate-20261024-test-source-build.log",
+          "bytes": 17399,
+          "sha256": "94d7b11dbc1225aa8dd197cdbfcd3800bea828ae0a0c3068f4508291b22d9267"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
     }
   }
 }

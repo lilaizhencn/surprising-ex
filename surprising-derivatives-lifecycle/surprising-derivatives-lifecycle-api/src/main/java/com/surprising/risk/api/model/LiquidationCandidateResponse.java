@@ -4,9 +4,10 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.PositionSide;
 import java.time.Instant;
 
+/** 已提交候选事实；snapshotId及四项风险指标来自当前Core快照，缺失时为null，不代表候选发生时的风险值。 */
 public record LiquidationCandidateResponse(
         long candidateId,
-        long snapshotId,
+        Long snapshotId,
         long userId,
         String instrumentId,
         MarginMode marginMode,
@@ -14,20 +15,9 @@ public record LiquidationCandidateResponse(
         String accountType,
         String settleAsset,
         long signedQuantitySteps,
-        long markPriceTicks,
-        long equityUnits,
-        long maintenanceMarginUnits,
-        long marginRatioPpm,
+        Long markPriceTicks,
+        Long equityUnits,
+        Long maintenanceMarginUnits,
+        Long marginRatioPpm,
         LiquidationCandidateStatus status,
-        Instant eventTime) {
-
-    public LiquidationCandidateResponse {
-        marginMode = MarginMode.defaultIfNull(marginMode);
-        positionSide = PositionSide.defaultIfNull(positionSide);
-        accountType = normalizeAccountType(accountType);
-    }
-
-    private static String normalizeAccountType(String value) {
-        return value == null || value.isBlank() ? "USDT_PERPETUAL" : value.trim().toUpperCase();
-    }
-}
+        Instant eventTime) {}
