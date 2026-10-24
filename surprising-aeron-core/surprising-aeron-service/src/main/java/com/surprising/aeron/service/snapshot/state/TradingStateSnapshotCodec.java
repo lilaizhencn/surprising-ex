@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 50;
+    private static final int VERSION = 51;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -567,13 +567,13 @@ public final class TradingStateSnapshotCodec {
                 .number(9, value.childQuantitySteps()); // 9：算法单每个子单的数量
         if (value.algoTypeCode() != CoreAlgoOrderCommand.ICEBERG_TYPE_CODE)
             writer.number(10, value.intervalSeconds()); // 10：仅定时间隔算法保存切片间隔，秒
-        return writer.number(11, value.durationSeconds()) // 11：算法单总执行时长，秒
+        writer.number(11, value.durationSeconds()) // 11：算法单总执行时长，秒
                 .number(12, SnapshotEnumCodes.encode(value.marginMode())) // 12：全仓或逐仓保证金模式
                 .number(13, SnapshotEnumCodes.encode(value.positionSide())) // 13：净持仓、多仓或空仓方向
-                .bool(14, value.reduceOnly()) // 14：是否只允许减少已有持仓
-                .bool(15, value.postOnly()) // 15：是否只允许成为挂单 Maker
-                .number(16, SnapshotEnumCodes.encode(value.timeInForce())) // 16：GTC、IOC、FOK 或 GTX 的订单有效方式
-                .number(17, value.statusCode()) // 17：算法父单业务状态编号
+                .bool(14, value.reduceOnly()); // 14：是否只允许减少已有持仓
+        if (value.algoTypeCode() != CoreAlgoOrderCommand.TWAP_TYPE_CODE)
+            writer.number(16, SnapshotEnumCodes.encode(value.timeInForce())); // 16：TWAP固定IOC，不另存
+        return writer.number(17, value.statusCode()) // 17：算法父单业务状态编号
                 .number(18, value.currentOrderId()) // 18：算法父单当前正在推进的子订单编号
                 .text(19, value.rejectReason()) // 19：算法或触发操作保存的拒绝原因
                 .number(21, value.startAtEpochMillis()) // 21：算法单开始执行时刻，毫秒
@@ -611,8 +611,8 @@ public final class TradingStateSnapshotCodec {
                 SnapshotEnumCodes.readCoreMarginMode(r.integer(12)), // 12：全仓或逐仓保证金模式
                 SnapshotEnumCodes.readCorePositionSide(r.integer(13)), // 13：净持仓、多仓或空仓方向
                 r.bool(14), // 14：是否只允许减少已有持仓
-                r.bool(15), // 15：是否只允许成为挂单 Maker
-                SnapshotEnumCodes.readCoreTimeInForce(r.integer(16)), // 16：GTC、IOC、FOK 或 GTX 的订单有效方式
+                algoType == CoreAlgoOrderCommand.TWAP_TYPE_CODE ? CoreTimeInForce.IOC
+                        : SnapshotEnumCodes.readCoreTimeInForce(r.integer(16)), // 16：TWAP没有此字段
                 r.integer(17), // 17：算法父单业务状态编号
                 r.number(18), // 18：算法父单当前正在推进的子订单编号
                 r.text(19), // 19：算法或触发操作保存的拒绝原因

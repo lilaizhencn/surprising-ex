@@ -18,6 +18,10 @@ Surprising Exchange 现货、永续、交割和期权交易模块。当前 `surp
 
 `PlaceAlgoOrderRequest.intervalSeconds`只属于TWAP，要求1–86400秒并继续满足网关配置范围及执行时长约束。ICEBERG请求可省略间隔，提供的值不参与业务且在绑定时清除；其响应间隔为0，表示不适用。总时长和每片数量继续独立保留。Web和移动端已同步请求、解析与展示；本轮只完成相关编译，未运行交互或交易测试。
 
+## 算法单执行方式
+
+TWAP按算法类型使用IOC，并清除不适用的PostOnly输入；调用方不必提交固定执行选项。ICEBERG保留用户PostOnly选择及GTC/GTX输入，PostOnly=true时以GTX提交；其他无效TIF仍拒绝。内部状态只保存确定后的TIF，响应PostOnly由GTX计算，避免保存两个可能冲突的状态。普通订单契约保持原样。
+
 ## long 定点数模型
 
 订单入口不使用 `BigDecimal`。API、数据库、Kafka command 都使用 long：

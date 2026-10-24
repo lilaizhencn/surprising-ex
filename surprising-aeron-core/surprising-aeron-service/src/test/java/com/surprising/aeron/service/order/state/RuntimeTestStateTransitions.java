@@ -231,8 +231,7 @@ public final class RuntimeTestStateTransitions {
                 ? new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create(
                 view.algoOrderId(), view.clientAlgoOrderId(), view.instrumentId(), view.algoTypeCode(), view.side(),
                         view.priceTicks(), view.quantitySteps(), view.childQuantitySteps(), view.intervalSeconds(),
-                        view.durationSeconds(), view.marginMode(), view.positionSide(), view.reduceOnly(),
-                        view.postOnly(), view.timeInForce(), view.startAtEpochMillis())
+                        view.durationSeconds(), view.marginMode(), view.positionSide(), view.reduceOnly(), view.timeInForce(), view.startAtEpochMillis())
                 : new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
                 view.algoOrderId(), view.revision() - 1, view.statusCode(), view.currentOrderId(), view.rejectReason(),
                         view.nextSliceAtEpochMillis(), view.completedAtEpochMillis(), view.updatedAtEpochMillis(), appended);

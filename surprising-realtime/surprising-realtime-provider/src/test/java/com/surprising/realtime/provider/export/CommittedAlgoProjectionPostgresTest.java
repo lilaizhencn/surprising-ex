@@ -29,7 +29,7 @@ class CommittedAlgoProjectionPostgresTest {
     @AfterEach void clean() {if(jdbc!=null)jdbc.execute("DROP SCHEMA algo_export_it CASCADE");}
     private CoreAlgoOrderView view(long id,long user,long revision,long executed,long active) {
         return new CoreAlgoOrderView(id,user,"client-"+id,"604",0,CoreOrderSide.BUY,100,4,2,5,20,
-                CoreMarginMode.CROSS,CorePositionSide.NET,false,false,CoreTimeInForce.GTC,1,201,"",1000,6000,0,1000,1000+revision,revision,List.of(201L),executed,active,active>0?1:0);
+                CoreMarginMode.CROSS,CorePositionSide.NET,false,CoreTimeInForce.GTC,1,201,"",1000,6000,0,1000,1000+revision,revision,List.of(201L),executed,active,active>0?1:0);
     }
     private void write(long sequence,CoreAlgoOrderView... values) {transaction.executeWithoutResult(tx->projection.persist(ProductLine.SPOT,List.of(values),sequence));}
     private CoreAlgoOrderView stored(long id) {return CoreAlgoOrderCodec.decode(jdbc.queryForObject("SELECT raw_algo_state FROM core_algo_order_projection WHERE product_line='SPOT' AND algo_order_id=?",byte[].class,id));}
@@ -54,7 +54,7 @@ class CommittedAlgoProjectionPostgresTest {
                     "604", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0);
             apply(replay,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(register, ProductLine.SPOT),1);
             var parent = new CoreAlgoOrderCommand.Create(701, "client-701", "604", 0, CoreOrderSide.BUY,
-                    100, 4, 2, 5, 20, CoreMarginMode.CROSS, CorePositionSide.NET, false, false,
+                    100, 4, 2, 5, 20, CoreMarginMode.CROSS, CorePositionSide.NET, false,
                     CoreTimeInForce.GTC, 1000);
             apply(replay,CoreMessageType.UPSERT_ALGO_ORDER,7,CoreAlgoOrderCodec.encodeCommand(parent),2);
             jdbc.execute("ALTER TABLE core_algo_order_projection ADD CONSTRAINT reject_bootstrap CHECK(user_id<>7)");

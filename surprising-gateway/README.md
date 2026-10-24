@@ -44,7 +44,8 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 协议仍保留。算法委托用户查询已于 2026-10-20 迁入 realtime 提交投影，后台触发单等专用查询仍需单独梳理；见 [算法委托查询](../docs/algo-read-projection.md)。
 
 算法委托规范化删除不可达的TWAP/postOnly拒绝：postOnly仍只在ICEBERG下按原规则计算，原TIF、数量及范围校验保留。Core算法母单也删除列表不可变复制后重复的null判断，空值仍由原List.copyOf拒绝。
-ICEBERG创建请求可省略intervalSeconds，若提供则在请求/状态类型绑定时清除；只有TWAP校验间隔范围及执行时长与间隔的关系。ICEBERG仍按原扫描配置推进下一片，执行时长和子单数量继续有独立作用。命令v4、状态/投影v2和快照v50不保存ICEBERG间隔。
+ICEBERG创建请求可省略intervalSeconds，若提供则在请求/状态类型绑定时清除；只有TWAP校验间隔范围及执行时长与间隔的关系。ICEBERG仍按原扫描配置推进下一片，执行时长和子单数量继续有独立作用。命令v5、状态/投影v3和快照v51不保存ICEBERG间隔。
+算法创建直接完成原校验、字符串规范化、稳定订单身份和提交，不再复制一份完整请求或计算无人读取的命令UUID。内部算法记录只保存TIF，PostOnly结果按GTX读取；用户选择PostOnly的ICEBERG在入口统一为GTX，GTC/GTX之外的无效选择仍拒绝。TWAP按类型采用IOC，不再要求请求提供固定选项。Web和移动端同步删除无用请求字段。
 本轮后端17个相关模块及依赖执行`-am -DskipTests clean test-compile`通过，Web build与Flutter bundle编译通过；未运行测试、服务、交易、恢复或设备/浏览器交互。详见[Aeron字段审计](../surprising-aeron-core/surprising-aeron-service/validation/command-data-audit-20261023.json)。
 
 ## 用户安全与设备限制

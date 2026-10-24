@@ -24,7 +24,6 @@ import java.util.List;
  * @param marginMode 使用全仓还是逐仓保证金；两种模式的可用权益不能混算
  * @param positionSide 净持仓、多头腿或空头腿；双向持仓时用于区分同一合约的两条腿
  * @param reduceOnly 是否只允许减少已有持仓，不能借这笔订单增加反向或同向风险
- * @param postOnly 是否要求只做挂单方，不能立即吃掉对手盘
  * @param timeInForce 订单的有效方式，例如持续挂单、立即成交或撤销、只做挂单方
  * @param statusCode 协议约定的母单状态编号，3、4、5 视为终态
  * @param currentOrderId 母单当前关联的执行子单编号
@@ -43,7 +42,7 @@ public record CoreAlgoOrderState(
         long algoOrderId, long userId, String clientAlgoOrderId, String instrumentId, int algoTypeCode,
         CoreOrderSide side, long priceTicks, long quantitySteps, long childQuantitySteps,
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
-        boolean reduceOnly, boolean postOnly, CoreTimeInForce timeInForce, int statusCode,
+        boolean reduceOnly, CoreTimeInForce timeInForce, int statusCode,
         long currentOrderId, String rejectReason, long startAtEpochMillis,
         long nextSliceAtEpochMillis, long completedAtEpochMillis, long createdAtEpochMillis,
         long updatedAtEpochMillis, long revision, List<Long> childOrderIds,
@@ -65,7 +64,6 @@ public record CoreAlgoOrderState(
      * @param marginMode 使用全仓还是逐仓保证金；两种模式的可用权益不能混算
      * @param positionSide 净持仓、多头腿或空头腿；双向持仓时用于区分同一合约的两条腿
      * @param reduceOnly 是否只允许减少已有持仓，不能借这笔订单增加反向或同向风险
-     * @param postOnly 是否要求只做挂单方，不能立即吃掉对手盘
      * @param timeInForce 订单的有效方式，例如持续挂单、立即成交或撤销、只做挂单方
      * @param statusCode 协议约定的母单状态编号，3、4、5 视为终态
      * @param currentOrderId 母单当前关联的执行子单编号
@@ -82,12 +80,12 @@ public record CoreAlgoOrderState(
         long algoOrderId, long userId, String clientAlgoOrderId, String instrumentId, int algoTypeCode,
         CoreOrderSide side, long priceTicks, long quantitySteps, long childQuantitySteps,
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
-        boolean reduceOnly, boolean postOnly, CoreTimeInForce timeInForce, int statusCode,
+        boolean reduceOnly, CoreTimeInForce timeInForce, int statusCode,
         long currentOrderId, String rejectReason, long startAtEpochMillis,
         long nextSliceAtEpochMillis, long completedAtEpochMillis, long createdAtEpochMillis,
         long updatedAtEpochMillis, long revision, List<Long> childOrderIds) {
         this(algoOrderId,userId,clientAlgoOrderId,instrumentId,algoTypeCode,side,priceTicks,quantitySteps,
-                childQuantitySteps,intervalSeconds,durationSeconds,marginMode,positionSide,reduceOnly,postOnly,
+                childQuantitySteps,intervalSeconds,durationSeconds,marginMode,positionSide,reduceOnly,
                 timeInForce,statusCode,currentOrderId,rejectReason,startAtEpochMillis,nextSliceAtEpochMillis,
                 completedAtEpochMillis,createdAtEpochMillis,updatedAtEpochMillis,revision,childOrderIds,0,0);
     }
@@ -100,7 +98,7 @@ public record CoreAlgoOrderState(
     public CoreAlgoOrderState withRetiredProgress(long executed, long pendingChild) {
         return new CoreAlgoOrderState(algoOrderId,userId,clientAlgoOrderId,instrumentId,algoTypeCode,side,
                 priceTicks,quantitySteps,childQuantitySteps,intervalSeconds,durationSeconds,marginMode,positionSide,
-                reduceOnly,postOnly,timeInForce,statusCode,currentOrderId,rejectReason,startAtEpochMillis,
+                reduceOnly,timeInForce,statusCode,currentOrderId,rejectReason,startAtEpochMillis,
                 nextSliceAtEpochMillis,completedAtEpochMillis,createdAtEpochMillis,updatedAtEpochMillis,revision,
                 childOrderIds,executed,pendingChild);
     }
@@ -109,6 +107,7 @@ public record CoreAlgoOrderState(
      * 补齐可空文本、复制子单列表，并校验母单数量、执行时长、时间、历史进度及每个子单编号。
      */
     public CoreAlgoOrderState {
+        if (algoTypeCode == CoreAlgoOrderCommand.TWAP_TYPE_CODE) timeInForce = CoreTimeInForce.IOC;
         if (algoTypeCode == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) intervalSeconds = 0;
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
         instrumentId = OrderReservation.requireInstrumentId(instrumentId);

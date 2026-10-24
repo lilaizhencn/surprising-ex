@@ -26,7 +26,6 @@ public record AlgoOrderRecord(
         MarginMode marginMode,
         PositionSide positionSide,
         boolean reduceOnly,
-        boolean postOnly,
         TimeInForce timeInForce,
         AlgoOrderStatus status,
         Long currentOrderId,
@@ -38,6 +37,10 @@ public record AlgoOrderRecord(
         Instant updatedAt) {
 
     public AlgoOrderRecord {
+        if (algoType == AlgoOrderType.TWAP) timeInForce = TimeInForce.IOC;
         productLine = Objects.requireNonNull(productLine, "productLine");
+    }
+    public boolean postOnly() {
+        return timeInForce == TimeInForce.GTX;
     }
 }

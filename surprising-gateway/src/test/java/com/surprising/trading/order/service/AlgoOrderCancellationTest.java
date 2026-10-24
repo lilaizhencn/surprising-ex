@@ -108,7 +108,7 @@ class AlgoOrderCancellationTest {
             long now = System.currentTimeMillis();
             state = new AtomicReference<>(new CoreAlgoOrderView(701, 7, "cancel-701", "1", 1,
                     CoreOrderSide.BUY, 100, 2, 1, 1, 30, CoreMarginMode.CROSS, CorePositionSide.NET,
-                    false, false, CoreTimeInForce.GTC, AlgoOrderStatus.RUNNING.ordinal(), 0, "",
+                    false, CoreTimeInForce.GTC, AlgoOrderStatus.RUNNING.ordinal(), 0, "",
                     now, now, 0, now, now, 1, children, 0, 0, 0));
             var properties = new TradingOrderProperties();
             properties.getKafka().setProductLine(ProductLine.SPOT);
@@ -119,8 +119,7 @@ class AlgoOrderCancellationTest {
                 boolean active = childActive.get() && !v.childOrderIds().isEmpty();
                 return new CoreAlgoOrderView(v.algoOrderId(), v.userId(), v.clientAlgoOrderId(), v.instrumentId(),
                         v.algoTypeCode(), v.side(), v.priceTicks(), v.quantitySteps(), v.childQuantitySteps(),
-                        v.intervalSeconds(), v.durationSeconds(), v.marginMode(), v.positionSide(), v.reduceOnly(),
-                        v.postOnly(), v.timeInForce(), v.statusCode(), v.currentOrderId(), v.rejectReason(),
+                        v.intervalSeconds(), v.durationSeconds(), v.marginMode(), v.positionSide(), v.reduceOnly(), v.timeInForce(), v.statusCode(), v.currentOrderId(), v.rejectReason(),
                         v.startAtEpochMillis(), v.nextSliceAtEpochMillis(), v.completedAtEpochMillis(),
                         v.createdAtEpochMillis(), v.updatedAtEpochMillis(), v.revision(), v.childOrderIds(),
                         0, active ? 1 : 0, active ? 1 : 0);
@@ -143,8 +142,7 @@ class AlgoOrderCancellationTest {
             if (update.appendedChildOrderId() != 0) children.add(update.appendedChildOrderId());
             state.set(new CoreAlgoOrderView(v.algoOrderId(), v.userId(), v.clientAlgoOrderId(), v.instrumentId(),
                     v.algoTypeCode(), v.side(), v.priceTicks(), v.quantitySteps(), v.childQuantitySteps(),
-                    v.intervalSeconds(), v.durationSeconds(), v.marginMode(), v.positionSide(), v.reduceOnly(),
-                    v.postOnly(), v.timeInForce(), update.statusCode(), update.currentOrderId(), update.rejectReason(),
+                    v.intervalSeconds(), v.durationSeconds(), v.marginMode(), v.positionSide(), v.reduceOnly(), v.timeInForce(), update.statusCode(), update.currentOrderId(), update.rejectReason(),
                     v.startAtEpochMillis(), update.nextSliceAtEpochMillis(), update.completedAtEpochMillis(),
                     v.createdAtEpochMillis(), update.updatedAtEpochMillis(), update.expectedRevision() + 1, children,
                     v.executedQuantitySteps(), v.activeQuantitySteps(), v.activeChildOrderCount()));

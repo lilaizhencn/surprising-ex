@@ -6,13 +6,14 @@ public record CoreAlgoOrderView(
         long algoOrderId, long userId, String clientAlgoOrderId, String instrumentId, int algoTypeCode,
         CoreOrderSide side, long priceTicks, long quantitySteps, long childQuantitySteps,
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
-        boolean reduceOnly, boolean postOnly, CoreTimeInForce timeInForce, int statusCode,
+        boolean reduceOnly, CoreTimeInForce timeInForce, int statusCode,
         long currentOrderId, String rejectReason, long startAtEpochMillis,
         long nextSliceAtEpochMillis, long completedAtEpochMillis, long createdAtEpochMillis,
         long updatedAtEpochMillis, long revision, List<Long> childOrderIds,
         long executedQuantitySteps, long activeQuantitySteps, int activeChildOrderCount) {
 
     public CoreAlgoOrderView {
+        if (algoTypeCode == CoreAlgoOrderCommand.TWAP_TYPE_CODE) timeInForce = CoreTimeInForce.IOC;
         if (algoTypeCode == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) intervalSeconds = 0;
         clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
         rejectReason = rejectReason == null ? "" : rejectReason;

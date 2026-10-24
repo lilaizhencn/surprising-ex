@@ -759,7 +759,7 @@ public class ClusteredBatchTradingBenchmark {
                     if (current == null) {
                         algo = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create(id, "algo-lane-" + i,
                                 "10", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS,
-                                CorePositionSide.NET, false, false, CoreTimeInForce.IOC, 1);
+                                CorePositionSide.NET, false, CoreTimeInForce.IOC, 1);
                     } else {
                         algo = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
                                 id, current.revision(), 0, 0, "", 1, 0, revision, 0);

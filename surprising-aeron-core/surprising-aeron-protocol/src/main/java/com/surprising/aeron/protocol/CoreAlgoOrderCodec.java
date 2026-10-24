@@ -7,17 +7,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CoreAlgoOrderCodec {
-    private static final int VERSION = 2;
-    private static final int COMMAND_VERSION = 4;
+    private static final int VERSION = 3;
+    private static final int COMMAND_VERSION = 5;
     private static final int MAX_TEXT_BYTES = 256;
     private static final int FIXED_ITEM_BYTES =
-            Long.BYTES * 16 + Integer.BYTES * 8 + Byte.BYTES * 2;
+            Long.BYTES * 16 + Integer.BYTES * 8 + Byte.BYTES;
 
     private CoreAlgoOrderCodec() { }
 
     public static byte[] encodeCommand(CoreAlgoOrderCommand command) {
         int length = switch (command) {
-            case CoreAlgoOrderCommand.Create value -> Integer.BYTES * 7 + Long.BYTES * 6 + 2
+            case CoreAlgoOrderCommand.Create value -> Integer.BYTES * 7 + Long.BYTES * 6 + 1
+                    - (value.algoTypeCode() == CoreAlgoOrderCommand.TWAP_TYPE_CODE ? Integer.BYTES : 0)
                     + (value.algoTypeCode() == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? 0 : Long.BYTES)
                     + textLength(value.clientAlgoOrderId()) + textLength(value.instrumentId());
             case CoreAlgoOrderCommand.Update value -> Integer.BYTES * 3 + Long.BYTES * 7
@@ -35,8 +36,9 @@ public final class CoreAlgoOrderCodec {
                 if (value.algoTypeCode() != CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) buffer.putLong(value.intervalSeconds());
                 buffer.putLong(value.durationSeconds())
                         .putInt(value.marginMode().wireCode()).putInt(value.positionSide().wireCode())
-                        .put((byte) (value.reduceOnly() ? 1 : 0)).put((byte) (value.postOnly() ? 1 : 0))
-                        .putInt(value.timeInForce().wireCode()).putLong(value.startAtEpochMillis());
+                        .put((byte) (value.reduceOnly() ? 1 : 0));
+                if (value.algoTypeCode() != CoreAlgoOrderCommand.TWAP_TYPE_CODE) buffer.putInt(value.timeInForce().wireCode());
+                buffer.putLong(value.startAtEpochMillis());
             }
             case CoreAlgoOrderCommand.Update value -> {
                 buffer.putInt(2).putLong(value.algoOrderId()).putLong(value.expectedRevision())
@@ -72,8 +74,9 @@ public final class CoreAlgoOrderCodec {
         long interval = type == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? 0 : reader.longValue();
         return new CoreAlgoOrderCommand.Create(id, clientId, instrumentId, type, side, price, quantity,
                 childQuantity, interval, reader.longValue(), CoreMarginMode.fromWireCode(reader.intValue()),
-                CorePositionSide.fromWireCode(reader.intValue()), reader.bool(), reader.bool(),
-                CoreTimeInForce.fromWireCode(reader.intValue()), reader.longValue());
+                CorePositionSide.fromWireCode(reader.intValue()), reader.bool(),
+                type == CoreAlgoOrderCommand.TWAP_TYPE_CODE ? CoreTimeInForce.IOC
+                        : CoreTimeInForce.fromWireCode(reader.intValue()), reader.longValue());
     }
 
     public static byte[] encode(CoreAlgoOrderView value) {
@@ -130,7 +133,8 @@ public final class CoreAlgoOrderCodec {
     private static int encodedItemLength(CoreAlgoOrderView value) {
         if (value == null) throw new IllegalArgumentException("algo order is required");
         int length = FIXED_ITEM_BYTES
-                - (value.algoTypeCode() == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? Long.BYTES : 0);
+                - (value.algoTypeCode() == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? Long.BYTES : 0)
+                - (value.algoTypeCode() == CoreAlgoOrderCommand.TWAP_TYPE_CODE ? Integer.BYTES : 0);
         length = Math.addExact(length, textLength(value.clientAlgoOrderId()));
         length = Math.addExact(length, textLength(value.instrumentId()));
         length = Math.addExact(length, textLength(value.rejectReason()));
@@ -159,9 +163,9 @@ public final class CoreAlgoOrderCodec {
         if (value.algoTypeCode() != CoreAlgoOrderCommand.ICEBERG_TYPE_CODE) buffer.putLong(value.intervalSeconds());
         buffer.putLong(value.durationSeconds())
                 .putInt(value.marginMode().wireCode()).putInt(value.positionSide().wireCode())
-                .put((byte) (value.reduceOnly() ? 1 : 0)).put((byte) (value.postOnly() ? 1 : 0))
-                .putInt(value.timeInForce().wireCode())
-                .putInt(value.statusCode()).putLong(value.currentOrderId());
+                .put((byte) (value.reduceOnly() ? 1 : 0));
+        if (value.algoTypeCode() != CoreAlgoOrderCommand.TWAP_TYPE_CODE) buffer.putInt(value.timeInForce().wireCode());
+        buffer.putInt(value.statusCode()).putLong(value.currentOrderId());
         CoreStateQueryCodec.putText(buffer, value.rejectReason(), true, MAX_TEXT_BYTES);
         buffer.putLong(value.startAtEpochMillis()).putLong(value.nextSliceAtEpochMillis())
                 .putLong(value.completedAtEpochMillis()).putLong(value.createdAtEpochMillis())
@@ -182,14 +186,16 @@ public final class CoreAlgoOrderCodec {
         long duration = reader.longValue();
         CoreMarginMode margin = CoreMarginMode.fromWireCode(reader.intValue());
         CorePositionSide position = CorePositionSide.fromWireCode(reader.intValue());
-        boolean reduce = reader.bool(), post = reader.bool(); CoreTimeInForce tif = CoreTimeInForce.fromWireCode(reader.intValue());
+        boolean reduce = reader.bool();
+        CoreTimeInForce tif = type == CoreAlgoOrderCommand.TWAP_TYPE_CODE ? CoreTimeInForce.IOC
+                : CoreTimeInForce.fromWireCode(reader.intValue());
         int status = reader.intValue(); long current = reader.longValue(); String reason = reader.text();
         long start = reader.longValue(), next = reader.longValue(), completed = reader.longValue();
         long created = reader.longValue(), updated = reader.longValue(), revision = reader.longValue();
         int childCount = reader.count(); List<Long> children = new ArrayList<>(childCount);
         for (int index = 0; index < childCount; index++) children.add(reader.longValue());
         return new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
-                interval, duration, margin, position, reduce, post, tif, status, current, reason,
+                interval, duration, margin, position, reduce, tif, status, current, reason,
                 start, next, completed, created, updated, revision, children, reader.longValue(),
                 reader.longValue(), reader.intValue());
     }

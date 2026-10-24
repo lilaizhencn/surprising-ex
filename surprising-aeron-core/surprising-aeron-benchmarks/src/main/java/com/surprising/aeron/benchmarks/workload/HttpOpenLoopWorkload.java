@@ -337,7 +337,7 @@ public final class HttpOpenLoopWorkload {
                     + config.limitPriceTicks() + ","
                     + "\"quantitySteps\":1,\"childQuantitySteps\":1,\"intervalSeconds\":1,"
                     + "\"durationSeconds\":1,\"marginMode\":\"CROSS\",\"positionSide\":\"NET\","
-                    + "\"reduceOnly\":false,\"postOnly\":false,\"timeInForce\":\"IOC\"}");
+                    + "\"reduceOnly\":false}");
             default -> post("/api/v1/trading/orders/cancel-all-after", "{\"userId\":" + intent.userId()
                     + ",\"instrumentId\":\"" + intent.instrumentId() + "\",\"countdownMs\":60000}");
         };

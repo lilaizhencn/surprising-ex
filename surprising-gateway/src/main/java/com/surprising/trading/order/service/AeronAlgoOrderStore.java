@@ -40,7 +40,7 @@ public class AeronAlgoOrderStore {
                 record.instrumentId(), record.algoType().ordinal(), CoreOrderSide.valueOf(record.side().name()),
                 record.priceTicks(), record.quantitySteps(), record.childQuantitySteps(), record.intervalSeconds(),
                 record.durationSeconds(), CoreMarginMode.valueOf(record.marginMode().name()),
-                CorePositionSide.valueOf(record.positionSide().name()), record.reduceOnly(), record.postOnly(),
+                CorePositionSide.valueOf(record.positionSide().name()), record.reduceOnly(),
                 CoreTimeInForce.valueOf(record.timeInForce().name()), epoch(record.startAt()));
         aeron.command(CoreMessageType.UPSERT_ALGO_ORDER,
                 StableOrderIdentity.algoCommandId(record.productLine(), record.userId(), record.clientAlgoOrderId()),
@@ -86,7 +86,7 @@ public class AeronAlgoOrderStore {
                 value.instrumentId(), AlgoOrderType.values()[value.algoTypeCode()], OrderSide.valueOf(value.side().name()),
                 value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(), value.intervalSeconds(),
                 value.durationSeconds(), MarginMode.valueOf(value.marginMode().name()),
-                PositionSide.valueOf(value.positionSide().name()), value.reduceOnly(), value.postOnly(),
+                PositionSide.valueOf(value.positionSide().name()), value.reduceOnly(),
                 TimeInForce.valueOf(value.timeInForce().name()), AlgoOrderStatus.values()[value.statusCode()],
                 value.currentOrderId() == 0 ? null : value.currentOrderId(), empty(value.rejectReason()),
                 instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()),

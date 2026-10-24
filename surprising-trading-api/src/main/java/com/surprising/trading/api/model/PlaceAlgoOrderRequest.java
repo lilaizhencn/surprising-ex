@@ -28,8 +28,12 @@ public record PlaceAlgoOrderRequest(
 
     public PlaceAlgoOrderRequest {
         if (algoType == AlgoOrderType.ICEBERG) intervalSeconds = 0;
-        else if (algoType == AlgoOrderType.TWAP && (intervalSeconds < 1 || intervalSeconds > 86_400))
-            throw new IllegalArgumentException("TWAP intervalSeconds must be in [1, 86400]");
+        else if (algoType == AlgoOrderType.TWAP) {
+            if (intervalSeconds < 1 || intervalSeconds > 86_400)
+                throw new IllegalArgumentException("TWAP intervalSeconds must be in [1, 86400]");
+            postOnly = false;
+            timeInForce = TimeInForce.IOC;
+        }
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);
     }

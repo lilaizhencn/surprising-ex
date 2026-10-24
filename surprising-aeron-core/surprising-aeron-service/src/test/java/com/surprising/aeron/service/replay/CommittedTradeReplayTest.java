@@ -279,7 +279,7 @@ class CommittedTradeReplayTest {
      */
     private CoreAlgoOrderView algo(int status,long revision,List<Long> children) {
         return new CoreAlgoOrderView(701,7,"algo-client-701","604",0,CoreOrderSide.BUY,100,4,2,5,20,
-                CoreMarginMode.CROSS,CorePositionSide.NET,false,false,CoreTimeInForce.GTC,status,
+                CoreMarginMode.CROSS,CorePositionSide.NET,false,CoreTimeInForce.GTC,status,
                 children.isEmpty()?0:children.getLast(),"",TIME,TIME+5000,0,TIME,TIME+revision,revision,children,0,0,0);
     }
 
@@ -467,7 +467,7 @@ class CommittedTradeReplayTest {
                 value.algoOrderId(), value.clientAlgoOrderId(), value.instrumentId(), value.algoTypeCode(),
                         value.side(), value.priceTicks(), value.quantitySteps(), value.childQuantitySteps(),
                         value.intervalSeconds(), value.durationSeconds(), value.marginMode(), value.positionSide(),
-                        value.reduceOnly(), value.postOnly(), value.timeInForce(), value.startAtEpochMillis())
+                        value.reduceOnly(), value.timeInForce(), value.startAtEpochMillis())
                 : new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
                 value.algoOrderId(), value.revision() - 1, value.statusCode(), value.currentOrderId(),
                         value.rejectReason(), value.nextSliceAtEpochMillis(), value.completedAtEpochMillis(),

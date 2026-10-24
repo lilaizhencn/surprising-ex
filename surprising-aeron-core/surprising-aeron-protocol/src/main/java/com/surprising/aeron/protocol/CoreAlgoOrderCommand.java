@@ -2,15 +2,17 @@ package com.surprising.aeron.protocol;
 
 /** 算法单新建意图与生命周期增量；账户归属由命令头提供。 */
 public sealed interface CoreAlgoOrderCommand {
+    int TWAP_TYPE_CODE = 0;
     int ICEBERG_TYPE_CODE = 1;
     long algoOrderId();
 
     record Create(long algoOrderId, String clientAlgoOrderId, String instrumentId, int algoTypeCode,
                   CoreOrderSide side, long priceTicks, long quantitySteps, long childQuantitySteps,
                   long intervalSeconds, long durationSeconds, CoreMarginMode marginMode,
-                  CorePositionSide positionSide, boolean reduceOnly, boolean postOnly,
+                  CorePositionSide positionSide, boolean reduceOnly,
                   CoreTimeInForce timeInForce, long startAtEpochMillis) implements CoreAlgoOrderCommand {
         public Create {
+            if (algoTypeCode == TWAP_TYPE_CODE) timeInForce = CoreTimeInForce.IOC;
             if (algoTypeCode == ICEBERG_TYPE_CODE) intervalSeconds = 0;
             clientAlgoOrderId = clientAlgoOrderId == null ? "" : clientAlgoOrderId;
             if (algoOrderId <= 0 || instrumentId == null || instrumentId.isBlank() || algoTypeCode < 0

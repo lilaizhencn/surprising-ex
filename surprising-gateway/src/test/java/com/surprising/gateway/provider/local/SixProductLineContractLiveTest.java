@@ -789,9 +789,10 @@ class SixProductLineContractLiveTest {
     private long submitAlgo(Participant user,int instrument,String client,String type,String side,long price) throws Exception {
         var body=new LinkedHashMap<String,Object>();body.put("userId",user.id);body.put("instrumentId",String.valueOf(instrument));
         body.put("clientAlgoOrderId",client);body.put("algoType",type);body.put("side",side);body.put("priceTicks",price);
-        body.put("quantitySteps",2);body.put("childQuantitySteps",1);body.put("intervalSeconds",1);body.put("durationSeconds",30);
-        body.put("marginMode","CROSS");body.put("positionSide","NET");body.put("reduceOnly",false);body.put("postOnly",false);
-        body.put("timeInForce",type.equals("TWAP")?"IOC":"GTC");body.put("startAt",Instant.now().toString());
+        body.put("quantitySteps",2);body.put("childQuantitySteps",1);body.put("durationSeconds",30);
+        if (type.equals("TWAP")) body.put("intervalSeconds",1);
+        body.put("marginMode","CROSS");body.put("positionSide","NET");body.put("reduceOnly",false);
+        body.put("startAt",Instant.now().toString());
         return request("POST","/api/v1/gateway/trading/algo",json.writeValueAsString(body),user.token,null,200).path("algoOrderId").asLong();
     }
 

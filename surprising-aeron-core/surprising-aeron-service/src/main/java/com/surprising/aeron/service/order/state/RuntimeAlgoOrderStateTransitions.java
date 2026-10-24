@@ -135,7 +135,7 @@ public final class RuntimeAlgoOrderStateTransitions {
                         create.instrumentId(), create.algoTypeCode(), create.side(), create.priceTicks(),
                         create.quantitySteps(), create.childQuantitySteps(), create.intervalSeconds(),
                                 create.durationSeconds(),
-                        create.marginMode(), create.positionSide(), create.reduceOnly(), create.postOnly(),
+                        create.marginMode(), create.positionSide(), create.reduceOnly(),
                                 create.timeInForce(),
                         0, 0, "", start, start, 0, clusterTimestamp, clusterTimestamp, 1, java.util.List.of());
             }
@@ -172,7 +172,7 @@ public final class RuntimeAlgoOrderStateTransitions {
                         current.instrumentId(), current.algoTypeCode(), current.side(), current.priceTicks(),
                         current.quantitySteps(), current.childQuantitySteps(), current.intervalSeconds(),
                                 current.durationSeconds(),
-                        current.marginMode(), current.positionSide(), current.reduceOnly(), current.postOnly(),
+                        current.marginMode(), current.positionSide(), current.reduceOnly(),
                                 current.timeInForce(),
                         update.statusCode(), update.currentOrderId(), update.rejectReason(), current.startAtEpochMillis(),
                         update.nextSliceAtEpochMillis(), update.completedAtEpochMillis(), current.createdAtEpochMillis(),

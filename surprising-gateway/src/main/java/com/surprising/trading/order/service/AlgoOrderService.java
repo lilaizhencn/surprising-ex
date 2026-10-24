@@ -10,13 +10,11 @@ import com.surprising.trading.api.model.AlgoOrderType;
 import com.surprising.trading.api.model.CancelAlgoOrderRequest;
 import com.surprising.trading.api.model.CancelOpenAlgoOrdersRequest;
 import com.surprising.trading.api.model.CancelOrderRequest;
-import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderResponse;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
 import com.surprising.trading.api.model.PlaceOrderRequest;
-import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.AlgoOrderChild;
@@ -27,7 +25,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -63,23 +60,53 @@ public class AlgoOrderService {
     }
 
     public AlgoOrderResponse place(PlaceAlgoOrderRequest request) {
-        PlaceAlgoOrderRequest normalized = normalize(request);
+        if (request == null || request.userId() <= 0) {
+            throw new IllegalArgumentException("algo order request and userId are required");
+        }
+        String instrumentId = normalizeSymbol(request.instrumentId());
+        if (request.algoType() == null || request.side() == null) {
+            throw new IllegalArgumentException("algoType and side are required");
+        }
+        if (request.quantitySteps() <= 0 || request.childQuantitySteps() <= 0
+                || request.childQuantitySteps() > request.quantitySteps()) {
+            throw new IllegalArgumentException("quantitySteps and childQuantitySteps are invalid");
+        }
+        validateRange(request.durationSeconds(), properties.getAlgo().getMinDurationSeconds(),
+                properties.getAlgo().getMaxDurationSeconds(), "durationSeconds");
+        if (request.algoType() == AlgoOrderType.TWAP) {
+            validateRange(request.intervalSeconds(), properties.getAlgo().getMinIntervalSeconds(),
+                    properties.getAlgo().getMaxIntervalSeconds(), "intervalSeconds");
+            if (request.durationSeconds() < request.intervalSeconds()) {
+                throw new IllegalArgumentException("durationSeconds must be >= intervalSeconds");
+            }
+            long maxSlices = (request.durationSeconds() + request.intervalSeconds() - 1L)
+                    / request.intervalSeconds();
+            long minChild = request.quantitySteps() / maxSlices
+                    + (request.quantitySteps() % maxSlices == 0 ? 0 : 1);
+            if (request.childQuantitySteps() < minChild) {
+                throw new IllegalArgumentException("childQuantitySteps is too small to finish TWAP inside durationSeconds");
+            }
+        }
+        TimeInForce tif = normalizeTimeInForce(request);
+        String clientAlgoOrderId = emptyToNull(request.clientAlgoOrderId());
+        if (clientAlgoOrderId == null) {
+            throw new IllegalArgumentException("clientAlgoOrderId is required");
+        }
+        if (clientAlgoOrderId.length() > 64) {
+            throw new IllegalArgumentException("clientAlgoOrderId length must be <= 64");
+        }
         ProductLine productLine = currentProductLine();
         requireLocalProductLine(productLine);
-        long algoOrderId = StableOrderIdentity.algoOrderId(productLine, normalized.userId(),
-                normalized.clientAlgoOrderId());
-        UUID commandId = StableOrderIdentity.algoCommandId(productLine, normalized.userId(),
-                normalized.clientAlgoOrderId());
+        long algoOrderId = StableOrderIdentity.algoOrderId(productLine, request.userId(), clientAlgoOrderId);
         AlgoOrderRecord record = new AlgoOrderRecord(
-                algoOrderId, productLine, normalized.userId(), normalized.clientAlgoOrderId(),
-                normalized.instrumentId(), normalized.algoType(), normalized.side(), normalized.priceTicks(),
-                normalized.quantitySteps(), normalized.childQuantitySteps(), normalized.intervalSeconds(),
-                normalized.durationSeconds(), normalized.marginMode(), normalized.positionSide(), normalized.reduceOnly(),
-                normalized.postOnly(), normalized.timeInForce(), AlgoOrderStatus.PENDING, null, null,
-                normalized.startAt(), null, null, null, null);
+                algoOrderId, productLine, request.userId(), clientAlgoOrderId,
+                instrumentId, request.algoType(), request.side(), request.priceTicks(),
+                request.quantitySteps(), request.childQuantitySteps(), request.intervalSeconds(),
+                request.durationSeconds(), request.marginMode(), request.positionSide(), request.reduceOnly(),
+                tif, AlgoOrderStatus.PENDING, null, null,
+                request.startAt(), null, null, null, null);
         var persisted = store.create(record);
-        AlgoOrderResponse response = store.response(store.get(persisted.userId(), persisted.algoOrderId()));
-        return response;
+        return store.response(store.get(persisted.userId(), persisted.algoOrderId()));
     }
 
     public AlgoOrderResponse cancel(CancelAlgoOrderRequest request) {
@@ -322,62 +349,14 @@ public class AlgoOrderService {
         return new AlgoOrderRecord(order.algoOrderId(), order.productLine(), order.userId(),
                 order.clientAlgoOrderId(), order.instrumentId(), order.algoType(), order.side(), order.priceTicks(),
                 order.quantitySteps(), order.childQuantitySteps(), order.intervalSeconds(), order.durationSeconds(),
-                order.marginMode(), order.positionSide(), order.reduceOnly(), order.postOnly(), order.timeInForce(),
+                order.marginMode(), order.positionSide(), order.reduceOnly(), order.timeInForce(),
                 status, currentOrderId, reason, order.startAt(), nextSliceAt, completedAt,
                 order.createdAt(), now);
     }
 
-    private PlaceAlgoOrderRequest normalize(PlaceAlgoOrderRequest request) {
-        if (request == null || request.userId() <= 0) {
-            throw new IllegalArgumentException("algo order request and userId are required");
-        }
-        String instrumentId = normalizeSymbol(request.instrumentId());
-        if (request.algoType() == null || request.side() == null) {
-            throw new IllegalArgumentException("algoType and side are required");
-        }
-        if (request.quantitySteps() <= 0 || request.childQuantitySteps() <= 0
-                || request.childQuantitySteps() > request.quantitySteps()) {
-            throw new IllegalArgumentException("quantitySteps and childQuantitySteps are invalid");
-        }
-        validateRange(request.durationSeconds(), properties.getAlgo().getMinDurationSeconds(),
-                properties.getAlgo().getMaxDurationSeconds(), "durationSeconds");
-        if (request.algoType() == AlgoOrderType.TWAP) {
-            validateRange(request.intervalSeconds(), properties.getAlgo().getMinIntervalSeconds(),
-                    properties.getAlgo().getMaxIntervalSeconds(), "intervalSeconds");
-            if (request.durationSeconds() < request.intervalSeconds()) {
-                throw new IllegalArgumentException("durationSeconds must be >= intervalSeconds");
-            }
-            long maxSlices = (request.durationSeconds() + request.intervalSeconds() - 1L)
-                    / request.intervalSeconds();
-            long minChild = request.quantitySteps() / maxSlices
-                    + (request.quantitySteps() % maxSlices == 0 ? 0 : 1);
-            if (request.childQuantitySteps() < minChild) {
-                throw new IllegalArgumentException("childQuantitySteps is too small to finish TWAP inside durationSeconds");
-            }
-        }
-        MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
-        PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
-        TimeInForce tif = normalizeTimeInForce(request);
-        boolean postOnly = request.algoType() == AlgoOrderType.ICEBERG
-                && (request.postOnly() || tif == TimeInForce.GTX);
-        String clientAlgoOrderId = emptyToNull(request.clientAlgoOrderId());
-        if (clientAlgoOrderId == null) {
-            throw new IllegalArgumentException("clientAlgoOrderId is required");
-        }
-        if (clientAlgoOrderId.length() > 64) {
-            throw new IllegalArgumentException("clientAlgoOrderId length must be <= 64");
-        }
-        return new PlaceAlgoOrderRequest(request.userId(), clientAlgoOrderId, instrumentId,
-                request.algoType(), request.side(), request.priceTicks(), request.quantitySteps(),
-                request.childQuantitySteps(), request.intervalSeconds(), request.durationSeconds(), marginMode,
-                positionSide, request.reduceOnly(), postOnly, tif, request.startAt());
-    }
 
     private TimeInForce normalizeTimeInForce(PlaceAlgoOrderRequest request) {
         if (request.algoType() == AlgoOrderType.TWAP) {
-            if (request.timeInForce() != null && request.timeInForce() != TimeInForce.IOC) {
-                throw new IllegalArgumentException("TWAP child orders must use IOC");
-            }
             return TimeInForce.IOC;
         }
         if (request.priceTicks() <= 0) {
@@ -387,7 +366,7 @@ public class AlgoOrderService {
         if (tif != TimeInForce.GTC && tif != TimeInForce.GTX) {
             throw new IllegalArgumentException("ICEBERG timeInForce must be GTC or GTX");
         }
-        return tif;
+        return request.postOnly() ? TimeInForce.GTX : tif;
     }
 
     private void validateRange(long value, long min, long max, String name) {

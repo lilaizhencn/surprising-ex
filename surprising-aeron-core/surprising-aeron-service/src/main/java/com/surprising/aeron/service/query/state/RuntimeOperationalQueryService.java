@@ -160,7 +160,7 @@ public final class RuntimeOperationalQueryService {
             result.add(new CoreAlgoOrderView(state.algoOrderId(), state.userId(), state.clientAlgoOrderId(),
                     state.instrumentId(), state.algoTypeCode(), state.side(), state.priceTicks(), state.quantitySteps(),
                     state.childQuantitySteps(), state.intervalSeconds(), state.durationSeconds(), state.marginMode(),
-                    state.positionSide(), state.reduceOnly(), state.postOnly(), state.timeInForce(), state.statusCode(),
+                    state.positionSide(), state.reduceOnly(), state.timeInForce(), state.statusCode(),
                     state.currentOrderId(), state.rejectReason(), state.startAtEpochMillis(),
                     state.nextSliceAtEpochMillis(), state.completedAtEpochMillis(), state.createdAtEpochMillis(),
                     state.updatedAtEpochMillis(), state.revision(), children, executed, active, activeCount));

@@ -106,6 +106,25 @@ class AlgoOrderServiceTest {
         }
     }
 
+    @Test
+    void icebergPostOnlyUsesGtxWithoutASecondStoredFlag() {
+        var properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(ProductLine.SPOT);
+        var store = mock(AeronAlgoOrderStore.class);
+        org.mockito.Mockito.when(store.create(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        var service = new AlgoOrderService(properties, mock(OrderService.class), store,
+                mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class),
+                mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class));
+        service.place(new PlaceAlgoOrderRequest(1001, "ice-post", "1", AlgoOrderType.ICEBERG,
+                OrderSide.BUY, 100, 100, 10, 0, 20, MarginMode.CROSS, PositionSide.NET,
+                false, true, TimeInForce.GTC, null));
+        var captured = org.mockito.ArgumentCaptor.forClass(com.surprising.trading.order.model.AlgoOrderRecord.class);
+        org.mockito.Mockito.verify(store).create(captured.capture());
+        org.assertj.core.api.Assertions.assertThat(captured.getValue().timeInForce()).isEqualTo(TimeInForce.GTX);
+        org.assertj.core.api.Assertions.assertThat(captured.getValue().postOnly()).isTrue();
+    }
+
     private AlgoOrderService service(ProductLine line) {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getKafka().setProductLine(line);
