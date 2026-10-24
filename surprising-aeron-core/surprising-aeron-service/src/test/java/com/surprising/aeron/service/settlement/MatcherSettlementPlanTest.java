@@ -612,9 +612,9 @@ class MatcherSettlementPlanTest {
                             true, 1, 1, 2, 1, 1, 0,
                             null, List.of()), runtime, identities);
             // 调用方撤单数组或混合接受与拒绝的撤单结果列表，具体用例分别核对复制及顺序。
-            var cancellations = List.of(new com.surprising.aeron.service.matcher.CoreCancellationResult(13, true, "CANCELLED"),
-                    new com.surprising.aeron.service.matcher.CoreCancellationResult(12, false, "NOT_FOUND"),
-                    new com.surprising.aeron.service.matcher.CoreCancellationResult(11, true, "CANCELLED"));
+            var cancellations = List.of(new com.surprising.aeron.service.matcher.CoreCancellationResult(13, true),
+                    new com.surprising.aeron.service.matcher.CoreCancellationResult(12, false),
+                    new com.surprising.aeron.service.matcher.CoreCancellationResult(11, true));
             slot.preCancellationsFromExpected(List.of(12L, 11L, 13L), cancellations);
             assertThat(slot.preCancellationCount()).isEqualTo(2);
             assertThat(slot.preCancellationOrderId(0)).isEqualTo(11);

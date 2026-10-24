@@ -388,22 +388,6 @@ public final class TreasuryRuntime {
     }
 
     /**
-     * 复制当前范围资金费变更币对集合，调用方不修改内部集合。
-     */
-    IntHashSet changedFundingSymbols() {
-        assertOwner();
-        return new IntHashSet(changedFundingSymbols);
-    }
-
-    /**
-     * 复制当前范围生命周期变更币对集合。
-     */
-    IntHashSet changedLifecycleSymbols() {
-        assertOwner();
-        return new IntHashSet(changedLifecycleSymbols);
-    }
-
-    /**
      * 清除当前范围变化键及进度前值引用，保留资产原语前值数组容量；不修改资金权威余额。
      */
     public void clearChangedKeys() {
@@ -413,22 +397,6 @@ public final class TreasuryRuntime {
         if (!changedLifecycleSymbols.isEmpty()) changedLifecycleSymbols.clear();
         if (!patchFundingBefore.isEmpty()) patchFundingBefore.clear();
         if (!patchLifecycleBefore.isEmpty()) patchLifecycleBefore.clear();
-    }
-
-    /**
-     * 按捕获槽物化该资产首个七列前值；未捕获或七列全零时返回空，使用零与缺失等价语义。
-     * @param assetId 需要读写或捕获的非负资产编号
-     */
-    AssetState patchAssetBefore(int assetId) {
-        assertOwner();
-        // 当前资产捕获列或返回页的有效原语下标。
-        int index = assetChanges.indexOf(assetId);
-        if (index < 0 || (feeBefore[index] | insuranceBefore[index] | deficitBefore[index]
-                | liquidationFeeBefore[index] | fundingResidualBefore[index]
-                | roundingResidualBefore[index] | clearingPnlBefore[index]) == 0) return null;
-        return new AssetState(feeBefore[index], insuranceBefore[index], deficitBefore[index],
-                liquidationFeeBefore[index], fundingResidualBefore[index], roundingResidualBefore[index],
-                clearingPnlBefore[index]);
     }
 
     /**
@@ -789,19 +757,6 @@ public final class TreasuryRuntime {
                     new LifecycleState(settlementId, progress));
         }
     }
-
-    /**
-     * 为回滚或导出物化的单资产七类系统资金前值，不是在线权威余额表。
-     * @param fee 该资产手续费前值
-     * @param insurance 该资产保险基金前值
-     * @param deficit 保险亏空余额或前值
-     * @param liquidationFee 该资产独立强平费前值
-     * @param fundingResidual 该资产资金费残差前值
-     * @param roundingResidual 该资产舍入残差前值
-     * @param clearingPnl 该资产系统清算盈亏前值
-     */
-    record AssetState(long fee, long insurance, long deficit, long liquidationFee,
-                      long fundingResidual, long roundingResidual, long clearingPnl) { }
 
     /**
      * 当前控制范围首次修改前的资金费完成编号及可空分页进度。

@@ -26,7 +26,7 @@ class MatcherPipelineGroupTest {
     @Test
     void matcherPublishesWithoutOwnerDrainAndTransportRetirementDoesNotTouchReusedSlot() {
         // Owner 命令槽环，用于验证结果直接发布和槽位复用。
-        var contexts = new CommandSlotRing(1, 1);
+        var contexts = new CommandSlotRing(1);
         // 第一条命令占用的上下文，随后由同一对象承载第二条。
         var slot = contexts.claim(1);
         try (/* 本测试使用的 Matcher 分片组。 */ var pipelines = new MatcherPipelineGroup(1, 2, true, contexts)) {
@@ -224,7 +224,7 @@ class MatcherPipelineGroupTest {
     @Test
     void sequenceSlotRejectsDuplicateRoutesAndRecoversAfterQueueRejection() {
         // Owner 命令槽环，用于验证结果直接发布和槽位复用。
-        var contexts = new CommandSlotRing(4, 1);
+        var contexts = new CommandSlotRing(4);
         // 第一笔订单输入，路由拒绝测试中则是第一条命令槽。
         var first = contexts.claim(1);
         // 第二笔订单输入，路由拒绝测试中则是第二条命令槽。
@@ -260,7 +260,7 @@ class MatcherPipelineGroupTest {
      */
     private static MatcherPipelineGroup pipelines(int shards, int capacity, boolean start, long... sequences) {
         // Owner 命令槽环，用于验证结果直接发布和槽位复用。
-        var contexts = new CommandSlotRing(shards * capacity, 1);
+        var contexts = new CommandSlotRing(shards * capacity);
         for (long /* 当前轮询或预占槽位的 Core 序号。 */ sequence : sequences) contexts.claim(sequence);
         return new MatcherPipelineGroup(shards, capacity, start, contexts);
     }

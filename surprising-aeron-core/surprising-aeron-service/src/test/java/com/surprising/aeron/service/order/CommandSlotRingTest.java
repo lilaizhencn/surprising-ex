@@ -23,7 +23,7 @@ class CommandSlotRingTest {
     @Test
     void matcherRouteMustBeConsumedBeforeTheSequenceSlotCanBeReused() {
         // 当前固定容量命令槽池。
-        var ring = new CommandSlotRing(2, 1);
+        var ring = new CommandSlotRing(2);
         // 当前已占用的命令槽。
         var context = ring.claim(1);
         context.claimMatcherSubmission(0);
@@ -42,7 +42,7 @@ class CommandSlotRingTest {
     @Test
     void suspendedSequencesTransferFundsWithoutSharingTheActiveBuffer() {
         // 当前固定容量命令槽池。
-        var ring = new CommandSlotRing(4, 4);
+        var ring = new CommandSlotRing(4);
         // 首个槽或首个同步完成结果，具体见当前声明。
         var first = ring.claim(1);
         // 第二个已占用槽。
@@ -97,7 +97,7 @@ class CommandSlotRingTest {
     @Test
     void synchronousControlLanesCannotEraseMatcherParticipantsOrWeakenAckValidation() {
         // 当前固定容量命令槽池。
-        var ring=new CommandSlotRing(4,4);
+        var ring=new CommandSlotRing(4);
         // 当前已占用的命令槽。
         var context=ring.claim(1);
         assertThatThrownBy(()->context.includeControlLanes(2,15)).isInstanceOf(IllegalStateException.class);
@@ -129,7 +129,7 @@ class CommandSlotRingTest {
     @Test
     void aggregatesExactlyOneAckPerExpectedLaneAndReleasesTheResultReference() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(4, 4);
+        CommandSlotRing ring = new CommandSlotRing(4);
         // 当前已占用的命令槽。
         CommandSlot context = ring.claim(1);
         // 人工撮合事实，绑定同一 Core 序号后用于 Lane 确认。
@@ -154,7 +154,7 @@ class CommandSlotRingTest {
     @Test
     void storesSynchronousMatchingResultAndKeepsTheFirstCompletion() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(4, 4);
+        CommandSlotRing ring = new CommandSlotRing(4);
         // 当前已占用的命令槽。
         CommandSlot context = ring.claim(3);
         // 首个槽或首个同步完成结果，具体见当前声明。
@@ -177,7 +177,7 @@ class CommandSlotRingTest {
     @Test
     void failsClosedForDuplicateUnexpectedOrOutOfRangeAck() {
         // 当前已占用的命令槽。
-        CommandSlot context = new CommandSlotRing(4, 4).claim(1);
+        CommandSlot context = new CommandSlotRing(4).claim(1);
         // 人工撮合事实，绑定同一 Core 序号后用于 Lane 确认。
         CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequenceInPlace(1);
         context.result(result, 0b11, 0b1111);
@@ -197,7 +197,7 @@ class CommandSlotRingTest {
     @Test
     void storesMatchingRejectionInTheSequenceSlot() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(4, 4);
+        CommandSlotRing ring = new CommandSlotRing(4);
         // 当前已占用的命令槽。
         CommandSlot context = ring.claim(1);
 
@@ -216,7 +216,7 @@ class CommandSlotRingTest {
     @Test
     void ownsSuspendedCommitStateBySequence() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(4, 4);
+        CommandSlotRing ring = new CommandSlotRing(4);
         // 当前已占用的命令槽。
         CommandSlot context = ring.claim(2);
         // 本次挂起的空资金累加器。
@@ -248,7 +248,7 @@ class CommandSlotRingTest {
     @Test
     void restoresSuspendedPrimitiveChangeBuffersByOwnershipTransfer() {
         // 当前固定容量命令槽池。
-        CommandSlotRing ring = new CommandSlotRing(2, 1);
+        CommandSlotRing ring = new CommandSlotRing(2);
         // 当前已占用的命令槽。
         CommandSlot context = ring.claim(1);
         // 提交输入被挂起的原构建器。

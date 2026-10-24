@@ -899,8 +899,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         appliedCommandCount, matcherSnapshot, false, restoredBusinessStateHash, configuration);
         this.pendingMatching = new PendingMatchingRing(
                 Math.min(configuration.maxPendingMatching(), matchingAdapter.topology().matcherWindowSize()),
-                matchingAdapter.topology().matchingEngineCount(),
-                matchingAdapter.topology().accountLaneCount());
+                matchingAdapter.topology().matchingEngineCount());
         commits.initializeMatcherProgress(matchingAdapter.topology().matchingEngineCount() + 1);
         commits.initializeMatcherProgress(matcherSnapshot);
         this.matcherPipeline = new MatcherPipelineGroup(

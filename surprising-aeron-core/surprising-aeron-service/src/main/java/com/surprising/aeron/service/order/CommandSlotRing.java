@@ -21,13 +21,11 @@ public final class CommandSlotRing {
     private int highWaterMark;
 
     /**
-     * 校验正的二次幂容量和一至六十四的 Lane 数，预分配空 CommandSlot；laneCount 仅做范围检查，不保存或据此给每槽分配 Lane 数组。
+     * 校验正的二次幂容量，预分配空 CommandSlot。
      * @param capacity 正的二次幂槽位数
-     * @param laneCount 当前配置的账户 Lane 数，仅校验一至六十四
      */
-    public CommandSlotRing(int capacity, int laneCount) {
-        if (capacity <= 0 || (capacity & (capacity - 1)) != 0
-                || laneCount <= 0 || laneCount > Long.SIZE) {
+    public CommandSlotRing(int capacity) {
+        if (capacity <= 0 || (capacity & (capacity - 1)) != 0) {
             throw new IllegalArgumentException("lane command context capacity must be a power of two");
         }
         contexts = new CommandSlot[capacity];

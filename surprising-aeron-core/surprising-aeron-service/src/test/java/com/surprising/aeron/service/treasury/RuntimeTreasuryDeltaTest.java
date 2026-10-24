@@ -52,8 +52,6 @@ class RuntimeTreasuryDeltaTest {
         treasury.setRoundingResidual(7, 6);
         treasury.setClearingPnl(7, -54);
 
-        assertThat(treasury.patchAssetBefore(7)).isEqualTo(
-                new TreasuryRuntime.AssetState(90, 500, 20, 1, 4, 5, -100));
         // 从当前财库前后值生成的资金累加器，用于守恒及逐分录核对。
         RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
         treasury.appendFundsDelta(funds);
@@ -77,7 +75,6 @@ class RuntimeTreasuryDeltaTest {
         assertThat(treasury.roundingResidual(7)).isEqualTo(5);
         assertThat(treasury.clearingPnl(7)).isEqualTo(-100);
         assertThat(treasury.hasChangedValues()).isFalse();
-        assertThat(treasury.patchAssetBefore(7)).isNull();
     }
 
     /**
@@ -174,12 +171,18 @@ class RuntimeTreasuryDeltaTest {
         treasury.clearChangedKeys(); treasury.clearChangedKeys();
         assertThat(treasury.fee(7)).isEqualTo(100);
         assertThat(treasury.changedAssets().isEmpty()).isTrue();
-        assertThat(treasury.changedFundingSymbols().isEmpty()).isTrue();
-        assertThat(treasury.changedLifecycleSymbols().isEmpty()).isTrue();
-        assertThat(treasury.patchAssetBefore(7)).isNull();
+        assertThat(treasury.fundingSettlement(8)).isEqualTo(11);
+        assertThat(treasury.lifecycleSettlement(9)).isEqualTo(12);
+        assertThat(treasury.hasChangedValues()).isFalse();
         treasury.setFee(7, 200);
-        assertThat(treasury.patchAssetBefore(7)).isNotNull();
         assertThat(treasury.changedAssets().contains(7)).isTrue();
+        var funds = new RuntimeFundsAccumulator();
+        treasury.appendFundsDelta(funds);
+        assertThat(funds.toDelta().postings()).containsExactly(new RuntimeFundsDelta.Posting(
+                7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 100));
+        treasury.rollbackChangedValues();
+        assertThat(treasury.fee(7)).isEqualTo(100);
+        assertThat(treasury.hasChangedValues()).isFalse();
     }
 
     /**

@@ -324,8 +324,10 @@ class DeterministicExchangeCoreAdapterTest {
                     new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
             assertThat(result.accepted()).isFalse();
             assertThat(result.outcome()).isEqualTo(MatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
-            assertThat(result.cancellations()).extracting(CoreCancellationResult::resultCode)
-                    .containsExactly("SUCCESS", "MATCHING_UNKNOWN_ORDER_ID", "NOT_SUBMITTED");
+            assertThat(result.resultCode()).isEqualTo("MATCHING_UNKNOWN_ORDER_ID");
+            assertThat(result.cancellations()).extracting(CoreCancellationResult::orderId, CoreCancellationResult::accepted)
+                    .containsExactly(org.assertj.core.groups.Tuple.tuple(1L, true),
+                            org.assertj.core.groups.Tuple.tuple(2L, false), org.assertj.core.groups.Tuple.tuple(3L, false));
             assertThat(cancelDirect(adapter, 5, new java.util.UUID(7, 5), 1000, 7, 3, "1").accepted()).isTrue();
         }
     }

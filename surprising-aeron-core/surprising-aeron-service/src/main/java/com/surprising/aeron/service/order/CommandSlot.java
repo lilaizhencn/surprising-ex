@@ -184,11 +184,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     private final CancelMatchingContinuation cancelMatching = new CancelMatchingContinuation();
     /** 预构造的替换/改单撮合任务。 */
     private final ReplaceMatchingContinuation replaceMatching = new ReplaceMatchingContinuation();
-    /**  本槽持有的可复用准入订单实例，使用前由调用方填充。 返回本槽预分配的可变准入订单，调用方在新命令使用前覆盖所需字段并遵守租约。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private final ResolvedPlaceOrder reusableResolvedOrder = new ResolvedPlaceOrder();
-
     /**
      *  当前等待收集的 Lane 提交事件。
      * 返回待收集的账户 Lane 提交事件。
@@ -971,7 +966,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         matchingLifecycle = MATCHING_ADMITTED;
         deferred.clear();
         cachedMatcherShard = -1;
-        reusableResolvedOrder.clear();
     }
 
     /**

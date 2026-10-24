@@ -1305,7 +1305,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         for (/* 当前批次项或盘口档位的下标。 */ int index = 0; index < results.size(); index++) {
             // 当前顺序位置的非空撤单回执，用来生成逐项结果并确定成功前缀。
             CoreMatchingResult result = java.util.Objects.requireNonNull(results.get(index), "cancellation result");
-            cancellations.add(new CoreCancellationResult(requested.get(index).orderId(), result.accepted(), result.resultCode()));
+            cancellations.add(new CoreCancellationResult(requested.get(index).orderId(), result.accepted()));
             if (failure == null && result.accepted()) successfulPrefix++;
             else if (failure == null) failure = result;
         }

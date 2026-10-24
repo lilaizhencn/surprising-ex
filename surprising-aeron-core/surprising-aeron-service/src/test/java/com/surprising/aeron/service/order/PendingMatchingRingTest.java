@@ -23,7 +23,7 @@ class PendingMatchingRingTest {
     @Test
     void ledgerDispatchAdvancesWithoutRetiringResponsesAndSurvivesSlotReuse() {
         // 当前测试创建的 Owner 待撮合环。
-        var ring = new PendingMatchingRing(4, 1, 4);
+        var ring = new PendingMatchingRing(4, 1);
         // 最早的已占用命令槽。
         var first = acquire(ring, 1, UUID.randomUUID(), 1001);
         // 第二个命令槽。
@@ -60,7 +60,7 @@ class PendingMatchingRingTest {
     @Test
     void removingUnfundedOrRejectedHeadKeepsTheLedgerCursorInOriginalOrder() {
         // 当前测试创建的 Owner 待撮合环。
-        var ring = new PendingMatchingRing(4, 1, 4);
+        var ring = new PendingMatchingRing(4, 1);
         // 最早的已占用命令槽。
         var first = acquire(ring, 1, UUID.randomUUID(), 1001);
         // 第二个命令槽。
@@ -84,7 +84,7 @@ class PendingMatchingRingTest {
     @Test
     void keepsTheLowWatermarkWhileAllowingIndependentPartitionCompletion() {
         // 当前测试创建的 Owner 待撮合环。
-        PendingMatchingRing ring = new PendingMatchingRing(3, 1, 4);
+        PendingMatchingRing ring = new PendingMatchingRing(3, 1);
         // 最早的已占用命令槽。
         CommandSlot first = acquire(ring, 7, UUID.randomUUID(), 1001);
         // 首槽原对象的另一个引用，用于验证同序号重登记不另加项。
@@ -133,7 +133,7 @@ class PendingMatchingRingTest {
     @Test
     void advancesEachMatcherSubmissionShardWithoutScanningThePendingRing() {
         // 当前测试创建的 Owner 待撮合环。
-        PendingMatchingRing ring = new PendingMatchingRing(4, 2, 4);
+        PendingMatchingRing ring = new PendingMatchingRing(4, 2);
         // 零分片最早提交项。
         CommandSlot shardZeroFirst = acquire(ring, 1, UUID.randomUUID(), 1001);
         // 一分片唯一提交项。
@@ -163,7 +163,7 @@ class PendingMatchingRingTest {
     @Test
     void exposesOnlyTheDeterministicSubmissionHead() {
         // 当前测试创建的 Owner 待撮合环。
-        PendingMatchingRing ring = new PendingMatchingRing(2, 1, 4);
+        PendingMatchingRing ring = new PendingMatchingRing(2, 1);
         // 最早的已占用命令槽。
         CommandSlot first = acquire(ring, 1, UUID.randomUUID(), 1001);
         // 第二个命令槽。
@@ -184,7 +184,7 @@ class PendingMatchingRingTest {
     @Test
     void reusesTheSequenceContextPendingCarrierAfterTheSlotIsReleased() {
         // 当前测试创建的 Owner 待撮合环。
-        PendingMatchingRing ring = new PendingMatchingRing(4, 1, 4);
+        PendingMatchingRing ring = new PendingMatchingRing(4, 1);
         // 最早的已占用命令槽。
         CommandSlot first = acquire(ring, 1, UUID.randomUUID(), 1001);
         ring.put(first);

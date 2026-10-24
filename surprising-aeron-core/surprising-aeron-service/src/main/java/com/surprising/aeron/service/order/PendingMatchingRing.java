@@ -61,12 +61,11 @@ public final class PendingMatchingRing {
     public void progressChanged() { dispatchRevision++; }
 
     /**
-     * 校验请求容量及正 Matcher 分片数，容量向上取二次幂，创建命令槽池、全局/分片链数组、UUID 和用户计数索引，负一下标表示无链接；Lane 数由槽池继续校验。
+     * 校验请求容量及正 Matcher 分片数，容量向上取二次幂，创建命令槽池、全局/分片链数组、UUID 和用户计数索引，负一下标表示无链接。
      * @param requestedCapacity 正的请求容量，上限二的三十次方，向上取二次幂
      * @param matcherShardCount 正的 Matcher 分片数量
-     * @param laneCount 一至六十四的账户 Lane 数
      */
-    public PendingMatchingRing(int requestedCapacity, int matcherShardCount, int laneCount) {
+    public PendingMatchingRing(int requestedCapacity, int matcherShardCount) {
         if (requestedCapacity <= 0 || requestedCapacity > 1 << 30) {
             throw new IllegalArgumentException("pending matching capacity must be positive");
         }
@@ -89,7 +88,7 @@ public final class PendingMatchingRing {
         java.util.Arrays.fill(submissionHeads, -1);
         java.util.Arrays.fill(submissionTails, -1);
         mask = capacity - 1;
-        contexts = new CommandSlotRing(capacity, laneCount);
+        contexts = new CommandSlotRing(capacity);
         entriesByCommandId = new PendingCommandIdIndex(capacity);
         pendingByUser = new LongIntHashMap(capacity);
     }
