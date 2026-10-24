@@ -29,7 +29,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
     /** 本命令尚未消耗的工作预算，Owner 每片完成后扣减。 */
     private int remaining;
     /** 每个 Lane 唯一的扫描输入槽，账本准备路由后由对应 Lane 只读消费。 */
-    private final RiskScanRuntime[] inputs;
+    private final RiskLaneProgress[] inputs;
     /** Owner 按 Lane 编号收集的估值回执，后续用于编号和合并游标。 */
     private final RiskLaneProcessor.Page[] results;
     /** 账本为各参与 Lane 分配的本片工作量，Lane 估值时读取。 */
@@ -90,7 +90,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
         this.indexedUserIds = indexedUserIds;
         // 运行时配置的账户 Lane 数量，用来一次性创建对应长度的复用数组。
         int lanes = runtime.topology().accountLaneCount();
-        inputs = new RiskScanRuntime[lanes];
+        inputs = new RiskLaneProgress[lanes];
         results = new RiskLaneProcessor.Page[lanes];
         allocations = new int[lanes];
         userPages = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[lanes];
@@ -252,7 +252,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
      */
     @Override public void apply(TreasuryRuntime ignored) {
         if (ledgerScope != null) ledgerScope.publishRiskPositionInputs();
-        // 原扫描已经保存的各 Lane 独立进度，空列表时按标量起点生成。
+        // 原扫描已经保存的各 Lane 独立进度；空列表表示新扫描尚未分派。
         List<RiskLaneProgress> cursors = initial.laneProgress();
         if (!cursors.isEmpty() && cursors.size() != inputs.length)
             throw new IllegalStateException("risk scan Lane topology differs");
@@ -262,7 +262,9 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
         int participants = 0;
         for (/* 本轮正在初始化、收集、执行或合并的账户 Lane 下标。 */ int lane = 0; lane < inputs.length; lane++) {
             // 当前 Lane 的恢复游标，若没有下一用户则可标记为完成。
-            RiskLaneProgress cursor = cursors.isEmpty() ? initialCursor(initial, lane) : cursors.get(lane);
+            RiskLaneProgress cursor = cursors.isEmpty()
+                    ? new RiskLaneProgress(0, initial.riskComplete(), 0, 0, "-", 0, 0, 0, 0, 0)
+                    : cursors.get(lane);
             // 该 Lane 的复用用户页，清空后只填充本片需要的后续用户及少量前瞻项。
             var page = userPages[lane];
             page.clear();
@@ -273,7 +275,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
             }
             if (!cursor.complete() && cursor.userId() == 0 && page.isEmpty())
                 cursor = new RiskLaneProgress(cursor.lastUserId(), true, 0, 0, "-", 0, 0, 0, 0, 0);
-            inputs[lane] = laneInput(initial, lane, cursor);
+            inputs[lane] = cursor;
             results[lane] = null;
             allocations[lane] = 0;
             if (!cursor.complete()) participants++;
@@ -287,7 +289,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
         for (/* 从上次轮转点开始的 Lane 偏移量，确保各 Lane 按确定顺序轮流获得预算。 */ int offset = 0; offset < inputs.length && assigned < selectedCount; offset++) {
             // 本轮正在初始化、收集、执行或合并的账户 Lane 下标。
             int lane = (initial.accountLaneId() + offset) % inputs.length;
-            if (inputs[lane].riskComplete()) continue;
+            if (inputs[lane].complete()) continue;
             allocations[lane] = sliceBudget / selectedCount + (assigned < sliceBudget % selectedCount ? 1 : 0);
             laneMask |= 1L << lane;
             nextLane = (lane + 1) % inputs.length;
@@ -335,12 +337,8 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
      * @param lane 本次准备、估值或提交的账户 Lane 编号
      */
     private RiskLaneProcessor.Page scanLane(int lane) {
-        // 该 Lane 上一次完整保存的进度，当前没有新回执时保留其修订号。
-        RiskLaneProgress previous = initial.laneProgress().isEmpty()
-                ? initialCursor(initial, lane) : initial.laneProgress().get(lane);
-        return RiskLaneProcessor.scan(runtime, inputs[lane], userPages[lane],
-                instrument, mark, settleAssetId, initial.symbolId(), allocations[lane], identities,
-                previous.userRevision(), previous.marketRevision());
+        return RiskLaneProcessor.scan(runtime, lane, inputs[lane], userPages[lane],
+                instrument, mark, settleAssetId, initial.symbolId(), allocations[lane], identities);
     }
 
     /**
@@ -374,22 +372,19 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
      * Owner 合并各 Lane 的游标和修订号，提交下一强平编号及轮转位置；旧轮完成但期间来过新价格时，从头安排最新价格的第二轮扫描。
      */
     private void finish() {
-        // 本片合并后的各 Lane 恢复游标列表，稍后整体写回扫描记录。
         List<RiskLaneProgress> cursors = new ArrayList<>(inputs.length);
-        // 只有每个账户 Lane 都完成，该币对的本轮账户风险遍历才算完成。
         boolean complete = true;
-        for (/* 本轮正在初始化、收集、执行或合并的账户 Lane 下标。 */ int lane = 0; lane < inputs.length; lane++) {
-            // 当前 Lane 本片的新回执；未分配预算的 Lane 为 null，保留原输入进度。
+        for (int lane = 0; lane < inputs.length; lane++) {
             RiskLaneProcessor.Page page = results[lane];
-            // 有回执时使用新游标，没有回执时继续使用该 Lane 原输入。
-            RiskScanRuntime scan = page == null ? inputs[lane] : page.scan();
-            // 当前 Lane 是否已遍历完本轮用户，来源于新回执或保留的完成标记。
-            boolean done = page == null ? scan.riskComplete() : page.complete();
-            // 该 Lane 上一次完整保存的进度，当前没有新回执时保留其修订号。
-            RiskLaneProgress previous = initial.laneProgress().isEmpty()
-                    ? initialCursor(initial, lane) : initial.laneProgress().get(lane);
-            cursors.add(cursor(scan, done, page == null ? previous.userRevision() : page.userRevision(),
-                    page == null ? previous.marketRevision() : runtime.marketRevision()));
+            RiskLaneProgress cursor = page == null ? inputs[lane] : page.progress();
+            boolean done = cursor.complete();
+            long userRevision = cursor.userRevision();
+            long marketRevision = page == null ? inputs[lane].marketRevision() : runtime.marketRevision();
+            // 只保存各 Lane 自身的游标；没有未完成用户时清除累计值所依据的修订号。
+            cursors.add(new RiskLaneProgress(cursor.lastUserId(), done, cursor.userId(), cursor.phase(),
+                    cursor.positionCursor(), cursor.reservationCursor(), cursor.unrealizedPnlUnits(),
+                    cursor.maintenanceMarginUnits(), cursor.isolatedMarginUnits(), cursor.isolatedReservationUnits(),
+                    cursor.userId() == 0 ? 0 : userRevision, cursor.userId() == 0 ? 0 : marketRevision));
             complete &= done;
         }
         if (nextLiquidationId != runtime.nextLiquidationId()) runtime.setNextLiquidationId(nextLiquidationId);
@@ -397,69 +392,17 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
         if (!complete) {
             while (cursors.get(nextLane).complete()) nextLane = (nextLane + 1) % inputs.length;
         }
-        // 准备写回的币对扫描记录，标量字段展示下一 Lane，列表保存全部 Lane 的完整进度。
-        RiskScanRuntime progress = laneInput(initial, nextLane, cursors.get(nextLane)).withLaneProgress(cursors);
-        if (complete) {
-            progress = progress.withRiskProgress(true, 0, 0, "-", 0, 0, 0, 0, 0,
-                    progress.lastUserId()).withLaneProgress(cursors);
-        }
+        RiskScanRuntime next = new RiskScanRuntime(initial.symbolId(), nextLane, initial.priceSequence(),
+                initial.scanStartPriceSequence(), complete, initial.triggerComplete(), initial.triggerPhase(),
+                initial.triggerPriceCursor(), initial.triggerOrderCursor(), initial.triggerUpperId(),
+                initial.triggerMarkPriceTicks(), initial.triggerGeneratedAtEpochMillis(),
+                initial.triggerOcoOrderId(), initial.triggerOcoCursor(), initial.lastScheduledRevision(), cursors);
         if (complete && initial.scanStartPriceSequence() != initial.priceSequence()) {
-            progress = new RiskScanRuntime(initial.symbolId(), 0, initial.priceSequence(), initial.priceSequence(),
-                    0, false, 0, 0, "-", 0, 0, 0, 0, 0, progress.triggerComplete(), progress.triggerPhase(),
-                    progress.triggerPriceCursor(), progress.triggerOrderCursor(), progress.triggerUpperId(),
-                    progress.triggerMarkPriceTicks(), progress.triggerGeneratedAtEpochMillis(), 0, 0);
+            next = new RiskScanRuntime(initial.symbolId(), 0, initial.priceSequence(), initial.priceSequence(),
+                    false, next.triggerComplete(), next.triggerPhase(), next.triggerPriceCursor(),
+                    next.triggerOrderCursor(), next.triggerUpperId(), next.triggerMarkPriceTicks(),
+                    next.triggerGeneratedAtEpochMillis(), 0, 0, 0, List.of());
         }
-        runtime.putRiskScan(progress.withLastScheduledRevision(Math.incrementExact(runtime.revision())));
-    }
-
-    /**
-     * 尚无独立 Lane 游标时，从标量进度生成各 Lane 起点；此前已越过的 Lane 标为完成，全程不读取账户数据。
-     * @param scan 包含账户风险及条件单游标的原扫描记录
-     * @param lane 本次准备、估值或提交的账户 Lane 编号
-     */
-    private static RiskLaneProgress initialCursor(RiskScanRuntime scan, int lane) {
-        if (lane == scan.accountLaneId()) return cursor(scan, scan.riskComplete());
-        return new RiskLaneProgress(0, lane < scan.accountLaneId() || scan.riskComplete(),
-                0, 0, "-", 0, 0, 0, 0, 0);
-    }
-
-    /**
-     * 把标量扫描字段转成单 Lane 游标，未显式提供的用户和市场修订号记为 0。
-     * @param scan 包含账户风险及条件单游标的原扫描记录
-     * @param complete 该 Lane 的账户风险遍历是否已完成
-     */
-    private static RiskLaneProgress cursor(RiskScanRuntime scan, boolean complete) {
-        return cursor(scan, complete, 0, 0);
-    }
-
-    /**
-     * 把当前 Lane 标量进度连同有效修订号封装成恢复游标；没有正在处理的用户时，两项修订号都清零。
-     * @param scan 包含账户风险及条件单游标的原扫描记录
-     * @param complete 该 Lane 的账户风险遍历是否已完成
-     * @param userRevision 当前未完成用户的累计值对应的用户修订号
-     * @param marketRevision 当前累计值对应的市场修订号
-     */
-    private static RiskLaneProgress cursor(RiskScanRuntime scan, boolean complete,
-            long userRevision, long marketRevision) {
-        return new RiskLaneProgress(scan.lastUserId(), complete, scan.riskUserId(), scan.riskPhase(),
-                scan.riskPositionCursor(), scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(),
-                scan.riskMaintenanceMarginUnits(), scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(),
-                scan.riskUserId() == 0 ? 0 : userRevision, scan.riskUserId() == 0 ? 0 : marketRevision);
-    }
-
-    /**
-     * 将一个 Lane 的恢复游标装入本币对扫描输入，保留原来的行情、条件单及关联撤单进度，供该 Lane 单独处理。
-     * @param scan 包含账户风险及条件单游标的原扫描记录
-     * @param lane 本次准备、估值或提交的账户 Lane 编号
-     * @param cursor 该 Lane 的独立恢复游标，包含未完成用户、阶段和累计金额
-     */
-    private static RiskScanRuntime laneInput(RiskScanRuntime scan, int lane, RiskLaneProgress cursor) {
-        return new RiskScanRuntime(scan.symbolId(), lane, scan.priceSequence(), scan.scanStartPriceSequence(),
-                cursor.lastUserId(), cursor.complete(), cursor.userId(), cursor.phase(), cursor.positionCursor(),
-                cursor.reservationCursor(), cursor.unrealizedPnlUnits(), cursor.maintenanceMarginUnits(),
-                cursor.isolatedMarginUnits(), cursor.isolatedReservationUnits(), scan.triggerComplete(),
-                scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
-                scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
-                scan.triggerOcoCursor(), scan.lastScheduledRevision());
+        runtime.putRiskScan(next.withLastScheduledRevision(Math.incrementExact(runtime.revision())));
     }
 }

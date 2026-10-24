@@ -2,6 +2,7 @@ package com.surprising.aeron.service.risk;
 
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreRiskStatus;
+import com.surprising.aeron.model.RiskLaneProgress;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.UserRuntime;
@@ -26,6 +27,7 @@ public final class RiskLaneProcessor {
     /**
      * 在本批预算内逐个处理用户；用户或行情修订变化时重置该用户累计值，用户完成后推进最后完成编号，返回本 Lane 的进度和新增强平需求。
      * @param runtime 本轮操作的交易运行时，账户数据只能在所属 Lane 的权限范围内读取或修改
+     * @param laneId 当前任务所属账户 Lane，供读取该 Lane 的估值暂存区
      * @param initial 该账户 Lane 开始本批扫描时的风险游标和累计金额
      * @param indexedUserIds 已经按编号升序排列、且属于该 Lane 的有界用户页
      * @param changedInstrument 本轮价格变化的合约配置，逐仓只重算该合约，全仓按结算资产合并估值
@@ -34,58 +36,56 @@ public final class RiskLaneProcessor {
      * @param changedSymbolId 本轮价格变化的币对整数编号，用来限定逐仓重算范围
      * @param maxWork 本批最多处理的工作项数量，用户遍历至少消耗一个单位以保证能退出
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和用户持仓
-     * @param expectedUserRevision 上次保留累计值时的用户修订号，变化后必须重新估值该用户
-     * @param expectedMarketRevision 上次保留累计值时的市场修订号，变化后不能沿用旧的跨仓累加值
      */
-    static Page scan(TradingAccountRuntime runtime, RiskScanRuntime initial,
+    static Page scan(TradingAccountRuntime runtime, int laneId, RiskLaneProgress initial,
                                         LongArrayList indexedUserIds,
                                         CoreInstrument changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
-                                        RuntimeIdentityRegistry identities, long expectedUserRevision, long expectedMarketRevision) {
+                                        RuntimeIdentityRegistry identities) {
         // 当前 Lane 可复用的本批强平需求容器，容量受本次工作预算限制。
         RiskLiquidationBatch creations = runtime.riskLiquidationBatch(maxWork);
         // 本批正在推进的扫描游标，每处理完一个用户片段就接收新进度。
-        RiskScanRuntime progress = initial;
+        RiskLaneProgress progress = initial;
         // 本批还剩多少工作预算，任何用户处理至少扣一个单位。
         int remaining = maxWork;
         // 当前用户这份累计结果所依据的最新修订号，随页回执交给 Owner 保存。
-        long userRevision = expectedUserRevision;
+        long userRevision = initial.userRevision();
+        long expectedMarketRevision = initial.marketRevision();
         while (remaining > 0) {
             // 沿旧用户游标继续或从有序页选出的用户，记录不存在时本 Lane 这一页结束。
-            UserRuntime user = progress.riskUserId() == 0
+            UserRuntime user = progress.userId() == 0
                     ? nextUser(runtime, indexedUserIds, progress.lastUserId())
-                    : runtime.user(progress.riskUserId());
+                    : runtime.user(progress.userId());
             if (user == null) {
-                return new Page(progress, maxWork - remaining, true, creations, userRevision);
+                return finishPage(progress, maxWork - remaining, true, creations, userRevision, expectedMarketRevision);
             }
-            if (progress.riskUserId() == 0 || user.revision() != userRevision
+            if (progress.userId() == 0 || user.revision() != userRevision
                     || expectedMarketRevision != runtime.marketRevision()) {
-                progress = progress.withRiskProgress(false, user.userId(), 0, "-", 0,
-                        0, 0, 0, 0, progress.lastUserId());
+                progress = new RiskLaneProgress(progress.lastUserId(), false, user.userId(), 0, "-", 0, 0, 0, 0, 0);
             }
             userRevision = user.revision();
             expectedMarketRevision = runtime.marketRevision();
             // 本次处理一个用户得到的游标、消耗工作量及是否完成的回执。
-            UserPage page = processUser(runtime, progress, user, changedInstrument, changedMark,
+            UserPage page = processUser(runtime, laneId, progress, user, changedInstrument, changedMark,
                     settleAssetId, changedSymbolId, remaining, creations, identities);
-            progress = page.scan();
+            progress = page.progress();
             // 本次从预算中扣除的工作量，最少为 1，避免空记录使循环无法推进。
             int consumed = Math.max(1, page.workUnits());
             remaining -= consumed;
             if (page.complete()) {
-                progress = progress.withRiskProgress(false, 0, 0, "-", 0,
-                        0, 0, 0, 0, user.userId());
+                progress = new RiskLaneProgress(user.userId(), false, 0, 0, "-", 0, 0, 0, 0, 0);
             }
         }
         // 没有未完成用户且有序页中也无下一用户时，才表明本 Lane 当前遍历已结束。
-        boolean complete = progress.riskUserId() == 0
+        boolean complete = progress.userId() == 0
                 && nextUser(runtime, indexedUserIds, progress.lastUserId()) == null;
-        return new Page(progress, maxWork - remaining, complete, creations, userRevision);
+        return finishPage(progress, maxWork - remaining, complete, creations, userRevision, expectedMarketRevision);
     }
 
     /**
      * 按三个阶段继续当前用户：0 累计同资产持仓风险并重算变化合约的逐仓风险，1 累计逐仓委托冻结，2 用共享权益写入各全仓持仓风险；预算耗尽时保存完整游标。
      * @param runtime 本轮操作的交易运行时，账户数据只能在所属 Lane 的权限范围内读取或修改
+     * @param laneId 当前任务所属账户 Lane
      * @param scan 本次分批处理的风险游标及账户累计值
      * @param user 正在估值的当前 Lane 用户记录
      * @param changedInstrument 本轮价格变化的合约配置，逐仓只重算该合约，全仓按结算资产合并估值
@@ -96,30 +96,30 @@ public final class RiskLaneProcessor {
      * @param creations 本批新增强平需求的有界容器，Owner 稍后按固定顺序分配编号
      * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和用户持仓
      */
-    private static UserPage processUser(TradingAccountRuntime runtime,
-                                        RiskScanRuntime scan, UserRuntime user,
+    private static UserPage processUser(TradingAccountRuntime runtime, int laneId,
+                                        RiskLaneProgress scan, UserRuntime user,
                                         CoreInstrument changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
                                         RiskLiquidationBatch creations,
                                         RuntimeIdentityRegistry identities) {
         // 用户估值所处阶段：0 扫持仓，1 扫逐仓委托冻结，2 写全仓风险。
-        int phase = scan.riskPhase();
+        int phase = scan.phase();
         // 当前阶段最后处理的持仓业务键，换阶段时重置为短横线。
-        String positionCursor = scan.riskPositionCursor();
+        String positionCursor = scan.positionCursor();
         // 当前用户最后处理的冻结委托编号，便于预算用完后继续。
-        long reservationCursor = scan.riskReservationCursor();
+        long reservationCursor = scan.reservationCursor();
         // 同一结算资产下已累计的全仓权益变化，期货用浮盈亏，期权用市值。
-        long unrealized = scan.riskUnrealizedPnlUnits();
+        long unrealized = scan.unrealizedPnlUnits();
         // 同一结算资产下已累计的全仓维持保证金，后续用它判断共享风险。
-        long maintenance = scan.riskMaintenanceMarginUnits();
+        long maintenance = scan.maintenanceMarginUnits();
         // 该资产已累计的逐仓持仓保证金，不能再次计入全仓共享钱包。
-        long isolatedMargin = scan.riskIsolatedMarginUnits();
+        long isolatedMargin = scan.isolatedMarginUnits();
         // 该资产已累计的逐仓委托冻结，计算全仓钱包时还要扣掉这部分。
-        long isolatedReservation = scan.riskIsolatedReservationUnits();
+        long isolatedReservation = scan.isolatedReservationUnits();
         // 本页按总余额扣逐仓占用后得到的全仓钱包；最小 long 表示尚未计算。
         long wallet = Long.MIN_VALUE;
         // 当前账户 Lane 复用的估值暂存区，读取单个持仓后覆盖计算结果。
-        PositionRiskScratch positionRisk = runtime.accountLane(scan.accountLaneId()).positionRiskScratch();
+        PositionRiskScratch positionRisk = runtime.accountLane(laneId).positionRiskScratch();
         // 同一条常驻 Lane 线程可能在旧扫描失效后继续处理新价格。
         // 把小型行情缓存绑定到当前市场修订，避免继续使用旧标记价。
         positionRisk.scanMarketRevision = runtime.marketRevision();
@@ -160,8 +160,8 @@ public final class RiskLaneProcessor {
                 ReservationRuntime reservation = nextReservation(runtime, user.userId(), reservationCursor);
                 if (reservation == null) {
                     if (maintenance == 0) {
-                        return new UserPage(scan.withRiskProgress(false, user.userId(), 0, "-", 0,
-                                unrealized, maintenance, isolatedMargin, isolatedReservation, scan.lastUserId()),
+                        return new UserPage(new RiskLaneProgress(scan.lastUserId(), false, user.userId(), 0, "-", 0,
+                                unrealized, maintenance, isolatedMargin, isolatedReservation),
                                 work, true);
                     }
                     phase = 2;
@@ -181,8 +181,8 @@ public final class RiskLaneProcessor {
             // 游标后下一份持仓的运行时整数键，0 表示当前持仓遍历到末尾。
             long positionIdentity = nextPositionKey(runtime, identities, user.userId(), positionCursor);
             if (positionIdentity == 0) {
-                return new UserPage(scan.withRiskProgress(false, user.userId(), 0, "-", 0,
-                        unrealized, maintenance, isolatedMargin, isolatedReservation, scan.lastUserId()),
+                return new UserPage(new RiskLaneProgress(scan.lastUserId(), false, user.userId(), 0, "-", 0,
+                                unrealized, maintenance, isolatedMargin, isolatedReservation),
                         work, true);
             }
             positionCursor = identities.positionKey(user.userId(), positionIdentity);
@@ -210,9 +210,8 @@ public final class RiskLaneProcessor {
                     positionRisk.instrument, positionRisk.priceSequence, equity, positionRisk.unrealized,
                     positionRisk.maintenance, ratio, creations, identities);
         }
-        return new UserPage(scan.withRiskProgress(false, user.userId(), phase, positionCursor,
-                reservationCursor, unrealized, maintenance, isolatedMargin, isolatedReservation,
-                scan.lastUserId()), work, false);
+        return new UserPage(new RiskLaneProgress(scan.lastUserId(), false, user.userId(), phase, positionCursor,
+                reservationCursor, unrealized, maintenance, isolatedMargin, isolatedReservation), work, false);
     }
 
     /**
@@ -459,20 +458,28 @@ public final class RiskLaneProcessor {
         private long equityDelta;
     }
 
+    /** 将本批完成标记和估值版本写回唯一的 Lane 进度；没有未完成用户时不保留失效版本。 */
+    private static Page finishPage(RiskLaneProgress progress, int workUnits, boolean complete,
+            RiskLiquidationBatch creations, long userRevision, long marketRevision) {
+        var result = new RiskLaneProgress(progress.lastUserId(), complete, progress.userId(), progress.phase(),
+                progress.positionCursor(), progress.reservationCursor(), progress.unrealizedPnlUnits(),
+                progress.maintenanceMarginUnits(), progress.isolatedMarginUnits(), progress.isolatedReservationUnits(),
+                progress.userId() == 0 ? 0 : userRevision, progress.userId() == 0 ? 0 : marketRevision);
+        return new Page(result, workUnits, creations);
+    }
+
     /**
      * 一个账户 Lane 本批扫描的回执，Owner 收集后提交各 Lane 游标，并按固定顺序给新增强平需求分配编号。
-     * @param scan 本次分批处理的风险游标及账户累计值
+     * @param progress 本次分批处理的风险游标及账户累计值
      * @param workUnits 本批实际处理的工作项数量，Owner 用它扣减共享预算
-     * @param complete 对应账户 Lane 或当前用户是否已完整遍历，不能仅凭本批用完预算判断完成
      * @param creations 本批新增强平需求的有界容器，Owner 稍后按固定顺序分配编号
-     * @param userRevision 当前未完成用户累计值对应的状态修订号，供下次继续时判断是否失效
      */
-    record Page(RiskScanRuntime scan, int workUnits, boolean complete, RiskLiquidationBatch creations, long userRevision) { }
+    record Page(RiskLaneProgress progress, int workUnits, RiskLiquidationBatch creations) { }
     /**
      * 单个用户在本批内的估值进度及工作量，用来区分用户已经算完与预算耗尽后还要继续两种情况。
-     * @param scan 本次分批处理的风险游标及账户累计值
+     * @param progress 本次分批处理的风险游标及账户累计值
      * @param workUnits 本批实际处理的工作项数量，Owner 用它扣减共享预算
      * @param complete 对应账户 Lane 或当前用户是否已完整遍历，不能仅凭本批用完预算判断完成
      */
-    private record UserPage(RiskScanRuntime scan, int workUnits, boolean complete) { }
+    private record UserPage(RiskLaneProgress progress, int workUnits, boolean complete) { }
 }

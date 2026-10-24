@@ -44,7 +44,7 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 协议仍保留。算法委托用户查询已于 2026-10-20 迁入 realtime 提交投影，后台触发单等专用查询仍需单独梳理；见 [算法委托查询](../docs/algo-read-projection.md)。
 
 算法委托规范化删除不可达的TWAP/postOnly拒绝：postOnly仍只在ICEBERG下按原规则计算，原TIF、数量及范围校验保留。Core算法母单也删除列表不可变复制后重复的null判断，空值仍由原List.copyOf拒绝。
-ICEBERG创建请求可省略intervalSeconds，若提供则在请求/状态类型绑定时清除；只有TWAP校验间隔范围及执行时长与间隔的关系。ICEBERG仍按原扫描配置推进下一片，执行时长和子单数量继续有独立作用。命令v6、状态/投影v5和快照v53不保存ICEBERG间隔。
+ICEBERG创建请求可省略intervalSeconds，若提供则在请求/状态类型绑定时清除；只有TWAP校验间隔范围及执行时长与间隔的关系。ICEBERG仍按原扫描配置推进下一片，执行时长和子单数量继续有独立作用。命令v6、状态/投影v5和快照v54不保存ICEBERG间隔。
 算法执行和取消直接读取原Core视图的进度及子单编号，删除AlgoOrderProgress/AlgoOrderChild两种包装和工厂，不再为取消临时构造HTTP响应。创建提交后只查询一次权威母单；不可达的第二完成分支删除。
 本轮`mvn -pl surprising-gateway -am -DskipTests clean test-compile`在HotSpot JDK27下通过（12模块，34.874秒），只编译测试源码；未运行服务、测试、恢复、交互或性能场景。
 
@@ -617,3 +617,5 @@ HTTP `*InternalController` 和 `gateway.provider.local.*LocalRoutes` 共用 `con
 第二十九轮明确区分已关联子单列表与Core已有待关联终态编号，删除查询拼接列表；Gateway先关联退休子单再推进切片，取消复用同一恢复入口。查询/投影编码升至v5，命令v6、Core状态26组件和快照v53不变，公开HTTP字段与子单计数口径保留。17个相关模块干净`-am -DskipTests clean test-compile`通过（77.861秒）；涉及关联丢失、快照及取消的测试源码仅编译、未运行，不据此宣称恢复验证通过。
 
 第三十轮倒计时SET稳定命令身份包含真实时长，同毫秒修改时长或禁用不会复用原意图身份，相同完整命令重试保持稳定；Core指纹、认领版本、精确截止及快照格式不变。全撤索引删除只有测试使用的Map查询转发重载，现有测试直接使用原lookup入口。相关12模块干净`mvn -pl surprising-gateway -am -DskipTests clean test-compile`通过（35.400秒）；首次编译两处遗漏调用已修正，同毫秒及重试场景源码仅编译未运行。
+
+第三十二轮风险扫描全局冷/热记录各删除9项Lane摘要，现各16组件；Lane实际估值与恢复仍保存原12项进度。交易快照v54删除风险扫描字段5/7至14，旧格式不读；精确批次续扫契约、命令版本及公开接口不变。状态哈希覆盖完整Lane进度和预算轮转。17个相关模块干净`-am -DskipTests clean test-compile`通过（61.789秒），未执行测试、服务、资金或恢复场景。

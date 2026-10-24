@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第三十一轮：A121/A122七个零调用方法删除99行，A125测试无用参数/误导命名清理；17模块干净编译62.190秒，测试源码改后5模块test-compile13.024秒。4022classfile旧生产方法定义/引用均零；辅助正文和5条断言保留。累计120解决。A123全局扫描摘要重复确认待实施，A124批次续扫守卫保留。",
+    "checkpoint": "第三十二轮：A123扫描摘要整链删除，冷/热25->16，Page5->3，测试投影24->15；A126哈希纳入真实Lane进度及轮转。17模块干净编译61.789秒，4022classfile旧字段/八项getter/旧构造引用为零。累计122解决；A127两处零调用构造待处理，A11候选保留原一致性边界。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -6801,11 +6801,11 @@
     },
     {
       "id": "A123",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed_duplicate_global_summary_requires_lane_input_refactor",
       "topic": "风险扫描全局记录中的单Lane摘要可能重复保存laneProgress内容",
       "source_basis_commit": "3a2c69975cee307ec6d6f0486635e59ac67b692b",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java",
@@ -6844,7 +6844,9 @@
         ],
         "proposed_cleanup": "RiskLaneProcessor任务输入/回执使用已经存在的RiskLaneProgress，保留Lane编号作为真实线程上下文；全局冷/热扫描各删除九项摘要组件，仅保存元数据和完整Lane列表。状态查询所需当前Lane位置按索引读取，无新包装/接口或全表扫描。同步状态哈希、投影、快照当前格式及相关构造；不保留旧格式/标量兼容层。"
       },
-      "verification_limit": "已确认生产全局记录存在重复副本，尚未删除；Lane临时估值输入的九项事实必须继续使用。仅静态链路及编译产物，未执行资金/风险/恢复。"
+      "verification_limit": "已确认生产全局记录存在重复副本，尚未删除；Lane临时估值输入的九项事实必须继续使用。仅静态链路及编译产物，未执行资金/风险/恢复。",
+      "resolved_in_round": "thirty_second_cleanup_round",
+      "implementation": "冷/热扫描各25->16组件，九项标量摘要整链删除；Lane输入与回执直接使用原12组件RiskLaneProgress。回执Page5->3，两个重复版本形参移除；准确续扫位置只从当前轮转Lane取值。快照v54删除字段5/7..14，投影/恢复/测试投影同步收窄，无旧格式读取或标量兼容层。"
     },
     {
       "id": "A124",
@@ -6915,6 +6917,62 @@
       "resolved_in_round": "thirty_first_cleanup_round",
       "test_code_changed": true,
       "implementation": "删除blockedLane及两处无用传参、两处无必要throws；重命名测试/辅助/局部变量及说明以对应实际重复扫描场景；辅助执行正文逐字不变，5条断言与测试控制流在变量/方法重命名及删去无用实参后完全相同。"
+    },
+    {
+      "id": "A126",
+      "status": "resolved",
+      "analysis_status": "confirmed_hash_coverage_gap",
+      "topic": "风险扫描业务哈希只覆盖标量摘要，遗漏完整Lane进度与预算轮转位置",
+      "source_basis_commit": "f9b62b9d47942112d84bbbb1bfd9c807537f0dcf",
+      "business_code_changed": true,
+      "resolved_in_round": "thirty_second_cleanup_round",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+          "anchor": "for (RiskLaneProgress lane : scan.laneProgress())"
+        }
+      ],
+      "evidence": {
+        "before": "该文件原业务哈希无laneProgress()和scan.accountLaneId()读取，也不混入riskState.hashCode；另一Lane游标/失效版本变化可能未影响全局摘要。",
+        "after": "不再混入已删除摘要，明确覆盖轮转位置、Lane列表长度和每个Lane全部12组件。",
+        "test_source": "既有快照往返用例增加非当前Lane两种修订变化和轮转位置变化的不同哈希、恢复后完整状态相等断言，仅编译未执行。"
+      },
+      "verification_limit": "静态源码和编译产物，未运行哈希/快照/风险场景；不宣称运行修复验证通过。"
+    },
+    {
+      "id": "A127",
+      "status": "confirmed",
+      "analysis_status": "confirmed_no_current_constructor_callers",
+      "topic": "完整风险冷状态和根冷状态保留两个零调用便利构造",
+      "source_basis_commit": "f9b62b9d47942112d84bbbb1bfd9c807537f0dcf",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskState.java",
+          "anchor": "RiskScan scan,"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+          "anchor": "CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages)"
+        }
+      ],
+      "evidence": {
+        "classfiles_scanned": 4022,
+        "unused_constructors": [
+          {
+            "owner": "com/surprising/aeron/model/TradingCoreState",
+            "descriptor": "(Lcom/surprising/product/api/ProductLine;JLjava/util/Map;Ljava/util/Map;Ljava/util/Map;Lcom/surprising/aeron/model/CoreRiskState;Lcom/surprising/aeron/service/treasury/CoreTreasuryState;Ljava/util/Map;)V",
+            "current_main_and_test_callers": []
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreRiskState",
+            "descriptor": "(Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Lcom/surprising/aeron/model/CoreRiskState$RiskScan;J)V",
+            "current_main_and_test_callers": []
+          }
+        ],
+        "role_check": "均为未注解的便利构造；当前快照/恢复使用完整记录构造。单扫描构造还包含无人使用的null/idle转Map路径。",
+        "proposed_cleanup": "核对全部当前源码构造后删除这两个重载及无用分支，保留当前canonical/其他实际构造和风险、客户端索引校验；不改状态字段/布局。"
+      }
     }
   ],
   "preserve_verified_purposes": [
@@ -6932,8 +6990,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "优先A123：Lane任务直接使用已有RiskLaneProgress，全局冷/热记录删除重复摘要；保持资金累计、版本失效、预算轮转及批次精确续扫守卫。",
-    "继续逐命令/字段和恢复审查；A11有序查询边界保留，不以编译宣称运行功能完整验证。"
+    "清理A127两个零调用便利构造，先核对当前源码与反射/快照入口，不删除实际字段及约束。",
+    "继续逐业务操作追踪命令、状态、约束和恢复；风险扫描控制名称/操作者/原因有明确管理API读写职责，不能只因不参与计算删除。",
+    "A11有序查询边界保持；未执行运行测试，不能宣布所有资金和恢复路径完整验证。"
   ],
   "rejected_false_positives": [
     {
@@ -7014,7 +7073,7 @@
     "status": "removed_after_results_archived",
     "new_temporary_services_or_files": false
   },
-  "evidence_basis_commit": "8a73a4ead",
+  "evidence_basis_commit": "f9b62b9d47942112d84bbbb1bfd9c807537f0dcf",
   "cleanup_round": {
     "authorized_scope": [
       "A01",
@@ -7230,30 +7289,30 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "8b10a1461a6b58e3c30b2195032174d5742624aa",
+    "source_basis_commit": "f9b62b9d47942112d84bbbb1bfd9c807537f0dcf",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A106",
-      "A115"
+      "A123",
+      "A126"
     ],
     "confirmed_ids": [
-      "A118",
-      "A116"
+      "A127"
     ],
     "candidate_ids": [
       "A11"
     ],
     "retained_ids": [
       "A105",
-      "A117"
+      "A117",
+      "A124"
     ],
     "counts": {
-      "resolved": 113,
+      "resolved": 122,
       "candidate": 1,
-      "retained": 2,
-      "confirmed": 2
+      "retained": 3,
+      "confirmed": 1
     },
-    "evidence": "twenty_eighth_cleanup_round",
+    "evidence": "thirty_second_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -27044,6 +27103,699 @@
         "/tmp/aeron-risk-state-cleanup-20261024.test-source-build.json": "c0f373733eec75d0ed9fb7914c9fc346c1b5774fcdb253414a2c6374d8cceafe"
       },
       "files_removed": 9,
+      "pyc_files_removed": 0
+    },
+    "full_audit_complete": false
+  },
+  "thirty_second_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "f9b62b9d47942112d84bbbb1bfd9c807537f0dcf",
+    "resolved_ids": [
+      "A123",
+      "A126"
+    ],
+    "new_confirmed_ids": [
+      "A127"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 122,
+      "candidate": 1,
+      "retained": 3,
+      "confirmed": 1
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4,
+      "algo_command": 6,
+      "algo_view": 5,
+      "cancel_all_after_command": 5,
+      "cancel_all_after_query_view": 3
+    },
+    "implementation": {
+      "removed_global_record_components": 18,
+      "removed_lane_receipt_components": 2,
+      "removed_test_projection_components": 9,
+      "removed_duplicate_scan_arguments": 2,
+      "added_thread_context_arguments": 1,
+      "retained_lane_progress_components": 12,
+      "new_types_interfaces_registries_stages": 0,
+      "new_persisted_fields": 0,
+      "removed_snapshot_field_ids": [
+        5,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14
+      ],
+      "removed_convenience_constructor_overloads": 8,
+      "removed_obsolete_summary_conversion_helpers": 4,
+      "new_private_helper": "finishPage有两个实际调用，发布前将本片完成/失效版本写入唯一Lane进度，不创建新的状态类型或执行阶段。",
+      "unchanged_financial_rules": "原三个估值阶段、金额计算、整数精度/溢出、冻结扣减、强平编号与Owner提交时序保留；Lane编号改为显式线程上下文。",
+      "actual_last_user_contract": "Runtime.lastUserId()是O(1)读取当前轮转Lane的实际位置，新扫描未分派时0；仍供4个既有消费者使用，非旧标量字段或旧格式读取。",
+      "initialization_and_lifecycle": "空列表表示新扫描未分派；行情更新保留各Lane完成用户并清除失效累计；全部完成及价格更新后的重启规则、停用、触发/OCO进度与预算轮转保持。",
+      "owner_version_publication": "用户版本由Lane结果中的实际进度提供；Owner仍按原提交点绑定当前市场版本，未完成用户为空时清零无用版本。",
+      "old_format_policy": "用户确认尚未使用；只读交易快照v54，不增加v53/标量读取兼容。"
+    },
+    "verification": {
+      "java": "HotSpot Corretto27+33-FR",
+      "maven": "3.9.16",
+      "disk_available": "168GiB",
+      "build": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "wall_seconds": 61.789,
+        "log_sha256": "7e559078cc3e228c674d73e2509e79b8c678bd4a20288567f13343f9846790b1"
+      },
+      "reactor_modules": 17,
+      "failed_first_build": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 1,
+        "wall_seconds": 21.121,
+        "log_sha256": "c80df6d466299af81185d0dabe371c3b01c71fa296fae08a9fa9815d1e0e2010",
+        "reason": "一处测试局部restarted仍调用已删除的冷lastUserId摘要；改为同一轮转Lane.lastUserId的原正数断言。主结果同时完成Page字段及参数去重后重做完整干净编译。"
+      },
+      "compiled_source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskState.java": "28e43ac50557cdcda1ae1f0a5e608dba031bdc12d642abd8f88a4ae5437e31a8",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "b68e79e855600af530c830cc7fd8a69086c727b209bae01e9b06a22693417b6e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskLaneProcessor.java": "2cee2c0d576ba287201a7676578d9e8c058f3f4ad05264e27bdb27578b24766b",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java": "8f450dc97dd21aad6273e753a62938778997188be9a3d31dd996c2aff07caa87",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanRuntime.java": "c64529b48de192aaecd869ebafb4e5e5df4b2608d1496f06e12755d05ebcf74a",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java": "3b2dc39a26dc10232609a69a7f1bf4fa0747f1e3df4647b5cf440d284f375d5d",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java": "bed0a9d2c48e2c79fa05a33fe684f7c8a0f763bd35c75ec17c4d0e094423eb1f",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java": "1c5346cf792ae817793497cecdad0b6e646ecf49dadd984fe72810f9210ba62f",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "78decba533a6c585cf24f5d945a8edc55055af5aa0b1149c3d6c0cbf57d6c59d",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreRiskStateTest.java": "e10b3470f779a3542715aa435cb9f67de162b8354f1645850e9b07480f966472",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.java": "ae4c5dcdae35bad82ff85583f9416f3dc55133269db9fcf10cb9d2ca84692d77",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingAccountRuntimeTest.java": "da3d90e88db39074049e5e3186a1818aedd6a919cd8109aee89f58b16fe7f61a",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.java": "d414adf1c7f1ca75619bca2283c357499e74d3537ee93d73fadee25f4f351914",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreLedgerQueryTest.java": "2978b65234228c0eb0b4319e16c7de9f9448deeaaa802c3eced388fa0aa5e0ef",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot.java": "60e712e3249515058cefe6f919d10508648c91a283dd7ab9b940b942d2c2fb6b"
+      },
+      "source_comparisons": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskLaneProcessor.java",
+          "result": "all code tokens preserved after explicit context/type/accessor and ten-argument constructor mapping"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java",
+          "result": "only nine redundant constructor arguments removed; all remaining tokens preserved"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "result": "only nine redundant constructor arguments removed; all remaining tokens preserved"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "result": "only risk-scan fields 5/7..14 and version53->54 changed; all other snapshot tokens preserved"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/RiskLaneProgress.java",
+          "result": "all twelve authoritative Lane facts and validation byte-for-byte unchanged"
+        }
+      ],
+      "snapshot_and_guard_evidence": {
+        "risk_scan_snapshot_write_ids": [
+          1,
+          2,
+          3,
+          4,
+          6,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25
+        ],
+        "risk_scan_snapshot_read_ids": [
+          1,
+          2,
+          3,
+          4,
+          6,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25
+        ],
+        "removed_ids": [
+          5,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "unchanged_continuation_guard_sources_sha256": {
+          "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreRiskScanContinuation.java": "374b3a1cb8a943106403c8f69b07664cc91f681cce6832025a3e0e205ba07157",
+          "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java": "19b4c249ddc5f760a63ac8d3ba7565503978ba4647b3bbad3d9ddda905827dbf",
+          "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java": "780a82d5608413a2ac8b566f93792e2e2e07020dc8fc970f1eec07e0d5cc6037"
+        }
+      },
+      "classfile_evidence": {
+        "classfiles_scanned": 4022,
+        "instance_fields": {
+          "com/surprising/aeron/service/snapshot/state/TradingRuntimeSnapshot$RiskScanSnapshot": [
+            [
+              18,
+              "accountLaneId",
+              "I"
+            ],
+            [
+              18,
+              "priceSequence",
+              "J"
+            ],
+            [
+              18,
+              "scanStartPriceSequence",
+              "J"
+            ],
+            [
+              18,
+              "riskComplete",
+              "Z"
+            ],
+            [
+              18,
+              "triggerComplete",
+              "Z"
+            ],
+            [
+              18,
+              "triggerPhase",
+              "I"
+            ],
+            [
+              18,
+              "triggerPriceCursor",
+              "J"
+            ],
+            [
+              18,
+              "triggerOrderCursor",
+              "J"
+            ],
+            [
+              18,
+              "triggerUpperId",
+              "J"
+            ],
+            [
+              18,
+              "triggerMarkPriceTicks",
+              "J"
+            ],
+            [
+              18,
+              "triggerGeneratedAtEpochMillis",
+              "J"
+            ],
+            [
+              18,
+              "triggerOcoOrderId",
+              "J"
+            ],
+            [
+              18,
+              "triggerOcoCursor",
+              "J"
+            ],
+            [
+              18,
+              "lastScheduledRevision",
+              "J"
+            ],
+            [
+              18,
+              "laneProgress",
+              "Ljava/util/List;"
+            ]
+          ],
+          "com/surprising/aeron/model/RiskLaneProgress": [
+            [
+              18,
+              "lastUserId",
+              "J"
+            ],
+            [
+              18,
+              "complete",
+              "Z"
+            ],
+            [
+              18,
+              "userId",
+              "J"
+            ],
+            [
+              18,
+              "phase",
+              "I"
+            ],
+            [
+              18,
+              "positionCursor",
+              "Ljava/lang/String;"
+            ],
+            [
+              18,
+              "reservationCursor",
+              "J"
+            ],
+            [
+              18,
+              "unrealizedPnlUnits",
+              "J"
+            ],
+            [
+              18,
+              "maintenanceMarginUnits",
+              "J"
+            ],
+            [
+              18,
+              "isolatedMarginUnits",
+              "J"
+            ],
+            [
+              18,
+              "isolatedReservationUnits",
+              "J"
+            ],
+            [
+              18,
+              "userRevision",
+              "J"
+            ],
+            [
+              18,
+              "marketRevision",
+              "J"
+            ]
+          ],
+          "com/surprising/aeron/model/CoreRiskState$RiskScan": [
+            [
+              18,
+              "instrumentId",
+              "Ljava/lang/String;"
+            ],
+            [
+              18,
+              "accountLaneId",
+              "I"
+            ],
+            [
+              18,
+              "priceSequence",
+              "J"
+            ],
+            [
+              18,
+              "scanStartPriceSequence",
+              "J"
+            ],
+            [
+              18,
+              "riskComplete",
+              "Z"
+            ],
+            [
+              18,
+              "triggerComplete",
+              "Z"
+            ],
+            [
+              18,
+              "triggerPhase",
+              "I"
+            ],
+            [
+              18,
+              "triggerPriceCursor",
+              "J"
+            ],
+            [
+              18,
+              "triggerOrderCursor",
+              "J"
+            ],
+            [
+              18,
+              "triggerUpperId",
+              "J"
+            ],
+            [
+              18,
+              "triggerMarkPriceTicks",
+              "J"
+            ],
+            [
+              18,
+              "triggerGeneratedAtEpochMillis",
+              "J"
+            ],
+            [
+              18,
+              "triggerOcoOrderId",
+              "J"
+            ],
+            [
+              18,
+              "triggerOcoCursor",
+              "J"
+            ],
+            [
+              18,
+              "lastScheduledRevision",
+              "J"
+            ],
+            [
+              18,
+              "laneProgress",
+              "Ljava/util/List;"
+            ]
+          ],
+          "com/surprising/aeron/service/risk/RiskLaneProcessor$Page": [
+            [
+              18,
+              "progress",
+              "Lcom/surprising/aeron/model/RiskLaneProgress;"
+            ],
+            [
+              18,
+              "workUnits",
+              "I"
+            ],
+            [
+              18,
+              "creations",
+              "Lcom/surprising/aeron/service/risk/RiskLiquidationBatch;"
+            ]
+          ],
+          "com/surprising/aeron/service/risk/RiskScanRuntime": [
+            [
+              18,
+              "symbolId",
+              "I"
+            ],
+            [
+              18,
+              "accountLaneId",
+              "I"
+            ],
+            [
+              18,
+              "priceSequence",
+              "J"
+            ],
+            [
+              18,
+              "scanStartPriceSequence",
+              "J"
+            ],
+            [
+              18,
+              "riskComplete",
+              "Z"
+            ],
+            [
+              18,
+              "triggerComplete",
+              "Z"
+            ],
+            [
+              18,
+              "triggerPhase",
+              "I"
+            ],
+            [
+              18,
+              "triggerPriceCursor",
+              "J"
+            ],
+            [
+              18,
+              "triggerOrderCursor",
+              "J"
+            ],
+            [
+              18,
+              "triggerUpperId",
+              "J"
+            ],
+            [
+              18,
+              "triggerMarkPriceTicks",
+              "J"
+            ],
+            [
+              18,
+              "triggerGeneratedAtEpochMillis",
+              "J"
+            ],
+            [
+              18,
+              "triggerOcoOrderId",
+              "J"
+            ],
+            [
+              18,
+              "triggerOcoCursor",
+              "J"
+            ],
+            [
+              18,
+              "lastScheduledRevision",
+              "J"
+            ],
+            [
+              18,
+              "laneProgress",
+              "Ljava/util/List;"
+            ]
+          ],
+          "com/surprising/aeron/service/risk/RiskLaneProcessor$UserPage": [
+            [
+              18,
+              "progress",
+              "Lcom/surprising/aeron/model/RiskLaneProgress;"
+            ],
+            [
+              18,
+              "workUnits",
+              "I"
+            ],
+            [
+              18,
+              "complete",
+              "Z"
+            ]
+          ]
+        },
+        "obsolete_field_getter_constructor_references": [],
+        "actual_runtime_last_user_getter_callers": [
+          "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/order/ClusteredBatchTradingBenchmark$Workload.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/MatchingCommandAdmission.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator$1.class",
+          "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.class"
+        ],
+        "metadata_constructors": {
+          "com/surprising/aeron/model/CoreRiskState$RiskScan": [
+            [
+              1,
+              "<init>",
+              "(Ljava/lang/String;IJJZZIJJJJJJJJLjava/util/List;)V"
+            ]
+          ],
+          "com/surprising/aeron/service/risk/RiskScanRuntime": [
+            [
+              1,
+              "<init>",
+              "(IIJJZZIJJJJJJJJLjava/util/List;)V"
+            ]
+          ]
+        }
+      },
+      "metadata_constructor_syntax_inventory": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreRiskStateTest.java",
+          "line": 496,
+          "type": "RiskScan",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.java",
+          "line": 97,
+          "type": "RiskScan",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.java",
+          "line": 127,
+          "type": "RiskScan",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.java",
+          "line": 129,
+          "type": "RiskScan",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingAccountRuntimeTest.java",
+          "line": 1897,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreLedgerQueryTest.java",
+          "line": 103,
+          "type": "RiskScan",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskState.java",
+          "line": 174,
+          "type": "RiskScan",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java",
+          "line": 140,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 798,
+          "type": "RiskScan",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.java",
+          "line": 154,
+          "type": "RiskScan",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanRuntime.java",
+          "line": 36,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanRuntime.java",
+          "line": 43,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanRuntime.java",
+          "line": 51,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanRuntime.java",
+          "line": 57,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java",
+          "line": 398,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java",
+          "line": 404,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java",
+          "line": 54,
+          "type": "RiskScanRuntime",
+          "arity": 16
+        }
+      ],
+      "hash_source_coverage": "当前源逐项纳入12个Lane组件各一次及轮转位置；旧源没有Lane列表、轮转或riskState.hashCode的混合。",
+      "source_test_scenarios": "现有多Lane小预算、恢复、行情失效及资金断言保留；既有快照用例增加非当前Lane版本/轮转哈希和状态往返场景，仅编译。",
+      "tests_executed": false,
+      "services_started": false,
+      "frontend": "公开HTTP/WS及CoreRiskScanContinuation三个字段不变；无前端源码变更，未重复前端编译。",
+      "not_executed": [
+        "tests",
+        "services",
+        "funds/trading",
+        "runtime recovery",
+        "database",
+        "browser/device",
+        "JMH/JFR"
+      ]
+    },
+    "next_operation_analysis": {
+      "unused_constructors": [
+        {
+          "owner": "com/surprising/aeron/model/TradingCoreState",
+          "descriptor": "(Lcom/surprising/product/api/ProductLine;JLjava/util/Map;Ljava/util/Map;Ljava/util/Map;Lcom/surprising/aeron/model/CoreRiskState;Lcom/surprising/aeron/service/treasury/CoreTreasuryState;Ljava/util/Map;)V",
+          "current_main_and_test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState",
+          "descriptor": "(Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Lcom/surprising/aeron/model/CoreRiskState$RiskScan;J)V",
+          "current_main_and_test_callers": []
+        }
+      ],
+      "scan_control_metadata": "CoreRiskScanControlView仍有RiskService管理规则读写与RiskRuntimeConfigService更新人/原因/时间回显的明确管理职责，未作为无用计算字段删除。"
+    },
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-risk-lane-progress-20261024",
+      "status": "archived_then_removed",
+      "compiler_outputs_retained": true,
+      "artifact_sha256": {
+        "/tmp/aeron-risk-lane-progress-20261024.before-signatures.json": "eb55a4e5ebb14b08dab26d802c9c3f8b761bfe2deaae73e4c7f45a4a9f5513c9",
+        "/tmp/aeron-risk-lane-progress-20261024.before.json": "7b806329225ada9400a99b66f0a2c66338ab878683be72409d6a5c770a3e105f",
+        "/tmp/aeron-risk-lane-progress-20261024.build.json": "08055b9d503145895d421ef76a4ea242c58a2c1e627113e9485c8d438eacd996",
+        "/tmp/aeron-risk-lane-progress-20261024.classfiles.json": "f4f877e704f5575d2731ad212ed90ca7d345f44cddd7e3654bf9d9f6bac0897b",
+        "/tmp/aeron-risk-lane-progress-20261024.compare.py": "0b7c4f6ee9d2fde8d92b2398e454c7634fe555542dee6885aea825b915f1b67a",
+        "/tmp/aeron-risk-lane-progress-20261024.comparison.json": "a10bbc3507f76ddaff2c94addb5ada804738e21e16e4f237fe1c6c5510cca218",
+        "/tmp/aeron-risk-lane-progress-20261024.compiled-sources.json": "6130f221448fe74fcc45cce238c271bf5631df54f0fe33b59a8d9cc848004f5e",
+        "/tmp/aeron-risk-lane-progress-20261024.constructors.json": "d35fc79be32e75f654fad09d053b56c92d073b0c56b953ab8aff4973e1bb3e6f",
+        "/tmp/aeron-risk-lane-progress-20261024.failed-1-build.json": "67531b4c1e2eebad0b87ce2301d5528c548f4a41e1fbeb6ec85755e09f1d8dd2",
+        "/tmp/aeron-risk-lane-progress-20261024.failed-1-maven.log": "c80df6d466299af81185d0dabe371c3b01c71fa296fae08a9fa9815d1e0e2010",
+        "/tmp/aeron-risk-lane-progress-20261024.failed-1-sources.json": "f6ee4eba115659abcc6fda55411c4915450372912d3e7aeaaf736723a2144c1f",
+        "/tmp/aeron-risk-lane-progress-20261024.maven.log": "7e559078cc3e228c674d73e2509e79b8c678bd4a20288567f13343f9846790b1",
+        "/tmp/aeron-risk-lane-progress-20261024.next-constructors.json": "0cafa9949eb48482f0741232755540e2c9bc0d3d1c65cb98bc4cb78866cd60f1",
+        "/tmp/aeron-risk-lane-progress-20261024.scan.py": "27f7abe271da259fcbf3133da6eb6df0bad3e8d9f157dcd448b4dbb7cd02bbc1",
+        "/tmp/aeron-risk-lane-progress-20261024.snapshot-and-guards.json": "36389d1c48e20a8eda882b54a7214187f55e5fb766ba4fdcf2ac79a1ba66b432"
+      },
+      "files_removed": 15,
       "pyc_files_removed": 0
     },
     "full_audit_complete": false

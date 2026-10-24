@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 53;
+    private static final int VERSION = 54;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -774,16 +774,7 @@ public final class TradingStateSnapshotCodec {
                 .number(2, value.accountLaneId()) // 2：账户 Lane 的分页位置
                 .number(3, value.priceSequence()) // 3：参考价格序号
                 .number(4, value.scanStartPriceSequence()) // 4：此轮风险扫描开始时的价格序号
-                .number(5, value.lastUserId()) // 5：当前分页已处理到的用户编号
                 .bool(6, value.riskComplete()) // 6：本币对当前风险扫描是否结束
-                .number(7, value.riskUserId()) // 7：当前正在估值的用户编号
-                .number(8, value.riskPhase()) // 8：当前用户风险估值阶段
-                .text(9, value.riskPositionCursor()) // 9：当前用户风险估值的持仓游标
-                .number(10, value.riskReservationCursor()) // 10：当前用户风险估值的订单预留游标
-                .number(11, value.riskUnrealizedPnlUnits()) // 11：本次用户风险扫描累计的未实现盈亏
-                .number(12, value.riskMaintenanceMarginUnits()) // 12：本次用户风险扫描累计的维持保证金
-                .number(13, value.riskIsolatedMarginUnits()) // 13：本次用户风险扫描累计的逐仓保证金
-                .number(14, value.riskIsolatedReservationUnits()) // 14：本次用户风险扫描累计的逐仓订单预留
                 .bool(15, value.triggerComplete()) // 15：当前币对触发单扫描是否结束
                 .number(16, value.triggerPhase()) // 16：触发单扫描阶段
                 .number(17, value.triggerPriceCursor()) // 17：触发条件价格索引的分页位置
@@ -809,16 +800,7 @@ public final class TradingStateSnapshotCodec {
                 r.integer(2), // 2：账户 Lane 的分页位置
                 r.number(3), // 3：参考价格序号
                 r.number(4), // 4：此轮风险扫描开始时的价格序号
-                r.number(5), // 5：当前分页已处理到的用户编号
                 r.bool(6), // 6：本币对当前风险扫描是否结束
-                r.number(7), // 7：当前正在估值的用户编号
-                r.integer(8), // 8：当前用户风险估值阶段
-                r.text(9), // 9：当前用户风险估值的持仓游标
-                r.number(10), // 10：当前用户风险估值的订单预留游标
-                r.number(11), // 11：本次用户风险扫描累计的未实现盈亏
-                r.number(12), // 12：本次用户风险扫描累计的维持保证金
-                r.number(13), // 13：本次用户风险扫描累计的逐仓保证金
-                r.number(14), // 14：本次用户风险扫描累计的逐仓订单预留
                 r.bool(15), // 15：当前币对触发单扫描是否结束
                 r.integer(16), // 16：触发单扫描阶段
                 r.number(17), // 17：触发条件价格索引的分页位置

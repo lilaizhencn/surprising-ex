@@ -2,6 +2,7 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreMarkPriceState;
 import com.surprising.aeron.model.CoreRiskState;
+import com.surprising.aeron.model.RiskLaneProgress;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -16,6 +17,7 @@ import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -93,9 +95,10 @@ class TradingStateSnapshotCodecTest {
         TradingCoreState empty = TradingCoreState.empty(ProductLine.SPOT);
         // 人工填写的风险/触发续扫游标值，供往返比较。
         CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan(
-                "1", 7, 6, 0, false, 7, 1, "position-key", 9,
-                10, 11, 12, 13, false, TriggerOrderIndex.PHASE_TRAILING_LESS_OR_EQUAL,
-                400, 300, 500, 70_000, 1_234, 88, 77);
+                "1", 0, 7, 6, false, false, TriggerOrderIndex.PHASE_TRAILING_LESS_OR_EQUAL,
+                400, 300, 500, 70_000, 1_234, 88, 77, 0,
+                List.of(new RiskLaneProgress(0, false, 7, 1, "position-key", 9, 10, 11, 12, 13, 14, 15),
+                        new RiskLaneProgress(20, false, 21, 2, "other-position", 22, 23, 24, 25, 26, 27, 28)));
         // 包含标记价与指定续扫任务的风险状态。
         CoreRiskState risk = new CoreRiskState(
                 Map.of("1", new CoreMarkPriceState("1", 70_000, 7, 1_000)),
@@ -112,6 +115,29 @@ class TradingStateSnapshotCodecTest {
 
         assertThat(restored.riskState().scans().get("1")).isEqualTo(scan);
         assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
+
+        // 当前轮转点仍在 Lane 0；Lane 1 的进度和失效版本变化也必须改变状态哈希。
+        var other = scan.laneProgress().get(1);
+        var changed = List.of(scan.laneProgress().getFirst(),
+                new RiskLaneProgress(other.lastUserId(), other.complete(), other.userId(), other.phase(),
+                        other.positionCursor(), other.reservationCursor(), other.unrealizedPnlUnits(),
+                        other.maintenanceMarginUnits(), other.isolatedMarginUnits(), other.isolatedReservationUnits(),
+                        other.userRevision() + 1, other.marketRevision() + 1));
+        for (var variant : List.of(
+                new CoreRiskState.RiskScan("1", 0, 7, 6, false, false,
+                        TriggerOrderIndex.PHASE_TRAILING_LESS_OR_EQUAL, 400, 300, 500, 70_000, 1_234, 88, 77, 0, changed),
+                new CoreRiskState.RiskScan("1", 1, 7, 6, false, false,
+                        TriggerOrderIndex.PHASE_TRAILING_LESS_OR_EQUAL, 400, 300, 500, 70_000, 1_234, 88, 77, 0,
+                        scan.laneProgress()))) {
+            var variantRisk = new CoreRiskState(risk.markPrices(), risk.snapshots(), risk.liquidations(),
+                    Map.of("1", variant), risk.nextLiquidationId(), risk.scanControl(), risk.marketRevision());
+            var variantState = new TradingCoreState(state.productLine(), state.revision(), state.users(),
+                    state.orders(), state.instruments(), variantRisk, state.treasuryState(), state.leverages(),
+                    state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(), state.triggerOrders());
+            assertThat(variantState.businessStateHash()).isNotEqualTo(state.businessStateHash());
+            assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(variantState), ProductLine.SPOT))
+                    .isEqualTo(variantState);
+        }
     }
 
     /**

@@ -152,10 +152,7 @@ public final class RuntimeStateMaterializer {
             // 从内部编号解析得到的币对业务名称。
             String instrumentId = identities.instrumentId(symbolId);
             scans.put(instrumentId, new CoreRiskState.RiskScan(instrumentId, scan.accountLaneId(), scan.priceSequence(),
-                    scan.scanStartPriceSequence(), scan.lastUserId(), scan.riskComplete(), scan.riskUserId(),
-                    scan.riskPhase(), scan.riskPositionCursor(), scan.riskReservationCursor(),
-                    scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(),
-                    scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),
+                    scan.scanStartPriceSequence(), scan.riskComplete(), scan.triggerComplete(),
                     scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                     scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
                     scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress()));

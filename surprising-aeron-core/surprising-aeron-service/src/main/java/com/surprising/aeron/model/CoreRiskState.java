@@ -143,295 +143,35 @@ public record CoreRiskState(
     }
 
     /**
-     * 某个币对一轮行情驱动的风险及条件单扫描进度，分别保留账户估值、价格索引和关联撤单游标，使有限工作量的一批结束后还能继续。
-     * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
-     * @param accountLaneId 当前风险进度对应的账户 Lane 编号，范围为 0 到 63
-     * @param priceSequence 行情的单调序号，用来识别扫描和估值采用的是哪一版价格
-     * @param scanStartPriceSequence 这一轮扫描最初启动时的行情序号，与当前扫描序号分开保存
-     * @param lastUserId 本轮最后一个已经处理完的用户编号，后续从它之后继续
-     * @param riskComplete 这一轮账户风险扫描是否已经完成
-     * @param riskUserId 正在分批估值的用户编号，0 表示没有尚未完成的用户
-     * @param riskPhase 用户估值阶段：0 累计持仓风险，1 累计逐仓委托冻结，2 写入全仓风险
-     * @param riskPositionCursor 当前估值阶段最后处理的持仓键，短横线表示尚未开始遍历
-     * @param riskReservationCursor 当前用户最后处理的冻结委托编号，0 表示尚未开始
-     * @param riskUnrealizedPnlUnits 已经累计的跨仓权益变化，期货为未实现盈亏，期权按持仓市值口径计入
-     * @param riskMaintenanceMarginUnits 已经累计的全仓维持保证金，单位为结算资产最小单位
-     * @param riskIsolatedMarginUnits 已经累计的逐仓持仓保证金，计算全仓可用权益时要扣除
-     * @param riskIsolatedReservationUnits 已经累计的逐仓委托冻结金额，不能再次算进全仓共享权益
-     * @param triggerComplete 这一轮条件单扫描是否已经完成，与账户风险完成标记分别保存
-     * @param triggerPhase 条件单扫描阶段，同时编码价格来源及该来源内部的索引遍历阶段
-     * @param triggerPriceCursor 条件单价格索引最后扫描到的位置，用于下一批继续
-     * @param triggerOrderCursor 同一价格范围内最后扫描的条件单编号游标
-     * @param triggerUpperId 本轮允许扫描的条件单编号上界，限制扫描期间纳入的条件单范围
-     * @param triggerMarkPriceTicks 本轮条件单扫描固定采用的标记价格 tick
-     * @param triggerGeneratedAtEpochMillis 本轮扫描价格的生成时间，过期判断和触发时间均使用这个毫秒时间戳
-     * @param triggerOcoOrderId 正在处理关联撤单的触发单编号，0 表示没有中断待续的关联撤单
-     * @param triggerOcoCursor 关联条件单按编号倒序撤销时的继续位置，避免一批内处理过多
-     * @param lastScheduledRevision 最近一次调度这份扫描时记录的状态修订号
-     * @param laneProgress 各账户 Lane 的独立风险游标，列表下标就是 Lane 编号；空列表表示尚未分派
+     * 币对扫描的可恢复元数据。Lane 列表按编号保存各自唯一的风险进度；空列表表示尚未分派。
+     * accountLaneId 是下次分配预算的轮转起点，风险和触发完成标记属于各自流程。
      */
     public record RiskScan(
-            String instrumentId,
-            int accountLaneId,
-            long priceSequence,
-            long scanStartPriceSequence,
-            long lastUserId,
-            boolean riskComplete,
-            long riskUserId,
-            int riskPhase,
-            String riskPositionCursor,
-            long riskReservationCursor,
-            long riskUnrealizedPnlUnits,
-            long riskMaintenanceMarginUnits,
-            long riskIsolatedMarginUnits,
-            long riskIsolatedReservationUnits,
-            boolean triggerComplete,
-            int triggerPhase,
-            long triggerPriceCursor,
-            long triggerOrderCursor,
-            long triggerUpperId,
-            long triggerMarkPriceTicks,
-            long triggerGeneratedAtEpochMillis,
-            long triggerOcoOrderId,
-            long triggerOcoCursor, long lastScheduledRevision,
-            /** 各 Lane 独立恢复的风险进度；空列表表示扫描尚未分派。 */ List<RiskLaneProgress> laneProgress) {
-        /**
-         * 创建已有调度修订号、但尚未分派各 Lane 独立游标的扫描记录。
-         * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
-         * @param accountLaneId 当前风险进度对应的账户 Lane 编号，范围为 0 到 63
-         * @param priceSequence 行情的单调序号，用来识别扫描和估值采用的是哪一版价格
-         * @param scanStartPriceSequence 这一轮扫描最初启动时的行情序号，与当前扫描序号分开保存
-         * @param lastUserId 本轮最后一个已经处理完的用户编号，后续从它之后继续
-         * @param riskComplete 这一轮账户风险扫描是否已经完成
-         * @param riskUserId 正在分批估值的用户编号，0 表示没有尚未完成的用户
-         * @param riskPhase 用户估值阶段：0 累计持仓风险，1 累计逐仓委托冻结，2 写入全仓风险
-         * @param riskPositionCursor 当前估值阶段最后处理的持仓键，短横线表示尚未开始遍历
-         * @param riskReservationCursor 当前用户最后处理的冻结委托编号，0 表示尚未开始
-         * @param riskUnrealizedPnlUnits 已经累计的跨仓权益变化，期货为未实现盈亏，期权按持仓市值口径计入
-         * @param riskMaintenanceMarginUnits 已经累计的全仓维持保证金，单位为结算资产最小单位
-         * @param riskIsolatedMarginUnits 已经累计的逐仓持仓保证金，计算全仓可用权益时要扣除
-         * @param riskIsolatedReservationUnits 已经累计的逐仓委托冻结金额，不能再次算进全仓共享权益
-         * @param triggerComplete 这一轮条件单扫描是否已经完成，与账户风险完成标记分别保存
-         * @param triggerPhase 条件单扫描阶段，同时编码价格来源及该来源内部的索引遍历阶段
-         * @param triggerPriceCursor 条件单价格索引最后扫描到的位置，用于下一批继续
-         * @param triggerOrderCursor 同一价格范围内最后扫描的条件单编号游标
-         * @param triggerUpperId 本轮允许扫描的条件单编号上界，限制扫描期间纳入的条件单范围
-         * @param triggerMarkPriceTicks 本轮条件单扫描固定采用的标记价格 tick
-         * @param triggerGeneratedAtEpochMillis 本轮扫描价格的生成时间，过期判断和触发时间均使用这个毫秒时间戳
-         * @param triggerOcoOrderId 正在处理关联撤单的触发单编号，0 表示没有中断待续的关联撤单
-         * @param triggerOcoCursor 关联条件单按编号倒序撤销时的继续位置，避免一批内处理过多
-         * @param lastScheduledRevision 最近一次调度这份扫描时记录的状态修订号
-         */
-        public RiskScan(
-                String instrumentId,
-                int accountLaneId,
-                long priceSequence,
-                long scanStartPriceSequence,
-                long lastUserId,
-                boolean riskComplete,
-                long riskUserId,
-                int riskPhase,
-                String riskPositionCursor,
-                long riskReservationCursor,
-                long riskUnrealizedPnlUnits,
-                long riskMaintenanceMarginUnits,
-                long riskIsolatedMarginUnits,
-                long riskIsolatedReservationUnits,
-                boolean triggerComplete,
-                int triggerPhase,
-                long triggerPriceCursor,
-                long triggerOrderCursor,
-                long triggerUpperId,
-                long triggerMarkPriceTicks,
-                long triggerGeneratedAtEpochMillis,
-                long triggerOcoOrderId,
-                long triggerOcoCursor, long lastScheduledRevision) {
-            this(instrumentId, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete, riskUserId,
-                    riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
-                    riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
-                    triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
-                    triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor,
-                    lastScheduledRevision, List.of());
-        }
-
-        /**
-         * 创建包含完整风险和条件单游标的记录，最近调度修订号从 0 开始。
-         * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
-         * @param accountLaneId 当前风险进度对应的账户 Lane 编号，范围为 0 到 63
-         * @param priceSequence 行情的单调序号，用来识别扫描和估值采用的是哪一版价格
-         * @param scanStartPriceSequence 这一轮扫描最初启动时的行情序号，与当前扫描序号分开保存
-         * @param lastUserId 本轮最后一个已经处理完的用户编号，后续从它之后继续
-         * @param riskComplete 这一轮账户风险扫描是否已经完成
-         * @param riskUserId 正在分批估值的用户编号，0 表示没有尚未完成的用户
-         * @param riskPhase 用户估值阶段：0 累计持仓风险，1 累计逐仓委托冻结，2 写入全仓风险
-         * @param riskPositionCursor 当前估值阶段最后处理的持仓键，短横线表示尚未开始遍历
-         * @param riskReservationCursor 当前用户最后处理的冻结委托编号，0 表示尚未开始
-         * @param riskUnrealizedPnlUnits 已经累计的跨仓权益变化，期货为未实现盈亏，期权按持仓市值口径计入
-         * @param riskMaintenanceMarginUnits 已经累计的全仓维持保证金，单位为结算资产最小单位
-         * @param riskIsolatedMarginUnits 已经累计的逐仓持仓保证金，计算全仓可用权益时要扣除
-         * @param riskIsolatedReservationUnits 已经累计的逐仓委托冻结金额，不能再次算进全仓共享权益
-         * @param triggerComplete 这一轮条件单扫描是否已经完成，与账户风险完成标记分别保存
-         * @param triggerPhase 条件单扫描阶段，同时编码价格来源及该来源内部的索引遍历阶段
-         * @param triggerPriceCursor 条件单价格索引最后扫描到的位置，用于下一批继续
-         * @param triggerOrderCursor 同一价格范围内最后扫描的条件单编号游标
-         * @param triggerUpperId 本轮允许扫描的条件单编号上界，限制扫描期间纳入的条件单范围
-         * @param triggerMarkPriceTicks 本轮条件单扫描固定采用的标记价格 tick
-         * @param triggerGeneratedAtEpochMillis 本轮扫描价格的生成时间，过期判断和触发时间均使用这个毫秒时间戳
-         * @param triggerOcoOrderId 正在处理关联撤单的触发单编号，0 表示没有中断待续的关联撤单
-         * @param triggerOcoCursor 关联条件单按编号倒序撤销时的继续位置，避免一批内处理过多
-         */
-        public RiskScan(
-            String instrumentId,
-            int accountLaneId,
-            long priceSequence,
-            long scanStartPriceSequence,
-            long lastUserId,
-            boolean riskComplete,
-            long riskUserId,
-            int riskPhase,
-            String riskPositionCursor,
-            long riskReservationCursor,
-            long riskUnrealizedPnlUnits,
-            long riskMaintenanceMarginUnits,
-            long riskIsolatedMarginUnits,
-            long riskIsolatedReservationUnits,
-            boolean triggerComplete,
-            int triggerPhase,
-            long triggerPriceCursor,
-            long triggerOrderCursor,
-            long triggerUpperId,
-            long triggerMarkPriceTicks,
-            long triggerGeneratedAtEpochMillis,
-            long triggerOcoOrderId,
-            long triggerOcoCursor) {
-            this(instrumentId, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete, riskUserId,
-                    riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
-                    riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
-                    triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
-                    triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor, 0);
-        }
-
-        /**
-         * 复制 Lane 进度列表并校验数量、阶段、游标及行情序号；空编号统一成短横线，风险扫描完成时不得留有未完成用户。
-         */
+            String instrumentId, int accountLaneId, long priceSequence, long scanStartPriceSequence,
+            boolean riskComplete, boolean triggerComplete, int triggerPhase,
+            long triggerPriceCursor, long triggerOrderCursor, long triggerUpperId,
+            long triggerMarkPriceTicks, long triggerGeneratedAtEpochMillis,
+            long triggerOcoOrderId, long triggerOcoCursor, long lastScheduledRevision,
+            List<RiskLaneProgress> laneProgress) {
         public RiskScan {
             laneProgress = List.copyOf(laneProgress);
-            if (laneProgress.size() > Long.SIZE) throw new IllegalArgumentException("too many risk Lanes");
-            if (lastScheduledRevision < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE || priceSequence < 0 || scanStartPriceSequence < 0
-                    || scanStartPriceSequence > priceSequence || lastUserId < 0 || riskUserId < 0
-                    || riskPhase < 0 || riskPhase > 2 || riskReservationCursor < 0
-                    || riskMaintenanceMarginUnits < 0 || riskIsolatedMarginUnits < 0
-                    || riskIsolatedReservationUnits < 0 || triggerPhase < 0
-                    || triggerPriceCursor < 0 || triggerOrderCursor < 0 || triggerUpperId < 0
-                    || triggerMarkPriceTicks < 0 || triggerGeneratedAtEpochMillis < 0
-                    || triggerOcoOrderId < 0 || triggerOcoCursor < 0) {
+            if (laneProgress.size() > Long.SIZE || accountLaneId < 0 || accountLaneId >= Long.SIZE
+                    || !laneProgress.isEmpty() && accountLaneId >= laneProgress.size()
+                    || priceSequence < 0 || scanStartPriceSequence < 0 || scanStartPriceSequence > priceSequence
+                    || triggerPhase < 0 || triggerPriceCursor < 0 || triggerOrderCursor < 0
+                    || triggerUpperId < 0 || triggerMarkPriceTicks < 0 || triggerGeneratedAtEpochMillis < 0
+                    || triggerOcoOrderId < 0 || triggerOcoCursor < 0 || lastScheduledRevision < 0) {
                 throw new IllegalArgumentException("invalid risk scan");
             }
             instrumentId = instrumentId == null || instrumentId.isBlank() ? "-" : instrumentId;
-            riskPositionCursor = riskPositionCursor == null || riskPositionCursor.isBlank()
-                    ? "-" : riskPositionCursor;
-            if (riskComplete && riskUserId != 0) {
-                throw new IllegalArgumentException("complete risk scan cannot retain a user cursor");
-            }
         }
 
-        /**
-         * 创建从账户 Lane 0 开始的扫描，其他风险和条件单游标由调用方传入。
-         * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
-         * @param priceSequence 行情的单调序号，用来识别扫描和估值采用的是哪一版价格
-         * @param scanStartPriceSequence 这一轮扫描最初启动时的行情序号，与当前扫描序号分开保存
-         * @param lastUserId 本轮最后一个已经处理完的用户编号，后续从它之后继续
-         * @param riskComplete 这一轮账户风险扫描是否已经完成
-         * @param riskUserId 正在分批估值的用户编号，0 表示没有尚未完成的用户
-         * @param riskPhase 用户估值阶段：0 累计持仓风险，1 累计逐仓委托冻结，2 写入全仓风险
-         * @param riskPositionCursor 当前估值阶段最后处理的持仓键，短横线表示尚未开始遍历
-         * @param riskReservationCursor 当前用户最后处理的冻结委托编号，0 表示尚未开始
-         * @param riskUnrealizedPnlUnits 已经累计的跨仓权益变化，期货为未实现盈亏，期权按持仓市值口径计入
-         * @param riskMaintenanceMarginUnits 已经累计的全仓维持保证金，单位为结算资产最小单位
-         * @param riskIsolatedMarginUnits 已经累计的逐仓持仓保证金，计算全仓可用权益时要扣除
-         * @param riskIsolatedReservationUnits 已经累计的逐仓委托冻结金额，不能再次算进全仓共享权益
-         * @param triggerComplete 这一轮条件单扫描是否已经完成，与账户风险完成标记分别保存
-         * @param triggerPhase 条件单扫描阶段，同时编码价格来源及该来源内部的索引遍历阶段
-         * @param triggerPriceCursor 条件单价格索引最后扫描到的位置，用于下一批继续
-         * @param triggerOrderCursor 同一价格范围内最后扫描的条件单编号游标
-         * @param triggerUpperId 本轮允许扫描的条件单编号上界，限制扫描期间纳入的条件单范围
-         * @param triggerMarkPriceTicks 本轮条件单扫描固定采用的标记价格 tick
-         * @param triggerGeneratedAtEpochMillis 本轮扫描价格的生成时间，过期判断和触发时间均使用这个毫秒时间戳
-         * @param triggerOcoOrderId 正在处理关联撤单的触发单编号，0 表示没有中断待续的关联撤单
-         * @param triggerOcoCursor 关联条件单按编号倒序撤销时的继续位置，避免一批内处理过多
-         */
-        public RiskScan(String instrumentId, long priceSequence, long scanStartPriceSequence, long lastUserId,
-                        boolean riskComplete, long riskUserId, int riskPhase, String riskPositionCursor,
-                        long riskReservationCursor, long riskUnrealizedPnlUnits,
-                        long riskMaintenanceMarginUnits, long riskIsolatedMarginUnits,
-                        long riskIsolatedReservationUnits, boolean triggerComplete, int triggerPhase,
-                        long triggerPriceCursor, long triggerOrderCursor, long triggerUpperId,
-                        long triggerMarkPriceTicks, long triggerGeneratedAtEpochMillis,
-                        long triggerOcoOrderId, long triggerOcoCursor) {
-            this(instrumentId, 0, priceSequence, scanStartPriceSequence, lastUserId, riskComplete, riskUserId,
-                    riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
-                    riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
-                    triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
-                    triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor);
-        }
-
-        /**
-         * 创建只有用户遍历进度的扫描，条件单部分先记为完成，详细风险游标和累计值从空值开始。
-         * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
-         * @param priceSequence 行情的单调序号，用来识别扫描和估值采用的是哪一版价格
-         * @param scanStartPriceSequence 这一轮扫描最初启动时的行情序号，与当前扫描序号分开保存
-         * @param lastUserId 本轮最后一个已经处理完的用户编号，后续从它之后继续
-         * @param complete 当前更新的扫描部分是否完成；简化构造器中指账户风险部分
-         */
-        public RiskScan(String instrumentId, long priceSequence, long scanStartPriceSequence,
-                        long lastUserId, boolean complete) {
-            this(instrumentId, 0, priceSequence, scanStartPriceSequence, lastUserId, complete,
-                    0, 0, "-", 0, 0, 0, 0, 0,
-                    true, 0, 0, 0, 0, 0, 0, 0, 0);
-        }
-
-        /**
-         * 用同一个行情序号作为当前序号和本轮起始序号，创建简化的用户扫描游标。
-         * @param instrumentId 币对或合约编号，用于关联该产品的配置与状态
-         * @param priceSequence 行情的单调序号，用来识别扫描和估值采用的是哪一版价格
-         * @param lastUserId 本轮最后一个已经处理完的用户编号，后续从它之后继续
-         * @param complete 当前更新的扫描部分是否完成；简化构造器中指账户风险部分
-         */
-        public RiskScan(String instrumentId, long priceSequence, long lastUserId, boolean complete) {
-            this(instrumentId, priceSequence, priceSequence, lastUserId, complete);
-        }
-
-        /**
-         * 账户风险扫描与条件单扫描都完成时，整轮扫描才算完成。
-         */
         public boolean complete() {
             return riskComplete && triggerComplete;
         }
 
-        /**
-         * 替换条件单的阶段及价格、编号游标，保留账户风险和各 Lane 的独立进度。
-         * @param complete 当前更新的扫描部分是否完成；简化构造器中指账户风险部分
-         * @param phase 当前更新部分的扫描阶段，风险为 0 到 2，条件单则同时编码价格来源和索引阶段
-         * @param priceCursor 下一批条件单扫描继续使用的价格索引游标
-         * @param orderCursor 下一批条件单扫描继续使用的条件单编号游标
-         * @param upperId 这一轮条件单编号的固定上界
-         * @param markPriceTicks 风险估值使用的标记价格，单位为价格 tick
-         * @param generatedAtEpochMillis 行情来源生成这份价格的 Unix 毫秒时间戳
-         */
-        public RiskScan withTriggerProgress(boolean complete, int phase, long priceCursor, long orderCursor,
-                                            long upperId, long markPriceTicks, long generatedAtEpochMillis) {
-            return new RiskScan(instrumentId, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete,
-                    riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
-                    riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
-                    riskIsolatedReservationUnits, complete, phase, priceCursor, orderCursor, upperId,
-                    markPriceTicks, generatedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision, laneProgress);
-        }
-
-        /**
-         * 创建没有币对、没有行情序号且两个扫描部分都完成的空闲记录。
-         */
         static RiskScan idle() {
-            return new RiskScan("-", 0, 0, 0, true);
+            return new RiskScan("-", 0, 0, 0, true, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of());
         }
     }
 }

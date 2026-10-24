@@ -90,13 +90,17 @@ class CoreLedgerQueryTest {
                 3L, new CoreLiquidationState(3, 1003, "1", 1, 1, 70, CoreLiquidationState.Status.ADL_REQUIRED),
                 4L, new CoreLiquidationState(4, 1004, "1", 1, 1, 30, CoreLiquidationState.Status.ADL_REQUIRED),
                 5L, new CoreLiquidationState(5, 1005, "1", 1, 1, 0, CoreLiquidationState.Status.PLANNED));
+        var cursors = new java.util.ArrayList<>(java.util.Collections.nCopies(
+                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology().accountLaneCount(),
+                new com.surprising.aeron.model.RiskLaneProgress(0, false, 0, 0, "-", 0, 0, 0, 0, 0)));
+        cursors.set(0, new com.surprising.aeron.model.RiskLaneProgress(999, false, 0, 0, "-", 0, 0, 0, 0, 0));
         // 含五个用户、当前标记价、强平计划和风险扫描游标的完整参照状态。
         var state = new TradingCoreState(LINE, 0,
                 Map.of(1001L, CoreUserState.empty(LINE, 1001), 1002L, CoreUserState.empty(LINE, 1002),
                         1003L, CoreUserState.empty(LINE, 1003), 1004L, CoreUserState.empty(LINE, 1004),
                         1005L, CoreUserState.empty(LINE, 1005)),
                 Map.of(), Map.of("1", instrument), new CoreRiskState(
-                Map.of("1", new CoreMarkPriceState("1", 100, 1, 1)), Map.of(), liquidations, Map.of("1", new CoreRiskState.RiskScan("1", 1, 999, false)), 6),
+                Map.of("1", new CoreMarkPriceState("1", 100, 1, 1)), Map.of(), liquidations, Map.of("1", new CoreRiskState.RiskScan("1", 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors)), 6),
                 CoreTreasuryState.empty());
         // 冷运行时使用的身份映射，构造同一业务状态的独立查询参照。
         var identities = new RuntimeIdentityRegistry();

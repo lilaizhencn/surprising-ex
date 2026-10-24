@@ -139,10 +139,8 @@ public final class RuntimeStateProjector {
                         risk.maintenanceMarginUnits(), risk.marginRatioPpm())));
         source.riskState().scans().forEach((/* 当前结算进度、标记价或扫描记录所属币对名称。 */ instrumentId, /* 需要恢复风险及触发扫描阶段、游标和已累计中间值的记录。 */ scan) -> runtime.putRiskScan(new RiskScanRuntime(
                 identities.symbolId(instrumentId), scan.accountLaneId(), scan.priceSequence(),
-                scan.scanStartPriceSequence(), scan.lastUserId(),
-                scan.riskComplete(), scan.riskUserId(), scan.riskPhase(), scan.riskPositionCursor(),
-                scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(), scan.riskMaintenanceMarginUnits(),
-                scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),
+                scan.scanStartPriceSequence(),
+                scan.riskComplete(), scan.triggerComplete(),
                 scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                 scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
                 scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress())));

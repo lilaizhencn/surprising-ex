@@ -1890,8 +1890,10 @@ class TradingAccountRuntimeTest {
      * @param lastUserId 测试风险扫描已到的用户游标
      */
     private static RiskScanRuntime incompleteRiskScan(int symbolId, long lastUserId) {
-        return new RiskScanRuntime(symbolId, 1, 1, lastUserId, false,
-                0, 0, "-", 0, 0, 0, 0, 0,
-                true, 0, 0, 0, 0, 0, 0, 0, 0);
+        var cursors = new java.util.ArrayList<>(java.util.Collections.nCopies(
+                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology().accountLaneCount(),
+                new com.surprising.aeron.model.RiskLaneProgress(0, false, 0, 0, "-", 0, 0, 0, 0, 0)));
+        cursors.set(0, new com.surprising.aeron.model.RiskLaneProgress(lastUserId, false, 0, 0, "-", 0, 0, 0, 0, 0));
+        return new RiskScanRuntime(symbolId, 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors);
     }
 }

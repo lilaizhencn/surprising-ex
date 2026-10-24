@@ -102,11 +102,7 @@ public final class RuntimeSnapshotBuilder {
         Map<Integer, TradingRuntimeSnapshot.RiskScanSnapshot> riskScans = new TreeMap<>();
         state.riskScansForSnapshot().forEachKeyValue((/* 当前行情、风控或生命周期进度对应的品种编号。 */ symbolId, /* 当前品种的多阶段风险/触发游标，保留已有字段，不执行扫描。 */ scan) -> riskScans.put(symbolId,
                 new TradingRuntimeSnapshot.RiskScanSnapshot(scan.accountLaneId(), scan.priceSequence(),
-                        scan.scanStartPriceSequence(),
-                        scan.lastUserId(), scan.riskComplete(), scan.riskUserId(), scan.riskPhase(),
-                        scan.riskPositionCursor(), scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(),
-                        scan.riskMaintenanceMarginUnits(), scan.riskIsolatedMarginUnits(),
-                        scan.riskIsolatedReservationUnits(), scan.triggerComplete(), scan.triggerPhase(),
+                        scan.scanStartPriceSequence(), scan.riskComplete(), scan.triggerComplete(), scan.triggerPhase(),
                         scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                         scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
                         scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress())));

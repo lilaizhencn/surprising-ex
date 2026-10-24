@@ -450,16 +450,7 @@ public record TradingRuntimeSnapshot(
      * @param accountLaneId 账户 Lane 的分页位置
      * @param priceSequence 参考价格序号
      * @param scanStartPriceSequence 此轮风险扫描开始时的价格序号
-     * @param lastUserId 当前分页已处理到的用户编号
      * @param riskComplete 本币对当前风险扫描是否结束
-     * @param riskUserId 当前正在估值的用户编号
-     * @param riskPhase 当前用户风险估值阶段
-     * @param riskPositionCursor 当前用户风险估值的持仓游标
-     * @param riskReservationCursor 当前用户风险估值的订单预留游标
-     * @param riskUnrealizedPnlUnits 本次用户风险扫描累计的未实现盈亏
-     * @param riskMaintenanceMarginUnits 本次用户风险扫描累计的维持保证金
-     * @param riskIsolatedMarginUnits 本次用户风险扫描累计的逐仓保证金
-     * @param riskIsolatedReservationUnits 本次用户风险扫描累计的逐仓订单预留
      * @param triggerComplete 当前币对触发单扫描是否结束
      * @param triggerPhase 触发单扫描阶段
      * @param triggerPriceCursor 触发条件价格索引的分页位置
@@ -472,17 +463,12 @@ public record TradingRuntimeSnapshot(
      * @param lastScheduledRevision 此币对上次安排扫描时的修订号
      * @param laneProgress 各账户 Lane 保存的风险扫描进度列表
      */
-    public record RiskScanSnapshot(int accountLaneId, long priceSequence,
-                                   long scanStartPriceSequence, long lastUserId,
-                                   boolean riskComplete, long riskUserId, int riskPhase,
-                                   String riskPositionCursor, long riskReservationCursor,
-                                   long riskUnrealizedPnlUnits, long riskMaintenanceMarginUnits,
-                                   long riskIsolatedMarginUnits, long riskIsolatedReservationUnits,
-                                   boolean triggerComplete, int triggerPhase, long triggerPriceCursor,
-                                   long triggerOrderCursor, long triggerUpperId, long triggerMarkPriceTicks,
-                                   long triggerGeneratedAtEpochMillis, long triggerOcoOrderId,
-                                   long triggerOcoCursor, long lastScheduledRevision,
-            java.util.List<RiskLaneProgress> laneProgress) {
+    public record RiskScanSnapshot(int accountLaneId, long priceSequence, long scanStartPriceSequence,
+                                   boolean riskComplete, boolean triggerComplete, int triggerPhase,
+                                   long triggerPriceCursor, long triggerOrderCursor, long triggerUpperId,
+                                   long triggerMarkPriceTicks, long triggerGeneratedAtEpochMillis,
+                                   long triggerOcoOrderId, long triggerOcoCursor, long lastScheduledRevision,
+                                   java.util.List<RiskLaneProgress> laneProgress) {
     }
 
     /**

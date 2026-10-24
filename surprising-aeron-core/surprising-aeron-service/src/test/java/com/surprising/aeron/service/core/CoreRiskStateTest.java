@@ -181,7 +181,8 @@ class CoreRiskStateTest {
         }
         assertThat(completed.riskState().scan().accountLaneId())
                 .isEqualTo(topology.accountLaneCount() - 1);
-        assertThat(completed.riskState().scan().lastUserId()).isEqualTo(expectedLastUserId);
+        assertThat(completed.riskState().scan().laneProgress().get(topology.accountLaneCount() - 1).lastUserId())
+                .isEqualTo(expectedLastUserId);
         assertThat(completed.riskState().snapshots()).hasSize(1_300);
     }
 
@@ -423,7 +424,7 @@ class CoreRiskStateTest {
         // 第二个价格到达后保存的扫描进度，既记录最新序号，也保留尚未完成的用户遍历。
         CoreRiskState.RiskScan restarted = state.riskState().scans().get("1");
         assertThat(restarted.priceSequence()).isEqualTo(2);
-        assertThat(restarted.lastUserId()).isPositive();
+        assertThat(restarted.laneProgress().get(restarted.accountLaneId()).lastUserId()).isPositive();
         assertThat(restarted.complete()).isFalse();
         state = continueRiskScans(state);
         assertThat(state.riskState().scans().get("1").complete()).isTrue();
@@ -492,8 +493,8 @@ class CoreRiskStateTest {
         Map<String, CoreMarkPriceState> marks = new TreeMap<>(state.riskState().markPrices());
         marks.put("1", new CoreMarkPriceState("1", 80, 3, 1_000));
         // 尚未完成、还带有条件单索引游标的风险扫描记录。
-        CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan("1", 3, 3, 0, false)
-                .withTriggerProgress(false, 1, 80, 91, 100, 80, 1_700_000_000_001L);
+        CoreRiskState.RiskScan scan = new CoreRiskState.RiskScan("1", 0, 3, 3, false,
+                false, 1, 80, 91, 100, 80, 1_700_000_000_001L, 0, 0, 0, java.util.List.of());
         // 把新行情和手工扫描游标装入的风险状态，其余风险与强平事实沿用原值。
         CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
                 state.riskState().liquidations(), Map.of("1", scan),
@@ -506,8 +507,10 @@ class CoreRiskStateTest {
 
         // 只推进一个工作项的状态，应保存正在处理的用户和持仓游标。
         TradingCoreState firstPage = reducer.continueRiskScan(pending, 1);
-        assertThat(firstPage.riskState().scan().riskUserId()).isEqualTo(7);
-        assertThat(firstPage.riskState().scan().riskPositionCursor()).isEqualTo("1");
+        var scanProgress = firstPage.riskState().scan();
+        var laneProgress = scanProgress.laneProgress().get(scanProgress.accountLaneId());
+        assertThat(laneProgress.userId()).isEqualTo(7);
+        assertThat(laneProgress.positionCursor()).isEqualTo("1");
         assertThat(firstPage.riskState().scan().triggerComplete()).isFalse();
         // 将本次检查点编码成快照后再解码的状态，用来核对恢复结果。
         TradingCoreState restored = TradingStateSnapshotCodec.decode(

@@ -363,18 +363,10 @@ public record TradingCoreState(
         }
         for (CoreRiskState.RiskScan /* 当前标的风险与触发扫描游标及累积进度 */ scan : riskState.scans().values()) {
             hash = CoreStateHash.mix(hash, scan.instrumentId());
+            hash = CoreStateHash.mix(hash, scan.accountLaneId());
             hash = CoreStateHash.mix(hash, scan.priceSequence());
             hash = CoreStateHash.mix(hash, scan.scanStartPriceSequence());
-            hash = CoreStateHash.mix(hash, scan.lastUserId());
             hash = CoreStateHash.mix(hash, scan.riskComplete());
-            hash = CoreStateHash.mix(hash, scan.riskUserId());
-            hash = CoreStateHash.mix(hash, scan.riskPhase());
-            hash = CoreStateHash.mix(hash, scan.riskPositionCursor());
-            hash = CoreStateHash.mix(hash, scan.riskReservationCursor());
-            hash = CoreStateHash.mix(hash, scan.riskUnrealizedPnlUnits());
-            hash = CoreStateHash.mix(hash, scan.riskMaintenanceMarginUnits());
-            hash = CoreStateHash.mix(hash, scan.riskIsolatedMarginUnits());
-            hash = CoreStateHash.mix(hash, scan.riskIsolatedReservationUnits());
             hash = CoreStateHash.mix(hash, scan.triggerComplete());
             hash = CoreStateHash.mix(hash, scan.triggerPhase());
             hash = CoreStateHash.mix(hash, scan.triggerPriceCursor());
@@ -385,6 +377,21 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, scan.triggerOcoOrderId());
             hash = CoreStateHash.mix(hash, scan.triggerOcoCursor());
             hash = CoreStateHash.mix(hash, scan.lastScheduledRevision());
+            hash = CoreStateHash.mix(hash, scan.laneProgress().size());
+            for (RiskLaneProgress lane : scan.laneProgress()) {
+                hash = CoreStateHash.mix(hash, lane.lastUserId());
+                hash = CoreStateHash.mix(hash, lane.complete());
+                hash = CoreStateHash.mix(hash, lane.userId());
+                hash = CoreStateHash.mix(hash, lane.phase());
+                hash = CoreStateHash.mix(hash, lane.positionCursor());
+                hash = CoreStateHash.mix(hash, lane.reservationCursor());
+                hash = CoreStateHash.mix(hash, lane.unrealizedPnlUnits());
+                hash = CoreStateHash.mix(hash, lane.maintenanceMarginUnits());
+                hash = CoreStateHash.mix(hash, lane.isolatedMarginUnits());
+                hash = CoreStateHash.mix(hash, lane.isolatedReservationUnits());
+                hash = CoreStateHash.mix(hash, lane.userRevision());
+                hash = CoreStateHash.mix(hash, lane.marketRevision());
+            }
         }
         hash = CoreStateHash.mix(hash, riskState.nextLiquidationId());
         hash = CoreStateHash.mix(hash, riskState.marketRevision());

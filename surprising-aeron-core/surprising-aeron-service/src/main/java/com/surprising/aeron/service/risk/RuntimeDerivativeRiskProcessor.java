@@ -45,8 +45,6 @@ public final class RuntimeDerivativeRiskProcessor {
         // 当前轮最早启动的价格序号；旧轮没完时保留，用于完成后判断是否需要重扫最新价格。
         long scanStart = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.scanStartPriceSequence() : command.priceSequence();
-        // 旧轮最后完整处理的用户编号，旧轮完成或首次扫描时从 0 开始。
-        long lastUserId = currentScan != null && !currentScan.riskComplete() ? currentScan.lastUserId() : 0;
         // 旧轮尚未结束时的当前 Lane 编号，否则从 Lane 0 开始。
         int accountLaneId = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.accountLaneId() : 0;
@@ -54,10 +52,9 @@ public final class RuntimeDerivativeRiskProcessor {
         boolean disabled = !runtime.riskScanControl().enabled();
         // 新价格对应的扫描记录，先重置当前用户累计值，再补回各 Lane 的已完成边界。
         RiskScanRuntime nextScan = new RiskScanRuntime(symbolId, accountLaneId,
-                command.priceSequence(), scanStart, lastUserId, disabled,
-                0, 0, "-", 0, 0, 0, 0, 0,
+                command.priceSequence(), scanStart, disabled,
                 true, 0, 0, 0, 0, 0, 0, 0, 0,
-                currentScan == null ? 0 : currentScan.lastScheduledRevision());
+                currentScan == null ? 0 : currentScan.lastScheduledRevision(), java.util.List.of());
         if (!disabled && currentScan != null && !currentScan.riskComplete() && !currentScan.laneProgress().isEmpty()) {
             // 新价格使当前用户累计值失效；保留每个 Lane 已完成用户和轮次边界。
             var progress = new java.util.ArrayList<RiskLaneProgress>(
