@@ -1103,17 +1103,18 @@ class SixProductLineContractLiveTest {
         long pnl = inverse ? quantity.multiply(multiplier).multiply(java.math.BigDecimal.valueOf(100_000_000L))
                 .multiply(markPrice.subtract(entryPrice)).divide(entryPrice.multiply(markPrice).multiply(tick), 0, java.math.RoundingMode.HALF_UP).longValueExact()
                 : quantity.multiply(markPrice.subtract(entryPrice)).multiply(multiplier).longValueExact();
-        long notional = inverse ? quantity.abs().multiply(multiplier).multiply(java.math.BigDecimal.valueOf(100_000_000L))
-                .divide(markPrice.multiply(tick), 0, java.math.RoundingMode.HALF_UP).longValueExact()
-                : quantity.abs().multiply(markPrice).multiply(multiplier).longValueExact();
+        var notionalNumerator = inverse ? quantity.abs().multiply(multiplier).multiply(java.math.BigDecimal.valueOf(100_000_000L))
+                : quantity.abs().multiply(markPrice).multiply(multiplier);
+        var notionalDenominator = inverse ? markPrice.multiply(tick) : java.math.BigDecimal.ONE;
+        long notional = notionalNumerator.divide(notionalDenominator, 0, java.math.RoundingMode.HALF_UP).longValueExact();
         assertThat(risk.path("unrealizedPnlUnits").asLong()).as("independently calculated current PnL").isEqualTo(pnl);
         assertThat(risk.path("notionalUnits").asLong()).isEqualTo(notional);
         long maintenanceRate = instrument.path("maintenanceMarginRatePpm").asLong();
         for (var bracket : instrument.path("riskLimitBrackets")) if (bracket.path("notionalFloorUnits").asLong() <= notional)
             maintenanceRate = bracket.path("maintenanceMarginRatePpm").asLong();
-        long maintenance = line == ProductLine.OPTION ? 0 : java.math.BigDecimal.valueOf(notional)
-                .multiply(java.math.BigDecimal.valueOf(maintenanceRate)).divide(java.math.BigDecimal.valueOf(1_000_000), 0, java.math.RoundingMode.CEILING).longValueExact();
-        assertThat(risk.path("maintenanceMarginUnits").asLong()).isEqualTo(maintenance);
+        long maintenance = line == ProductLine.OPTION ? 0
+                : expectedMaintenanceUnits(notionalNumerator, notionalDenominator, maintenanceRate);
+        assertThat(risk.path("maintenanceMarginUnits").asLong()).as("exact maintenance from risk snapshot %s", risk).isEqualTo(maintenance);
         var balance = userState(core, actor.id).balances().stream().filter(b -> b.asset().equals(settlement)).findFirst().orElseThrow();
         long wallet = Math.addExact(balance.availableUnits(), balance.lockedUnits());
         long equity = Math.addExact(wallet, line == ProductLine.OPTION ? notional : pnl);
@@ -1124,6 +1125,14 @@ class SixProductLineContractLiveTest {
         assertThat(account.path("marginRatioPpm").asLong()).isEqualTo(maintenance * 1_000_000 / equity);
         System.out.printf("SIX_LINE_RISK_PASS productLine=%s instrumentId=%d pnl=%d notional=%d maintenance=%d equity=%d%n",
                 line, instrumentId, pnl, notional, maintenance, equity);
+    }
+
+    /** 保留名义金额分数，计算保证金后仅向上取整一次，避免反向合约先舍入名义金额而少算。 */
+    static long expectedMaintenanceUnits(java.math.BigDecimal notionalNumerator,
+                                         java.math.BigDecimal notionalDenominator, long ratePpm) {
+        return notionalNumerator.multiply(java.math.BigDecimal.valueOf(ratePpm))
+                .divide(notionalDenominator.multiply(java.math.BigDecimal.valueOf(1_000_000)),
+                        0, java.math.RoundingMode.CEILING).longValueExact();
     }
 
     private void verifyPublicOrderRead(Participant actor, JsonNode placed) throws Exception {

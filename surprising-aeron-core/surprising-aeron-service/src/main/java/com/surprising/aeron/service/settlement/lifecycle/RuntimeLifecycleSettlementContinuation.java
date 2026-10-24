@@ -11,7 +11,6 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.service.product.ProductTradingRulesRegistry;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
@@ -157,9 +156,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         /** 已交给账户 Lane 的操作种类，与 Owner 正在等待的阶段分开保存。 */
         private Phase dispatchedPhase;
         /** 各 Lane 准备的账户后值列表，先供账本核对保险，再交回原 Lane 应用。 */
-        private Object[] prepared;
-        /** 最终阶段由账本合并的清算差额缓冲，重用时清空。 */
-        private RuntimeTreasuryDelta treasuryDelta;
+        private List<RuntimeLifecycleSettlement.UserSettlement>[] prepared;
         /** 本页最终回执，包含是否仍需续页或补保险。 */
         private CoreSettlementProgressView result;
         /** 本次账本调用要执行的撤单进度、保险预算或最终记账阶段。 */
@@ -174,8 +171,8 @@ public final class RuntimeLifecycleSettlementContinuation {
          * nextOrderCursor：撤单尚未全部结束时写入进度及结果的下一订单游标。
          */
         private long requiredInsurance, nextOrderCursor;
-        /** 账户实际应用后返回的各 Lane 财库差额，账本最终阶段再合并。 */
-        private RuntimeTreasuryDelta[] financialResults;
+        /** 各账户 Lane 实际应用后按原顺序累计的清算金额，账本最终阶段再合并。 */
+        private long[] clearingByLane;
 
         /**
          * 按当前账户 Lane 数创建用户分组及订单分组入口，再初始化本页命令状态。
@@ -241,6 +238,7 @@ public final class RuntimeLifecycleSettlementContinuation {
          * @param moreOrders 订单索引是否还有后续页
          * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
          */
+        @SuppressWarnings("unchecked")
         private SettlementWork reset(SettleInstrumentCommand command, TradingAccountRuntime runtime,
                 CoreInstrument instrument, ProductTradingRules kernel, int symbolId, int assetId,
                 List<CancellationOrder> selectedOrders,
@@ -269,12 +267,11 @@ public final class RuntimeLifecycleSettlementContinuation {
             }
             this.orderLaneMask = RuntimeLifecycleSettlement.laneMask(ordersByLane);
             this.userLaneMask = RuntimeLifecycleSettlement.laneMask(usersByLane);
-            if (prepared == null || prepared.length != usersByLane.length) prepared = new Object[usersByLane.length];
+            if (prepared == null || prepared.length != usersByLane.length)
+                prepared = (List<RuntimeLifecycleSettlement.UserSettlement>[]) new List<?>[usersByLane.length];
             else Arrays.fill(prepared, null);
-            if (treasuryDelta == null) treasuryDelta = new RuntimeTreasuryDelta();
-            else treasuryDelta.clear();
-            if (financialResults == null) financialResults = new RuntimeTreasuryDelta[usersByLane.length];
-            else Arrays.fill(financialResults, null);
+            if (clearingByLane == null) clearingByLane = new long[usersByLane.length];
+            else Arrays.fill(clearingByLane, 0);
             ledgerDispatched = budgetSufficient = false;
             requiredInsurance = nextOrderCursor = 0;
             financialPhase = null;
@@ -325,7 +322,6 @@ public final class RuntimeLifecycleSettlementContinuation {
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> /* 当前 Lane 可复用的撤单列表，未分配时为空。 */ orders : ordersByLane) if (orders != null) orders.clear();
             if (prepared != null) Arrays.fill(prepared, null);
-            if (treasuryDelta != null) treasuryDelta.clear();
             this.result = result; this.phase = Phase.DONE;
             this.dispatchedPhase = null;
             return this;
@@ -344,7 +340,6 @@ public final class RuntimeLifecycleSettlementContinuation {
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> /* 当前 Lane 可复用的撤单列表，未分配时为空。 */ orders : ordersByLane) if (orders != null) orders.clear();
             if (prepared != null) Arrays.fill(prepared, null);
-            if (treasuryDelta != null) treasuryDelta.clear();
         }
 
         /**
@@ -393,9 +388,6 @@ public final class RuntimeLifecycleSettlementContinuation {
                 }
                 case APPLY -> {
                     if (!runtime.pollControlLanes()) return false;
-                    Arrays.fill(prepared, null);
-                    for (/* 当前分组数组的 Lane 下标。 */ int lane = 0; lane < usersByLane.length; lane++)
-                        if ((userLaneMask & (1L << lane)) != 0) prepared[lane] = runtime.controlLaneResult(lane);
                     financialPhase = FinancialPhase.INSURANCE;
                     ledgerDispatched = false;
                     phase = Phase.BUDGET_WAIT;
@@ -419,9 +411,6 @@ public final class RuntimeLifecycleSettlementContinuation {
                 }
                 case APPLY_WAIT -> {
                     if (!runtime.pollControlLanes()) return false;
-                    for (/* 当前分组数组的 Lane 下标。 */ int lane = 0; lane < usersByLane.length; lane++)
-                        if ((userLaneMask & (1L << lane)) != 0)
-                            financialResults[lane] = (RuntimeTreasuryDelta) runtime.controlLaneResult(lane);
                     financialPhase = FinancialPhase.FINAL;
                     ledgerDispatched = false;
                     phase = Phase.FINAL_WAIT;
@@ -452,21 +441,14 @@ public final class RuntimeLifecycleSettlementContinuation {
          */
         @Override
         public Object apply(int lane) {
-            return switch (dispatchedPhase) {
-                case CANCEL -> {
-                    RuntimeLifecycleSettlement.cancelOrdersOnLane(runtime, ordersByLane[lane]);
-                    yield null;
-                }
-                case PREPARE -> RuntimeLifecycleSettlement.prepareLane(runtime, instrument, kernel, command,
+            switch (dispatchedPhase) {
+                case CANCEL -> RuntimeLifecycleSettlement.cancelOrdersOnLane(runtime, ordersByLane[lane]);
+                case PREPARE -> prepared[lane] = RuntimeLifecycleSettlement.prepareLane(runtime, instrument, kernel, command,
                         usersByLane[lane], symbolId, assetId);
-                case APPLY -> {
-                    // 当前 Lane 准备的用户结算后值列表。
-                    @SuppressWarnings("unchecked") List<RuntimeLifecycleSettlement.UserSettlement> plans =
-                            (List<RuntimeLifecycleSettlement.UserSettlement>) prepared[lane];
-                    yield RuntimeLifecycleSettlement.applyLane(runtime, assetId, plans);
-                }
+                case APPLY -> clearingByLane[lane] = RuntimeLifecycleSettlement.applyLane(runtime, prepared[lane]);
                 default -> throw new IllegalStateException("settlement lane operation outside dispatch phase");
-            };
+            }
+            return null;
         }
 
         /**
@@ -499,11 +481,8 @@ public final class RuntimeLifecycleSettlementContinuation {
             }
             if (financialPhase == FinancialPhase.INSURANCE) {
                 requiredInsurance = 0;
-                for (Object /* 某个 Lane 已完成准备阶段的通用回执。 */ receipt : prepared) {
-                    if (receipt == null) continue;
-                    // 当前 Lane 准备的用户结算后值列表。
-                    @SuppressWarnings("unchecked") List<RuntimeLifecycleSettlement.UserSettlement> plans =
-                            (List<RuntimeLifecycleSettlement.UserSettlement>) receipt;
+                for (List<RuntimeLifecycleSettlement.UserSettlement> plans : prepared) {
+                    if (plans == null) continue;
                     for (RuntimeLifecycleSettlement.UserSettlement /* 当前用户结算后值及其保险需求。 */ plan : plans)
                         requiredInsurance = Math.addExact(requiredInsurance, plan.insurance());
                 }
@@ -518,9 +497,15 @@ public final class RuntimeLifecycleSettlementContinuation {
                 }
                 return;
             }
-            treasuryDelta.clear();
-            for (RuntimeTreasuryDelta /* 某个账户 Lane 实际应用后交来的清算差额。 */ delta : financialResults) if (delta != null) treasuryDelta.merge(delta);
-            treasuryDelta.apply(ledger);
+            long clearing = 0;
+            boolean accountsSettled = false;
+            for (int lane = 0; lane < prepared.length; lane++) {
+                if (prepared[lane] == null || prepared[lane].isEmpty()) continue;
+                clearing = Math.addExact(clearing, clearingByLane[lane]);
+                accountsSettled = true;
+            }
+            // 非空计划的清算金额可以为零；空计划不产生账本写入。
+            if (accountsSettled) ledger.setClearingPnl(assetId, Math.addExact(ledger.clearingPnl(assetId), clearing));
             // 本用户页已读到索引末尾或为空，从而可登记整个结算完成。
             boolean complete = userPage.complete() || userPage.userIds().isEmpty();
             if (complete) ledger.setLifecycleSettlement(symbolId, command.settlementId());

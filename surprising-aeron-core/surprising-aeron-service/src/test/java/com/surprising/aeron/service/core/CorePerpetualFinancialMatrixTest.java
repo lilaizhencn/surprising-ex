@@ -277,12 +277,13 @@ class CorePerpetualFinancialMatrixTest {
     }
 
     /**
-     * 四种永续组合启动账户和原 System Ledger，在异步作用域内推进资金费、提交并与冷结果比较；随后确认 Owner 不能直接读取财库资金费余额。
+     * 四种永续组合分别用单 Lane 和双 Lane 推进资金费并与冷结果比较，覆盖同 Lane 及跨 Lane 收付抵消；随后确认 Owner 不能直接读取财库资金费余额。
      * @param variant 本次正反向永续、全仓逐仓及资产单位的测试组合
+     * @param accountLaneCount 本场景账户 Lane 数量
      */
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.MethodSource("adlVariants")
-    void fundingRunsOnOriginalSystemLedgerWithoutOwnerMoneyAccess(Variant variant) {
+    @org.junit.jupiter.params.provider.MethodSource("accountLaneVariants")
+    void fundingRunsOnOriginalSystemLedgerWithoutOwnerMoneyAccess(Variant variant, int accountLaneCount) {
         // 本场景建立的原冷状态，作为后续业务转换或资金行基线
         TradingCoreState opening = withPosition(variant, USER_ID, QUANTITY, ENTRY_PRICE, DEFAULT_WALLET, POSITION_MARGIN);
         opening = withPosition(opening, variant, SECOND_MAKER_ID, -QUANTITY, ENTRY_PRICE, DEFAULT_WALLET, POSITION_MARGIN);
@@ -293,8 +294,14 @@ class CorePerpetualFinancialMatrixTest {
         // 冷辅助返回的资金费状态及支付事实，作为账本路径对照
         var expected = reducer.applyFundingWithFacts(marked, command);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities)) {
+        var topology = new LaneTopology(1, accountLaneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
+                LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE, LaneTopology.DEFAULT_QUEUE_CAPACITY,
+                LaneTopology.DEFAULT_QUEUE_CAPACITY);
+        assertThat(topology.accountLaneId(USER_ID) == topology.accountLaneId(SECOND_MAKER_ID))
+                .as("funding payer and receiver share a lane only in the single-lane fixture")
+                .isEqualTo(accountLaneCount == 1);
+        var identities = new RuntimeIdentityRegistry(topology);
+        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 // 在原 System Ledger 作用域内准备的资金费续步工作
@@ -316,7 +323,7 @@ class CorePerpetualFinancialMatrixTest {
      * @param accountLaneCount 账户 Lane 数量，单 Lane 验证同 Lane 减仓，双 Lane 验证跨 Lane 交接
      */
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.MethodSource("adlLaneVariants")
+    @org.junit.jupiter.params.provider.MethodSource("accountLaneVariants")
     void liquidationInsuranceAndAdlUseOriginalSystemLedgerAcrossAccountLanes(Variant variant, int accountLaneCount) {
         // 应用本场景标记价和风险扫描后的冷状态，保留价格序列和强平计划
         TradingCoreState marked = mark(adlSetup(variant), variant, 1, 1);
@@ -369,7 +376,7 @@ class CorePerpetualFinancialMatrixTest {
     static java.util.stream.Stream<Variant> adlVariants() { return VARIANTS.stream(); }
 
     /** 四种合约及保证金组合分别覆盖源、目标同 Lane 和跨 Lane 的原账本交接。 */
-    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> adlLaneVariants() {
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> accountLaneVariants() {
         return VARIANTS.stream().flatMap(variant -> java.util.stream.Stream.of(1, 2)
                 .map(laneCount -> org.junit.jupiter.params.provider.Arguments.of(variant, laneCount)));
     }

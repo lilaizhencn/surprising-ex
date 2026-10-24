@@ -13,7 +13,6 @@ import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.service.product.ProductTradingRulesRegistry;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
@@ -132,8 +131,6 @@ public final class RuntimePerpetualFundingProcessor {
         private LaneFundingResult[] laneResults;
         /** 账本按 Lane 汇总并最终按用户排序的明细缓冲；结果构造时复制，下一次重置清空。 */
         private final ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
-        /** 账本合并资金费实际收付反向差额的可复用缓冲。 */
-        private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         /**
          * accountsCollected：账户回执已被 Owner 收齐并登记发布变化的标记。
          * ledgerDispatched：本页财务命令已经成功投递的标记，防止重复记账。
@@ -158,7 +155,7 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         /**
-         * 拒绝覆盖账本尚未完成的选页输入；重置继承的财务范围与本页标记，清空回执、明细和差额并复用 Lane 分组容量，拓扑数量变化时重新创建分组及回执数组。
+         * 拒绝覆盖账本尚未完成的选页输入；重置继承的财务范围与本页标记，清空回执和明细并复用 Lane 分组容量，拓扑数量变化时重新创建分组及回执数组。
          * @param command 资金费结算编号、费率及用户分页参数
          * @param runtime 产品线和账户数据的原权威运行时
          * @param instrument 本轮固定使用的永续币对配置
@@ -186,7 +183,7 @@ public final class RuntimePerpetualFundingProcessor {
             }
             laneMask = 0; started = accountsCollected = ledgerDispatched = false; result = null;
             java.util.Arrays.fill(laneResults, null);
-            payments.clear(); treasuryDelta.clear();
+            payments.clear();
             if (!runtime.systemLedgerStarted()) selectAccountUsers();
             return this;
         }
@@ -212,12 +209,13 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         /**
-         * 使用本页固定币对、结算资产和标记价，交给当前账户 Lane 计算并写入自己用户的资金费余额。
+         * 使用本页固定币对、结算资产和标记价，由当前账户 Lane 结算并写入自己的回执槽，完成位发布后才供 Owner 与账本读取。
          * @param laneId 当前账户 Lane 编号
          */
-        private LaneFundingResult applyLane(int laneId) {
-            return RuntimePerpetualFundingProcessor.applyLane(command, usersByLane[laneId], runtime,
+        private Object applyLane(int laneId) {
+            laneResults[laneId] = RuntimePerpetualFundingProcessor.applyLane(command, usersByLane[laneId], runtime,
                     instrument, symbolId, settleAssetId, fundingMark);
+            return null;
         }
 
         /**
@@ -238,7 +236,8 @@ public final class RuntimePerpetualFundingProcessor {
                 if (laneMask != 0 && !runtime.pollControlLanes()) return false;
                 for (/* 当前用户所属账户 Lane 或回执数组的下标。 */ int lane = 0; lane < usersByLane.length; lane++) {
                     if ((laneMask & (1L << lane)) == 0) continue;
-                    collectAccountReceipt(lane, runtime.controlLaneResult(lane));
+                    LaneFundingResult receipt = laneResults[lane];
+                    for (long userId : receipt.changedUserIds()) runtime.markBalanceChanged(userId);
                 }
                 runtime.requireRevisionCapacity();
                 accountsCollected = true;
@@ -261,27 +260,22 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         /**
-         * 把有效 Lane 资金费回执保存到对应槽，并为实际余额改变的用户登记余额发布变化；其他类型或空回执不处理。
-         * @param lane 当前回执对应的账户 Lane 数组下标
-         * @param value 控制派发器返回的通用 Lane 回执
-         */
-        private void collectAccountReceipt(int lane, Object value) {
-            if (!(value instanceof LaneFundingResult /* 某个账户 Lane 的实际收付与财库差额回执。 */ receipt)) return;
-            laneResults[lane] = receipt;
-            for (long /* 当前正在计算或登记余额发布变化的用户编号。 */ userId : receipt.changedUserIds()) runtime.markBalanceChanged(userId);
-        }
-
-        /**
          * 在账本阶段按 Lane 合并实际收付明细和资金费剩余差额，应用原财库后保存完成编号或固定价格的续页进度；最后按用户编号排序返回明细，不在账户热路径做此排序。
          * @param ledger 当前账本线程可写的原财库对象
          */
         @Override protected void applyLedger(TreasuryRuntime ledger) {
+            long fundingResidual = 0;
+            boolean balancesChanged = false;
             for (LaneFundingResult /* 某个账户 Lane 的实际收付与财库差额回执。 */ receipt : laneResults) {
                 if (receipt == null) continue;
                 payments.addAll(receipt.payments());
-                treasuryDelta.merge(receipt.treasuryDelta());
+                fundingResidual = Math.addExact(fundingResidual, receipt.fundingResidualUnits());
+                balancesChanged |= !receipt.changedUserIds().isEmpty();
             }
-            treasuryDelta.apply(ledger);
+            // 实际收付可相互抵消为零；没有任何余额变化的页不产生账本写入。
+            if (balancesChanged)
+                ledger.setFundingResidual(settleAssetId,
+                        Math.addExact(ledger.fundingResidual(settleAssetId), fundingResidual));
             if (userPage.complete()) ledger.setFundingSettlement(symbolId, command.settlementId());
             else ledger.setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(command.settlementId(),
                     instrument, command.fundingRatePpm(), userPage.nextCursorUserId(), fundingMark));
@@ -321,7 +315,7 @@ public final class RuntimePerpetualFundingProcessor {
         ImmutableLongArrayList.Builder changedUserIds =
                 new ImmutableLongArrayList.Builder(Math.min(16, selectedUserIds.size()));
         // 当前 Lane 实际账户收付对应的反向财库资金费差额。
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
+        long fundingResidual = 0;
         for (/* 当前用户在本 Lane 选中列表里的下标。 */ int userIndex = 0; userIndex < selectedUserIds.size(); userIndex++) {
             // 当前正在计算或登记余额发布变化的用户编号。
             long userId = selectedUserIds.get(userIndex);
@@ -352,7 +346,7 @@ public final class RuntimePerpetualFundingProcessor {
             if (appliedDelta != 0) {
                 runtime.replaceBalance(new BalanceRuntime(userId, settleAssetId,
                         Math.addExact(balance.availableUnits(), appliedDelta), balance.lockedUnits()));
-                treasuryDelta.addFundingResidual(settleAssetId, Math.negateExact(appliedDelta));
+                fundingResidual = Math.addExact(fundingResidual, Math.negateExact(appliedDelta));
                 runtime.advanceUserRevision(userId);
                 changedUserIds.add(userId);
             }
@@ -388,7 +382,7 @@ public final class RuntimePerpetualFundingProcessor {
                 throw new IllegalStateException("runtime funding debit relief was not fully allocated");
             }
         }
-        return new LaneFundingResult(payments, changedUserIds.freeze(), treasuryDelta);
+        return new LaneFundingResult(payments, changedUserIds.freeze(), fundingResidual);
     }
 
     /**
@@ -413,10 +407,10 @@ public final class RuntimePerpetualFundingProcessor {
      * 单个账户 Lane 的收付明细、实际余额变化用户和财库差额；Lane 完成后才交给 Owner 与账本消费。
      * @param payments 本 Lane 构建的实际收付明细，完成后不再修改
      * @param changedUserIds 实际发生非零余额变化并推进修订号的用户编号
-     * @param treasuryDelta 实际账户资金变化的反向财库差额
+     * @param fundingResidualUnits 本 Lane 实际账户资金变化的反向资金费残差
      */
     private record LaneFundingResult(List<CoreFundingPaymentView> payments, ImmutableLongArrayList changedUserIds,
-                                     RuntimeTreasuryDelta treasuryDelta) {
+                                     long fundingResidualUnits) {
     }
 
 }

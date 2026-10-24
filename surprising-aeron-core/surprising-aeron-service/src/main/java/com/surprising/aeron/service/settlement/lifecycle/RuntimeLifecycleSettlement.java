@@ -11,12 +11,10 @@ import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.Can
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.product.ProductTradingRules;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
@@ -27,14 +25,13 @@ public final class RuntimeLifecycleSettlement {
 
     /**
      * 一个用户尚未应用的结算后值。只暂存跨 Lane 保险预算核对所需的数据，账户权威状态仍在所属 Lane；键与持仓数组保留原容量，只能应用非空持仓槽。
-     * @param userId 该计划所属用户编号
      * @param balance 按结算价和保险补足计算的最终余额
      * @param keys 持仓内部键数组，与 positions 按下标配对，尾部可能未使用
      * @param positions 归零并累计盈亏后的持仓数组，空槽表示该下标未产生结算计划
      * @param clearing 本用户全部持仓结算盈亏的反号，供财库清算子账应用
      * @param insurance 本用户结算权益不足零时需要保险补足的非负金额
      */
-    record UserSettlement(long userId, BalanceRuntime balance, long[] keys,
+    record UserSettlement(BalanceRuntime balance, long[] keys,
                           PositionRuntime[] positions, long clearing, long insurance) { }
 
     /**
@@ -110,7 +107,7 @@ public final class RuntimeLifecycleSettlement {
             long equity = Math.addExact(Math.addExact(available, crossMargin), crossPnl);
             if (equity < 0) insurance = Math.addExact(insurance, Math.negateExact(equity));
             Math.incrementExact(runtime.user(userId).revision());
-            plans.add(new UserSettlement(userId,
+            plans.add(new UserSettlement(
                     new BalanceRuntime(userId, assetId, Math.max(0, equity), locked),
                     keys, positions, Math.negateExact(totalPnl), insurance));
         }
@@ -120,23 +117,21 @@ public final class RuntimeLifecycleSettlement {
     /**
      * 在所属账户 Lane 应用保险已确认的后值：替换有效持仓、替换余额并推进用户修订号，返回清算盈亏差额供财库应用。此步骤不再次检查保险，也不在这里实现跨 Lane 回滚。
      * @param runtime 原权威运行时；Lane 操作依赖当前线程持有对应账户作用域
-     * @param assetId 结算资产的内部编号
      * @param plans 本 Lane 已完成计算且已确认整页保险预算的账户后值
      */
-    static RuntimeTreasuryDelta applyLane(TradingAccountRuntime runtime, int assetId,
-                                          List<UserSettlement> plans) {
+    static long applyLane(TradingAccountRuntime runtime, List<UserSettlement> plans) {
         // 当前 Lane 应用账户后返回的财库清算变化。
-        RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta();
+        long clearing = 0;
         for (UserSettlement /* 当前用户的余额、持仓及财库变化计划。 */ plan : plans) {
             for (/* 当前有效计划的写入下标或应用时扫描的配对数组下标。 */ int index = 0; index < plan.keys().length; index++) {
                 if (plan.positions()[index] != null)
                     runtime.replacePosition(plan.keys()[index], plan.positions()[index]);
             }
             runtime.replaceBalance(plan.balance());
-            runtime.advanceUserRevision(plan.userId());
-            delta.addClearing(assetId, plan.clearing());
+            runtime.advanceUserRevision(plan.balance().userId());
+            clearing = Math.addExact(clearing, plan.clearing());
         }
-        return delta;
+        return clearing;
     }
 
     /** 按币对的全局活动订单索引选页，校验每条订单路由并返回后续游标。 */
