@@ -86,7 +86,7 @@ class CoreRiskLaneQueryTest {
             // 按资产建立的 ADL 持仓索引，供参照计算定位候选仓位。
             var adlIndex = new AdlPositionIndex(state, identities);
             // 按本轮结算资产算出的完整 ADL 候选参照列表，再分别核对全量与限一条查询。
-            var adl = RuntimeRiskQueryService.adlCandidates(expected, identities, asset(line), adlIndex.positions(asset(line)), 10);
+            var adl = RuntimeRiskQueryService.adlCandidates(expected, identities, asset(line), adlIndex.positions(asset(line), Integer.MAX_VALUE), 10);
             core.activate();
             // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
             long handoff = core.runtimeState.laneHandoffEpoch();
@@ -167,7 +167,7 @@ class CoreRiskLaneQueryTest {
             var expectedRisk = RuntimeRiskQueryService.snapshots(cold, identities, 0);
             // Owner 更新市场事实前的 ADL 候选参照，不能受到随后配置原位更新的影响。
             var expectedAdl = RuntimeRiskQueryService.adlCandidates(cold, identities, "USDT",
-                    new AdlPositionIndex(state, identities).positions("USDT"), 10);
+                    new AdlPositionIndex(state, identities).positions("USDT", Integer.MAX_VALUE), 10);
             core.activate();
             // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
             long handoff = core.runtimeState.laneHandoffEpoch();

@@ -38,7 +38,7 @@ class AdlPositionIndexTest {
             assertThat(index.value(1)).isSameAs(stored);
             assertThat(stored.signedQuantitySteps()).isEqualTo(current.signedQuantitySteps());
             assertThat(assets.get("USDT")).isSameAs(members);
-            assertThat(index.positions("USDT")).hasSize(1);
+            assertThat(index.positions("USDT", 2)).hasSize(1);
         }
     }
 
@@ -57,19 +57,19 @@ class AdlPositionIndexTest {
         var moved = position("BTC", -5);
         index.apply(1, null, open);
         index.apply(1, index.value(1), closed);
-        assertThat(index.positions("USDT")).isEmpty();
+        assertThat(index.positions("USDT", 2)).isEmpty();
         assertThat(index.value(1).signedQuantitySteps()).isZero();
         index.apply(1, index.value(1), open);
-        assertThat(index.positions("USDT")).hasSize(1);
+        assertThat(index.positions("USDT", 2)).hasSize(1);
         index.apply(1, index.value(1), moved);
-        assertThat(index.positions("USDT")).isEmpty();
-        assertThat(index.positions("BTC")).hasSize(1);
+        assertThat(index.positions("USDT", 2)).isEmpty();
+        assertThat(index.positions("BTC", 2)).hasSize(1);
         index.apply(1, index.value(1), null);
-        assertThat(index.positions("BTC")).isEmpty();
+        assertThat(index.positions("BTC", 2)).isEmpty();
         assertThat(index.value(1)).isNull();
         index.apply(1, null, closed);
         index.apply(1, index.value(1), position("BTC", 0));
-        assertThat(index.positions("BTC")).isEmpty();
+        assertThat(index.positions("BTC", 2)).isEmpty();
     }
 
     /**
@@ -91,11 +91,11 @@ class AdlPositionIndexTest {
         assertThatThrownBy(() -> index.apply(1, unrelated.value(1), null))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(index.value(1).signedQuantitySteps()).isEqualTo(1);
-        assertThat(index.positions("USDT")).hasSize(2);
+        assertThat(index.positions("USDT", 2)).hasSize(2);
         index.apply(1, index.value(1), null);
         assertThat(index.value(2).userId()).isEqualTo(8);
         assertThat(index.value(2).signedQuantitySteps()).isEqualTo(2);
-        assertThat(index.positions("USDT")).hasSize(1);
+        assertThat(index.positions("USDT", 2)).hasSize(1);
     }
 
     /**

@@ -133,7 +133,7 @@ class LedgerPositionPublicationTest {
             runtime.startSystemLedgerLane();
             assertThatThrownBy(() -> oi.openInterestSteps("1")).hasMessageContaining("SystemLedgerLane");
             assertThatThrownBy(() -> users.higherUserId("1", 0)).hasMessageContaining("SystemLedgerLane");
-            assertThatThrownBy(() -> adl.positions("USDT")).hasMessageContaining("SystemLedgerLane");
+            assertThatThrownBy(() -> adl.positions("USDT", 2)).hasMessageContaining("SystemLedgerLane");
             // 逐轮复用的冻结持仓变化缓冲，prepared 空值用于明确删除
             var changes = new RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue>();
             onLedger(runtime, () -> {

@@ -56,14 +56,6 @@ public final class AdlPositionIndex {
     public int count() { return positionCount; }
 
     /**
-     * 取得某资产的全部非空仓候选路由，内部使用最大整数作为扫描数量上限；仍须由索引所属线程调用。
-     * @param asset 候选所属的结算资产代码，查询入口会规范化，字段更新入口沿用已发布代码
-     */
-    public Set<PositionKey> positions(String asset) {
-        return positions(asset, Integer.MAX_VALUE);
-    }
-
-    /**
      * 先规范资产代码并检查候选数量上限，再复制当前有效成员为只读路由，按用户、合约和持仓腿排序，返回保持该顺序的不可修改集合。
      * @param asset 候选所属的结算资产代码，查询入口会规范化，字段更新入口沿用已发布代码
      * @param maximumPositions 本次允许复制成候选路由的最大资产成员数量，超出时在物化前拒绝

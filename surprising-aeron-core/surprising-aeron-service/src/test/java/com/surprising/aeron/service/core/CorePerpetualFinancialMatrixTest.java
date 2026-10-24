@@ -261,7 +261,7 @@ class CorePerpetualFinancialMatrixTest {
         runtime.startAccountLanes();
         try {
             // 已派到账户 Lane 的 ADL 可轮询工作
-            var work = RuntimeAdlExecution.begin(command, runtime, identities);
+            var work = RuntimeAdlExecution.begin(null, command, runtime, identities);
             // 该异步 ADL 工作必须完成的单调时钟五秒期限
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while (!work.getAsBoolean()) {
@@ -342,13 +342,13 @@ class CorePerpetualFinancialMatrixTest {
                 // 按政策金额确认保险覆盖的强平结果命令
                 var resolve = new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
                 expected = reducer.resolveLiquidation(expected, resolve);
-                LedgerControlTestSupport.await(runtime, RuntimeLiquidationResolution.begin(resolve, runtime, identities, List.of(1L)));
+                LedgerControlTestSupport.await(runtime, RuntimeLiquidationResolution.begin(null, resolve, runtime, identities, List.of(1L)));
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
                 // 覆盖剩余亏空的 ADL 命令，目标为第二做市用户空头
                 var adl = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
                         -QUANTITY, 150, expected.riskState().markPrices().get(SYMBOL).priceSequence(), 5, linearOrInverse(variant, 700, 40_000));
                 expected = reducer.executeAdl(expected, adl);
-                LedgerControlTestSupport.await(runtime, RuntimeAdlExecution.begin(adl, runtime, identities));
+                LedgerControlTestSupport.await(runtime, RuntimeAdlExecution.begin(null, adl, runtime, identities));
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
                 runtime.assertAccountLanesHealthy();
             } finally { runtime.exitAsynchronousCommandScope(); }

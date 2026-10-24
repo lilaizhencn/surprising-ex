@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第五十二轮删除A168用户复制/装箱包装及A169四个OI String读取，共6方法。测试读取实际游标/查询Totals，状态与资金公式保留；5模块最终干净编译通过，4016当前classfile清除残留。164解决、A170确认、A11候选、4保留；全量审计继续。",
+    "checkpoint": "第五十三轮解决A170–A173：删除ADL索引无限制转发、ADL源用户临时字段及重复Lane计算、ADL/补亏测试专用begin和补亏不可达判断。最终5模块干净编译通过；168解决、A11候选、4保留；全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -9363,10 +9363,10 @@
     },
     {
       "id": "A170",
-      "status": "confirmed",
+      "status": "resolved",
       "topic": "ADL无上限positions(asset)转发只供测试，生产查询使用显式上限",
       "source_basis_commit": "264bb33c5b2a169c41734fe47fe1d3f623f680c9",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "analysis_status": "current_typed_consumers_confirmed_not_yet_removed",
       "analysis_round": "fifty_second_cleanup_round",
       "source_references": [
@@ -9391,7 +9391,109 @@
       ],
       "evidence": "无上限重载的5个调用类均在test-classes；生产RiskAccountQuery调用positions(String,int)，索引内无上限方法也仅转发到它。真实候选排序、规模限制、用户/合约/持仓腿信息及线程所有权有用途。",
       "proposed_cleanup": "删除单参默认无限制包装，测试按场景显式传限额；保留真实带上限入口、查询拒绝和候选/资金断言，不改实际ADL公式或排序。",
-      "verification_limit": "仅当前源码与4016份classfile的完整owner/name/descriptor确认；本轮未改该方法，未运行测试、ADL或恢复。"
+      "verification_limit": "仅当前源码与4016份classfile的完整owner/name/descriptor确认；本轮未改该方法，未运行测试、ADL或恢复。",
+      "resolved_in_round": "fifty_third_cleanup_round",
+      "resolution": {
+        "implementation": "删除单参positions(asset)无限制转发；14处测试显式提供上限，完整参照计算保留Integer.MAX_VALUE，成员/线程场景传2，原1/2边界断言不变。生产MAX_INDEX_SCAN和双参索引正文保留。",
+        "verification": "最终5模块clean test-compile退出0；该重载定义及引用为零，除该删除块外索引逐字一致；测试仅编译。"
+      }
+    },
+    {
+      "status": "resolved",
+      "source_basis_commit": "81865df06781513211066cb925b71da47b7ebb54",
+      "business_code_changed": true,
+      "resolved_in_round": "fifty_third_cleanup_round",
+      "analysis_round": "fifty_third_cleanup_round",
+      "analysis_status": "source_and_typed_consumer_audit_cleanup_compile_verified_runtime_not_executed",
+      "id": "A171",
+      "topic": "ADL续步仅为重复计算源Lane搬运sourceUserId，结果在派发前被调用方覆盖",
+      "fields_or_methods": [
+        "RuntimeAdlExecution.AdlWork.sourceUserId"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java",
+          "line": 92,
+          "anchor": "work.sourceUserId = route.userId()",
+          "reference_basis_commit": "81865df06781513211066cb925b71da47b7ebb54"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java",
+          "line": 179,
+          "anchor": "private long sourceUserId",
+          "reference_basis_commit": "81865df06781513211066cb925b71da47b7ebb54"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java",
+          "line": 212,
+          "anchor": "this.sourceLane = runtime.topology().accountLaneId(...)",
+          "reference_basis_commit": "81865df06781513211066cb925b71da47b7ebb54"
+        }
+      ],
+      "evidence": "源用户字段只有两条入口写入和prepare的一次读取；两条入口在任何派发前均设置相同sourceLane，prepare的结果被覆盖。续步字段不进入命令或快照。",
+      "resolution": {
+        "implementation": "删除字段、两次写入及prepare重复派生；保留原两条分支派发前sourceLane赋值和全部后续处理。",
+        "verification": "最终5模块干净编译退出0，字段定义/引用清零；ADL账户回调、轮询、账本及金融计算正文与清理前逐字一致。"
+      }
+    },
+    {
+      "status": "resolved",
+      "source_basis_commit": "81865df06781513211066cb925b71da47b7ebb54",
+      "business_code_changed": true,
+      "resolved_in_round": "fifty_third_cleanup_round",
+      "analysis_round": "fifty_third_cleanup_round",
+      "analysis_status": "source_and_typed_consumer_audit_cleanup_compile_verified_runtime_not_executed",
+      "id": "A172",
+      "topic": "ADL三参begin只为测试填入null并转发到实际复用入口",
+      "fields_or_methods": [
+        "RuntimeAdlExecution.begin(ExecuteAdlCommand,TradingAccountRuntime,RuntimeIdentityRegistry)"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java",
+          "line": 45,
+          "anchor": "public static java.util.function.BooleanSupplier begin(ExecuteAdlCommand command",
+          "reference_basis_commit": "81865df06781513211066cb925b71da47b7ebb54"
+        }
+      ],
+      "evidence": "精确owner/name/descriptor引用只有CorePerpetualFinancialMatrixTest；AdlCommands生产调用四参复用入口。",
+      "resolution": {
+        "implementation": "删除三参包装，两处测试直接传null调用实际复用入口，保留原等待及财务断言。",
+        "verification": "最终编译退出0，删除重载定义/引用为零；实际复用入口保留生产调用。"
+      }
+    },
+    {
+      "status": "resolved",
+      "source_basis_commit": "81865df06781513211066cb925b71da47b7ebb54",
+      "business_code_changed": true,
+      "resolved_in_round": "fifty_third_cleanup_round",
+      "analysis_round": "fifty_third_cleanup_round",
+      "analysis_status": "source_and_typed_consumer_audit_cleanup_compile_verified_runtime_not_executed",
+      "id": "A173",
+      "topic": "强平补亏默认begin仅供测试，提前返回后还保留不可达异步判断",
+      "fields_or_methods": [
+        "RuntimeLiquidationResolution.begin(ResolveLiquidationCommand,TradingAccountRuntime,RuntimeIdentityRegistry,Iterable)",
+        "RuntimeLiquidationResolution.resolve: if(asynchronous) return work"
+      ],
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java",
+          "line": 44,
+          "anchor": "public static java.util.function.BooleanSupplier begin(ResolveLiquidationCommand command",
+          "reference_basis_commit": "81865df06781513211066cb925b71da47b7ebb54"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java",
+          "line": 108,
+          "anchor": "if (asynchronous) return work",
+          "reference_basis_commit": "81865df06781513211066cb925b71da47b7ebb54"
+        }
+      ],
+      "evidence": "四参包装只被一个测试类调用，生产LiquidationCommands使用五参复用入口；resolve的异步分支此前已经返回，后续判断恒假。",
+      "resolution": {
+        "implementation": "删除包装及不可达判断，一处测试直接传null调用实际入口。",
+        "verification": "最终编译退出0，包装定义/引用为零；完整ResolutionWork正文逐字不变，保险分配与账户/账本顺序保留。"
+      }
     }
   ],
   "preserve_verified_purposes": [
@@ -9409,7 +9511,7 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A170的无上限ADL positions(asset)转发；测试显式传限额，保留真实查询边界、候选排序及持仓/资金断言。",
+    "继续核对单笔强平Owner派发Lane与账户步骤结果Lane是否重复保存；先明确同步/异步路由及作用域语义，再判断字段是否可删。",
     "继续沿业务操作核对命令、执行、提交、快照、SQL和查询字段/约束；真实查询DTO和异步所有权数据不按字段相似或getter数量删除。",
     "A11继续候选，明确领导者读、提交水位和会话语义前不删QUERY路由。",
     "仍只编译相关模块，未运行测试、真实交易及恢复不得宣称通过。"
@@ -9487,7 +9589,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "cleanup_compile_verified; followup_A170_confirmed; runtime_verification_not_executed; overall_audit_in_progress",
+  "analysis_round_status": "cleanup_compile_verified; followup_liquidation_lane_state_in_progress; runtime_verification_not_executed; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -9709,15 +9811,15 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "264bb33c5b2a169c41734fe47fe1d3f623f680c9",
-    "status": "cleanup_compile_verified_followup_adl_wrapper_confirmed",
+    "source_basis_commit": "81865df06781513211066cb925b71da47b7ebb54",
+    "status": "cleanup_compile_verified_followup_liquidation_lane_state_analysis_continues",
     "resolved_ids": [
-      "A168",
-      "A169"
+      "A170",
+      "A171",
+      "A172",
+      "A173"
     ],
-    "confirmed_ids": [
-      "A170"
-    ],
+    "confirmed_ids": [],
     "candidate_ids": [
       "A11"
     ],
@@ -9728,12 +9830,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 164,
+      "resolved": 168,
       "candidate": 1,
-      "retained": 4,
-      "confirmed": 1
+      "retained": 4
     },
-    "evidence": "fifty_second_cleanup_round",
+    "evidence": "fifty_third_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -11781,6 +11882,35 @@
         "confirmed": 1
       },
       "evidence": "fifty_first_cleanup_round",
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "264bb33c5b2a169c41734fe47fe1d3f623f680c9",
+      "status": "cleanup_compile_verified_followup_adl_wrapper_confirmed",
+      "resolved_ids": [
+        "A168",
+        "A169"
+      ],
+      "confirmed_ids": [
+        "A170"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 164,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "evidence": "fifty_second_cleanup_round",
       "overall_audit_completed": false
     }
   ],
@@ -36059,6 +36189,611 @@
           "path": "/tmp/aeron-index-observation-cleanup-20261024-finalize.py",
           "bytes": 4700,
           "sha256": "bbec94c3dcebfdb405edb653e5702cec72679c38bf3649f134c745d38f93a9d6"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "fifty_third_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "81865df06781513211066cb925b71da47b7ebb54",
+    "resolved_ids": [
+      "A170",
+      "A171",
+      "A172",
+      "A173"
+    ],
+    "newly_found_and_resolved_ids": [
+      "A171",
+      "A172",
+      "A173"
+    ],
+    "new_confirmed_ids": [],
+    "counts_after_cleanup": {
+      "resolved": 168,
+      "candidate": 1,
+      "retained": 4
+    },
+    "report": "surprising-aeron-core/surprising-aeron-service/validation/deep-code-cleanup-20261024-round53.md",
+    "previous_goal_turn_classification": {
+      "classification": "progress",
+      "reason": "81865df06完成A168/A169的6接口清理、测试调用迁移、最终5模块干净编译并推送，且确认A170。"
+    },
+    "removed_methods": [
+      "AdlPositionIndex.positions(String)",
+      "RuntimeAdlExecution.begin(command,runtime,identities)",
+      "RuntimeLiquidationResolution.begin(command,runtime,identities,candidateIds)"
+    ],
+    "removed_field": "RuntimeAdlExecution.AdlWork.sourceUserId:J",
+    "removed_constraints_or_branches": [
+      "补亏同步路径不可达if(asynchronous)，真实业务约束不变"
+    ],
+    "production_fields_or_snapshot_layout_changed": {
+      "transient_work_fields_removed": 1,
+      "persisted_fields_changed": false,
+      "command_layout_changed": false,
+      "snapshot_layout_changed": false,
+      "http_contract_changed": false
+    },
+    "verification": {
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 21.242,
+      "source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java": "4636f2dc476e5551833ebd24f73e8b92a08ea59c0beb899cec98a93f505767f1",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/AdlPositionIndex.java": "f6d72e6d297e8cdbf47c5f756153d2558d460a0ec522a671d6446f7c40956e5b",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java": "29e4f5d0eeadd734df13d40ad97d0c4f0f4a089afce0cce9c0c520421ca7b22d",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.java": "f9fa19b0877e3547a28eb85eb46f26aea8bcd4c5b7cde225e66ef665c4dc39c9",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.java": "690c07ff2239d623753451dbd707334148be05ccef17f082735dd129ae1d8bb5",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreRiskLaneQueryTest.java": "44ab04bf9d3ad7d483a6ba7dd1ff5cee1760e11c52f28778f69755c71097601c",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/AdlPositionIndexTest.java": "5acfab384c1848946173e4b9aa77949b60fb1b1164412d92fb88f81ba7b38604",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/LedgerPositionPublicationTest.java": "7e29432a9f7e49349cf9183e41ebb7c1471ab6f668cb77254da9e91356896d5c",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java": "30cb97761bb374fea72a34ce33bfe9be20dd2a7db66c83aabd0fb9b9c0005b63"
+      },
+      "log_sha256": "a9358fa1de414b59d37c7aa4b51f702d37afe34800de5a2dfbe2272eea1def1d",
+      "tests_executed": false,
+      "sql_executed": false
+    },
+    "verification_history": {
+      "initial_A170_build": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "elapsed_seconds": 30.873,
+        "source_sha256": {
+          "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/AdlPositionIndex.java": "f6d72e6d297e8cdbf47c5f756153d2558d460a0ec522a671d6446f7c40956e5b",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.java": "f9fa19b0877e3547a28eb85eb46f26aea8bcd4c5b7cde225e66ef665c4dc39c9",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreRiskLaneQueryTest.java": "44ab04bf9d3ad7d483a6ba7dd1ff5cee1760e11c52f28778f69755c71097601c",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/AdlPositionIndexTest.java": "5acfab384c1848946173e4b9aa77949b60fb1b1164412d92fb88f81ba7b38604",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/LedgerPositionPublicationTest.java": "7e29432a9f7e49349cf9183e41ebb7c1471ab6f668cb77254da9e91356896d5c",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java": "30cb97761bb374fea72a34ce33bfe9be20dd2a7db66c83aabd0fb9b9c0005b63"
+        },
+        "log_sha256": "5aa1926a3c14689422932e8f966eaa793287b52e985062433f4cf2d8bc68f6e9",
+        "tests_executed": false,
+        "sql_executed": false
+      },
+      "before_resolution_cleanup": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "elapsed_seconds": 20.946,
+        "source_sha256": {
+          "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java": "4636f2dc476e5551833ebd24f73e8b92a08ea59c0beb899cec98a93f505767f1",
+          "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/AdlPositionIndex.java": "f6d72e6d297e8cdbf47c5f756153d2558d460a0ec522a671d6446f7c40956e5b",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.java": "f9fa19b0877e3547a28eb85eb46f26aea8bcd4c5b7cde225e66ef665c4dc39c9",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.java": "3561e131b5d72f1b2bb2e57dff70c7cda848bc5907455c5dc4c774ea5d308a5b",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreRiskLaneQueryTest.java": "44ab04bf9d3ad7d483a6ba7dd1ff5cee1760e11c52f28778f69755c71097601c",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/AdlPositionIndexTest.java": "5acfab384c1848946173e4b9aa77949b60fb1b1164412d92fb88f81ba7b38604",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/LedgerPositionPublicationTest.java": "7e29432a9f7e49349cf9183e41ebb7c1471ab6f668cb77254da9e91356896d5c",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java": "30cb97761bb374fea72a34ce33bfe9be20dd2a7db66c83aabd0fb9b9c0005b63"
+        },
+        "log_sha256": "e50cae3f739395e336fa6057422bed855aa720573c13a6be7d0113a1b38d24c0",
+        "tests_executed": false,
+        "sql_executed": false
+      }
+    },
+    "static_verification": {
+      "classfile_count": 4016,
+      "major_versions": {
+        "71": 4016
+      },
+      "compiled_java_source_count": 9,
+      "compiled_java_source_hashes_match": true,
+      "removed_three_method_definitions_and_references_absent": true,
+      "removed_adl_source_user_field_definition_and_references_absent": true,
+      "production_source_only_expected_removal_and_documentation": true,
+      "adl_apply_poll_ledger_and_financial_body_unchanged": true,
+      "resolution_work_body_unchanged": true,
+      "protected_source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/RiskAccountQuery.java": "b6b1e20b9a8e1457c93e5d16d53c7e3afa4345d833c9b51d89b992753e28bbbe",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/command/AdlCommands.java": "71d88688846376eacd638423be46b4808f5344b8dde02d6c52592704458dac04",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/command/LiquidationCommands.java": "f6ae300c4501b6c3fb29943c7b44ebf41ace8711bd00e53b112200b52bf93b91",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/LiquidationRuntime.java": "d74280fb793e90bb34f83193b1b17ac4e9b3da4e4120432cbeab3b9265d99156",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java": "770deac16a9f8582487e87915bd61c156465ac0c724c1b744433258225252356",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/RuntimeFactIndexes.java": "d0dae1f1bc5f0ec797f024bc425ab703aa7d392e61128b3c2ca7c0606f547174",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.java": "147e02c999439765d6269f512de7e408e41329321d45ab3a05dfe4d22905b024",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java": "8f450dc97dd21aad6273e753a62938778997188be9a3d31dd996c2aff07caa87",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java": "780a82d5608413a2ac8b566f93792e2e2e07020dc8fc970f1eec07e0d5cc6037",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/RuntimeAccountRollback.java": "24e758124f2ccc8123738bd479951fc69858133832289e4ffa8bc6c83aec7d12",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "78decba533a6c585cf24f5d945a8edc55055af5aa0b1149c3d6c0cbf57d6c59d",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java": "25116726de6b68369f32e2feaa7d756d83f4d8c72b13b96a6b9b2be4cc9f1baa",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/retention/TerminalStateRetention.java": "8b7307f8368db2589fb1535aed49802b2c8624b53cd251670a9b1fb08c6ca75e"
+      },
+      "preserved_consumers": [
+        {
+          "caller": "com/surprising/aeron/service/core/index/AdlPositionIndex",
+          "owner": "com/surprising/aeron/service/core/index/AdlPositionIndex",
+          "name": "positions",
+          "descriptor": "Lorg/eclipse/collections/impl/map/mutable/primitive/LongObjectHashMap;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/command/LiquidationCommands",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork;Lcom/surprising/aeron/protocol/ResolveLiquidationCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Ljava/lang/Iterable;)Lcom/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/adl/command/AdlCommands",
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork;Lcom/surprising/aeron/protocol/ExecuteAdlCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/query/RiskAccountQuery",
+          "owner": "com/surprising/aeron/service/core/index/AdlPositionIndex",
+          "name": "positions",
+          "descriptor": "(Ljava/lang/String;I)Ljava/util/Set;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions",
+          "owner": "com/surprising/aeron/service/core/index/AdlPositionIndex",
+          "name": "positions",
+          "descriptor": "(Ljava/lang/String;I)Ljava/util/Set;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork;Lcom/surprising/aeron/protocol/ExecuteAdlCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork;Lcom/surprising/aeron/protocol/ResolveLiquidationCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Ljava/lang/Iterable;)Lcom/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest",
+          "owner": "com/surprising/aeron/service/core/index/AdlPositionIndex",
+          "name": "positions",
+          "descriptor": "(Ljava/lang/String;I)Ljava/util/Set;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/CoreRiskLaneQueryTest",
+          "owner": "com/surprising/aeron/service/core/index/AdlPositionIndex",
+          "name": "positions",
+          "descriptor": "(Ljava/lang/String;I)Ljava/util/Set;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/index/LedgerPositionPublicationTest",
+          "owner": "com/surprising/aeron/service/core/index/AdlPositionIndex",
+          "name": "positions",
+          "descriptor": "(Ljava/lang/String;I)Ljava/util/Set;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/index/AdlPositionIndexTest",
+          "owner": "com/surprising/aeron/service/core/index/AdlPositionIndex",
+          "name": "positions",
+          "descriptor": "(Ljava/lang/String;I)Ljava/util/Set;"
+        }
+      ],
+      "reactor_module_count": 5,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service"
+      ],
+      "tests_executed": false,
+      "runtime_recovery_verified": false,
+      "final_source_and_classfile_recheck_passed": true
+    },
+    "evidence": {
+      "index_migration": {
+        "source": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/AdlPositionIndex.java",
+        "before_sha256": "84e4117f2e6c08830d8a54d1905a2e5d5e345dc754565279bf7dbddd0e4cc37e",
+        "removed_block": "    /**\n     * 取得某资产的全部非空仓候选路由，内部使用最大整数作为扫描数量上限；仍须由索引所属线程调用。\n     * @param asset 候选所属的结算资产代码，查询入口会规范化，字段更新入口沿用已发布代码\n     */\n    public Set<PositionKey> positions(String asset) {\n        return positions(asset, Integer.MAX_VALUE);\n    }\n\n",
+        "migrations": [
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.java",
+            "calls": 1
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.java",
+            "calls": 1
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreRiskLaneQueryTest.java",
+            "calls": 1
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreRiskLaneQueryTest.java",
+            "calls": 1
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/LedgerPositionPublicationTest.java",
+            "calls": 1
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/AdlPositionIndexTest.java",
+            "calls": 9
+          }
+        ],
+        "call_count": 14,
+        "reference_fixture_policy": "完整参照计算显式Integer.MAX_VALUE，单元成员/所有权场景上限2；原1/2边界断言保持。"
+      },
+      "adl_before_typed_refs": [
+        {
+          "caller": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork;Lcom/surprising/aeron/protocol/ExecuteAdlCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork",
+          "name": "sourceUserId",
+          "descriptor": "J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork",
+          "name": "prepare",
+          "descriptor": "(Lcom/surprising/aeron/protocol/ExecuteAdlCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/risk/LiquidationRuntime;Lcom/surprising/aeron/service/instrument/CoreInstrument;Lcom/surprising/aeron/service/market/MarkPriceRuntime;JII)V"
+        },
+        {
+          "caller": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork",
+          "name": "sourceLane",
+          "descriptor": "I"
+        },
+        {
+          "caller": "com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork",
+          "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork.class",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork",
+          "name": "sourceUserId",
+          "descriptor": "J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork",
+          "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork.class",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork",
+          "name": "sourceLane",
+          "descriptor": "I"
+        },
+        {
+          "caller": "com/surprising/aeron/service/adl/command/AdlCommands",
+          "path": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/command/AdlCommands.class",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork;Lcom/surprising/aeron/protocol/ExecuteAdlCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Lcom/surprising/aeron/service/adl/RuntimeAdlExecution$AdlWork;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+          "path": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.class",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/adl/RuntimeAdlExecution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/protocol/ExecuteAdlCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Ljava/util/function/BooleanSupplier;"
+        }
+      ],
+      "resolution_before_typed_refs": [
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork;Lcom/surprising/aeron/protocol/ResolveLiquidationCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Ljava/lang/Iterable;)Lcom/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork",
+          "name": "sourceUserId",
+          "descriptor": "J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork",
+          "name": "sourceUserId",
+          "descriptor": "J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/command/LiquidationCommands",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork;Lcom/surprising/aeron/protocol/ResolveLiquidationCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Ljava/lang/Iterable;)Lcom/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution",
+          "name": "begin",
+          "descriptor": "(Lcom/surprising/aeron/protocol/ResolveLiquidationCommand;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;Ljava/lang/Iterable;)Ljava/util/function/BooleanSupplier;"
+        }
+      ],
+      "removed_blocks": {
+        "adl_begin_wrapper": "    /**\n     * 不提供旧续步时开始异步 ADL，由内部创建本次需要的命令续步并派发源账户校验。\n     * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令\n     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理\n     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射\n     */\n    public static java.util.function.BooleanSupplier begin(ExecuteAdlCommand command,\n            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {\n        return begin(null, command, runtime, identities);\n    }\n\n",
+        "resolution_begin_wrapper": "    /**\n     * 没有旧续步时开始异步补亏，内部创建续步并派发各相关账户的索赔读取。\n     * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额\n     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理\n     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射\n     * @param candidateIds 参与保险分配的候选强平编号，准备阶段按源强平结算资产过滤\n     */\n    public static java.util.function.BooleanSupplier begin(ResolveLiquidationCommand command,\n            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {\n        return begin(null, command, runtime, identities, candidateIds);\n    }\n\n",
+        "unreachable_resolution_branch": "if (asynchronous) return work;",
+        "source_field": "RuntimeAdlExecution.AdlWork.sourceUserId:J"
+      }
+    },
+    "followup_scan": {
+      "confirmed_ids": [],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "retained_purposes": [
+        "ResolutionWork.sourceUserId实际由currentLaneOwns读取，用于源强平正文捕获，保留。",
+        "ExecutionCheck.liquidation结果被CoreMatchingFlow和有序提交读取，捕获数组和完成守卫保留。",
+        "批量强平beginExecutionBatch及ExecutionRequest由OrderedCommitCoordinator$1调用，生产分派入口及其三组件保留。"
+      ],
+      "typed_liquidation_refs": [
+        {
+          "caller": "com/surprising/aeron/service/order/CoreMatchingFlow",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck",
+          "name": "liquidation",
+          "descriptor": "(I)Lcom/surprising/aeron/service/risk/LiquidationRuntime;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/order/commit/OrderedCommitCoordinator",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck",
+          "name": "liquidation",
+          "descriptor": "(I)Lcom/surprising/aeron/service/risk/LiquidationRuntime;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/order/commit/OrderedCommitCoordinator$1",
+          "tag": 10,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck",
+          "name": "liquidation",
+          "descriptor": "(I)Lcom/surprising/aeron/service/risk/LiquidationRuntime;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage",
+          "name": "laneId",
+          "descriptor": "I"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionWork",
+          "tag": 9,
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage",
+          "name": "laneId",
+          "descriptor": "I"
+        }
+      ],
+      "typed_batch_refs": [
+        {
+          "caller": "com/surprising/aeron/service/order/commit/OrderedCommitCoordinator$1",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "name": "<init>",
+          "descriptor": "(Lcom/surprising/aeron/protocol/ExecuteLiquidationCommand;Ljava/util/Collection;J)V"
+        },
+        {
+          "caller": "com/surprising/aeron/service/order/commit/OrderedCommitCoordinator$1",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor",
+          "name": "beginExecutionBatch",
+          "descriptor": "(Ljava/util/List;Lcom/surprising/aeron/service/core/TradingAccountRuntime;Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;)Ljava/util/function/BooleanSupplier;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "name": "command",
+          "descriptor": "()Lcom/surprising/aeron/protocol/ExecuteLiquidationCommand;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "name": "canceledOrders",
+          "descriptor": "()Ljava/util/Collection;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "name": "nextCursorOrderId",
+          "descriptor": "()J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "name": "command",
+          "descriptor": "Lcom/surprising/aeron/protocol/ExecuteLiquidationCommand;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "name": "canceledOrders",
+          "descriptor": "Ljava/util/Collection;"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "name": "nextCursorOrderId",
+          "descriptor": "J"
+        },
+        {
+          "caller": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor",
+          "owner": "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionRequest",
+          "name": "command",
+          "descriptor": "()Lcom/surprising/aeron/protocol/ExecuteLiquidationCommand;"
+        }
+      ],
+      "leads": [
+        "继续核对ExecutionWork.laneId与BatchExecutionStage.laneId，当前未删除、未计为已确认发现。"
+      ],
+      "overall_audit_completed": false
+    },
+    "previous_latest_analysis_round": {
+      "date": "2026-10-24",
+      "source_basis_commit": "264bb33c5b2a169c41734fe47fe1d3f623f680c9",
+      "status": "cleanup_compile_verified_followup_adl_wrapper_confirmed",
+      "resolved_ids": [
+        "A168",
+        "A169"
+      ],
+      "confirmed_ids": [
+        "A170"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 164,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "evidence": "fifty_second_cleanup_round",
+      "overall_audit_completed": false
+    },
+    "limits": "仅5个相关模块生产/测试源码编译及静态核对。未运行测试、SQL、服务、Aeron/Kafka、交易、恢复、UI或性能工具；不声明全功能、资金恢复或性能通过。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-adl-cleanup-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-adl-before-refs.json",
+          "bytes": 3950,
+          "sha256": "03332aa177a3b3ffc366671761452e946859dd88af586013b121e802c8ec733f"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-batch-next-scan.json",
+          "bytes": 2958,
+          "sha256": "4a31134d259291db37094d97d63b668d424943483098321b5b91efa9cbae50c7"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-before-resolution-build.json",
+          "bytes": 1950,
+          "sha256": "2f1eb814d6642031b30bbc54b61f83b81e462fd054d9e6eafc39b216109de1b5"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-before-resolution-build.log",
+          "bytes": 10443,
+          "sha256": "e50cae3f739395e336fa6057422bed855aa720573c13a6be7d0113a1b38d24c0"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-before.json",
+          "bytes": 1901,
+          "sha256": "5a4a22d5b184cd98c969582b08daf0c6f5f34c52f9448ea480a92611c2c96ab3"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-build.json",
+          "bytes": 1548,
+          "sha256": "e5621a7ad7fb9eea8da9015d1e41cf3a11c81910388715410817c228a9c18141"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-build.log",
+          "bytes": 10443,
+          "sha256": "5aa1926a3c14689422932e8f966eaa793287b52e985062433f4cf2d8bc68f6e9"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-build.py",
+          "bytes": 1212,
+          "sha256": "9e00457e25f5bc6ff1a86e1abe6dcc21882376327c355a52176b73bc84f92497"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-classfiles.py",
+          "bytes": 1549,
+          "sha256": "ba83956ee271b3acf2d6b2d5487db7043cd3797bb8df7ef1a3de25023226b622"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-final-build.json",
+          "bytes": 2161,
+          "sha256": "4f8b65018981f2d59fe8b42cd088e4c8e3d0db289787162ef9cea46351637464"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-final-build.log",
+          "bytes": 10443,
+          "sha256": "a9358fa1de414b59d37c7aa4b51f702d37afe34800de5a2dfbe2272eea1def1d"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-final-build.py",
+          "bytes": 1108,
+          "sha256": "2b1c29443bbe831a6fca452eef552724c90461fa5ffaea71b80571f1a5bc9cc9"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-finalize.py",
+          "bytes": 2302,
+          "sha256": "b2c231f61251ed4ec627d62c7703d854489f656ef6cd945f70f2fd6e08cee6ec"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-liquidation-next-scan.json",
+          "bytes": 1549,
+          "sha256": "5746b141f8924a796f051af6f0b63c1549e65f7d99e0672ec56bfee741e8c99d"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-record.py",
+          "bytes": 8951,
+          "sha256": "47a119411c0543293120fd3be40fa799aedadad2234d281835a2e272cdd9c76b"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-removed-blocks.json",
+          "bytes": 1765,
+          "sha256": "3d592a1447cd064d96e4e2ffc770b21de090b3c6b7f2e0dfc58afb5654cf7eb2"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-resolution-before.java",
+          "bytes": 23042,
+          "sha256": "cfb9af04d8b278d1c87ded9b3f9043165c524f5872bc88e49cbb75a9fe53d84d"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-resolution-scan.json",
+          "bytes": 2245,
+          "sha256": "b7ddbf0eb72e822235eba4cf29ba57429cf2542c77504b7ea71445836596c7bd"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-runtime-before.java",
+          "bytes": 29855,
+          "sha256": "fb3ddadec8203dd120fc789b244d3e4c287965a7d464c34c061ea724df7f7feb"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-static.json",
+          "bytes": 7508,
+          "sha256": "0335737142f3d1ec732d9bf1264f4053a6f7cbb633defd449a4d0713a0cd4d7d"
+        },
+        {
+          "path": "/tmp/aeron-adl-cleanup-20261024-verify.py",
+          "bytes": 6323,
+          "sha256": "332b8434034a7fb72838c16c241e8cc8265e033926997810f9c4128b27d2f86c"
         }
       ],
       "compiler_outputs_retained": true,

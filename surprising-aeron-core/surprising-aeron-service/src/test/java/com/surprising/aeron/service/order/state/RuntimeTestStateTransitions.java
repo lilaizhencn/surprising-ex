@@ -474,7 +474,7 @@ public final class RuntimeTestStateTransitions {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
             return RuntimeRiskQueryService.adlCandidates(runtime, identities, asset,
-                    new AdlPositionIndex(before, identities).positions(asset), limit);
+                    new AdlPositionIndex(before, identities).positions(asset, Integer.MAX_VALUE), limit);
         }
     }
 

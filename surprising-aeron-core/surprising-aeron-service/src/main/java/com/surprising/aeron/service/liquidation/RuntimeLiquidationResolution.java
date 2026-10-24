@@ -35,18 +35,6 @@ public final class RuntimeLiquidationResolution {
     }
 
     /**
-     * 没有旧续步时开始异步补亏，内部创建续步并派发各相关账户的索赔读取。
-     * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
-     * @param candidateIds 参与保险分配的候选强平编号，准备阶段按源强平结算资产过滤
-     */
-    public static java.util.function.BooleanSupplier begin(ResolveLiquidationCommand command,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
-        return begin(null, command, runtime, identities, candidateIds);
-    }
-
-    /**
      * 可回收的旧续步连同资金差额存储一起复用，否则新建，再准备本次索赔和补亏工作。
      * @param reuse 上次已经可回收的补亏续步，未提供或尚不可复用时新建
      * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额
@@ -105,7 +93,6 @@ public final class RuntimeLiquidationResolution {
         // 本命令新建或复用的补亏续步，异步路径准备好后返回 Owner。
         ResolutionWork work = reuse == null || !reuse.reusable() ? new ResolutionWork() : reuse;
         work.prepare(runtime, command, liquidation, assetId, allocation);
-        if (asynchronous) return work;
         work.applyLedger(runtime.treasury());
         runtime.releaseOwnerLaneAccess();
         runtime.executeLaneMutations(work.laneMask, 1, work);

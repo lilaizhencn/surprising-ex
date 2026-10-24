@@ -37,17 +37,6 @@ public final class RuntimeAdlExecution {
     }
 
     /**
-     * 不提供旧续步时开始异步 ADL，由内部创建本次需要的命令续步并派发源账户校验。
-     * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
-     */
-    public static java.util.function.BooleanSupplier begin(ExecuteAdlCommand command,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        return begin(null, command, runtime, identities);
-    }
-
-    /**
      * 优先复用已经可回收的命令续步及其整数资金差额缓冲，初始化新 ADL 输入并返回给 Owner 轮询。
      * @param reuse 上次已完成、可再次使用的 ADL 续步，null 或尚不可复用时新建
      * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
@@ -89,7 +78,6 @@ public final class RuntimeAdlExecution {
             long positionKey = identities.positionKey(command.targetUserId(), instrument, command.positionSide());
             // 新建或已可复用的 ADL 命令续步，保存本次输入和跨线程进度。
             AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
-            work.sourceUserId = route.userId();
             work.prepare(command, runtime, null, instrument, mark, positionKey,
                     identities.assetId(instrument.settleAsset()), runtime.topology().accountLaneId(command.targetUserId()));
             work.fundingInProgress = runtime.treasury().fundingProgress(symbolId) != null;
@@ -133,7 +121,6 @@ public final class RuntimeAdlExecution {
         int sourceLane = runtime.topology().accountLaneId(liquidation.userId());
         // 新建或已可复用的 ADL 命令续步，保存本次输入和跨线程进度。
         AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
-        work.sourceUserId = liquidation.userId();
         work.prepare(command, runtime, liquidation, instrument, mark, positionKey,
                 settleAssetId, targetLane);
         work.sourceLane = sourceLane;
@@ -175,8 +162,6 @@ public final class RuntimeAdlExecution {
         private final RuntimeTreasuryDelta targetDelta = new RuntimeTreasuryDelta();
         /** done：账户与账本处理均完成后由 Owner 标记，重复轮询直接结束；accountsCollected：Owner 是否已经登记本次目标账户结算变更；ledgerDispatched：本次账本命令是否已成功入队，避免重复记账。 */
         private boolean done, accountsCollected, ledgerDispatched;
-        /** Owner 从强平路由取得的源用户编号，尚未读取强平正文时据此定位 Lane。 */
-        private long sourceUserId;
         /** 当前处于源 Lane 读取并校验强平的阶段，而非目标减仓阶段。 */
         private boolean capturingLiquidation;
         /** 目标减仓回调已经派发、Owner 正等待它完成。 */
@@ -187,7 +172,7 @@ public final class RuntimeAdlExecution {
         private boolean fundingInProgress;
 
         /**
-         * 绑定本次 ADL 的命令、市场输入及两个账户 Lane，清空资金差额并重置续步阶段，供首次使用或命令槽复用。
+         * 绑定本次 ADL 的命令、市场输入及目标账户 Lane，清空资金差额并重置续步阶段；调用方在派发前设置源账户 Lane。
          * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
          * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
          * @param liquidation 本命令要继续处理的强平记录，异步准备时可为空，随后由源账户 Lane 读取
@@ -209,7 +194,6 @@ public final class RuntimeAdlExecution {
             this.positionKey = positionKey;
             this.settleAssetId = settleAssetId;
             this.targetLane = targetLane;
-            this.sourceLane = runtime.topology().accountLaneId(liquidation != null ? liquidation.userId() : sourceUserId);
             this.targetDelta.clear();
             this.done = accountsCollected = ledgerDispatched = capturingLiquidation = false;
             this.targetLaneDispatched = liquidationLaneDispatched = false;

@@ -620,7 +620,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 // 从恢复状态建立的 ADL 持仓索引，供运行时查询候选
                 var index = new AdlPositionIndex(restored, identities);
                 assertThat(RuntimeRiskQueryService.adlCandidates(runtime, identities,
-                        variant.settleAsset(), index.positions(variant.settleAsset()), 10))
+                        variant.settleAsset(), index.positions(variant.settleAsset(), Integer.MAX_VALUE), 10))
                         .containsExactlyElementsOf(candidates);
                 assertThat(reducer.adlCandidates(restored, variant.settleAsset(), 10))
                         .containsExactlyElementsOf(candidates);
