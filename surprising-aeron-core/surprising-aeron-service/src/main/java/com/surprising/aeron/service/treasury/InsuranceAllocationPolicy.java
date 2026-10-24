@@ -18,13 +18,13 @@ import lombok.RequiredArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class InsuranceAllocationPolicy {
 
-    /** 运行时索赔固定顺序：触发价格序号、用户、业务合约名、持仓方向 ordinal、强平编号。 */
-    private static final Comparator<Claim> CLAIM_ORDER = Comparator
-            .comparingLong((/* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ Claim claim) -> claim.liquidation().triggerPriceSequence())
-            .thenComparingLong(/* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim -> claim.liquidation().userId())
-            .thenComparing(Claim::instrumentId)
-            .thenComparingInt(/* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim -> claim.liquidation().positionSide().ordinal())
-            .thenComparingLong(/* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim -> claim.liquidation().liquidationId());
+    /** 索赔固定顺序：触发价格序号、用户、合约名、持仓方向、强平编号。 */
+    private static final Comparator<LiquidationRuntime> CLAIM_ORDER = Comparator
+            .comparingLong(LiquidationRuntime::triggerPriceSequence)
+            .thenComparingLong(LiquidationRuntime::userId)
+            .thenComparing(value -> value.instrument().instrumentId())
+            .thenComparingInt(value -> value.positionSide().ordinal())
+            .thenComparingLong(LiquidationRuntime::liquidationId);
 
     /**
      * 在原运行时可读边界准备候选索赔，再通过静默账本查询读取各资产保险预算并计算全部分配，不直接从 Owner 读取可变财库。
@@ -47,7 +47,7 @@ public final class InsuranceAllocationPolicy {
     @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class AllocationInputs {
         /** 当前命令或查询按结算资产保存的索赔列表，后续分配会原地排序，消费期间独占。 */
-        private final Map<Integer, ArrayList<Claim>> byAsset;
+        private final Map<Integer, ArrayList<LiquidationRuntime>> byAsset;
     }
 
     /**
@@ -62,7 +62,7 @@ public final class InsuranceAllocationPolicy {
             throw new IllegalArgumentException("insurance allocation inputs are required");
         runtime.assertOwner();
         // 本次新建的结算资产到索赔列表分组。
-        Map<Integer, ArrayList<Claim>> byAsset = new HashMap<>();
+        Map<Integer, ArrayList<LiquidationRuntime>> byAsset = new HashMap<>();
         for (Long /* 当前读取的可空候选强平编号。 */ candidateId : candidateIds) {
             if (candidateId == null) continue;
             // 当前运行时或冷状态读取到的强平记录。
@@ -76,7 +76,7 @@ public final class InsuranceAllocationPolicy {
             // 当前索赔所属结算资产编号。
             int assetId = identities.assetId(instrument.settleAsset());
             byAsset.computeIfAbsent(assetId, /* 创建该资产分组时回调收到的键，只需要新建列表，不再读取键。 */ ignored -> new ArrayList<>())
-                    .add(new Claim(liquidation, identities.instrumentId(liquidation.symbolId())));
+                    .add(liquidation);
         }
         return new AllocationInputs(byAsset);
     }
@@ -92,7 +92,7 @@ public final class InsuranceAllocationPolicy {
             int[] assetIds, CoreInstrument[] instruments) {
         if (runtime.currentLaneCommandScope() == null) throw new IllegalStateException("insurance claim read requires Lane ownership");
         // 本次新建的结算资产到索赔列表分组。
-        Map<Integer, ArrayList<Claim>> byAsset = new HashMap<>();
+        Map<Integer, ArrayList<LiquidationRuntime>> byAsset = new HashMap<>();
         for (/* 当前候选、有效回执或已排序索赔列表下标。 */ int index = 0; index < ids.length; index++) {
             // 当前 Lane 回执或运行时查到的强平值，空值跳过。
             LiquidationRuntime value = runtime.liquidation(ids[index]);
@@ -100,7 +100,7 @@ public final class InsuranceAllocationPolicy {
             CoreInstrument instrument = instruments[index];
             if (value == null || value.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED
                     || instrument == null || instrument != value.instrument()) continue;
-            byAsset.computeIfAbsent(assetIds[index], /* 创建该资产分组时回调收到的键，只需要新建列表，不再读取键。 */ ignored -> new ArrayList<>()).add(new Claim(value, instrument.instrumentId()));
+            byAsset.computeIfAbsent(assetIds[index], /* 创建该资产分组时回调收到的键，只需要新建列表，不再读取键。 */ ignored -> new ArrayList<>()).add(value);
         }
         return new AllocationInputs(byAsset);
     }
@@ -111,7 +111,7 @@ public final class InsuranceAllocationPolicy {
      */
     public static AllocationInputs mergeLaneClaims(AllocationInputs[] laneClaims) {
         // 合并各 Lane 分组后新建的资产索赔 Map。
-        Map<Integer, ArrayList<Claim>> merged = new HashMap<>();
+        Map<Integer, ArrayList<LiquidationRuntime>> merged = new HashMap<>();
         for (AllocationInputs /* 本次准备或合并的索赔输入，包含当前调用持有的列表引用。 */ inputs : laneClaims) if (inputs != null)
             inputs.byAsset.forEach((/* 当前索赔所属结算资产编号。 */ assetId, /* 当前资产需要分配的独占索赔列表，排序会改变列表顺序。 */ claims) -> merged.computeIfAbsent(assetId, /* 创建该资产分组时回调收到的键，只需要新建列表，不再读取键。 */ ignored -> new ArrayList<>()).addAll(claims));
         return new AllocationInputs(merged);
@@ -154,7 +154,7 @@ public final class InsuranceAllocationPolicy {
         // 当前索赔所属结算资产编号。
         int assetId = identities.assetId(targetInstrument.settleAsset());
         // 当前资产需要分配的独占索赔列表，排序会改变列表顺序。
-        ArrayList<Claim> claims = new ArrayList<>();
+        ArrayList<LiquidationRuntime> claims = new ArrayList<>();
         for (Long /* 当前候选列表中的可空强平编号。 */ id : candidateIds) {
             if (id == null) continue;
             // 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。
@@ -164,38 +164,12 @@ public final class InsuranceAllocationPolicy {
             CoreInstrument instrument = runtime.instrument(identities.instrumentId(claim.symbolId()));
             if (instrument != null && instrument == claim.instrument()
                     && identities.assetId(instrument.settleAsset()) == assetId) {
-                claims.add(new Claim(claim, identities.instrumentId(claim.symbolId())));
+                claims.add(claim);
             }
         }
         // 本次准备或合并的索赔输入，包含当前调用持有的列表引用。
         ResolutionInputs inputs = new ResolutionInputs(liquidationId, assetId, target.deficitUnits(), claims);
         return runtime.queryLedgerAtRest(/* 账本静默查询回调持有的原财库，预算由该执行边界读取。 */ ledger -> resolve(inputs, ledger));
-    }
-
-    /**
-     * 按指定目标及结算资产准备当前可读候选索赔，只保留需要保险且规范对象匹配的记录，预算留给账本读取。
-     * @param runtime 提供当前可读取强平事实及账本查询边界的运行时
-     * @param identities 把运行时币对及结算资产转换为业务名称或稠密编号的字典
-     * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
-     * @param target 本次目标强平事实，缺口及身份由既有输入边界固定
-     * @param assetId 目标共享保险预算的结算资产编号
-     */
-    public static ResolutionInputs prepareResolution(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                               Iterable<Long> candidateIds, LiquidationRuntime target, int assetId) {
-        // 当前资产需要分配的独占索赔列表，排序会改变列表顺序。
-        ArrayList<Claim> claims = new ArrayList<>();
-        for (Long /* 当前候选列表中的可空强平编号。 */ id : candidateIds) {
-            if (id == null) continue;
-            // 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。
-            LiquidationRuntime claim = runtime.liquidation(id);
-            if (claim == null || claim.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
-            // 当前候选对应的规范合约对象，需与强平输入中的对象匹配。
-            CoreInstrument instrument = runtime.instrument(identities.instrumentId(claim.symbolId()));
-            if (instrument != null && instrument == claim.instrument()
-                    && identities.assetId(instrument.settleAsset()) == assetId)
-                claims.add(new Claim(claim, identities.instrumentId(claim.symbolId())));
-        }
-        return new ResolutionInputs(target.liquidationId(), assetId, target.deficitUnits(), claims);
     }
 
     /**
@@ -208,11 +182,11 @@ public final class InsuranceAllocationPolicy {
     public static ResolutionInputs prepareResolution(LiquidationRuntime[] receipts, int count,
                                                LiquidationRuntime target, int assetId) {
         // 当前资产需要分配的独占索赔列表，排序会改变列表顺序。
-        ArrayList<Claim> claims = new ArrayList<>();
+        ArrayList<LiquidationRuntime> claims = new ArrayList<>();
         for (/* 当前候选、有效回执或已排序索赔列表下标。 */ int index = 0; index < count; index++) {
             // 当前 Lane 回执或运行时查到的强平值，空值跳过。
             LiquidationRuntime value = receipts[index];
-            if (value != null) claims.add(new Claim(value, value.instrument().instrumentId()));
+            if (value != null) claims.add(value);
         }
         return new ResolutionInputs(target.liquidationId(), assetId, target.deficitUnits(), claims);
     }
@@ -224,7 +198,7 @@ public final class InsuranceAllocationPolicy {
      * @param deficitUnits 本次目标输入中记录的缺口金额
      * @param claims 当前调用独占的待保险索赔列表，分配方法会原地排序
      */
-    public record ResolutionInputs(long liquidationId, int assetId, long deficitUnits, ArrayList<Claim> claims) { }
+    public record ResolutionInputs(long liquidationId, int assetId, long deficitUnits, ArrayList<LiquidationRuntime> claims) { }
 
     /**
      * 原地排序当前独占索赔列表并累计缺口，目标存在才按保险非负预算计算比例；预算足够用目标输入缺口，不足时整除并按目标排序位置补余数，同时返回是否首位。
@@ -233,7 +207,7 @@ public final class InsuranceAllocationPolicy {
      */
     public static Resolution resolve(ResolutionInputs inputs, TreasuryRuntime ledger) {
         // 当前资产需要分配的独占索赔列表，排序会改变列表顺序。
-        ArrayList<Claim> claims = inputs.claims();
+        ArrayList<LiquidationRuntime> claims = inputs.claims();
         if (claims.isEmpty()) return new Resolution(false, 0);
         claims.sort(CLAIM_ORDER);
         // 目标在固定排序中的下标，负一表示目标不在当前索赔列表。
@@ -242,9 +216,9 @@ public final class InsuranceAllocationPolicy {
         BigInteger total = BigInteger.ZERO;
         for (/* 当前候选、有效回执或已排序索赔列表下标。 */ int index = 0; index < claims.size(); index++) {
             // 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。
-            Claim claim = claims.get(index);
-            total = total.add(BigInteger.valueOf(claim.liquidation().deficitUnits()));
-            if (claim.liquidation().liquidationId() == inputs.liquidationId()) targetIndex = index;
+            LiquidationRuntime claim = claims.get(index);
+            total = total.add(BigInteger.valueOf(claim.deficitUnits()));
+            if (claim.liquidationId() == inputs.liquidationId()) targetIndex = index;
         }
         if (targetIndex < 0 || total.signum() == 0) return new Resolution(false, 0);
         // 当前非负保险余额与同资产总缺口取小后的可分配预算。
@@ -255,12 +229,12 @@ public final class InsuranceAllocationPolicy {
         BigInteger allocated = BigInteger.ZERO;
         // 目标按比例整除得到的基础补偿，不含余数补一。
         long targetBase = 0;
-        for (Claim /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) {
+        for (LiquidationRuntime /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) {
             // 当前索赔按预算乘缺口再除总缺口得到的基础份额。
-            BigInteger share = available.multiply(BigInteger.valueOf(claim.liquidation().deficitUnits()))
+            BigInteger share = available.multiply(BigInteger.valueOf(claim.deficitUnits()))
                     .divide(total);
             allocated = allocated.add(share);
-            if (claim.liquidation().liquidationId() == inputs.liquidationId()) targetBase = share.longValueExact();
+            if (claim.liquidationId() == inputs.liquidationId()) targetBase = share.longValueExact();
         }
         // 预算减基础份额合计后的剩余单位数，按固定排序前缀逐项补一。
         int remainder = available.subtract(allocated).intValueExact();
@@ -280,15 +254,15 @@ public final class InsuranceAllocationPolicy {
      * @param claims 当前调用独占的待保险索赔列表，分配方法会原地排序
      * @param result 接收强平编号到补偿金额的调用方结果 Map
      */
-    private static void allocateAsset(long availableUnits, ArrayList<Claim> claims, Map<Long, Long> result) {
+    private static void allocateAsset(long availableUnits, ArrayList<LiquidationRuntime> claims, Map<Long, Long> result) {
         claims.sort(CLAIM_ORDER);
         // 使用 BigInteger 汇总的同资产总缺口，避免长整数总额溢出。
         BigInteger total = BigInteger.ZERO;
-        for (Claim /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) total = total.add(BigInteger.valueOf(claim.liquidation().deficitUnits()));
+        for (LiquidationRuntime /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) total = total.add(BigInteger.valueOf(claim.deficitUnits()));
         // 当前非负保险余额与同资产总缺口取小后的可分配预算。
         BigInteger available = BigInteger.valueOf(Math.max(0, availableUnits)).min(total);
         if (available.signum() == 0) {
-            for (Claim /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) result.put(claim.liquidation().liquidationId(), 0L);
+            for (LiquidationRuntime /* 当前参与排序、筛选或比例计算的强平索赔记录，比较字段取业务事实。 */ claim : claims) result.put(claim.liquidationId(), 0L);
             return;
         }
         // 当前资产每个已排序索赔的基础比例补偿原语数组。
@@ -297,7 +271,7 @@ public final class InsuranceAllocationPolicy {
         BigInteger allocated = BigInteger.ZERO;
         for (/* 当前候选、有效回执或已排序索赔列表下标。 */ int index = 0; index < claims.size(); index++) {
             // 当前索赔按预算乘缺口再除总缺口得到的基础份额。
-            BigInteger share = available.multiply(BigInteger.valueOf(claims.get(index).liquidation().deficitUnits()))
+            BigInteger share = available.multiply(BigInteger.valueOf(claims.get(index).deficitUnits()))
                     .divide(total);
             base[index] = share.longValueExact();
             allocated = allocated.add(share);
@@ -307,15 +281,8 @@ public final class InsuranceAllocationPolicy {
         for (/* 当前候选、有效回执或已排序索赔列表下标。 */ int index = 0; index < claims.size(); index++) {
             // 当前索赔基础份额加上可能的一个余数单位后的最终补偿。
             long coverage = base[index] + (index < remainder ? 1 : 0);
-            result.put(claims.get(index).liquidation().liquidationId(), coverage);
+            result.put(claims.get(index).liquidationId(), coverage);
         }
     }
 
-    /**
-     * 当前调用持有的强平记录引用及业务合约名，供排序和比例计算使用，不另建权威强平或资金状态。
-     * @param liquidation 当前命令持有的强平记录引用，不复制权威账户
-     * @param instrumentId 索赔对应的业务合约名称，用于确定性排序
-     */
-    private record Claim(LiquidationRuntime liquidation, String instrumentId) {
-    }
 }
