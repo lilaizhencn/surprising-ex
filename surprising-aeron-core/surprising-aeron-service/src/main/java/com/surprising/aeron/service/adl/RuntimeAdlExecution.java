@@ -10,7 +10,6 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.aeron.support.math.CoreContractMath;
@@ -23,7 +22,7 @@ import lombok.NoArgsConstructor;
 public final class RuntimeAdlExecution {
 
     /**
-     * 优先复用已经可回收的命令续步及其整数资金差额缓冲，初始化新 ADL 输入并返回给 Owner 轮询。
+     * 优先复用已经可回收的命令续步，初始化新 ADL 输入并返回给 Owner 轮询。
      * @param reuse 上次已完成、可再次使用的 ADL 续步，null 或尚不可复用时新建
      * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
@@ -50,10 +49,9 @@ public final class RuntimeAdlExecution {
         long positionKey = identities.positionKey(command.targetUserId(), instrument, command.positionSide());
         // 新建或已可复用的 ADL 命令续步，保存本次输入和跨线程进度。
         AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
-        work.prepare(command, runtime, null, instrument, mark, positionKey,
-                identities.assetId(instrument.settleAsset()), runtime.topology().accountLaneId(command.targetUserId()));
+        work.prepare(command, runtime, instrument, mark, positionKey,
+                identities.assetId(instrument.settleAsset()));
         work.fundingInProgress = runtime.treasury().fundingProgress(symbolId) != null;
-        work.sourceLane = runtime.topology().accountLaneId(route.userId());
         work.capturingLiquidation = true;
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(route.userId()), work);
         return work;
@@ -76,12 +74,8 @@ public final class RuntimeAdlExecution {
         private long positionKey;
         /** 目标持仓结算资产的整数编号，余额及总账差额使用同一资产。 */
         private int settleAssetId;
-        /** 盈利目标账户所属 Lane，负责减仓、余额和用户修订号修改。 */
-        private int targetLane;
-        /** 亏空来源账户所属 Lane，负责读取及更新强平记录。 */
-        private int sourceLane;
-        /** 目标账户写入、账本稍后消费的可复用资金差额缓冲。 */
-        private final RuntimeTreasuryDelta targetDelta = new RuntimeTreasuryDelta();
+        /** 目标账户算出的清算对手项，完成账户回调后交给账本消费。 */
+        private long clearingUnits;
         /** done：账户与账本处理均完成后由 Owner 标记，重复轮询直接结束；accountsCollected：Owner 是否已经登记本次目标账户结算变更；ledgerDispatched：本次账本命令是否已成功入队，避免重复记账。 */
         private boolean done, accountsCollected, ledgerDispatched;
         /** 当前处于源 Lane 读取并校验强平的阶段，而非目标减仓阶段。 */
@@ -94,35 +88,31 @@ public final class RuntimeAdlExecution {
         private boolean fundingInProgress;
 
         /**
-         * 绑定本次 ADL 的命令、市场输入及目标账户 Lane，清空资金差额并重置续步阶段；调用方在派发前设置源账户 Lane。
+         * 绑定本次 ADL 的命令和市场输入，清空清算差额并重置续步阶段；源强平记录随后由所属账户 Lane 捕获。
          * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
          * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-         * @param liquidation 本命令要继续处理的强平记录，异步准备时可为空，随后由源账户 Lane 读取
          * @param instrument 目标合约的配置，包含产品类型、结算资产及金额换算精度
          * @param mark 已核对序号的标记价及期权风险行情输入
          * @param positionKey 目标用户及合约持仓腿在运行时中的整数键
          * @param settleAssetId 本合约结算资产的整数编号
-         * @param targetLane 盈利目标用户所属的账户 Lane 编号
          */
         private void prepare(ExecuteAdlCommand command, TradingAccountRuntime runtime,
-                LiquidationRuntime liquidation, CoreInstrument instrument, MarkPriceRuntime mark,
-                long positionKey, int settleAssetId, int targetLane) {
+                CoreInstrument instrument, MarkPriceRuntime mark, long positionKey, int settleAssetId) {
             initializeLedgerCommand(runtime);
             this.command = command;
 
-            this.liquidation = liquidation;
+            this.liquidation = null;
             this.instrument = instrument;
             this.mark = mark;
             this.positionKey = positionKey;
             this.settleAssetId = settleAssetId;
-            this.targetLane = targetLane;
-            this.targetDelta.clear();
+            this.clearingUnits = 0;
             this.done = accountsCollected = ledgerDispatched = capturingLiquidation = false;
             this.targetLaneDispatched = liquidationLaneDispatched = false;
         }
 
         /**
-         * 在当前账户 Lane 执行对应阶段：先检查源强平状态、资金费边界和覆盖范围；随后由目标 Lane 修改持仓及余额，源 Lane 更新剩余亏空，返回目标资金差额。
+         * 在当前账户 Lane 执行对应阶段：先检查源强平状态、资金费边界和覆盖范围；随后由目标 Lane 修改持仓及余额并保存清算差额，源 Lane 更新剩余亏空。
          * @param ignored 通用账户回调签名中的 Lane 参数；实际按当前 Lane 是否拥有源或目标用户决定步骤
          */
         @Override
@@ -139,16 +129,15 @@ public final class RuntimeAdlExecution {
                     throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
                 return null;
             }
-            // 本次账户回调产生的目标资金差额，单纯源校验或源记录更新时为空。
-            RuntimeTreasuryDelta delta = null;
             if (runtime.currentLaneOwns(command.targetUserId()) && !liquidationLaneDispatched) {
-                delta = applyAdlTarget(command, runtime, liquidation, instrument, mark,
-                        positionKey, settleAssetId, targetDelta);
+                clearingUnits = applyAdlTarget(command, runtime, liquidation, instrument, mark,
+                        positionKey, settleAssetId);
             }
-            if (runtime.currentLaneOwns(liquidation.userId()) && (targetLane == sourceLane || liquidationLaneDispatched)) {
+            if (runtime.currentLaneOwns(liquidation.userId())
+                    && (runtime.currentLaneOwns(command.targetUserId()) || liquidationLaneDispatched)) {
                 completeAdlLiquidation(command, runtime);
             }
-            return delta;
+            return null;
         }
 
         /**
@@ -161,15 +150,16 @@ public final class RuntimeAdlExecution {
                 if (!runtime.pollControlLanes()) return false;
                 capturingLiquidation = false;
                 targetLaneDispatched = true;
-                runtime.dispatchControlLanes(1L << targetLane, this);
+                runtime.dispatchControlLanes(runtime.topology().accountLaneMask(command.targetUserId()), this);
                 return false;
             }
             if (targetLaneDispatched) {
                 if (!runtime.pollControlLanes()) return false;
                 targetLaneDispatched = false;
-                if (targetLane != sourceLane) {
+                long sourceLaneMask = runtime.topology().accountLaneMask(liquidation.userId());
+                if (runtime.topology().accountLaneMask(command.targetUserId()) != sourceLaneMask) {
                     liquidationLaneDispatched = true;
-                    runtime.dispatchControlLanes(1L << sourceLane, this);
+                    runtime.dispatchControlLanes(sourceLaneMask, this);
                     return false;
                 }
             }
@@ -200,7 +190,12 @@ public final class RuntimeAdlExecution {
          * 账本消费目标账户的资金差额，完成清算对手项和亏空抵减。
          * @param ledger 当前账本线程持有的资金总账，只有在账本执行阶段应用资金差额
          */
-        @Override protected void applyLedger(TreasuryRuntime ledger) { targetDelta.apply(ledger); }
+        @Override protected void applyLedger(TreasuryRuntime ledger) {
+            long nextDeficit = Math.subtractExact(ledger.insuranceDeficit(settleAssetId), command.coveredUnits());
+            long nextClearing = Math.addExact(ledger.clearingPnl(settleAssetId), clearingUnits);
+            ledger.setInsurance(settleAssetId, ledger.insurance(settleAssetId), nextDeficit);
+            ledger.setClearingPnl(settleAssetId, nextClearing);
+        }
 
     }
 
@@ -208,16 +203,15 @@ public final class RuntimeAdlExecution {
      * 目标账户 Lane 校验持仓未变化、方向与源强平相反且平仓盈利足以补亏；按本次减仓量释放保证金、调整现金与持仓并增加用户修订号，返回对应总账差额。
      * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
      * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param liquidation 本命令要继续处理的强平记录，异步准备时可为空，随后由源账户 Lane 读取
+     * @param liquidation 源账户 Lane 已捕获并校验的强平记录
      * @param instrument 目标合约的配置，包含产品类型、结算资产及金额换算精度
      * @param mark 已核对序号的标记价及期权风险行情输入
      * @param positionKey 目标用户及合约持仓腿在运行时中的整数键
      * @param settleAssetId 本合约结算资产的整数编号
-     * @param reuse 目标账户资金差额的复用缓冲区，清空后填入本次清算和亏空变化
      */
-    private static RuntimeTreasuryDelta applyAdlTarget(ExecuteAdlCommand command, TradingAccountRuntime runtime,
+    private static long applyAdlTarget(ExecuteAdlCommand command, TradingAccountRuntime runtime,
             LiquidationRuntime liquidation, CoreInstrument instrument, MarkPriceRuntime mark,
-            long positionKey, int settleAssetId, RuntimeTreasuryDelta reuse) {
+            long positionKey, int settleAssetId) {
         // 目标用户当前持仓，方向、数量、入场价和保证金模式都必须与命令预期一致。
         PositionRuntime position = runtime.position(positionKey);
         if (position == null || position.marginMode() != command.marginMode()
@@ -257,12 +251,8 @@ public final class RuntimeAdlExecution {
                 : coverCapacity;
         // 平仓现金变化扣掉用于覆盖源亏空的金额后，目标账户实际计入的净现金差额。
         long targetCashDelta = Math.subtractExact(closeCashDelta, command.coveredUnits());
-        // 本次需要交账本的清算对手项及亏空抵减，先清空再写入。
-        RuntimeTreasuryDelta treasuryDelta = reuse == null ? new RuntimeTreasuryDelta() : reuse;
-        treasuryDelta.clear();
-        treasuryDelta.addClearing(settleAssetId, Math.negateExact(targetCashDelta));
-        treasuryDelta.addDeficit(settleAssetId, Math.negateExact(command.coveredUnits()));
-        treasuryDelta.addClearing(settleAssetId, Math.negateExact(command.coveredUnits()));
+        // 保留原清算对手项的取反与累加顺序，在任何账户写入前检查溢出；亏空抵减直接取命令覆盖额。
+        long clearingUnits = Math.addExact(Math.negateExact(targetCashDelta), Math.negateExact(command.coveredUnits()));
         // 目标账户释放保证金并应用净现金差额后的新余额。
         BalanceRuntime nextBalance = new BalanceRuntime(balance.userId(), balance.assetId(),
                 Math.addExact(balance.availableUnits(), Math.addExact(releasedMargin, targetCashDelta)),
@@ -280,7 +270,7 @@ public final class RuntimeAdlExecution {
         runtime.replaceBalance(nextBalance);
         runtime.replacePosition(positionKey, nextPosition);
         runtime.advanceUserRevision(command.targetUserId());
-        return treasuryDelta;
+        return clearingUnits;
     }
 
     /**

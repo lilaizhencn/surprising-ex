@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
@@ -310,12 +311,13 @@ class CorePerpetualFinancialMatrixTest {
     }
 
     /**
-     * 四种永续组合按强平执行、保险注资、保险确认、ADL 顺序推进原控制任务，每步提交后都与冷转换完整状态比较，并检查账户 Lane 健康。
+     * 四种永续组合分别用单 Lane 和双 Lane 推进强平执行、保险注资、保险确认及 ADL，每步提交后都与冷转换完整状态比较，并检查账户 Lane 健康。
      * @param variant 本次正反向永续、全仓逐仓及资产单位的测试组合
+     * @param accountLaneCount 账户 Lane 数量，单 Lane 验证同 Lane 减仓，双 Lane 验证跨 Lane 交接
      */
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.MethodSource("adlVariants")
-    void liquidationInsuranceAndAdlUseOriginalSystemLedgerAcrossAccountLanes(Variant variant) {
+    @org.junit.jupiter.params.provider.MethodSource("adlLaneVariants")
+    void liquidationInsuranceAndAdlUseOriginalSystemLedgerAcrossAccountLanes(Variant variant, int accountLaneCount) {
         // 应用本场景标记价和风险扫描后的冷状态，保留价格序列和强平计划
         TradingCoreState marked = mark(adlSetup(variant), variant, 1, 1);
         // 本场景强平计划一的执行命令，采用原触发序列和固定执行价
@@ -323,8 +325,14 @@ class CorePerpetualFinancialMatrixTest {
         // 随强平、保险注资、保险确认和 ADL 逐步更新的冷路径预期状态
         TradingCoreState expected = reducer.executeLiquidation(marked, execute);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities)) {
+        var topology = new LaneTopology(1, accountLaneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
+                LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE, LaneTopology.DEFAULT_QUEUE_CAPACITY,
+                LaneTopology.DEFAULT_QUEUE_CAPACITY);
+        assertThat(topology.accountLaneId(USER_ID) == topology.accountLaneId(SECOND_MAKER_ID))
+                .as("ADL source and target share a lane only in the single-lane fixture")
+                .isEqualTo(accountLaneCount == 1);
+        var identities = new RuntimeIdentityRegistry(topology);
+        try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 // 按原账户及账本路径准备的可轮询强平执行工作
@@ -359,6 +367,12 @@ class CorePerpetualFinancialMatrixTest {
      * 返回正反向永续与全仓逐仓的四种组合，供账本和 ADL 参数化测试使用。
      */
     static java.util.stream.Stream<Variant> adlVariants() { return VARIANTS.stream(); }
+
+    /** 四种合约及保证金组合分别覆盖源、目标同 Lane 和跨 Lane 的原账本交接。 */
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> adlLaneVariants() {
+        return VARIANTS.stream().flatMap(variant -> java.util.stream.Stream.of(1, 2)
+                .map(laneCount -> org.junit.jupiter.params.provider.Arguments.of(variant, laneCount)));
+    }
 
     /**
      * 构建全部矩阵行，检查四种组合各十八场景的七十二个固定键没有遗漏、额外项或重复。名称虽含 failingFirst，当前断言目标仍是清单全部满足。

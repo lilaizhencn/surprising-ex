@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第六十三轮清理补亏冷包装、一次性输入/缓存、多资产差额搬运及源Lane位图，共7字段、1record，生产净减81行；18模块干净构建、136回归、六线实测、两种永续实际保险/ADL及12次Cluster恢复通过。193解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第六十四轮清理ADL恒空准备参数、重复Lane缓存和多资产差额搬运，Work净减2字段；18模块干净构建、140回归、六线实测、两种永续实际保险/ADL及12次Cluster恢复通过。196解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -10901,6 +10901,49 @@
       ],
       "evidence": "仅由仍保留的sourceUserId和固定拓扑确定，读取/写回直接取得原位图，无新扫描或集合。",
       "verification": "18模块干净构建、136回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复；范围见round63-runtime-20261025.json。"
+    },
+    {
+      "id": "A199",
+      "status": "resolved",
+      "source_basis_commit": "a66951c3def3f28d0da785ecb11ec851b86cde88",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_fourth_cleanup_round",
+      "topic": "ADL准备时恒空的强平参数",
+      "fields_or_methods": [
+        "AdlWork.prepare liquidation参数"
+      ],
+      "evidence": "唯一生产调用恒null，直接清空，强平事实仍由源Lane捕获。",
+      "verification": "18模块干净构建、140回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复，见round64-runtime-20261025.json。"
+    },
+    {
+      "id": "A200",
+      "status": "resolved",
+      "source_basis_commit": "a66951c3def3f28d0da785ecb11ec851b86cde88",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_fourth_cleanup_round",
+      "topic": "ADL重复Lane路由缓存",
+      "fields_or_methods": [
+        "AdlWork.targetLane",
+        "AdlWork.sourceLane",
+        "prepare targetLane参数"
+      ],
+      "evidence": "目标/源用户和固定拓扑可推导；同Lane合并及跨Lane顺序由8个实际线程用例补验。",
+      "verification": "18模块干净构建、140回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复，见round64-runtime-20261025.json。"
+    },
+    {
+      "id": "A201",
+      "status": "resolved",
+      "source_basis_commit": "a66951c3def3f28d0da785ecb11ec851b86cde88",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_fourth_cleanup_round",
+      "topic": "ADL通用多资产差额及无消费回调返回",
+      "fields_or_methods": [
+        "AdlWork.targetDelta",
+        "applyAdlTarget reuse参数",
+        "apply返回差额"
+      ],
+      "evidence": "保留必要long清算交接，资产与亏空抵减取已有身份/命令；精确运算顺序、账本所有权及回滚保留。",
+      "verification": "18模块干净构建、140回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复，见round64-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -10996,7 +11039,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A195_to_A198_cleaned_136_cases_six_live_products_actual_adl_twelve_cold_recoveries_verified; overall_audit_in_progress",
+  "analysis_round_status": "A199_to_A201_cleaned_140_cases_six_live_products_actual_adl_twelve_cold_recoveries_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11218,13 +11261,12 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "10d11e6978839583eba72665dbfce18c5fb70fd6",
-    "status": "insurance_resolution_state_cleaned_and_actual_adl_verified",
+    "source_basis_commit": "a66951c3def3f28d0da785ecb11ec851b86cde88",
+    "status": "adl_work_state_cleaned_and_verified",
     "resolved_ids": [
-      "A195",
-      "A196",
-      "A197",
-      "A198"
+      "A199",
+      "A200",
+      "A201"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11237,11 +11279,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 193,
+      "resolved": 196,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "sixty_third_cleanup_round",
+    "evidence": "sixty_fourth_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44152,6 +44194,28 @@
     "cold_recoveries": 12,
     "counts": {
       "resolved": 193,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "sixty_fourth_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "a66951c3def3f28d0da785ecb11ec851b86cde88",
+    "resolved_ids": [
+      "A199",
+      "A200",
+      "A201"
+    ],
+    "removed_instance_fields_net": 2,
+    "production_net_lines_removed": 10,
+    "report": "deep-code-cleanup-20261025-round64.md",
+    "evidence": "round64-runtime-20261025.json",
+    "unit_tests": 140,
+    "runtime_products": 6,
+    "cold_recoveries": 12,
+    "counts": {
+      "resolved": 196,
       "candidate": 1,
       "retained": 4
     },
