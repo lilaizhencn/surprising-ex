@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第四十四轮：A151旧订单/条件单/持仓私有Kafka及派生报告删除，连同无人读取的PositionCacheEvent共70包装字段和专属枚举/约束清理。六产品helper原20条断言保持，原生就绪和推送检查无条件，用户隔离fixture沿用VersionedEvent。18模块干净源码编译通过；无测试/服务/JMH执行。累计146解决。A152生产类中的测试专用默认产品构造入口待删，A11仍候选。",
+    "checkpoint": "第四十五轮：A152三参测试构造、默认产品工厂及多余Autowired删除，消费者单一显式配置构造；实际handler源码保持，12模块test-compile通过。累计147解决，无测试/上下文执行。A153账户无注入producer/template和无读端主题别名/排空字段待删，真实交割/行权consumer工厂及其他发布者保留。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -8458,12 +8458,40 @@
     },
     {
       "id": "A152",
-      "status": "confirmed",
-      "analysis_status": "production_class_test_only_constructor_and_fallback_factory_confirmed",
+      "status": "resolved",
+      "analysis_status": "test_only_production_fallback_removed_compile_verified",
       "topic": "Kafka公共行情消费者仍携带仅测试使用的三参构造和默认产品工厂",
       "source_basis_commit": "9f23241051f74bb8d386c3121f4894d26c7ee783",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 48,
+          "anchor": "public KafkaFanoutConsumer(ObjectMapper objectMapper,"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 51,
+          "anchor": "WebSocketProperties properties) {"
+        }
+      ],
+      "evidence": {
+        "exact_external_constructor_calls": {
+          "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;Lcom/surprising/websocket/provider/config/WebSocketProperties;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class",
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTopicTest.class"
+          ],
+          "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+          ]
+        },
+        "test_only_descriptor": "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V",
+        "real_spring_constructor": "Autowired明确选择含WebSocketProperties的4参构造，3参只由KafkaFanoutConsumerTest调用；defaultTestProperties只为这个构造生成固定LINEAR_PERPETUAL配置。",
+        "boundary_to_keep": "保留部署绑定的显式产品属性和所有公共行情topic/key校验；测试直接提供自己的真实配置fixture，生产类不留测试专用默认产品入口。"
+      },
+      "proposed_cleanup": "删除3参构造和专属defaultTestProperties，生产类只保留单一显式依赖构造；现有单元测试传入配置，保持价格/资金费及产品隔离场景。",
+      "verification_limit": "当前源码和4015份classfile的构造调用确认，尚未修改此项。",
+      "historical_source_references": [
         {
           "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
           "line": 50,
@@ -8485,22 +8513,73 @@
           "anchor": "properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL)"
         }
       ],
-      "evidence": {
-        "exact_external_constructor_calls": {
-          "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;Lcom/surprising/websocket/provider/config/WebSocketProperties;)V": [
-            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class",
-            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTopicTest.class"
-          ],
-          "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V": [
-            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
-          ]
+      "resolved_in_round": "forty_fifth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除三参构造与defaultTestProperties，只保留一个显式配置构造；单构造不再标多余Autowired。测试BeforeEach提供产品配置，价格、资金费及跨产品拒绝场景保留。实际handler源码逐字节保持。",
+        "tests_executed": false,
+        "spring_context_started": false
+      }
+    },
+    {
+      "id": "A153",
+      "status": "confirmed",
+      "analysis_status": "unused_account_producer_beans_and_owned_metadata_confirmed",
+      "topic": "账户Kafka配置保留无人注入的producer/template和无业务读端的主题元数据",
+      "source_basis_commit": "387e4118fb2be05d2c4696a3816cfa732a726715",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountKafkaConfiguration.java",
+          "line": 26,
+          "anchor": "public ProducerFactory<String, String> accountProducerFactory("
         },
-        "test_only_descriptor": "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V",
-        "real_spring_constructor": "Autowired明确选择含WebSocketProperties的4参构造，3参只由KafkaFanoutConsumerTest调用；defaultTestProperties只为这个构造生成固定LINEAR_PERPETUAL配置。",
-        "boundary_to_keep": "保留部署绑定的显式产品属性和所有公共行情topic/key校验；测试直接提供自己的真实配置fixture，生产类不留测试专用默认产品入口。"
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountKafkaConfiguration.java",
+          "line": 48,
+          "anchor": "public KafkaTemplate<String, String> accountKafkaTemplate("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountKafkaConfiguration.java",
+          "line": 43,
+          "anchor": "private String productLineName("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountProperties.java",
+          "line": 38,
+          "anchor": "private String instrumentLifecycleDrainTopic"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountProperties.java",
+          "line": 54,
+          "anchor": "public String getOrderCommandsTopic()"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountProperties.java",
+          "line": 97,
+          "anchor": "public String getInstrumentLifecycleGroupId()"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/consumer/ExpiringContractSettlementConsumer.java",
+          "line": 39,
+          "anchor": "containerFactory = \"accountInstrumentLifecycleKafkaListenerContainerFactory\""
+        }
+      ],
+      "evidence": {
+        "producer_consumers": "全仓accountKafkaTemplate/accountProducerFactory名字、代码图调用及KafkaTemplate注入点核对：account template无实际注入者；交易发布器显式Qualifier(orderKafkaTemplate)，InstrumentOutboxPublisher显式Qualifier(instrumentKafkaTemplate)，没有隐式选择account模板。两个其他producer/template仍在，不因删除account分支引入默认bean。",
+        "unused_derived_metadata": [
+          "AccountProperties.Kafka.getOrderCommandsTopic",
+          "AccountProperties.Kafka.getOpenInterestEventsTopic",
+          "AccountProperties.Kafka.getLiquidationFeeEventsTopic",
+          "AccountProperties.Kafka.getAccountStateEventsTopic",
+          "AccountProperties.Kafka.getInstrumentLifecycleGroupId"
+        ],
+        "unused_bound_field": "AccountProperties.Kafka.instrumentLifecycleDrainTopic仅旧YAML绑定和Lombok访问器，实际排空发布与消费使用TradingOrderProperties中的同名设置，不能全仓删除同名字段。",
+        "actual_boundary": "ExpiringContractSettlementConsumer仍通过accountInstrumentLifecycleKafkaListenerContainerFactory消费交割/行权，保留accountConsumerFactory、产品隔离、bootstrap/clientId/maxPoll及失败关闭重试。",
+        "shared_topic_note": "某些Shared ProductTopicNames方法仍供其他配置或真实消费者使用；先删除AccountProperties中无读端的别名，不按名字批量删其他所有者。"
       },
-      "proposed_cleanup": "删除3参构造和专属defaultTestProperties，生产类只保留单一显式依赖构造；现有单元测试传入配置，保持价格/资金费及产品隔离场景。",
-      "verification_limit": "当前源码和4015份classfile的构造调用确认，尚未修改此项。"
+      "proposed_cleanup": "删除account producer/template及专属productLineName兜底、旧producer断言、无读端账户主题别名和本账户排空YAML/字段；保留真实结算consumer工厂与配置、订单排空/费率和合约outbox发布器。",
+      "verification_limit": "当前源码与代码图/配置注入核对，尚未删除此项，也未启动Spring/Kafka。"
     }
   ],
   "preserve_verified_purposes": [
@@ -8518,9 +8597,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "解决A152测试专用生产构造及默认产品工厂，让消费者只接收显式配置依赖，保留公共行情/资金费/产品隔离测试场景。",
-    "继续逐业务核对命令到Core状态、持久化、恢复与API读端的字段/约束用途，保留真实线程、资金和到期结算边界。",
-    "A11保持当前领导者读、提交水位及会话约束。"
+    "处理A153账户无消费者producer及专属元数据，保留实际到期结算Kafka工厂、client配置及其他所有者同名排空设置。",
+    "继续从命令生成到Core处理、持久化、恢复和读端逐字段检查真实用途，保持Owner/Lane、资金/预占/终态和产品边界。",
+    "A11保持领导者读取、提交水位与查询会话语义，未有等价方案前不绕过Cluster。"
   ],
   "rejected_false_positives": [
     {
@@ -8817,13 +8896,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "9f23241051f74bb8d386c3121f4894d26c7ee783",
+    "source_basis_commit": "387e4118fb2be05d2c4696a3816cfa732a726715",
     "status": "cleanup_compile_verified_followup_confirmed",
     "resolved_ids": [
-      "A151"
+      "A152"
     ],
     "confirmed_ids": [
-      "A152"
+      "A153"
     ],
     "candidate_ids": [
       "A11"
@@ -8835,12 +8914,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 146,
+      "resolved": 147,
       "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "forty_fourth_cleanup_round",
+    "evidence": "forty_fifth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -10708,6 +10787,26 @@
       ],
       "counts": {
         "resolved": 146,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "tests_executed": false,
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "387e4118fb2be05d2c4696a3816cfa732a726715",
+      "status": "cleanup_compile_verified_followup_confirmed",
+      "evidence": "forty_fifth_cleanup_round",
+      "resolved_ids": [
+        "A152"
+      ],
+      "new_confirmed_ids": [
+        "A153"
+      ],
+      "counts": {
+        "resolved": 147,
         "candidate": 1,
         "retained": 4,
         "confirmed": 1
@@ -32848,6 +32947,114 @@
           "path": "/tmp/aeron-private-kafka-20261024-static.json",
           "bytes": 7547,
           "sha256": "76d740ea5f8604c79885b85660536394849ce7d766cfac998865778d4310741e"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "forty_fifth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "387e4118fb2be05d2c4696a3816cfa732a726715",
+    "resolved_ids": [
+      "A152"
+    ],
+    "new_confirmed_ids": [
+      "A153"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 147,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "implementation": [
+      "Kafka消费者只有一个接收显式WebSocketProperties的构造，不在生产类携带测试工厂或默认产品回退。",
+      "原4个三参测试调用改传真实配置，BeforeEach明确线性永续；跨产品用例仍显式切换OPTION，原价格/资金费和产品拒绝断言保留。",
+      "单构造删除多余Autowired，实际所有handler方法源码与本轮HEAD完全一致，未新增抽象、状态或fallback。"
+    ],
+    "verification": {
+      "command": "mvn -pl surprising-gateway -am -DskipTests test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 25.769,
+      "log_sha256": "7b7095655a0b6ca2d81b65084fac14b23a42f8446e988269f7ffb35e30c5c3f4",
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/README.md": "eb66221a47c56166d25b93e1d70e16c92efce2f251f2db08e77b25395f82e36a",
+        "surprising-gateway/README-websocket.md": "0d63cf5cbba616f75a85d716a0f8ea6a74881c459aa4cd49fbe3eafbf887fca1",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java": "f23ba6328d4f7d30d5fdfb6ab5b7efec67a2fd5d168288289e89fbed60cb6d01",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.java": "e90440bc4081868db734c4edd849615636bf4cb3a14cea39345962b43f4197dd"
+      },
+      "tests_executed": false,
+      "sql_executed": false,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-realtime-api",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-gateway"
+      ],
+      "reactor_module_count": 12
+    },
+    "static_verification": {
+      "classfiles": 4015,
+      "sole_constructor": "public com.surprising.websocket.provider.consumer.KafkaFanoutConsumer(tools.jackson.databind.ObjectMapper, com.surprising.websocket.provider.service.SubscriptionRegistry, com.surprising.websocket.provider.service.CandleUpdateCoalescer, com.surprising.websocket.provider.config.WebSocketProperties);",
+      "old_three_argument_descriptor": "(Ltools/jackson/databind/ObjectMapper;Lcom/surprising/websocket/provider/service/SubscriptionRegistry;Lcom/surprising/websocket/provider/service/CandleUpdateCoalescer;)V",
+      "old_descriptor_references": [],
+      "default_test_factory_absent": true,
+      "all_actual_handler_method_source_unchanged": true,
+      "handler_source_sha256": "a0dbe25708be519fb0d4cb0036b7e97deb79581c9caedc7dac3e16024930cdba",
+      "javap_sha256": "282ea51dc2919711f1523a4408b6bf7d99721de634e4d3cfffdde401fb3a9a6d",
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/README.md": "eb66221a47c56166d25b93e1d70e16c92efce2f251f2db08e77b25395f82e36a",
+        "surprising-gateway/README-websocket.md": "0d63cf5cbba616f75a85d716a0f8ea6a74881c459aa4cd49fbe3eafbf887fca1",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java": "f23ba6328d4f7d30d5fdfb6ab5b7efec67a2fd5d168288289e89fbed60cb6d01",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.java": "e90440bc4081868db734c4edd849615636bf4cb3a14cea39345962b43f4197dd"
+      },
+      "tests_executed": false,
+      "applications_started": false,
+      "git_diff_check": "passed"
+    },
+    "followup_analysis": {
+      "confirmed_id": "A153",
+      "candidate_id": "A11",
+      "overall_audit_completed": false
+    },
+    "limits": "仅相关12模块test-compile及javap/构造描述符/源码核对；未执行测试、Spring上下文、Kafka/Aeron、SQL、服务或UI。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-fanout-constructor-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-fanout-constructor-20261024-build.json",
+          "bytes": 884,
+          "sha256": "48a74d8c07cbdc682485856e61dbd2142879dc4965b1e3495b4c4c611228efe3"
+        },
+        {
+          "path": "/tmp/aeron-fanout-constructor-20261024-build.log",
+          "bytes": 20778,
+          "sha256": "7b7095655a0b6ca2d81b65084fac14b23a42f8446e988269f7ffb35e30c5c3f4"
+        },
+        {
+          "path": "/tmp/aeron-fanout-constructor-20261024-javap.txt",
+          "bytes": 4795,
+          "sha256": "282ea51dc2919711f1523a4408b6bf7d99721de634e4d3cfffdde401fb3a9a6d"
+        },
+        {
+          "path": "/tmp/aeron-fanout-constructor-20261024-record.py",
+          "bytes": 7857,
+          "sha256": "80d039c1275c90b1f802b5fb7ed9f94c627c9f52d0f9b9d3ad4e2faf2a0b45be"
+        },
+        {
+          "path": "/tmp/aeron-fanout-constructor-20261024-static.json",
+          "bytes": 1552,
+          "sha256": "b44090c488de09086efdf07b95f2aca6a882d62d6db9c8400d88b8dcf9a9c107"
         }
       ],
       "compiler_outputs_retained": true,

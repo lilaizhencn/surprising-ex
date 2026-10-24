@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -39,10 +40,16 @@ class KafkaFanoutConsumerTest {
     @Mock
     private CandleUpdateCoalescer candleUpdateCoalescer;
 
+    private final WebSocketProperties properties = new WebSocketProperties();
+
+    @BeforeEach
+    void configureProduct() {
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+    }
+
     @Test
     void productTopicFanoutRejectsOtherProductPriceTopicBeforePublishing() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
         KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
                 properties);
@@ -63,7 +70,7 @@ class KafkaFanoutConsumerTest {
     @Test
     void fansOutFundingRateDecimalEventBySymbol() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer, properties);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         PerpFundingRateEvent event = new PerpFundingRateEvent("1", new BigDecimal("0.000100"),
                 eventTime.plusSeconds(3600), 8, 9L, eventTime);
@@ -82,7 +89,7 @@ class KafkaFanoutConsumerTest {
     @Test
     void fansOutFreshMarkPriceBySymbol() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer, properties);
         MarkPriceEvent event = markPriceEvent(Instant.now());
 
         consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
@@ -98,7 +105,7 @@ class KafkaFanoutConsumerTest {
     @Test
     void fansOutIndexBranchFromUnifiedPriceTopic() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer, properties);
         Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
         IndexPriceEvent event = new IndexPriceEvent("1", new BigDecimal("50000"), 9L,
                 PriceStatus.HEALTHY, 2, 2, BigDecimal.valueOf(2), eventTime, List.of());
@@ -116,7 +123,7 @@ class KafkaFanoutConsumerTest {
     @Test
     void dropsStaleMarkPriceWithoutFanoutOrRetryFailure() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
+        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer, properties);
         MarkPriceEvent event = markPriceEvent(Instant.now().minusSeconds(4));
 
         consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,

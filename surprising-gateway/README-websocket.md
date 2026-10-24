@@ -64,6 +64,8 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 
 风险更新由启用的`RealtimeWebSocketBridge`发布现有`VersionedEvent(version, entityId, value)`，快照仍包含`positionRisks`，客户端按原版本栅栏维护风险实体。旧Kafka账户/持仓风险事件没有当前生产者，已删除监听器、31字段事件模型及专属topic配置；关闭原生实时通道不会切换到旧风险Kafka投递。风险HTTP查询及真实Core风险值保留。本轮只编译相关模块，未运行推送或UI场景。
 
+公共Kafka fanout消费者只通过唯一构造接收显式`WebSocketProperties`，不再留三参测试构造或固定回退到线性永续的配置工厂。测试自行提供产品配置，价格、资金费和跨产品拒绝场景保留。
+
 私有增量沿用`VersionedEvent(version, entityId, value)`。`triggerOrders`的`value`是Core条件单视图列表；客户端保留`PENDING`/`TRIGGERING`，终态移除，并按原版本栅栏处理重复/乱序。重连后先建立现有用户快照。旧订单、条件单、持仓Kafka事件及派生成交报告已删除，没有当前生产者的topic入口、旧版本/修订约束和Redis持仓包装一并清理；Core金融字段及REST模型保留。
 
 ## 持仓推送链路

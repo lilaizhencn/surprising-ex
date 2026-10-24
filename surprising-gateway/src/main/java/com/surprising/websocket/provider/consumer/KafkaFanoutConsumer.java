@@ -25,7 +25,6 @@ import java.util.Map;
 import java.time.Duration;
 import java.time.Instant;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -48,25 +47,12 @@ public class KafkaFanoutConsumer {
 
     public KafkaFanoutConsumer(ObjectMapper objectMapper,
                                SubscriptionRegistry registry,
-                               CandleUpdateCoalescer candleUpdateCoalescer) {
-        this(objectMapper, registry, candleUpdateCoalescer, defaultTestProperties());
-    }
-
-    @Autowired
-    public KafkaFanoutConsumer(ObjectMapper objectMapper,
-                               SubscriptionRegistry registry,
                                CandleUpdateCoalescer candleUpdateCoalescer,
                                WebSocketProperties properties) {
         this.objectMapper = objectMapper;
         this.registry = registry;
         this.candleUpdateCoalescer = candleUpdateCoalescer;
         this.properties = properties;
-    }
-
-    private static WebSocketProperties defaultTestProperties() {
-        WebSocketProperties properties = new WebSocketProperties();
-        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-        return properties;
     }
 
     public void onCandle(ConsumerRecord<String, String> record) {
