@@ -6,7 +6,7 @@ import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
 
 /**
- * 永续资金费命令入口：解码请求并取得持仓用户索引，在线模式把一页工作交给原命令槽续步；提交回放模式同步应用后填入提交结果，并按需通知明细观察者。U 本位与币本位的金额计算仍由各自产品规则负责。
+ * 永续资金费命令入口：解码请求并取得持仓用户索引，一页工作交给原命令槽续步，完成后填入提交结果，并按需通知独立提交回放的明细观察者。U 本位与币本位的金额计算仍由各自产品规则负责。
  */
 public final class PerpetualFundingCommands {
     /** 当前产品线交易 Owner，持有原运行时、索引、命令槽和结果构建器。 */
@@ -33,7 +33,7 @@ public final class PerpetualFundingCommands {
     }
 
     /**
-     * 解码资金费参数并取得全局游标之后的持仓用户索引；在线模式复用工作对象后交给 directCommand 轮询，回放模式同步结算、填写结果并通知观察者。
+     * 解码资金费参数并取得全局游标之后的持仓用户索引；复用工作对象后交给 directCommand 轮询；在线与独立回放都在实际完成后收集结果。
      * @param message 已路由到本产品线的资金费命令及其 UUID
      */
     public void executeApplyFunding(CoreMessage message) {
@@ -41,18 +41,10 @@ public final class PerpetualFundingCommands {
         var command = TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe());
         // 本币对全局用户游标之后的持仓用户来源，具体页由账本阶段选择。
         Iterable<Long> indexedUserIds = owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId());
-        if (owner.asynchronousCommands()) {
-            // 命令槽持有的一页资金费工作，Owner 后续轮询收齐账户和账本回执。
-            var work = RuntimePerpetualFundingProcessor.prepare(owner.directCommand.reusableFundingWork(), command,
-                    indexedUserIds, owner.runtimeState(), owner.identities());
-            owner.directCommand.deferFundingControl(work);
-            return;
-        }
-        // 提交回放同步应用后得到的进度与实际收付明细。
-        var result = RuntimePerpetualFundingProcessor.applyRuntime(command, indexedUserIds, owner.runtimeState(),
-                owner.identities());
-        complete(result);
-        notifyReplayObserver(result);
+        // 命令槽持有的一页资金费工作，Owner 后续轮询收齐账户和账本回执。
+        var work = RuntimePerpetualFundingProcessor.prepare(owner.directCommand.reusableFundingWork(), command,
+                indexedUserIds, owner.runtimeState(), owner.identities());
+        owner.directCommand.deferFundingControl(work);
     }
 
     /**
@@ -61,16 +53,6 @@ public final class PerpetualFundingCommands {
      */
     public void notifyReplayObserver(RuntimePerpetualFundingProcessor.FundingResult result) {
         if (replayObserver != null) replayObserver.accept(result);
-    }
-
-    /**
-     * 请求提交发布、保存资金费进度，并把收付明细涉及的用户加入结果变化集合。
-     * @param result 已经应用账户和财库的本页资金费结果
-     */
-    private void complete(RuntimePerpetualFundingProcessor.FundingResult result) {
-        owner.requestCommitPublication();
-        owner.resultBuilder.commandFundingProgress = result.progress();
-        owner.resultBuilder.addChangedUsersFromFundingPayments(result.payments());
     }
 
 }

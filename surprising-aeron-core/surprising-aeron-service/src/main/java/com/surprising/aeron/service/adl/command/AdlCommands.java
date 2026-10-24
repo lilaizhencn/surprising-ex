@@ -21,23 +21,17 @@ public final class AdlCommands {
     }
 
     /**
-     * 解码请求后登记目标用户提示；异步时准备复用工作并交给原控制槽，冷路径直接执行后请求发布。提示先登记不代表目标持仓已经减仓成功。
+     * 解码请求后登记目标用户提示，准备复用工作并交给原控制槽。提示先登记不代表目标持仓已经减仓成功。
      * @param message 当前借用的请求头与载荷，解码期间保持缓冲有效
      */
     public void executeExecuteAdl(CoreMessage message) {
         // 解码得到的强平 ID、目标用户及持仓、价格序列、减仓量和补亏要求
         var command = TradingCommandCodec.decodeExecuteAdl(message.payloadUnsafe());
         owner.resultBuilder.setSingleChangedUser(command.targetUserId());
-        if (owner.asynchronousCommands()) {
-            // 复用槽中准备好的 ADL 跨账户工作，真正完成由原控制任务继续轮询
-            var work = RuntimeAdlExecution.begin(owner.directCommand.reusableAdlWork(),
-                    command, owner.runtimeState(), owner.identities());
-            owner.directCommand.deferAdlControl(work);
-        } else {
-            RuntimeAdlExecution.applyRuntime(
-                    command, owner.runtimeState(), owner.identities());
-            owner.requestCommitPublication();
-        }
+        // 复用槽中准备好的 ADL 跨账户工作，真正完成由原控制任务继续轮询
+        var work = RuntimeAdlExecution.begin(owner.directCommand.reusableAdlWork(),
+                command, owner.runtimeState(), owner.identities());
+        owner.directCommand.deferAdlControl(work);
     }
 
 }

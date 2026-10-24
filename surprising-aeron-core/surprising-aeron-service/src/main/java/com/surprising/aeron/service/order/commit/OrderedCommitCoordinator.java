@@ -19,7 +19,6 @@ import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.order.command.OrderBatchKind;
 import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.risk.RiskScanCoordinator;
-import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
@@ -409,19 +408,12 @@ public final class OrderedCommitCoordinator {
                         // 当前强平撤单进度或待恢复分片进度，具体类型见声明
                         var progress = new CoreLiquidationProgressView(nextCursor == 0, nextCursor,
                                 chunk.orders().size());
-                        if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
-                            // 本命令要挂起轮询的强平、到期或批次控制工作
-                            var work = com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor
-                                     .beginExecution(pending.liquidationWork(), command, orders, nextCursor,
-                                            owner.runtimeState(), owner.identities());
-                            pending.liquidationWork(work);
-                            pending.deferLiquidationExecutionControl(this, work, progress);
-                        } else {
-                            if (nextCursor != 0) owner.liquidations().advanceLiquidationCancellationRuntime(
-                                    command, orders, nextCursor);
-                            else owner.liquidations().executeLiquidationRuntime(command, orders);
-                            owner.resultBuilder.commandLiquidationProgress = progress;
-                        }
+                        // 本命令要挂起轮询的强平、到期或批次控制工作
+                        var work = com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor
+                                 .beginExecution(pending.liquidationWork(), command, orders, nextCursor,
+                                        owner.runtimeState(), owner.identities());
+                        pending.liquidationWork(work);
+                        pending.deferLiquidationExecutionControl(this, work, progress);
                     }
                 }
                 case LIQUIDATION_BATCH -> {
@@ -434,16 +426,11 @@ public final class OrderedCommitCoordinator {
                     var command = pending.decodedCommand().settlement();
                     if (matchingResult.accepted()) {
                         owner.instrumentSettlement().applySettlementChangedIds(command);
-                        if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
-                            // 本命令要挂起轮询的强平、到期或批次控制工作
-                            var work = owner.instrumentSettlement().beginAsyncSettlement(
-                                    pending.settlementWork(), command);
-                            pending.settlementWork(work);
-                            pending.deferSettlementControl(this, work);
-                        } else {
-                            owner.instrumentSettlement().settleInstrumentRuntime(command,
-                                    pending.command().header().commandId());
-                        }
+                        // 本命令要挂起轮询的强平、到期或批次控制工作
+                        var work = owner.instrumentSettlement().beginAsyncSettlement(
+                                pending.settlementWork(), command);
+                        pending.settlementWork(work);
+                        pending.deferSettlementControl(this, work);
                     }
                 }
             }
@@ -872,22 +859,14 @@ public final class OrderedCommitCoordinator {
                         remaining -= orders.size();
                     }
                     if (nextCursor == 0) applied++; else pendingCount++;
-                    if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
-                        executionRequests.add(new com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor
-                                .ExecutionRequest(single, orders, nextCursor));
-                        continue;
-                    }
-                    if (nextCursor != 0) owner.liquidations().advanceLiquidationCancellationRuntime(single, orders, nextCursor);
-                    else owner.liquidations().executeLiquidationRuntime(single, orders);
+                    executionRequests.add(new com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor
+                            .ExecutionRequest(single, orders, nextCursor));
                 }
                 if (!executionRequests.isEmpty()) {
-                    if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
-                        accountWork = com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor
-                                .beginExecutionBatch(executionRequests, owner.runtimeState(), owner.identities());
-                        executionRequests = new ArrayList<>();
-                        return false;
-                    }
-                    executionRequests.clear();
+                    accountWork = com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor
+                            .beginExecutionBatch(executionRequests, owner.runtimeState(), owner.identities());
+                    executionRequests = new ArrayList<>();
+                    return false;
                 }
                 // 本轮实际完成的风险续扫工作量
                 int completedRiskWork = 0;
@@ -902,17 +881,8 @@ public final class OrderedCommitCoordinator {
                             && scan.priceSequence() == continuation.priceSequence()
                             && scan.lastUserId() == continuation.lastUserId()) {
                         beforeRiskRevision = owner.runtimeState().revision();
-                        if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) {
-                            riskWork = new RiskScanCoordinator(batch.maxRiskScanUsers(), owner.positionUserIndex(),
-                                    owner.runtimeState(), owner.identities());
-                        } else {
-                            completedRiskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(batch.maxRiskScanUsers(),
-                                    owner.positionUserIndex(), owner.runtimeState(), owner.identities());
-                            if (completedRiskWork > 0) owner.runtimeState().acceptChangedUserIds(/* 当前实际变化用户，用于补充其账户 Lane 回执位 */ userId ->
-                                    pending.includeControlLanes(owner.matchingAdapter().topology().accountLaneMask(userId),
-                                            validAccountLaneMask()));
-                            if (owner.runtimeState().revision() != beforeRiskRevision) publication.request();
-                        }
+                        riskWork = new RiskScanCoordinator(batch.maxRiskScanUsers(), owner.positionUserIndex(),
+                                owner.runtimeState(), owner.identities());
                     }
                 }
                 if (riskWork != null) {
@@ -926,8 +896,7 @@ public final class OrderedCommitCoordinator {
                 return true;
             }
         };
-        if (owner.runtimeState().systemLedgerStarted() || owner.runtimeState().asynchronousCommands()) pending.deferControl(work);
-        else if (!work.getAsBoolean()) throw new IllegalStateException("synchronous liquidation batch suspended");
+        pending.deferControl(work);
     }
 
     /**

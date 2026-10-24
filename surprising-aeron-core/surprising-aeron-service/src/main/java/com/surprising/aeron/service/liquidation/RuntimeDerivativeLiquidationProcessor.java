@@ -35,22 +35,6 @@ import lombok.NoArgsConstructor;
 public final class RuntimeDerivativeLiquidationProcessor {
 
     /**
-     * 在账本线程尚未启动的同步运行环境执行最终强平账户步骤；账本已启动时要求改用异步续步。
-     * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
-     * @param canceledOrders Matcher 已完成的撤单回执集合，账户步骤据此解除源用户订单和资金冻结
-     * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-     * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
-     */
-    public static TradingAccountRuntime applyExecutionRuntime(ExecuteLiquidationCommand command,
-                                                            Collection<CancellationOrder> canceledOrders,
-                                                            TradingAccountRuntime runtime,
-                                                            RuntimeIdentityRegistry identities) {
-        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active liquidation requires its asynchronous continuation");
-        execute(null, command, canceledOrders, 0, runtime, identities, false);
-        return runtime;
-    }
-
-    /**
      * 新建或复用已经可回收的单笔强平续步，保留校验及账户步骤对象供命令槽复用，并派发目标账户 Lane。
      * @param reuse 命令槽上一次可复用的单笔执行续步，null 或尚不可回收时重新创建
      * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
@@ -62,7 +46,16 @@ public final class RuntimeDerivativeLiquidationProcessor {
     public static ExecutionWork beginExecution(ExecutionWork reuse, ExecuteLiquidationCommand command,
             Collection<CancellationOrder> canceledOrders, long nextCursorOrderId,
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        return execute(reuse, command, canceledOrders, nextCursorOrderId, runtime, identities, true);
+        if (command == null || runtime == null || identities == null || nextCursorOrderId < 0
+                || !runtime.productLine().isDerivative()) {
+            throw new IllegalArgumentException("invalid liquidation account stage");
+        }
+        runtime.assertOwner();
+        // 当前命令新建或复用的单笔强平续步，准备后派发源账户 Lane。
+        ExecutionWork work = reuse == null || !reuse.reusable() ? new ExecutionWork() : reuse;
+        work.prepare(command, canceledOrders, nextCursorOrderId, runtime, identities);
+        runtime.dispatchControlLanes(1L << work.laneId, work);
+        return work;
     }
 
     /**
@@ -525,38 +518,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     /**
-     * Owner 校验衍生品输入，准备可复用的单笔续步；异步时派发所属 Lane 后返回，同步时释放 Owner 账户访问权、执行账户变更并应用完成回执。
-     * @param reuse 命令槽上一次可复用的单笔执行续步，null 或尚不可回收时重新创建
-     * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
-     * @param canceledOrders Matcher 已完成的撤单回执集合，账户步骤据此解除源用户订单和资金冻结
-     * @param nextCursorOrderId 本批后仍待撤的下一订单编号，0 表示已经到最终强平执行阶段
-     * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-     * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
-     * @param asynchronous 是否仅派发账户步骤并返回续步，交给 Owner 后续轮询账本完成
-     */
-    private static ExecutionWork execute(ExecutionWork reuse, ExecuteLiquidationCommand command,
-            Collection<CancellationOrder> canceledOrders, long nextCursorOrderId,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
-        if (command == null || runtime == null || identities == null || nextCursorOrderId < 0
-                || !runtime.productLine().isDerivative()) {
-            throw new IllegalArgumentException("invalid liquidation account stage");
-        }
-        runtime.assertOwner();
-        // 当前命令新建或复用的单笔强平续步，准备后派发源账户 Lane。
-        ExecutionWork work = reuse == null || !reuse.reusable() ? new ExecutionWork() : reuse;
-        work.prepare(command, canceledOrders, nextCursorOrderId, runtime, identities);
-        if (asynchronous) {
-            runtime.dispatchControlLanes(1L << work.laneId, work);
-            return work;
-        }
-        runtime.releaseOwnerLaneAccess();
-        // 同步账户执行返回的各 Lane 结果，按本笔 Lane 下标取资金回执。
-        Object[] results = runtime.executeLaneMutations(1L << work.laneId, 1, work);
-        work.finish(results[work.laneId]);
-        return null;
-    }
-
-    /**
      * 单笔强平命令槽的可复用续步：派发账户步骤，Owner 收集账户资金回执后派发账本，等账本完成才增加全局修订号。
      */
     public static final class ExecutionWork extends SystemLedgerCommand
@@ -648,17 +609,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         }
 
         /**
-         * 同步路径把账户回执交给统一完成步骤，登记账户变化、应用账本差额并推进全局修订号，避免重复完成。
-         * @param result 同步账户步骤返回的资金差额回执，可能为空以表示没有最终现金结算
-         */
-        private void finish(Object result) {
-            if (done) return;
-            finishExecution(runtime, stage.userId, stage.assetId, stage.positionKey,
-                    (RuntimeTreasuryDelta) result, stage.canceledCount);
-            done = true;
-        }
-
-        /**
          * 命令槽回收时释放本次命令、撤单集合和身份表引用，保留续步及账户结果供下一条命令复用。
          */
         public void clearReferences() {
@@ -668,24 +618,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
             nextCursorOrderId = 0;
             done = false;
         }
-    }
-
-    /**
-     * 同步完成时，有资金差额才登记账户结算变化并记总账；不论是否有资金回执，都按本笔是否含撤单推进相应全局修订号。
-     * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-     * @param userId 这笔强平所属的源账户用户编号
-     * @param assetId 本笔账户步骤的结算资产整数编号，仅最终持仓结算时使用
-     * @param positionKey 源强平目标持仓腿的运行时整数键，0 表示尚未定位到有效持仓
-     * @param treasuryDelta 本笔强平需要应用到保险、亏空及清算总账的资金差额，可为空
-     * @param canceledCount 本笔实际应用的撤单数量，用于决定全局修订号增加一还是二
-     */
-    private static void finishExecution(TradingAccountRuntime runtime, long userId, int assetId,
-            long positionKey, RuntimeTreasuryDelta treasuryDelta, int canceledCount) {
-        if (treasuryDelta != null) {
-            runtime.recordUserSettlementChanges(userId, assetId, positionKey);
-            treasuryDelta.apply(runtime.treasury());
-        }
-        runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), canceledCount == 0 ? 1 : 2));
     }
 
     /**
@@ -764,24 +696,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         treasuryDelta.addDeficit(settleAssetId, uncovered);
         treasuryDelta.addClearing(settleAssetId, uncovered);
         return treasuryDelta;
-    }
-
-    /**
-     * 要求下一撤单编号为正，把本批已撤订单交账户步骤解冻并转为 ORDERED 继续状态，返回原运行时。
-     * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
-     * @param canceledOrders Matcher 已完成的撤单回执集合，账户步骤据此解除源用户订单和资金冻结
-     * @param nextCursorOrderId 本批后仍待撤的下一订单编号，此继续撤单入口要求为正数
-     * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-     * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
-     */
-    public static TradingAccountRuntime applyCancellationAdvanceRuntime(ExecuteLiquidationCommand command,
-                                                                      Collection<CancellationOrder> canceledOrders,
-                                                                      long nextCursorOrderId,
-                                                                      TradingAccountRuntime runtime,
-                                                                      RuntimeIdentityRegistry identities) {
-        if (nextCursorOrderId <= 0) throw new IllegalArgumentException("invalid liquidation cancellation cursor");
-        execute(null, command, canceledOrders, nextCursorOrderId, runtime, identities, false);
-        return runtime;
     }
 
     /**

@@ -11,7 +11,7 @@ import static com.surprising.aeron.service.funding.RuntimePerpetualFundingProces
  */
 public final class RuntimePerpetualFundingFixture {
     /**
-     * 校验基础输入，把旧状态投影成独立运行时；未传用户索引时使用旧状态用户集合，再调用账本未激活的生产同步资金费入口。
+     * 校验基础输入，把旧状态投影成独立运行时；未传用户索引时使用旧状态用户集合，再推进实际资金费工作；冷投影不启动账户或账本线程。
      * @param before 用于投影独立运行时的旧交易状态
      * @param command 本次资金费请求
      * @param indexedUserIds 可选的递增用户来源，为空时取旧状态用户集合
@@ -28,5 +28,14 @@ public final class RuntimePerpetualFundingFixture {
         // 本次模拟使用的用户索引来源。
         Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
         return applyRuntime(command, users, runtime, identities);
+    }
+
+    /** 在测试拥有的运行时推进真实资金费工作，返回原计算结果。 */
+    public static FundingResult applyRuntime(ApplyFundingCommand command, Iterable<Long> userIds,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+        var work = com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor.prepare(
+                null, command, userIds, runtime, identities);
+        com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work::poll);
+        return work.result();
     }
 }

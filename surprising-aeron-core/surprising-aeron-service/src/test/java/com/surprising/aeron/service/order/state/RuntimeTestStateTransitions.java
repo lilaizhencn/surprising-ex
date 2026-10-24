@@ -1,5 +1,11 @@
 package com.surprising.aeron.service.order.state;
 
+import com.surprising.aeron.service.core.RuntimeDerivativeLiquidationFixture;
+
+import com.surprising.aeron.service.core.RuntimeLifecycleSettlementFixture;
+
+import com.surprising.aeron.service.core.RuntimePerpetualFundingFixture;
+
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
@@ -27,14 +33,11 @@ import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.account.RuntimeAccountStateTransitions;
-import com.surprising.aeron.service.adl.RuntimeAdlExecution;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
-import com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor;
-import com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution;
 import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
@@ -43,7 +46,6 @@ import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchFixture;
 import com.surprising.aeron.service.settlement.RuntimeSpotMatchFixture;
-import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlement;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions;
@@ -311,25 +313,23 @@ public final class RuntimeTestStateTransitions {
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      * @param userIds 本次资金费或生命周期页选择的用户集合，null 交给生产入口采用其默认规则
-     * @param chunkCommandId 当前分页命令的幂等 UUID，null 交给生产入口处理默认标识
      */
     public SettlementApplication settleInstrumentWithProgress(TradingCoreState before,
                                                         SettleInstrumentCommand command,
-                                                        Iterable<Long> userIds, UUID chunkCommandId) {
-        return settleInstrumentWithProgress(before, command, userIds, chunkCommandId, null);
+                                                        Iterable<Long> userIds) {
+        return settleInstrumentWithProgress(before, command, userIds, null);
     }
 
     /**
-     * 在冷投影中调用生产生命周期结算，传入用户、分块 UUID 和可选活动索引，物化后状态并保留实际进度。
+     * 在冷投影中调用生产生命周期结算，传入用户、当前页和可选活动索引，物化后状态并保留实际进度。
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      * @param userIds 本次资金费或生命周期页选择的用户集合，null 交给生产入口采用其默认规则
-     * @param chunkCommandId 当前分页命令的幂等 UUID，null 交给生产入口处理默认标识
      * @param activeOrders 生命周期结算可选的活动订单索引，原生产入口负责解释 null
      */
     public SettlementApplication settleInstrumentWithProgress(TradingCoreState before,
                                                         SettleInstrumentCommand command,
-                                                        Iterable<Long> userIds, UUID chunkCommandId,
+                                                        Iterable<Long> userIds,
                                                         ActiveOrderIndex activeOrders) {
         // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -338,7 +338,6 @@ public final class RuntimeTestStateTransitions {
             var progress = RuntimeTestStateTransitions.applyLifecycleSettlement(before,
                     command,
                     userIds,
-                    chunkCommandId,
                     activeOrders,
                     runtime,
                     identities);
@@ -352,7 +351,7 @@ public final class RuntimeTestStateTransitions {
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      */
     public TradingCoreState settleInstrument(TradingCoreState before, SettleInstrumentCommand command) {
-        return settleInstrumentWithProgress(before, command, null, null, null).state();
+        return settleInstrumentWithProgress(before, command, null, null).state();
     }
 
     /**
@@ -567,7 +566,7 @@ public final class RuntimeTestStateTransitions {
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
     public static CoreSettlementProgressView applyLifecycleSettlement(TradingCoreState before, SettleInstrumentCommand command,
-                                                   Iterable<Long> indexedUserIds, UUID chunkCommandId,
+                                                   Iterable<Long> indexedUserIds,
                                                    ActiveOrderIndex activeOrderIndex, TradingAccountRuntime runtime,
                                                    RuntimeIdentityRegistry identities) {
         if (before == null || command == null || runtime == null || identities == null) {
@@ -577,7 +576,7 @@ public final class RuntimeTestStateTransitions {
         Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
         // 本次使用的活动订单索引；未传时从旧状态构建。
         ActiveOrderIndex orders = activeOrderIndex == null ? new ActiveOrderIndex(before) : activeOrderIndex;
-        return RuntimeLifecycleSettlement.applyRuntime(command, users, chunkCommandId, orders, runtime, identities);
+        return RuntimeLifecycleSettlementFixture.applyRuntime(command, users, orders, runtime, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
@@ -589,7 +588,7 @@ public final class RuntimeTestStateTransitions {
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
-        return RuntimeLiquidationResolution.applyRuntime(command, runtime, identities, before.riskState().liquidations().keySet());
+        return RuntimeDerivativeLiquidationFixture.applyResolution(command, runtime, identities, before.riskState().liquidations().keySet());
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
@@ -602,7 +601,7 @@ public final class RuntimeTestStateTransitions {
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid perpetual liquidation apply");
         }
-        return RuntimeDerivativeLiquidationProcessor.applyExecutionRuntime(command, canceledOrders, runtime, identities);
+        return RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(command, canceledOrders, runtime, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
@@ -616,7 +615,7 @@ public final class RuntimeTestStateTransitions {
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid liquidation cancellation apply");
         }
-        return RuntimeDerivativeLiquidationProcessor.applyCancellationAdvanceRuntime(command, canceledOrders, nextCursorOrderId, runtime, identities);
+        return RuntimeDerivativeLiquidationFixture.applyCancellationAdvanceRuntime(command, canceledOrders, nextCursorOrderId, runtime, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
@@ -627,7 +626,7 @@ public final class RuntimeTestStateTransitions {
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid ADL apply");
         }
-        return RuntimeAdlExecution.applyRuntime(command, runtime, identities);
+        return RuntimeDerivativeLiquidationFixture.applyAdl(command, runtime, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
@@ -665,7 +664,7 @@ public final class RuntimeTestStateTransitions {
         }
         // 未传用户索引时使用旧状态用户集合，否则沿用调用方的索引。
         Iterable<Long> users = indexedUserIds == null ? before.users().keySet() : indexedUserIds;
-        return RuntimePerpetualFundingProcessor.applyRuntime(command, users, runtime, identities);
+        return RuntimePerpetualFundingFixture.applyRuntime(command, users, runtime, identities);
     }
 
     /** 冷状态强平使用的同一业务比较顺序，不使用集合遍历或线程完成顺序。 */

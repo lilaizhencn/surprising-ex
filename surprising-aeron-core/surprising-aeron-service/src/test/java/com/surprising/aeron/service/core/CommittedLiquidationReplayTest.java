@@ -25,7 +25,7 @@ class CommittedLiquidationReplayTest {
                         TradingCommandCodec.encodeRegisterInstrument(new RegisterInstrumentCommand(
                                 "1", "BTC", "USDT", "USDT", 1, 1, 1,
                                 new CoreInstrumentRiskLimits(100_000, 10_000_000, Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                                        List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, 10_000_000, 100_000, 50_000))),
+                                        List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, 10_000_000, 100_000, 90_000))),
                                 0, 0, 0, -1, 0), LINE));
                 send(replay, reference, CoreMessageType.APPLY_MARK_PRICE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), LINE));
@@ -40,11 +40,12 @@ class CommittedLiquidationReplayTest {
                 }
                 var changes = new ArrayList<LiquidationChange>();
                 send(replay, reference, CoreMessageType.APPLY_MARK_PRICE, 0,
-                        TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 1, 2, TIME + sequence + 1), LINE));
+                        TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 95, 2, TIME + sequence + 1), LINE));
                 changes.addAll(replay.liquidationChanges());
                 for (int i = 0; changes.isEmpty() && i < 8; i++) {
                     send(replay, reference, CoreMessageType.CONTINUE_RISK_SCAN, 0,
-                            TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(4096)));
+                            TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(
+                                    reference.runtimeState().riskScanControl().scanBatchSize())));
                     changes.addAll(replay.liquidationChanges());
                 }
                 planned = changes.stream().filter(c -> c.state().userId() == 2).findFirst().orElseThrow();
@@ -60,7 +61,9 @@ class CommittedLiquidationReplayTest {
                 byte[] bytes = CoreMessageCodec.encode(command);
                 long position = sequence * 4096, time = TIME + sequence;
                 restored.apply(bytes, time, position);
-                CoreTestCompletion.applyAsynchronously(reference, command, time, position);
+                var response = CoreTestCompletion.applyAsynchronously(reference, command, time, position);
+                assertThat(response.commandStatus()).as("liquidation execution: %s", response.resultCode())
+                        .isEqualTo(ResponseStatus.APPLIED);
                 assertThat(restored.businessHash()).isEqualTo(reference.snapshotBusinessStateHash());
                 var change = restored.liquidationChanges().stream()
                         .filter(c -> c.state().liquidationId() == planned.state().liquidationId()).findFirst().orElseThrow();

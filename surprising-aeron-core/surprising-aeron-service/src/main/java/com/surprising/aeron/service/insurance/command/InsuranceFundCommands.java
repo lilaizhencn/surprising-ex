@@ -21,18 +21,14 @@ public final class InsuranceFundCommands {
     }
 
     /**
-     * 异步时准备可复用保险基金调整并登记控制续步，冷路径直接应用原财库转换；两条路径都请求发布，最终成功仍等待控制完成。
+     * 准备可复用保险基金调整并登记控制续步，请求发布，最终成功等待控制完成。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
      */
     public void executeAdjustInsuranceFund(CoreMessage message) {
         // 本次解出的保险基金资产和调整数量
         var command = TradingCommandCodec.decodeAdjustInsuranceFund(message.payloadUnsafe());
-        if (owner.asynchronousCommands()) {
-            owner.directCommand.deferControl(RuntimeInsuranceFundStateTransitions.prepare(
-                    owner.runtimeState(), owner.identities(), command));
-        } else {
-            RuntimeInsuranceFundStateTransitions.adjust(owner.runtimeState(), owner.identities(), command);
-        }
+        owner.directCommand.deferControl(RuntimeInsuranceFundStateTransitions.prepare(
+                owner.runtimeState(), owner.identities(), command));
         owner.requestCommitPublication();
     }
 }

@@ -1579,8 +1579,8 @@ class TradingAccountRuntimeTest {
             assertThat(state.ownerLaneAccess()).isFalse();
             // 通知两 Lane 已执行的门闩，或检查被拒绝内联回调没有执行的原子计数
             var executed = new java.util.concurrent.atomic.AtomicInteger();
-            assertThatThrownBy(() -> state.executeLifecycleSettlements(
-                    java.util.List.of(203L, 8L), Long::longValue, /* 本不允许内联调用的生命周期回调参数，若执行会错误增加计数 */ laneId -> executed.incrementAndGet()))
+            assertThatThrownBy(() -> state.executeLaneMutations(
+                    state.topology().accountLaneMask(203) | state.topology().accountLaneMask(8), 2, /* 本不允许内联调用的生命周期回调参数，若执行会错误增加计数 */ laneId -> executed.incrementAndGet()))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
             assertThatThrownBy(() -> state.executeUserSettlement(8, executed::incrementAndGet))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");

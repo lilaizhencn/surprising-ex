@@ -12,7 +12,6 @@ import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import java.util.Collection;
 import java.util.List;
-import static com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.*;
 
 /**
  * 强平、保险补亏和 ADL 一致性测试的独立运行时辅助器，先投影业务状态，再调用对应真实账户及账本步骤，返回结果供测试比对。
@@ -85,7 +84,7 @@ public final class RuntimeDerivativeLiquidationFixture {
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        return RuntimeLiquidationResolution.applyRuntime(command, runtime, identities,
+        return RuntimeDerivativeLiquidationFixture.applyResolution(command, runtime, identities,
                 before.riskState().liquidations().keySet());
     }
 
@@ -102,6 +101,40 @@ public final class RuntimeDerivativeLiquidationFixture {
         }
         // 从本次业务状态投影的独立运行时，接收真实强平、补亏或 ADL 变更。
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
-        return RuntimeAdlExecution.applyRuntime(command, runtime, identities);
+        return RuntimeDerivativeLiquidationFixture.applyAdl(command, runtime, identities);
+    }
+
+    /** 在测试侧推进实际强平工作，账户和账本计算仍由原生产实现完成。 */
+    public static TradingAccountRuntime applyExecutionRuntime(ExecuteLiquidationCommand command,
+            Collection<com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder> orders,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+        var work = com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.beginExecution(
+                null, command, orders, 0, runtime, identities);
+        com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work);
+        return runtime;
+    }
+
+    public static TradingAccountRuntime applyCancellationAdvanceRuntime(ExecuteLiquidationCommand command,
+            Collection<com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder> orders,
+            long nextCursorOrderId, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+        if (nextCursorOrderId <= 0) throw new IllegalArgumentException("invalid liquidation cancellation cursor");
+        var work = com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.beginExecution(
+                null, command, orders, nextCursorOrderId, runtime, identities);
+        com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work);
+        return runtime;
+    }
+
+    public static TradingAccountRuntime applyResolution(ResolveLiquidationCommand command,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
+        var work = RuntimeLiquidationResolution.begin(null, command, runtime, identities, candidateIds);
+        com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work);
+        return runtime;
+    }
+
+    public static TradingAccountRuntime applyAdl(ExecuteAdlCommand command,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+        var work = RuntimeAdlExecution.begin(null, command, runtime, identities);
+        com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work);
+        return runtime;
     }
 }

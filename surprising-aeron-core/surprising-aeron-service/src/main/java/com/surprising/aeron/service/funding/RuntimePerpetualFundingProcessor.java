@@ -25,40 +25,9 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
-/** 永续合约资金费的账户与财库处理。固定本轮标记价和价格序号后，按全局用户页分给账户 Lane；用户应付金额只扣可用余额，扣不到的部分从持仓收付明细中依次减免。账本记录实际收付的反向差额与分页进度，Owner 最后推进修订号。 构造约定：静态业务入口不创建实例；每页状态保存在 FundingWork。 */
+/** 永续合约资金费的账户与财库处理。固定本轮标记价后，按全局用户页分给账户 Lane；用户应付金额只扣可用余额，扣不到的部分从持仓收付明细中依次减免。账本记录实际收付的反向差额与分页进度，Owner 最后推进修订号。 构造约定：静态业务入口不创建实例；每页状态保存在 FundingWork。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class RuntimePerpetualFundingProcessor {
-
-    /**
-     * 仅在 System Ledger 未激活时准备并同步执行各 Lane 资金费，合并财库和结果。在线账本已激活时拒绝此入口，改由 FundingWork.poll 分次推进。
-     * @param command 资金费结算编号、费率及用户分页参数
-     * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
-     * @param runtime 产品线和账户数据的原权威运行时
-     * @param identities 币对及结算资产内部编号映射
-     */
-    public static FundingResult applyRuntime(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
-                                             TradingAccountRuntime runtime,
-                                             RuntimeIdentityRegistry identities) {
-        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active funding requires its asynchronous continuation");
-        // 当前页同步资金费工作对象。
-        FundingWork work = prepare(command, indexedUserIds, runtime, identities);
-        // 同步执行各账户 Lane 后取得的回执数组。
-        Object[] results = runtime.executeLifecycleSettlements(work.laneMask, work.userPage.userIds().size(),
-                work::applyLane);
-        return work.finish(results);
-    }
-
-    /**
-     * 校验当前资金费请求并创建工作对象，尚不表示账户与账本已经结算完成。
-     * @param command 资金费结算编号、费率及用户分页参数
-     * @param indexedUserIds 非空、按全局用户编号递增且不重复的索引来源
-     * @param runtime 产品线和账户数据的原权威运行时
-     * @param identities 币对及结算资产内部编号映射
-     */
-    public static FundingWork prepare(ApplyFundingCommand command, Iterable<Long> indexedUserIds,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        return prepare(null, command, indexedUserIds, runtime, identities);
-    }
 
     /**
      * 在 Owner 上核对永续产品、币对维护状态、标记价、递增结算编号及分页参数。续页沿用进度中固定的标记价，并要求同一币对配置对象、费率和游标；可回收对象优先重置复用。与到期结算不同，已完成的同编号资金费也会按过期编号拒绝。
@@ -281,7 +250,7 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         /**
-         * 读取异步 poll 已保存的页结果，尚未完成时拒绝；同步 finish 的返回值由同步调用者直接使用。
+         * 读取 poll 已保存的页结果，尚未完成时拒绝。
          */
         public FundingResult result() {
             if (result == null) throw new IllegalStateException("funding has not completed");
@@ -297,16 +266,6 @@ public final class RuntimePerpetualFundingProcessor {
             if (!(value instanceof LaneFundingResult /* 某个账户 Lane 的实际收付与财库差额回执。 */ receipt)) return;
             laneResults[lane] = receipt;
             for (long /* 当前正在计算或登记余额发布变化的用户编号。 */ userId : receipt.changedUserIds()) runtime.markBalanceChanged(userId);
-        }
-
-        /**
-         * 供账本未激活的同步入口收齐账户回执，直接应用财库后构造返回结果；不在此给异步 result 字段赋值。
-         * @param results 账本未激活时同步收齐的各 Lane 结果数组
-         */
-        private FundingResult finish(Object[] results) {
-            for (/* 当前用户所属账户 Lane 或回执数组的下标。 */ int lane = 0; lane < results.length; lane++) collectAccountReceipt(lane, results[lane]);
-            applyLedger(runtime.treasury());
-            return finishOwnerResult();
         }
 
         /**

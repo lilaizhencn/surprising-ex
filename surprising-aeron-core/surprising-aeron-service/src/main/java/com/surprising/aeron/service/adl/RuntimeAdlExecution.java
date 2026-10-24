@@ -23,20 +23,6 @@ import lombok.NoArgsConstructor;
 public final class RuntimeAdlExecution {
 
     /**
-     * 在账本线程尚未启动的同步运行环境执行 ADL；账本已经启动时拒绝同步调用，要求使用异步续步。
-     * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
-     */
-    public static TradingAccountRuntime applyRuntime(ExecuteAdlCommand command,
-                                                   TradingAccountRuntime runtime,
-                                                   RuntimeIdentityRegistry identities) {
-        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active ADL requires its asynchronous continuation");
-        adl(null, command, runtime, identities, false);
-        return runtime;
-    }
-
-    /**
      * 优先复用已经可回收的命令续步及其整数资金差额缓冲，初始化新 ADL 输入并返回给 Owner 轮询。
      * @param reuse 上次已完成、可再次使用的 ADL 续步，null 或尚不可复用时新建
      * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
@@ -45,96 +31,32 @@ public final class RuntimeAdlExecution {
      */
     public static AdlWork begin(AdlWork reuse, ExecuteAdlCommand command,
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        return adl(reuse, command, runtime, identities, true);
-    }
-
-    /**
-     * 校验衍生品及 Owner 权限，定位强平、标记价和目标仓位；异步时先让源账户 Lane 读取并校验强平，同步时依次执行目标和源账户，再应用账本回执。
-     * @param reuse 上次已完成、可再次使用的 ADL 续步，null 或尚不可复用时新建
-     * @param command 指定亏空强平、盈利目标、预期持仓版本、减仓数量和覆盖金额的 ADL 命令
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
-     * @param asynchronous 是否只派发跨线程工作并返回可轮询续步；同步路径在本次调用内完成
-     */
-    private static AdlWork adl(AdlWork reuse, ExecuteAdlCommand command,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL apply");
         }
         runtime.assertOwner();
-        if (asynchronous) {
-            // Owner 可读的强平路由，用来定位源用户和合约，不在 Owner 直接遍历账户表。
-            var route = runtime.liquidationRoute(command.liquidationId());
-            if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
-            // 源强平对应的合约配置，检查产品并为目标平仓计算提供金额参数。
-            CoreInstrument instrument = requireInstrument(runtime, route.instrumentId());
-            // 源强平合约的整数编号，用于检查行情和资金费进度。
-            int symbolId = identities.symbolId(route.instrumentId());
-            // 与 ADL 命令要求序号一致的当前行情，后续目标平仓估值固定使用它。
-            MarkPriceRuntime mark = runtime.markPrice(symbolId);
-            if (mark == null || mark.priceSequence() != command.markPriceSequence())
-                throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
-            // 盈利目标用户指定持仓腿的整数键，目标 Lane 稍后核对持仓事实。
-            long positionKey = identities.positionKey(command.targetUserId(), instrument, command.positionSide());
-            // 新建或已可复用的 ADL 命令续步，保存本次输入和跨线程进度。
-            AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
-            work.prepare(command, runtime, null, instrument, mark, positionKey,
-                    identities.assetId(instrument.settleAsset()), runtime.topology().accountLaneId(command.targetUserId()));
-            work.fundingInProgress = runtime.treasury().fundingProgress(symbolId) != null;
-            work.sourceLane = runtime.topology().accountLaneId(route.userId());
-            work.capturingLiquidation = true;
-            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(route.userId()), work);
-            return work;
-        }
-        // 同步路径直接取得的源强平记录，必须处于需要 ADL 补亏的状态。
-        LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
-        if (liquidation == null) {
-            throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
-        }
-        if (liquidation.status() != CoreLiquidationState.Status.ADL_REQUIRED) {
-            throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "ADL requires ADL state");
-        }
-        if (runtime.treasury().fundingProgress(liquidation.symbolId()) != null) {
-            throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
-        }
-        if (!identities.instrumentId(liquidation.symbolId()).equals(command.instrumentId())
-                || command.targetUserId() == liquidation.userId()
-                || command.coveredUnits() > liquidation.deficitUnits()) {
-            throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
-        }
+        // Owner 可读的强平路由，用来定位源用户和合约，不在 Owner 直接遍历账户表。
+        var route = runtime.liquidationRoute(command.liquidationId());
+        if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
         // 源强平对应的合约配置，检查产品并为目标平仓计算提供金额参数。
-        CoreInstrument instrument = requireInstrument(runtime, identities.instrumentId(liquidation.symbolId()));
+        CoreInstrument instrument = requireInstrument(runtime, route.instrumentId());
+        // 源强平合约的整数编号，用于检查行情和资金费进度。
+        int symbolId = identities.symbolId(route.instrumentId());
         // 与 ADL 命令要求序号一致的当前行情，后续目标平仓估值固定使用它。
-        MarkPriceRuntime mark = runtime.markPrice(liquidation.symbolId());
-        if (mark == null || mark.priceSequence() != command.markPriceSequence()) {
+        MarkPriceRuntime mark = runtime.markPrice(symbolId);
+        if (mark == null || mark.priceSequence() != command.markPriceSequence())
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
-        }
-
         // 盈利目标用户指定持仓腿的整数键，目标 Lane 稍后核对持仓事实。
-        long positionKey = identities.positionKey(
-                command.targetUserId(), instrument, command.positionSide());
-        // 源合约结算资产的整数编号，目标现金和账本都按这项资产计算。
-        int settleAssetId = identities.assetId(instrument.settleAsset());
-        // 盈利目标用户的 Lane 编号，先在这里执行持仓及余额变化。
-        int targetLane = runtime.topology().accountLaneId(command.targetUserId());
-        // 亏空来源用户的 Lane 编号，与目标不同时还要单独更新强平记录。
-        int sourceLane = runtime.topology().accountLaneId(liquidation.userId());
+        long positionKey = identities.positionKey(command.targetUserId(), instrument, command.positionSide());
         // 新建或已可复用的 ADL 命令续步，保存本次输入和跨线程进度。
         AdlWork work = reuse == null || !reuse.reusable() ? new AdlWork() : reuse;
-        work.prepare(command, runtime, liquidation, instrument, mark, positionKey,
-                settleAssetId, targetLane);
-        work.sourceLane = sourceLane;
-        runtime.releaseOwnerLaneAccess();
-        // 同步目标账户工作返回的各 Lane 结果，按目标 Lane 下标取得资金回执。
-        Object[] results = runtime.executeLaneMutations(1L << targetLane, 1, work);
-        // 目标 Lane 的资金回执，在源记录更新后由同步完成步骤应用到总账。
-        Object targetResult = results[targetLane];
-        if (targetLane != sourceLane) {
-            work.liquidationLaneDispatched = true;
-            runtime.executeLaneMutations(1L << sourceLane, 1, work);
-        }
-        work.finish(targetResult);
-        return null;
+        work.prepare(command, runtime, null, instrument, mark, positionKey,
+                identities.assetId(instrument.settleAsset()), runtime.topology().accountLaneId(command.targetUserId()));
+        work.fundingInProgress = runtime.treasury().fundingProgress(symbolId) != null;
+        work.sourceLane = runtime.topology().accountLaneId(route.userId());
+        work.capturingLiquidation = true;
+        runtime.dispatchControlLanes(runtime.topology().accountLaneMask(route.userId()), work);
+        return work;
     }
 
     /**
@@ -280,17 +202,6 @@ public final class RuntimeAdlExecution {
          */
         @Override protected void applyLedger(TreasuryRuntime ledger) { targetDelta.apply(ledger); }
 
-        /**
-         * 同步路径登记目标账户变化，将有效资金回执应用到总账，再增加全局修订号并标记完成。
-         * @param result 同步账户 Lane 返回的资金差额回执，完成时应用到账本
-         */
-        private void finish(Object result) {
-            if (done) return;
-            runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
-            if (result instanceof RuntimeTreasuryDelta /* 同步结果类型匹配后取得的有效资金差额，直接应用到总账。 */ delta) delta.apply(runtime.treasury());
-            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-            done = true;
-        }
     }
 
     /**

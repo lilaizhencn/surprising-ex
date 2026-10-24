@@ -161,39 +161,6 @@ public final class RuntimeDerivativeRiskProcessor {
     }
 
     /**
-     * Owner 在一个共享预算内轮转待扫币对，每次最多给一个币对 8 项工作；空币对访问也扣预算，防止持续刷新或空扫描形成无限循环。
-     * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
-     * @param positionUsers 按币对和 Lane 定位有持仓用户的索引，避免为每轮风险扫描遍历全体账户
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    public static int continueRiskBudget(int maxWork, PositionUserIndex positionUsers,
-                                         TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (runtime == null || identities == null || positionUsers == null || maxWork <= 0 || maxWork > 4096) {
-            throw new IllegalArgumentException("invalid risk scan budget");
-        }
-        runtime.assertOwner();
-        if (!runtime.riskScanControl().enabled()) return 0;
-        // 调用上限与配置自适应预算中较小的总工作量，本次跨币对共用。
-        int budget = Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
-                        runtime.incompleteRiskScanCount()));
-        // 共享预算尚未消耗的部分，每轮至少扣一个单位。
-        int remaining = budget;
-        while (remaining > 0) {
-            // 本轮按公平调度选中的待扫币对，没有后续扫描时退出。
-            RiskScanRuntime selected = runtime.firstRiskIncompleteScan();
-            if (selected == null) break;
-            // 每片结束就轮转币对，避免一个繁忙币对用完整条命令预算。
-            // 用户和持仓游标保存未完成工作；只有一个币对时可以连续获得片段。
-            // 该币对最多 8 项工作的一片实际消耗量，空访问按至少 1 项扣减。
-            int work = applyContinuationRuntime(Math.min(8, remaining), selected.symbolId(), positionUsers,
-                    runtime, identities);
-            remaining -= Math.max(1, work);
-        }
-        return budget - remaining;
-    }
-
-    /**
      * 要求当前运行时已经注册该币对，缺失时返回 INSTRUMENT_NOT_FOUND 业务拒绝。
      * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
      * @param instrumentId 对外的币对或合约编号，需要已注册到当前运行时

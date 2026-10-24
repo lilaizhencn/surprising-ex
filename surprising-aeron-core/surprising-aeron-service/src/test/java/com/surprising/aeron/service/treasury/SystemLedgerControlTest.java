@@ -9,6 +9,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.AdjustInsuranceFundCommand;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
 import com.surprising.aeron.service.core.LedgerControlTestSupport;
+import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -21,7 +22,7 @@ import static org.assertj.core.api.Assertions.*;
  */
 class SystemLedgerControlTest {
     /**
-     * 检查账本激活后 Owner 不能直接读写原保险余额，调整成功仍须等资金验证及范围关闭后才能复用，下一代同任务扣款一次并核对产品修订。
+     * 检查账本激活后 Owner 不能直接读写原保险余额，调整成功仍须等资金验证及范围关闭，下一笔独立任务扣款一次并核对产品修订。
      */
     @Test
     void insuranceBudgetAndMoneyAreOnlyReadAndWrittenByOriginalLedger() {
@@ -49,9 +50,9 @@ class SystemLedgerControlTest {
             LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 75L);
             assertThat(work.reusable()).isTrue();
-            // 同一个保险调整任务完全关闭后再次准备的新代次引用。
+            // 工厂为下一笔保险调整创建独立任务，原任务的财务范围此时已经关闭。
             var next = RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", -20));
-            assertThat(next).isSameAs(work);
+            assertThat(next).isNotSameAs(work);
             LedgerControlTestSupport.await(runtime, next);
             LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 55L);
@@ -157,7 +158,7 @@ class SystemLedgerControlTest {
                     /**
                      * 为本测试初始化既有财务控制范围，随后只执行保险预留阶段。
                      */
-                    InsuranceReservation() { initializeLedgerCommand(runtime); }
+                    InsuranceReservation(TradingAccountRuntime ownerRuntime) { initializeLedgerCommand(ownerRuntime); }
                     /**
                      * 在原账本内暂扣二十保险，保留前值供后续账户拒绝回滚。
                      * @param ledger 本测试业务阶段由账本线程独占的原 Treasury
@@ -173,7 +174,7 @@ class SystemLedgerControlTest {
                     boolean poll() { return ledgerCommandCompleted(); }
                 }
                 // 本用例局部类创建的未结束财务范围保险预留任务。
-                var reservation = new InsuranceReservation();
+                var reservation = new InsuranceReservation(runtime);
                 assertThat(runtime.dispatchLedgerCommand(reservation)).isTrue();
                 LedgerControlTestSupport.await(runtime, reservation::poll);
                 runtime.dispatchControlLanes(1, /* 占位任务或故意拒绝的控制回调收到的入参，本测试不读取其业务内容。 */ ignored -> { throw new CoreStateRejectedException("ACCOUNT_REJECTED", "account settlement rejected"); });
@@ -219,7 +220,7 @@ class SystemLedgerControlTest {
                     /**
                      * 为本测试准备一项使用原财务范围的账本更新任务。
                      */
-                    FinancialWork() { initializeLedgerCommand(runtime); }
+                    FinancialWork(TradingAccountRuntime ownerRuntime) { initializeLedgerCommand(ownerRuntime); }
                     /**
                      * 把费用改为十八并把资金费编号推进到三，用于检查后续原前值回滚。
                      * @param ledger 本测试业务阶段由账本线程独占的原 Treasury
@@ -231,7 +232,7 @@ class SystemLedgerControlTest {
                     boolean poll() { return ledgerCommandCompleted(); }
                 }
                 // 当前需要等待账本执行及范围关闭的控制任务。
-                var work = new FinancialWork();
+                var work = new FinancialWork(runtime);
                 assertThat(runtime.dispatchLedgerCommand(work)).isTrue();
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(original.fundingSettlement(symbol)).isEqualTo(3);

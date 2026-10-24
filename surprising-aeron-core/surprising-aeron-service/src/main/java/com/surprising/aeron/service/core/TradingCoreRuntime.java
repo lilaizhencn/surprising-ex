@@ -708,10 +708,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     public void requestCommitPublication() { commits.publication.request(); }
     /**
-     * 返回当前运行时是否正在异步命令作用域内。
-     */
-    public boolean asynchronousCommands() { return runtimeState.asynchronousCommands(); }
-    /**
      * 取得强平索引中的活动强平身份集合，供既有强平编排使用。
      */
     public Iterable<Long> activeLiquidationIds() { return factIndexes.liquidations().activeIds(); }

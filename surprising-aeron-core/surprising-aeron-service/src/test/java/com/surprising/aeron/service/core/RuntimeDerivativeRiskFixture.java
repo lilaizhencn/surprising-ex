@@ -51,4 +51,13 @@ public final class RuntimeDerivativeRiskFixture {
         applyContinuationRuntime(maxWork, indexedUserIds, runtime, identities);
         return runtime;
     }
+
+    /** 测试侧使用实际风险协调器和预算，不保留第二套续扫循环。 */
+    public static int continueRiskBudget(int maxWork,
+            com.surprising.aeron.service.core.index.PositionUserIndex positionUsers,
+            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
+        var work = new com.surprising.aeron.service.risk.RiskScanCoordinator(maxWork, positionUsers, runtime, identities);
+        com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work::poll);
+        return work.completedWork();
+    }
 }

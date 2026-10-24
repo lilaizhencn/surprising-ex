@@ -2,7 +2,6 @@ package com.surprising.aeron.service.position.command;
 
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 
 /**
@@ -21,7 +20,7 @@ public final class PositionCommands {
     }
 
     /**
-     * 解码单向或双向持仓模式；异步路径交给控制续步，冷路径仅在模式实际改变时请求发布。
+     * 解码单向或双向持仓模式，交给账户控制续步，实际变化后请求发布。
      * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
      */
     public void executeUpdatePositionMode(CoreMessage message) {
@@ -30,15 +29,11 @@ public final class PositionCommands {
         owner.resultBuilder.setSingleChangedUser(userId);
         // 本次解出的单向或双向持仓模式
         var command = TradingCommandCodec.decodeUpdatePositionMode(message.payloadUnsafe());
-        if (owner.asynchronousCommands()) {
-            owner.directCommand.deferPositionModeChange(userId, command);
-        } else if (DerivativeAccountCommandProcessor.updatePositionMode(owner.runtimeState(), userId, command)) {
-            owner.requestCommitPublication();
-        }
+        owner.directCommand.deferPositionModeChange(userId, command);
     }
 
     /**
-     * 解码持仓保证金增减；异步路径准备原控制续步，冷路径完成保证金转换后请求发布。具体资金和持仓校验留在账户处理器。
+     * 解码持仓保证金增减，准备所属账户的保证金控制续步。具体资金和持仓校验留在账户处理器。
      * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
      */
     public void executeAdjustPositionMargin(CoreMessage message) {
@@ -47,12 +42,6 @@ public final class PositionCommands {
         owner.resultBuilder.setSingleChangedUser(userId);
         // 本次解出的标的、保证金模式、持仓方向及保证金增减数量
         var command = TradingCommandCodec.decodeAdjustPositionMargin(message.payloadUnsafe());
-        if (owner.asynchronousCommands()) {
-            owner.directCommand.deferPositionMarginAdjustment(userId, command);
-        } else {
-            DerivativeAccountCommandProcessor.adjustPositionMargin(
-                    owner.runtimeState(), owner.identities(), userId, command);
-            owner.requestCommitPublication();
-        }
+        owner.directCommand.deferPositionMarginAdjustment(userId, command);
     }
 }

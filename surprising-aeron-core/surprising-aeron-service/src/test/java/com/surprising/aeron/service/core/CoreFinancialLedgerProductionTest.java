@@ -5,10 +5,7 @@ import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.adl.RuntimeAdlExecution;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor;
-import com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -72,7 +69,7 @@ class CoreFinancialLedgerProductionTest {
             var action = work.actions().getFirst();
             // 使用相同底层转换得到的冷对照状态，不是独立公式模型
             var expected = expected(core.tradingState(), (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
-                    RuntimeDerivativeLiquidationProcessor.applyExecutionRuntime(new ExecuteLiquidationCommand(
+                    RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(new ExecuteLiquidationCommand(
                             action.liquidationId(), action.triggerPriceSequence(), action.markPriceTicks(), 0),
                             List.of(), runtime, identities));
             // 本次工作查询或批次执行的协议结果
@@ -120,7 +117,7 @@ class CoreFinancialLedgerProductionTest {
             var execute = new ExecuteLiquidationCommand(planned.liquidationId(), 2, 1, 0);
             // 使用相同底层转换得到的冷对照状态，不是独立公式模型
             var expected = expected(core.tradingState(), (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
-                    RuntimeDerivativeLiquidationProcessor.applyExecutionRuntime(execute, List.of(), runtime, identities));
+                    RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(execute, List.of(), runtime, identities));
             // 执行前的账户所有权交接轮次，执行后要求不变
             long handoff = core.runtimeState.laneHandoffEpoch();
             appliedWithGuard(core, CoreMessageType.EXECUTE_LIQUIDATION, 0, TradingCommandCodec.encodeExecuteLiquidation(execute), TIME);
@@ -135,7 +132,7 @@ class CoreFinancialLedgerProductionTest {
             // 由保险承担25的强平处置命令
             var insurance = new ResolveLiquidationCommand(planned.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE, 25);
             expected = expected(expected, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
-                    RuntimeLiquidationResolution.applyRuntime(insurance, runtime, identities, List.of(planned.liquidationId())));
+                    RuntimeDerivativeLiquidationFixture.applyResolution(insurance, runtime, identities, List.of(planned.liquidationId())));
             appliedWithGuard(core, CoreMessageType.RESOLVE_LIQUIDATION, 0, TradingCommandCodec.encodeResolveLiquidation(insurance), TIME);
             assertThat(core.tradingState()).isEqualTo(expected);
             // 保险承担之后仍要求ADL的剩余强平状态
@@ -144,7 +141,7 @@ class CoreFinancialLedgerProductionTest {
             // 对剩余缺口执行ADL的原业务参数
             var adl = new ExecuteAdlCommand(planned.liquidationId(), 2, "1", CoreMarginMode.CROSS,
                     CorePositionSide.NET, -10, 100, 2, 10, residual.deficitUnits());
-            expected = expected(expected, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) -> RuntimeAdlExecution.applyRuntime(adl, runtime, identities));
+            expected = expected(expected, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) -> RuntimeDerivativeLiquidationFixture.applyAdl(adl, runtime, identities));
             appliedWithGuard(core, CoreMessageType.EXECUTE_ADL, 0, TradingCommandCodec.encodeExecuteAdl(adl), TIME);
             assertThat(core.tradingState()).isEqualTo(expected);
             assertThat(core.tradingState().users().values()).allSatisfy(/* 本轮准备资金、成交或检查的测试用户 */ user -> assertThat(user.positions().values()).allSatisfy(/* 当前断言的持仓视图，要求数量为零 */ position -> assertThat(position.signedQuantitySteps()).isZero()));
@@ -175,7 +172,7 @@ class CoreFinancialLedgerProductionTest {
             var opening = core.tradingState();
             // 使用相同底层转换得到的冷对照状态，不是独立公式模型
             var expected = expected(opening, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
-                    RuntimeTestStateTransitions.applyLifecycleSettlement(opening, settlement, null, null, null, runtime, identities));
+                    RuntimeTestStateTransitions.applyLifecycleSettlement(opening, settlement, null, null, runtime, identities));
             // 执行前的账户所有权交接轮次，执行后要求不变
             long handoff = core.runtimeState.laneHandoffEpoch();
             appliedWithGuard(core, CoreMessageType.SETTLE_INSTRUMENT, 0, TradingCommandCodec.encodeSettleInstrument(settlement), TIME + 2_000);

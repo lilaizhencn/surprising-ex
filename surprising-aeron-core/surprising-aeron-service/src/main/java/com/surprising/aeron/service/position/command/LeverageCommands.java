@@ -2,7 +2,6 @@ package com.surprising.aeron.service.position.command;
 
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 
 /**
@@ -21,7 +20,7 @@ public final class LeverageCommands {
     }
 
     /**
-     * 异步时准备杠杆控制续步；冷路径只有实际改变状态才请求发布。响应用户提示先于校验登记，不表示变更已成功。
+     * 准备杠杆控制续步，只有实际改变状态才请求发布。响应用户提示先于校验登记，不表示变更已成功。
      * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
      */
     public void executeUpdateLeverage(CoreMessage message) {
@@ -30,11 +29,6 @@ public final class LeverageCommands {
         owner.resultBuilder.setSingleChangedUser(userId);
         // 解码后的标的、保证金模式、目标杠杆及持仓重计要求
         var command = TradingCommandCodec.decodeUpdateLeverage(message.payloadUnsafe());
-        if (owner.asynchronousCommands()) {
-            owner.directCommand.deferLeverageChange(userId, command);
-        } else if (DerivativeAccountCommandProcessor.updateLeverage(
-                owner.runtimeState(), owner.identities(), userId, command)) {
-            owner.requestCommitPublication();
-        }
+        owner.directCommand.deferLeverageChange(userId, command);
     }
 }

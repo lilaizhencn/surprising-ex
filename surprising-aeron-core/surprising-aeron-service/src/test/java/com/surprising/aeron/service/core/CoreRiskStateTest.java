@@ -334,7 +334,7 @@ class CoreRiskStateTest {
         for (/* 本轮需要登记行情并安排风险扫描的测试币对编号。 */ String instrumentId : List.of("1", "4", "2"))
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 1, 1, 1000), runtime, ids);
         // 这次共享预算实际消耗的工作项数量，不能超过 64。
-        int work = RuntimeDerivativeRiskProcessor.continueRiskBudget(64, positions, runtime, ids);
+        int work = RuntimeDerivativeRiskFixture.continueRiskBudget(64, positions, runtime, ids);
         assertThat(work).isBetween(3,64);
         assertThat(runtime.firstRiskIncompleteScan()).isNull();
         // 风险处理后的运行时物化结果，便于按业务编号核对强平与资金事实。

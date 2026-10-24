@@ -4,7 +4,6 @@ import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
-import com.surprising.aeron.service.account.RuntimeAccountStateTransitions;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 
 /**
@@ -33,40 +32,23 @@ public final class BalanceTransferCommands {
     }
 
     /**
-     * 异步执行时准备直接余额控制续步，冷执行时应用原账户转换并要求提交发布。
+     * 准备所属账户 Lane 的余额调整续步，提交发布由完成收集处理。
      * @param userId 需要调整的账户用户身份
      * @param command 已解码的资产及余额调整数量
      */
     private void adjustBalance(long userId, BalanceAdjustmentCommand command) {
-        if (owner.asynchronousCommands()) {
-            owner.directCommand.deferBalanceAdjustment(userId, command);
-        } else {
-            RuntimeAccountStateTransitions.adjustBalance(owner.runtimeState(), owner.identities(), userId, command);
-            owner.requestCommitPublication();
-        }
+        owner.directCommand.deferBalanceAdjustment(userId, command);
     }
 
     /**
-     * 解码带原用户上下文的划转，异步路径交给转出控制槽，冷路径执行原转出转换后请求发布。
+     * 解码带原用户上下文的划转，交给源账户控制槽执行并收集。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
      */
     public void executeTransferOut(CoreMessage message) {
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         // 载荷解出的划转参数，后续沿用源/目标用户及产品线信息
         var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
-        if (owner.asynchronousCommands()) {
-            owner.directCommand.deferTransferOut(message.header().userId(), command);
-        } else {
-            RuntimeAccountStateTransitions.transferOut(owner.runtimeState(), owner.identities(), message.header().userId(), command);
-            completeTransferPublication();
-        }
-    }
-
-    /**
-     * 要求当前命令发布变化，实际完成与响应由外层提交流程决定。
-     */
-    private void completeTransferPublication() {
-        owner.requestCommitPublication();
+        owner.directCommand.deferTransferOut(message.header().userId(), command);
     }
 
     /**
@@ -87,17 +69,12 @@ public final class BalanceTransferCommands {
     }
 
     /**
-     * 解码划转身份，异步路径准备完成划转续步，冷路径完成原待转记录并要求发布。
+     * 解码划转身份，准备所属账户的完成划转续步。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
      */
     public void executeCompleteTransfer(CoreMessage message) {
         // 本次需要完成的划转业务 ID
         long id = TradingCommandCodec.decodeCompleteTransfer(message.payloadUnsafe()).transferId();
-        if (owner.asynchronousCommands()) {
-            owner.directCommand.deferTransferComplete(message.header().userId(), id);
-        } else {
-            RuntimeAccountStateTransitions.completeTransfer(owner.runtimeState(), message.header().userId(), id);
-            owner.requestCommitPublication();
-        }
+        owner.directCommand.deferTransferComplete(message.header().userId(), id);
     }
 }

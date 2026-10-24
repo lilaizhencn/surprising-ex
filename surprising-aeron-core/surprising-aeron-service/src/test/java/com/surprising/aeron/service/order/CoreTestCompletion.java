@@ -7,6 +7,15 @@ import com.surprising.aeron.service.core.TradingCoreRuntime;
  * 测试侧把真实异步协议入口推进成便于断言的同步结果。查询仍走实际 Lane 或 Matcher 读取，不直接借 Owner 表；轮询设置局部截止，但嵌套等待各有期限，不把它当成生产线程的等待策略。applyAsynchronously 名称指进入异步作用域，方法本身会阻塞推进。
  */
 public final class CoreTestCompletion {
+    /** 测试侧有界推进现有控制工作，完成表示本页已返回，不表示业务分页已结束。 */
+    public static void completeControlWork(java.util.function.BooleanSupplier work) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (!work.getAsBoolean()) {
+            if (System.nanoTime() >= deadline) throw new AssertionError("control work did not complete");
+            Thread.onSpinWait();
+        }
+    }
+
     /**
      * 走真实订单查询，ENTITY_NOT_FOUND 返回空，其他响应要求 OK 后解码订单视图。
      * @param owner 当前由测试线程拥有的交易运行时

@@ -10,7 +10,7 @@ import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 
 /**
- * 风控命令入口：更新标记价并建立触发扫描，后续复制命令按预算续扫风险和触发单。异步路径把账户估值交给原控制槽，冷路径直接推进；形成强平计划后，实际强平仍由后续命令执行。
+ * 风控命令入口：更新标记价并建立触发扫描，后续复制命令按预算续扫风险和触发单。账户估值交给原控制槽推进；形成强平计划后，实际强平仍由后续命令执行。
  */
 public final class RiskCommands {
     /** 本产品线交易 Owner，扫描状态和交易结果沿用其原有边界。 */
@@ -43,7 +43,7 @@ public final class RiskCommands {
     }
 
     /**
-     * 先核对扫描已启用且请求预算未超控制上限；优先选风险未完扫描，否则选仍有触发工作的一项。触发未完时只给风险一半预算，整数折半可能为零。异步交接控制槽等待后续推进；冷路径实际续扫后将剩余预算交触发单，并记录本轮扫描。
+     * 先核对扫描已启用且请求预算未超控制上限；优先选风险未完扫描，否则选仍有触发工作的一项。触发未完时只给风险一半预算，整数折半可能为零。交接控制槽推进风险，再将剩余预算交触发单，并记录本轮扫描。
      * @param message 当前借用的请求头与载荷，解码期间保持缓冲有效
      */
     public void executeContinueRiskScan(CoreMessage message) {
@@ -69,35 +69,19 @@ public final class RiskCommands {
         int maxWork = RiskScanCoordinator.adaptiveBudget(command.maxUsers(), pendingBefore);
         // 本轮扫描开始的单调时钟时间，仅用于耗时观测
         long startedAt = System.nanoTime();
-        // 本轮续扫前的业务修订，异步交给控制槽比较，冷路径用于判断是否请求发布
+        // 本轮续扫前的业务修订，交给控制槽比较，用于判断是否请求发布
         long beforeRevision = owner.runtimeState().revision();
         // 忙碌账户可能让风险估值跨多次价格更新仍未完成，因此给止盈止损预留预算，避免一直等整轮风险扫完。
         // 分给风险估值的预算，触发尚未完成时折半以保留触发推进机会
         int riskBudget = activeScan.triggerComplete() ? maxWork : maxWork / 2;
-        if (owner.asynchronousCommands()) {
-            // 复用的异步风险协调任务；风险已完或分配预算为零时为空，由原控制槽继续处理剩余步骤
-            RiskScanCoordinator risk = null;
-            if (!activeScan.riskComplete() && riskBudget > 0) {
-                risk = owner.directCommand.reusableRiskScanCoordinator(
-                        riskBudget);
-            }
-            owner.directCommand.deferRiskScanControl(risk, activeScan.symbolId(), instrumentId, maxWork,
-                    pendingBefore, startedAt, beforeRevision);
-            return;
-        }
-        // 冷风险续扫实际消耗的工作量，用来扣除本轮总预算
-        int completedRiskWork = 0;
+        // 复用的异步风险协调任务；风险已完或分配预算为零时为空，由原控制槽继续处理剩余步骤
+        RiskScanCoordinator risk = null;
         if (!activeScan.riskComplete() && riskBudget > 0) {
-            completedRiskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(riskBudget,
-                    owner.positionUserIndex(), owner.runtimeState(), owner.identities());
+            risk = owner.directCommand.reusableRiskScanCoordinator(
+                    riskBudget);
         }
-        if (owner.runtimeState().revision() != beforeRevision) owner.requestCommitPublication();
-        // 风险工作后还可用于触发单扫描的预算
-        int remainingWork = maxWork - completedRiskWork;
-        if (remainingWork > 0 && !owner.runtimeState().riskScan(activeScan.symbolId()).triggerComplete()) {
-            owner.evaluatePendingTriggerScan(instrumentId, remainingWork);
-        }
-        owner.logRiskScan("continuation", instrumentId, maxWork, pendingBefore, startedAt);
+        owner.directCommand.deferRiskScanControl(risk, activeScan.symbolId(), instrumentId, maxWork,
+                pendingBefore, startedAt, beforeRevision);
     }
 
     /**

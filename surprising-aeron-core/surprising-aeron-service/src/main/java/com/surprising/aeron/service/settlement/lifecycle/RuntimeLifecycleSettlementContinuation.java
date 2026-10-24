@@ -27,19 +27,6 @@ import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 public final class RuntimeLifecycleSettlementContinuation {
 
     /**
-     * 校验并新建当前结算页的续步对象，不在此等待账户结算完成。
-     * @param command 本页结算编号、固定价格及双游标
-     * @param indexedUserIds 按全局用户编号递增的持仓用户来源，由账本选页后再路由
-     * @param activeOrderIndex 币对活动订单路由索引
-     * @param runtime 保持原身份的权威运行时，元数据由 Owner 推进
-     * @param identities 币对与资产内部编号映射
-     */
-    public static SettlementWork prepare(SettleInstrumentCommand command, Iterable<Long> indexedUserIds,
-            ActiveOrderIndex activeOrderIndex, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        return prepare(null, command, indexedUserIds, activeOrderIndex, runtime, identities);
-    }
-
-    /**
      * 校验结算编号、产品规则和已有游标，选取当前订单页；同一编号已经完整结算时返回完成对象，否则优先重用已经可回收的工作对象及其分组容量。此处只准备任务，账户写入随后由 poll 派发。
      * @param reuse 原命令槽持有的工作对象，仅 reusable 为真时重置使用，否则新建
      * @param command 本页结算编号、固定价格及双游标
@@ -75,7 +62,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         kernel.validateLifecycleSettlement(instrument, command);
         // 用于核对双游标和结算参数的已有进度。
         TreasuryRuntime.LifecycleProgressRuntime previousProgress = runtime.treasury().lifecycleProgress(symbolId);
-        RuntimeLifecycleSettlement.validateProgress(previousProgress, command, true);
+        RuntimeLifecycleSettlement.validateProgress(previousProgress, command);
         // 此前是否已经完成全部账户侧撤单。
         boolean ordersComplete = previousProgress != null && previousProgress.ordersComplete();
         // 本次选出的账户侧撤单路由。

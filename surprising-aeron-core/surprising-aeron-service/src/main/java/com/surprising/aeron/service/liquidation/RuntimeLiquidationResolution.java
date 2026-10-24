@@ -19,22 +19,6 @@ import lombok.NoArgsConstructor;
 public final class RuntimeLiquidationResolution {
 
     /**
-     * 在账本线程未启动时同步处理保险补亏或完成；账本已经启动则要求改用异步续步。
-     * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
-     * @param candidateIds 参与保险分配的候选强平编号，准备阶段按源强平结算资产过滤
-     */
-    public static TradingAccountRuntime applyRuntime(ResolveLiquidationCommand command,
-                                                   TradingAccountRuntime runtime,
-                                                   RuntimeIdentityRegistry identities,
-                                                   Iterable<Long> candidateIds) {
-        if (runtime.systemLedgerStarted()) throw new IllegalStateException("active resolution requires its asynchronous continuation");
-        resolve(null, command, runtime, identities, candidateIds, false);
-        return runtime;
-    }
-
-    /**
      * 可回收的旧续步连同资金差额存储一起复用，否则新建，再准备本次索赔和补亏工作。
      * @param reuse 上次已经可回收的补亏续步，未提供或尚不可复用时新建
      * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额
@@ -44,60 +28,23 @@ public final class RuntimeLiquidationResolution {
      */
     public static ResolutionWork begin(ResolutionWork reuse, ResolveLiquidationCommand command,
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
-        return resolve(reuse, command, runtime, identities, candidateIds, true);
-    }
-
-    /**
-     * Owner 校验衍生品输入并定位源强平、合约和结算资产；异步时先派发索赔读取，同步时直接准备分配、执行账本判断，再由源 Lane 更新强平并完成。
-     * @param reuse 上次已经可回收的补亏续步，未提供或尚不可复用时新建
-     * @param command 本次强平补亏决议，包含强平编号、保险或完成类型及声明覆盖金额
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param identities 币对、资产及持仓业务编号与运行时整数键的映射
-     * @param candidateIds 参与保险分配的候选强平编号，准备阶段按源强平结算资产过滤
-     * @param asynchronous 是否只派发跨线程工作并返回可轮询续步；同步路径在本次调用内完成
-     */
-    private static ResolutionWork resolve(ResolutionWork reuse, ResolveLiquidationCommand command,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds,
-            boolean asynchronous) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
         runtime.assertOwner();
-        if (asynchronous) {
-            // Owner 可读的候选或源强平路由，提供用户及合约信息以安排所属 Lane 读取。
-            var route = runtime.liquidationRoute(command.liquidationId());
-            if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
-            // 源强平或当前候选的合约配置，用来确定并过滤结算资产。
-            CoreInstrument instrument = requireInstrument(runtime, route.instrumentId());
-            // 源强平的结算资产编号，保险候选和账本都限定在这项资产。
-            int assetId = identities.assetId(instrument.settleAsset());
-            // 本命令新建或复用的补亏续步，异步路径准备好后返回 Owner。
-            ResolutionWork work = reuse == null || !reuse.reusable() ? new ResolutionWork() : reuse;
-            work.sourceUserId = route.userId();
-            work.prepare(runtime, command, null, assetId, null);
-            work.prepareClaimReads(candidateIds, identities);
-            return work;
-        }
-        // 同步路径读取的源强平记录，缺失时拒绝继续处理。
-        LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
-        if (liquidation == null) {
-            throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
-        }
+        // Owner 可读的候选或源强平路由，提供用户及合约信息以安排所属 Lane 读取。
+        var route = runtime.liquidationRoute(command.liquidationId());
+        if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
         // 源强平或当前候选的合约配置，用来确定并过滤结算资产。
-        CoreInstrument instrument = requireInstrument(runtime, identities.instrumentId(liquidation.symbolId()));
+        CoreInstrument instrument = requireInstrument(runtime, route.instrumentId());
         // 源强平的结算资产编号，保险候选和账本都限定在这项资产。
         int assetId = identities.assetId(instrument.settleAsset());
-        // 同步保险决议预先准备的候选索赔输入，非保险决议不需要它。
-        InsuranceAllocationPolicy.ResolutionInputs allocation = command.resolution() == ResolveLiquidationCommand.Resolution.INSURANCE
-                ? InsuranceAllocationPolicy.prepareResolution(runtime, identities, candidateIds, liquidation, assetId) : null;
         // 本命令新建或复用的补亏续步，异步路径准备好后返回 Owner。
         ResolutionWork work = reuse == null || !reuse.reusable() ? new ResolutionWork() : reuse;
-        work.prepare(runtime, command, liquidation, assetId, allocation);
-        work.applyLedger(runtime.treasury());
-        runtime.releaseOwnerLaneAccess();
-        runtime.executeLaneMutations(work.laneMask, 1, work);
-        work.finish();
-        return null;
+        work.sourceUserId = route.userId();
+        work.prepare(runtime, command, null, assetId, null);
+        work.prepareClaimReads(candidateIds, identities);
+        return work;
     }
 
     /**

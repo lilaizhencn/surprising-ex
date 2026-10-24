@@ -1380,47 +1380,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 遍历生命周期业务项，跳过空项和无效用户，累计实际工作项并合并目标 Lane，再同步执行。
-     * @param <E> 待路由业务项的类型
-     * @param values 本次待路由的业务项，空项由对应集合入口跳过
-     * @param ownerUserId 从业务项提取所属用户身份的函数
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public <E> Object[] executeLifecycleSettlements(Iterable<E> values,
-                                                    java.util.function.ToLongFunction<E> ownerUserId,
-                                                    java.util.function.IntFunction<Object> operation) {
-        assertOwner();
-        if (values == null || ownerUserId == null || operation == null) {
-            throw new IllegalArgumentException("invalid lifecycle settlement command");
-        }
-        // 由本轮有效业务用户合并得到的目标 Lane 位集合
-        long selectedLaneMask = 0;
-        // 生命周期列表中实际有效的业务项数，不以 Lane 数替代
-        int workItems = 0;
-        for (E /* 本轮正在提取所属用户的业务项，空项直接跳过 */ value : values) {
-            if (value == null) continue;
-            // 本轮读出的用户身份，按对应入口过滤或路由
-            long userId = ownerUserId.applyAsLong(value);
-            if (userId <= 0) continue;
-            workItems++;
-            selectedLaneMask |= topology.accountLaneMask(userId);
-        }
-        return executeLaneMutations(selectedLaneMask, workItems, operation);
-    }
-
-    /**
-     * 使用已经分组的生命周期 Lane 掩码和工作量，直接进入同步修改入口。
-     * @param selectedLaneMask 调用方已经按业务项合并的目标 Lane 位集合
-     * @param workItems 本次实际工作数量，非空 Lane 掩码要求大于零
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public Object[] executeLifecycleSettlements(long selectedLaneMask, int workItems,
-                                                java.util.function.IntFunction<Object> operation) {
-        assertOwner();
-        return executeLaneMutations(selectedLaneMask, workItems, operation);
-    }
-
-    /**
      * 同步修改入口：校验掩码、工作量及访问权，先清上轮结果，再按 Lane 编号逐个执行并记结算次数；返回复用数组，后续调用会改写它。这里不派发并行工作。
      * @param selectedLaneMask 调用方已经按业务项合并的目标 Lane 位集合
      * @param workItems 本次实际工作数量，非空 Lane 掩码要求大于零

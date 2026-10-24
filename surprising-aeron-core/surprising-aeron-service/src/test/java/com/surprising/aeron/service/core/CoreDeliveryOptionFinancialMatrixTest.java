@@ -35,14 +35,12 @@ import com.surprising.aeron.service.account.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.core.index.AdlPositionIndex;
-import com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.query.state.*;
 import com.surprising.aeron.service.query.state.RuntimeLiquidationQueryService;
 import com.surprising.aeron.service.query.state.RuntimeRiskQueryService;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
-import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlement;
 import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation;
 import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
@@ -63,7 +61,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import static com.surprising.aeron.service.matcher.MatcherEventFixtures.trade;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -144,8 +141,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(opening, identities)) {
             // 直接结算方法返回的用户和订单游标及完成状态
-            CoreSettlementProgressView actual = RuntimeLifecycleSettlement.applyRuntime(command,
-                    List.of(USER_ID, SECOND_MAKER_ID), null, new ActiveOrderIndex(opening), runtime, identities);
+            CoreSettlementProgressView actual = RuntimeLifecycleSettlementFixture.applyRuntime(command,
+                    List.of(USER_ID, SECOND_MAKER_ID), new ActiveOrderIndex(opening), runtime, identities);
 
             assertThat(actual.complete()).isTrue();
             RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
@@ -174,7 +171,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
-                var work = RuntimeLifecycleSettlementContinuation.prepare(command, List.of(USER_ID, SECOND_MAKER_ID),
+                var work = RuntimeLifecycleSettlementContinuation.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID),
                         new ActiveOrderIndex(opening), runtime, identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(work.result().complete()).isTrue();
@@ -209,12 +206,12 @@ class CoreDeliveryOptionFinancialMatrixTest {
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
-                var work = RuntimeLifecycleSettlementContinuation.prepare(command, List.of(USER_ID), index, runtime, identities);
+                var work = RuntimeLifecycleSettlementContinuation.prepare(null, command, List.of(USER_ID), index, runtime, identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(work.result().requiredInsuranceUnits()).isEqualTo(20);
                 assertThat(work.result().nextCursorUserId()).isZero();
                 assertThat(work.result().processedUsers()).isZero();
-                RuntimeLifecycleSettlement.applyRuntime(command, List.of(USER_ID), new UUID(1, 702), index, cold, coldIdentities);
+                RuntimeLifecycleSettlementFixture.applyRuntime(command, List.of(USER_ID), index, cold, coldIdentities);
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(RuntimeStateMaterializer.materialize(cold, coldIdentities));
                 cold.clearChangedKeys();
                 // 给缺口对应结算资产保险基金增加二十的补款命令
@@ -225,7 +222,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 work = RuntimeLifecycleSettlementContinuation.prepare(work, command, List.of(USER_ID), index, runtime, identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(work.result().complete()).isTrue();
-                RuntimeLifecycleSettlement.applyRuntime(command, List.of(USER_ID), new UUID(1, 703), index, cold, coldIdentities);
+                RuntimeLifecycleSettlementFixture.applyRuntime(command, List.of(USER_ID), index, cold, coldIdentities);
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(RuntimeStateMaterializer.materialize(cold, coldIdentities));
                 assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).isEmpty();
             } finally { runtime.exitAsynchronousCommandScope(); }
@@ -322,11 +319,11 @@ class CoreDeliveryOptionFinancialMatrixTest {
         SettleInstrumentCommand firstCommand = new SettleInstrumentCommand(402, delivery.instrumentId(), delivery.settlementPriceTicks(), 0, 1);
         // 首段返回的状态与结算进度，正常分段场景尚未整体完成
         RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(cursorState,
-                firstCommand, List.of(USER_ID, MAKER_ID), UUID.fromString("00000000-0000-0000-0000-000000000402"));
+                firstCommand, List.of(USER_ID, MAKER_ID));
         // 预期拒绝前的业务哈希，之后必须保持原值
         long hash = first.state().businessStateHash();
         assertThatThrownBy(() -> reducer.settleInstrumentWithProgress(first.state(), firstCommand,
-                List.of(USER_ID, MAKER_ID), UUID.fromString("00000000-0000-0000-0000-000000000402")))
+                List.of(USER_ID, MAKER_ID)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 本次预期的业务拒绝异常，用稳定业务代码核对原因 */ exception -> assertThat(exception.code()).isEqualTo("INVALID_COMMAND"));
         assertThat(first.state().businessStateHash()).isEqualTo(hash);
@@ -360,8 +357,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
             // 首段返回的状态与结算进度，正常分段场景尚未整体完成
             RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
-                    firstCommand, List.of(USER_ID, MAKER_ID),
-                    UUID.fromString("00000000-0000-0000-0000-000000000403"));
+                    firstCommand, List.of(USER_ID, MAKER_ID));
 
             assertThat(first.progress().complete()).isFalse();
             assertThat(first.progress().nextCursorUserId()).isEqualTo(USER_ID);
@@ -373,8 +369,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             // 从保存用户游标继续处理下一用户的结算结果，应整体完成
             RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
                     new SettleInstrumentCommand(settlementId, variant.instrumentId(), variant.settlementPriceTicks(), USER_ID, 1),
-                    List.of(USER_ID, MAKER_ID),
-                    UUID.fromString("00000000-0000-0000-0000-000000000404"));
+                    List.of(USER_ID, MAKER_ID));
 
             assertThat(second.progress().complete()).isTrue();
             assertThat(second.state().treasuryState().lifecycleProgress(variant.instrumentId())).isNull();
@@ -398,8 +393,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
             // 首段返回的状态与结算进度，正常分段场景尚未整体完成
             RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
-                    firstCommand, List.of(USER_ID, MAKER_ID),
-                    UUID.fromString("00000000-0000-0000-0000-000000000405"));
+                    firstCommand, List.of(USER_ID, MAKER_ID));
 
             assertThat(first.progress().complete()).isFalse();
             assertThat(first.progress().nextCursorUserId()).isEqualTo(USER_ID);
@@ -411,8 +405,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             // 从保存用户游标继续处理下一用户的结算结果，应整体完成
             RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
                     new SettleInstrumentCommand(settlementId, variant.instrumentId(), variant.settlementPriceTicks(), USER_ID, 1),
-                    List.of(USER_ID, MAKER_ID),
-                    UUID.fromString("00000000-0000-0000-0000-000000000406"));
+                    List.of(USER_ID, MAKER_ID));
 
             assertThat(second.progress().complete()).isTrue();
             assertThat(second.state().treasuryState().lifecycleProgress(variant.instrumentId())).isNull();
@@ -673,7 +666,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             var execution = new com.surprising.aeron.protocol.ExecuteLiquidationCommand(
                     99, 1, PREMIUM_PRICE, 0);
             assertThat(RuntimeLiquidationQueryService.isExecutable(runtime, identities, execution)).isFalse();
-            RuntimeDerivativeLiquidationProcessor.applyExecutionRuntime(execution, List.of(), runtime, identities);
+            RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(execution, List.of(), runtime, identities);
             assertThat(runtime.liquidation(99).status()).isEqualTo(CoreLiquidationState.Status.CANCELED);
             assertThat(runtime.position(identities.positionKey(USER_ID, option.instrumentId()))
                     .signedQuantitySteps()).isEqualTo(1);

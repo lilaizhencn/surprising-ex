@@ -22,22 +22,17 @@ public final class FeePolicyCommands implements java.util.function.IntFunction<O
     }
 
     /**
-     * 解码政策；异步时先保存唯一 pending 并派发 Lane 0，派发失败清槽，成功后登记 Owner 控制续步；冷路径直接更新并要求发布。
+     * 解码政策，保存唯一 pending 并派发 Lane 0；派发失败清槽，成功后登记 Owner 控制续步。
      * @param message 本次借用的原命令及载荷，调用期间保持缓冲有效
      */
     public void executeUpsertFeePolicy(CoreMessage message) {
         // 本请求载荷解出的费用政策配置
         var command = TradingCommandCodec.decodeUpsertFeePolicy(message.payloadUnsafe());
-        if (owner.asynchronousCommands()) {
-            if (pending != null) throw new IllegalStateException("fee policy command is still pending");
-            pending = command;
-            try { owner.runtimeState().dispatchControlLanes(1L, this); }
-            catch (/* 本次派发或完成收集的原异常，清 pending 后继续传播 */ RuntimeException | Error failure) { pending = null; throw failure; }
-            owner.directCommand.deferControl(this);
-        } else {
-            owner.runtimeState().upsertFeePolicy(command);
-            owner.requestCommitPublication();
-        }
+        if (pending != null) throw new IllegalStateException("fee policy command is still pending");
+        pending = command;
+        try { owner.runtimeState().dispatchControlLanes(1L, this); }
+        catch (/* 本次派发或完成收集的原异常，清 pending 后继续传播 */ RuntimeException | Error failure) { pending = null; throw failure; }
+        owner.directCommand.deferControl(this);
     }
 
     /**

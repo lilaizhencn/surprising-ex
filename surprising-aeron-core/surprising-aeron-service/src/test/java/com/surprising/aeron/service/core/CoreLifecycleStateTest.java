@@ -36,7 +36,6 @@ import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -407,7 +406,7 @@ class CoreLifecycleStateTest {
 
         // 第一页处理后的状态、进度和相应业务事实。
         RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
-                firstCommand, List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000096"));
+                firstCommand, List.of(1L, 2L));
 
         assertThat(first.progress().complete()).isFalse();
         assertThat(first.progress().nextCursorUserId()).isEqualTo(1);
@@ -419,8 +418,7 @@ class CoreLifecycleStateTest {
 
         // 使用第一页面游标处理后续页的结果。
         RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(restored,
-                new SettleInstrumentCommand(96, "1", 120, 1, 1), List.of(1L, 2L),
-                UUID.fromString("00000000-0000-0000-0000-000000000097"));
+                new SettleInstrumentCommand(96, "1", 120, 1, 1), List.of(1L, 2L));
 
         assertThat(second.progress().complete()).isTrue();
         assertThat(second.state().treasuryState().lifecycleProgress("1")).isNull();
@@ -445,7 +443,7 @@ class CoreLifecycleStateTest {
         // 第一页处理后的状态、进度和相应业务事实。
         RuntimeTestStateTransitions.SettlementApplication first = reducer.settleInstrumentWithProgress(state,
                 new SettleInstrumentCommand(97, "1", 120, 0, 256, 0, 1),
-                List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000097"));
+                List.of(1L, 2L));
 
         assertThat(first.progress().complete()).isFalse();
         assertThat(first.progress().ordersComplete()).isFalse();
@@ -456,7 +454,7 @@ class CoreLifecycleStateTest {
         // 使用第一页面游标处理后续页的结果。
         RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(first.state(),
                 new SettleInstrumentCommand(97, "1", 120, 0, 256, 102, 1),
-                List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000098"));
+                List.of(1L, 2L));
 
         assertThat(second.progress().complete()).isTrue();
         assertThat(second.state().order(102).status()).isEqualTo(CoreOrderStatus.CANCELED);

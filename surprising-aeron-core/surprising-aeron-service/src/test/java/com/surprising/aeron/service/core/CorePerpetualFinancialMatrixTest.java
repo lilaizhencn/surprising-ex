@@ -211,7 +211,7 @@ class CorePerpetualFinancialMatrixTest {
                     .isNotEqualTo(runtime.topology().accountLaneId(SECOND_MAKER_ID));
             // 直接资金费处理返回的支付事实和进度，不是另一个运行时快照
             RuntimePerpetualFundingProcessor.FundingResult actual =
-                    RuntimePerpetualFundingProcessor.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
+                    RuntimePerpetualFundingFixture.applyRuntime(command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
                             identities);
 
             RuntimeStateParityChecker.assertMatches(expected.state(), identities, runtime);
@@ -297,7 +297,7 @@ class CorePerpetualFinancialMatrixTest {
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
             try {
                 // 在原 System Ledger 作用域内准备的资金费续步工作
-                var work = RuntimePerpetualFundingProcessor.prepare(command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
+                var work = RuntimePerpetualFundingProcessor.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
                         identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(work.poll()).isTrue();
