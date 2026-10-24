@@ -318,6 +318,52 @@ class CorePerpetualFinancialMatrixTest {
         }
     }
 
+    /** 邮箱满时反复轮询不重复扣资金费；完成后复用同一工作处理空页，旧明细仍是独立结果。 */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("accountLaneVariants")
+    void fundingRetriesFullLedgerAndReusesCompletedWorkForAnEmptyPage(Variant variant, int accountLaneCount) {
+        var opening = withPosition(variant, USER_ID, QUANTITY, ENTRY_PRICE, DEFAULT_WALLET, POSITION_MARGIN);
+        opening = withPosition(opening, variant, SECOND_MAKER_ID, -QUANTITY, ENTRY_PRICE, DEFAULT_WALLET, POSITION_MARGIN);
+        var marked = mark(opening, variant, ENTRY_PRICE, 1);
+        var command = new ApplyFundingCommand(701, SYMBOL, 100_000);
+        var expected = reducer.applyFundingWithFacts(marked, command);
+        var topology = new LaneTopology(1, accountLaneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
+                LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE, LaneTopology.DEFAULT_QUEUE_CAPACITY,
+                LaneTopology.DEFAULT_QUEUE_CAPACITY);
+        var identities = new RuntimeIdentityRegistry(topology);
+        try (var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
+            // 本例先完成选页，再激活线程，才能只阻塞资金记账，不把用户选页也挡在满队列后。
+            var work = RuntimePerpetualFundingProcessor.prepare(null, command,
+                    List.of(USER_ID, SECOND_MAKER_ID), runtime, identities);
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
+            var ready = new java.util.concurrent.atomic.AtomicBoolean();
+            try {
+                try {
+                    fillLedgerMailbox(runtime, ready);
+                    assertAccountsWaitForLedgerWithoutRepeating(runtime, work::poll);
+                    assertThat(work.reusable()).isTrue();
+                    assertThatThrownBy(work::result).hasMessageContaining("not completed");
+                } finally { ready.set(true); }
+                LedgerControlTestSupport.await(runtime, work::poll);
+                var retained = work.result();
+                assertThat(retained.payments()).isEqualTo(expected.payments());
+                var settled = LedgerControlTestSupport.commit(runtime, identities, false);
+                assertThat(settled).isEqualTo(expected.state());
+                var empty = RuntimePerpetualFundingProcessor.prepare(work,
+                        new ApplyFundingCommand(702, SYMBOL, 100_000), List.of(), runtime, identities);
+                assertThat(empty).isSameAs(work);
+                LedgerControlTestSupport.await(runtime, empty::poll);
+                assertThat(empty.result().payments()).isEmpty();
+                assertThat(empty.result().progress().complete()).isTrue();
+                assertThat(empty.result().progress().processedUsers()).isZero();
+                var afterEmpty = LedgerControlTestSupport.commit(runtime, identities, false);
+                assertThat(afterEmpty.users()).isEqualTo(settled.users());
+                assertThat(afterEmpty.treasuryState().fundingSettlements()).containsEntry(SYMBOL, 702L);
+                assertThat(retained.payments()).isEqualTo(expected.payments());
+            } finally { runtime.exitAsynchronousCommandScope(); }
+        }
+    }
+
     /**
      * 四种永续组合分别用单 Lane 和双 Lane 推进强平执行、保险注资、保险确认及 ADL，每步提交后都与冷转换完整状态比较，并检查账户 Lane 健康。
      * @param variant 本次正反向永续、全仓逐仓及资产单位的测试组合
@@ -364,7 +410,18 @@ class CorePerpetualFinancialMatrixTest {
                 var adl = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
                         -QUANTITY, 150, expected.riskState().markPrices().get(SYMBOL).priceSequence(), 5, linearOrInverse(variant, 700, 40_000));
                 expected = reducer.executeAdl(expected, adl);
-                LedgerControlTestSupport.await(runtime, RuntimeAdlExecution.begin(null, adl, runtime, identities));
+                var ready = new java.util.concurrent.atomic.AtomicBoolean();
+                RuntimeAdlExecution.AdlWork work;
+                try {
+                    fillLedgerMailbox(runtime, ready);
+                    work = RuntimeAdlExecution.begin(null, adl, runtime, identities);
+                    assertAccountsWaitForLedgerWithoutRepeating(runtime, work);
+                    assertThat(work.reusable()).isTrue();
+                } finally { ready.set(true); }
+                LedgerControlTestSupport.await(runtime, work);
+                long completedRevision = runtime.revision();
+                assertThat(work.getAsBoolean()).isTrue();
+                assertThat(runtime.revision()).isEqualTo(completedRevision);
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
                 runtime.assertAccountLanesHealthy();
             } finally { runtime.exitAsynchronousCommandScope(); }
@@ -2003,4 +2060,26 @@ class CorePerpetualFinancialMatrixTest {
     private record Row(String key, Variant variant, TradingCoreState opening, TradingCoreState ending,
                        List<Long> makerIds, boolean economic, boolean includeLiquidationDeficit, Funds funds) {
     }
+    /** 用真实账本的就绪队首堵住邮箱，填充项不读取或修改财务数据。调用方 finally 放行。 */
+    private static void fillLedgerMailbox(TradingAccountRuntime runtime, java.util.concurrent.atomic.AtomicBoolean ready) {
+        var ledger = AccountLaneTestAccess.ledger(runtime);
+        assertThat(ledger.offer(new com.surprising.aeron.service.treasury.SystemLedgerLane.Entry() {
+            @Override public boolean ready() { return ready.get(); }
+            @Override public void apply(com.surprising.aeron.service.treasury.TreasuryRuntime ignored) { }
+        })).isTrue();
+        while (ledger.offer(ignored -> { })) { }
+    }
+
+    /** 确认账户已发布且全部账户回执收齐，再在满邮箱下重复轮询，修订不能提前或重复推进。 */
+    private static void assertAccountsWaitForLedgerWithoutRepeating(TradingAccountRuntime runtime,
+            java.util.function.BooleanSupplier work) {
+        long revision = runtime.revision();
+        LedgerControlTestSupport.await(runtime, () -> {
+            assertThat(work.getAsBoolean()).isFalse();
+            return runtime.hasUncommittedCommandChanges() && runtime.controlLaneDiagnostics().startsWith("pending=false");
+        });
+        for (int i = 0; i < 3; i++) assertThat(work.getAsBoolean()).isFalse();
+        assertThat(runtime.revision()).isEqualTo(revision);
+    }
+
 }

@@ -93,10 +93,10 @@ public final class RuntimeLifecycleSettlementContinuation {
         private enum Phase {
             /** 下一次派发本页账户侧撤单。 */
             CANCEL,
-            /** 先收齐撤单回执；订单读完后才派发用户结算后值计算。 */
-            PREPARE,
+            /** 等待撤单回执；无订单时直接从这里准备账户结算。 */
+            CANCEL_WAIT,
             /** 收齐准备后值回执，随后转入账本保险核对，尚未应用账户。 */
-            APPLY,
+            PREPARE_WAIT,
             /** 等待账本保险结果，不足则结束本页，足够才派发账户应用。 */
             BUDGET_WAIT,
             /** 等待账户后值应用完毕并收集各 Lane 清算差额。 */
@@ -151,10 +151,8 @@ public final class RuntimeLifecycleSettlementContinuation {
         private long orderLaneMask;
         /** 本页含有待检查用户的账户 Lane 位图。 */
         private long userLaneMask;
-        /** Owner 下次 poll 应推进的阶段。 */
+        /** Owner 当前等待或准备执行的阶段；账户回调读取同一等待阶段，收齐回执后才推进。 */
         private Phase phase;
-        /** 已交给账户 Lane 的操作种类，与 Owner 正在等待的阶段分开保存。 */
-        private Phase dispatchedPhase;
         /** 各 Lane 准备的账户后值列表，先供账本核对保险，再交回原 Lane 应用。 */
         private List<RuntimeLifecycleSettlement.UserSettlement>[] prepared;
         /** 本页最终回执，包含是否仍需续页或补保险。 */
@@ -214,7 +212,6 @@ public final class RuntimeLifecycleSettlementContinuation {
             for (/* 当前分组数组的 Lane 下标。 */ int lane = 0; lane < usersByLane.length; lane++) usersByLane[lane] = new LongArrayList();
             this.ordersByLane = (ArrayList<CancellationOrder>[]) new ArrayList<?>[runtime.topology().accountLaneCount()];
             this.orderLaneMask = this.userLaneMask = 0; this.phase = Phase.DONE; this.result = result;
-            this.dispatchedPhase = null;
         }
 
         /**
@@ -276,8 +273,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             requiredInsurance = nextOrderCursor = 0;
             financialPhase = null;
             this.result = null;
-            this.dispatchedPhase = null;
-            this.phase = selectedOrders.isEmpty() ? Phase.PREPARE : Phase.CANCEL;
+            this.phase = selectedOrders.isEmpty() ? Phase.CANCEL_WAIT : Phase.CANCEL;
             if (!runtime.systemLedgerStarted()) selectAccountUsers();
             return this;
         }
@@ -323,7 +319,6 @@ public final class RuntimeLifecycleSettlementContinuation {
             for (ArrayList<CancellationOrder> /* 当前 Lane 可复用的撤单列表，未分配时为空。 */ orders : ordersByLane) if (orders != null) orders.clear();
             if (prepared != null) Arrays.fill(prepared, null);
             this.result = result; this.phase = Phase.DONE;
-            this.dispatchedPhase = null;
             return this;
         }
 
@@ -336,7 +331,6 @@ public final class RuntimeLifecycleSettlementContinuation {
             command = null;  instrument = null; kernel = null;
             selectedOrders = List.of(); userPage = null;
             result = null; phase = Phase.DONE;
-            dispatchedPhase = null;
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> /* 当前 Lane 可复用的撤单列表，未分配时为空。 */ orders : ordersByLane) if (orders != null) orders.clear();
             if (prepared != null) Arrays.fill(prepared, null);
@@ -363,12 +357,11 @@ public final class RuntimeLifecycleSettlementContinuation {
             }
             switch (phase) {
                 case CANCEL -> {
-                    dispatchedPhase = Phase.CANCEL;
+                    phase = Phase.CANCEL_WAIT;
                     runtime.dispatchControlLanes(orderLaneMask, this);
-                    phase = Phase.PREPARE;
                     return false;
                 }
-                case PREPARE -> {
+                case CANCEL_WAIT -> {
                     if (orderLaneMask != 0 && !runtime.pollControlLanes()) return false;
                     if (moreOrders) {
                         nextOrderCursor = selectedOrders.isEmpty() ? command.cursorOrderId() : selectedOrders.getLast().orderId();
@@ -381,12 +374,11 @@ public final class RuntimeLifecycleSettlementContinuation {
                         phase = Phase.FINAL_WAIT;
                         return false;
                     }
-                    dispatchedPhase = Phase.PREPARE;
+                    phase = Phase.PREPARE_WAIT;
                     runtime.dispatchControlLanes(userLaneMask, this);
-                    phase = Phase.APPLY;
                     return false;
                 }
-                case APPLY -> {
+                case PREPARE_WAIT -> {
                     if (!runtime.pollControlLanes()) return false;
                     financialPhase = FinancialPhase.INSURANCE;
                     ledgerDispatched = false;
@@ -404,9 +396,8 @@ public final class RuntimeLifecycleSettlementContinuation {
                         phase = Phase.DONE;
                         return true;
                     }
-                    dispatchedPhase = Phase.APPLY;
-                    runtime.dispatchControlLanes(userLaneMask, this);
                     phase = Phase.APPLY_WAIT;
+                    runtime.dispatchControlLanes(userLaneMask, this);
                     return false;
                 }
                 case APPLY_WAIT -> {
@@ -441,11 +432,11 @@ public final class RuntimeLifecycleSettlementContinuation {
          */
         @Override
         public Object apply(int lane) {
-            switch (dispatchedPhase) {
-                case CANCEL -> RuntimeLifecycleSettlement.cancelOrdersOnLane(runtime, ordersByLane[lane]);
-                case PREPARE -> prepared[lane] = RuntimeLifecycleSettlement.prepareLane(runtime, instrument, kernel, command,
+            switch (phase) {
+                case CANCEL_WAIT -> RuntimeLifecycleSettlement.cancelOrdersOnLane(runtime, ordersByLane[lane]);
+                case PREPARE_WAIT -> prepared[lane] = RuntimeLifecycleSettlement.prepareLane(runtime, instrument, kernel, command,
                         usersByLane[lane], symbolId, assetId);
-                case APPLY -> clearingByLane[lane] = RuntimeLifecycleSettlement.applyLane(runtime, prepared[lane]);
+                case APPLY_WAIT -> clearingByLane[lane] = RuntimeLifecycleSettlement.applyLane(runtime, prepared[lane]);
                 default -> throw new IllegalStateException("settlement lane operation outside dispatch phase");
             }
             return null;

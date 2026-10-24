@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第六十八轮A214-A221：原始划转命令贯穿Lane/查询/快照/回放，账户续步去副本及装箱，删除六个非在线同步入口；净减6字段、2类和198行。18模块干净构建、完整1973例（1个Linux亲和性平台跳过）、PIPELINED131、SQL5/Gateway7、六线实测及24次恢复通过。216解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第六十九轮A222-A224：ADL六标记与资金费三标记分别收敛成单phase，到期账户派发复用当前等待phase，净减8字段、16行；18模块干净构建、154不同回归与PIPELINED154次、六线实测及12次恢复通过。219解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -11227,6 +11227,52 @@
       ],
       "evidence": "删除3个仅冷测试调用的同步入口，测试改走原账户续步；保留实际账户计算、业务检查、修订及Owner发布。",
       "verification": "18模块干净构建；完整1973例含1个Linux亲和性平台跳过；PIPELINED131例；真实SQL5例与Gateway7例；六线顺序实测及24次Cluster冷恢复。见round68-runtime-20261025.json。"
+    },
+    {
+      "id": "A222",
+      "status": "resolved",
+      "source_basis_commit": "759f90965cd2fbfe02de8e7aebef98baa78d45e7",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_ninth_cleanup_round",
+      "topic": "ADL互斥阶段布尔组合",
+      "fields_or_methods": [
+        "done",
+        "accountsCollected",
+        "ledgerDispatched",
+        "capturingLiquidation",
+        "targetLaneDispatched",
+        "liquidationLaneDispatched"
+      ],
+      "evidence": "AdlWork的6个阶段标记收敛为一个7值phase，净减5字段；源校验、目标减仓、同Lane合并／跨Lane源补亏、账户发布、账本投递与完成的先后顺序保留。",
+      "verification": "18模块干净构建；默认与PIPELINED各154例；实际满邮箱、同／跨Lane和资金费复用；六产品线顺序HTTP/WS、资金费/强平/保险/ADL、到期与12次Cluster冷恢复。见round69-runtime-20261025.json。"
+    },
+    {
+      "id": "A223",
+      "status": "resolved",
+      "source_basis_commit": "759f90965cd2fbfe02de8e7aebef98baa78d45e7",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_ninth_cleanup_round",
+      "topic": "资金费顺序阶段布尔组合",
+      "fields_or_methods": [
+        "started",
+        "accountsCollected",
+        "ledgerDispatched"
+      ],
+      "evidence": "FundingWork的3个顺序标记改为一个4值phase，净减2字段；usersReady/usersQueued及不可变结果继续承担各自交接职责。",
+      "verification": "18模块干净构建；默认与PIPELINED各154例；实际满邮箱、同／跨Lane和资金费复用；六产品线顺序HTTP/WS、资金费/强平/保险/ADL、到期与12次Cluster冷恢复。见round69-runtime-20261025.json。"
+    },
+    {
+      "id": "A224",
+      "status": "resolved",
+      "source_basis_commit": "759f90965cd2fbfe02de8e7aebef98baa78d45e7",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_ninth_cleanup_round",
+      "topic": "到期结算账户派发阶段副本",
+      "fields_or_methods": [
+        "RuntimeLifecycleSettlementContinuation.SettlementWork.dispatchedPhase"
+      ],
+      "evidence": "删除dispatchedPhase，现有phase在派发前切到CANCEL_WAIT/PREPARE_WAIT/APPLY_WAIT，Lane读取同一等待阶段；内联和工作线程均使用同一顺序，净减1字段。",
+      "verification": "18模块干净构建；默认与PIPELINED各154例；实际满邮箱、同／跨Lane和资金费复用；六产品线顺序HTTP/WS、资金费/强平/保险/ADL、到期与12次Cluster冷恢复。见round69-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11322,7 +11368,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A214_to_A221_cleaned_full1973_one_platform_skip_pipelined131_SQL5_gateway7_six_live_products_24_cold_recoveries_verified; overall_audit_in_progress",
+  "analysis_round_status": "A222_to_A224_cleaned_154_distinct_cases_154_pipelined_six_live_products_twelve_cold_recoveries_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11544,17 +11590,12 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "3b983cac848d343056517d7aac3acedab1fb2271",
-    "status": "account_control_and_original_transfer_commands_cleaned_and_verified",
+    "source_basis_commit": "759f90965cd2fbfe02de8e7aebef98baa78d45e7",
+    "status": "financial_continuation_phase_copies_cleaned_and_verified",
     "resolved_ids": [
-      "A214",
-      "A215",
-      "A216",
-      "A217",
-      "A218",
-      "A219",
-      "A220",
-      "A221"
+      "A222",
+      "A223",
+      "A224"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11567,11 +11608,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 216,
+      "resolved": 219,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "sixty_eighth_cleanup_round",
+    "evidence": "sixty_ninth_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44628,6 +44669,32 @@
     },
     "counts": {
       "resolved": 216,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "sixty_ninth_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "759f90965cd2fbfe02de8e7aebef98baa78d45e7",
+    "resolved_ids": [
+      "A222",
+      "A223",
+      "A224"
+    ],
+    "removed_instance_fields_net": 8,
+    "production_net_lines_removed": 16,
+    "new_private_phase_enums": 2,
+    "new_services_interfaces_or_business_stages": 0,
+    "report": "deep-code-cleanup-20261025-round69.md",
+    "evidence": "round69-runtime-20261025.json",
+    "distinct_unit_tests": 154,
+    "additional_pipelined_executions": 154,
+    "runtime_products": 6,
+    "cold_recoveries": 12,
+    "command_snapshot_http_ws_contracts_changed": false,
+    "counts": {
+      "resolved": 219,
       "candidate": 1,
       "retained": 4
     },

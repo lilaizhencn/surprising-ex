@@ -52,7 +52,6 @@ public final class RuntimeAdlExecution {
         work.prepare(command, runtime, instrument, mark, positionKey,
                 identities.assetId(instrument.settleAsset()));
         work.fundingInProgress = runtime.treasury().fundingProgress(symbolId) != null;
-        work.capturingLiquidation = true;
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(route.userId()), work);
         return work;
     }
@@ -76,14 +75,10 @@ public final class RuntimeAdlExecution {
         private int settleAssetId;
         /** 目标账户算出的清算对手项，完成账户回调后交给账本消费。 */
         private long clearingUnits;
-        /** done：账户与账本处理均完成后由 Owner 标记，重复轮询直接结束；accountsCollected：Owner 是否已经登记本次目标账户结算变更；ledgerDispatched：本次账本命令是否已成功入队，避免重复记账。 */
-        private boolean done, accountsCollected, ledgerDispatched;
-        /** 当前处于源 Lane 读取并校验强平的阶段，而非目标减仓阶段。 */
-        private boolean capturingLiquidation;
-        /** 目标减仓回调已经派发、Owner 正等待它完成。 */
-        private boolean targetLaneDispatched;
-        /** 源强平亏空更新回调已经派发，用于区分只更新源记录的阶段。 */
-        private boolean liquidationLaneDispatched;
+        /** 原有源校验、目标减仓、源补亏、账户发布和账本交接的互斥阶段。 */
+        private enum Phase { CAPTURE, TARGET, SOURCE, ACCOUNTS, SUBMIT_LEDGER, LEDGER_WAIT, DONE }
+        /** Owner 推进当前阶段；账户阶段在派发前确定，收齐回执后才改变。 */
+        private Phase phase;
         /** Owner 准备时捕获的该币对资金费切仓是否进行中，源校验据此拒绝冲突。 */
         private boolean fundingInProgress;
 
@@ -107,8 +102,7 @@ public final class RuntimeAdlExecution {
             this.positionKey = positionKey;
             this.settleAssetId = settleAssetId;
             this.clearingUnits = 0;
-            this.done = accountsCollected = ledgerDispatched = capturingLiquidation = false;
-            this.targetLaneDispatched = liquidationLaneDispatched = false;
+            this.phase = Phase.CAPTURE;
         }
 
         /**
@@ -117,25 +111,29 @@ public final class RuntimeAdlExecution {
          */
         @Override
         public Object apply(int ignored) {
-            if (capturingLiquidation) {
-                liquidation = runtime.liquidation(command.liquidationId());
-                if (liquidation == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
-                if (liquidation.status() != CoreLiquidationState.Status.ADL_REQUIRED)
-                    throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "ADL requires ADL state");
-                if (fundingInProgress)
-                    throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
-                if (!instrument.instrumentId().equals(command.instrumentId()) || command.targetUserId() == liquidation.userId()
-                        || command.coveredUnits() > liquidation.deficitUnits())
-                    throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
-                return null;
-            }
-            if (runtime.currentLaneOwns(command.targetUserId()) && !liquidationLaneDispatched) {
-                clearingUnits = applyAdlTarget(command, runtime, liquidation, instrument, mark,
-                        positionKey, settleAssetId);
-            }
-            if (runtime.currentLaneOwns(liquidation.userId())
-                    && (runtime.currentLaneOwns(command.targetUserId()) || liquidationLaneDispatched)) {
-                completeAdlLiquidation(command, runtime);
+            switch (phase) {
+                case CAPTURE -> {
+                    liquidation = runtime.liquidation(command.liquidationId());
+                    if (liquidation == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
+                    if (liquidation.status() != CoreLiquidationState.Status.ADL_REQUIRED)
+                        throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "ADL requires ADL state");
+                    if (fundingInProgress)
+                        throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
+                    if (!instrument.instrumentId().equals(command.instrumentId()) || command.targetUserId() == liquidation.userId()
+                            || command.coveredUnits() > liquidation.deficitUnits())
+                        throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
+                }
+                case TARGET -> {
+                    if (runtime.currentLaneOwns(command.targetUserId()))
+                        clearingUnits = applyAdlTarget(command, runtime, liquidation, instrument, mark,
+                                positionKey, settleAssetId);
+                    if (runtime.currentLaneOwns(liquidation.userId()) && runtime.currentLaneOwns(command.targetUserId()))
+                        completeAdlLiquidation(command, runtime);
+                }
+                case SOURCE -> {
+                    if (runtime.currentLaneOwns(liquidation.userId())) completeAdlLiquidation(command, runtime);
+                }
+                default -> throw new IllegalStateException("ADL account operation outside dispatch phase");
             }
             return null;
         }
@@ -145,40 +143,39 @@ public final class RuntimeAdlExecution {
          */
         @Override
         public boolean getAsBoolean() {
-            if (done) return true;
-            if (capturingLiquidation) {
+            if (phase == Phase.DONE) return true;
+            if (phase == Phase.CAPTURE) {
                 if (!runtime.pollControlLanes()) return false;
-                capturingLiquidation = false;
-                targetLaneDispatched = true;
+                phase = Phase.TARGET;
                 runtime.dispatchControlLanes(runtime.topology().accountLaneMask(command.targetUserId()), this);
                 return false;
             }
-            if (targetLaneDispatched) {
+            if (phase == Phase.TARGET) {
                 if (!runtime.pollControlLanes()) return false;
-                targetLaneDispatched = false;
                 long sourceLaneMask = runtime.topology().accountLaneMask(liquidation.userId());
                 if (runtime.topology().accountLaneMask(command.targetUserId()) != sourceLaneMask) {
-                    liquidationLaneDispatched = true;
+                    phase = Phase.SOURCE;
                     runtime.dispatchControlLanes(sourceLaneMask, this);
                     return false;
                 }
+                phase = Phase.ACCOUNTS;
             }
-            if (liquidationLaneDispatched) {
+            if (phase == Phase.SOURCE) {
                 if (!runtime.pollControlLanes()) return false;
-                liquidationLaneDispatched = false;
+                phase = Phase.ACCOUNTS;
             }
-            if (!accountsCollected) {
+            if (phase == Phase.ACCOUNTS) {
                 runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
                 runtime.requireRevisionCapacity();
-                accountsCollected = true;
+                phase = Phase.SUBMIT_LEDGER;
             }
-            if (!ledgerDispatched) {
+            if (phase == Phase.SUBMIT_LEDGER) {
                 if (!runtime.dispatchLedgerCommand(this)) return false;
-                ledgerDispatched = true;
+                phase = Phase.LEDGER_WAIT;
             }
             if (!ledgerCommandCompleted()) return false;
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-            done = true;
+            phase = Phase.DONE;
             liquidation = null;
             command = null;
             instrument = null;

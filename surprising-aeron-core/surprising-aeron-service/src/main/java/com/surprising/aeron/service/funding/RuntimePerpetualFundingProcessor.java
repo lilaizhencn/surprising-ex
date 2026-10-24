@@ -123,19 +123,15 @@ public final class RuntimePerpetualFundingProcessor {
         private long laneMask;
         /** 按实际账户归属划分的用户列表，重置保留容量。 */
         private LongArrayList[] usersByLane;
-        /** 本页账户派发已开始的标记，防止重复结算。 */
-        private boolean started;
+        /** 本页账户与账本交接的位置，代替三个顺序阶段标记的组合。 */
+        private enum Phase { DISPATCH_ACCOUNTS, COLLECT_ACCOUNTS, SUBMIT_LEDGER, LEDGER_WAIT }
+        private Phase phase;
         /** 异步完成时由 Owner 保存的本页结果，重置后为空。 */
         private FundingResult result;
         /** 各账户 Lane 的实际收付回执，交接完成后供账本读取。 */
         private LaneFundingResult[] laneResults;
         /** 账本按 Lane 汇总并最终按用户排序的明细缓冲；结果构造时复制，下一次重置清空。 */
         private final ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
-        /**
-         * accountsCollected：账户回执已被 Owner 收齐并登记发布变化的标记。
-         * ledgerDispatched：本页财务命令已经成功投递的标记，防止重复记账。
-         */
-        private boolean accountsCollected, ledgerDispatched;
 
         /**
          * 保存当前命令及固定价格输入，初始化该页可复用状态；账本未激活时立即选用户，否则等账本线程读取索引。
@@ -181,7 +177,7 @@ public final class RuntimePerpetualFundingProcessor {
             } else {
                 for (LongArrayList /* 当前 Lane 可复用的用户列表，只清内容并保留容量。 */ users : usersByLane) users.clear();
             }
-            laneMask = 0; started = accountsCollected = ledgerDispatched = false; result = null;
+            laneMask = 0; phase = Phase.DISPATCH_ACCOUNTS; result = null;
             java.util.Arrays.fill(laneResults, null);
             payments.clear();
             if (!runtime.systemLedgerStarted()) selectAccountUsers();
@@ -228,11 +224,11 @@ public final class RuntimePerpetualFundingProcessor {
                 if (!usersQueued) usersQueued = runtime.dispatchLedgerQuery(userInput);
                 if (!usersReady) return false;
             }
-            if (!started) {
-                started = true;
+            if (phase == Phase.DISPATCH_ACCOUNTS) {
+                phase = Phase.COLLECT_ACCOUNTS;
                 if (laneMask != 0) runtime.dispatchControlLanes(laneMask, this::applyLane);
             }
-            if (!accountsCollected) {
+            if (phase == Phase.COLLECT_ACCOUNTS) {
                 if (laneMask != 0 && !runtime.pollControlLanes()) return false;
                 for (/* 当前用户所属账户 Lane 或回执数组的下标。 */ int lane = 0; lane < usersByLane.length; lane++) {
                     if ((laneMask & (1L << lane)) == 0) continue;
@@ -240,11 +236,11 @@ public final class RuntimePerpetualFundingProcessor {
                     for (long userId : receipt.changedUserIds()) runtime.markBalanceChanged(userId);
                 }
                 runtime.requireRevisionCapacity();
-                accountsCollected = true;
+                phase = Phase.SUBMIT_LEDGER;
             }
-            if (!ledgerDispatched) {
+            if (phase == Phase.SUBMIT_LEDGER) {
                 if (!runtime.dispatchLedgerCommand(this)) return false;
-                ledgerDispatched = true;
+                phase = Phase.LEDGER_WAIT;
             }
             if (!ledgerCommandCompleted()) return false;
             result = finishOwnerResult();
