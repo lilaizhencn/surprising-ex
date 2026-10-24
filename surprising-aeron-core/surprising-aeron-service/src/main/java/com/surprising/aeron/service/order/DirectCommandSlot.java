@@ -371,28 +371,24 @@ public final class DirectCommandSlot {
     }
 
     /**
-     * 准备杠杆变更账户任务，保存变更前修订用于原业务检查。
+     * 准备杠杆变更账户任务，是否发生变化由账户回执判断。
      * @param userId 操作所属账户用户
      * @param command 本方法对应的原始或已解码业务命令，类型见声明
-     * @param beforeRevision 工作开始前的权威修订号
      */
-    public void deferLeverageChange(long userId, UpdateLeverageCommand command,
-                             long beforeRevision) {
+    public void deferLeverageChange(long userId, UpdateLeverageCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.prepareLeverageChange(owner.runtimeState(), owner.identities(), userId, command, beforeRevision);
+        accountControl.prepareLeverageChange(owner.runtimeState(), owner.identities(), userId, command);
         controlWork = accountControlWork;
     }
 
     /**
-     * 准备持仓模式变更账户任务，保留变更前修订。
+     * 准备持仓模式变更账户任务，是否发生变化由账户回执判断。
      * @param userId 操作所属账户用户
      * @param command 本方法对应的原始或已解码业务命令，类型见声明
-     * @param beforeRevision 工作开始前的权威修订号
      */
-    public void deferPositionModeChange(long userId, UpdatePositionModeCommand command,
-                                 long beforeRevision) {
+    public void deferPositionModeChange(long userId, UpdatePositionModeCommand command) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
-        accountControl.preparePositionModeChange(owner.runtimeState(), userId, command, beforeRevision);
+        accountControl.preparePositionModeChange(owner.runtimeState(), userId, command);
         controlWork = accountControlWork;
     }
 

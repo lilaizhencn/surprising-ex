@@ -41,8 +41,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     private long userId;
     /** 需要读取返回值的账户 Lane 编号，供杠杆及持仓路径使用。 */
     private int laneId;
-    /** 准备杠杆或持仓模式变更时保存的命令前产品修订号。 */
-    private long beforeRevision;
     /** 余额或逐仓保证金调整预先算好的下一产品修订号。 */
     private long nextRevision;
     /** 本续步是否已由 Owner 收集并完成，或划转完成路径无需派发。 */
@@ -169,19 +167,17 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     }
 
     /**
-     * 重置并保存命令前修订号，通过业务校验解析杠杆键及合约，再派发所属 Lane 执行账户杠杆变更。
+     * 重置续步，通过业务校验解析杠杆键及合约，再派发所属 Lane 执行账户杠杆变更。
      * @param runtime 要派发并收集账户变化的交易运行时
      * @param identities 将业务资产、合约和持仓身份转为运行时键的字典
      * @param userId 本次控制命令操作的用户编号
      * @param command 杠杆变更命令，包含合约、保证金模式、杠杆及重定价开关
-     * @param beforeRevision 当前命令开始前的产品修订号，用于变更标记比较
      */
     public AccountControlTask prepareLeverageChange(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                                   long userId, UpdateLeverageCommand command, long beforeRevision) {
+                                                   long userId, UpdateLeverageCommand command) {
         clear();
         this.kind = KIND_LEVERAGE;
         this.runtime = Objects.requireNonNull(runtime);
-        this.beforeRevision = beforeRevision;
         this.leverageKey = DerivativeAccountCommandProcessor.leverageKey(runtime, identities, userId, command);
         this.leveragePpm = command.leveragePpm();
         this.repriceCrossMargin = command.repriceCrossMargin();
@@ -193,21 +189,19 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     }
 
     /**
-     * 检查输入并保存用户、目标持仓模式和命令前修订号，再交所属 Lane 检查全账户敞口并执行。
+     * 检查输入并保存用户和目标持仓模式，再交所属 Lane 检查全账户敞口并执行。
      * @param runtime 要派发并收集账户变化的交易运行时
      * @param userId 本次控制命令操作的用户编号
      * @param command 目标持仓模式命令
-     * @param beforeRevision 当前命令开始前的产品修订号，用于变更标记比较
      */
     public AccountControlTask preparePositionModeChange(TradingAccountRuntime runtime, long userId,
-                                                       UpdatePositionModeCommand command, long beforeRevision) {
+                                                       UpdatePositionModeCommand command) {
         if (runtime == null || userId <= 0 || command == null)
             throw new IllegalArgumentException("invalid account position mode change");
         runtime.assertOwner();
         clear();
         this.kind = KIND_POSITION_MODE;
         this.runtime = runtime;
-        this.beforeRevision = beforeRevision;
         this.userId = userId;
         this.positionModeCommand = command;
         this.laneId = runtime.topology().accountLaneId(userId);
@@ -246,7 +240,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         runtime = null;
         userId = 0;
         laneId = 0;
-        beforeRevision = 0;
         nextRevision = 0;
         completed = false;
         stateChanged = false;
@@ -330,14 +323,14 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
                 if (Boolean.TRUE.equals(runtime.controlLaneResult(laneId))) {
                     runtime.recordLeverageChange(leverageKey, leveragePpm);
                     runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-                    if (runtime.revision() != beforeRevision) stateChanged = true;
+                    stateChanged = true;
                 }
             }
             case KIND_POSITION_MODE -> {
                 if (Boolean.TRUE.equals(runtime.controlLaneResult(laneId))) {
                     runtime.markUserChanged(userId);
                     runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-                    if (runtime.revision() != beforeRevision) stateChanged = true;
+                    stateChanged = true;
                 }
             }
             case KIND_POSITION_MARGIN -> {

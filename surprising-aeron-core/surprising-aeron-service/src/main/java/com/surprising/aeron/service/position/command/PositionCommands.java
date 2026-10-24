@@ -21,7 +21,7 @@ public final class PositionCommands {
     }
 
     /**
-     * 解码单向或双向持仓模式；异步路径保留原修订进入控制续步，冷路径仅在模式实际改变时请求发布。
+     * 解码单向或双向持仓模式；异步路径交给控制续步，冷路径仅在模式实际改变时请求发布。
      * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
      */
     public void executeUpdatePositionMode(CoreMessage message) {
@@ -31,9 +31,7 @@ public final class PositionCommands {
         // 本次解出的单向或双向持仓模式
         var command = TradingCommandCodec.decodeUpdatePositionMode(message.payloadUnsafe());
         if (owner.asynchronousCommands()) {
-            // 持仓模式变更前的业务修订，交给异步完成逻辑判断是否变化
-            long beforeRevision = owner.runtimeState().revision();
-            owner.directCommand.deferPositionModeChange(userId, command, beforeRevision);
+            owner.directCommand.deferPositionModeChange(userId, command);
         } else if (DerivativeAccountCommandProcessor.updatePositionMode(owner.runtimeState(), userId, command)) {
             owner.requestCommitPublication();
         }

@@ -328,8 +328,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
         runtime.dispatchControlLanes(laneMask, /* 当前批量回调正在执行的账户 Lane，只准备和应用属于自己的步骤。 */ lane -> {
             for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < stages.length; index++) {
                 if (laneIds[index] != lane) continue;
-                stages[index] = BatchExecutionStage.prepare(requests.get(index), runtime, identities);
-                results[index] = stages[index].apply();
+                var request = requests.get(index);
+                stages[index] = new BatchExecutionStage();
+                results[index] = stages[index].execute(request.command(), request.canceledOrders(),
+                        request.nextCursorOrderId(), runtime, identities);
             }
             return results;
         });
@@ -403,106 +405,31 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     /**
-     * 一笔强平在所属账户 Lane 内的执行步骤，保存本批撤单编号、当前持仓及币对输入；按阶段选择只推进撤单游标，或在最后一批真正平仓结算。
+     * 一笔强平在所属账户 Lane 内完成校验、撤单解冻及平仓，只保留 Owner 随后需要的强平身份、结算资产、持仓键和实际撤单数量。
      */
     private static final class BatchExecutionStage {
-        /** 本笔强平命令，提供执行价格、费率和撤单游标等固定输入。 */
-        private ExecuteLiquidationCommand command;
-        /** Matcher 已撤且本笔尚待账户解冻的订单编号数组。 */
-        private long[] orderIds;
-        /** 本批后下一笔待撤编号，0 表示可进入最终平仓。 */
-        private long nextCursorOrderId;
         /** 本笔实际需要应用的撤单数量，失效计划会把它清零。 */
         private int canceledCount;
-        /** 只推进撤单的阶段标记，true 时保存下一游标，不执行持仓平仓。 */
-        private boolean advance;
-        /** 本次步骤或续步所绑定的交易运行时。 */
-        private TradingAccountRuntime runtime;
-        /** 本账户步骤读取的源强平记录，后续检查及执行以它为输入。 */
-        private LiquidationRuntime liquidation;
-        /** 源强平合约的配置引用，最终执行时用于持仓检查和金额计算。 */
-        private CoreInstrument instrument;
+        /** 本次账户执行的源用户身份，Owner 据此登记结算变更。 */
+        private long userId;
         /** 源持仓的结算资产整数编号，用于现金修改及登记结算变更。 */
         private int assetId;
         /** 源用户当前持仓腿的运行时整数键。 */
         private long positionKey;
-        /** 源用户所属的账户 Lane 编号，账户工作只在该 Lane 执行。 */
-        private int laneId;
-        /** 这笔强平所属的源用户编号，按它定位 Lane 和发布变更。 */
-        private long userId;
 
         /**
-         * 创建当前 Lane 的一笔账户执行步骤，并按命令、撤单列表及持仓输入初始化阶段字段。
-         * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
-         * @param orderIds 本批已在 Matcher 撤销、尚待账户解冻的订单编号数组，无撤单时为空
-         * @param nextCursorOrderId 本批后仍待撤的下一订单编号，0 表示已经到最终强平执行阶段
-         * @param advance 是否只完成本批撤单并保存下一游标，true 时暂不执行持仓强平
-         * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-         * @param liquidation 源账户当前强平记录，提供用户、币对、持仓腿和计划平仓量
-         * @param instrument 目标合约配置，最终强平时用于验证产品和计算金额，只推进撤单时可为空
-         * @param assetId 本笔账户步骤的结算资产整数编号，仅最终持仓结算时使用
-         * @param positionKey 源强平目标持仓腿的运行时整数键，0 表示尚未定位到有效持仓
-         */
-        private BatchExecutionStage(ExecuteLiquidationCommand command, long[] orderIds,
-                                    long nextCursorOrderId, boolean advance,
-                                    TradingAccountRuntime runtime, LiquidationRuntime liquidation,
-                                    CoreInstrument instrument, int assetId, long positionKey) {
-            reset(command, orderIds, nextCursorOrderId, advance, runtime, liquidation,
-                    instrument, assetId, positionKey);
-        }
-
-        /**
-         * 复用账户步骤时替换全部输入，记录本次撤单数量，并从强平源用户确定账户 Lane；不在这里实际撤单或平仓。
-         * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
-         * @param orderIds 本批已在 Matcher 撤销、尚待账户解冻的订单编号数组，无撤单时为空
-         * @param nextCursorOrderId 本批后仍待撤的下一订单编号，0 表示已经到最终强平执行阶段
-         * @param advance 是否只完成本批撤单并保存下一游标，true 时暂不执行持仓强平
-         * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-         * @param liquidation 源账户当前强平记录，提供用户、币对、持仓腿和计划平仓量
-         * @param instrument 目标合约配置，最终强平时用于验证产品和计算金额，只推进撤单时可为空
-         * @param assetId 本笔账户步骤的结算资产整数编号，仅最终持仓结算时使用
-         * @param positionKey 源强平目标持仓腿的运行时整数键，0 表示尚未定位到有效持仓
-         */
-        private void reset(ExecuteLiquidationCommand command, long[] orderIds,
-                           long nextCursorOrderId, boolean advance,
-                           TradingAccountRuntime runtime, LiquidationRuntime liquidation,
-                           CoreInstrument instrument, int assetId, long positionKey) {
-            this.command = command; this.orderIds = orderIds; this.nextCursorOrderId = nextCursorOrderId;
-            this.canceledCount = orderIds == null ? 0 : orderIds.length;
-            this.advance = advance; this.runtime = runtime;
-            this.liquidation = liquidation; this.instrument = instrument; this.assetId = assetId;
-            this.positionKey = positionKey; this.userId = liquidation.userId();
-            this.laneId = runtime.topology().accountLaneId(userId);
-        }
-
-        /**
-         * 从批量请求取出命令、撤单回执和下一游标，进入完整的账户输入检查。
-         * @param request 当前批量步骤的命令、撤单回执和下一游标组合
-         * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-         * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
-         */
-        private static BatchExecutionStage prepare(ExecutionRequest request,
-                                                    TradingAccountRuntime runtime,
-                                                    RuntimeIdentityRegistry identities) {
-            return prepare(null, request.command(), request.canceledOrders(), request.nextCursorOrderId(),
-                    runtime, identities);
-        }
-
-        /**
-         * 在当前账户范围读取强平，按仅推进撤单或最终执行分别检查游标、阶段与价格；把撤单回执转成编号数组并核对所属用户，再定位持仓键与结算资产，创建或复用执行步骤。
-         * @param reuse 上次已经结束的账户执行步骤，可为空以创建新对象
+         * 在当前账户范围读取并校验强平、撤单、持仓与结算资产，再执行本批撤单或最终平仓；临时输入仅在本次调用中使用，Owner 所需结果写回本对象。
          * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
          * @param canceledOrders Matcher 已完成的撤单回执集合，账户步骤据此解除源用户订单和资金冻结
          * @param nextCursorOrderId 本批后仍待撤的下一订单编号，0 表示已经到最终强平执行阶段
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
-        private static BatchExecutionStage prepare(BatchExecutionStage reuse,
-                                                    ExecuteLiquidationCommand command,
-                                                    Collection<CancellationOrder> canceledOrders,
-                                                    long nextCursorOrderId,
-                                                    TradingAccountRuntime runtime,
-                                                    RuntimeIdentityRegistry identities) {
+        private RuntimeTreasuryDelta execute(ExecuteLiquidationCommand command,
+                                             Collection<CancellationOrder> canceledOrders,
+                                             long nextCursorOrderId,
+                                             TradingAccountRuntime runtime,
+                                             RuntimeIdentityRegistry identities) {
             if (!runtime.productLine().isDerivative()) {
                 throw new IllegalArgumentException("liquidation requires derivative product");
             }
@@ -555,17 +482,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
                     : position == null ? 0 : position.assetId();
             if (position != null && !identities.asset(assetId).equals(instrument.settleAsset()))
                 throw new IllegalStateException("liquidation position settlement asset differs from instrument");
-            if (reuse == null) return new BatchExecutionStage(command, orderIds, nextCursorOrderId, advance,
-                    runtime, liquidation, instrument, assetId, positionKey);
-            reuse.reset(command, orderIds, nextCursorOrderId, advance, runtime, liquidation,
-                    instrument, assetId, positionKey);
-            return reuse;
-        }
-
-        /**
-         * 最终执行前先判断计划是否已经失效；失效则取消计划且不应用撤单回执。有效时逐笔撤单解冻，尚有下一游标则保留 ORDERED，最后一批才真正执行持仓强平。
-         */
-        private RuntimeTreasuryDelta apply() {
+            this.userId = liquidation.userId();
+            this.assetId = assetId;
+            this.positionKey = positionKey;
+            this.canceledCount = count;
             // 本笔已经到最终阶段，但当前持仓或风险不再符合强平计划，因此不应应用撤单或平仓。
             boolean obsolete = !advance && !executable(runtime, liquidation, instrument, positionKey);
             if (obsolete) canceledCount = 0;
@@ -602,16 +522,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
             return executeAccountLiquidation(command, runtime, liquidation, instrument, assetId, positionKey);
         }
 
-        /**
-         * 命令槽回收时释放命令、撤单数组、运行时和币对输入引用，保留步骤对象供下一次使用。
-         */
-        private void clearReferences() {
-            command = null;
-            orderIds = null;
-            runtime = null;
-            liquidation = null;
-            instrument = null;
-        }
     }
 
     /**
@@ -701,8 +611,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
          */
         @Override
         public Object apply(int ignored) {
-            stage = BatchExecutionStage.prepare(stage, command, canceledOrders, nextCursorOrderId, runtime, identities);
-            return stage.apply();
+            if (stage == null) stage = new BatchExecutionStage();
+            return stage.execute(command, canceledOrders, nextCursorOrderId, runtime, identities);
         }
 
         /**
@@ -713,7 +623,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             if (done) return true;
             if (!accountsCollected) {
                 if (!runtime.pollControlLanes()) return false;
-                treasuryDelta = (RuntimeTreasuryDelta) runtime.controlLaneResult(stage.laneId);
+                treasuryDelta = (RuntimeTreasuryDelta) runtime.controlLaneResult(laneId);
                 if (treasuryDelta != null)
                     runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
                 Math.addExact(runtime.revision(), stage.canceledCount == 0 ? 1 : 2);
@@ -749,10 +659,9 @@ public final class RuntimeDerivativeLiquidationProcessor {
         }
 
         /**
-         * 命令槽回收时释放本次输入和内部账户步骤引用，保留续步及步骤对象供下一条命令复用。
+         * 命令槽回收时释放本次命令、撤单集合和身份表引用，保留续步及账户结果供下一条命令复用。
          */
         public void clearReferences() {
-            if (stage != null) stage.clearReferences();
             command = null;
             canceledOrders = null;
             identities = null;
