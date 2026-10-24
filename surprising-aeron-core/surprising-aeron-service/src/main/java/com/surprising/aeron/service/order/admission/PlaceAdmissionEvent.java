@@ -67,8 +67,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private FeePolicyBook decisionPolicies;
     /** Owner 固定的决策业务时间，价格鲜度、费率及到期检查使用此值。 */
     private long decisionTimestamp;
-    /** 本次 Lane 操作带来的客户身份分配计数差，Owner 读取后清零。 */
-    private long identityAllocations;
     /** 账户准入计算的应预留金额，回执连同是否获准一起交给 Matcher。 */
     private long reservedAmount;
     /** 成功写入订单后用户账户版本，用于 Matcher 结算回执核对。 */
@@ -163,7 +161,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         this.settlementStatus = settlementStatus;
         this.preparedClientKey = 0;
         this.identities = identities;
-        identityAllocations = 0;
         this.assetId = assetId;
         this.laneId = laneId;
         this.matcherWaitRequired = matcherWaitRequired;
@@ -217,8 +214,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         if (lane.laneId() != runtime.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place admission reached the wrong Account Lane");
         }
-        // 本次准入开始前 Lane 的客户身份分配计数，结束后取差交给 Owner。
-        long allocationsBefore = lane.clientIdentityAllocations();
         try {
             runtime.enterLaneCommandScope(lane);
             try {
@@ -265,7 +260,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
             preparedClientKey = 0;
             rejection = failure;
         }
-        identityAllocations = lane.clientIdentityAllocations() - allocationsBefore;
         // 完成位可见前先取得通知所需的运行时引用；排队事件仍保留到本命令的 Matcher 续步消费完回执。
         // 发布完成或消费位之前先取得的通知目标，避免对象回收清理 runtime 后再读取该字段。
         TradingAccountRuntime completionRuntime = runtime;
@@ -332,7 +326,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         rejection = null;
         closeCapacityCancellations = List.of();
         reservedAmount = 0;
-        identityAllocations = 0;
         coreSequence = 0;
         userId = 0;
         laneId = 0;
@@ -405,10 +398,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         matcherConsumed = true;
     }
 
-    /**
-     * 取走本次客户身份分配计数差并清零，避免 Owner 重复统计。
-     */
-    public long takeIdentityAllocations() { /* 本次取走的客户身份分配计数差，返回后原字段已经清零。 */ long result = identityAllocations; identityAllocations = 0; return result; }
     /**
      * 返回本次准入准备的实际客户端订单身份键，读取前由调用方遵守完成边界。
      */

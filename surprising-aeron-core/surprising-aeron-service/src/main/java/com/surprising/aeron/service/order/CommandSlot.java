@@ -271,7 +271,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
 
     /**
      * 从本槽已捕获的结果副本中按订单号查找，不回读 Lane 订单表。
-     * @param orderId 当前逻辑命令或结果绑定的订单号
      */
     public OrderRuntime laneResultOrder(long orderId) { return laneResultTarget.order(orderId); }
     /**
@@ -392,10 +391,9 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      * @param orderId 当前逻辑命令或结果绑定的订单号
      * @param orders 执行期间保持稳定的前置或控制撤单有序列表
      */
-    java.util.function.Supplier<?> prepareControlMatching(TradingCoreRuntime owner, long orderId,
+    java.util.function.Supplier<?> prepareControlMatching(TradingCoreRuntime owner,
             List<CancellationOrder> orders) {
         controlMatching.owner = Objects.requireNonNull(owner);
-        controlMatching.orderId = orderId;
         controlMatching.orders = Objects.requireNonNull(orders);
         return controlMatching;
     }
@@ -431,8 +429,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     private final class ControlMatchingContinuation implements java.util.function.Supplier<Object> {
         /** 固定撮合任务借用的所属交易运行时。 */
         private TradingCoreRuntime owner;
-        /** 固定任务关联的逻辑或实际订单号，具体用途由对应任务确定。 */
-        private long orderId;
         /** 控制撤单任务借用的有序请求列表。 */
         private List<CancellationOrder> orders;
         /**
@@ -440,12 +436,12 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
          */
         @Override public Object get() {
             return owner.matchingAdapter().cancelControlOrders(coreSequence, command.header().commandId(),
-                    orderId, command.header().submittedAtEpochMillis(), orders);
+                    command.header().submittedAtEpochMillis(), orders);
         }
         /**
-         * 清掉控制任务借用的 Owner、逻辑订单号及列表引用，任务对象继续复用。
+         * 清掉控制任务借用的 Owner 及列表引用，任务对象继续复用。
          */
-        void clear() { owner = null; orderId = 0; orders = null; }
+        void clear() { owner = null; orders = null; }
     }
 
     /**

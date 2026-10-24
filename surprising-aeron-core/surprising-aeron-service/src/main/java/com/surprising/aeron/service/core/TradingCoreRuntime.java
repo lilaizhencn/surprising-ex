@@ -3089,7 +3089,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 var command = progress.command;
                 // 适配器根据完整撤单描述和证据构造的撮合完成结果
                 var evidenced = owner.matchingAdapter.completeControlCancellations(
-                        command.sequence(), command.command().header().commandId(), 0,
+                        command.sequence(), command.command().header().commandId(),
                         command.command().header().submittedAtEpochMillis(), progress.orders, progress.results);
                 pending.removeFirst();
                 command.crossShardCancellationStarted(false);

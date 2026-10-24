@@ -1063,7 +1063,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * 拒绝空结果及故障后的回执，核对非控制业务分片，再绑定 Core 身份及原生/业务序号；绑定后遇到致命结果分类登记故障，仍返回已绑定事实。
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param commandId 逻辑命令 UUID
-     * @param orderId 当前命令关联的订单号，证据校验允许零
      * @param sequence 预先分配的证据分片业务序号
      * @param matcherShardId 业务证据分片号，负一表示控制分片
      * @param result 当前原生或普通撮合结果，方法签名决定具体类型
@@ -1071,7 +1070,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private CoreMatchingResult bindMatcherEvidence(
             long coreSequence,
             java.util.UUID commandId,
-            long orderId,
             long sequence,
             int matcherShardId,
             CoreMatchingResult result) {
@@ -1086,7 +1084,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (matcherShardId >= 0 && nativeShard >= 0 && nativeShard != matcherShardId)
             throw new IllegalStateException("native matcher result crossed its evidence partition");
         // 控制证据可串联不同订单簿，native sequence 仍必须在原生引擎自己的序列内严格递增。
-        CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
+        CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId,
                 sequence, matcherShardId, nativeShard, result);
         poisonIfFatal(bound);
         return bound;
@@ -1314,7 +1312,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 是否所有撤单项都接受，空列表也没有失败。
         boolean accepted = failure == null;
         return new CoreMatchingResult(accepted, accepted ? "SUCCESS" : failure.resultCode(), cancellations,
-                !accepted && successfulPrefix != 0, 0, 0, 0, 0, 0, 0, -1,
+                !accepted && successfulPrefix != 0, 0, 0, 0, 0, 0, -1,
                 null, CoreMatchingResult.concatenateEvents(results));
     }
 
@@ -1363,18 +1361,17 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * 在当前命令作用域按既定顺序执行控制撤单并绑定控制分片负一的业务证据；运行异常记录故障，已执行前缀不回滚。
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param commandId 逻辑命令 UUID
-     * @param logicalOrderId 外层控制命令关联的逻辑订单号
      * @param timestamp Cluster 提供的确定性业务时间戳
      * @param orders 按调用方确定顺序排列的控制撤单请求
      */
     public CoreMatchingResult cancelControlOrders(long coreSequence, java.util.UUID commandId,
-            long logicalOrderId, long timestamp, List<CancellationOrder> orders) {
-        validateCommandEvidence(coreSequence, commandId, logicalOrderId, timestamp);
+            long timestamp, List<CancellationOrder> orders) {
+        validateCommandEvidence(coreSequence, commandId, 0, timestamp);
         java.util.Objects.requireNonNull(orders, "control cancellations");
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(timestamp);
         try {
-            return bindMatcherEvidence(coreSequence, commandId, logicalOrderId,
+            return bindMatcherEvidence(coreSequence, commandId,
                     matcherEvidence.nextSequence(-1), -1, cancelRoutedBatch(orders));
         } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
             matcherFailure.compareAndSet(null, failure);
@@ -1406,15 +1403,14 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
      * 仅聚合已经在原生分片执行过的撤单结果，绑定一次控制业务证据，不重新操作任何订单簿。
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param commandId 逻辑命令 UUID
-     * @param logicalOrderId 外层控制命令关联的逻辑订单号
      * @param timestamp Cluster 提供的确定性业务时间戳
      * @param orders 按调用方确定顺序排列的控制撤单请求
      * @param results 与每个请求一一对应的撤单结果，未执行项需用占位结果
      */
     public CoreMatchingResult completeControlCancellations(long coreSequence, java.util.UUID commandId,
-            long logicalOrderId, long timestamp, List<CancellationOrder> orders, List<CoreMatchingResult> results) {
-        validateCommandEvidence(coreSequence, commandId, logicalOrderId, timestamp);
-        return bindMatcherEvidence(coreSequence, commandId, logicalOrderId,
+            long timestamp, List<CancellationOrder> orders, List<CoreMatchingResult> results) {
+        validateCommandEvidence(coreSequence, commandId, 0, timestamp);
+        return bindMatcherEvidence(coreSequence, commandId,
                 matcherEvidence.nextSequence(-1), -1, aggregateRoutedCancellationResults(orders, results));
     }
 

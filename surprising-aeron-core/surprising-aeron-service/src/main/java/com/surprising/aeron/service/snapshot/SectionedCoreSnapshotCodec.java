@@ -12,20 +12,20 @@ import lombok.experimental.Accessors;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 
-/** 分段快照 v29 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。提供整体编码、恢复和增量接收；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。 构造约定：禁止实例化纯静态格式入口。 */
+/** 分段快照 v30 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。提供整体编码、恢复和增量接收；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。 构造约定：禁止实例化纯静态格式入口。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SectionedCoreSnapshotCodec {
 
     /** 外层小端魔数，标识 Surprising 核心分段快照。 */
     public static final int MAGIC = 0x5358534E;
-    /** 当前外层格式版本二十九，不代表内嵌负载版本。 */
-    public static final int VERSION = 29;
+    /** 当前外层格式版本三十，不代表内嵌负载版本。 */
+    public static final int VERSION = 30;
     /** 封套十二字节：魔数、版本、保留位与总段数。 */
     public static final int ENVELOPE_LENGTH = 12;
     /** 每个段头八字节：顺序段编号和负载长度。 */
     public static final int SECTION_HEADER_LENGTH = 8;
-    /** 第一段固定元数据负载长度八十九字节。 */
-    public static final int HEADER_LENGTH = 89;
+    /** 第一段固定元数据负载长度八十一字节。 */
+    public static final int HEADER_LENGTH = 81;
     /** 一个来源水位条目二十字节，包含来源码、实例号与序号。 */
     public static final int SOURCE_SEQUENCE_LENGTH = 20;
     /** 一个命令结果负载的固定部分七十六字节，不含前置条目长度和变长响应数据。 */

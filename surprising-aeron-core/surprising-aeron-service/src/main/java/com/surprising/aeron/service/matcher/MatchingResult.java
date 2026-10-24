@@ -42,10 +42,6 @@ public interface MatchingResult {
      */
     long nativeCoreSequence();
     /**
-     * 返回关联的普通订单编号，零可表示未绑定或没有单一订单。
-     */
-    long nativeOrderId();
-    /**
      * 返回此结果发布到所属证据分片时的业务序号。
      */
     long nativeMatcherSequence();

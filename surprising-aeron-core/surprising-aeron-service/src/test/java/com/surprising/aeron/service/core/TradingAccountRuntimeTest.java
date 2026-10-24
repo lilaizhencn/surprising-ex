@@ -1516,7 +1516,7 @@ class TradingAccountRuntimeTest {
             } finally {
                 state.releaseOwnerLaneAccess();
             }
-            assertThat(identities.snapshot().clientKeys()).isEmpty();
+            assertThat(identities.clientIdentityCount()).isZero();
         } finally {
             state.close();
         }

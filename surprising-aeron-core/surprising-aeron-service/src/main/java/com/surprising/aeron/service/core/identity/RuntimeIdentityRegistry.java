@@ -9,7 +9,6 @@ import com.surprising.aeron.service.account.LaneClientIdentities;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -214,15 +213,6 @@ public final class RuntimeIdentityRegistry {
         rollbackClientKeyInLane(clientLane(userId), userId, name, key);
     }
 
-    /**
-     * Owner 从 Lane 回执累计新身份分配数，精确加到字典版本；加法溢出报错，本方法不单独检查计数正负。
-     * @param count 从 Lane 回执汇总的新客户端身份分配次数
-     */
-    public void recordLaneClientAllocations(long count) {
-        assertOwner();
-        dictionaryVersion = Math.addExact(dictionaryVersion, count);
-    }
-
     // 账户 Lane 读取已准备持仓键时，Owner 仍可准备后续命令的身份。
     /** 用户与原持仓名到确定性键的并发正向表，支持异步发布读取。 */
     private final Map<PositionIdentity, Long> positionKeys = new ConcurrentHashMap<>();
@@ -375,10 +365,6 @@ public final class RuntimeIdentityRegistry {
     private int nextSymbolId;
     /** 下次 Owner 持仓分配顺序号，从一起，不是哈希业务键。 */
     private long nextPositionKey = 1;
-    /**  Owner 已记录的资产、标的及客户端、持仓分配版本，释放不倒退。 读取已记录身份分配的版本值；释放不倒退，不能把它当成当前存活身份数。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long dictionaryVersion;
     /** 当前身份字典 Owner 线程，冷构建首次使用时绑定。 */
     private Thread owner;
 
@@ -400,7 +386,7 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * Owner 先查原资产文本，未命中再规范化并分配从零开始的内部编号，发布反向数组并增加版本；后续异常不自动回滚此前分配。
+     * Owner 先查原资产文本，未命中再规范化并分配从零开始的内部编号，发布反向数组；后续异常不自动回滚此前分配。
      * @param asset 要规范化或查询的资产文本
      */
     public int assetId(String asset) {
@@ -418,7 +404,6 @@ public final class RuntimeIdentityRegistry {
         int id = nextAssetId++;
         assetIds.put(normalized, id);
         assets = storeIdentity(assets, id, normalized);
-        dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return id;
     }
 
@@ -456,7 +441,7 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * 要求永久标的 ID 为正，Owner 查重后分配从零开始的内部编号，发布规范数字文本并增加版本。
+     * 要求永久标的 ID 为正，Owner 查重后分配从零开始的内部编号，发布规范数字文本。
      * @param instrumentId 永久数字标的身份；整数重载直接给数值，文本重载使用规范数字文本
      */
     public int symbolId(int instrumentId) {
@@ -469,7 +454,6 @@ public final class RuntimeIdentityRegistry {
         int id = nextSymbolId++;
         symbolIds.put(instrumentId, id);
         symbols = storeIdentity(symbols, id, Integer.toString(instrumentId));
-        dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return id;
     }
 
@@ -523,14 +507,12 @@ public final class RuntimeIdentityRegistry {
         // 当前用户身份的确定性长整数键
         long key = clientKeyOrZero(userId, clientOrderId);
         if (key == 0) return 0;
-        // 客户端表返回的带符号准备结果，负号表示此次新分配
-        long prepared = clientTable(userId).prepare(key, userId, clientOrderId, false);
-        if (prepared < 0) dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        clientTable(userId).prepare(key, userId, clientOrderId, false);
         return key;
     }
 
     /**
-     * Owner 为本次准入保留客户端身份引用，新分配计入版本；对外返回实际正键，不保留 Lane 准备结果的符号。
+     * Owner 为本次准入保留客户端身份引用，对外返回实际正键，不保留 Lane 准备结果的符号。
      * @param userId 该身份所属用户
      * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
      */
@@ -539,14 +521,12 @@ public final class RuntimeIdentityRegistry {
         // 当前用户身份的确定性长整数键
         long key = clientKeyOrZero(userId, clientOrderId);
         if (key == 0) return 0;
-        // 客户端表返回的带符号准备结果，负号表示此次新分配
-        long prepared = clientTable(userId).prepare(key, userId, clientOrderId, true);
-        if (prepared < 0) recordLaneClientAllocations(1);
+        clientTable(userId).prepare(key, userId, clientOrderId, true);
         return key;
     }
 
     /**
-     * 核对所属 Lane 后保留一次客户端身份；新分配增加 Lane 本地分配数并返回负键，已有身份返回正键，零表示无客户端单号。
+     * 核对所属 Lane 后保留一次客户端身份；新分配返回负键，已有身份返回正键，零表示无客户端单号。
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
      * @param userId 该身份所属用户
      * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
@@ -559,7 +539,6 @@ public final class RuntimeIdentityRegistry {
         if (key == 0) return 0;
         // 客户端表返回的带符号准备结果，负号表示此次新分配
         long prepared = table.prepare(key, userId, clientOrderId, true);
-        if (prepared < 0) lane.clientIdentityAllocations(Math.incrementExact(lane.clientIdentityAllocations()));
         // 仅返回值用负号标记新分配，Lane 状态中存储的实际身份键始终为正。
         return prepared;
     }
@@ -608,11 +587,6 @@ public final class RuntimeIdentityRegistry {
         return preparedKey < 0 ? Math.negateExact(preparedKey) : preparedKey;
     }
 
-    /**
-     * 用负号判断准备结果是否表示此次新建身份；零和正值均不是新建。
-     * @param preparedKey 本次客户端身份准备结果，负号表示新建，绝对值为实际键
-     */
-    public static boolean newClientIdentity(long preparedKey) { return preparedKey < 0; }
 
     /**
      * 核对所属 Lane 后按用户和原持仓名查身份；无结果返回空，不分配。
@@ -947,7 +921,6 @@ public final class RuntimeIdentityRegistry {
     private void recordPositionAllocation(long key, PositionEntry entry) {
         if (entry.allocationRecorded) return;
         trackAllocation(positionAllocationKeys, positionKeyAllocations, nextPositionKey++, key);
-        dictionaryVersion = Math.incrementExact(dictionaryVersion);
         entry.allocationRecorded = true;
     }
 
@@ -1209,7 +1182,7 @@ count = Math.addExact(count, lane.clientIdentities().publishedCount());
     }
 
     /**
-     * Owner 仅在引用数为零时把持仓项标记退休，再移除正向、反向和分配记录；未知或仍被保留的项直接跳过，游标和版本不倒退。
+     * Owner 仅在引用数为零时把持仓项标记退休，再移除正向、反向和分配记录；未知或仍被保留的项直接跳过，游标不倒退。
      * @param positionKey 可以尝试退休的确定性持仓整数键
      */
     public void releasePositionKey(long positionKey) {
@@ -1223,27 +1196,6 @@ count = Math.addExact(count, lane.clientIdentities().publishedCount());
         ownerLookupScratch.positionEntries.remove(positionKey);
         positions.remove(new PositionMapKey(positionKey), entry);
         removeAllocation(positionAllocationKeys, positionKeyAllocations, positionKey);
-    }
-
-    /**
-     * Owner 导出资产、规范标的、存活客户端和持仓身份；客户端与持仓快照游标按当前条目数加一编码，不直接复制历史分配顺序号。
-     */
-    public Snapshot snapshot() {
-        assertOwner();
-        // 本次快照从各客户端表导出的存活身份映射
-        Map<ClientIdentity, Long> clientKeys = new HashMap<>(clientIdentityCount());
-        if (clientRuntime != null) {
-            for (/* 新旧冷运行时账户 Lane 的遍历下标 */ int laneIndex = 0; laneIndex < clientRuntime.accountLaneCount(); laneIndex++) {
-            // 用户所属账户 Lane 或当前循环正迁移的 Lane
-            AccountLaneState lane = clientRuntime.accountLane(laneIndex);
-lane.clientIdentities().exportTo(clientKeys);
-        }
-        } else if (unboundClients != null) unboundClients.forEachValue(/* 当前用户或迁移中的客户端身份表 */ table -> table.exportTo(clientKeys));
-        // 本次快照以永久数字文本为键导出的标的字典
-        Map<String, Integer> exportedSymbols = new HashMap<>(symbolIds.size());
-        symbolIds.forEachKeyValue((/* 标的字典保存的外部永久正整数 ID */ permanentId, /* 该永久标的对应的内部稠密编号 */ runtimeId) -> exportedSymbols.put(symbols[runtimeId], runtimeId));
-        return new Snapshot(assetIds, exportedSymbols, clientKeys, positionKeys,
-                nextAssetId, nextSymbolId, clientKeys.size() + 1L, positionKeys.size() + 1L);
     }
 
     /**
@@ -1352,85 +1304,6 @@ lane.clientIdentities().exportTo(clientKeys);
         if (allocation == 0) return;
         if (allocations.removeKeyIfAbsent(allocation, key) != key) {
             throw new IllegalStateException("runtime identity allocation index is inconsistent");
-        }
-    }
-
-    /**
-     * 从快照重建独立冷身份表和反向数组，导入客户端身份、以零发布引用恢复持仓项；恢复游标并按各游标推算字典版本，不启动工作线程。
-     * @param snapshot 创建和恢复边界提供的身份快照
-     */
-    public static RuntimeIdentityRegistry restore(Snapshot snapshot) {
-        if (snapshot == null) throw new IllegalArgumentException("identity snapshot is required");
-        // 从快照重建的独立冷身份表
-        RuntimeIdentityRegistry registry = new RuntimeIdentityRegistry();
-        snapshot.assetIds().forEach((/* 新建身份时才构造的原持仓名或当前导入的原文本 */ name, /* 当前内部身份编号，或恢复回调提供的内部编号 */ id) -> {
-            registry.assetIds.put(name, id);
-            registry.assets = storeIdentity(registry.assets, id, name);
-        });
-        snapshot.symbolIds().forEach((/* 新建身份时才构造的原持仓名或当前导入的原文本 */ name, /* 当前内部身份编号，或恢复回调提供的内部编号 */ id) -> {
-            registry.symbolIds.put(com.surprising.product.api.utils.InstrumentIds.parse(name), id);
-            registry.symbols = storeIdentity(registry.symbols, id, name);
-        });
-        snapshot.clientKeys().forEach((/* 当前比较、导入或哈希的用户范围身份 */ identity, /* 当前用户身份的确定性长整数键 */ key) -> {
-            registry.clientTable(identity.userId()).importIdentity(key, identity.userId(), identity.clientOrderId());
-        });
-        snapshot.positionKeys().forEach((/* 当前比较、导入或哈希的用户范围身份 */ identity, /* 当前用户身份的确定性长整数键 */ key) -> {
-            registry.positionKeys.put(identity, key);
-            registry.positions.put(new PositionMapKey(key), new PositionEntry(identity, true));
-        });
-        registry.nextAssetId = snapshot.nextAssetId();
-        registry.nextSymbolId = snapshot.nextSymbolId();
-        registry.nextPositionKey = snapshot.nextPositionKey();
-        registry.dictionaryVersion = Math.addExact(
-                Math.addExact(snapshot.nextAssetId(), snapshot.nextSymbolId()),
-                Math.addExact(snapshot.nextClientKey() - 1, snapshot.nextPositionKey() - 1));
-        return registry;
-    }
-
-    /**
-     * 身份恢复数据和游标。只读包装不保证底层数据全被复制，创建及持有期间须遵守快照边界；不保存未消费发布结果的引用数。
-     * @param assetIds 资产文本到内部编号的快照映射
-     * @param symbolIds 规范永久数字标的文本到内部编号的快照映射
-     * @param clientKeys 用户客户端单号到实际身份键的存活映射
-     * @param positionKeys 用户持仓名到确定性键的存活映射
-     * @param nextAssetId 快照中的下次资产编号
-     * @param nextSymbolId 快照中的下次内部标的编号
-     * @param nextClientKey 客户端快照游标，须大于存活条目数
-     * @param nextPositionKey 持仓快照游标，须大于存活条目数，恢复后用于 Owner 分配记账
-     */
-    public record Snapshot(Map<String, Integer> assetIds, Map<String, Integer> symbolIds,
-                           Map<ClientIdentity, Long> clientKeys, Map<PositionIdentity, Long> positionKeys,
-                           int nextAssetId, int nextSymbolId, long nextClientKey, long nextPositionKey) {
-        /**
-         * 包装只读映射并检查游标与条目数的基本关系；有序资产、标的映射及客户端、持仓映射仍借用原底层数据，并非全部深拷贝。
-         */
-        public Snapshot {
-            assetIds = Collections.unmodifiableMap(assetIds instanceof java.util.NavigableMap<?, ?> ? assetIds : new java.util.LinkedHashMap<>(assetIds));
-            symbolIds = Collections.unmodifiableMap(symbolIds instanceof java.util.NavigableMap<?, ?> ? symbolIds : new java.util.LinkedHashMap<>(symbolIds));
-            clientKeys = Collections.unmodifiableMap(clientKeys);
-            positionKeys = Collections.unmodifiableMap(positionKeys);
-            if (nextAssetId < assetIds.size() || nextSymbolId < symbolIds.size()
-                    || nextClientKey <= clientKeys.size() || nextPositionKey <= positionKeys.size()) {
-                throw new IllegalArgumentException("invalid identity snapshot cursors");
-            }
-        }
-    }
-
-    /**
-     * 用户范围内的原客户端单号值，不修剪文本；记录本身不额外校验参数。
-     * @param userId 该身份所属用户
-     * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
-     */
-    public record ClientIdentity(long userId, String clientOrderId) implements Comparable<ClientIdentity> {
-        /**
-         * 先按用户数字，再按原客户端单号字典序排序。
-         * @param other 按当前键或身份规则比较的另一对象
-         */
-        @Override
-        public int compareTo(ClientIdentity other) {
-            // 先比较两个用户 ID，只有相同才比较原客户端单号
-            int result = Long.compare(userId, other.userId);
-            return result != 0 ? result : clientOrderId.compareTo(other.clientOrderId);
         }
     }
 

@@ -1190,8 +1190,6 @@ public final class TriggerOrderCommands {
         private com.surprising.aeron.service.order.admission.ResolvedPlaceOrder order;
         /** 解析子单遇到的业务拒绝代码，非空则认领后完成为失败。 */
         private String failureReason;
-        /** 账户成功准入留下的客户端身份准备令牌，Owner 用它登记新分配数量。 */
-        private long preparedClientKey;
         /**
          * assetId：子单实际预留资产的内部 ID，解析未成功时为零。
          * laneId：触发单所属用户账户 Lane，由 Owner 预先定位。
@@ -1235,7 +1233,6 @@ public final class TriggerOrderCommands {
             trigger = null; order = null; failureReason = "";
             this.triggerId = triggerId; this.triggerSequence = triggerSequence;
             this.price = price; this.triggeredAt = triggeredAt; this.commandId = commandId;
-            preparedClientKey = 0;
             decision = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.context(
                     owner.runtimeState(), owner.identities(), route.instrumentId(), owner.currentClusterTimestamp());
             baseAssetId = owner.identities().assetId(decision.instrument().baseAsset());
@@ -1301,7 +1298,6 @@ public final class TriggerOrderCommands {
                         commandId, childSequence, openInterest, owner.identities(),
                         com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.clientKeyValue(key), assetId,
                         decision.lifecycleSettled(), decision.fundingInProgress());
-                preparedClientKey = key;
                 return receipt;
             } catch (/* 子单决策或冻结中遇到的业务拒绝，记成触发失败而非技术故障 */ CoreStateRejectedException rejected) {
                 if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
@@ -1331,10 +1327,6 @@ public final class TriggerOrderCommands {
             if (!owner.runtimeState().pollControlLanes()) return false;
             // 账户子单准入的回执，空表示本次没有成功接纳子单
             var result = owner.runtimeState().controlLaneResult(laneId);
-            // 账户成功准入留下的原客户端身份令牌，用于登记新分配数量
-            long clientKey = preparedClientKey;
-            if (com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.newClientIdentity(clientKey))
-                owner.identities().recordLaneClientAllocations(1);
             owner.requestCommitPublication();
             if (result != null) {
                 // 账户返回的子单订单回执，先收集冻结预留再排入撮合

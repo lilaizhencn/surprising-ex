@@ -1327,7 +1327,8 @@ class RuntimeCommitRecoveryTest {
         // 反射取得的未中断对照原身份表
         var referenceIdentities = (com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry)
                 field(reference, "identities");
-        assertThat(recoveredIdentities.snapshot()).isEqualTo(referenceIdentities.snapshot());
+        assertThat(com.surprising.aeron.service.core.identity.IdentityTestContents.capture(recoveredIdentities))
+                .isEqualTo(com.surprising.aeron.service.core.identity.IdentityTestContents.capture(referenceIdentities));
         assertThat(recovered.tradingState().riskState()).isEqualTo(reference.tradingState().riskState());
         assertThat(recovered.tradingState().treasuryState()).isEqualTo(reference.tradingState().treasuryState());
         assertThat(recovered.snapshotBusinessStateHash()).isEqualTo(reference.snapshotBusinessStateHash());
@@ -1453,7 +1454,7 @@ class RuntimeCommitRecoveryTest {
      */
     private static Object canonicalIndexValue(Object value) {
         if (value instanceof com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry /* 当前冷重建或规范化取内容的原身份字典 */ identities)
-            return identities.snapshot(); // 比较跨恢复对象的字典内容，而不是 Java 对象身份。
+            return com.surprising.aeron.service.core.identity.IdentityTestContents.capture(identities); // 比较身份事实，不导出另一套可恢复格式。
         if (value instanceof com.surprising.aeron.service.order.state.OrderRuntime /* 当前原订单，取文本比较跨恢复合约对象身份 */ order)
             return order.toString(); // 恢复后合约对象身份可不同，用本测试既有订单文本规则对照。
         if (value == null) return "<null>";

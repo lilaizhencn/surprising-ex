@@ -509,8 +509,6 @@ public final class TradingCoreOwner {
             return next != null && next.action() == null;
         }
         if (pendingIngressReady()) return true;
-        // 已经观察到完成游标没有变化；在生产者发布新通知前，重复进入完整推进器不会产生进展。
-        if (commandPipeline.waitingForMatchingNotification()) return ownerCompletionAvailable();
         return state != null && state.matchingProgress.hasDrainWork();
     }
 

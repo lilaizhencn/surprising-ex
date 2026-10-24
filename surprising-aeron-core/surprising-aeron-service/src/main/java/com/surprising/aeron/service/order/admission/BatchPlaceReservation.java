@@ -37,10 +37,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     private UUID commandId;
     /** 按产品和买卖方向选定的冻结资产运行时编号。 */
     private int assetId;
-    /**  prepareClientKeyInLane 的原始准备结果，实际客户键通过 clientKeyValue 取得。 返回本项客户身份准备的原始结果值，供原流程回退或取实际身份键，调用方先等控制任务完成。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long preparedClientKey;
     /** 原批次命令槽保存的获准订单租约，寿命长于本项可复用任务。 */
     private OrderRuntime admittedOrder;
     /** 原批次项槽访问入口，Lane 把获准订单租约写回它，不增加 Owner 订单副本。 */
@@ -147,7 +143,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
             assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
                     : side() == CoreOrderSide.BUY ? decision.quoteAssetId() : decision.baseAssetId();
             identity = identities.prepareClientKeyInLane(lane, userId, clientOrderId());
-            preparedClientKey = identity;
             // 从准备返回值取出的实际客户身份键，后续账户准入和冻结使用它。
             long clientKey = RuntimeIdentityRegistry.clientKeyValue(identity);
             // 该用户当前币对及持仓腿的已有身份，0 表示无持仓身份。
@@ -173,7 +168,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
             return null;
         } catch (/* 本项执行的原始运行时异常或 Error，回退已准备客户身份后原样上抛给控制调度器。 */ RuntimeException | Error failure) {
             if (identity != 0) identities.rollbackClientKeyInLane(lane, userId, clientOrderId(), identity);
-            preparedClientKey = 0;
             throw failure;
         } finally {
             // 发布完成位后任务体不再读取自己的字段；结果发布仍归原控制调度器，Owner 必须等 pollControlLanes 完成再消费。
@@ -200,7 +194,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         identities = null;
         decision = null;
         commandId = null;
-        sequence = userId = openInterestSteps = preparedClientKey = 0;
+        sequence = userId = openInterestSteps = 0;
         assetId = 0;
         admittedOrder = null;
         source = null;

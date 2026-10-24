@@ -428,7 +428,7 @@ public final class CoreMatchingFlow {
     }
 
     /**
-     * 融合模式可先内联执行；只在第一次 Owner 收据收集时登记身份分配并保存准入或拒绝，随后推进分片提交顺序。已拒绝且未提交的等待者可取消；收据实际释放还需 Matcher 已消费。
+     * 融合模式可先内联执行；只在第一次 Owner 收据收集时保存准入或拒绝，随后推进分片提交顺序。已拒绝且未提交的等待者可取消；收据实际释放还需 Matcher 已消费。
      * @param pending 本池仍在生命周期内的命令槽
      */
     public boolean collectPlaceAdmissionIfReady(CommandSlot pending) {
@@ -440,7 +440,6 @@ public final class CoreMatchingFlow {
         // Lane 已报告的可空准入业务异常。
         RuntimeException rejection = admission.rejection();
         if (!pending.placeAdmissionOwnerCollected()) {
-            owner.identities().recordLaneClientAllocations(admission.takeIdentityAllocations());
             if (rejection != null) {
                 // 按业务、算术或其他准入失败分类后的拒绝结果码。
                 CoreResultCode resultCode = rejection instanceof CoreStateRejectedException /* 带明确业务拒绝码的异常，用于映射 CoreResultCode。 */ rejected
@@ -564,15 +563,12 @@ public final class CoreMatchingFlow {
      * @param pending 本池仍在生命周期内的命令槽
      */
     private Supplier<?> prepareControlCancellations(CommandSlot pending) {
-        // 单笔强平使用计划标识，其余控制没有单一逻辑订单时为零。
-        long logicalOrderId = 0;
         // 当前选中或准备交给 Matcher 的有序撤单身份。
         List<CancellationOrder> orders;
         switch (pending.operation()) {
             case LIQUIDATION -> {
                 // 当前操作对应的已解码输入或准备的固定 Matcher 函数，具体类型见声明。
                 var command = pending.decodedCommand().liquidation();
-                logicalOrderId = command.liquidationId();
                 // 账户校验收据确认的当前强平计划状态。
                 var liquidation = pending.liquidationCheck().liquidation(0);
                 orders = liquidation == null || !pending.liquidationCheck().executable(0) ? List.of()
@@ -598,7 +594,7 @@ public final class CoreMatchingFlow {
             var combined = new ArrayList<CancellationOrder>(prefix.size() + orders.size());
             combined.addAll(prefix); combined.addAll(orders); orders = combined;
         }
-        return pending.prepareControlMatching(owner, logicalOrderId, orders);
+        return pending.prepareControlMatching(owner, orders);
     }
 
     /**

@@ -12,7 +12,7 @@ import lombok.experimental.Accessors;
 import org.agrona.DirectBuffer;
 
 /**
- * 按字节片段接收 v27 快照的内部状态机：先封套，再逐个段头/负载，边接收边更新非页尾 CRC；每段只分配对应长度数组，不创建额外全文件数组。接收时已检查总上限，完整后才交给 Parser 解码与配对检查。它不自行调度线程，也不承诺接收异常后可回滚复用。
+ * 按字节片段接收 v30 快照的内部状态机：先封套，再逐个段头/负载，边接收边更新非页尾 CRC；每段只分配对应长度数组，不创建额外全文件数组。接收时已检查总上限，完整后才交给 Parser 解码与配对检查。它不自行调度线程，也不承诺接收异常后可回滚复用。
  */
 public final class SectionedCoreSnapshotRecovery {
 

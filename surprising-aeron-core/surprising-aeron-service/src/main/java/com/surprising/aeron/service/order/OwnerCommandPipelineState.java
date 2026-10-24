@@ -8,7 +8,7 @@ import lombok.Setter;
 import lombok.experimental.Accessors;
 
 /**
- * Owner 独占的命令调度状态：保存响应窗口、控制命令、当前提交队首、依赖阻塞引用、等待通知游标和观测计数。这里决定下一步能推进什么，不拥有订单簿、余额或持仓事实，也不创建计时器或工作线程；窗口模式方法只在启用流水执行时调用。
+ * Owner 独占的命令调度状态：保存响应窗口、控制命令、当前提交队首、依赖阻塞引用和观测计数。这里决定下一步能推进什么，不拥有订单簿、余额或持仓事实，也不创建计时器或工作线程；窗口模式方法只在启用流水执行时调用。
  */
 public final class OwnerCommandPipelineState {
     /** Owner 每轮完成收集使用的批次上限六十四，实际循环由调用方控制。 */
@@ -72,13 +72,6 @@ public final class OwnerCommandPipelineState {
     /** 必须先退休的依赖前缀最后条目，引用既有窗口对象。 */
     private ClusterCommandWindow.Entry blockedThrough;
 
-    /** 上次等待通知时保存的派发上限。 */
-    private long waitingDispatchSequence;
-    /** 上次等待通知时观察到的完成进度。 */
-    private long waitingMatchingProgress;
-    /** 上次无进展且无本地工作的等待通知标记。 */
-    private boolean waitingMatchingNotification;
-
     /**  Owner 已记录的命令阶段推进次数。 返回 Owner 已记录的推进次数，不是已应用 Core 序号。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -98,7 +91,7 @@ public final class OwnerCommandPipelineState {
     private long retryFences;
 
     /**
-     * 清当前窗口及全部控制、等待、依赖和观测字段，供启动或测试复用；不会重置交易运行时的业务状态。
+     * 清当前窗口及全部控制、依赖和观测字段，供启动或测试复用；不会重置交易运行时的业务状态。
      */
     public void reset() {
         if (commandWindow != null) commandWindow.clear();
@@ -110,9 +103,6 @@ public final class OwnerCommandPipelineState {
         progressDeadline = 0;
         blockedIngress = null;
         blockedThrough = null;
-        waitingDispatchSequence = 0;
-        waitingMatchingProgress = 0;
-        waitingMatchingNotification = false;
         commandProgress = 0;
         commandWindowHighWaterMark = 0;
         drainedCommands = 0;
@@ -122,7 +112,7 @@ public final class OwnerCommandPipelineState {
     }
 
     /**
-     * 终止时清窗口和活动引用，保留进展/峰值/边界计数及上次等待游标，清等待通知标记，便于随后输出摘要。
+     * 终止时清窗口和活动引用，保留进展/峰值/边界计数，便于随后输出摘要。
      */
     public void clearCommandContainers() {
         if (commandWindow != null) commandWindow.clear();
@@ -134,7 +124,6 @@ public final class OwnerCommandPipelineState {
         progressDeadline = 0;
         blockedIngress = null;
         blockedThrough = null;
-        waitingMatchingNotification = false;
     }
 
     /**
@@ -244,49 +233,13 @@ public final class OwnerCommandPipelineState {
     }
 
     /**
-     * 保存本次派发上限和完成进度，只有进度未变且没有本地可推进工作时才标记等待通知。
-     * @param dispatchThrough 本次允许派发到的序号上限
-     * @param matchingProgress 本轮收集后的完成进度
-     * @param progressBefore 本轮开始前观察到的进度
-     * @param hasLocalMatchingWork 是否仍有 Owner 可直接推进的本地撮合工作
-     */
-    void rememberMatchingWait(long dispatchThrough, long matchingProgress, long progressBefore,
-                              boolean hasLocalMatchingWork) {
-        waitingDispatchSequence = dispatchThrough;
-        waitingMatchingProgress = matchingProgress;
-        waitingMatchingNotification = matchingProgress == progressBefore && !hasLocalMatchingWork;
-    }
-
-    /**
-     * 仅当上次在等通知、派发上限和进度都没变且无新完成通知时，允许本轮跳过重复扫描。
-     * @param dispatchThrough 本次允许派发到的序号上限
-     * @param progressBefore 本轮开始前观察到的进度
-     * @param hasMatchingNotifications 是否收到新的 Matcher 完成通知
-     */
-    boolean canSkipMatchingPoll(long dispatchThrough, long progressBefore,
-                                boolean hasMatchingNotifications) {
-        return waitingMatchingNotification
-                && waitingDispatchSequence == dispatchThrough
-                && waitingMatchingProgress == progressBefore
-                && !hasMatchingNotifications;
-    }
-
-    /**
-     * 返回上次计算保存的等待通知状态，不实时探查 worker。
-     */
-    public boolean waitingForMatchingNotification() {
-        return waitingMatchingNotification;
-    }
-
-    /**
-     * 调用方确认队首终态后退休一项；若它正是阻塞依赖末项先清引用，随后移窗口、清提交/等待状态并增加进展计数。
+     * 调用方确认队首终态后退休一项；若它正是阻塞依赖末项先清引用，随后移窗口、清提交状态并增加进展计数。
      */
     public void finishHeadCommit() {
         if (committingHead == null) throw new IllegalStateException("no command commit boundary");
         if (committingHead == blockedThrough) clearBlockedIngress();
         commandWindow.removePrefix(1);
         committingHead = null;
-        waitingMatchingNotification = false;
         commandProgress++;
     }
 

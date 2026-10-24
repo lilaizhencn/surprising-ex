@@ -273,7 +273,7 @@ public final class SectionedCoreSnapshotParser {
     /**
      * 已经解码并完成组件配对的输入集合。保留状态与原生模块引用以及待移交的终态索引，可用于查看清单或准备、激活恢复运行时；生命周期由使用方负责。
      * @param productLine 该快照唯一所属的产品线
-     * @param appliedCommandCount 冻结点已应用的 Core 命令数量，须与 coreSequence 相同
+     * @param appliedCommandCount 冻结点已应用的 Core 命令水位
      * @param commandResults 按命令 UUID 保存的幂等结果表
      * @param sourceSequences 按来源类型及来源实例记录的消费水位表
      * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
@@ -310,11 +310,11 @@ public final class SectionedCoreSnapshotParser {
             TradingCoreRuntime candidate = null;
             try {
                 com.surprising.aeron.service.core.TradingAccountRuntime.validateAccountLaneSnapshotManifest(
-                        accountLanes, manifest.coreSequence(), tradingState, matcherSnapshot.topology());
+                        accountLanes, manifest.appliedCommandCount(), tradingState, matcherSnapshot.topology());
                 candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount,
                         commandResults, sourceSequences, tradingState, retention, matcherSnapshot,
                         manifest.projectionSequence(), feePolicies, pendingTransfers, configuration);
-                candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
+                candidate.restoreAccountLaneSnapshots(accountLanes, manifest.appliedCommandCount());
                 if (activate) candidate.activate();
                 return candidate;
             } catch (/* 当前解析或候选恢复的运行异常，按所在边界转为协议错误并清理已移交资源。 */ RuntimeException exception) {
@@ -338,7 +338,7 @@ public final class SectionedCoreSnapshotParser {
         CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
             requireProductLine(expectedProductLine);
             return new CoreSnapshotManifest(productLine, SectionedCoreSnapshotCodec.VERSION,
-                    manifest.snapshotId(), manifest.coreSequence(), manifest.clusterTimestamp(),
+                    manifest.snapshotId(), manifest.clusterTimestamp(),
                     manifest.clusterPosition(), appliedCommandCount, matcherSnapshot.matcherSequence(),
                     manifest.businessStateHash(), matcherSnapshot.engineStateHash(),
                     manifest.sourceSequenceDigest(), matcherSnapshot.topology(), manifest.globalFundsHash(), checksum);

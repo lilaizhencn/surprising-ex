@@ -31,12 +31,10 @@ final class SectionedCoreSnapshotValidation {
         if (productLine != expectedProductLine) {
             throw new ProtocolException("snapshot product line mismatch: " + productLine);
         }
-        // 头部记录的 Core 已应用数量，稍后与 Core 水位配对。
+        // 头部记录的 Core 已应用水位，稍后与独立 Matcher 段配对。
         long appliedCommandCount = header.getLong();
         // 头部读取的快照编号，要求为正。
         long snapshotId = header.getLong();
-        // 头部读取的 Core 水位，要求非负。
-        long coreSequence = header.getLong();
         // 独立的实时投影发布水位，要求非负。
         long projectionSequence = header.getLong();
         // 投影水位的按位反码，用于识别元数据错误。
@@ -58,11 +56,11 @@ final class SectionedCoreSnapshotValidation {
         if (projectionSequenceComplement != ~projectionSequence) {
             throw new ProtocolException("snapshot projection sequence mismatch");
         }
-        if (appliedCommandCount < 0 || coreSequence < 0 || projectionSequence < 0
+        if (appliedCommandCount < 0 || projectionSequence < 0
                 || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new ProtocolException("invalid snapshot sequence or position");
         }
-        return new HeaderManifest(productLine, snapshotId, coreSequence,
+        return new HeaderManifest(productLine, snapshotId,
                 projectionSequence, accountLaneDigest,
                 clusterTimestamp, clusterPosition, appliedCommandCount,
                 businessStateHash, globalFundsHash, sourceSequenceDigest);
@@ -87,8 +85,7 @@ final class SectionedCoreSnapshotValidation {
         requireMatch(manifest.productLine() == matcherSnapshot.productLine()
                 && manifest.productLine() == tradingState.productLine(), "product line");
         requireMatch(manifest.snapshotId() == matcherSnapshot.snapshotId(), "snapshot id");
-        requireMatch(manifest.coreSequence() == matcherSnapshot.coreSequence(), "core sequence");
-        requireMatch(manifest.appliedCommandCount() == manifest.coreSequence(), "applied sequence");
+        requireMatch(manifest.appliedCommandCount() == matcherSnapshot.coreSequence(), "core sequence");
         requireMatch(manifest.businessStateHash() == TradingCoreRuntime.canonicalBusinessStateHash(
                 tradingState.businessStateHash(), feePolicies, pendingTransfers)
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
@@ -149,18 +146,17 @@ final class SectionedCoreSnapshotValidation {
      * 从固定元数据段读取的内部清单，额外保留投影水位与 Lane 摘要供恢复核对；这是值载体，不在 record 构造时再次执行配对。
      * @param productLine 该快照唯一所属的产品线
      * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
-     * @param coreSequence 快照覆盖的已应用 Core 命令水位
      * @param projectionSequence 冻结点已发布的实时投影水位，不要求等于 Core 命令数
      * @param accountLaneDigest 头部保存的账户 Lane 清单摘要
      * @param clusterTimestamp 捕获点的非负 Cluster 业务时间
      * @param clusterPosition 捕获点的非负 Cluster 日志位置
-     * @param appliedCommandCount 冻结点已应用的 Core 命令数量，须与 coreSequence 相同
+     * @param appliedCommandCount 冻结点已应用的 Core 命令水位
      * @param businessStateHash Core 状态连同费率、待完成划转的业务哈希
      * @param globalFundsHash 头部保存的全局资金哈希
      * @param sourceSequenceDigest 各消息来源已消费序号的汇总摘要
      */
     record HeaderManifest(
-            ProductLine productLine, long snapshotId, long coreSequence,
+            ProductLine productLine, long snapshotId,
             long projectionSequence, long accountLaneDigest,
             long clusterTimestamp, long clusterPosition, long appliedCommandCount,
             long businessStateHash, long globalFundsHash,

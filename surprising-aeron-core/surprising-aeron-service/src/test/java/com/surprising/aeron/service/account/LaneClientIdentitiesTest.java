@@ -82,7 +82,7 @@ class LaneClientIdentitiesTest {
     }
 
     /**
-     * 把独立字典绑定旧运行时再冷迁移到新运行时，核对源清空、字典版本不变及双引用身份需要两次释放。
+     * 把独立字典绑定旧运行时再冷迁移到新运行时，核对源清空、身份不漂移及双引用身份需要两次释放。
      */
     @Test void initialBindingAndColdRebindTransferAuthorityWithExactReferences() {
         // 被验证冷绑定与 Lane 路由规则的运行时身份字典。
@@ -92,8 +92,6 @@ class LaneClientIdentitiesTest {
         identities.prepareClientKey(7, "first");
         // 用户八持有一次的第二个确定性客户身份键。
         long second = identities.clientKey(8, "second");
-        // 首次 Lane 绑定前记录的字典版本，冷重绑定应保持此版本。
-        long version = identities.dictionaryVersion();
         try (/* 首次接收身份权威表的旧运行时，作用域结束自动关闭。 */ var oldRuntime = new TradingAccountRuntime(); /* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingAccountRuntime()) {
             identities.bindClientLanes(oldRuntime);
             // 旧运行时中用户七的身份表，冷迁移成功后其存活数量应归零。
@@ -101,7 +99,8 @@ class LaneClientIdentitiesTest {
             assertThat(identities.clientIdentityCount()).isEqualTo(2);
             identities.bindClientLanes(runtime);
             assertThat(oldTable.publishedCount()).isZero();
-            assertThat(identities.dictionaryVersion()).isEqualTo(version);
+            assertThat(identities.findClientKeyValue(7, "first")).isEqualTo(first);
+            assertThat(identities.findClientKeyValue(8, "second")).isEqualTo(second);
             identities.releaseClientKey(7, first);
             assertThat(identities.clientOrderId(7, first)).isEqualTo("first");
             identities.releaseClientKey(7, first);
@@ -163,9 +162,9 @@ class LaneClientIdentitiesTest {
             var firstLane = runtime.accountLane(runtime.topology().accountLaneId(firstUser));
             // 运行时真实持有的第二用户账户 Lane。
             var secondLane = runtime.accountLane(runtime.topology().accountLaneId(secondUser));
-            // 直接导入相同数值键模拟少见碰撞，不改变生产哈希算法。
-            firstLane.clientIdentities.importIdentity(19, firstUser, "first-name");
-            secondLane.clientIdentities.importIdentity(19, secondUser, "second-name");
+            // 用实际准备入口传相同数值键模拟少见碰撞，不改变生产哈希算法。
+            firstLane.clientIdentities.prepare(19, firstUser, "first-name", false);
+            secondLane.clientIdentities.prepare(19, secondUser, "second-name", false);
             assertThat(identities.clientOrderId(firstUser, 19)).isEqualTo("first-name");
             assertThat(identities.clientOrderId(otherUser, 19)).isEqualTo("second-name");
             identities.releaseClientKey(firstUser, 19);

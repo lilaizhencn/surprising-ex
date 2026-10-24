@@ -8,10 +8,9 @@ import com.surprising.product.api.ProductLine;
  * @param productLine 该快照唯一所属的产品线
  * @param schemaVersion 外层快照格式版本号，独立于各内嵌负载自己的格式版本
  * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
- * @param coreSequence 快照覆盖的已应用 Core 命令水位
  * @param clusterTimestamp 捕获点的非负 Cluster 业务时间
  * @param clusterPosition 捕获点的非负 Cluster 日志位置
- * @param appliedCommandCount 冻结点已应用的 Core 命令数量，须与 coreSequence 相同
+ * @param appliedCommandCount 冻结点已应用的 Core 命令水位
  * @param matcherSequence 原生快照模块中的最大持久化序号，不是 Core 应用数量
  * @param businessStateHash Core 状态连同费率、待完成划转的业务哈希
  * @param engineStateHash Matcher 引擎模块汇总出的 int 哈希
@@ -24,7 +23,6 @@ public record CoreSnapshotManifest(
         ProductLine productLine,
         int schemaVersion,
         long snapshotId,
-        long coreSequence,
         long clusterTimestamp,
         long clusterPosition,
         long appliedCommandCount,
@@ -37,11 +35,11 @@ public record CoreSnapshotManifest(
         long checksum) {
 
     /**
-     * 要求产品线/拓扑非空、版本为正、时间及序号非负，Core 水位等于已应用数量，资金哈希非零且校验值非负。此构造器允许快照号为零，也没有单独要求业务哈希非零；真实字节格式的更严检查在解析流程执行。
+     * 要求产品线/拓扑非空、版本为正、时间及序号非负，资金哈希非零且校验值非负。此构造器允许快照号为零，也没有单独要求业务哈希非零；真实字节格式的更严检查在解析流程执行。
      */
     public CoreSnapshotManifest {
-        if (productLine == null || schemaVersion <= 0 || snapshotId < 0 || coreSequence < 0 || clusterTimestamp < 0 || clusterPosition < 0
-                || coreSequence != appliedCommandCount || matcherSequence < 0
+        if (productLine == null || schemaVersion <= 0 || snapshotId < 0 || appliedCommandCount < 0 || clusterTimestamp < 0 || clusterPosition < 0
+                || matcherSequence < 0
                 || topology == null || globalFundsHash == 0
                 || checksum < 0) {
             throw new IllegalArgumentException("invalid core snapshot manifest");

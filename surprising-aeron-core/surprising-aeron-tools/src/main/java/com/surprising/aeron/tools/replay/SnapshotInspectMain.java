@@ -18,9 +18,9 @@ public final class SnapshotInspectMain {
         }
         ProductLine productLine = ProductLine.requireExternalCode(args[0]);
         var manifest = TradingCoreRuntime.inspectSnapshot(productLine, Files.readAllBytes(Path.of(args[1])));
-        log.info("{}", String.format(java.util.Locale.ROOT, "productLine=%s schemaVersion=%d snapshotId=%d coreSequence=%d "
+        log.info("{}", String.format(java.util.Locale.ROOT, "productLine=%s schemaVersion=%d snapshotId=%d "
                         + "appliedCommandCount=%d businessStateHash=%016x checksum=%016x%n",
-                manifest.productLine(), manifest.schemaVersion(), manifest.snapshotId(), manifest.coreSequence(),
+                manifest.productLine(), manifest.schemaVersion(), manifest.snapshotId(),
                 manifest.appliedCommandCount(), manifest.businessStateHash(), manifest.checksum()).stripTrailing());
     }
 }

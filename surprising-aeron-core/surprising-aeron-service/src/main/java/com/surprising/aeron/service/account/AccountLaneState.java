@@ -236,16 +236,6 @@ public final class AccountLaneState {
     private final IntObjectHashMap<LongLongHashMap> pendingReservedUnitsByAsset = new IntObjectHashMap<>();
     /** 整个 Lane 仍待完成的预留条数。 */
     private int totalPendingReservations;
-    /**
-     *  本 Lane 新建客户身份的累计次数，完成收据由 Owner 汇入字典版本。
-     * 返回 Lane 已记录的客户身份新建累计数。
-     * 直接设置客户身份新建累计数，供恢复及受控更新使用；不自动汇入 Owner 字典版本。
-     * @param clientIdentityAllocations 恢复或更新后的客户身份累计分配次数
-     */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    @Setter
-    long clientIdentityAllocations;
     /** 该 Lane 已应用的修订计数，和单个用户或订单修订号不同。 */
     private long revision;
     /** 该 Lane 已应用的 Core 命令水位。 */

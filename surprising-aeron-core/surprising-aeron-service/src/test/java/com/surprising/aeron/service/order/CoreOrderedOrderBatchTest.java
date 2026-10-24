@@ -2185,8 +2185,6 @@ class CoreOrderedOrderBatchTest {
             applyBalance(state, 1001, 20_000);
             // 当前 Core 内的账户权威运行时，故障后通过合法 Lane 读取检查
             TradingAccountRuntime runtime = field(state, "runtimeState");
-            // 故障前浅观察的业务索引值，当前用例没有再比较该局部基线
-            var indexesBefore = allIndexSnapshots(state);
             // 执行当前批次前的运行时业务修订
             long revisionBefore = runtime.revision();
             // 故障前的独立发布序号，失败不得错误前进
@@ -2243,15 +2241,8 @@ class CoreOrderedOrderBatchTest {
             TradingAccountRuntime runtime = field(state, "runtimeState");
             // 当前运行时的资产、品种、客户号及持仓身份字典
             RuntimeIdentityRegistry identities = field(state, "identities");
-            // 故障前复制的身份字典观察值
-            var identityBefore = identities.snapshot();
-            // 故障前浅观察的业务索引值，当前用例没有再比较该局部基线
-            var indexesBefore = allIndexSnapshots(state);
-            // 故障前业务哈希局部基线，当前用例没有在故障后比较它
-            long businessBefore = state.snapshotBusinessStateHash();
-            // 故障前资金哈希局部基线，当前用例没有在故障后比较它
-            long fundsBefore = com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
-                    state.snapshotTradingState());
+            // 故障前持仓身份分配检查点，实际成交后的新身份不得回滚。
+            long positionCheckpointBefore = identities.positionCheckpoint();
             // 故障前的独立发布序号，失败不得错误前进
             long projectionBefore = state.snapshotProjectionSequence();
             // 故障注入前的已提交 Core 水位
@@ -2297,7 +2288,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(makerPositionKey).isNotNull();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.position(takerPositionKey).signedQuantitySteps())).isEqualTo(1);
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1002, () -> runtime.position(makerPositionKey).signedQuantitySteps())).isEqualTo(-1);
-            assertThat(identities.snapshot()).isNotEqualTo(identityBefore);
+            assertThat(identities.positionCheckpoint()).isGreaterThan(positionCheckpointBefore);
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_301))).isNull();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_302))).isNull();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(15_301))).isNull();

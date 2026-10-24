@@ -8,14 +8,14 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 身份表的确定性键、稠密编号、引用保留及快照恢复测试。显式区分独立冷表、普通并发读取线程与真实账户运行时；这些用例不代表交易集群吞吐或碰撞概率证明。
+ * 身份表的确定性键、稠密编号、引用保留及并发读取测试。显式区分独立冷表、普通并发读取线程与真实账户运行时；这些用例不代表交易集群吞吐或碰撞概率证明。
  */
 class RuntimeIdentityRegistryTest {
     /**
-     * 验证永久大整数 ID 仍分配内部零号，未知查询用负一或空表示；快照保留规范数字文本，恢复后编号与后续分配稳定。
+     * 验证永久大整数 ID 仍分配内部零号，未知查询用负一或空表示；反向查询保留规范数字文本，重复查询和后续分配稳定。
      */
     @Test
-    void nativePermanentIdsKeepDenseZeroAndSnapshotProtocolSpellings() {
+    void nativePermanentIdsKeepDenseZeroAndCanonicalSpellings() {
         // 本用例当前验证的独立身份表，或原表与恢复表遍历中的当前实例
         var registry = new RuntimeIdentityRegistry();
         assertThat(registry.symbolId(Integer.MAX_VALUE)).isZero();
@@ -24,15 +24,9 @@ class RuntimeIdentityRegistryTest {
         assertThat(registry.findSymbolIdValue(Integer.MAX_VALUE)).isZero();
         assertThat(registry.findSymbolIdValue(9999)).isEqualTo(-1);
         assertThat(registry.findSymbolId("9999")).isNull();
-        // 导出的身份快照，检查永久标的文本与内部编号关系
-        var snapshot = registry.snapshot();
-        assertThat(snapshot.symbolIds()).containsEntry("2147483647", 0).containsEntry("10000", 1);
-        // 从快照恢复的独立身份表，释放它不影响原表
-        var restored = RuntimeIdentityRegistry.restore(snapshot);
-        assertThat(restored.symbolId(Integer.MAX_VALUE)).isZero();
-        assertThat(restored.symbolId(10000)).isEqualTo(1);
-        assertThat(restored.symbolId(9999)).isEqualTo(2);
-        assertThat(restored.instrumentId(0)).isEqualTo("2147483647");
+        assertThat(registry.instrumentId(0)).isEqualTo("2147483647");
+        assertThat(registry.instrumentId(1)).isEqualTo("10000");
+        assertThat(registry.symbolId(9999)).isEqualTo(2);
     }
 
     /**
@@ -63,26 +57,10 @@ class RuntimeIdentityRegistryTest {
     }
 
     /**
-     * 检查两份发布引用未消费前不能退休身份，并在最后消费后核对快照仍能恢复该存活身份。
+     * 用单线程执行器替独立 Lane 保留两份持仓身份；逐次消费和尝试退休，验证最后消费前身份存活，最终可删除并以相同键重建。
      */
     @Test
-    void lanePositionIdentitySurvivesEarlierCommitRetirementUntilItsOutputIsPublished() throws Exception {
-        verifyPositionRetention(true);
-    }
-
-    /**
-     * 不经过快照，检查发布引用保护、最终退休及同名确定性重建。
-     */
-    @Test
-    void lanePositionIdentityRetentionWithoutSnapshot() throws Exception {
-        verifyPositionRetention(false);
-    }
-
-    /**
-     * 用单线程执行器替独立 Lane 保留两份持仓身份；逐次消费和尝试退休，验证最后消费前身份存活，最终可删除并以相同键重建。可选快照只检查存活身份恢复，不复制发布引用数。
-     * @param snapshot 是否在最后一份发布引用消费后、身份退休前额外核对快照恢复
-     */
-    private void verifyPositionRetention(boolean snapshot) throws Exception {
+    void lanePositionIdentitySurvivesUntilItsOutputIsPublished() throws Exception {
         // 本用例当前验证的独立身份表，或原表与恢复表遍历中的当前实例
         var registry = new RuntimeIdentityRegistry();
         registry.assertOwner();
@@ -100,11 +78,6 @@ class RuntimeIdentityRegistryTest {
             registry.releasePositionKey(key);
             assertThat(registry.findPositionKey(user, "1:LONG")).isEqualTo(key);
             registry.releasePublishedPosition(key);
-            if (snapshot) {
-                // 从快照恢复的独立身份表，释放它不影响原表
-                var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
-                assertThat(restored.positionKey(user, key)).isEqualTo("1:LONG");
-            }
             registry.releasePositionKey(key);
             assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
             // 最后删除后重新准备同名身份所得结果；客户端结果保留新分配符号
@@ -113,15 +86,14 @@ class RuntimeIdentityRegistryTest {
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);
             assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
-            if (snapshot) assertThat(registry.snapshot().positionKeys()).isEmpty();
         }
     }
 
     /**
-     * 冷表两次准备同一客户端单号，逐次 Lane 释放只在最后删除；恢复表可独立释放而不影响原表，错误 Lane 拒绝。
+     * 冷表两次准备同一客户端单号，逐次 Lane 释放只在最后删除；相同身份在独立表中可释放而不影响原表，错误 Lane 拒绝。
      */
     @Test
-    void laneReleaseCompletesWithoutAnOwnerHandoffAndRestoresLiveKeys() {
+    void laneReleaseCompletesWithoutAnOwnerHandoffAndPreservesOtherTables() {
         // 本用例当前验证的独立身份表，或原表与恢复表遍历中的当前实例
         var registry = new RuntimeIdentityRegistry();
         // 本用例身份所属用户十七
@@ -139,12 +111,13 @@ class RuntimeIdentityRegistryTest {
         assertThat(registry.clientIdentityCount()).isZero();
         // 最后删除后重新准备同名身份所得结果；客户端结果保留新分配符号
         var recreated = registry.prepareClientKeyInLane(lane, user, "客户-retired");
-        // 从快照恢复的独立身份表，释放它不影响原表
-        var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
+        // 独立表为相同用户和原名生成同一确定性身份，释放不影响原表
+        var independent = new RuntimeIdentityRegistry();
+        assertThat(independent.clientKey(user, "客户-retired")).isEqualTo(RuntimeIdentityRegistry.clientKeyValue(recreated));
         // 去掉重新准备客户端结果符号后的实际正键
         long recreatedKey = RuntimeIdentityRegistry.clientKeyValue(recreated);
-        restored.releaseClientKeyInLane(lane, user, recreatedKey);
-        assertThat(restored.clientIdentityCount()).isZero();
+        independent.releaseClientKeyInLane(lane, user, recreatedKey);
+        assertThat(independent.clientIdentityCount()).isZero();
         assertThat(registry.clientIdentityCount()).isEqualTo(1);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.releaseClientKeyInLane(
                 new AccountLaneState(lane.laneId() + 1, 16), user, recreatedKey))
@@ -152,32 +125,30 @@ class RuntimeIdentityRegistryTest {
     }
 
     /**
-     * 在原始及恢复冷表中检查异线程只读反查、跨用户误释放和逐用户删除互不干扰；未启动真实账户工作线程。
+     * 在冷表中检查异线程只读反查、跨用户误释放和逐用户删除互不干扰；未启动真实账户工作线程。
      */
     @Test
-    void clientReadOnlyLookupAndLaneReleasePreserveOtherKeysAfterRestore() throws Exception {
-        // 供快照与恢复对照的原始冷客户端身份表
-        var original = new RuntimeIdentityRegistry();
+    void clientReadOnlyLookupAndLaneReleasePreserveOtherKeys() throws Exception {
+        // 供异线程读取和释放验证的冷客户端身份表
+        var registry = new RuntimeIdentityRegistry();
         // 首次客户端准备结果，或第一个用户/名称的实际持仓键
-        long first = original.clientKey(7, "客户-A");
+        long first = registry.clientKey(7, "客户-A");
         // 另一用户或另一名称的身份键，用于检查释放隔离
-        long second = original.clientKey(8, "客户-B");
-        for (var /* 本用例当前验证的独立身份表，或原表与恢复表遍历中的当前实例 */ registry : new RuntimeIdentityRegistry[]{original, RuntimeIdentityRegistry.restore(original.snapshot())}) {
-            assertThat(registry.clientOrderId(7, first)).isEqualTo("客户-A");
-            assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
-            // 模拟独立 Lane 操作或普通冷读的单线程执行器，用例结束关闭
-            var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
-            try {
-                assertThat(executor.submit(() -> registry.clientOrderId(7, first)).get()).isEqualTo("客户-A");
-            } finally { executor.shutdownNow(); }
-            registry.releaseClientKey(8, first);
-            assertThat(registry.findClientKey(7, "客户-A")).isEqualTo(first);
-            registry.releaseClientKey(7, first);
-            assertThat(registry.findClientKey(7, "客户-A")).isNull();
-            assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
-            registry.releaseClientKey(8, second);
-            assertThat(registry.clientIdentityCount()).isZero();
-        }
+        long second = registry.clientKey(8, "客户-B");
+        assertThat(registry.clientOrderId(7, first)).isEqualTo("客户-A");
+        assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
+        // 模拟独立 Lane 操作或普通冷读的单线程执行器，用例结束关闭
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            assertThat(executor.submit(() -> registry.clientOrderId(7, first)).get()).isEqualTo("客户-A");
+        } finally { executor.shutdownNow(); }
+        registry.releaseClientKey(8, first);
+        assertThat(registry.findClientKey(7, "客户-A")).isEqualTo(first);
+        registry.releaseClientKey(7, first);
+        assertThat(registry.findClientKey(7, "客户-A")).isNull();
+        assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
+        registry.releaseClientKey(8, second);
+        assertThat(registry.clientIdentityCount()).isZero();
     }
 
     /**
@@ -201,7 +172,7 @@ class RuntimeIdentityRegistryTest {
             var duplicate = identities.prepareClientKeyInLane(lane, userId, "客户😀");
             assertThat(RuntimeIdentityRegistry.clientKeyValue(duplicate))
                     .isEqualTo(RuntimeIdentityRegistry.clientKeyValue(first));
-            assertThat(lane.clientIdentityAllocations()).isEqualTo(1);
+            assertThat(identities.clientIdentityCount()).isOne();
             identities.rollbackClientKeyInLane(lane, userId, "客户😀", duplicate);
             assertThat(identities.clientIdentityCount()).isEqualTo(1);
             identities.rollbackClientKeyInLane(lane, userId, "客户😀", first);
@@ -250,30 +221,28 @@ class RuntimeIdentityRegistryTest {
     }
 
     /**
-     * 用 Java 字符串哈希相同的 Aa、BB 检查身份仍按完整文本区分，并检查用户隔离、中文补充字符、恢复及单项释放。
+     * 用 Java 字符串哈希相同的 Aa、BB 检查身份仍按完整文本区分，并检查用户隔离、中文补充字符及单项释放。
      */
     @Test
-    void positionLookupSeparatesEqualHashesAndSurvivesRestoreAndRelease() {
+    void positionLookupSeparatesEqualHashesAndReleasesOnlyTheTarget() {
         // 本用例 Owner 准备和查询的身份表
-        var identities = new RuntimeIdentityRegistry();
+        var registry = new RuntimeIdentityRegistry();
         assertThat("Aa".hashCode()).isEqualTo("BB".hashCode());
         // 首次客户端准备结果，或第一个用户/名称的实际持仓键
-        long first = identities.positionKey(7, "Aa");
+        long first = registry.positionKey(7, "Aa");
         // 另一用户或另一名称的身份键，用于检查释放隔离
-        long second = identities.positionKey(7, "BB");
+        long second = registry.positionKey(7, "BB");
         // 另一用户相同名称的持仓键，验证用户维度隔离
-        long third = identities.positionKey(8, "Aa");
+        long third = registry.positionKey(8, "Aa");
         // 含中文与补充平面字符的原持仓名对应键
-        long unicode = identities.positionKey(7, "客户😀:NET");
-        for (var /* 本用例当前验证的独立身份表，或原表与恢复表遍历中的当前实例 */ registry : new RuntimeIdentityRegistry[]{identities, RuntimeIdentityRegistry.restore(identities.snapshot())}) {
-            assertThat(registry.positionKey(7, new String("Aa"))).isEqualTo(first);
-            assertThat(registry.preparedPositionKey(7, "BB")).isEqualTo(second).isNotEqualTo(first);
-            assertThat(registry.preparedPositionKey(8, "Aa")).isEqualTo(third).isNotEqualTo(first);
-            assertThat(registry.findPositionKey(7, "客户😀:NET")).isEqualTo(unicode);
-            registry.releasePositionKey(first);
-            assertThat(registry.findPositionKey(7, "Aa")).isNull();
-            assertThat(registry.findPositionKey(7, "BB")).isEqualTo(second);
-        }
+        long unicode = registry.positionKey(7, "客户😀:NET");
+        assertThat(registry.positionKey(7, new String("Aa"))).isEqualTo(first);
+        assertThat(registry.preparedPositionKey(7, "BB")).isEqualTo(second).isNotEqualTo(first);
+        assertThat(registry.preparedPositionKey(8, "Aa")).isEqualTo(third).isNotEqualTo(first);
+        assertThat(registry.findPositionKey(7, "客户😀:NET")).isEqualTo(unicode);
+        registry.releasePositionKey(first);
+        assertThat(registry.findPositionKey(7, "Aa")).isNull();
+        assertThat(registry.findPositionKey(7, "BB")).isEqualTo(second);
     }
 
     /**
@@ -287,8 +256,6 @@ class RuntimeIdentityRegistryTest {
         int instrumentId = identities.symbolId("1");
         // 规范化后 USDT 的内部资产编号
         int asset = identities.assetId(" usdt ");
-        // 重复查询前字典版本，用于确认命中不增加分配
-        long version = identities.dictionaryVersion();
         for (String /* 本次规范化或 UTF-8 哈希验证所用的原文本 */ value : new String[] {"1", new String("1"), "1", "1"}) {
             assertThat(identities.symbolId(value)).isEqualTo(instrumentId);
             assertThat(identities.findSymbolId(value)).isEqualTo(instrumentId);
@@ -297,7 +264,9 @@ class RuntimeIdentityRegistryTest {
             assertThat(identities.assetId(value)).isEqualTo(asset);
             assertThat(identities.findAssetId(value)).isEqualTo(asset);
         }
-        assertThat(identities.dictionaryVersion()).isEqualTo(version);
+        assertThat(identities.asset(asset)).isEqualTo("USDT");
+        assertThat(identities.instrumentId(instrumentId)).isEqualTo("1");
+        assertThat(identities.assetId("BTC")).isEqualTo(asset + 1);
         for (String /* 本次规范化或 UTF-8 哈希验证所用的原文本 */ value : new String[] {null, "", "BTC/USDT"}) {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.symbolId(value))
                     .isInstanceOf(IllegalArgumentException.class);
@@ -305,6 +274,7 @@ class RuntimeIdentityRegistryTest {
                     .isInstanceOf(IllegalArgumentException.class);
         }
         assertThat(identities.findSymbolId("2")).isNull();
+        assertThat(identities.symbolId("2")).isEqualTo(instrumentId + 1);
     }
 
     /**
@@ -352,29 +322,6 @@ class RuntimeIdentityRegistryTest {
         }
     }
 
-    /**
-     * 检查资产、标的各首次分配增加一次版本，重复获取不增加；恢复后反向文本及本用例版本相同。
-     */
-    @Test
-    void dictionaryVersionAdvancesOnlyWhenStableIdentitiesAreAllocatedAndSurvivesRestore() {
-        // 本用例 Owner 准备和查询的身份表
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        // 首次资产和标的分配前的版本
-        long initial = identities.dictionaryVersion();
-        // 新分配的 USDT 内部资产编号
-        int assetId = identities.assetId("USDT");
-        // 新分配的内部稠密标的编号
-        int symbolId = identities.symbolId("1");
-        identities.assetId("USDT");
-        identities.symbolId("1");
-
-        assertThat(identities.dictionaryVersion()).isEqualTo(initial + 2);
-        // 从快照恢复的独立身份表，释放它不影响原表
-        RuntimeIdentityRegistry restored = RuntimeIdentityRegistry.restore(identities.snapshot());
-        assertThat(restored.asset(assetId)).isEqualTo("USDT");
-        assertThat(restored.instrumentId(symbolId)).isEqualTo("1");
-        assertThat(restored.dictionaryVersion()).isEqualTo(identities.dictionaryVersion());
-    }
 
     /**
      * 检查回滚跳过检查点后已主动释放的分配，删掉其余后缀，保留检查点前身份并恢复顺序游标。

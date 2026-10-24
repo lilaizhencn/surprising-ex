@@ -450,7 +450,7 @@ class MatcherSettlementPlanTest {
             for (/* 添加重复 maker 成交事件的当前次数。 */ int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10,20,100,1,false,false));
             // 包含九次小额成交的接受结果，用来触发多 Lane 深度事件链。
             var deep = new CoreMatchingResult(true, "SUCCESS", List.of(),
-                    true, 0, 0, 0, 0, 0, 0, -1,
+                    true, 0, 0, 0, 0, 0, -1,
                     null, events).withCoreSequenceInPlace(1);
             // 当前批次共享的剩余数量、终态及最近 maker 校验暂存。
             var scratch = new MatcherSettlementPlan.BatchValidationScratch(); /* 需要在各代间复用的结算计划对象。 */ var slot = new MatcherSettlementPlan();
@@ -609,7 +609,7 @@ class MatcherSettlementPlanTest {
             // 需要在各代间复用的结算计划对象。
             var slot = MatcherSettlementPlan.buildInto(new MatcherSettlementPlan(), 1, 11, 21, 11, 0,
                     new CoreMatchingResult(true, "SUCCESS", List.of(),
-                            true, 1, 1, 2, 11, 1, 1, 0,
+                            true, 1, 1, 2, 1, 1, 0,
                             null, List.of()), runtime, identities);
             // 调用方撤单数组或混合接受与拒绝的撤单结果列表，具体用例分别核对复制及顺序。
             var cancellations = List.of(new com.surprising.aeron.service.matcher.CoreCancellationResult(13, true, "CANCELLED"),
@@ -645,7 +645,7 @@ class MatcherSettlementPlanTest {
                     fill(4), runtime, identities)).isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
             // 两次引用同一 maker 且累计超量的原始成交结果。
             var repeated = new CoreMatchingResult(true, "SUCCESS", List.of(),
-                    true, 1, 0, 0, 0, 0, 0, -1,
+                    true, 1, 0, 0, 0, 0, -1,
                     null, List.of(MatcherEventFixtures.trade(10, 20, 100, 2, false, false),
                             MatcherEventFixtures.trade(10, 20, 100, 2, false, false)));
             assertThatThrownBy(() -> MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
@@ -681,7 +681,7 @@ class MatcherSettlementPlanTest {
      */
     private static CoreMatchingResult fill(long quantity, long sequence) {
         return new CoreMatchingResult(true, "SUCCESS", List.of(),
-                true, 0, 0, 0, 0, 0, 0, -1,
+                true, 0, 0, 0, 0, 0, -1,
                 null, List.of(MatcherEventFixtures.trade(10,20,100,quantity,false,false))).withCoreSequenceInPlace(sequence);
     }
     /**

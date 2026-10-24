@@ -1145,7 +1145,8 @@ class CoreMatchingStateTest {
                             productLine == ProductLine.SPOT ? 5 : 1_000));
             apply(state, 5, 12, CoreMessageType.PLACE_ORDER,
                     place(102, CoreOrderSide.SELL, 100, 5, reservationKind, sellerAsset,
-                            productLine == ProductLine.SPOT ? 5 : 1_000));
+                            productLine == ProductLine.SPOT ? 5 : 1_000,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, false));
             apply(state, 6, 22, CoreMessageType.PLACE_ORDER,
                     place(201, CoreOrderSide.BUY, 100, 1, reservationKind, buyerAsset, 100));
 
@@ -1153,6 +1154,26 @@ class CoreMatchingStateTest {
             byte[] snapshot = state.snapshot();
             try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
+                var originalIdentities = state.identities();
+                var restoredIdentities = restored.identities();
+                long client = AccountLaneQueryTestSupport.read(state.runtimeState(), 12,
+                        () -> originalIdentities.findClientKeyValue(12, "client-102"));
+                assertThat(client).isPositive();
+                assertThat(AccountLaneQueryTestSupport.read(restored.runtimeState(), 12,
+                        () -> restoredIdentities.findClientKeyValue(12, "client-102"))).isEqualTo(client);
+                assertThat(AccountLaneQueryTestSupport.read(restored.runtimeState(), 12,
+                        () -> restoredIdentities.clientOrderId(12, client))).isEqualTo("client-102");
+                assertThat(restoredIdentities.instrumentId(restoredIdentities.symbolId("1"))).isEqualTo("1");
+                assertThat(restoredIdentities.asset(restoredIdentities.assetId(sellerAsset))).isEqualTo(sellerAsset);
+                if (productLine != ProductLine.SPOT) {
+                    for (long user : new long[]{11, 22}) {
+                        Long position = originalIdentities.findPositionKey(user, "1");
+                        assertThat(position).isNotNull();
+                        assertThat(restoredIdentities.findPositionKey(user, "1")).isEqualTo(position);
+                        assertThat(restoredIdentities.preparedPositionKey(user, "1")).isEqualTo(position);
+                    }
+                }
+
                 assertThat(awaitMatchingHash(restored)).isEqualTo(awaitMatchingHash(state));
                 // 第七条继续成交或主动平仓命令的终态回执。
                 CoreResponse receipt7 = apply(restored, 7, 22, CoreMessageType.PLACE_ORDER,

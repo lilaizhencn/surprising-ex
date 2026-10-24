@@ -479,7 +479,7 @@ class SectionedCoreSnapshotCodecTest {
 
             assertThat(manifest.schemaVersion()).isEqualTo(SectionedCoreSnapshotCodec.VERSION);
             assertThat(manifest.snapshotId()).isEqualTo(73);
-            assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
+            assertThat(manifest.appliedCommandCount()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
             assertThat(manifest.clusterPosition()).isEqualTo(5_678);
             assertThat(manifest.sourceSequenceDigest()).isNotZero();
@@ -490,7 +490,7 @@ class SectionedCoreSnapshotCodecTest {
     }
 
     /**
-     * 构造九类头部配对错误并各自重算外层 CRC，要求失败消息分别指向产品线、拓扑、应用/快照/Core/投影水位、业务/资金哈希及来源摘要；不代表头部所有字段的每种错误组合。
+     * 构造七类头部配对错误并各自重算外层 CRC，要求失败消息分别指向产品线、快照/Core/投影水位、业务/资金哈希及来源摘要；不代表头部所有字段的每种错误组合。
      */
     @Test
     void rejectsEveryPairedManifestMismatchAfterChecksumRecomputation() {
@@ -504,16 +504,15 @@ class SectionedCoreSnapshotCodecTest {
             snapshot = state.snapshot(74);
         }
 
-        // 八类预期错误名称到各自 CRC 已重算输入的有序表。
+        // 七类预期错误名称到各自 CRC 已重算输入的有序表。
         Map<String, byte[]> mismatches = new LinkedHashMap<>();
         mismatches.put("product line", mutateHeaderProductLine(snapshot));
-        mismatches.put("applied sequence", mutateHeaderLong(snapshot, 1));
         mismatches.put("snapshot id", mutateHeaderLong(snapshot, 9));
-        mismatches.put("core sequence", mutateHeaderLong(snapshot, 17));
-        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 25));
-        mismatches.put("business state hash", mutateHeaderLong(snapshot, 65));
-        mismatches.put("funds hash", mutateHeaderLong(snapshot, 73));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 81));
+        mismatches.put("core sequence", mutateHeaderLong(snapshot, 1));
+        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 17));
+        mismatches.put("business state hash", mutateHeaderLong(snapshot, 57));
+        mismatches.put("funds hash", mutateHeaderLong(snapshot, 65));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 73));
 
         mismatches.forEach((/* 本变体预期出现于异常中的字段名称。 */ field, /* 为当前独立错误变体克隆并修改的完整快照字节。 */ mutated) -> {
             // 解码本变体捕获到的异常，要求是协议错误并含指定字段名。
@@ -524,7 +523,7 @@ class SectionedCoreSnapshotCodecTest {
     }
 
     /**
-     * 使用当前 v29 快照，改产品线为期权并把第五段交易状态清零，再重算 CRC；要求先报产品线不匹配，说明该检查早于交易状态解码，方法名中的 V9 不改变当前格式。
+     * 使用当前 v30 快照，改产品线为期权并把第五段交易状态清零，再重算 CRC；要求先报产品线不匹配，说明该检查早于交易状态解码，方法名中的 V9 不改变当前格式。
      */
     @Test
     void rejectsWrongProductLineBeforeDecodingOtherV9Sections() {

@@ -15,10 +15,9 @@ import java.util.UUID;
 /**
  * 编码前的同一冻结点输入：把 Core 交易状态、Matcher 快照、消费水位、幂等结果、费率、划转和各 Lane 清单配在一起。record 只固定引用，不在构造器里复制 Map、List 或字节数组；调用方须在编码结束前保持输入稳定。完整哈希审计另由 verifyFullState 执行。
  * @param productLine 该快照唯一所属的产品线
- * @param appliedCommandCount 冻结点已应用的 Core 命令数量，须与 coreSequence 相同
+ * @param appliedCommandCount 冻结点已应用的 Core 命令水位
  * @param sourceSequenceDigest 各消息来源已消费序号的汇总摘要
  * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
- * @param coreSequence 快照覆盖的已应用 Core 命令水位
  * @param projectionSequence 冻结点已发布的实时投影水位，不要求等于 Core 命令数
  * @param businessStateHash Core 状态连同费率、待完成划转的业务哈希
  * @param fundsStateHash 冻结交易状态按资产与所有者计算的资金哈希
@@ -38,7 +37,6 @@ public record CoreSnapshotImage(
         long appliedCommandCount,
         long sourceSequenceDigest,
         long snapshotId,
-        long coreSequence,
         long projectionSequence,
         long businessStateHash,
         long fundsStateHash,
@@ -54,11 +52,11 @@ public record CoreSnapshotImage(
         List<AccountLaneSnapshot> accountLanes) {
 
     /**
-     * 检查基本非空、非负序号、正快照号、非零业务/资金哈希及 Core 产品线匹配；Core 序号必须等于已应用数量。这里只保存传入引用，不执行全量哈希或 Matcher 逐单对账。
+     * 检查基本非空、非负序号、正快照号、非零业务/资金哈希及 Core 产品线匹配。这里只保存传入引用，不执行全量哈希或 Matcher 逐单对账。
      */
     public CoreSnapshotImage {
         if (productLine == null || appliedCommandCount < 0 || snapshotId <= 0 || projectionSequence < 0
-                || coreSequence != appliedCommandCount || clusterTimestamp < 0 || clusterPosition < 0
+                || clusterTimestamp < 0 || clusterPosition < 0
                 || businessStateHash == 0 || fundsStateHash == 0
                 || matcherSnapshot == null || tradingState == null
                 || terminalRetention == null || tradingState.productLine() != productLine
@@ -85,7 +83,7 @@ public record CoreSnapshotImage(
      * 调用 Matcher 快照的 Core 元数据校验，不在这里读取原生订单簿或重新撮合。
      * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
      * @param tradingState 冻结点物化的交易状态，包含订单、账户与资金数据
-     * @param appliedCommandCount 冻结点已应用的 Core 命令数量，须与 coreSequence 相同
+     * @param appliedCommandCount 冻结点已应用的 Core 命令水位
      * @param businessStateHash Core 状态连同费率、待完成划转的业务哈希
      */
     static void verifyMatcherState(MatcherSnapshot matcherSnapshot, TradingCoreState tradingState,

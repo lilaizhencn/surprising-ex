@@ -97,10 +97,6 @@ public final class MatcherSettlementEvent implements
     private com.surprising.aeron.service.order.command.ResolvedMatchingAdmission replacement;
     /** 改单新预留使用的资产编号。 */
     private int replacementAssetId;
-    /**  改单 Lane 新分配的客户身份次数，交给 Owner 归集。 返回本代改单在所属 Lane 新分配的客户身份数量，供 Owner 收集时归集。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long replacementIdentityAllocations;
     /** 触发子订单对应的源触发状态，Matcher 结果据此准备终态。 */
     private com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger;
     /** 源触发单本次触发的复制业务时间。 */
@@ -145,8 +141,6 @@ public final class MatcherSettlementEvent implements
     @Accessors(fluent = true, chain = false)
     @Getter
     private long directLastMatcherSequence;
-    /** 本代结果视图对应的首项订单编号。 */
-    private long directOrderId;
     /** 已保存原生或合成结果的有效项数，批次全部齐备后才发布。 */
     private int directNativeItemCount;
     /** 本事件独占并复用的实际成功前置撤单编号数组。 */
@@ -550,7 +544,6 @@ public final class MatcherSettlementEvent implements
             directNativeResult = result;
             directMatcherSequence = matcherSequence;
             directLastMatcherSequence = matcherSequence;
-            directOrderId = orderId;
             directNativeItemCount = 1;
             directNativeAccepted = result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
                     || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED;
@@ -611,7 +604,6 @@ public final class MatcherSettlementEvent implements
                         directAcceptedCancellations, directAcceptedCancellationCount);
                 directNativeResult = result;
                 directMatcherSequence = matcherSequence;
-                directOrderId = orderId;
                 directNativeAccepted = nativeAccepted(result);
             }
             if (resultTarget != null) resultTarget.matcherResult(index, nativeAccepted(result));
@@ -667,7 +659,6 @@ public final class MatcherSettlementEvent implements
             directNativeResult = result;
             directMatcherSequence = matcherSequence;
             directLastMatcherSequence = matcherSequence;
-            directOrderId = orderId;
             directNativeItemCount = 1;
             directNativeAccepted = placementAccepted;
             directNativeStateChanged = cancellationAccepted && !placementAccepted;
@@ -700,7 +691,6 @@ public final class MatcherSettlementEvent implements
                     directCoreSequence, admissionUserId, admissionOrderId, routedLaneMask);
             directSyntheticResultCode = resultCode;
             directMatcherSequence = directLastMatcherSequence = matcherSequence;
-            directOrderId = orderId;
             directNativeAccepted = false;
             directNativeItemCount = 1;
             finishDirectPublication();
@@ -949,12 +939,6 @@ public final class MatcherSettlementEvent implements
         return directCoreSequence;
     }
     /**
-     * 为证据接口返回本代首项订单编号。
-     */
-    @Override public long nativeOrderId() {
-        return directOrderId;
-    }
-    /**
      * 为证据接口返回本代首项 Matcher 序号。
      */
     @Override public long nativeMatcherSequence() {
@@ -1046,7 +1030,6 @@ public final class MatcherSettlementEvent implements
         cancellationUserId = 0;
         replacement = null;
         replacementAssetId = 0;
-        replacementIdentityAllocations = 0;
         sourceTrigger = null;
         triggeredAt = 0;
         matcherCompletionRoute = null;
@@ -1061,7 +1044,7 @@ public final class MatcherSettlementEvent implements
         directCommandId = null;
         authorizedCancellations = java.util.List.of();
         directNativeResult = null;
-        directMatcherSequence = directLastMatcherSequence = directOrderId = 0;
+        directMatcherSequence = directLastMatcherSequence = 0;
         directNativeItemCount = 0;
         directAcceptedCancellationCount = 0;
         directNativeAccepted = directNativeStateChanged = false;
@@ -1263,12 +1246,9 @@ public final class MatcherSettlementEvent implements
         OrderRuntime prepared = batchStorage.admittedOrders[0];
         if (lane.order(replacement.originalOrderId()).status() != CoreOrderStatus.CANCELED)
             throw new IllegalStateException("accepted replacement did not cancel original order");
-        // 准备新客户订单身份前的 Lane 分配计数。
-        long allocationsBefore = lane.clientIdentityAllocations();
         // 在所属 Lane 准备得到的新订单客户身份原语键。
         long clientKey = RuntimeIdentityRegistry.clientKeyValue(
                 identities.prepareClientKeyInLane(lane, userId, prepared.clientOrderId()));
-        replacementIdentityAllocations = lane.clientIdentityAllocations() - allocationsBefore;
         runtime.accountRollback().captureBalanceBefore(lane, userId, replacementAssetId);
         runtime.placeOrderInLane(lane, userId, replacement.resolved(), directCommandId,
                 replacement.requiredReservationUnits(), clientKey, prepared.symbolId(), replacementAssetId,

@@ -1,9 +1,7 @@
 package com.surprising.aeron.service.account;
 
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import java.util.Arrays;
-import java.util.Map;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.Accessors;
@@ -178,17 +176,6 @@ public final class LaneClientIdentities {
     }
 
     /**
-     * 冷恢复时保留已有确定性键，按一个引用直接导入；重复键仍拒绝，不重新计算客户号身份。
-     * @param key 由运行时字典计算的正数客户身份键
-     * @param userId 此客户号身份所属的用户编号
-     * @param name 用户提供的非空白客户订单号文本
-     */
-    public void importIdentity(long key, long userId, String name) {
-        assertOwner();
-        insert(key, userId, name, 1);
-    }
-
-    /**
      * 把存活行连同引用次数按目标拓扑复制到未发布的目标 Lane，逐目标校验所有者；本方法不清源表，全部成功后的源清理由字典重绑定流程负责。
      * @param target 尚未发布、已准备好 Lane 拓扑的目标运行时
      */
@@ -216,13 +203,4 @@ public final class LaneClientIdentities {
         nextRow = freeCount = publishedCount = 0;
     }
 
-    /**
-     * 冷查询或快照保护范围内把存活身份导出到业务身份到键的目标表；本入口不自行取得所有权，不导出引用次数。
-     * @param target 接收用户加客户号业务身份到整数键映射的导出表
-     */
-    public void exportTo(Map<RuntimeIdentityRegistry.ClientIdentity, Long> target) {
-        for (/* 本次查找、导入或遍历使用的身份数组下标，只有引用非零的行才存活。 */ int row = 0; row < nextRow; row++)
-            if (references[row] != 0)
-                target.put(new RuntimeIdentityRegistry.ClientIdentity(users[row], names[row]), keys[row]);
-    }
 }

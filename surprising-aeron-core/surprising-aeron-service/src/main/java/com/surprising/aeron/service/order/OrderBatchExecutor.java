@@ -537,17 +537,13 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 收集已经完成的账户预留，登记新客户身份分配数并绑定本项账户冻结副本；保存先撤列表，再请求发布。
+     * 收集已经完成的账户预留，绑定本项账户冻结副本；保存先撤列表，再请求发布。
      * @param batch 本条批量命令的复用上下文
      * @param userId 本批请求用户，账户按该用户路由
      */
     private void collectBatchPlaceReservation(OrderBatchPending batch, long userId) {
         // 本批复用的顺序下单账户预留工作
         var work = batch.placeReservation;
-        // 账户预留返回的带分配标记客户身份键
-        long key = work.preparedClientKey();
-        if (com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.newClientIdentity(key))
-            owner.identities().recordLaneClientAllocations(1);
         // 账户已经冻结并交给本项的订单副本
         OrderRuntime admitted = work.admittedOrder();
         owner.runtimeState().collectControlReservation(admitted, batch.sequence);

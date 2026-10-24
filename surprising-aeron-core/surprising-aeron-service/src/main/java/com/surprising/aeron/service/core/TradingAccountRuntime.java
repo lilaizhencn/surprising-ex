@@ -2739,8 +2739,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta(fundsAccumulator);
         // 该事件是否已有账本财务交接，避免再从各 Lane 重复累计同一资金变化
         boolean ledgerFunds = event.hasLedgerSettlement();
-        if (event.replacementIdentityAllocations() != 0)
-            event.identities().recordLaneClientAllocations(event.replacementIdentityAllocations());
         // 该计划 Core 序号是否仍有 Owner 侧待预留索引，需要按原计划移除
         boolean ownerPending = pendingReservations.containsSequence(event.plan().coreSequence());
         for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < event.planCount(); index++) {

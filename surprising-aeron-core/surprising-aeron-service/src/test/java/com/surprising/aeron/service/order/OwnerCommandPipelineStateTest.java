@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 直接验证 Owner 调度字段及响应窗口：控制结果序号、依赖末项引用、提交边界和等待扫描缓存。辅助请求为空负载，仅供窗口身份使用，不执行实际下单。
+ * 直接验证 Owner 调度字段及响应窗口：控制结果序号、依赖末项引用、提交边界。辅助请求为空负载，仅供窗口身份使用，不执行实际下单。
  */
 class OwnerCommandPipelineStateTest {
     /**
@@ -101,28 +101,6 @@ class OwnerCommandPipelineStateTest {
         state.finishHeadCommit();
         assertThat(state.hasCommittingHead()).isFalse();
         assertThatThrownBy(state::finishHeadCommit).isInstanceOf(IllegalStateException.class);
-    }
-
-    /**
-     * 保存无进展等待后，只有派发上限、进度和通知都未变才可跳过；队首退休或仍有本地工作都必须重新扫描。
-     */
-    @Test
-    void waitingProbeIsInvalidatedByProgressNotificationsAndHeadRetirement() {
-        // 直接测试的 Owner 调度状态，不带真实交易运行时。
-        var state = new OwnerCommandPipelineState();
-        add(state, 1);
-        add(state, 2);
-        state.beginHeadCommit();
-        state.rememberMatchingWait(2, 7, 7, false);
-        assertThat(state.canSkipMatchingPoll(2, 7, false)).isTrue();
-        assertThat(state.canSkipMatchingPoll(3, 7, false)).isFalse();
-        assertThat(state.canSkipMatchingPoll(2, 8, false)).isFalse();
-        assertThat(state.canSkipMatchingPoll(2, 7, true)).isFalse();
-        state.finishHeadCommit();
-        state.beginHeadCommit();
-        assertThat(state.canSkipMatchingPoll(2, 7, false)).isFalse();
-        state.rememberMatchingWait(2, 7, 7, true);
-        assertThat(state.canSkipMatchingPoll(2, 7, false)).isFalse();
     }
 
     /**

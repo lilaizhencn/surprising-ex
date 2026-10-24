@@ -68,7 +68,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(target.plan().preCancellationCount()).isEqualTo(1);
             assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.FATAL_DIVERGENCE);
             assertThat(target.nativeMatches(id)).isTrue();
-            assertThat(target.nativeOrderId()).isEqualTo(3);
+            assertThat(target.plan().takerOrderId()).isEqualTo(3);
             assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
         }
     }
@@ -171,7 +171,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(rejected.outcome()).isEqualTo(MatchingResult.Outcome.REJECTED_UNCHANGED);
             assertThat(rejected.nativeCoreSequence()).isEqualTo(4);
             assertThat(rejected.nativeMatches(new java.util.UUID(7, 4))).isTrue();
-            assertThat(rejected.nativeOrderId()).isEqualTo(901);
+            assertThat(rejected.plan().takerOrderId()).isEqualTo(901);
             assertThat(rejected.nativeMatcherSequence()).isGreaterThan(accepted.nativeMatcherSequence());
             assertThat(accepted.matcherEvents()).extracting(MatcherResult.MatcherEvent::size).containsExactly(6L);
         }
@@ -220,7 +220,7 @@ class DeterministicExchangeCoreAdapterTest {
                 assertThat(actual.accepted()).isTrue();
                 assertThat(actual.nativeCoreSequence()).isEqualTo(i);
                 assertThat(actual.nativeMatches(id)).isTrue();
-                assertThat(actual.nativeOrderId()).isEqualTo(i);
+                assertThat(actual.plan().takerOrderId()).isEqualTo(i);
                 assertThat(actual.nativeMatcherSequence()).isEqualTo(i);
                 assertThat(actual.nativeMatcherShardId()).isEqualTo(adapter.matcherShardId("21"));
                 assertThat(actual.nativeMatcherResult().timestamp()).isEqualTo(1000 + i);
@@ -274,12 +274,12 @@ class DeterministicExchangeCoreAdapterTest {
             // 第一实际订单簿分片上的控制撤单原生结果。
             var firstNative = adapter.cancelControlOrder(1000, 7, 16, first);
             // 第一控制撤单完成后的业务证据回执。
-            var a = adapter.completeControlCancellations(18, new java.util.UUID(7, 18), 16, 1000,
+            var a = adapter.completeControlCancellations(18, new java.util.UUID(7, 18), 1000,
                     List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(16, 7, first)), List.of(firstNative));
             // 另一实际订单簿分片上的控制撤单原生结果。
             var secondNative = adapter.cancelControlOrder(1000, 8, 17, second);
             // 第二控制撤单完成后的业务证据回执。
-            var b = adapter.completeControlCancellations(19, new java.util.UUID(8, 19), 17, 1000,
+            var b = adapter.completeControlCancellations(19, new java.util.UUID(8, 19), 1000,
                     List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(17, 8, second)), List.of(secondNative));
             assertThat(a.accepted()).isTrue();
             assertThat(b.accepted()).isTrue();
@@ -318,7 +318,7 @@ class DeterministicExchangeCoreAdapterTest {
             placeDirect(adapter, 7, bid(1, 90));
             placeDirect(adapter, 7, bid(3, 80));
             // 当前直接命令取得的撮合回执。
-            var result = adapter.cancelControlOrders(4, new java.util.UUID(7, 4), 0, 1000, List.of(
+            var result = adapter.cancelControlOrders(4, new java.util.UUID(7, 4), 1000, List.of(
                     new DeterministicExchangeCoreAdapter.CancellationOrder(1, 7, "1"),
                     new DeterministicExchangeCoreAdapter.CancellationOrder(2, 7, "1"),
                     new DeterministicExchangeCoreAdapter.CancellationOrder(3, 7, "1")));
@@ -369,7 +369,7 @@ class DeterministicExchangeCoreAdapterTest {
             var result = placeDirect(adapter, 22, command);
             assertThat(result.matcherEvents()).extracting(MatcherResult.MatcherEvent::matchedOrderId)
                     .containsExactly(101L, 102L);
-            assertThat(result.nativeOrderId()).isEqualTo(201);
+            assertThat(result.plan().takerOrderId()).isEqualTo(201);
             assertThat(result.nativeMatcherResult().sequence()).isPositive();
             assertThat(result.matcherEvents()).isSameAs(result.nativeMatcherResult().events());
         }
@@ -383,10 +383,10 @@ class DeterministicExchangeCoreAdapterTest {
         // 仅用于分片序号验证的新证据账本。
         var ledger = new MatcherEvidenceLedger(com.surprising.aeron.config.LaneTopology.productionDefault());
         // 首个直接命令回执，或当前时间复用测试的第一条回执。
-        var first = ledger.bind(1, new java.util.UUID(0, 1), 101,
+        var first = ledger.bind(1, new java.util.UUID(0, 1),
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 1));
         // 时间复用场景的第二条直接命令回执。
-        var second = ledger.bind(2, new java.util.UUID(0, 2), 102,
+        var second = ledger.bind(2, new java.util.UUID(0, 2),
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
         assertThat(first.nativeMatcherSequence()).isEqualTo(1);
         assertThat(second.nativeMatcherSequence()).isEqualTo(2);
@@ -399,9 +399,9 @@ class DeterministicExchangeCoreAdapterTest {
     void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
         // 仅用于分片序号验证的新证据账本。
         var ledger = new MatcherEvidenceLedger(com.surprising.aeron.config.LaneTopology.productionDefault());
-        ledger.bind(2, new java.util.UUID(0, 2), 202,
+        ledger.bind(2, new java.util.UUID(0, 2),
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
-        assertThatThrownBy(() -> ledger.bind(1, new java.util.UUID(0, 1), 201,
+        assertThatThrownBy(() -> ledger.bind(1, new java.util.UUID(0, 1),
                 ledger.nextSequence(0), 0, 0, nativeResult(2, 1)))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("native sequence is not strictly increasing");
     }

@@ -81,7 +81,7 @@ public final class MatchingPipelineProgress {
     }
 
     /**
-     * 先收准入就绪分片提示，逐就绪分片只推进提交头。批量准入完成后登记身份并提交；失败则清理准备数据，单项保留已知拒绝，多项转顺序准入。普通 PLACE 可以先提交 Matcher 等收据，顺序批次项仍由批次执行器拥有游标。
+     * 先收准入就绪分片提示，逐就绪分片只推进提交头。批量准入完成后保存准入并提交；失败则清理准备数据，单项保留已知拒绝，多项转顺序准入。普通 PLACE 可以先提交 Matcher 等收据，顺序批次项仍由批次执行器拥有游标。
      */
     public void progressPlaceBatchAdmissions() {
         drainPlaceAdmissionNotifications();
@@ -136,7 +136,6 @@ public final class MatchingPipelineProgress {
                         // 就绪位只是合并提示，事件未完成时保留，避免同分片较晚通知合并后被清掉。
                         break;
                     }
-                    owner.identities().recordLaneClientAllocations(batchAdmission.takeIdentityAllocations());
                     // 批量准入收据报告的运行异常。
                     RuntimeException rejection = batchAdmission.rejection();
                     if (rejection != null) {

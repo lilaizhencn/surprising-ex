@@ -58,8 +58,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private MatcherSettlementChanges changes;
     /** 当前产品身份表，客户键在所属 Lane 准备并在失败时回退。 */
     private RuntimeIdentityRegistry identities;
-    /** 本次 Lane 客户身份分配计数差，Owner 取走后清零。 */
-    private long identityAllocations;
     /** 本批开始前用户元数据的命令槽前值，供本批失败回退，不是长期账户镜像。 */
     private UserRuntime userBefore;
     /** 保存用户前值的可复用命令槽，回收时清内容但保留存储供下一批使用。 */
@@ -116,7 +114,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.runtime = runtime;
         this.changes = changes;
         this.identities = identities;
-        identityAllocations = 0;
         admittedCount = 0;
         rejection = null;
         completed = false;
@@ -135,8 +132,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         UserRuntime currentUser = lane.user(userId);
         userBefore = currentUser == null ? null
                 : (userBeforeSlot = currentUser.copyIntoCommandSlot(userBeforeSlot));
-        // 本批开始前 Lane 客户身份分配计数，用结束差值记录本批成本。
-        long allocationsBefore = lane.clientIdentityAllocations();
         try {
             runtime.enterMatcherSettlementScope(lane, changes);
             lane.admissionIndexCapacity(Math.max(2, itemCount));
@@ -202,7 +197,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             admittedCount = 0;
             rejection = failure;
         }
-        identityAllocations = lane.clientIdentityAllocations() - allocationsBefore;
         // 完成发布前取得的通知目标，用于唤醒原 Matcher 分片续步。
         TradingAccountRuntime completionRuntime = runtime;
         lane.recordCommandOperation();
@@ -231,10 +225,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         matcherShard = 0;
     }
 
-    /**
-     * 取走本批客户身份分配计数差并清零，避免 Owner 重复累计。
-     */
-    public long takeIdentityAllocations() { /* 本次取走的客户身份分配计数差，返回后原字段清零。 */ long count = identityAllocations; identityAllocations = 0; return count; }
     /**
      * 返回 Lane 是否发布了本批准入完成，成功和已回退的业务拒绝都可完成。
      */

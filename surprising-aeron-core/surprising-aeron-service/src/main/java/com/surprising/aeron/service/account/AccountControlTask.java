@@ -169,18 +169,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     }
 
     /**
-     * 以零作为命令前修订参照，委托完整入口准备杠杆变更。
-     * @param runtime 要派发并收集账户变化的交易运行时
-     * @param identities 将业务资产、合约和持仓身份转为运行时键的字典
-     * @param userId 本次控制命令操作的用户编号
-     * @param command 杠杆变更命令，包含合约、保证金模式、杠杆及重定价开关
-     */
-    public AccountControlTask prepareLeverageChange(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                                   long userId, UpdateLeverageCommand command) {
-        return prepareLeverageChange(runtime, identities, userId, command, 0);
-    }
-
-    /**
      * 重置并保存命令前修订号，通过业务校验解析杠杆键及合约，再派发所属 Lane 执行账户杠杆变更。
      * @param runtime 要派发并收集账户变化的交易运行时
      * @param identities 将业务资产、合约和持仓身份转为运行时键的字典
@@ -202,17 +190,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         this.completed = false;
         runtime.dispatchControlLanes(1L << laneId, this);
         return this;
-    }
-
-    /**
-     * 以零作为命令前修订参照，委托完整入口准备持仓模式变更。
-     * @param runtime 要派发并收集账户变化的交易运行时
-     * @param userId 本次控制命令操作的用户编号
-     * @param command 目标持仓模式命令
-     */
-    public AccountControlTask preparePositionModeChange(TradingAccountRuntime runtime, long userId,
-                                                       UpdatePositionModeCommand command) {
-        return preparePositionModeChange(runtime, userId, command, 0);
     }
 
     /**

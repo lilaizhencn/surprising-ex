@@ -633,7 +633,7 @@ class RuntimeStateBusinessRulesTest {
         try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(before, identities)) {
             runtime.startAccountLanes();
             // 本次降低全仓杠杆并补足保证金的可轮询账户控制任务
-            var work = new AccountControlTask().prepareLeverageChange(runtime, identities, 101, command);
+            var work = new AccountControlTask().prepareLeverageChange(runtime, identities, 101, command, runtime.revision());
             // 本次控制任务轮询的单调时钟五秒期限
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             // 账户控制任务是否完成，退出轮询后必须为真

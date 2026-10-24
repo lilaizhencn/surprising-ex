@@ -48,10 +48,6 @@ public final class CoreMatchingResult implements MatchingResult {
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
     private long nativeCommandIdLeastSignificantBits;
-    /**  本结果关联的普通订单编号。 返回关联的普通订单编号，零可表示未绑定或没有单一订单。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private long nativeOrderId;
     /** 显式保存的原生 exchange-core 序号，零时可从原生结果回读。 */
     private long nativeSequenceValue;
     /**  此回执在证据分片内的业务序号。 返回此结果发布到所属证据分片时的业务序号。 */
@@ -74,7 +70,7 @@ public final class CoreMatchingResult implements MatchingResult {
     /** 仅保存接受状态和结果码，其余证据尚未绑定且没有撤单或成交事件。 */
     public CoreMatchingResult(boolean accepted, String resultCode) {
         this(accepted, resultCode, List.of(), false,
-                0, 0, 0, 0, 0, 0, -1, null, List.of());
+                0, 0, 0, 0, 0, -1, null, List.of());
     }
 
     /**
@@ -86,7 +82,6 @@ public final class CoreMatchingResult implements MatchingResult {
      * @param nativeCoreSequence 已绑定的 Core 序号，零可表示未绑定
      * @param nativeCommandIdMostSignificantBits 原命令 UUID 高六十四位
      * @param nativeCommandIdLeastSignificantBits 原命令 UUID 低六十四位
-     * @param nativeOrderId 关联订单编号，未绑定或控制结果可为零
      * @param nativeSequence 原生 exchange-core 序号，零允许稍后从原生结果取得
      * @param nativeMatcherSequence 业务证据分片发布序号
      * @param nativeMatcherShardId 业务证据分片编号，控制分片为负一
@@ -99,14 +94,13 @@ public final class CoreMatchingResult implements MatchingResult {
                               long nativeCoreSequence,
                               long nativeCommandIdMostSignificantBits,
                               long nativeCommandIdLeastSignificantBits,
-                              long nativeOrderId,
                               long nativeSequence,
                               long nativeMatcherSequence,
                               int nativeMatcherShardId,
                               MatcherResult nativeMatcherResult,
                               List<MatcherResult.MatcherEvent> matcherEvents) {
         if (resultCode == null || resultCode.isBlank() || cancellations == null
-                || nativeCoreSequence < 0 || nativeOrderId < 0 || nativeSequence < 0
+                || nativeCoreSequence < 0 || nativeSequence < 0
                 || nativeMatcherSequence < 0 || nativeMatcherShardId < -1
                 || matcherEvents == null) {
             throw new IllegalArgumentException("invalid matching result");
@@ -118,7 +112,6 @@ public final class CoreMatchingResult implements MatchingResult {
         this.nativeCoreSequence = nativeCoreSequence;
         this.nativeCommandIdMostSignificantBits = nativeCommandIdMostSignificantBits;
         this.nativeCommandIdLeastSignificantBits = nativeCommandIdLeastSignificantBits;
-        this.nativeOrderId = nativeOrderId;
         this.nativeSequenceValue = nativeSequence;
         this.nativeMatcherSequence = nativeMatcherSequence;
         this.nativeMatcherShardId = nativeMatcherShardId;
@@ -150,22 +143,20 @@ public final class CoreMatchingResult implements MatchingResult {
     }
 
     /**
-     * 仅供 Matcher 在完成环发布之前写入 Core 序号、UUID、订单和分片证据，并返回同一对象；方法自身不另检查线程、已发布状态或标量合法性，调用方负责该构造窗口。
+     * 仅供 Matcher 在完成环发布之前写入 Core 序号、UUID 和分片证据，并返回同一对象；方法自身不另检查线程、已发布状态或标量合法性，调用方负责该构造窗口。
      * @param coreSequence 要保存或补齐的 Core 命令序号
      * @param commandIdMostSignificantBits 待绑定命令 UUID 高六十四位
      * @param commandIdLeastSignificantBits 待绑定命令 UUID 低六十四位
-     * @param orderId 要绑定的普通订单编号
      * @param nativeSequence 原生 exchange-core 序号，零允许稍后从原生结果取得
      * @param matcherSequence 要绑定的业务分片证据序号
      * @param matcherShardId 要绑定的业务证据分片编号
      */
     CoreMatchingResult bindEvidenceInPlace(
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
-            long orderId, long nativeSequence, long matcherSequence, int matcherShardId) {
+            long nativeSequence, long matcherSequence, int matcherShardId) {
         nativeCoreSequence = coreSequence;
         nativeCommandIdMostSignificantBits = commandIdMostSignificantBits;
         nativeCommandIdLeastSignificantBits = commandIdLeastSignificantBits;
-        nativeOrderId = orderId;
         nativeSequenceValue = nativeSequence;
         nativeMatcherSequence = matcherSequence;
         nativeMatcherShardId = matcherShardId;
@@ -185,7 +176,7 @@ public final class CoreMatchingResult implements MatchingResult {
     }
 
     /**
-     * 只把 Core 序号清零，其余 UUID、订单、原生序号和事件引用不清除。
+     * 只把 Core 序号清零，其余 UUID、原生序号和事件引用不清除。
      */
     public void clearCoreSequence() {
         nativeCoreSequence = 0;
