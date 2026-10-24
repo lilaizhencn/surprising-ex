@@ -35,7 +35,8 @@ final class ProjectionTestFixtures {
     }
     static CommittedPortfolioHistoryService portfolio(JdbcTemplate jdbc, TransactionTemplate transaction) {
         return new CommittedPortfolioHistoryService(new PortfolioStartRepository(jdbc), new PortfolioCutoffRepository(jdbc),
-                new PortfolioCashFlowRepository(jdbc), new PortfolioEquityRepository(jdbc), transaction);
+                new PortfolioCashFlowRepository(jdbc), new PortfolioEquityRepository(jdbc),
+                new CommittedBalanceAdjustmentRepository(jdbc), transaction);
     }
     static CommittedAlgoProjectionService algos(JdbcTemplate jdbc, TransactionTemplate transaction) {
         return new CommittedAlgoProjectionService(new CommittedAlgoRepository(jdbc), new AlgoInitializationRepository(jdbc), transaction);

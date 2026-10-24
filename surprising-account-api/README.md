@@ -129,18 +129,23 @@ curl -X POST 'http://localhost:9086/api/v1/accounts/admin/balance-adjustments' \
 
 其中 `ledger`、`product-ledger`、`transfers` 和 `adjustments` 支持生产后台统一游标分页参数 `limit`、`cursor`、`sort`。排序白名单为 `createdAt.desc` 和 `createdAt.asc`，响应保留原列表字段并额外返回 `nextCursor`、`hasMore`、`sort`、`limit`，便于后台通过 gateway 做大账户历史明细翻页。
 
-admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Username`。余额调整先提交 Aeron Core，
-`account_admin_balance_adjustments` 只作为异步审计记录。生产中 admin API 必须只允许充值系统、清结算系统或受控后台调用。
+admin namespace 要求 gateway 注入 `X-Admin-User-Id`，会记录 `X-Admin-Username`。
+普通及管理员调账在提交 Core 前，先用独立事务把稳定命令 ID、资金请求及首次来源写入 `account_balance_adjustments`；
+相同资金请求重试不覆盖首次来源，金额、资产或用户冲突则在提交前拒绝。普通请求不保存无读端的管理员说明、完成余额或时间。
+已提交回放只为管理员请求补齐原命令的精确事后总额和业务时间，与余额现金流水、命令回执和导出水位同事务提交。
+历史查询只返回当前产品已完成的管理员请求；拒绝或未知结果不能用实时余额、当前时间伪造成功历史。
+零金额调账仍可建账，审计可以完成，收益投影不生成零现金流水。命令和 Cluster 快照不携带管理员身份或原因。
+生产中 admin API 必须只允许充值系统、清结算系统或受控后台调用。
 
 ## 数据库
 
-根目录 [init.sql](../init.sql) 创建的账户表只保存 Core Export 账本、划转、管理员调整和保险基金审计事实。它们不是实时余额权威来源，
+根目录 [init.sql](../init.sql) 创建的账户表保存 Core Export 账本、划转、调账请求及完成审计和保险基金审计事实。它们不是实时余额权威来源，
 在线账户命令不得对余额、冻结资金和持仓表执行 DML：
 
 - `account_ledger_entries`
 - `account_product_ledger_entries`
 - `account_product_transfers`（仅保存 `TRANSFER_IN` Core Fact 投影出的已完成历史，不保存在线划转状态）
-- `account_admin_balance_adjustments`
+- `account_balance_adjustments`（请求先提交，原余额及时间由已提交事实补齐；账户类型由产品和操作种类提供）
 - `insurance_fund_ledger`
 - `insurance_deficit_coverages`
 - `adl_events`

@@ -84,7 +84,7 @@ class CommittedLiquidationProjectionPostgresTest {
     }
 
     private void persist(LiquidationChange change, long watermark) {
-        orders.persist(LINE, List.of(), List.of(), watermark, List.of(), List.of(change));
+        orders.persist(LINE, List.of(), List.of(), watermark, List.of(), List.of(change), List.of());
     }
 
     private LiquidationChange change(ProductLine line, long position, long price, long fee, Status status) {

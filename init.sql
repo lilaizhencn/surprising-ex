@@ -1673,44 +1673,41 @@ CREATE INDEX IF NOT EXISTS account_ledger_liquidation_fee_order_idx
     ON account_ledger_entries (order_id, trade_id)
     WHERE reference_type = 'LIQUIDATION_FEE';
 
-CREATE TABLE IF NOT EXISTS account_admin_balance_adjustments (
+-- 首次请求来源先于 Core 提交；完成余额/时间只接收原已提交回放事实。
+CREATE TABLE IF NOT EXISTS account_balance_adjustments (
     adjustment_id       BIGSERIAL PRIMARY KEY,
-    reference_key       TEXT NOT NULL,
+    product_line        TEXT NOT NULL,
+    command_id          UUID NOT NULL,
     adjustment_kind     TEXT NOT NULL,
-    admin_user_id       BIGINT NOT NULL,
+    admin_user_id       BIGINT,
     admin_username      TEXT,
     user_id             BIGINT NOT NULL,
-    account_type        TEXT,
     asset               TEXT NOT NULL,
     amount_units        BIGINT NOT NULL,
-    balance_after_units BIGINT NOT NULL,
+    balance_after_units NUMERIC(39,0),
     reference_id        TEXT NOT NULL,
     reason              TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT account_admin_adjustments_kind_check CHECK (adjustment_kind IN ('BASIC', 'PRODUCT')),
-    CONSTRAINT account_admin_adjustments_type_check CHECK (
-        account_type IS NULL OR account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
-                                                 'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
-    ),
-    CONSTRAINT account_admin_adjustments_kind_type_check CHECK (
-        (adjustment_kind = 'BASIC' AND account_type IS NULL)
-        OR (adjustment_kind = 'PRODUCT' AND account_type IS NOT NULL)
-    ),
-    CONSTRAINT account_admin_adjustments_admin_positive CHECK (admin_user_id > 0),
-    CONSTRAINT account_admin_adjustments_user_positive CHECK (user_id > 0),
-    CONSTRAINT account_admin_adjustments_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
-    CONSTRAINT account_admin_adjustments_amount_non_zero CHECK (amount_units <> 0),
-    CONSTRAINT account_admin_adjustments_reference_present CHECK (length(reference_id) > 0)
+    created_at          TIMESTAMPTZ,
+    CONSTRAINT account_adjustments_command_unique UNIQUE (product_line, command_id),
+    CONSTRAINT account_adjustments_product_check CHECK (product_line IN
+        ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL', 'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')),
+    CONSTRAINT account_adjustments_kind_check CHECK (adjustment_kind IN ('BASIC', 'PRODUCT')),
+    CONSTRAINT account_adjustments_admin_positive CHECK (admin_user_id IS NULL OR admin_user_id > 0),
+    CONSTRAINT account_adjustments_admin_name_check CHECK (admin_user_id IS NOT NULL OR admin_username IS NULL),
+    CONSTRAINT account_adjustments_user_positive CHECK (user_id > 0),
+    CONSTRAINT account_adjustments_asset_format CHECK (asset ~ '^[A-Z0-9]{2,20}$'),
+    CONSTRAINT account_adjustments_reference_present CHECK (length(reference_id) > 0),
+    CONSTRAINT account_adjustments_completion_check CHECK ((balance_after_units IS NULL) = (created_at IS NULL)),
+    CONSTRAINT account_adjustments_balance_check CHECK (balance_after_units IS NULL OR balance_after_units >= 0)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS account_admin_adjustments_reference_uidx
-    ON account_admin_balance_adjustments (reference_key);
+CREATE INDEX IF NOT EXISTS account_adjustments_admin_time_idx
+    ON account_balance_adjustments (product_line, admin_user_id, created_at DESC, adjustment_id DESC)
+    WHERE admin_user_id IS NOT NULL AND created_at IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS account_admin_adjustments_admin_time_idx
-    ON account_admin_balance_adjustments (admin_user_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS account_admin_adjustments_user_time_idx
-    ON account_admin_balance_adjustments (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS account_adjustments_user_time_idx
+    ON account_balance_adjustments (product_line, user_id, created_at DESC, adjustment_id DESC)
+    WHERE admin_user_id IS NOT NULL AND created_at IS NOT NULL;
 
 DROP TABLE IF EXISTS account_margin_reservations;
 DROP SEQUENCE IF EXISTS trading_margin_reservation_seq;
@@ -1735,15 +1732,6 @@ BEGIN
                 AND target_account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
                                             'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
                 AND source_account_type <> target_account_type
-            );
-    END IF;
-
-    IF to_regclass('public.account_admin_balance_adjustments') IS NOT NULL THEN
-        ALTER TABLE account_admin_balance_adjustments DROP CONSTRAINT IF EXISTS account_admin_adjustments_type_check;
-        ALTER TABLE account_admin_balance_adjustments
-            ADD CONSTRAINT account_admin_adjustments_type_check CHECK (
-                account_type IS NULL OR account_type IN ('FUNDING', 'SPOT', 'USDT_PERPETUAL', 'COIN_PERPETUAL',
-                                                         'USDT_DELIVERY', 'COIN_DELIVERY', 'OPTION')
             );
     END IF;
 

@@ -34,7 +34,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
     @Accessors(fluent = true, chain = false)
     @Getter
     private CommittedCommandResult commandResult;
-    /**  最近一次余额或转账命令的可空非零现金差额。 读取最近一次命令产生的可空实际现金差额，不把释放冻结当收入。 */
+    /**  最近一次余额或转账命令的可空实际现金变化。 读取最近一次命令产生的可空实际现金差额，不把释放冻结当收入；零调账仅供审计确认，收益投影不记现金流水。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private CommittedBalanceFlow balanceFlow;
@@ -194,12 +194,14 @@ public final class CommittedTradeReplay implements AutoCloseable {
             if (balanceTarget != null && commandResult != null
                     && commandResult.status() == ResponseStatus.APPLIED) {
                 // 执行前后资产总额的 BigInteger 差值，零不生成现金流水
-                var delta = balanceUnits(balanceTarget.userId(), balanceTarget.asset())
-                        .subtract(beforeBalance);
-                // 重复返回原已应用收据时没有新的现金变化，零差额不另生成流水。
-                if (delta.signum() != 0) balanceFlow = new CommittedBalanceFlow(state.productLine(),
-                        balanceTarget.userId(), command.header().commandId(), balanceTarget.asset(), delta.toString(),
-                        logPosition, timestamp, balanceTarget.transfer());
+                var afterBalance = balanceUnits(balanceTarget.userId(), balanceTarget.asset());
+                var delta = afterBalance.subtract(beforeBalance);
+                // 重试不再次确认；首次零调账保留建账审计事实，现金投影跳过零差额。
+                if (delta.signum() != 0 || command.header().messageType() == CoreMessageType.ADJUST_BALANCE
+                        && response != null && response.status() == ResponseStatus.APPLIED)
+                    balanceFlow = new CommittedBalanceFlow(state.productLine(), balanceTarget.userId(),
+                            command.header().commandId(), balanceTarget.asset(), delta.toString(), afterBalance.toString(),
+                            logPosition, timestamp, balanceTarget.transfer());
             }
             if (fundingResult != null) {
                 if (response.commandStatus() != ResponseStatus.APPLIED)
@@ -327,18 +329,19 @@ public final class CommittedTradeReplay implements AutoCloseable {
     private record BalanceFlowTarget(long userId, String asset, TransferFundsCommand transfer) {}
 
     /**
-     * 本次已提交尝试实际产生的现金净差额，使用十进制整数字符串保存金额并附带可空转账元数据；本 record 没有额外构造校验。
+     * 本次已提交尝试的现金净差额及原始事后总额，使用十进制整数字符串；零调账保留原始完成事实，现金流水消费者跳过零差额。
      * @param product 当前回放或结果事实所属的独立产品线
      * @param userId 当前事实所属正用户 ID
      * @param commandId 本次已提交命令尝试 UUID
      * @param asset 需要比较的规范资产代码
      * @param amountUnits 本次实际现金净差额的十进制整数字符串
+     * @param balanceAfterUnits 原命令完成后可用加冻结的精确总额
      * @param clusterPosition 事实所属的正复制日志位置
      * @param occurredAt 事实所属的正业务毫秒时间
      * @param transfer 可空转账元数据，用来区分转账方向与用户归属
      */
     public record CommittedBalanceFlow(ProductLine product, long userId, UUID commandId, String asset,
-                                       String amountUnits, long clusterPosition, long occurredAt,
+                                       String amountUnits, String balanceAfterUnits, long clusterPosition, long occurredAt,
                                        TransferFundsCommand transfer) {}
 
     /**

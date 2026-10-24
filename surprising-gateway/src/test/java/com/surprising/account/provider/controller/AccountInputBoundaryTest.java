@@ -1,5 +1,6 @@
 package com.surprising.account.provider.controller;
 
+import com.surprising.account.provider.repository.BalanceAdjustmentRepository;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.service.*;
 import com.surprising.account.api.model.*;
@@ -29,7 +30,7 @@ class AccountInputBoundaryTest {
     AccountService service;
     void setup(ProductLine line) {
         var properties=new AccountProperties();properties.getKafka().setProductLine(line);
-        var commands=new AccountCommandGateway(properties,aeron);service=new AccountService(properties,commands,views);
+        var commands=new AccountCommandGateway(properties,aeron,mock(BalanceAdjustmentRepository.class));service=new AccountService(properties,commands,views);
         mvc=MockMvcBuilders.standaloneSetup(new AccountInternalController(new AccountRequestHandler(service,mock(AccountQueryService.class),commands))).setControllerAdvice(new com.surprising.gateway.provider.controller.advice.ReadViewHttpErrors()).build();
     }
     @ParameterizedTest @ValueSource(strings={"position", "positions", "position-margin", "position-mode"})

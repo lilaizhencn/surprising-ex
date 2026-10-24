@@ -38,7 +38,7 @@ class AccountHistoryPagePostgresTest {
     final long first=9007199254740993L;
     JdbcTemplate admin,jdbc;String schema;
     AccountLedgerRepository basic;ProductLedgerRepository product;ProductTransferRepository transfers;
-    AdminBalanceAdjustmentRepository adjustments;
+    BalanceAdjustmentRepository adjustments;
     final AccountService live=mock(AccountService.class);
     final AccountCommandGateway commands=mock(AccountCommandGateway.class);
     ObjectMapper json=new ObjectMapper();
@@ -49,12 +49,12 @@ class AccountHistoryPagePostgresTest {
         admin.execute("CREATE SCHEMA "+schema);jdbc=new JdbcTemplate(new DriverManagerDataSource(
                 url+(url.contains("?")?"&":"?")+"currentSchema="+schema,user,password));
         String init=Files.readString(Path.of("../init.sql"));
-        for(String table:List.of("account_ledger_entries","account_product_ledger_entries","account_product_transfers","account_admin_balance_adjustments")) {
+        for(String table:List.of("account_ledger_entries","account_product_ledger_entries","account_product_transfers","account_balance_adjustments")) {
             int start=init.indexOf("CREATE TABLE IF NOT EXISTS "+table+" (");
             jdbc.execute(init.substring(start,init.indexOf("\n);",start)+3));
         }
         basic=spy(new AccountLedgerRepository(jdbc));product=spy(new ProductLedgerRepository(jdbc));
-        transfers=spy(new ProductTransferRepository(jdbc));adjustments=spy(new AdminBalanceAdjustmentRepository(jdbc));
+        transfers=spy(new ProductTransferRepository(jdbc));adjustments=spy(new BalanceAdjustmentRepository(jdbc));
     }
     @AfterEach void cleanup() {if(admin!=null&&schema!=null)admin.execute("DROP SCHEMA "+schema+" CASCADE");}
 
@@ -136,7 +136,7 @@ class AccountHistoryPagePostgresTest {
             jdbc.update("INSERT INTO account_ledger_entries(entry_id,user_id,asset,amount_units,balance_after_units,reference_type,reference_id,created_at) VALUES(?,?,'USDT',100,1000,'ADJUSTMENT',?,?)",id,user,"ref-"+n,time);
             jdbc.update("INSERT INTO account_product_ledger_entries(entry_id,user_id,account_type,asset,amount_units,balance_after_units,reference_type,reference_id,created_at) VALUES(?,? ,?,'USDT',100,1000,'ADJUSTMENT',?,?)",id,user,rowType,"ref-"+n,time);
             jdbc.update("INSERT INTO account_product_transfers(transfer_id,user_id,source_account_type,target_account_type,asset,amount_units,reference_id,status,created_at,updated_at) VALUES(?,?,?,'FUNDING','USDT',100,?,'COMPLETED',?,?)",id,user,rowType,"ref-"+n,time,time);
-            jdbc.update("INSERT INTO account_admin_balance_adjustments(adjustment_id,reference_key,adjustment_kind,admin_user_id,user_id,account_type,asset,amount_units,balance_after_units,reference_id,created_at) VALUES(?,?,'PRODUCT',7,?,?,'USDT',100,1000,?,?)",id,"ref-"+n,user,rowType,"ref-"+n,time);
+            jdbc.update("INSERT INTO account_balance_adjustments(adjustment_id,product_line,command_id,adjustment_kind,admin_user_id,user_id,asset,amount_units,balance_after_units,reference_id,created_at) VALUES(?,?,?,'PRODUCT',7,?,'USDT',100,1000,?,?)",id,AccountType.valueOf(rowType).productLine().orElseThrow().name(),new UUID(7,id),user,"ref-"+n,time);
         }
         // Basic account history has no product-account filter; the fourth row uses another reference category.
         jdbc.update("UPDATE account_ledger_entries SET reference_type='OTHER' WHERE entry_id=?",first+103);

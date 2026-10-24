@@ -41,6 +41,9 @@ class CommittedPortfolioHistoryPostgresTest {
         String migration = Files.readString(root.resolve("deployment/migrations/20261020-portfolio-income.sql"));
         jdbc.execute(migration);
         jdbc.execute(migration);
+        String init = Files.readString(root.resolve("init.sql"));
+        int adjustment = init.indexOf("CREATE TABLE IF NOT EXISTS account_balance_adjustments (");
+        jdbc.execute(init.substring(adjustment, init.indexOf("\n);", adjustment) + 3));
         transaction = new TransactionTemplate(new DataSourceTransactionManager(source));
         history = ProjectionTestFixtures.portfolio(jdbc, transaction);
     }
@@ -102,7 +105,7 @@ class CommittedPortfolioHistoryPostgresTest {
     @Test void transferReceiptsKeepTheirIdentityAndSurviveCashAdjustmentRetention() {
         var transfer = new com.surprising.aeron.protocol.TransferFundsCommand(91, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
                 "SPOT", "USDT_PERPETUAL", "USDT", 100, "synthetic-91", "", 7, 8);
-        var outgoing = new CommittedBalanceFlow(ProductLine.SPOT, 7, new UUID(79, 91), "USDT", "-100", 91, NOW, transfer);
+        var outgoing = new CommittedBalanceFlow(ProductLine.SPOT, 7, new UUID(79, 91), "USDT", "-100", "900", 91, NOW, transfer);
         history.persist(List.of(outgoing, flow(1, "1")));
         var row = jdbc.queryForMap("SELECT source_product_line,target_product_line,source_user_id,target_user_id FROM core_portfolio_cash_flow WHERE transfer_id=91");
         assertEquals("SPOT", row.get("source_product_line"));
@@ -122,11 +125,16 @@ class CommittedPortfolioHistoryPostgresTest {
                 """, UUID.randomUUID(), NOW));
     }
 
+    @Test void zeroAdjustmentAuditFactsDoNotBecomeCashFlowRows() {
+        history.persist(List.of(flow(1, "0")));
+        assertEquals(0, count("core_portfolio_cash_flow"));
+    }
+
     private int count(String table) { return jdbc.queryForObject("SELECT count(*) FROM " + table, Integer.class); }
     private CommittedPortfolioSnapshot snapshot(long at, Map<Long, UserEquity> users) {
         return new CommittedPortfolioSnapshot(ProductLine.SPOT, at, at, users);
     }
     private CommittedBalanceFlow flow(long id, String amount) {
-        return new CommittedBalanceFlow(ProductLine.SPOT, 7, new UUID(79, id), "USDT", amount, id, NOW + id, null);
+        return new CommittedBalanceFlow(ProductLine.SPOT, 7, new UUID(79, id), "USDT", amount, "1000", id, NOW + id, null);
     }
 }

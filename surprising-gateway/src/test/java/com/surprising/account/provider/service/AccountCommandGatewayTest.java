@@ -1,5 +1,6 @@
 package com.surprising.account.provider.service;
 
+import com.surprising.account.provider.repository.BalanceAdjustmentRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -38,9 +39,9 @@ class AccountCommandGatewayTest {
                 .thenReturn(new CoreResponse(ResponseStatus.APPLIED, 1));
         when(targetAeron.userState(7L)).thenReturn(new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 2,
                 CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 250, 0)), List.of(), List.of()));
-        AccountCommandGateway source = new AccountCommandGateway(properties(ProductLine.SPOT), sourceAeron);
+        AccountCommandGateway source = new AccountCommandGateway(properties(ProductLine.SPOT), sourceAeron, mock(BalanceAdjustmentRepository.class));
         AccountCommandGateway target = new AccountCommandGateway(
-                properties(ProductLine.LINEAR_PERPETUAL), targetAeron);
+                properties(ProductLine.LINEAR_PERPETUAL), targetAeron, mock(BalanceAdjustmentRepository.class));
         ProductTransferOperationRequest request = new ProductTransferOperationRequest(91L, 7L,
                 ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL, AccountType.FUNDING,
                 AccountType.USDT_PERPETUAL, "USDT", 250L, "transfer-91", "allocation");
@@ -62,7 +63,7 @@ class AccountCommandGatewayTest {
         when(aeron.userState(7L)).thenReturn(new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 1,
                 CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 900, 100)), List.of(), List.of()));
         AccountCommandGateway gateway = new AccountCommandGateway(
-                properties(ProductLine.LINEAR_PERPETUAL), aeron);
+                properties(ProductLine.LINEAR_PERPETUAL), aeron, mock(BalanceAdjustmentRepository.class));
 
         var response = gateway.adjustBalance(new BalanceAdjustmentRequest(7, "usdt", 1_000,
                 "deposit-1", "test"), null, null);
@@ -81,12 +82,58 @@ class AccountCommandGatewayTest {
         when(aeron.userState(7L)).thenReturn(new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 2,
                 CorePositionMode.HEDGE, List.of(), List.of(), List.of()));
         AccountCommandGateway gateway = new AccountCommandGateway(
-                properties(ProductLine.LINEAR_PERPETUAL), aeron);
+                properties(ProductLine.LINEAR_PERPETUAL), aeron, mock(BalanceAdjustmentRepository.class));
 
         var response = gateway.updatePositionMode(new PositionModeUpdateRequest(7,
                 ProductLine.LINEAR_PERPETUAL, PositionMode.HEDGE, "mode-1"));
 
         assertThat(response.positionMode()).isEqualTo(PositionMode.HEDGE);
+    }
+
+    @Test
+    void adminIntentIsSavedBeforeOfferWithTheExistingStableCommandIdentity() {
+        var aeron = mock(AccountAeronGateway.class);
+        var journal = mock(BalanceAdjustmentRepository.class);
+        when(aeron.userState(7)).thenReturn(new CoreUserStateView(ProductLine.SPOT, 7, 1,
+                CorePositionMode.ONE_WAY, List.of(new CoreBalanceView("USDT", 900, 100)), List.of(), List.of()));
+        var gateway = new AccountCommandGateway(properties(ProductLine.SPOT), aeron, journal);
+        gateway.adjustBalance(new BalanceAdjustmentRequest(7, " usdt ", 100, " ref-7 ", "original"), "11", "admin");
+        var id = java.util.UUID.nameUUIDFromBytes("SPOT:7:balance-adjust:ref-7".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var order = org.mockito.Mockito.inOrder(journal, aeron);
+        order.verify(journal).prepare(ProductLine.SPOT, id, "BASIC", 11L, "admin", 7, "USDT", 100, "ref-7", "original");
+        order.verify(aeron).command(eq(CoreMessageType.ADJUST_BALANCE), eq(id), eq(7L), any());
+        order.verify(aeron).userState(7);
+    }
+
+    @Test
+    void unavailableJournalPreventsAnyCoreOffer() {
+        var aeron = mock(AccountAeronGateway.class);
+        var journal = mock(BalanceAdjustmentRepository.class);
+        org.mockito.Mockito.doThrow(new org.springframework.dao.DataAccessResourceFailureException("journal unavailable"))
+                .when(journal).prepare(any(), any(), any(), any(), any(), anyLong(), any(), anyLong(), any(), any());
+        var gateway = new AccountCommandGateway(properties(ProductLine.SPOT), aeron, journal);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> gateway.adjustBalance(
+                new BalanceAdjustmentRequest(7, "USDT", 100, "ref-7", "audit"), "11", "admin"))
+                .isInstanceOf(org.springframework.dao.DataAccessException.class);
+        org.mockito.Mockito.verifyNoInteractions(aeron);
+    }
+
+    @Test
+    void zeroAdjustmentRemainsAnAccountCreationCommandAndProductIdentityIsStable() {
+        var aeron = mock(AccountAeronGateway.class);
+        var journal = mock(BalanceAdjustmentRepository.class);
+        when(aeron.userState(7)).thenReturn(new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 1,
+                CorePositionMode.ONE_WAY, List.of(), List.of(), List.of()));
+        var gateway = new AccountCommandGateway(properties(ProductLine.LINEAR_PERPETUAL), aeron, journal);
+        gateway.adjustProductBalance(new com.surprising.account.api.model.ProductBalanceAdjustmentRequest(
+                7, AccountType.USDT_PERPETUAL, "USDT", 0, "create-7", "create account"), null, null);
+        var id = java.util.UUID.nameUUIDFromBytes("LINEAR_PERPETUAL:7:product-balance-adjust:create-7"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        verify(journal).prepare(ProductLine.LINEAR_PERPETUAL, id, "PRODUCT", null, null,
+                7, "USDT", 0, "create-7", "create account");
+        var payload = org.mockito.ArgumentCaptor.forClass(byte[].class);
+        verify(aeron).command(eq(CoreMessageType.ADJUST_BALANCE), eq(id), eq(7L), payload.capture());
+        assertThat(com.surprising.aeron.protocol.TradingCommandCodec.decodeBalanceAdjustment(payload.getValue()).deltaUnits()).isZero();
     }
 
     private static AccountProperties properties(ProductLine productLine) {

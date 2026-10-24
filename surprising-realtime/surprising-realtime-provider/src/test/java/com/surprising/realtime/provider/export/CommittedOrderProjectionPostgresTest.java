@@ -48,7 +48,7 @@ class CommittedOrderProjectionPostgresTest {
     void springPersistenceContextRollsBackReceiptsStatisticsAndWatermarkTogether() {
         try (var context = com.surprising.realtime.provider.export.config.CommittedProjectionConfiguration.openPersistence(source)) {
             var stores = context.getBeansWithAnnotation(org.springframework.stereotype.Repository.class);
-            assertThat(stores).hasSize(22);
+            assertThat(stores).hasSize(23);
             assertThat(stores.values()).allSatisfy(store ->
                     assertThat(org.springframework.aop.support.AopUtils.isAopProxy(store)).isTrue());
             var service = context.getBean(CommittedOrderProjectionService.class);

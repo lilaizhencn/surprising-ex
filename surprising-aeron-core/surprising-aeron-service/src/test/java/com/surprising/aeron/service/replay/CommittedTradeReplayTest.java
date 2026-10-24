@@ -432,6 +432,61 @@ class CommittedTradeReplayTest {
         assertThat(rejected.clusterPosition()).isEqualTo(1);
     }
 
+    @Test void balanceAdjustmentKeepsItsOriginalTotalAndRetryAfterSnapshotCreatesNoNewFact() {
+        var line = ProductLine.SPOT;
+        CommittedTradeReplay.CommittedBalanceFlow original;
+        byte[] snapshot;
+        try (var replay = new CommittedTradeReplay(line, null)) {
+            send(replay, line, CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(
+                    new RegisterInstrumentCommand("604", "BTC", "USDT", "USDT", 1, 1, 1,
+                            null, 0, 0, 0, -1, 0), line));
+            send(replay, line, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1000)));
+            place(replay, line, 7, 201, CoreOrderSide.BUY); // 200 留在冻结余额中。
+            send(replay, line, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 50)));
+            original = replay.balanceFlow();
+            assertThat(original.amountUnits()).isEqualTo("50");
+            assertThat(original.balanceAfterUnits()).isEqualTo("1050");
+            assertThat(original.occurredAt()).isEqualTo(TIME + sequence);
+            send(replay, line, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
+            assertThat(replay.balanceFlow().balanceAfterUnits()).isEqualTo("1075");
+            assertThat(original.balanceAfterUnits()).isEqualTo("1050");
+            snapshot = replay.snapshot();
+        }
+        try (var restored = new CommittedTradeReplay(line, snapshot)) {
+            long seq = ++sequence;
+            var retry = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE, original.commandId(), line,
+                    CommandSource.OPERATIONS, 991, seq, 7, TIME + seq, seq),
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 50)));
+            restored.apply(CoreMessageCodec.encode(retry), TIME + seq, seq);
+            assertThat(restored.balanceFlow()).isNull();
+            assertThat(restored.commandResult().status()).isEqualTo(ResponseStatus.APPLIED);
+        }
+    }
+
+    @Test void zeroAccountCreationHasOneAuditFactAndRejectedDebitsHaveNone() {
+        var line = ProductLine.SPOT;
+        try (var replay = new CommittedTradeReplay(line, null)) {
+            send(replay, line, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 0)));
+            var created = replay.balanceFlow();
+            assertThat(created.amountUnits()).isEqualTo("0");
+            assertThat(created.balanceAfterUnits()).isEqualTo("0");
+            long seq = ++sequence;
+            var retry = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE, created.commandId(), line,
+                    CommandSource.OPERATIONS, 991, seq, 7, TIME + seq, seq),
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 0)));
+            replay.apply(CoreMessageCodec.encode(retry), TIME + seq, seq);
+            assertThat(replay.balanceFlow()).isNull();
+            send(replay, line, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", -1)));
+            assertThat(replay.commandResult().status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(replay.balanceFlow()).isNull();
+        }
+    }
+
     /**
      * 通过固定币对、价格一百、数量二的普通限价单发送助手下单，客户号按业务 ID 唯一构造。
      * @param replay 接收已提交帧的独立回放实例

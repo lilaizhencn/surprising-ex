@@ -19,11 +19,14 @@ public class CommittedPortfolioHistoryService {
     private final PortfolioCutoffRepository cutoffs;
     private final PortfolioCashFlowRepository cashFlows;
     private final PortfolioEquityRepository equities;
+    private final CommittedBalanceAdjustmentRepository balanceAdjustments;
 
     public CommittedPortfolioHistoryService(PortfolioStartRepository startRows, PortfolioCutoffRepository cutoffs,
             PortfolioCashFlowRepository cashFlows, PortfolioEquityRepository equities,
+            CommittedBalanceAdjustmentRepository balanceAdjustments,
             @org.springframework.beans.factory.annotation.Qualifier("committedProjectionTransactions") TransactionTemplate transaction) {
         this.startRows=startRows; this.cutoffs=cutoffs; this.cashFlows=cashFlows; this.equities=equities; this.transaction=transaction;
+        this.balanceAdjustments = balanceAdjustments;
     }
 
     public PortfolioProjectionStart start(ProductLine product, long checkpointPosition, long checkpointTimestamp) {
@@ -39,15 +42,17 @@ public class CommittedPortfolioHistoryService {
     }
 
     private void persistFacts(List<CommittedBalanceFlow> flows) {
+        balanceAdjustments.persist(flows);
         // PostgreSQL's rewritten multi-row UPSERT cannot affect one key twice.
         // This bounded batch index holds references only, never an account state copy.
         var unique = new LinkedHashMap<FlowIdentity, CommittedBalanceFlow>();
         for (var flow : flows) {
+            if ("0".equals(flow.amountUnits())) continue;
             var previous = unique.putIfAbsent(new FlowIdentity(flow.product(), flow.commandId(), flow.userId()), flow);
             if (previous != null && !previous.equals(flow))
                 throw new IllegalStateException("cash-flow batch contains conflicting command facts");
         }
-        cashFlows.persist(unique.values());
+        if (!unique.isEmpty()) cashFlows.persist(unique.values());
     }
 
     public boolean contains(ProductLine product, long cutoff) { return cutoffs.contains(product, cutoff); }

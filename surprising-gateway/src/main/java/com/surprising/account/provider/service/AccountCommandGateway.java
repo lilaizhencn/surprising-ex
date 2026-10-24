@@ -14,6 +14,7 @@ import com.surprising.account.api.model.ProductTransferRequest;
 import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.account.provider.config.AccountProperties;
+import com.surprising.account.provider.repository.BalanceAdjustmentRepository;
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -41,17 +42,23 @@ public class AccountCommandGateway {
 
     private final AccountProperties properties;
     private final AccountAeronGateway aeron;
+    private final BalanceAdjustmentRepository adjustments;
 
-    public AccountCommandGateway(AccountProperties properties, AccountAeronGateway aeron) {
+    public AccountCommandGateway(AccountProperties properties, AccountAeronGateway aeron,
+                                 BalanceAdjustmentRepository adjustments) {
         this.properties = properties;
         this.aeron = aeron;
+        this.adjustments = adjustments;
     }
 
     public BalanceResponse adjustBalance(BalanceAdjustmentRequest request, String adminUserId, String adminUsername) {
         UUID commandId = commandId("balance-adjust", request.userId(), request.referenceId());
+        String asset = adjustmentAsset(request.asset());
+        adjustments.prepare(properties.getKafka().getProductLine(), commandId, "BASIC",
+                adminId(adminUserId), adminUsername, request.userId(), asset, request.amountUnits(),
+                request.referenceId().trim(), request.reason());
         aeron.command(CoreMessageType.ADJUST_BALANCE, commandId, request.userId(),
-                TradingCommandCodec.encodeBalanceAdjustment(
-                        new BalanceAdjustmentCommand(request.asset(), request.amountUnits())));
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, request.amountUnits())));
         CoreUserStateView state = requireUserState(request.userId());
         return balance(state, request.asset());
     }
@@ -60,9 +67,12 @@ public class AccountCommandGateway {
                                                         String adminUserId, String adminUsername) {
         requireProductAccount(request.accountType(), "产品余额调整");
         UUID commandId = commandId("product-balance-adjust", request.userId(), request.referenceId());
+        String asset = adjustmentAsset(request.asset());
+        adjustments.prepare(properties.getKafka().getProductLine(), commandId, "PRODUCT",
+                adminId(adminUserId), adminUsername, request.userId(), asset, request.amountUnits(),
+                request.referenceId().trim(), request.reason());
         aeron.command(CoreMessageType.ADJUST_BALANCE, commandId, request.userId(),
-                TradingCommandCodec.encodeBalanceAdjustment(
-                        new BalanceAdjustmentCommand(request.asset(), request.amountUnits())));
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, request.amountUnits())));
         BalanceResponse balance = balance(requireUserState(request.userId()), request.asset());
         return new ProductBalanceResponse(request.userId(), request.accountType(), balance.asset(),
                 balance.availableUnits(), balance.lockedUnits(), balance.equityUnits(), balance.updatedAt());
@@ -167,6 +177,18 @@ public class AccountCommandGateway {
 
     private UUID transferCommandId(String phase, ProductTransferOperationRequest request) {
         return commandId("transfer-" + phase, request.userId(), Long.toString(request.transferId()));
+    }
+
+    private static String adjustmentAsset(String asset) {
+        if (asset == null || asset.isBlank()) throw new IllegalArgumentException("asset is required");
+        return asset.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    private static Long adminId(String value) {
+        if (value == null) return null;
+        long id = Long.parseLong(value.trim());
+        if (id <= 0) throw new IllegalArgumentException("admin userId must be positive");
+        return id;
     }
 
     private UUID commandId(String operation, long userId, String referenceId) {

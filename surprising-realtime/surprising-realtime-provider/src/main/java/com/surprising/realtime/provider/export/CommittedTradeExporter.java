@@ -507,8 +507,7 @@ final class CommittedTradeExporter {
                 else if (mode == ExportMode.STATISTICS_REPAIR) orders.statistics().repair(product,commandResults);
                 else if (mode == ExportMode.PORTFOLIO_REPAIR) orders.portfolio().persist(balanceFlows);
                 else {
-                    orders.persist(product, orderChanges, commandResults, sequence, algoChanges, liquidationChanges);
-                    if (!balanceFlows.isEmpty()) orders.portfolio().persist(balanceFlows);
+                    orders.persist(product, orderChanges, commandResults, sequence, algoChanges, liquidationChanges, balanceFlows);
                     sink.publish(trades);
                 }
                 // Neither the checkpoint nor this marker advances when either sink fails.

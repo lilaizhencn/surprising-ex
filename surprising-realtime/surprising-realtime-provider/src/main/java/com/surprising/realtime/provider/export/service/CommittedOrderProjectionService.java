@@ -232,24 +232,28 @@ public class CommittedOrderProjectionService {
     /** All orders and their visibility watermark commit together, before the export checkpoint. */
     public void persist(ProductLine product, List<RealtimeFrame> orders,
                  List<CommittedCommandResult> commandResults, long exportSequence) {
-        persist(product, orders, commandResults, exportSequence, List.of());
+        persist(product, orders, commandResults, exportSequence, List.of(), List.of(), List.of());
     }
 
     public void persist(ProductLine product, List<RealtimeFrame> orders,
                  List<CommittedCommandResult> commandResults, long exportSequence,
                  List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges) {
-        persist(product, orders, commandResults, exportSequence, algoChanges, List.of());
+        persist(product, orders, commandResults, exportSequence, algoChanges, List.of(), List.of());
     }
 
     public void persist(ProductLine product, List<RealtimeFrame> orders,
                  List<CommittedCommandResult> commandResults, long exportSequence,
                  List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges,
-                 List<LiquidationChange> liquidationChanges) {
+                 List<LiquidationChange> liquidationChanges,
+                 List<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");
+        for (var flow : balanceFlows)
+            if (flow.product() != product) throw new IllegalArgumentException("cross-product balance projection");
         if (orders.isEmpty() && commandResults.isEmpty() && algoChanges.isEmpty()) {
             // Commands without order changes must still advance the visibility watermark.
             transaction.executeWithoutResult(status -> {
                 liquidationRows.persist(product, liquidationChanges);
+                portfolio.persist(balanceFlows);
                 watermarks.advanceWatermark(product, exportSequence);
             });
             return;
@@ -323,6 +327,7 @@ public class CommittedOrderProjectionService {
             statistics.persist(product,commandResults);
             algos.persist(product, algoChanges, exportSequence);
             liquidationRows.persist(product, liquidationChanges);
+            portfolio.persist(balanceFlows);
             receiptRows.persistCommandResults(product, receipts);
             executionRows.persistExecutions(product, fills);
             triggerRows.persistTriggers(product, triggers.values(), exportSequence);

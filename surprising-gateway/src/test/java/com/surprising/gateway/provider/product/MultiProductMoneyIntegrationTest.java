@@ -1,5 +1,6 @@
 package com.surprising.gateway.provider.product;
 
+import com.surprising.account.provider.repository.BalanceAdjustmentRepository;
 import com.surprising.account.api.model.*;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.exception.AccountCommandRejectedException;
@@ -111,7 +112,7 @@ class MultiProductMoneyIntegrationTest {
                 var response=query(CoreMessageType.USER_STATE_QUERY,call.getArgument(0),new byte[0]);
                 return response.status()==ResponseStatus.OK?CoreStateQueryCodec.decodeUserState(response.data()):null;
             });
-            accounts=new AccountCommandGateway(properties,aeron);
+            accounts=new AccountCommandGateway(properties,aeron,mock(BalanceAdjustmentRepository.class));
         }
         CoreResponse query(CoreMessageType type,long user,byte[] payload) {
             long seq=++sequence;

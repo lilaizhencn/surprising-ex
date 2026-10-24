@@ -10,7 +10,7 @@ import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import com.surprising.product.api.ProductLineConfiguration;
 import com.surprising.account.provider.repository.AccountLedgerRepository;
-import com.surprising.account.provider.repository.AdminBalanceAdjustmentRepository;
+import com.surprising.account.provider.repository.BalanceAdjustmentRepository;
 import com.surprising.account.provider.repository.ProductLedgerRepository;
 import com.surprising.account.provider.repository.ProductTransferRepository;
 import org.springframework.stereotype.Service;
@@ -28,12 +28,12 @@ public class AccountQueryService {
     private final AccountLedgerRepository accountLedgerRepository;
     private final ProductLedgerRepository productLedgerRepository;
     private final ProductTransferRepository productTransferRepository;
-    private final AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository;
+    private final BalanceAdjustmentRepository adminBalanceAdjustmentRepository;
 
     public AccountQueryService(AccountLedgerRepository accountLedgerRepository,
                                ProductLedgerRepository productLedgerRepository,
                                ProductTransferRepository productTransferRepository,
-                               AdminBalanceAdjustmentRepository adminBalanceAdjustmentRepository, AccountProperties properties) {
+                               BalanceAdjustmentRepository adminBalanceAdjustmentRepository, AccountProperties properties) {
         this.properties = properties;
         this.accountLedgerRepository = accountLedgerRepository;
         this.productLedgerRepository = productLedgerRepository;
@@ -83,7 +83,7 @@ public class AccountQueryService {
         if (accountType != null) {
             requireProductAccount(accountType);
         }
-        var page = adminBalanceAdjustmentRepository.page(adminUserId, userId,
+        var page = adminBalanceAdjustmentRepository.page(currentProductLine(), adminUserId, userId,
                 adjustmentKind, accountType, asset,
                 referenceId, pageQuery);
         return new AdminBalanceAdjustmentQueryResponse(page.items().size(), page.items(), page.nextCursor(),

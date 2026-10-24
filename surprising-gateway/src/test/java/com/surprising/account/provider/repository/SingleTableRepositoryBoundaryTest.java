@@ -44,13 +44,13 @@ class SingleTableRepositoryBoundaryTest {
     @Test
     void adminBalanceAdjustmentRepositoryOnlyQueriesAdjustmentTable() {
         JdbcTemplate jdbcTemplate = emptyQueryJdbcTemplate();
-        AdminBalanceAdjustmentRepository repository = new AdminBalanceAdjustmentRepository(jdbcTemplate);
+        BalanceAdjustmentRepository repository = new BalanceAdjustmentRepository(jdbcTemplate);
 
-        repository.page(null, null, null, null, null, null, new AccountHistoryPageQuery(100,null,true));
+        repository.page(com.surprising.product.api.ProductLine.SPOT, null, null, null, null, null, null, new AccountHistoryPageQuery(100,null,true));
 
         String sql = capturedQuery(jdbcTemplate);
         assertThat(sql)
-                .contains("FROM account_admin_balance_adjustments")
+                .contains("FROM account_balance_adjustments")
                 .doesNotContain("account_ledger_entries");
     }
 

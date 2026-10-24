@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第四十八轮：A155–A160及沿身份版本追踪的A161已清理，共13个运行态字段、10个辅助record组件和3个重复水位组件；分段快照v30头部81字节。最终18模块干净编译通过，4014份classfile清除残留定义/引用。累计155解决，A154仍待修复、A11候选和4保留；未运行测试/服务/SQL/交易恢复，全量审计继续。",
+    "checkpoint": "第四十九轮：A154请求来源及原已提交审计完成链已实现；删除旧写入口、两列重复身份、非零限制和额外SQL阶段，普通请求不保存管理员说明/完成值。18模块最终干净编译通过。继续确认A162逐项撤单结果码、A163每槽未使用准入对象、A164构造链无用Lane约束，尚未删除；156解决、3确认、1候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -8612,11 +8612,11 @@
     },
     {
       "id": "A154",
-      "status": "confirmed",
-      "analysis_status": "admin_adjustment_metadata_discarded_and_audit_write_chain_missing_in_current_source",
+      "status": "resolved",
+      "analysis_status": "request_origin_and_original_committed_completion_implemented_compile_verified",
       "topic": "管理员调账身份参数未消费，既有调整审计查询缺少实际写入链路",
       "source_basis_commit": "cc2cf992d95ee74435eb3ea8dd374120a09513ab",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountRequestHandler.java",
@@ -8667,7 +8667,40 @@
         "consistency_risks_to_resolve": "不能简单在Core资金成功后写一条非原子SQL再声称可靠；也不能把后续实时查询余额或重放时的墙钟当成本命令原始事后余额/业务时间。需要核对原命令回执、持久请求审计或已提交回放中的现有事实。"
       },
       "required_next": "先追踪管理员批准/通用审计、reference与commandId、原已提交余额变化/回执和SQL查询契约；明确幂等、拒绝/未知结果、故障恢复和原始时间/余额来源，再修复现有审计写链。优先复用现有数据边界，避免向Cluster加入仅为展示搬运的副本。",
-      "verification_limit": "静态源码及当前classfile确认；未执行管理员调账、数据库、交易或恢复。"
+      "verification_limit": "静态源码及当前classfile确认；未执行管理员调账、数据库、交易或恢复。",
+      "resolved_in_round": "forty_ninth_cleanup_round",
+      "resolution": {
+        "implementation": "Gateway在Core offer前REQUIRES_NEW提交首次请求来源，普通/管理员共用稳定UUID且资金请求冲突提前拒绝。冷回放提供原事后总额/时间，管理员审计、收益现金流、回执和水位在原投影事务提交；普通来源不存无读端的管理员原因、完成余额或时间。旧record入口、reference_key/account_type重复列、非零金额限制和Exporter独立余额历史SQL提交删除。",
+        "formats": "Cluster命令、在线状态和全部快照源码及版本不变；仅冷回放事实增加有真实SQL消费者的原事后总额。",
+        "verification": "18模块HotSpot JDK27 clean test-compile退出0，22份Java源码及init.sql哈希匹配最终输入，4018份classfile无旧repository定义或引用；测试/SQL/服务/恢复未运行。",
+        "source_references": [
+          {
+            "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+            "line": 57,
+            "anchor": "adjustments.prepare("
+          },
+          {
+            "file": "surprising-gateway/src/main/java/com/surprising/account/provider/repository/BalanceAdjustmentRepository.java",
+            "line": 26,
+            "anchor": "@Transactional(propagation = Propagation.REQUIRES_NEW)"
+          },
+          {
+            "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java",
+            "line": 197,
+            "anchor": "var afterBalance = balanceUnits("
+          },
+          {
+            "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedBalanceAdjustmentRepository.java",
+            "line": 38,
+            "anchor": "WHERE product_line = ? AND command_id = ? AND admin_user_id IS NOT NULL"
+          },
+          {
+            "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedOrderProjectionService.java",
+            "line": 256,
+            "anchor": "portfolio.persist(balanceFlows)"
+          }
+        ]
+      }
     },
     {
       "id": "A155",
@@ -8961,6 +8994,125 @@
         "runtime_fields_removed": 6,
         "verification": "最终clean test-compile与classfile定义/引用扫描通过；未执行测试、交易或恢复。"
       }
+    },
+    {
+      "id": "A162",
+      "status": "confirmed",
+      "topic": "内部控制撤单逐项回执的resultCode只有测试读取，并施加无业务用途的非空限制",
+      "fields_or_methods": [
+        "CoreCancellationResult.resultCode",
+        "CoreCancellationResult canonical constructor resultCode validation"
+      ],
+      "evidence": "当前4018份classfile中，仅DeterministicExchangeCoreAdapterTest调用resultCode()；生产构造仅来自aggregateRoutedCancellationResults，三个实际消费类只调用orderId()/accepted()。整体CoreMatchingResult仍使用首个失败的结果码和成功前缀分类；不能删除整体结果码或公开批撤逐项结果码。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/CoreCancellationResult.java",
+          "line": 9,
+          "anchor": "public record CoreCancellationResult("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.java",
+          "line": 1308,
+          "anchor": "cancellations.add(new CoreCancellationResult("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java",
+          "line": 928,
+          "anchor": "if (cancellation.accepted() && cancellation.orderId() == orderId)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java",
+          "line": 979,
+          "anchor": "if (cancellation.accepted() && !expected.contains(orderId)"
+        }
+      ],
+      "proposed_cleanup": "内部逐项回执收敛为orderId/accepted，删除无消费的结果码搬运及非空检查；测试继续核对整体失败原因、成功前缀和第三笔仍可撤。无Cluster/快照字段变化。",
+      "source_basis_commit": "4ee8e87a9e747c05b338f7f864b29c12c37e3e05",
+      "business_code_changed": false,
+      "analysis_status": "source_and_current_compiled_references_confirmed_not_yet_removed",
+      "analysis_round": "forty_ninth_cleanup_round",
+      "verification_limit": "仅结构/源码与当前编译产物核对；未运行测试、服务、SQL、交易或恢复。"
+    },
+    {
+      "id": "A163",
+      "status": "confirmed",
+      "topic": "每个CommandSlot预建的reusableResolvedOrder没有业务读写，只在清理时调用clear",
+      "fields_or_methods": [
+        "CommandSlot.reusableResolvedOrder",
+        "CommandSlot.reusableResolvedOrder()"
+      ],
+      "evidence": "字段仅在本类构造、clear和无调用getter内出现；当前所有classfile没有getter调用或其他类字段引用。CommandSlotRing为容量中的每个槽创建该对象，普通下单实际借用继承ResolvedPlaceOrder的PlaceAdmissionEvent，批量路径使用自身resolvedOrderSlots。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlot.java",
+          "line": 190,
+          "anchor": "private final ResolvedPlaceOrder reusableResolvedOrder"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlot.java",
+          "line": 974,
+          "anchor": "reusableResolvedOrder.clear()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlotRing.java",
+          "line": 34,
+          "anchor": "contexts[index] = new CommandSlot()"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/PlaceAdmissionEvent.java",
+          "line": 24,
+          "anchor": "extends ResolvedPlaceOrder"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderBatchPending.java",
+          "line": 43,
+          "anchor": "private final ResolvedPlaceOrder[] resolvedOrderSlots"
+        }
+      ],
+      "proposed_cleanup": "删除该字段、getter、构造分配、清空和无用import；保留真实单笔/批次准入槽、Matcher发布和退休条件。不据此宣称性能提升。",
+      "source_basis_commit": "4ee8e87a9e747c05b338f7f864b29c12c37e3e05",
+      "business_code_changed": false,
+      "analysis_status": "source_and_current_compiled_references_confirmed_not_yet_removed",
+      "analysis_round": "forty_ninth_cleanup_round",
+      "verification_limit": "仅结构/源码与当前编译产物核对；未运行测试、服务、SQL、交易或恢复。"
+    },
+    {
+      "id": "A164",
+      "status": "confirmed",
+      "topic": "命令槽池构造链的laneCount只用于重复范围检查，不参与容量、路由或确认位分配",
+      "fields_or_methods": [
+        "CommandSlotRing(int capacity,int laneCount)",
+        "PendingMatchingRing(int requestedCapacity,int matcherShardCount,int laneCount)"
+      ],
+      "evidence": "PendingMatchingRing只把laneCount传给CommandSlotRing；后者只检查1..64，不保存、不用于数组或槽初始化。真实LaneTopology已检查账户Lane数量，CommandSlot.result/includeControlLanes/completeLanes另按真实拓扑掩码检查参与位和完成位。",
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlotRing.java",
+          "line": 28,
+          "anchor": "public CommandSlotRing(int capacity, int laneCount)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java",
+          "line": 92,
+          "anchor": "contexts = new CommandSlotRing(capacity, laneCount)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+          "line": 900,
+          "anchor": "this.pendingMatching = new PendingMatchingRing("
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/config/LaneTopology.java",
+          "line": 39,
+          "anchor": "requirePowerOfTwo(accountLaneCount, 1, Long.SIZE"
+        }
+      ],
+      "proposed_cleanup": "去掉两级构造的laneCount透传及槽池内的虚假约束，迁移实际创建点和测试。保留容量、真实Lane拓扑、完成掩码和恢复路由校验。",
+      "source_basis_commit": "4ee8e87a9e747c05b338f7f864b29c12c37e3e05",
+      "business_code_changed": false,
+      "analysis_status": "source_and_current_compiled_references_confirmed_not_yet_removed",
+      "analysis_round": "forty_ninth_cleanup_round",
+      "verification_limit": "仅结构/源码与当前编译产物核对；未运行测试、服务、SQL、交易或恢复。"
     }
   ],
   "preserve_verified_purposes": [
@@ -8978,10 +9130,10 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A154管理员调账审计生产链缺口：沿持久请求、稳定commandId、原命令结果及已提交余额事实核对幂等、未知结果、原始余额/时间与恢复，避免给Cluster添加纯展示副本。",
-    "继续逐业务操作检查准入、执行、提交、快照及SQL/读端字段和约束；保留真实接口调用、响应租约、资金/身份所有权和恢复边界。",
-    "A11查询通道保留现有领导者读、提交水位和会话语义；仅在明确一致性设计后处理。",
-    "后续修改仍只运行相关模块编译，未运行的测试/真实交易/恢复不得宣称通过。"
+    "处理A162/A163/A164：删除内部撤单结果码和约束、每槽无人消费的准入对象、构造链无用Lane参数；保留整体失败原因、真实准入输入及拓扑/完成位校验。",
+    "继续逐业务操作核对命令、准入、执行、提交、快照与SQL字段的实际消费者，避免只按getter直接调用判断接口/反射消费。",
+    "A11继续保留领导者读、提交水位与查询会话语义，未经明确一致性设计不删除QUERY路由。",
+    "后续仍只编译相关模块；测试、SQL、真实交易和恢复没有运行不得宣称通过。"
   ],
   "rejected_false_positives": [
     {
@@ -9056,7 +9208,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "cleanup_compile_verified; followup_scan_performed; runtime_verification_not_executed; overall_audit_in_progress",
+  "analysis_round_status": "cleanup_compile_verified; three_followup_findings_confirmed; runtime_verification_not_executed; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -9278,19 +9430,20 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "2399425e9dfe0029c2af95f1d0f1ac78bb7fde13",
-    "status": "cleanup_compile_verified_followup_scan_performed",
+    "source_basis_commit": "4ee8e87a9e747c05b338f7f864b29c12c37e3e05",
+    "status": "cleanup_compile_verified_followup_three_confirmed",
     "resolved_ids": [
-      "A155",
-      "A156",
-      "A157",
-      "A158",
-      "A159",
-      "A160",
-      "A161"
+      "A154"
+    ],
+    "new_confirmed_ids": [
+      "A162",
+      "A163",
+      "A164"
     ],
     "confirmed_ids": [
-      "A154"
+      "A162",
+      "A163",
+      "A164"
     ],
     "candidate_ids": [
       "A11"
@@ -9302,12 +9455,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 155,
+      "resolved": 156,
       "candidate": 1,
       "retained": 4,
-      "confirmed": 1
+      "confirmed": 3
     },
-    "evidence": "forty_eighth_cleanup_round",
+    "evidence": "forty_ninth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -11220,6 +11373,40 @@
         "confirmed": 1
       },
       "tests_executed": false,
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "2399425e9dfe0029c2af95f1d0f1ac78bb7fde13",
+      "status": "cleanup_compile_verified_followup_scan_performed",
+      "resolved_ids": [
+        "A155",
+        "A156",
+        "A157",
+        "A158",
+        "A159",
+        "A160",
+        "A161"
+      ],
+      "confirmed_ids": [
+        "A154"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 155,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "evidence": "forty_eighth_cleanup_round",
       "overall_audit_completed": false
     }
   ],
@@ -34247,6 +34434,371 @@
           "path": "/tmp/aeron-core-redundancy-20261024-verify.py",
           "bytes": 8192,
           "sha256": "888e25dc4af04998d464f3a4c108455b539de15e1261b236a939b04f75314288"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "forty_ninth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "4ee8e87a9e747c05b338f7f864b29c12c37e3e05",
+    "resolved_ids": [
+      "A154"
+    ],
+    "new_confirmed_ids": [
+      "A162",
+      "A163",
+      "A164"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 156,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 3
+    },
+    "previous_goal_turn_classification": "progress: 4ee8e87a9已推送A155–A161清理及最终18模块干净编译，仍保留资金、身份和快照恢复边界。",
+    "report": "validation/deep-code-cleanup-20261024-round49.md",
+    "implementation": {
+      "request": "Gateway请求先独立提交首次来源、规范资金参数和稳定命令身份；相同请求不覆盖来源/说明，资金冲突不offer。预写幂等冲突沿用现有AccountCommandRejectedException与IDEMPOTENCY_CONFLICT错误码。",
+      "completion": "只从原已提交回放取精确事后总额和Cluster业务时间，只为管理员来源补齐完成事实。零调账确认建账，重复/拒绝不产生新事实；普通来源不保存原因/完成值。",
+      "transaction": "复用PortfolioHistory业务服务及现有REQUIRED模板，现金流水/审计完成/订单/回执/强平/统计/水位同事务，之后才Kafka和checkpoint；删除LIVE单独portfolio.persist阶段。",
+      "state": "无Cluster管理员元数据、无新在线状态、无命令或快照版本变化、无兼容层或修复模式。",
+      "removed": [
+        "无生产调用的旧record写入口及旧repository类型",
+        "reference_key和account_type重复列",
+        "阻止零调账建账的amount_units<>0约束",
+        "LIVE额外余额历史SQL提交阶段",
+        "普通来源无读端的reason/完成余额/时间持久化"
+      ]
+    },
+    "verification": {
+      "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 65.507,
+      "source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java": "6e26119fc953862fe414ec7f1b9da07f850606ec0fdfafdc513e8f55aef8249f",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java": "abc5665d5cd3d438aba2f809f150f8eca3689ca4f3253822d1e08bb8536a3f0b",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/repository/BalanceAdjustmentRepository.java": "f25c4624e8b533486c08efb3fe525cab8de046e7d288aebfcd5be733bc78e133",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java": "1cebdd3b45ba043454049c5448c7229697149bc4ee98f57f59474b61903078e3",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountQueryService.java": "b3a5b560f38d59639944b71e22b4231d6d7a228987e733366430b06a1249fa0b",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountHistoryPagePostgresTest.java": "e761e05ec2f96cdd4ce8e96e0e7ff4e05f4fff2e07988196dfc478155a5bbd7a",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountInputBoundaryTest.java": "34abc1c684ee7478099e4161f71097d3b772a3e10534945a266e89ebd0451404",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/repository/BalanceAdjustmentJournalPostgresTest.java": "78d58cb2a0169ff2b8324e6f849621a6a3c9a60fb2c6abdf4e2c5bf72af640ea",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/repository/SingleTableRepositoryBoundaryTest.java": "938c0621b998c6242f8a97ed9ba08c7c84f2d352c6ee86ec4f5e623ac78d64fe",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/service/AccountCommandGatewayTest.java": "c5eff14082dfbfbd628545a3638b6fb7dd2f4eb3968d4e6ebeced6a1ba771c57",
+        "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductMoneyIntegrationTest.java": "8d96052a9c9c1a076c7dc9422791d2b32427cdc8a98858178a921ea6ad740d35",
+        "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java": "6a978fccea58bf664959c0b84a3012ea2560c3f74729cbd1a0924e324554548c",
+        "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedBalanceAdjustmentRepository.java": "6a04766e122cf70152d23c7ad50d174d2fae45d3a588336ebcd1ec0fb7abe756",
+        "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedOrderProjectionService.java": "1265ddcc3ad3e70cea398b6f6547c550a959de78761eab6eba59a137aa1f6c62",
+        "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedPortfolioHistoryService.java": "765cbb4b8c595135fee863c2e9acaabd928ac2877916acf97b83da26c33d1000",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedBalanceAdjustmentPostgresTest.java": "fe7cb855265b10a1658b69cd1aaaba6a06989fe5fec2b9a574c46872b3b3f435",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedLiquidationProjectionPostgresTest.java": "b0521348a8844edc3592e145188deb9f9371273071933e9564b394127b16a5b7",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java": "47d648be3d332c997e5bc435d9023c59f63fb3e8191428e9045df49eff041419",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedPortfolioHistoryPostgresTest.java": "49ccfd1c595314e55c24df28c20c7a06b70608f39014ae7c57db62b61fde1cc9",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedTradeExportIntegrationTest.java": "342abee29ee8b3c3f4b7057a498fd680ab478982a1c0a78b4db2f573dbc6d972",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ExportBatchTest.java": "16b8fb6b07ac72dddd392e96a3a39a1f5797d33386aa94d44bc34851db67f248",
+        "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ProjectionTestFixtures.java": "3ba40cd6879affa06fb46fff01b44345fb5c95c7095f3ad9f09cd75d4290524f"
+      },
+      "deleted_java_sources": [
+        "surprising-gateway/src/main/java/com/surprising/account/provider/repository/AdminBalanceAdjustmentRepository.java"
+      ],
+      "init_sql_sha256": "939da96594dbc4a220bfa76eb49350898cf7470121c110e7cb4dfb29a15e5eae",
+      "log_sha256": "8e43412b5a8bafdaa0e5b76aecbee11343ab597dac7969a76ca7daa2385724c2",
+      "tests_executed": false,
+      "sql_executed": false
+    },
+    "static_verification": {
+      "classfile_count": 4018,
+      "major_versions": {
+        "71": 4018
+      },
+      "compiled_java_sources": 22,
+      "source_hashes_match": true,
+      "old_repository_definition_and_references_absent": true,
+      "only_core_production_change_is_cold_replay": true,
+      "protected_source_sha256": {
+        "surprising-gateway/src/main/java/com/surprising/account/api/model/AdminBalanceAdjustmentRecord.java": "f83ce0e603a4ef3892ceea8955711af61c07bcfa233aa3ab5a14c4f3bd7904df",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/BalanceAdjustmentCommand.java": "516b8c7d752e163a688e3ad999825e9b8874f7700cd5d1cc9cbe7b3e6bae4f7f"
+      },
+      "typed_production_links": [
+        {
+          "owner": "com/surprising/account/provider/repository/BalanceAdjustmentRepository",
+          "method": "prepare",
+          "descriptor": "(Lcom/surprising/product/api/ProductLine;Ljava/util/UUID;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/String;JLjava/lang/String;JLjava/lang/String;Ljava/lang/String;)V",
+          "callers": [
+            "com/surprising/account/provider/service/AccountCommandGateway"
+          ]
+        },
+        {
+          "owner": "com/surprising/realtime/provider/export/repository/CommittedBalanceAdjustmentRepository",
+          "method": "persist",
+          "descriptor": "(Ljava/util/List;)V",
+          "callers": [
+            "com/surprising/realtime/provider/export/service/CommittedPortfolioHistoryService"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/service/replay/CommittedTradeReplay$CommittedBalanceFlow",
+          "method": "balanceAfterUnits",
+          "descriptor": "()Ljava/lang/String;",
+          "callers": [
+            "com/surprising/realtime/provider/export/repository/CommittedBalanceAdjustmentRepository"
+          ]
+        }
+      ],
+      "tests_executed": false,
+      "sql_executed": false,
+      "git_diff_check": "passed",
+      "reactor_module_count": 18,
+      "old_active_table_or_repository_source_references": 0,
+      "framework_repository_proxy": "ProductBusinessConfiguration已有EnableTransactionManagement，prepare为注入bean的公开方法，非本类调用",
+      "snapshot_and_command_source_changes": false
+    },
+    "verification_history": {
+      "first_build": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 1,
+        "elapsed_seconds": 46.264,
+        "source_sha256": {
+          "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java": "6e26119fc953862fe414ec7f1b9da07f850606ec0fdfafdc513e8f55aef8249f",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java": "abc5665d5cd3d438aba2f809f150f8eca3689ca4f3253822d1e08bb8536a3f0b",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/repository/BalanceAdjustmentRepository.java": "bcfdebbfe75e4ad258611be77edb14c6d22c185449c9d49f20fb545ea8b4a587",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java": "1cebdd3b45ba043454049c5448c7229697149bc4ee98f57f59474b61903078e3",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountQueryService.java": "b3a5b560f38d59639944b71e22b4231d6d7a228987e733366430b06a1249fa0b",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountHistoryPagePostgresTest.java": "e761e05ec2f96cdd4ce8e96e0e7ff4e05f4fff2e07988196dfc478155a5bbd7a",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountInputBoundaryTest.java": "34abc1c684ee7478099e4161f71097d3b772a3e10534945a266e89ebd0451404",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/repository/BalanceAdjustmentJournalPostgresTest.java": "84f38890c9359ad648fa1843f0a0cbbfb13ec697f1b25f0ab4735ce281d62e52",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/repository/SingleTableRepositoryBoundaryTest.java": "938c0621b998c6242f8a97ed9ba08c7c84f2d352c6ee86ec4f5e623ac78d64fe",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/service/AccountCommandGatewayTest.java": "c5eff14082dfbfbd628545a3638b6fb7dd2f4eb3968d4e6ebeced6a1ba771c57",
+          "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductMoneyIntegrationTest.java": "8d96052a9c9c1a076c7dc9422791d2b32427cdc8a98858178a921ea6ad740d35",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java": "6a978fccea58bf664959c0b84a3012ea2560c3f74729cbd1a0924e324554548c",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedBalanceAdjustmentRepository.java": "31053a5bddc44155293b0a8fabf648d2cd0ad8950541fd269627bcf8a611014a",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedOrderProjectionService.java": "1265ddcc3ad3e70cea398b6f6547c550a959de78761eab6eba59a137aa1f6c62",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedPortfolioHistoryService.java": "765cbb4b8c595135fee863c2e9acaabd928ac2877916acf97b83da26c33d1000",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedBalanceAdjustmentPostgresTest.java": "1de96b90a91831c96329c74d1ad2625c8ea3f03aa8f24fe37d84c11899302498",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedLiquidationProjectionPostgresTest.java": "b0521348a8844edc3592e145188deb9f9371273071933e9564b394127b16a5b7",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java": "47d648be3d332c997e5bc435d9023c59f63fb3e8191428e9045df49eff041419",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedPortfolioHistoryPostgresTest.java": "49ccfd1c595314e55c24df28c20c7a06b70608f39014ae7c57db62b61fde1cc9",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ExportBatchTest.java": "ee4ac070d88d6c6100d5d3e0043e03bc036ddaf8f289f72f50d92ad67b65a1ec",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ProjectionTestFixtures.java": "3ba40cd6879affa06fb46fff01b44345fb5c95c7095f3ad9f09cd75d4290524f"
+        },
+        "deleted_java_sources": [
+          "surprising-gateway/src/main/java/com/surprising/account/provider/repository/AdminBalanceAdjustmentRepository.java"
+        ],
+        "init_sql_sha256": "942201bfb301642e8f9fddddcd02dfc19a83e19171db3b973910219ac7b7a0de",
+        "log_sha256": "71a635b88a068269763f90bc4f34b691421a9c762f6d4cb8cb57925014917b47",
+        "tests_executed": false,
+        "sql_executed": false
+      },
+      "failure": "CommittedTradeExportIntegrationTest的mock漏迁移第7参数；修正后完整重编译。",
+      "intermediate_build": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "elapsed_seconds": 52.129,
+        "source_sha256": {
+          "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java": "6e26119fc953862fe414ec7f1b9da07f850606ec0fdfafdc513e8f55aef8249f",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java": "abc5665d5cd3d438aba2f809f150f8eca3689ca4f3253822d1e08bb8536a3f0b",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/repository/BalanceAdjustmentRepository.java": "0365e0d2d62374e46f2bacbd6f6b78f39f71bec3c26b9aff1ad0c8bf9bc8f79a",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java": "1cebdd3b45ba043454049c5448c7229697149bc4ee98f57f59474b61903078e3",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountQueryService.java": "b3a5b560f38d59639944b71e22b4231d6d7a228987e733366430b06a1249fa0b",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountHistoryPagePostgresTest.java": "e761e05ec2f96cdd4ce8e96e0e7ff4e05f4fff2e07988196dfc478155a5bbd7a",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountInputBoundaryTest.java": "34abc1c684ee7478099e4161f71097d3b772a3e10534945a266e89ebd0451404",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/repository/BalanceAdjustmentJournalPostgresTest.java": "4c1624b30804a3adcb87b61f94db4f0d457fd906b6adda222638f20ef9535333",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/repository/SingleTableRepositoryBoundaryTest.java": "938c0621b998c6242f8a97ed9ba08c7c84f2d352c6ee86ec4f5e623ac78d64fe",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/service/AccountCommandGatewayTest.java": "c5eff14082dfbfbd628545a3638b6fb7dd2f4eb3968d4e6ebeced6a1ba771c57",
+          "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductMoneyIntegrationTest.java": "8d96052a9c9c1a076c7dc9422791d2b32427cdc8a98858178a921ea6ad740d35",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java": "6a978fccea58bf664959c0b84a3012ea2560c3f74729cbd1a0924e324554548c",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedBalanceAdjustmentRepository.java": "31053a5bddc44155293b0a8fabf648d2cd0ad8950541fd269627bcf8a611014a",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedOrderProjectionService.java": "1265ddcc3ad3e70cea398b6f6547c550a959de78761eab6eba59a137aa1f6c62",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedPortfolioHistoryService.java": "765cbb4b8c595135fee863c2e9acaabd928ac2877916acf97b83da26c33d1000",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedBalanceAdjustmentPostgresTest.java": "1de96b90a91831c96329c74d1ad2625c8ea3f03aa8f24fe37d84c11899302498",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedLiquidationProjectionPostgresTest.java": "b0521348a8844edc3592e145188deb9f9371273071933e9564b394127b16a5b7",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java": "47d648be3d332c997e5bc435d9023c59f63fb3e8191428e9045df49eff041419",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedPortfolioHistoryPostgresTest.java": "49ccfd1c595314e55c24df28c20c7a06b70608f39014ae7c57db62b61fde1cc9",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedTradeExportIntegrationTest.java": "342abee29ee8b3c3f4b7057a498fd680ab478982a1c0a78b4db2f573dbc6d972",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ExportBatchTest.java": "16b8fb6b07ac72dddd392e96a3a39a1f5797d33386aa94d44bc34851db67f248",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ProjectionTestFixtures.java": "3ba40cd6879affa06fb46fff01b44345fb5c95c7095f3ad9f09cd75d4290524f"
+        },
+        "deleted_java_sources": [
+          "surprising-gateway/src/main/java/com/surprising/account/provider/repository/AdminBalanceAdjustmentRepository.java"
+        ],
+        "init_sql_sha256": "939da96594dbc4a220bfa76eb49350898cf7470121c110e7cb4dfb29a15e5eae",
+        "log_sha256": "6304c71e0c2504e18132bb91f69a93bb90ffa9c2a9a27d601ba52d3c48a2a117",
+        "tests_executed": false,
+        "sql_executed": false
+      },
+      "final_reason": "普通来源无用完成值及幂等冲突原错误契约复核完成后，对最终源码重新完成同范围18模块干净编译。",
+      "before_error_contract_build": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "elapsed_seconds": 60.782,
+        "source_sha256": {
+          "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java": "6e26119fc953862fe414ec7f1b9da07f850606ec0fdfafdc513e8f55aef8249f",
+          "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/replay/CommittedTradeReplayTest.java": "abc5665d5cd3d438aba2f809f150f8eca3689ca4f3253822d1e08bb8536a3f0b",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/repository/BalanceAdjustmentRepository.java": "0365e0d2d62374e46f2bacbd6f6b78f39f71bec3c26b9aff1ad0c8bf9bc8f79a",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java": "1cebdd3b45ba043454049c5448c7229697149bc4ee98f57f59474b61903078e3",
+          "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountQueryService.java": "b3a5b560f38d59639944b71e22b4231d6d7a228987e733366430b06a1249fa0b",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountHistoryPagePostgresTest.java": "e761e05ec2f96cdd4ce8e96e0e7ff4e05f4fff2e07988196dfc478155a5bbd7a",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/controller/AccountInputBoundaryTest.java": "34abc1c684ee7478099e4161f71097d3b772a3e10534945a266e89ebd0451404",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/repository/BalanceAdjustmentJournalPostgresTest.java": "4c1624b30804a3adcb87b61f94db4f0d457fd906b6adda222638f20ef9535333",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/repository/SingleTableRepositoryBoundaryTest.java": "938c0621b998c6242f8a97ed9ba08c7c84f2d352c6ee86ec4f5e623ac78d64fe",
+          "surprising-gateway/src/test/java/com/surprising/account/provider/service/AccountCommandGatewayTest.java": "c5eff14082dfbfbd628545a3638b6fb7dd2f4eb3968d4e6ebeced6a1ba771c57",
+          "surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductMoneyIntegrationTest.java": "8d96052a9c9c1a076c7dc9422791d2b32427cdc8a98858178a921ea6ad740d35",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/CommittedTradeExporter.java": "6a978fccea58bf664959c0b84a3012ea2560c3f74729cbd1a0924e324554548c",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedBalanceAdjustmentRepository.java": "6a04766e122cf70152d23c7ad50d174d2fae45d3a588336ebcd1ec0fb7abe756",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedOrderProjectionService.java": "1265ddcc3ad3e70cea398b6f6547c550a959de78761eab6eba59a137aa1f6c62",
+          "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/service/CommittedPortfolioHistoryService.java": "765cbb4b8c595135fee863c2e9acaabd928ac2877916acf97b83da26c33d1000",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedBalanceAdjustmentPostgresTest.java": "fe7cb855265b10a1658b69cd1aaaba6a06989fe5fec2b9a574c46872b3b3f435",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedLiquidationProjectionPostgresTest.java": "b0521348a8844edc3592e145188deb9f9371273071933e9564b394127b16a5b7",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedOrderProjectionPostgresTest.java": "47d648be3d332c997e5bc435d9023c59f63fb3e8191428e9045df49eff041419",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedPortfolioHistoryPostgresTest.java": "49ccfd1c595314e55c24df28c20c7a06b70608f39014ae7c57db62b61fde1cc9",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/CommittedTradeExportIntegrationTest.java": "342abee29ee8b3c3f4b7057a498fd680ab478982a1c0a78b4db2f573dbc6d972",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ExportBatchTest.java": "16b8fb6b07ac72dddd392e96a3a39a1f5797d33386aa94d44bc34851db67f248",
+          "surprising-realtime/surprising-realtime-provider/src/test/java/com/surprising/realtime/provider/export/ProjectionTestFixtures.java": "3ba40cd6879affa06fb46fff01b44345fb5c95c7095f3ad9f09cd75d4290524f"
+        },
+        "deleted_java_sources": [
+          "surprising-gateway/src/main/java/com/surprising/account/provider/repository/AdminBalanceAdjustmentRepository.java"
+        ],
+        "init_sql_sha256": "939da96594dbc4a220bfa76eb49350898cf7470121c110e7cb4dfb29a15e5eae",
+        "log_sha256": "ec827eca70e95f2679d40c1a30e1c580dcfcf423226d4c3870e9a76638c74096",
+        "tests_executed": false,
+        "sql_executed": false
+      }
+    },
+    "test_source_scenarios": [
+      "提交前写入及失败不offer",
+      "稳定命令UUID和零金额建账",
+      "REQUIRES_NEW抵抗调用方回滚",
+      "首次普通/管理员来源不可重指派、产品隔离、冲突拒绝、未完成不可查",
+      "原事后总额包含冻结且不随后续命令变化",
+      "零调整/拒绝/重复及实际快照恢复后的事实边界",
+      "投影水位失败回滚审计与回执，再精确重试",
+      "请求金额冲突回滚整批、宽总额不截断、普通来源不写管理员完成值",
+      "ExportBatch SQL失败保留余额及强平事实；可变列表断言移到实际调用时读取",
+      "预写资金冲突仍为现有账户业务拒绝类型和IDEMPOTENCY_CONFLICT错误码"
+    ],
+    "followup_scan": {
+      "new_confirmed_ids": [
+        "A162",
+        "A163",
+        "A164"
+      ],
+      "new_fields_not_removed_in_this_round": true,
+      "retained_actual_consumers": [
+        "MatchingResult.nativeMatcherSequence/nativeMatcherShardId由OrderedCommitCoordinator接口调用，用于验证/推进Matcher进度。",
+        "PlaceAdmissionEvent.assetId直接用于所属Lane的placeOrderInLane冻结资金。",
+        "AdmissionIdentity.settlementStatus供lifecycleSettled/fundingInProgress读取，不能按getter零调用删除。",
+        "CommandSlot.commitChangedUserIds/commitChangedOrderIds用于Owner挂起/恢复缓冲所有权交换。"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "overall_audit_completed": false
+    },
+    "previous_latest_analysis_round": {
+      "date": "2026-10-24",
+      "source_basis_commit": "2399425e9dfe0029c2af95f1d0f1ac78bb7fde13",
+      "status": "cleanup_compile_verified_followup_scan_performed",
+      "resolved_ids": [
+        "A155",
+        "A156",
+        "A157",
+        "A158",
+        "A159",
+        "A160",
+        "A161"
+      ],
+      "confirmed_ids": [
+        "A154"
+      ],
+      "candidate_ids": [
+        "A11"
+      ],
+      "retained_ids": [
+        "A105",
+        "A117",
+        "A124",
+        "A129"
+      ],
+      "counts": {
+        "resolved": 155,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "evidence": "forty_eighth_cleanup_round",
+      "overall_audit_completed": false
+    },
+    "limits": "仅18模块生产/测试源码编译及静态核对。没有执行测试、SQL、服务、Aeron/Kafka、真实交易、恢复或性能工具；SQL语法/事务与资金恢复场景仍未运行验证。HTTP模型不变，未执行客户端/UI。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-adjustment-audit-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build-before-error-contract.json",
+          "bytes": 5242,
+          "sha256": "501b4553ef5ed3876467834da3847668091eafef54d420fd9a82a2c8b30a7c5f"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build-before-error-contract.log",
+          "bytes": 40146,
+          "sha256": "ec827eca70e95f2679d40c1a30e1c580dcfcf423226d4c3870e9a76638c74096"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build-first.json",
+          "bytes": 5023,
+          "sha256": "33d687fa1a53483f1aa2acec4a751a69c3ace155e0f07ef76a0c1988ba7d1f7d"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build-first.log",
+          "bytes": 41767,
+          "sha256": "71a635b88a068269763f90bc4f34b691421a9c762f6d4cb8cb57925014917b47"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build-intermediate.json",
+          "bytes": 5242,
+          "sha256": "78f8db9038d39d34b96ccc251fcbb8d1a5eb7f18170e583def4164d068f92dee"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build-intermediate.log",
+          "bytes": 40146,
+          "sha256": "6304c71e0c2504e18132bb91f69a93bb90ffa9c2a9a27d601ba52d3c48a2a117"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build.json",
+          "bytes": 5242,
+          "sha256": "b56721d88017c9b41358d48fc824c5d772faaf7d94be579770b759277b61ddb9"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build.log",
+          "bytes": 40147,
+          "sha256": "8e43412b5a8bafdaa0e5b76aecbee11343ab597dac7969a76ca7daa2385724c2"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-build.py",
+          "bytes": 1728,
+          "sha256": "61f9493fa3b20918a995ed953ceb65c9d3a680b443a4e783b13b8a0e18f5bc57"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-finalize.py",
+          "bytes": 3365,
+          "sha256": "788bd1ff26aa91f6c312876da2cb8a4b59bd5ade217946b01cbaeaa4a5aaf720"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-record.py",
+          "bytes": 18755,
+          "sha256": "be9d78b6f4ed665638bb53c34b29c9210ca0e8e462371cf438ef4fc909be4b22"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-static.json",
+          "bytes": 35534,
+          "sha256": "ca79d75627a00375ad19198d753d3aed3e0c34ac60668b64374adea4cf5bebf2"
+        },
+        {
+          "path": "/tmp/aeron-adjustment-audit-20261024-static.py",
+          "bytes": 4900,
+          "sha256": "14a30f71ea6ae63f8abb1ee967414885579d937e6b28cdb69d97165597906fa0"
         }
       ],
       "compiler_outputs_retained": true,
