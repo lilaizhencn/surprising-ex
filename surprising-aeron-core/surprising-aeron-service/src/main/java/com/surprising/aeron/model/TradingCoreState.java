@@ -204,20 +204,6 @@ public record TradingCoreState(
     }
 
     /**
-     * 空白客户端单号返回空，其余用用户和原单号查派生索引，再取原订单正文。
-     * @param userId 待读取、验证或排序的用户 ID
-     * @param clientOrderId 用户原始客户端单号，查询空白返回空，排序键构造拒绝空白
-     */
-    public CoreOrderState order(long userId, String clientOrderId) {
-        if (clientOrderId == null || clientOrderId.isBlank()) {
-            return null;
-        }
-        // 当前客户端索引映射到的订单号，或逐变化 ID 遍历的订单号
-        Long orderId = clientOrderIndex.get(new ClientOrderKey(userId, clientOrderId));
-        return orderId == null ? null : orders.get(orderId);
-    }
-
-    /**
      * 核对图键与用户自身 ID 一致，并属于该产品线。
      * @param productLine 本状态唯一所属产品线
      * @param userId 待读取、验证或排序的用户 ID

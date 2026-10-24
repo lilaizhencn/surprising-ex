@@ -402,60 +402,10 @@ public record CoreRiskState(
         }
 
         /**
-         * 只更新最近调度修订号，保留所有账户风险和条件单进度。
-         * @param revision 本次记录的最近调度状态修订号
-         */
-        public RiskScan withLastScheduledRevision(long revision) {
-            return new RiskScan(instrumentId, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId,
-                    riskComplete, riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
-                    riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
-                    riskIsolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor,
-                    triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
-                    triggerOcoOrderId, triggerOcoCursor, revision, laneProgress);
-        }
-
-        /**
-         * 用各 Lane 的新进度列表替换原列表，其他扫描游标不变。
-         * @param progress 各账户 Lane 的新风险进度，构造新记录时复制为不可修改列表
-         */
-        public RiskScan withLaneProgress(List<RiskLaneProgress> progress) {
-            return new RiskScan(instrumentId, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId,
-                    riskComplete, riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
-                    riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
-                    riskIsolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor,
-                    triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
-                    triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision, progress);
-        }
-
-        /**
          * 账户风险扫描与条件单扫描都完成时，整轮扫描才算完成。
          */
         public boolean complete() {
             return riskComplete && triggerComplete;
-        }
-
-        /**
-         * 替换账户风险部分的用户、阶段、游标和累计金额，保留条件单进度；此构造路径将独立 Lane 进度列表重置为空。
-         * @param complete 当前更新的扫描部分是否完成；简化构造器中指账户风险部分
-         * @param userId 当前尚未完成估值的用户编号，0 表示没有进行中的用户
-         * @param phase 当前更新部分的扫描阶段，风险为 0 到 2，条件单则同时编码价格来源和索引阶段
-         * @param positionCursor 最后处理的持仓键，短横线表示尚未开始遍历持仓
-         * @param reservationCursor 最后处理的冻结委托编号，0 表示尚未开始遍历
-         * @param unrealizedPnlUnits 风险估值累计的权益变化，期货按未实现盈亏、期权按市值口径计入
-         * @param maintenanceMarginUnits 维持持仓所要求的保证金金额，单位为结算资产最小单位
-         * @param isolatedMarginUnits 已经累计的逐仓持仓保证金，需要从全仓共享资金中扣除
-         * @param isolatedReservationUnits 已经累计的逐仓委托冻结金额，需要从全仓共享资金中扣除
-         * @param completedUserId 最后一个完整处理完的用户编号，作为后续用户遍历起点
-         */
-        public RiskScan withRiskProgress(boolean complete, long userId, int phase, String positionCursor,
-                                         long reservationCursor, long unrealizedPnlUnits,
-                                         long maintenanceMarginUnits, long isolatedMarginUnits,
-                                         long isolatedReservationUnits, long completedUserId) {
-            return new RiskScan(instrumentId, accountLaneId, priceSequence, scanStartPriceSequence, completedUserId, complete,
-                    userId, phase, positionCursor, reservationCursor, unrealizedPnlUnits,
-                    maintenanceMarginUnits, isolatedMarginUnits, isolatedReservationUnits,
-                    triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
-                    triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision);
         }
 
         /**
@@ -475,31 +425,6 @@ public record CoreRiskState(
                     riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
                     riskIsolatedReservationUnits, complete, phase, priceCursor, orderCursor, upperId,
                     markPriceTicks, generatedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision, laneProgress);
-        }
-
-        /**
-         * 记录或清除需要分批继续的关联撤单目标及游标，保留其余扫描进度。
-         * @param orderId 正在处理关联撤单的触发单编号，0 表示没有待继续的关联撤单
-         * @param cursor 关联撤单按条件单编号倒序处理的继续位置
-         */
-        public RiskScan withTriggerOcoProgress(long orderId, long cursor) {
-            return new RiskScan(instrumentId, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete,
-                    riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
-                    riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
-                    riskIsolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor,
-                    triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
-                    orderId, cursor, lastScheduledRevision, laneProgress);
-        }
-
-        /**
-         * 转到指定账户 Lane 并清空用户风险累加进度，保留条件单部分；独立 Lane 进度列表按该构造路径重置为空。
-         * @param laneId 接下来需要处理的账户 Lane 编号
-         */
-        public RiskScan nextAccountLane(int laneId) {
-            return new RiskScan(instrumentId, laneId, priceSequence, scanStartPriceSequence, 0, false,
-                    0, 0, "-", 0, 0, 0, 0, 0,
-                    triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
-                    triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision);
         }
 
         /**

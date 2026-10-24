@@ -280,14 +280,4 @@ public record RiskScanRuntime(int symbolId, int accountLaneId, long priceSequenc
                 triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, orderId, cursor, lastScheduledRevision, laneProgress);
     }
 
-    /**
-     * 转到指定账户 Lane 并清空用户风险累加进度，保留条件单部分；独立 Lane 进度列表按该构造路径重置为空。
-     * @param laneId 接下来需要处理的账户 Lane 编号
-     */
-    public RiskScanRuntime nextAccountLane(int laneId) {
-        return new RiskScanRuntime(symbolId, laneId, priceSequence, scanStartPriceSequence, 0, false,
-                0, 0, "-", 0, 0, 0, 0, 0, triggerComplete, triggerPhase, triggerPriceCursor,
-                triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
-                triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision);
-    }
 }

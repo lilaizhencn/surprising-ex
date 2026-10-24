@@ -87,31 +87,30 @@ class ParallelRiskScanTest {
     }
 
     /**
-     * 分别以首 Lane 和末 Lane 作为辅助方法参数运行两次扫描，比较完整结果及编号与 Lane 的对应顺序。当前辅助方法未实际注入阻塞，因此本用例尚不能证明慢 Lane 或不同完成顺序的行为。
+     * 对相同业务状态重复扫描，比较完整结果及编号与 Lane 的对应顺序，同时核对用户和财库资金保持不变。
      */
     @Test
-    void slowLaneDoesNotPreventOtherLanesFromValuingAndIdsIgnoreCompletionOrder() throws Exception {
+    void repeatedScansAssignTheSameLiquidationIdsInLaneOrder() {
         // 本用例的初始业务状态，按场景构造逐仓或共享权益的全仓持仓。
         var source = source(CoreMarginMode.ISOLATED, 1);
-        // 以首 Lane 编号作为参数得到的第一次扫描结果，当前辅助实现并未真正阻塞首 Lane。
-        var slowFirst = scanWithBlockedLane(source, 0);
-        // 以末 Lane 编号作为参数得到的第二次扫描结果，当前辅助实现并未真正阻塞末 Lane。
-        var slowLast = scanWithBlockedLane(source, TOPOLOGY.accountLaneCount() - 1);
-        assertThat(slowFirst).isEqualTo(slowLast);
-        assertThat(slowFirst.riskState().nextLiquidationId()).isEqualTo(TOPOLOGY.accountLaneCount() + 1L);
+        // 相同初始状态的第一次完整扫描结果。
+        var first = scanAllLanes(source);
+        // 相同初始状态的第二次完整扫描结果。
+        var repeated = scanAllLanes(source);
+        assertThat(first).isEqualTo(repeated);
+        assertThat(first.riskState().nextLiquidationId()).isEqualTo(TOPOLOGY.accountLaneCount() + 1L);
         for (/* 当前检查编号顺序或分配测试账户的账户 Lane 下标。 */ int lane = 0; lane < TOPOLOGY.accountLaneCount(); lane++)
-            assertThat(TOPOLOGY.accountLaneId(slowFirst.riskState().liquidations().get(lane + 1L).userId()))
+            assertThat(TOPOLOGY.accountLaneId(first.riskState().liquidations().get(lane + 1L).userId()))
                     .isEqualTo(lane);
-        assertThat(slowFirst.users()).isEqualTo(source.users());
-        assertThat(slowFirst.treasuryState()).isEqualTo(source.treasuryState());
+        assertThat(first.users()).isEqualTo(source.users());
+        assertThat(first.treasuryState()).isEqualTo(source.treasuryState());
     }
 
     /**
-     * 创建运行时并启动账户 Lane，轮询完成一批风险扫描后物化业务状态。当前实现未使用 blockedLane 参数，也未阻塞任何 Lane，名称中的阻塞场景尚未真正构造。
+     * 创建运行时并启动账户 Lane，轮询完成一批风险扫描后物化业务状态。
      * @param source 本轮扫描开始前的业务状态，包含各 Lane 的测试持仓
-     * @param blockedLane 调用方传入的拟阻塞 Lane 编号；当前辅助实现没有使用它或注入阻塞
      */
-    private TradingCoreState scanWithBlockedLane(TradingCoreState source, int blockedLane) throws Exception {
+    private TradingCoreState scanAllLanes(TradingCoreState source) {
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
         var ids = new RuntimeIdentityRegistry();
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
