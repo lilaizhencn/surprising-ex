@@ -106,9 +106,8 @@ final class RiskAccountQuery implements SettlementLaneWorker.Command, Function<A
         try {
             if (asset == null) {
                 // 按指定用户或全部持仓用户取得的风险路由，已受索引扫描上限约束。
-                var routes = owner.positionUserIndex().riskQueryRoutes(requestedUser,
+                users = owner.positionUserIndex().riskQueryUserIds(requestedUser,
                         RuntimeOperationalQueryService.MAX_INDEX_SCAN);
-                users = routes.userIds();
             } else {
                 // 指定结算资产下的非零持仓候选路由，每项都要保留用户及持仓身份。
                 var routes = owner.adlPositionIndex().positions(asset, RuntimeOperationalQueryService.MAX_INDEX_SCAN);

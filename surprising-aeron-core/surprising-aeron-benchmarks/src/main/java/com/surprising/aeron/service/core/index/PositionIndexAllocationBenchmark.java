@@ -43,7 +43,7 @@ public class PositionIndexAllocationBenchmark {
                 instrument, 2, 100, 200, 0, 20);
         openInterest = new OpenInterestIndex(state);
         adl = new AdlPositionIndex(state, identities);
-        indexes = new RuntimeFactIndexes(new PositionUserIndex(state, identities), openInterest,
+        indexes = new RuntimeFactIndexes(new PositionUserIndex(state), openInterest,
                 new TriggerOrderIndex(state), new AlgoOrderIndex(state), new LiquidationIndex(state),
                 new CancelAllAfterIndex(state), new ActiveOrderIndex(state, identities), adl);
     }

@@ -51,7 +51,7 @@ public class TriggerCommitBenchmark {
         var identities = new RuntimeIdentityRegistry();
         triggerIndex = new TriggerOrderIndex(initial);
         runtime.bindFactIndexes(new RuntimeFactIndexes(
-                new PositionUserIndex(initial, identities),
+                new PositionUserIndex(initial),
                 new OpenInterestIndex(initial),
                 triggerIndex,
                 new AlgoOrderIndex(initial),

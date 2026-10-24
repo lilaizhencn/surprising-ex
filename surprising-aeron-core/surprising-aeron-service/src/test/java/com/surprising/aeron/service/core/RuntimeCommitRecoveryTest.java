@@ -1409,7 +1409,7 @@ class RuntimeCommitRecoveryTest {
         // 八份从同一冷正文重建索引的字段对照结果
         Map<String, Map<String, Object>> rebuilt = Map.ofEntries(
                 Map.entry("position-user", indexSnapshot(
-                        new com.surprising.aeron.service.core.index.PositionUserIndex(core, identities))),
+                        new com.surprising.aeron.service.core.index.PositionUserIndex(core))),
                 Map.entry("open-interest", indexSnapshot(
                         new com.surprising.aeron.service.core.index.OpenInterestIndex(core))),
                 Map.entry("trigger", indexSnapshot(

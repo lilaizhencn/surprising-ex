@@ -5,7 +5,6 @@ import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.position.RuntimePositionIndexValue;
 import java.util.Collections;
@@ -49,30 +48,18 @@ public final class PositionUserIndex {
      * @param state 初次构建或恢复重建所依据的完整业务状态
      */
     public PositionUserIndex(TradingCoreState state) {
-        this.topology = CoreConfiguration.standaloneLaneTopology();
-        rebuild(state);
-    }
-
-    /**
-     * 使用当前配置的账户 Lane 拓扑，转到显式拓扑构造入口。
-     * @param state 初次构建或恢复重建所依据的完整业务状态
-     * @param identities 当前签名接收的身份映射；现有重建直接使用用户和外部合约编号，不使用此参数
-     */
-    public PositionUserIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        this(state, identities,
-                CoreConfiguration.standaloneLaneTopology());
+        this(state, CoreConfiguration.standaloneLaneTopology());
     }
 
     /**
      * 要求明确的 Lane 拓扑，按该拓扑分组并从业务状态重建合约用户路由。
      * @param state 初次构建或恢复重建所依据的完整业务状态
-     * @param identities 当前签名接收的身份映射；现有重建直接使用用户和外部合约编号，不使用此参数
      * @param topology 确定用户属于哪个账户 Lane 的拓扑，索引与实际运行时必须使用同一配置
      */
-    public PositionUserIndex(TradingCoreState state, RuntimeIdentityRegistry identities, LaneTopology topology) {
+    public PositionUserIndex(TradingCoreState state, LaneTopology topology) {
         if (topology == null) throw new IllegalArgumentException("lane topology is required");
         this.topology = topology;
-        rebuild(state, identities);
+        rebuild(state);
     }
 
     /**
@@ -91,29 +78,24 @@ public final class PositionUserIndex {
     }
 
     /**
-     * 账本只读持仓记录计数索引，先校验含空仓在内的总规模，再选用户及涉及合约；用户 0 为全局范围，指定用户即使没有持仓也保留其路由供账户查询返回空结果。
+     * 账本只读持仓记录计数索引，校验含空仓在内的总规模并返回有序用户编号；用户 0 为全局范围，指定用户即使没有持仓也保留其路由供账户查询返回空结果。
      * @param userId 查询或维护的用户编号，风险查询路由中 0 表示全局范围
      * @param maximumPositions 风险查询允许的持仓记录总数上限，包含数量为 0 的记录，必须为正
      */
-    public RiskQueryRoutes riskQueryRoutes(long userId, int maximumPositions) {
+    public long[] riskQueryUserIds(long userId, int maximumPositions) {
         assertBusinessOwner();
         if (userId < 0 || maximumPositions < 1) throw new IllegalArgumentException("invalid risk query route");
         // 本次风险查询涉及的去重用户有序集合。
         TreeSet<Long> users = new TreeSet<>();
-        // 本次用户范围确实有持仓记录的合约编号有序集合。
-        TreeSet<String> instruments = new TreeSet<>();
         // 本次查询范围内累计的持仓记录数，空仓也计入规模上限。
         long total = 0;
-        for (var /* 当前合约对应的用户记录引用数映射项。 */ entry : positionCountsBySymbol.entrySet()) {
-            // 当前合约的每用户持仓记录引用数，不能按非零持仓数量代替。
-            LongIntHashMap counts = entry.getValue();
+        for (LongIntHashMap /* 当前合约的每用户持仓记录引用数，不能按非零持仓数量代替。 */ counts : positionCountsBySymbol.values()) {
             // 当前合约在全局或指定用户范围内的持仓记录数量。
             long count = userId == 0 ? counts.sum() : counts.get(userId);
             total = Math.addExact(total, count);
             if (total > maximumPositions)
                 throw new com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException();
             if (count == 0) continue;
-            instruments.add(entry.getKey());
             if (userId == 0) counts.forEachKey(users::add);
         }
         if (userId != 0) users.add(userId);
@@ -122,15 +104,8 @@ public final class PositionUserIndex {
         // 当前用户在有序列表的二分位置，或查询结果数组的写入下标，按本步骤决定后继、插入或删除位置。
         int index = 0;
         for (long /* 当前输出到查询数组或恢复遍历到的用户，编号用于路由与计数。 */ user : users) selected[index++] = user;
-        return new RiskQueryRoutes(selected, java.util.List.copyOf(instruments));
+        return selected;
     }
-
-    /**
-     * 本次风险查询选中的用户编号数组及涉及的外部合约列表，仅承载路由和市场输入范围，不含持仓数量或资金副本。
-     * @param userIds 本次查询选中的有序用户编号数组，由查询路由独立保存
-     * @param instrumentIds 本次风险查询涉及的外部合约编号列表，用于 Owner 固定市场输入
-     */
-    public record RiskQueryRoutes(long[] userIds, java.util.List<String> instrumentIds) { }
 
     /**
      * 取得全合约严格大于游标的最小用户编号，将底层末尾标记 0 转为 null。
@@ -249,24 +224,6 @@ public final class PositionUserIndex {
      * @param state 初次构建或恢复重建所依据的完整业务状态
      */
     public void rebuild(TradingCoreState state) {
-        assertBusinessOwner();
-        usersBySymbol.clear();
-        positionCountsBySymbol.clear();
-        for (CoreUserState /* 当前输出到查询数组或恢复遍历到的用户，编号用于路由与计数。 */ user : state.users().values()) {
-            // 恢复时从当前用户记录取得的用户编号，用来累计各合约持仓引用数。
-            long userId = user.userId();
-            for (CorePositionState /* 恢复业务状态中的一条持仓记录，包含空仓也要为它维护路由引用数。 */ position : user.positions().values()) {
-                addPosition(userId, position.instrumentId());
-            }
-        }
-    }
-
-    /**
-     * 按同样规则重建全部持仓路由；保留身份表参数签名，但当前实现直接用外部合约编号和用户编号，不调用身份表分配键。
-     * @param state 初次构建或恢复重建所依据的完整业务状态
-     * @param identities 当前签名接收的身份映射；现有重建直接使用用户和外部合约编号，不使用此参数
-     */
-    public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
         assertBusinessOwner();
         usersBySymbol.clear();
         positionCountsBySymbol.clear();

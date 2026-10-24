@@ -156,7 +156,7 @@ public final class RuntimeStateProjector {
         });
         validateClientIndex(source, runtime, identities);
         // 按币对和账户 Lane 查持仓用户的可重建索引。
-        PositionUserIndex positionUserIndex = new PositionUserIndex(source, identities, topology);
+        PositionUserIndex positionUserIndex = new PositionUserIndex(source, topology);
         // 按币对汇总未平仓数量的可重建索引。
         OpenInterestIndex openInterestIndex = new OpenInterestIndex(source);
         // 待触发订单及触发条件的可重建索引。

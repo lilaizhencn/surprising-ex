@@ -401,7 +401,7 @@ public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIn
      * @param identities 内部资产及标的编号对应的已准备身份表
      */
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        positionUsers.rebuild(state, identities);
+        positionUsers.rebuild(state);
         openInterest.rebuild(state);
         triggers.rebuild(state);
         algos.rebuild(state);

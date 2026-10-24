@@ -228,7 +228,7 @@ class RuntimeChangedIndexCommitTest {
      */
     private static IndexSet indexes(TradingCoreState state, RuntimeIdentityRegistry identities) {
         // 由初始冷状态构造的持仓用户索引
-        PositionUserIndex positionUsers = new PositionUserIndex(state, identities);
+        PositionUserIndex positionUsers = new PositionUserIndex(state);
         // 由初始冷状态构造的未平仓量索引
         OpenInterestIndex openInterest = new OpenInterestIndex(state);
         // 由初始冷状态构造的触发单索引

@@ -8,9 +8,7 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.position.RuntimePositionIndexValue;
-import java.util.TreeMap;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -105,7 +103,7 @@ class PositionUserIndexTest {
         // 生产默认账户 Lane 拓扑，索引分组和期望用户筛选必须一致。
         LaneTopology topology = LaneTopology.productionDefault();
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
-        PositionUserIndex index = new PositionUserIndex(state, new RuntimeIdentityRegistry(), topology);
+        PositionUserIndex index = new PositionUserIndex(state, topology);
 
         assertThat(index.higherUser("1", 7)).isEqualTo(11L);
         assertThat(index.higherUser("1", 11)).isNull();
@@ -128,10 +126,10 @@ class PositionUserIndexTest {
      * 一个用户含有仓和空仓记录，另一个只有有仓记录；检查全局和单用户路由都把空仓算入规模上限，不存在用户仍保留查询用户编号。
      */
     @Test
-    void riskQueryRoutesUseMembershipAndEnforceGlobalAndUserScanBounds() {
+    void riskQueryUsersUseMembershipAndEnforceGlobalAndUserScanBounds() {
         // 可被多个测试用户共用的业务持仓记录，保证每用户都生成同合约路由。
         var position = new CorePositionState("1", "USDT", 1, 100, 100, 0, 10);
-        // 合约 2 的零数量持仓，仍是一份记录，应出现在查询合约范围和规模计数中。
+        // 合约 2 的零数量持仓仍是一份记录，必须计入查询规模。
         var flat = new CorePositionState("2", "USDT", 0, 0, 0, 0, 0);
         // 用户 1 的两份持仓记录，一份有仓、一份空仓，用来区分记录数与非空仓数。
         var first = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0,
@@ -142,15 +140,14 @@ class PositionUserIndexTest {
                 CoreRiskState.empty(), CoreTreasuryState.empty());
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
         var index = new PositionUserIndex(state);
-        // 最多允许三份持仓记录的全局风险路由结果，用户去重但合约 2 仍需保留。
-        var global = index.riskQueryRoutes(0, 3);
-        assertThat(global.userIds()).containsExactly(1L, 7L);
-        assertThat(global.instrumentIds()).containsExactly("1", "2");
-        assertThat(index.riskQueryRoutes(7, 1).instrumentIds()).containsExactly("1");
-        assertThat(index.riskQueryRoutes(99, 1).userIds()).containsExactly(99L);
-        assertThatThrownBy(() -> index.riskQueryRoutes(0, 2))
+        // 最多允许三份持仓记录的全局风险路由结果，用户编号去重并排序。
+        assertThat(index.riskQueryUserIds(0, 3)).containsExactly(1L, 7L);
+        assertThat(index.riskQueryUserIds(1, 2)).containsExactly(1L);
+        assertThat(index.riskQueryUserIds(7, 1)).containsExactly(7L);
+        assertThat(index.riskQueryUserIds(99, 1)).containsExactly(99L);
+        assertThatThrownBy(() -> index.riskQueryUserIds(0, 2))
                 .isInstanceOf(com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException.class);
-        assertThatThrownBy(() -> index.riskQueryRoutes(1, 1))
+        assertThatThrownBy(() -> index.riskQueryUserIds(1, 1))
                 .isInstanceOf(com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException.class);
     }
 

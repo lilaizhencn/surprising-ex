@@ -62,7 +62,7 @@ class LedgerPositionPublicationTest {
         // 本用例资产、标的和持仓的原身份表
         var ids = new RuntimeIdentityRegistry();
         // 本用例真实账本接管的持仓用户索引
-        var users = new PositionUserIndex(initial, ids);
+        var users = new PositionUserIndex(initial);
         // 本用例真实账本接管的未平仓量索引
         var oi = new OpenInterestIndex(initial);
         // 本用例真实账本接管的 ADL 持仓索引
@@ -121,7 +121,7 @@ class LedgerPositionPublicationTest {
         // 本用例资产、标的和持仓的原身份表
         var ids = new RuntimeIdentityRegistry();
         // 本用例真实账本接管的持仓用户索引
-        var users = new PositionUserIndex(initial, ids);
+        var users = new PositionUserIndex(initial);
         // 本用例真实账本接管的未平仓量索引
         var oi = new OpenInterestIndex(initial);
         // 本用例真实账本接管的 ADL 持仓索引

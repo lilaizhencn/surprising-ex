@@ -73,7 +73,7 @@ class TriggerOrderIndexTest {
             var triggers = new TriggerOrderIndex(initial);
             triggers.apply(901, trigger(901, 7, 100));
             triggers.apply(902, trigger(902, second, 100));
-            runtime.bindFactIndexes(new RuntimeFactIndexes(new PositionUserIndex(initial, identities),
+            runtime.bindFactIndexes(new RuntimeFactIndexes(new PositionUserIndex(initial),
                     new OpenInterestIndex(initial), triggers,
                     new com.surprising.aeron.service.core.index.AlgoOrderIndex(initial),
                     new com.surprising.aeron.service.core.index.LiquidationIndex(initial),

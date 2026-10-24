@@ -330,7 +330,7 @@ class CoreRiskStateTest {
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
         var runtime = RuntimeStateProjector.project(state, ids);
         // 从初始持仓构造的用户索引，供分批风险扫描定位真正需要估值的账户。
-        var positions = new PositionUserIndex(state, ids, runtime.topology());
+        var positions = new PositionUserIndex(state, runtime.topology());
         for (/* 本轮需要登记行情并安排风险扫描的测试币对编号。 */ String instrumentId : List.of("1", "4", "2"))
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(instrumentId, 1, 1, 1000), runtime, ids);
         // 这次共享预算实际消耗的工作项数量，不能超过 64。
