@@ -58,57 +58,13 @@ public final class OpenInterestIndex {
 
     /**
      * 校验合约编号并返回多头总量与空头绝对总量的较大值，没有记录时为 0；不把多空相加重复统计同一规模。
-     * @param instrumentId 读取或更新的外部合约编号，Normalized 入口要求调用方已完成规范化
+     * @param instrumentId 持仓所属的外部合约编号
      */
     public long openInterestSteps(String instrumentId) {
         assertBusinessOwner();
         // 当前合约的索引自有累计桶，只读取其多空数字，不交给查询调用方修改。
         MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
         return value == null ? 0 : Math.max(value.longQuantity, value.shortQuantity);
-    }
-
-    /**
-     * 校验外部合约编号后读取多头绝对总量，没有记录时为 0。
-     * @param instrumentId 读取或更新的外部合约编号，Normalized 入口要求调用方已完成规范化
-     */
-    public long longQuantity(String instrumentId) {
-        assertBusinessOwner();
-        // 当前合约的索引自有累计桶，只读取其多空数字，不交给查询调用方修改。
-        MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
-        return value == null ? 0 : value.longQuantity;
-    }
-
-    /**
-     * 直接用调用方已规范化的合约编号读取多头总量，不重复做编号校验。
-     * @param instrumentId 读取或更新的外部合约编号，Normalized 入口要求调用方已完成规范化
-     */
-    public long longQuantityNormalized(String instrumentId) {
-        assertBusinessOwner();
-        // 当前合约的索引自有累计桶，只读取其多空数字，不交给查询调用方修改。
-        MutableTotals value = totals.get(instrumentId);
-        return value == null ? 0 : value.longQuantity;
-    }
-
-    /**
-     * 校验外部合约编号后读取空头的正绝对数量总和，没有记录时为 0。
-     * @param instrumentId 读取或更新的外部合约编号，Normalized 入口要求调用方已完成规范化
-     */
-    public long shortQuantity(String instrumentId) {
-        assertBusinessOwner();
-        // 当前合约的索引自有累计桶，只读取其多空数字，不交给查询调用方修改。
-        MutableTotals value = totals.get(OrderReservation.requireInstrumentId(instrumentId));
-        return value == null ? 0 : value.shortQuantity;
-    }
-
-    /**
-     * 直接用已规范化的合约编号读取空头绝对总量，不重复做编号校验。
-     * @param instrumentId 读取或更新的外部合约编号，Normalized 入口要求调用方已完成规范化
-     */
-    public long shortQuantityNormalized(String instrumentId) {
-        assertBusinessOwner();
-        // 当前合约的索引自有累计桶，只读取其多空数字，不交给查询调用方修改。
-        MutableTotals value = totals.get(instrumentId);
-        return value == null ? 0 : value.shortQuantity;
     }
 
     /**
@@ -162,7 +118,7 @@ public final class OpenInterestIndex {
 
     /**
      * 零差额直接返回；首次累计禁止负贡献，已有合约精确加减后禁止总量变负。合法时原位覆盖总量，即使归零也保留桶供复用。
-     * @param instrumentId 读取或更新的外部合约编号，Normalized 入口要求调用方已完成规范化
+     * @param instrumentId 持仓所属的外部合约编号
      * @param longDelta 本次多头绝对总量的带正负变化额
      * @param shortDelta 本次空头绝对总量的带正负变化额
      */

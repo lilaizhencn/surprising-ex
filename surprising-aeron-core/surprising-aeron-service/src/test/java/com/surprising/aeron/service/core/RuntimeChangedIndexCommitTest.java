@@ -52,16 +52,15 @@ class RuntimeChangedIndexCommitTest {
                 indexes.coordinator.applyCurrent(runtime, identities);
                 runtime.clearChangedKeys();
                 assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(Math.abs(quantity));
-                assertThat(indexes.openInterest.longQuantity("1")).isEqualTo(Math.max(quantity, 0));
-                assertThat(indexes.openInterest.shortQuantity("1")).isEqualTo(Math.max(-quantity, 0));
                 if (quantity == 0) assertThat(indexes.openInterest.totals()).isEmpty();
-                else assertThat(indexes.openInterest.totals()).containsOnlyKeys("1");
-                assertThat(indexes.positionUsers.users("1")).containsExactly(7L);
+                else assertThat(indexes.openInterest.totals()).containsExactly(org.assertj.core.api.Assertions.entry(
+                        "1", new OpenInterestIndex.Totals(Math.max(quantity, 0), Math.max(-quantity, 0))));
+                assertThat(indexes.positionUsers.usersAfter("1", 0)).containsExactly(7L);
             }
             runtime.removePosition(key, 7);
             indexes.coordinator.applyCurrent(runtime, identities);
             assertThat(indexes.openInterest.totals()).isEmpty();
-            assertThat(indexes.positionUsers.users("1")).isEmpty();
+            assertThat(indexes.positionUsers.usersAfter("1", 0)).isEmpty();
         }
     }
 
@@ -93,7 +92,7 @@ class RuntimeChangedIndexCommitTest {
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).containsExactly(11L);
-        assertThat(indexes.positionUsers.users("1")).containsExactly(7L);
+        assertThat(indexes.positionUsers.usersAfter("1", 0)).containsExactly(7L);
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(2);
 
         runtime.clearChangedKeys();
@@ -115,7 +114,7 @@ class RuntimeChangedIndexCommitTest {
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).isEmpty();
-        assertThat(indexes.positionUsers.users("1")).isEmpty();
+        assertThat(indexes.positionUsers.usersAfter("1", 0)).isEmpty();
         assertThat(indexes.openInterest.openInterestSteps("1")).isZero();
         runtime.close();
     }

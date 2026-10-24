@@ -39,7 +39,7 @@ class PositionUserIndexTest {
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
         PositionUserIndex index = new PositionUserIndex(before);
-        assertThat(index.users("1")).containsExactly(1L);
+        assertThat(index.usersAfter("1", 0)).containsExactly(1L);
 
         // 原用户映射的变更视图，把唯一有仓用户替换为无持仓用户。
         Map<Long, CoreUserState> afterUsers = new TreeMap<>(before.users());
@@ -49,7 +49,7 @@ class PositionUserIndexTest {
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
         index.rebuild(after);
 
-        assertThat(index.users("1")).isEmpty();
+        assertThat(index.usersAfter("1", 0)).isEmpty();
     }
 
     /**
@@ -70,11 +70,10 @@ class PositionUserIndexTest {
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
         OpenInterestIndex index = new OpenInterestIndex(before);
-        assertThat(index.totals().get("1").shortQuantity()).isEqualTo(2);
-        assertThat(index.longQuantity("1")).isZero();
-        assertThat(index.shortQuantity("1")).isEqualTo(2);
-        assertThat(index.longQuantity("2")).isZero();
-        assertThat(index.shortQuantity("2")).isZero();
+        assertThat(index.totals()).containsExactly(org.assertj.core.api.Assertions.entry(
+                "1", new OpenInterestIndex.Totals(0, 2)));
+        assertThat(index.openInterestSteps("1")).isEqualTo(2);
+        assertThat(index.openInterestSteps("2")).isZero();
 
         // 原用户映射的变更视图，把唯一有仓用户替换为无持仓用户。
         Map<Long, CoreUserState> afterUsers = new TreeMap<>(before.users());
@@ -85,7 +84,7 @@ class PositionUserIndexTest {
         index.rebuild(after);
 
         assertThat(index.totals()).isEmpty();
-        assertThat(index.shortQuantity("1")).isZero();
+        assertThat(index.openInterestSteps("1")).isZero();
     }
 
     /**
@@ -105,8 +104,8 @@ class PositionUserIndexTest {
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
         PositionUserIndex index = new PositionUserIndex(state, topology);
 
-        assertThat(index.higherUser("1", 7)).isEqualTo(11L);
-        assertThat(index.higherUser("1", 11)).isNull();
+        assertThat(index.higherUserId("1", 7)).isEqualTo(11L);
+        assertThat(index.higherUserId("1", 11)).isZero();
         assertThat(index.usersAfter("1", 2)).containsExactly(7L, 11L);
         index.apply(new RuntimePositionIndexValue(7, "1", "USDT", CorePositionSide.NET, 1),
                 new RuntimePositionIndexValue(7, "1", "USDT", CorePositionSide.NET, 9));

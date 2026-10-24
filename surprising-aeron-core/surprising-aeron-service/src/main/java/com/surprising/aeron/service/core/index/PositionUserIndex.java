@@ -7,10 +7,8 @@ import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.position.RuntimePositionIndexValue;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.NavigableSet;
 import java.util.TreeSet;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
@@ -63,21 +61,6 @@ public final class PositionUserIndex {
     }
 
     /**
-     * 合并指定合约各 Lane 的既有用户编号为有序只读集合，供确实需要完整集合的查询使用；在线逐项扫描应使用后继接口。
-     * @param instrumentId 需要读取或维护用户路由的外部合约编号
-     */
-    public NavigableSet<Long> users(String instrumentId) {
-        assertBusinessOwner();
-        // 该合约已有的各 Lane 有序用户列表，首次出现合约时才创建整组列表。
-        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
-        if (lanes == null) return Collections.emptyNavigableSet();
-        // 完整合约用户查询的临时去重排序集合，最后包成只读集合。
-        TreeSet<Long> sorted = new TreeSet<>();
-        for (LongArrayList /* 当前 Lane 的既有有序用户列表，逐项合并到完整查询结果。 */ users : lanes) users.forEach(sorted::add);
-        return Collections.unmodifiableNavigableSet(sorted);
-    }
-
-    /**
      * 账本只读持仓记录计数索引，校验含空仓在内的总规模并返回有序用户编号；用户 0 为全局范围，指定用户即使没有持仓也保留其路由供账户查询返回空结果。
      * @param userId 查询或维护的用户编号，风险查询路由中 0 表示全局范围
      * @param maximumPositions 风险查询允许的持仓记录总数上限，包含数量为 0 的记录，必须为正
@@ -105,17 +88,6 @@ public final class PositionUserIndex {
         int index = 0;
         for (long /* 当前输出到查询数组或恢复遍历到的用户，编号用于路由与计数。 */ user : users) selected[index++] = user;
         return selected;
-    }
-
-    /**
-     * 取得全合约严格大于游标的最小用户编号，将底层末尾标记 0 转为 null。
-     * @param instrumentId 需要读取或维护用户路由的外部合约编号
-     * @param cursorUserId 上次已经完整处理的用户编号，只返回比它更大的下一用户
-     */
-    public Long higherUser(String instrumentId, long cursorUserId) {
-        // 当前查到的严格大于游标的最小用户编号，0 表示尚无后继。
-        long higher = higherUserId(instrumentId, cursorUserId);
-        return higher == 0 ? null : higher;
     }
 
     /**

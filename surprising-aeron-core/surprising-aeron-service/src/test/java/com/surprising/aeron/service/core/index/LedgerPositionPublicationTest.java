@@ -103,7 +103,7 @@ class LedgerPositionPublicationTest {
                     assertThat(runtime.publishedPositionCount()).isOne();
                     onLedger(runtime, () -> {
                         assertThat(oi.openInterestSteps("1")).isEqualTo(10);
-                        assertThat(users.users("1")).containsExactly(7L);
+                        assertThat(users.usersAfter("1", 0)).containsExactly(7L);
                         assertThat(adl.value(key).signedQuantitySteps()).isEqualTo(10);
                     });
                     assertThat(runtime.treasury().fundingSettlement(symbol)).isZero();
@@ -147,7 +147,7 @@ class LedgerPositionPublicationTest {
                 changes.putIndexed(102, null, true, position(2, CorePositionSide.SHORT, -20));
                 indexes.applyPositions(changes, ids, null);
                 assertThat(oi.openInterestSteps("1")).isEqualTo(25);
-                assertThat(users.users("1")).containsExactly(1L, 2L);
+                assertThat(users.usersAfter("1", 0)).containsExactly(1L, 2L);
                 changes.clear();
             });
             assertThat(adl.count()).isEqualTo(3); // 已发布的技术计数不需要跨线程读取业务映射。
@@ -158,14 +158,13 @@ class LedgerPositionPublicationTest {
                 changes.putIndexed(102, null, true, null);
                 indexes.applyPositions(changes, ids, undo);
                 assertThat(oi.openInterestSteps("1")).isEqualTo(35);
-                assertThat(users.users("1")).containsExactly(1L);
+                assertThat(users.usersAfter("1", 0)).containsExactly(1L);
                 // 原 ADL 单元会被原地改写，撤销记录必须保存旧字段值，而非该单元引用。
                 undo.rollback(indexes);
-                assertThat(oi.longQuantity("1")).isEqualTo(15);
-                assertThat(oi.shortQuantity("1")).isEqualTo(25);
+                assertThat(oi.totals()).containsEntry("1", new OpenInterestIndex.Totals(15, 25));
                 assertThat(adl.value(101).signedQuantitySteps()).isEqualTo(15);
                 assertThat(adl.value(102).signedQuantitySteps()).isEqualTo(-20);
-                assertThat(users.users("1")).containsExactly(1L, 2L);
+                assertThat(users.usersAfter("1", 0)).containsExactly(1L, 2L);
             });
         }
         assertThat(oi.openInterestSteps("1")).isEqualTo(25);
