@@ -47,7 +47,7 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 
 ## 频道
 
-| 频道 | 公共频道 | 必填字段 | 来源 topic |
+| 频道 | 公共频道 | 必填字段 | 数据来源 |
 | --- | --- | --- | --- |
 | `candles` | 是 | `symbol`, `period` | `surprising.linear-perp.candle.events.v1` |
 | `index` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=INDEX_PRICE`) |
@@ -57,10 +57,12 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 | `triggerOrders` | 否 | 可选 `symbol` | `surprising.linear-perp.trigger-order.events.v1` |
 | `executionReports` | 否 | 可选 `symbol` | `surprising.linear-perp.order.events.v1` |
 | `positions` | 否 | 可选 `symbol` | `surprising.linear-perp.account.position.events.v1` |
-| `positionRisk` | 否 | 可选 `symbol` | `surprising.linear-perp.risk.position.events.v1` |
-| `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | `surprising.linear-perp.risk.account.events.v1` |
+| `positionRisk` | 否 | 可选 `symbol` | Core `RISK` 帧，经 Aeron 桥接 |
+| `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | 同一 Core `RISK` 帧，经 Aeron 桥接 |
 
 私有订阅不传 `symbol` 时使用通配符 `*`，表示接收该认证用户的所有相关事件。
+
+风险更新由启用的`RealtimeWebSocketBridge`发布现有`VersionedEvent(version, entityId, value)`，快照仍包含`positionRisks`，客户端按原版本栅栏维护风险实体。旧Kafka账户/持仓风险事件没有当前生产者，已删除监听器、31字段事件模型及专属topic配置；关闭原生实时通道不会切换到旧风险Kafka投递。风险HTTP查询及真实Core风险值保留。本轮只编译相关模块，未运行推送或UI场景。
 
 `triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
 
@@ -135,8 +137,6 @@ surprising:
       concurrency: 2
       max-poll-records: 1000
       position-events-topic: surprising.linear-perp.account.position.events.v1
-      account-risk-events-topic: surprising.linear-perp.risk.account.events.v1
-      position-risk-events-topic: surprising.linear-perp.risk.position.events.v1
     session:
       max-subscriptions: 200
       outbound-queue-capacity: 1000

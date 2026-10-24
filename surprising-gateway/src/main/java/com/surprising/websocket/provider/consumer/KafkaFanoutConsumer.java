@@ -15,8 +15,6 @@ import com.surprising.price.api.model.PerpFundingRateEvent;
 import com.surprising.price.api.model.PriceEventType;
 import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
-import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
-import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
@@ -261,39 +259,6 @@ public class KafkaFanoutConsumer {
         }
     }
 
-    @KafkaListener(
-            topics = "#{__listener.accountRiskEventsTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
-    public void onAccountRisk(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), accountRiskEventsTopic(), "account risk update");
-            RiskAccountUpdatedEvent event = objectMapper.readValue(record.value(), RiskAccountUpdatedEvent.class);
-            requireMatchingAccountRiskKey(record.key(), event);
-            registry.publish(topic(WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, event.userId()),
-                    event, event.eventTime());
-        } catch (Exception ex) {
-            log.error("Failed to fanout account risk update: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout account risk update", ex);
-        }
-    }
-
-    @KafkaListener(
-            topics = "#{__listener.positionRiskEventsTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaListenerContainerFactory")
-    public void onPositionRisk(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), positionRiskEventsTopic(), "position risk update");
-            RiskPositionUpdatedEvent event = objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.instrumentId(), "position risk update");
-            registry.publish(topic(WsChannel.POSITION_RISK, event.instrumentId(), event.userId()), event, event.eventTime());
-        } catch (Exception ex) {
-            log.error("Failed to fanout position risk update: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout position risk update", ex);
-        }
-    }
-
     public String groupId() {
         return properties.getKafka().getGroupId();
     }
@@ -324,23 +289,6 @@ public class KafkaFanoutConsumer {
 
     public String positionEventsTopic() {
         return properties.getKafka().getPositionEventsTopic();
-    }
-
-    public String accountRiskEventsTopic() {
-        return properties.getKafka().getAccountRiskEventsTopic();
-    }
-
-    public String positionRiskEventsTopic() {
-        return properties.getKafka().getPositionRiskEventsTopic();
-    }
-
-    private void requireMatchingAccountRiskKey(String recordKey, RiskAccountUpdatedEvent event) {
-        String expected = event.userId() + ":" + event.accountType() + ":" + event.settleAsset();
-        String normalizedKey = recordKey == null ? "" : recordKey.trim();
-        if (!expected.equalsIgnoreCase(normalizedKey)) {
-            throw new IllegalArgumentException("account risk key mismatch: expected=" + expected
-                    + ", actual=" + recordKey);
-        }
     }
 
     private void requireMatchingPositionKey(String recordKey, PositionUpdatedEvent event) {

@@ -75,14 +75,6 @@ public class WebSocketProperties {
             return productTopics().accountPositionEventsTopic();
         }
 
-        public String getAccountRiskEventsTopic() {
-            return productTopics().accountRiskEventsTopic();
-        }
-
-        public String getPositionRiskEventsTopic() {
-            return productTopics().positionRiskEventsTopic();
-        }
-
         private ProductTopicNames productTopics() {
             if (productLine == null) {
                 throw new IllegalStateException("websocket product line is required");

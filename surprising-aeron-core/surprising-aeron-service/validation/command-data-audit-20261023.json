@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第四十二轮：A149两个空Gateway关闭钩子及query的last异常副本删除，3次/25ms原边界保留；11模块干净源码编译通过，未运行测试/服务。累计144解决。确认A150原生Aeron风险推送已存在，旧Kafka两事件/监听/topic配置无当前生产者，待成树清理；真实风险金融值保留。",
+    "checkpoint": "第四十三轮：A150旧风险Kafka投递树、31字段事件和专属topic元数据删除，保留原生Core/Aeron风险更新及HTTP/快照/版本格式；514份受保护源码未变，相关14模块干净编译通过，无测试/推送/UI执行。累计145解决。A151旧订单/条件单/持仓私有Kafka及派生执行报告54字段待清理，需同步手工Kafka测试fixture并保留真实账户到期结算消费者。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -8273,12 +8273,42 @@
     },
     {
       "id": "A150",
-      "status": "confirmed",
-      "analysis_status": "native_risk_delivery_and_unproduced_legacy_kafka_branch_confirmed",
+      "status": "resolved",
+      "analysis_status": "legacy_delivery_tree_removed_clean_compile_verified",
       "topic": "风险推送已走原生Aeron，但旧Kafka风险事件、监听器与topic配置仍残留",
       "source_basis_commit": "15b240f69545e836cd4c6ade685400237231a4d0",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 203,
+          "anchor": "case RISK -> WsChannel.POSITION_RISK"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 235,
+          "anchor": "case RISK -> UserReadView.PositionRisk.decode(f)"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 264,
+          "anchor": "WsChannel.ACCOUNT_RISK,"
+        }
+      ],
+      "evidence": {
+        "native_path": "RealtimeStateCapture产生RISK帧；RealtimeWebSocketBridge解码UserReadView.PositionRisk并发布POSITION_RISK和ACCOUNT_RISK，使用VersionedEvent及原快照/就绪规则。",
+        "legacy_path": "KafkaFanoutConsumer的onAccountRisk/onPositionRisk是旧模型的唯一生产Java类引用；全仓配置/SQL/脚本及topic字面量只找到监听器、命名方法、测试造数和过期README，无Kafka发布者。realtime实际Kafka writer ReliableTradeKafkaSink只写trade。",
+        "legacy_record_components": {
+          "RiskAccountUpdatedEvent": 12,
+          "RiskPositionUpdatedEvent": 19
+        },
+        "frontend_review": "Web realtime.ts与Client realtime_state.dart通过version/value更新risk实体；快照positionRisks来自现有原生读视图。旧Kafka裸事件不提供这套版本/就绪契约，不是当前UI需要的消费格式。",
+        "reflection_review": "KafkaListener/SpEL是真实注册入口，删除须连带监听方法、topic getter、专属key校验、无用事件类型/默认构造及命名配置；不能只删除DTO。",
+        "preservation_requirement": "原生RISK帧、UserReadView、HTTP风险响应、WsChannel与VersionedEvent/快照的真实金融字段全部保留。"
+      },
+      "proposed_cleanup": "删除两条无当前生产者的旧Kafka风险投递树、31字段旧事件、专属topic元数据及仅为旧路径造数的测试；同步WebSocket中文说明，原生桥接及客户端订阅/消费契约保持原样，编译实际受影响模块。",
+      "verification_limit": "静态源码/客户端消费核对，尚未删除旧Kafka风险路径，也未运行Kafka、Aeron、UI。",
+      "historical_source_references": [
         {
           "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
           "line": 268,
@@ -8310,19 +8340,77 @@
           "anchor": "public String accountRiskEventsTopic()"
         }
       ],
-      "evidence": {
-        "native_path": "RealtimeStateCapture产生RISK帧；RealtimeWebSocketBridge解码UserReadView.PositionRisk并发布POSITION_RISK和ACCOUNT_RISK，使用VersionedEvent及原快照/就绪规则。",
-        "legacy_path": "KafkaFanoutConsumer的onAccountRisk/onPositionRisk是旧模型的唯一生产Java类引用；全仓配置/SQL/脚本及topic字面量只找到监听器、命名方法、测试造数和过期README，无Kafka发布者。realtime实际Kafka writer ReliableTradeKafkaSink只写trade。",
-        "legacy_record_components": {
-          "RiskAccountUpdatedEvent": 12,
-          "RiskPositionUpdatedEvent": 19
+      "resolved_in_round": "forty_third_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除旧Kafka两监听、专属key校验、listener/property/topic命名入口，以及两份共31字段事件、3个默认构造与静态from/默认产品/模式处理。删除3个旧路径造数测试和7条旧topic断言，保留原生RISK/HTTP/VersionedEvent/快照/订阅。",
+        "legacy_mode_condition": "KafkaFanoutConsumer仅在realtime.enabled=false或缺失时装配；删除的是此模式没有当前生产者的风险分支，并未合并互斥运行实例。正式原生桥接仍由原条件启用。",
+        "tests_executed": false,
+        "sql_executed": false,
+        "ui_exercised": false
+      }
+    },
+    {
+      "id": "A151",
+      "status": "confirmed",
+      "analysis_status": "unproduced_legacy_private_order_trigger_position_fanout_confirmed",
+      "topic": "订单/条件单/持仓旧Kafka私有投递树及派生成交报告包装仍残留",
+      "source_basis_commit": "a16f9b3d6e7011af62134a883b9514f23bb933a2",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 211,
+          "anchor": "public void onOrderEvent("
         },
-        "frontend_review": "Web realtime.ts与Client realtime_state.dart通过version/value更新risk实体；快照positionRisks来自现有原生读视图。旧Kafka裸事件不提供这套版本/就绪契约，不是当前UI需要的消费格式。",
-        "reflection_review": "KafkaListener/SpEL是真实注册入口，删除须连带监听方法、topic getter、专属key校验、无用事件类型/默认构造及命名配置；不能只删除DTO。",
-        "preservation_requirement": "原生RISK帧、UserReadView、HTTP风险响应、WsChannel与VersionedEvent/快照的真实金融字段全部保留。"
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 228,
+          "anchor": "public void onTriggerOrderEvent("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 250,
+          "anchor": "public void onPosition("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 329,
+          "anchor": "private ExecutionReportEvent fromOrderEvent("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 204,
+          "anchor": "case ORDER -> WsChannel.ORDERS"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 205,
+          "anchor": "case TRIGGER -> WsChannel.TRIGGER_ORDERS"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 206,
+          "anchor": "case POSITION -> WsChannel.POSITIONS"
+        }
+      ],
+      "evidence": {
+        "actual_source": "原生Bridge已处理ORDER/TRIGGER/POSITION/EXECUTION并发布对应频道及VersionedEvent，真实快照包含订单/持仓/条件单。",
+        "legacy_sources": "全仓构造/引用及topic命名核对：OrderEvent/TriggerOrderUpdatedEvent/PositionUpdatedEvent生产Java引用只有KafkaFanoutConsumer；ExecutionReportEvent仅由其fromOrderEvent派生。旧Kafka输入仅测试造数，未见当前业务发布者。",
+        "legacy_record_components": {
+          "surprising-trading-api/src/main/java/com/surprising/trading/api/model/OrderEvent.java": 8,
+          "surprising-trading-api/src/main/java/com/surprising/trading/api/model/TriggerOrderUpdatedEvent.java": 4,
+          "surprising-account-api/src/main/java/com/surprising/account/api/model/PositionUpdatedEvent.java": 19,
+          "surprising-gateway/src/main/java/com/surprising/websocket/api/model/ExecutionReportEvent.java": 23
+        },
+        "legacy_component_total": 54,
+        "other_references_to_handle": "SubscriptionRegistryTest用旧OrderEvent验证用户隔离；MultiProductGatewayHttpIntegrationTest在非native模式手工发旧OrderEvent，再等待executionReports。清理必须同步这些输入fixture，保持隔离、六产品和资金守恒断言，不能只删用例或削弱等待条件。",
+        "related_metadata": "WebSocketProperties和AccountProperties仍有三个旧topic getter；AccountProperties的其他Kafka配置不能整体删除。",
+        "actual_kafka_boundary_to_keep": "ExpiringContractSettlementConsumer的两个KafkaListener使用accountInstrumentLifecycleKafkaListenerContainerFactory处理到期结算；保留此真实消费者及工厂和相应部署/产品语义。",
+        "fields_to_keep": "Core真实订单/持仓/条件单、资金/成交事实，REST响应、原生快照及Web/Client版本化消费全部保留；仅清理旧包装/绑定。"
       },
-      "proposed_cleanup": "删除两条无当前生产者的旧Kafka风险投递树、31字段旧事件、专属topic元数据及仅为旧路径造数的测试；同步WebSocket中文说明，原生桥接及客户端订阅/消费契约保持原样，编译实际受影响模块。",
-      "verification_limit": "静态源码/客户端消费核对，尚未删除旧Kafka风险路径，也未运行Kafka、Aeron、UI。"
+      "proposed_cleanup": "沿旧三输入监听和派生execution包装成树删除，核对OrderEventType、PositionCacheEvent等专属后继是否有独立用途后处理；同步topic元数据及测试原生fixture，保持真实Kafka到期结算边界。",
+      "verification_limit": "本轮静态源码确认，无Kafka/Aeron或UI运行验证，此项尚未修改。"
     }
   ],
   "preserve_verified_purposes": [
@@ -8340,9 +8428,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "解决A150旧Kafka风险投递树，保留原生Aeron风险推送与其版本/快照/就绪及HTTP契约；不把真实风险金融值删除。",
-    "继续沿各业务操作检查命令、状态、恢复与读端的字段用途和无效约束。",
-    "A11保持原领导者读、提交水位与查询会话边界，有等价方案前不绕过Cluster。"
+    "处理A151旧私有Kafka包装与topic树，同步多产品HTTP和用户隔离测试的原生输入fixture；保留真实资金/持仓/终态断言与实际到期结算Kafka边界。",
+    "继续逐业务操作核对命令、执行、持久化和恢复/查询字段的独立用途，区分副本与真实财务事实。",
+    "A11继续保持现有领导者读、提交水位与会话边界。"
   ],
   "rejected_false_positives": [
     {
@@ -8639,13 +8727,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "15b240f69545e836cd4c6ade685400237231a4d0",
+    "source_basis_commit": "a16f9b3d6e7011af62134a883b9514f23bb933a2",
     "status": "cleanup_compile_verified_followup_confirmed",
     "resolved_ids": [
-      "A149"
+      "A150"
     ],
     "confirmed_ids": [
-      "A150"
+      "A151"
     ],
     "candidate_ids": [
       "A11"
@@ -8657,12 +8745,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 144,
+      "resolved": 145,
       "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "forty_second_cleanup_round",
+    "evidence": "forty_third_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -10490,6 +10578,26 @@
       ],
       "counts": {
         "resolved": 144,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "tests_executed": false,
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "a16f9b3d6e7011af62134a883b9514f23bb933a2",
+      "status": "cleanup_compile_verified_followup_confirmed",
+      "evidence": "forty_third_cleanup_round",
+      "resolved_ids": [
+        "A150"
+      ],
+      "new_confirmed_ids": [
+        "A151"
+      ],
+      "counts": {
+        "resolved": 145,
         "candidate": 1,
         "retained": 4,
         "confirmed": 1
@@ -32135,6 +32243,206 @@
           "path": "/tmp/aeron-risk-gateway-20261024-static.json",
           "bytes": 1104,
           "sha256": "17398ba9a7dcefecbd132ad5e2429928ded910e55de970ea011f4a2d6be0d495"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "forty_third_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "a16f9b3d6e7011af62134a883b9514f23bb933a2",
+    "resolved_ids": [
+      "A150"
+    ],
+    "new_confirmed_ids": [
+      "A151"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 145,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "implementation": [
+      "删除2条旧风险KafkaListener、专属key校验与2个listener topic入口。",
+      "删除WebSocketProperties及ProductTopicNames的旧风险topic元数据。",
+      "删除RiskAccountUpdatedEvent的12字段、RiskPositionUpdatedEvent的19字段及默认构造、from/默认产品/模式处理；真实HTTP和Core风险事实仍在原模型。",
+      "只移除旧消费路径的3个造数用例和7个topic断言，现有原生桥接、权限、快照/就绪与其测试源码保留。",
+      "更新中文WebSocket说明为现有Core/Aeron来源，删除过期配置例子；Web/Client原生消费格式不变，未改前端源码。"
+    ],
+    "verification": {
+      "command": "mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 40.93,
+      "log_sha256": "84eb6819f9387ff14a2a6124aae9ad81d4c1097e0b35885e6ed50a6ffc8c1835",
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/README.md": "bdd015918b8cc463b94b3e8906198b85b11ac9113e2ea0ff63b87dab5eae80ea",
+        "surprising-derivatives-lifecycle/README.md": "c9b73309145964923c7fd4f679f751d7c568487d775efc45d76b54528b2d700d",
+        "surprising-gateway/README-websocket.md": "82eb4e8e3a725613a9a0fa9838971ffe8492b3226ce8c12f6ea736b61f0419f2",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/config/WebSocketProperties.java": "49269708761521aa197f17684b375043bc6f55d9a7c4d56b7baf1147c0e2939b",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java": "686aef364b8e3af287ca95ece8e3c74192133b74028d46dc5aad6d2e768010ac",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/config/WebSocketPropertiesTest.java": "09aa99f4ef393ac19cb876df808584f4fc0405f6d3955f3355fa190703f1f786",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.java": "a3ae19f9fba59b05a06b0cce505d2f8025c790d780d2287e4f7b243cea4a9895",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTopicTest.java": "06d550fbfe6263e79591f907912969887a66ae128c2be618397a5e30116dc645",
+        "surprising-instrument-api/src/main/java/com/surprising/product/api/utils/ProductTopicNames.java": "ea835b1bf79afae136fc693321533933c30272e1a610c1f1b5aea4a17af46519",
+        "surprising-instrument-api/src/test/java/com/surprising/product/api/ProductTopicNamesTest.java": "59e93207c2252d9519dbbfa07311ddf8588a04d73bbe33b7268dd8da021921dd"
+      },
+      "tests_executed": false,
+      "sql_executed": false,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-realtime-api",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-derivatives-lifecycle",
+        "surprising-realtime-provider",
+        "surprising-gateway"
+      ],
+      "reactor_module_count": 14
+    },
+    "static_verification": {
+      "classfiles": 4021,
+      "deleted_models_and_topic_getters_classfile_references": {
+        "com/surprising/risk/api/model/RiskAccountUpdatedEvent": [],
+        "com/surprising/risk/api/model/RiskPositionUpdatedEvent": [],
+        "com.surprising.risk.api.model.RiskAccountUpdatedEvent": [],
+        "com.surprising.risk.api.model.RiskPositionUpdatedEvent": [],
+        "accountRiskEventsTopic": [],
+        "positionRiskEventsTopic": [],
+        "getAccountRiskEventsTopic": [],
+        "getPositionRiskEventsTopic": []
+      },
+      "protected_core_protocol_read_view_bridge_registry_http_models_and_sql_unchanged": 514,
+      "protected_scope_digest": "9f703f8a188dc3d235dca8498dd7d378595b17e134e2343457959780350e1353",
+      "frontend_current_consumer_hashes_unchanged": {
+        "../surprising-client/lib/src/realtime_state.dart": "6cee839d552451cbe64d29cda0ae622e603b0ffa7ee7defa602e8f8265843c33",
+        "../surprising-client/lib/src/account_projection.dart": "0388dce5923d0895581f1c7e4e1ed0000abbbe6ff9414e652ac764b6f3b60338",
+        "../surprising-ex-web/src/realtime.ts": "ca9fb796b020a7f27b10c3f6298216cdc35ff89aa50dedb6b4a48e5fb9b2912f",
+        "../surprising-ex-web/src/hooks/useRealtimeAssets.ts": "f71aa40a1b6d9b7409c2750cc64e23673f4014714c99691003c953a049dad765"
+      },
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/README.md": "bdd015918b8cc463b94b3e8906198b85b11ac9113e2ea0ff63b87dab5eae80ea",
+        "surprising-derivatives-lifecycle/README.md": "c9b73309145964923c7fd4f679f751d7c568487d775efc45d76b54528b2d700d",
+        "surprising-gateway/README-websocket.md": "82eb4e8e3a725613a9a0fa9838971ffe8492b3226ce8c12f6ea736b61f0419f2",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/config/WebSocketProperties.java": "49269708761521aa197f17684b375043bc6f55d9a7c4d56b7baf1147c0e2939b",
+        "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java": "686aef364b8e3af287ca95ece8e3c74192133b74028d46dc5aad6d2e768010ac",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/config/WebSocketPropertiesTest.java": "09aa99f4ef393ac19cb876df808584f4fc0405f6d3955f3355fa190703f1f786",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.java": "a3ae19f9fba59b05a06b0cce505d2f8025c790d780d2287e4f7b243cea4a9895",
+        "surprising-gateway/src/test/java/com/surprising/websocket/provider/service/KafkaFanoutConsumerTopicTest.java": "06d550fbfe6263e79591f907912969887a66ae128c2be618397a5e30116dc645",
+        "surprising-instrument-api/src/main/java/com/surprising/product/api/utils/ProductTopicNames.java": "ea835b1bf79afae136fc693321533933c30272e1a610c1f1b5aea4a17af46519",
+        "surprising-instrument-api/src/test/java/com/surprising/product/api/ProductTopicNamesTest.java": "59e93207c2252d9519dbbfa07311ddf8588a04d73bbe33b7268dd8da021921dd"
+      },
+      "removed_source_models": {
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/RiskPositionUpdatedEvent.java": {
+          "sha256": "b121a31b04aaf2e0751477a36c7c156a06f1f6c290a170828923fa2cda8e978e",
+          "components": 19
+        },
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/RiskAccountUpdatedEvent.java": {
+          "sha256": "4c11da5e97f33ab45853d703171d7f1f408f3f13cd04181085481f0b06a5f013",
+          "components": 12
+        }
+      },
+      "tests_executed": false,
+      "applications_started": false,
+      "git_diff_check": "passed"
+    },
+    "removed_models_precheck": {
+      "classfiles": 4023,
+      "external_constructor_or_factory_calls": {
+        "com/surprising/risk/api/model/RiskAccountUpdatedEvent::<init>": {
+          "(JJJLjava/lang/String;JJJJJLcom/surprising/risk/api/model/RiskStatus;Ljava/time/Instant;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+          ]
+        },
+        "com/surprising/risk/api/model/RiskPositionUpdatedEvent::<init>": {
+          "(JJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;JLjava/lang/String;JJJJJJJJLcom/surprising/risk/api/model/RiskStatus;Ljava/time/Instant;)V": [
+            "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+          ]
+        }
+      },
+      "external_class_references": {
+        "com/surprising/risk/api/model/RiskAccountUpdatedEvent": [
+          "surprising-gateway/target/classes/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.class",
+          "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+        ],
+        "com/surprising/risk/api/model/RiskPositionUpdatedEvent": [
+          "surprising-gateway/target/classes/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.class",
+          "surprising-gateway/target/test-classes/com/surprising/websocket/provider/service/KafkaFanoutConsumerTest.class"
+        ]
+      },
+      "source_models": {
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/RiskPositionUpdatedEvent.java": {
+          "sha256": "b121a31b04aaf2e0751477a36c7c156a06f1f6c290a170828923fa2cda8e978e",
+          "components": 19
+        },
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/model/RiskAccountUpdatedEvent.java": {
+          "sha256": "4c11da5e97f33ab45853d703171d7f1f408f3f13cd04181085481f0b06a5f013",
+          "components": 12
+        }
+      },
+      "application_classes_executed": false
+    },
+    "preserved_actual_boundaries": [
+      "Core RISK帧和Owner/Lane业务状态及快照",
+      "UserReadView及Valkey读视图",
+      "RealtimeWebSocketBridge/SubscriptionRegistry/WsChannel/VersionedEvent",
+      "HTTP风险模型及当前Web/Client风险实体消费",
+      "非风险公共Kafka及账户真实到期结算消费者/工厂"
+    ],
+    "followup_analysis": {
+      "confirmed_id": "A151",
+      "candidate_id": "A11",
+      "overall_audit_completed": false
+    },
+    "versions_unchanged": {
+      "core_schema": 16,
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "retention": 4
+    },
+    "limits": "仅HotSpot JDK27相关14模块clean test-compile、静态源码/classfile核对；未运行Kafka、Aeron/Cluster、推送、测试、服务、SQL或UI。514份受保护源码一致不能替代资金/恢复/交互实测。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-risk-kafka-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-risk-kafka-20261024-build.json",
+          "bytes": 2007,
+          "sha256": "e9e352417127da1e8d49216435ee5410cb42b9656f6521ef5e6fd6b3dac08f7d"
+        },
+        {
+          "path": "/tmp/aeron-risk-kafka-20261024-build.log",
+          "bytes": 31348,
+          "sha256": "84eb6819f9387ff14a2a6124aae9ad81d4c1097e0b35885e6ed50a6ffc8c1835"
+        },
+        {
+          "path": "/tmp/aeron-risk-kafka-20261024-edit.py",
+          "bytes": 3027,
+          "sha256": "eb063b0cab5aadd025f5f42f5a12fd662261343125f7165d8a6e553eac5e53cb"
+        },
+        {
+          "path": "/tmp/aeron-risk-kafka-20261024-pre.json",
+          "bytes": 2046,
+          "sha256": "0dbae3414180c74389d8932b6a67c5195a354f741c09c619282fd30854a0030f"
+        },
+        {
+          "path": "/tmp/aeron-risk-kafka-20261024-record.py",
+          "bytes": 9219,
+          "sha256": "302ac4cbb7cb9900744ebd6d8134dc847bad46ceef2b8ab91a78142161b86efc"
+        },
+        {
+          "path": "/tmp/aeron-risk-kafka-20261024-static.json",
+          "bytes": 3473,
+          "sha256": "7e941fb411ab681aa2a7b9f23e930b222bb2824efd8be0a011f31b6928c7f0c6"
         }
       ],
       "compiler_outputs_retained": true,

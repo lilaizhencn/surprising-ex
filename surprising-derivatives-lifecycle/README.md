@@ -176,7 +176,7 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 
 查询与`core_liquidation_projection_initialization`在同一SQL快照关联，区分尚未就绪和真实空页；未就绪/读取异常以原HTTP入口返回503。使用realtime-api既有`ReadViewUnavailableException`表达读取状态，HTTP状态转换仍由本模块controller负责。公开强平费率、执行价及实收费继续来自已提交事实。按当前约定只做相关模块编译，没有执行数据库或UI交互验证。
 
-候选的`snapshotId`与`markPriceTicks/equityUnits/maintenanceMarginUnits/marginRatioPpm`只表示查询时的Core风险补充值，不表示历史候选发生时的风险。没有匹配快照时为null（JSON配置也可能省略该键），不会用强平ID或固定0冒充；真实零权益仍返回0。候选自身的保证金模式、资产、原持仓数量和时间始终取已提交投影。响应不再补默认全仓、NET或固定产品类型；删除从未生产或消费、携带15字段及旧版本约束的`LiquidationCandidateEvent`。现有账户/持仓风险事件有Kafka读端，继续保留。
+候选的`snapshotId`与`markPriceTicks/equityUnits/maintenanceMarginUnits/marginRatioPpm`只表示查询时的Core风险补充值，不表示历史候选发生时的风险。没有匹配快照时为null（JSON配置也可能省略该键），不会用强平ID或固定0冒充；真实零权益仍返回0。候选自身的保证金模式、资产、原持仓数量和时间始终取已提交投影。响应不再补默认全仓、NET或固定产品类型；删除从未生产或消费、携带15字段及旧版本约束的`LiquidationCandidateEvent`。账户/持仓风险推送沿用Core原生Aeron链路；旧Kafka风险事件及其无生产者的消费分支已删除，HTTP风险模型和真实Core字段保留。
 
 强平历史响应删除没有来源且始终填0的`bankruptcyPriceTicks`，从16项字段减为15项；删除4个无人调用的短构造及默认CROSS/NET兜底，唯一完整映射直接传入已提交的保证金模式和持仓腿。实际执行价、执行费率、实收费及历史数量保留。Web/Client没有读取破产价的调用方，当前页面无需字段替换。本项只做相关模块编译，未执行查询或交易场景。
 

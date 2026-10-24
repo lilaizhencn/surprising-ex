@@ -129,14 +129,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("user.state.changelog");
     }
 
-    public String accountRiskEventsTopic() {
-        return topic("risk.account.events");
-    }
-
-    public String positionRiskEventsTopic() {
-        return topic("risk.position.events");
-    }
-
     public String deliverySettlementsTopic() {
         return topic("delivery.settlements");
     }
