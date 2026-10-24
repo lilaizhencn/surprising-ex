@@ -43,6 +43,7 @@ import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -365,6 +366,53 @@ class CorePerpetualFinancialMatrixTest {
                 expected = reducer.executeAdl(expected, adl);
                 LedgerControlTestSupport.await(runtime, RuntimeAdlExecution.begin(null, adl, runtime, identities));
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+                runtime.assertAccountLanesHealthy();
+            } finally { runtime.exitAsynchronousCommandScope(); }
+        }
+    }
+
+    /** 四种永续组合分别在同 Lane、跨 Lane 批量强平两个账户，核对原批费率、实际费用上限和完整账本结果。 */
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("accountLaneVariants")
+    void batchLiquidationKeepsNonzeroFeeAcrossAccountLanes(Variant variant, int accountLaneCount) {
+        var opening = withPosition(variant, USER_ID, QUANTITY, ENTRY_PRICE, 180, POSITION_MARGIN);
+        opening = withPosition(opening, variant, SECOND_MAKER_ID, QUANTITY, ENTRY_PRICE, 180, POSITION_MARGIN);
+        var marked = mark(opening, variant, 90, 1);
+        var actions = marked.riskState().liquidations().values().stream()
+                .sorted(Comparator.comparingLong(CoreLiquidationState::liquidationId))
+                .map(plan -> new com.surprising.aeron.protocol.ExecuteLiquidationBatchAction(plan.liquidationId(),
+                        plan.userId(), plan.instrumentId(), plan.triggerPriceSequence(), 90, 0)).toList();
+        assertThat(actions).hasSize(2);
+        var batch = new com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand(actions, 1_024, 100_000, null, 0);
+        TradingCoreState expected = marked;
+        for (var action : actions) expected = reducer.executeLiquidation(expected, new ExecuteLiquidationCommand(
+                action.liquidationId(), action.triggerPriceSequence(), action.executionPriceTicks(), batch.liquidationFeeRatePpm()));
+        var topology = new LaneTopology(1, accountLaneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
+                LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE, LaneTopology.DEFAULT_QUEUE_CAPACITY,
+                LaneTopology.DEFAULT_QUEUE_CAPACITY);
+        assertThat(topology.accountLaneId(USER_ID) == topology.accountLaneId(SECOND_MAKER_ID))
+                .isEqualTo(accountLaneCount == 1);
+        var identities = new RuntimeIdentityRegistry(topology);
+        try (var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
+            try {
+                var requests = actions.stream().map(action ->
+                        new RuntimeDerivativeLiquidationProcessor.ExecutionRequest(action, List.of(), 0)).toList();
+                var work = RuntimeDerivativeLiquidationProcessor.beginExecutionBatch(
+                        requests, batch.liquidationFeeRatePpm(), runtime, identities);
+                LedgerControlTestSupport.await(runtime, work);
+                assertThat(work.getAsBoolean()).isTrue();
+                var actual = LedgerControlTestSupport.commit(runtime, identities, false);
+                assertThat(actual).isEqualTo(expected);
+                boolean isolated = variant.marginMode() == CoreMarginMode.ISOLATED;
+                long fee = isolated ? 0 : linearOrInverse(variant, 80, 69);
+                assertThat(actual.riskState().liquidations().values()).allSatisfy(value -> {
+                    assertThat(value.liquidationFeeRatePpm()).isEqualTo(100_000);
+                    assertThat(value.liquidationFeeUnits()).isEqualTo(fee);
+                });
+                assertThat(actual.treasuryState().insuranceBalances()).containsEntry(variant.settleAsset(), isolated ? 200L : 360L);
+                assertThatThrownBy(() -> runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
+                        .isInstanceOf(IllegalStateException.class);
                 runtime.assertAccountLanesHealthy();
             } finally { runtime.exitAsynchronousCommandScope(); }
         }

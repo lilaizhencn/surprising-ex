@@ -126,7 +126,8 @@ class CoreFinancialLedgerProductionTest {
 
             // 使保险余额达到25所需的差额调整，不能直接理解为固定充值25
             var topUp = new AdjustInsuranceFundCommand("USDT", 25 - expected.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
-            expected = expected(expected, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) -> RuntimeInsuranceFundStateTransitions.adjust(runtime, identities, topUp));
+            expected = expected(expected, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
+                    LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, topUp)));
             appliedWithGuard(core, CoreMessageType.ADJUST_INSURANCE_FUND, 0, TradingCommandCodec.encodeAdjustInsuranceFund(topUp), TIME);
             assertThat(core.tradingState()).isEqualTo(expected);
             // 由保险承担25的强平处置命令

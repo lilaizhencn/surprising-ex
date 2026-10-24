@@ -793,9 +793,6 @@ public final class OrderedCommitCoordinator {
             int remaining = batch.maxCancelOrders();
             /** 本轮强平账户批次的可空续步，完成后请求发布。 */
             java.util.function.BooleanSupplier accountWork;
-            /** 已选择撤单页并准备交账户执行的强平请求集合，派发后换成空集合。 */
-            List<com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionRequest>
-                    executionRequests;
             /** 账户强平后可选的风险续扫工作。 */
             RiskScanCoordinator riskWork;
             /** 开始风险续扫前的修订，用于决定是否请求发布。 */
@@ -812,7 +809,8 @@ public final class OrderedCommitCoordinator {
                     accountWork = null;
                     publication.request();
                 }
-                if (executionRequests == null) executionRequests = new ArrayList<>();
+                List<com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionRequest>
+                        executionRequests = index < batch.actions().size() ? new ArrayList<>() : List.of();
                 while (index < batch.actions().size()) {
                     // 当前批次强平动作，含计划编号和撤单游标
                     var action = batch.actions().get(index++);
@@ -829,10 +827,6 @@ public final class OrderedCommitCoordinator {
                         pendingCount++;
                         continue;
                     }
-                    // 从当前批次动作构造的单笔强平执行请求
-                    ExecuteLiquidationCommand single = new ExecuteLiquidationCommand(action.liquidationId(),
-                            action.triggerPriceSequence(), action.executionPriceTicks(), batch.liquidationFeeRatePpm(),
-                            action.cursorOrderId(), Math.min(remaining, ExecuteLiquidationCommand.DEFAULT_MAX_ORDERS));
                     owner.resultBuilder.markUserChanged(liquidation.userId());
                     // 当前动作是否通过账户强平执行资格检查
                     boolean executable;
@@ -860,12 +854,11 @@ public final class OrderedCommitCoordinator {
                     }
                     if (nextCursor == 0) applied++; else pendingCount++;
                     executionRequests.add(new com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor
-                            .ExecutionRequest(single, orders, nextCursor));
+                            .ExecutionRequest(action, orders, nextCursor));
                 }
                 if (!executionRequests.isEmpty()) {
                     accountWork = com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor
-                            .beginExecutionBatch(executionRequests, owner.runtimeState(), owner.identities());
-                    executionRequests = new ArrayList<>();
+                            .beginExecutionBatch(executionRequests, batch.liquidationFeeRatePpm(), owner.runtimeState(), owner.identities());
                     return false;
                 }
                 // 本轮实际完成的风险续扫工作量

@@ -447,7 +447,8 @@ public final class RuntimeTestStateTransitions {
      */
     public TradingCoreState adjustInsuranceFund(TradingCoreState before, AdjustInsuranceFundCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                RuntimeInsuranceFundStateTransitions.adjust(runtime, identities, command));
+                com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(
+                        RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, command)));
     }
 
     /**

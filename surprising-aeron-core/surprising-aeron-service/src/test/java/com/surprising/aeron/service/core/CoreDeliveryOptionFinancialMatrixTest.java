@@ -217,7 +217,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 // 给缺口对应结算资产保险基金增加二十的补款命令
                 var topUp = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), 20);
                 LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, topUp));
-                RuntimeInsuranceFundStateTransitions.adjust(cold, coldIdentities, topUp);
+                LedgerControlTestSupport.await(cold, RuntimeInsuranceFundStateTransitions.prepare(cold, coldIdentities, topUp));
                 LedgerControlTestSupport.commit(runtime, identities, true); cold.clearChangedKeys();
                 work = RuntimeLifecycleSettlementContinuation.prepare(work, command, List.of(USER_ID), index, runtime, identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
