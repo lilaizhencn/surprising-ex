@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第三十九轮：A143风险快照ID与4指标缺失改为空、保留真实零值，补充不覆盖历史候选数量/资产；删除响应默认产品及模式兜底。A146无生产消费的15字段旧事件及约束删除。相关14模块干净编译，测试fixture一行修正后11模块增量编译通过；无测试/SQL/UI执行。累计141解决，新增A147固定零破产价及4无调用构造待清理，A11仍候选。",
+    "checkpoint": "第四十轮：A147强平历史响应删除固定0破产价、4无调用构造及默认模式兜底，保留15字段；相关14模块干净源码编译通过，未运行测试/SQL/服务/UI。累计142解决。新增A148旧强平Gateway同步/异步执行树及专属本地并发配置待删除；真实native批量路径及共享Aeron连接保留。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -8013,12 +8013,38 @@
     },
     {
       "id": "A147",
-      "status": "confirmed",
-      "analysis_status": "constant_producer_and_unused_constructor_descriptors_confirmed",
+      "status": "resolved",
+      "analysis_status": "removed_clean_compile_verified",
       "topic": "强平历史响应固定填零的bankruptcyPriceTicks及4个无外部调用构造入口",
       "source_basis_commit": "5f9ab8ae3e67d62a32d7d49b619f970fa3028900",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/liquidation/model/LiquidationOrderResponse.java",
+          "line": 8,
+          "anchor": "public record LiquidationOrderResponse("
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationService.java",
+          "line": 130,
+          "anchor": "value.closeQuantitySteps(), value.executionPriceTicks()"
+        }
+      ],
+      "evidence": {
+        "canonical_field_count": 16,
+        "declared_constructor_count": 5,
+        "externally_called_constructor_count": 1,
+        "externally_called_constructor_descriptors": {
+          "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Lcom/surprising/trading/api/model/OrderSide;JJJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V": [
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class"
+          ]
+        },
+        "bankruptcy_price_getter_external_calls": {},
+        "source_review": "实际生产者LiquidationService.response只用完整构造，破产价始终传0；全仓Java及Web/Client没有读取该字段。4个短构造只互相补CROSS/NET、零费率/价格，不是业务入口。此处固定0是bankruptcyPriceTicks，不是成交数量。"
+      },
+      "proposed_cleanup": "删除无来源无消费的bankruptcyPriceTicks、4个无调用构造及响应默认模式兜底；同步唯一生产映射和有必要的契约说明，只编译相关模块。保留真实执行价、费率、实际费用、历史数量及查询身份。",
+      "verification_limit": "本轮仅静态源码/4024份已编译classfile分析，此项尚未修改或运行。",
+      "historical_source_references": [
         {
           "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/liquidation/model/LiquidationOrderResponse.java",
           "line": 18,
@@ -8035,20 +8061,104 @@
           "anchor": "value.closeQuantitySteps(), 0, value.executionPriceTicks()"
         }
       ],
-      "evidence": {
-        "canonical_field_count": 16,
-        "declared_constructor_count": 5,
-        "externally_called_constructor_count": 1,
-        "externally_called_constructor_descriptors": {
-          "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Lcom/surprising/trading/api/model/OrderSide;JJJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V": [
-            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class"
-          ]
+      "resolved_in_round": "fortieth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "强平历史响应16到15字段，只保留唯一完整构造；删除固定0破产价、4无调用重载及默认CROSS/NET兜底。实际执行价、费率、实收费和历史数量/身份保留。",
+        "tests_executed": false,
+        "sql_executed": false
+      }
+    },
+    {
+      "id": "A148",
+      "status": "confirmed",
+      "analysis_status": "unused_gateway_roots_and_owned_config_confirmed",
+      "topic": "强平Gateway仍保留无调用的旧同步/异步单条执行树和本地扇出配置",
+      "source_basis_commit": "f8533d24b4148f3efbdf0c43139df4ee6951dfaf",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationService.java",
+          "line": 63,
+          "anchor": "aeron.executeBatch(work, feeRatePpm, 0)"
         },
-        "bankruptcy_price_getter_external_calls": {},
-        "source_review": "实际生产者LiquidationService.response只用完整构造，破产价始终传0；全仓Java及Web/Client没有读取该字段。4个短构造只互相补CROSS/NET、零费率/价格，不是业务入口。此处固定0是bankruptcyPriceTicks，不是成交数量。"
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationAeronGateway.java",
+          "line": 88,
+          "anchor": "public CoreResultCode execute("
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationAeronGateway.java",
+          "line": 103,
+          "anchor": "public CompletableFuture<List<CoreResultCode>> executeBatch("
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationAeronGateway.java",
+          "line": 117,
+          "anchor": "private void submitNext("
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/config/LiquidationProperties.java",
+          "line": 27,
+          "anchor": "private int clientConnections = 2"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/derivatives/lifecycle/config/LifecycleInfrastructureConfiguration.java",
+          "line": 20,
+          "anchor": "bind(\"surprising.liquidation.aeron\""
+        }
+      ],
+      "evidence": {
+        "actual_path": "LiquidationService.processWork通过native EXECUTE_LIQUIDATION_BATCH提交，无单条执行树调用。",
+        "unused_roots": [
+          "(Lcom/surprising/aeron/protocol/CoreLiquidationActionView;J)Lcom/surprising/aeron/protocol/CoreResultCode;",
+          "(Ljava/util/List;J)Ljava/util/concurrent/CompletableFuture;",
+          "(I)Lcom/surprising/aeron/protocol/CoreLiquidationWorkView;"
+        ],
+        "exact_external_gateway_calls": {
+          "com/surprising/liquidation/provider/service/LiquidationAeronGateway::work": {
+            "(JII)Lcom/surprising/aeron/protocol/CoreLiquidationWorkView;": [
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class",
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationServiceTest.class"
+            ]
+          },
+          "com/surprising/liquidation/provider/service/LiquidationAeronGateway::riskScanControl": {
+            "()Lcom/surprising/aeron/protocol/CoreRiskScanControlView;": [
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationRuntimeConfigService.class",
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class",
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationServiceTest.class"
+            ]
+          },
+          "com/surprising/liquidation/provider/service/LiquidationAeronGateway::continueRiskScan": {
+            "(I)V": [
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class",
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationServiceTest.class"
+            ]
+          },
+          "com/surprising/liquidation/provider/service/LiquidationAeronGateway::executeBatch": {
+            "(Lcom/surprising/aeron/protocol/CoreLiquidationWorkView;JI)Lcom/surprising/aeron/protocol/CoreLiquidationBatchResultView;": [
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class",
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationAeronGatewayTest.class",
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationServiceTest.class"
+            ]
+          },
+          "com/surprising/liquidation/provider/service/LiquidationAeronGateway::<init>": {
+            "(Lcom/surprising/liquidation/provider/config/LiquidationProperties;Lcom/surprising/derivatives/lifecycle/DerivativesAeronClient;)V": [
+              "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationAeronGatewayTest.class"
+            ]
+          }
+        },
+        "owned_implementation": [
+          "execute/executeStep/rejectedResult及单条stableCommandId",
+          "executeBatch(List,long)/submitNext/executeAsync Future扇出、原子计数和递归续页",
+          "work(int)无人调用便捷入口",
+          "AutoCloseable/PreDestroy空close没有资源释放职责"
+        ],
+        "owned_configuration": "LiquidationProperties.Aeron和clientConnections只服务旧扇出；Binder及YAML仍绑定并验证这个无人消费的宽度。真实共享客户端用RiskProperties.Aeron，不能删除。",
+        "reflection_review": "旧执行方法不是controller/调度/配置回调，无注册/反射入口；close确有PreDestroy反射入口但方法体为空且共享client由DerivativesAeronClient释放。"
       },
-      "proposed_cleanup": "删除无来源无消费的bankruptcyPriceTicks、4个无调用构造及响应默认模式兜底；同步唯一生产映射和有必要的契约说明，只编译相关模块。保留真实执行价、费率、实际费用、历史数量及查询身份。",
-      "verification_limit": "本轮仅静态源码/4024份已编译classfile分析，此项尚未修改或运行。"
+      "proposed_cleanup": "删除旧同步/异步执行树、空生命周期钩子及专属本地Aeron配置/范围校验；移除对应Binder/YAML和旧配置测试断言，保留native批量、游标推进、稳定命令ID、实际共享client及风险调度。只编译相关模块。",
+      "verification_limit": "静态源码及4024份classfile分析，尚未修改或运行这些旧路径。"
     }
   ],
   "preserve_verified_purposes": [
@@ -8066,9 +8176,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A147：删除强平历史响应固定0破产价及4个无调用构造/默认模式兜底，保留真实执行价、实收费和数量，编译相关模块。",
-    "继续按每个业务操作从命令产生、Core执行、Lane交接、最终持久化和恢复/查询检查，不能将缺少生产链等同于真实财务事实无用。",
-    "A11维持现有领导者读取、提交水位和查询会话边界；有等价一致性方案前不绕过Cluster。"
+    "解决A148旧强平Gateway执行树及专属配置，保持native批量游标、幂等与共享连接生命周期。",
+    "继续沿保险/ADL等生命周期操作追踪旧入口与字段的实际生产、消费、约束和恢复用途。",
+    "A11保持原领导者读取、提交水位和会话边界，有等价一致性方案前不绕过Cluster。"
   ],
   "rejected_false_positives": [
     {
@@ -8365,14 +8475,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "5f9ab8ae3e67d62a32d7d49b619f970fa3028900",
+    "source_basis_commit": "f8533d24b4148f3efbdf0c43139df4ee6951dfaf",
     "status": "cleanup_compile_verified_followup_confirmed",
     "resolved_ids": [
-      "A143",
-      "A146"
+      "A147"
     ],
     "confirmed_ids": [
-      "A147"
+      "A148"
     ],
     "candidate_ids": [
       "A11"
@@ -8384,12 +8493,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 141,
+      "resolved": 142,
       "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "thirty_ninth_cleanup_round",
+    "evidence": "fortieth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -10157,6 +10266,26 @@
       ],
       "counts": {
         "resolved": 141,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "tests_executed": false,
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "f8533d24b4148f3efbdf0c43139df4ee6951dfaf",
+      "status": "cleanup_compile_verified_followup_confirmed",
+      "evidence": "fortieth_cleanup_round",
+      "resolved_ids": [
+        "A147"
+      ],
+      "new_confirmed_ids": [
+        "A148"
+      ],
+      "counts": {
+        "resolved": 142,
         "candidate": 1,
         "retained": 4,
         "confirmed": 1
@@ -31275,6 +31404,182 @@
           "path": "/tmp/aeron-risk-candidate-20261024-test-source-build.log",
           "bytes": 17399,
           "sha256": "94d7b11dbc1225aa8dd197cdbfcd3800bea828ae0a0c3068f4508291b22d9267"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "fortieth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "f8533d24b4148f3efbdf0c43139df4ee6951dfaf",
+    "resolved_ids": [
+      "A147"
+    ],
+    "new_confirmed_ids": [
+      "A148"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 142,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "previous_goal_turn_classification": "progress: backend/client commits pushed, actual clean source compilation completed and A147 confirmed from current producers/consumers",
+    "implementation": [
+      "删除无来源且始终0的bankruptcyPriceTicks响应字段。",
+      "删除4个无外部调用构造及默认CROSS/NET转换，只保留完整的15字段响应；唯一生产映射不再传占位0。",
+      "实际执行价、执行费率、实收费、历史数量与查询身份全部保留，没有修改Cluster、SQL或快照。"
+    ],
+    "verification": {
+      "command": "mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 40.46,
+      "log_sha256": "353c4a8377dfe9c23cf2adce8e583fceefcd91deebcfe1247e62b2ad21acaacd",
+      "source_hashes": {
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/liquidation/model/LiquidationOrderResponse.java": "306af134f9ede6e0314894838ab166640ae2be3c0b466c97de2346eba15d8e18",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationService.java": "67f8058c67b4ac01066c0c2eec8bddc8d0fd3963b9959b9e402438871a08a530"
+      },
+      "tests_executed": false,
+      "sql_executed": false,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-realtime-api",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-derivatives-lifecycle",
+        "surprising-realtime-provider",
+        "surprising-gateway"
+      ],
+      "reactor_module_count": 14
+    },
+    "static_verification": {
+      "classfiles": 4024,
+      "record_components": {
+        "liquidationOrderId": "J",
+        "candidateId": "J",
+        "orderId": "J",
+        "userId": "J",
+        "instrumentId": "Ljava/lang/String;",
+        "marginMode": "Lcom/surprising/trading/api/model/MarginMode;",
+        "positionSide": "Lcom/surprising/trading/api/model/PositionSide;",
+        "side": "Lcom/surprising/trading/api/model/OrderSide;",
+        "quantitySteps": "J",
+        "takeoverPriceTicks": "J",
+        "liquidationFeeRatePpm": "J",
+        "liquidationFeeUnits": "J",
+        "status": "Lcom/surprising/liquidation/api/model/LiquidationOrderStatus;",
+        "reason": "Ljava/lang/String;",
+        "createdAt": "Ljava/time/Instant;"
+      },
+      "canonical_constructors": [
+        "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Lcom/surprising/trading/api/model/OrderSide;JJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V"
+      ],
+      "external_calls": {
+        "com/surprising/liquidation/provider/service/LiquidationAeronGateway::work": {
+          "(JII)Lcom/surprising/aeron/protocol/CoreLiquidationWorkView;": [
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationServiceTest.class"
+          ]
+        },
+        "com/surprising/liquidation/provider/service/LiquidationAeronGateway::riskScanControl": {
+          "()Lcom/surprising/aeron/protocol/CoreRiskScanControlView;": [
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationRuntimeConfigService.class",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationServiceTest.class"
+          ]
+        },
+        "com/surprising/liquidation/provider/service/LiquidationAeronGateway::continueRiskScan": {
+          "(I)V": [
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationServiceTest.class"
+          ]
+        },
+        "com/surprising/liquidation/provider/service/LiquidationAeronGateway::executeBatch": {
+          "(Lcom/surprising/aeron/protocol/CoreLiquidationWorkView;JI)Lcom/surprising/aeron/protocol/CoreLiquidationBatchResultView;": [
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationAeronGatewayTest.class",
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationServiceTest.class"
+          ]
+        },
+        "com/surprising/liquidation/provider/service/LiquidationAeronGateway::<init>": {
+          "(Lcom/surprising/liquidation/provider/config/LiquidationProperties;Lcom/surprising/derivatives/lifecycle/DerivativesAeronClient;)V": [
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/test-classes/com/surprising/liquidation/provider/service/LiquidationAeronGatewayTest.class"
+          ]
+        },
+        "com/surprising/liquidation/api/model/LiquidationOrderResponse::<init>": {
+          "(JJJJLjava/lang/String;Lcom/surprising/trading/api/model/MarginMode;Lcom/surprising/trading/api/model/PositionSide;Lcom/surprising/trading/api/model/OrderSide;JJJJLcom/surprising/liquidation/api/model/LiquidationOrderStatus;Ljava/lang/String;Ljava/time/Instant;)V": [
+            "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/classes/com/surprising/liquidation/provider/service/LiquidationService.class"
+          ]
+        }
+      },
+      "legacy_gateway_unused_entry_descriptors": [
+        "(Lcom/surprising/aeron/protocol/CoreLiquidationActionView;J)Lcom/surprising/aeron/protocol/CoreResultCode;",
+        "(Ljava/util/List;J)Ljava/util/concurrent/CompletableFuture;",
+        "(I)Lcom/surprising/aeron/protocol/CoreLiquidationWorkView;"
+      ],
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/README.md": "ba8681fb8e135607220f56dbaeba67bedf8150ad5f88674075d5de2f54fbeeca",
+        "surprising-derivatives-lifecycle/README.md": "240aff8b1adc73b7a74f4217ca315099adfb0abe7a188b3d59f3805278350be2",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/liquidation/model/LiquidationOrderResponse.java": "306af134f9ede6e0314894838ab166640ae2be3c0b466c97de2346eba15d8e18",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationService.java": "67f8058c67b4ac01066c0c2eec8bddc8d0fd3963b9959b9e402438871a08a530"
+      },
+      "application_classes_executed": false,
+      "git_diff_check": "passed"
+    },
+    "frontends": {
+      "bankruptcy_price_consumers_found": false,
+      "web_or_client_source_changes": false,
+      "ui_exercised": false
+    },
+    "versions_unchanged": {
+      "core_schema": 16,
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "retention": 4
+    },
+    "followup_analysis": {
+      "confirmed_id": "A148",
+      "candidate_id": "A11",
+      "overall_audit_completed": false
+    },
+    "limits": "仅相关14模块clean test-compile生产/测试源码编译和静态classfile/源码核对；没有执行测试、SQL、服务、交易/Archive/Cluster、UI或性能场景。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-liquidation-response-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-liquidation-response-20261024-build.json",
+          "bytes": 866,
+          "sha256": "6e18f002136d7b3f0425479d1f07f627ee3dc4c83a93fa8e7cd518294e0cd032"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-response-20261024-build.log",
+          "bytes": 31348,
+          "sha256": "353c4a8377dfe9c23cf2adce8e583fceefcd91deebcfe1247e62b2ad21acaacd"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-response-20261024-inspect.py",
+          "bytes": 3238,
+          "sha256": "e4cb0e5279fba89fb7b5262a427e3ff015870e82bd7ae7410e546ca8fb8cc597"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-response-20261024-record.py",
+          "bytes": 7795,
+          "sha256": "c663e8b7573d1cad0e16346e3130892be15c46f2487b4ae398a6bcd131b40268"
+        },
+        {
+          "path": "/tmp/aeron-liquidation-response-20261024-static.json",
+          "bytes": 5500,
+          "sha256": "08beaf29e96a6951da1377718f90034ef083f57066ea2215aeb47d1ec7e57828"
         }
       ],
       "compiler_outputs_retained": true,
