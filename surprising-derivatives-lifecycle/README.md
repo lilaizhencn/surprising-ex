@@ -181,3 +181,5 @@ Kafka职责归包：独立快照、审计、结算/排空及推送消费入口�
 强平历史响应删除没有来源且始终填0的`bankruptcyPriceTicks`，从16项字段减为15项；删除4个无人调用的短构造及默认CROSS/NET兜底，唯一完整映射直接传入已提交的保证金模式和持仓腿。实际执行价、执行费率、实收费及历史数量保留。Web/Client没有读取破产价的调用方，当前页面无需字段替换。本项只做相关模块编译，未执行查询或交易场景。
 
 强平提交只保留`LiquidationService.processWork → LiquidationAeronGateway.executeBatch → EXECUTE_LIQUIDATION_BATCH`原生路径；删除无业务调用的单条同步执行、Future扇出、原子计数和递归续页，以及仅服务旧扇出的本地Aeron配置、绑定与范围约束。产品线由共享risk配置传入，不再在YAML重复声明无人读取的强平产品键。实际连接池、超时和连接数仍由`RiskProperties.Aeron`及`DerivativesAeronClient`管理；Gateway没有自有连接，空`close`钩子一并删除。风险扫描、批量游标与命令ID规则保留。只编译相关模块，未执行测试或实际交易。
+
+风险和ADL Gateway也不声明空`close`/`AutoCloseable`，共享连接由`DerivativesAeronClient`释放。风险只读查询重试直接在成功时返回、不可重试或第三次失败时抛出，删除无消费的`last`异常副本及不可达尾部；仍最多3次，前两次可重试失败等待25ms，原异常分类和传播不变。本项只编译相关模块，未运行重试或关闭场景。

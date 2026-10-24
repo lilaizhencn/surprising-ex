@@ -14,7 +14,6 @@ import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import jakarta.annotation.PreDestroy;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
@@ -23,7 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
-public class RiskAeronGateway implements AutoCloseable {
+public class RiskAeronGateway {
 
     private final DerivativesAeronClient clients;
 
@@ -76,19 +75,16 @@ public class RiskAeronGateway implements AutoCloseable {
     }
 
     private CoreResponse query(CoreMessageType type, long userId) {
-        CompletionException last = null;
-        for (int attempt = 1; attempt <= 3; attempt++) {
+        for (int attempt = 1; ; attempt++) {
             try {
                 return clients.query(type, UUID.randomUUID(), userId, new byte[0]);
             } catch (CompletionException exception) {
                 if (!retryable(exception) || attempt == 3) {
                     throw exception;
                 }
-                last = exception;
                 LockSupport.parkNanos(25_000_000L);
             }
         }
-        throw last;
     }
 
     private static boolean retryable(Throwable failure) {
@@ -104,10 +100,6 @@ public class RiskAeronGateway implements AutoCloseable {
         }
         return false;
     }
-
-    @Override
-    @PreDestroy
-    public void close() { }
 
     public static final class RiskScanControlConflictException extends RuntimeException {
         public RiskScanControlConflictException(String message) {

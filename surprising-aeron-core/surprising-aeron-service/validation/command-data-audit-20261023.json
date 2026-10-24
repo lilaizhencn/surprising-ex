@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第四十一轮：A148删除10个旧强平Gateway方法及旧Future执行树、本地并发配置/范围约束/绑定和YAML冗余键。5个实际native方法和497份Core/协议/SQL/导出/共享client源码保持原样；相关11模块干净源码编译通过，无测试/SQL/服务执行。累计143解决。新增A149风险/ADL空关闭钩子及风险查询多余异常副本待清理；A11仍候选。",
+    "checkpoint": "第四十二轮：A149两个空Gateway关闭钩子及query的last异常副本删除，3次/25ms原边界保留；11模块干净源码编译通过，未运行测试/服务。累计144解决。确认A150原生Aeron风险推送已存在，旧Kafka两事件/监听/topic配置无当前生产者，待成树清理；真实风险金融值保留。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -8193,12 +8193,40 @@
     },
     {
       "id": "A149",
-      "status": "confirmed",
-      "analysis_status": "empty_resource_hooks_and_unreachable_exception_state_confirmed",
+      "status": "resolved",
+      "analysis_status": "implemented_clean_compile_verified",
       "topic": "风险/ADL Gateway空关闭钩子及风险查询重试的多余异常副本",
       "source_basis_commit": "a3d6978b54f22042ef3ee0acafaffc6678f27f7c",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskAeronGateway.java",
+          "line": 25,
+          "anchor": "public class RiskAeronGateway {"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskAeronGateway.java",
+          "line": 78,
+          "anchor": "for (int attempt = 1; ; attempt++)"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/service/AdlAeronGateway.java",
+          "line": 17,
+          "anchor": "public class AdlAeronGateway {"
+        }
+      ],
+      "evidence": {
+        "empty_close_external_classfile_calls": {
+          "com/surprising/risk/provider/service/RiskAeronGateway": {},
+          "com/surprising/adl/provider/service/AdlAeronGateway": {}
+        },
+        "real_owner": "Gateway持有注入的共享DerivativesAeronClient；后者已有实际close，Gateway的PreDestroy方法体为空，不承担释放。",
+        "retry_state_proof": "query每次成功立即返回；不应重试或attempt==3时在catch内直接抛出；只有前两次可重试失败才继续。因此last赋值和循环后的throw last没有可达消费，可在原3次尝试条件内去掉异常副本。",
+        "boundaries_to_keep": "保留NOT_CONNECTED/ResultUnknown重试分类、最多3次、前两次25ms等待及原异常传播；不改变查询一致性或真实客户端释放。"
+      },
+      "proposed_cleanup": "删除两个空关闭钩子及AutoCloseable声明；重试循环保留原终止条件，去掉last异常副本和不可达尾部，不新增替代状态或包装。只编译相关模块。",
+      "verification_limit": "静态源码及4023份classfile核对；此项尚未修改、没有运行重试或关闭场景。",
+      "historical_source_references": [
         {
           "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskAeronGateway.java",
           "line": 26,
@@ -8235,17 +8263,66 @@
           "anchor": "public void close()"
         }
       ],
-      "evidence": {
-        "empty_close_external_classfile_calls": {
-          "com/surprising/risk/provider/service/RiskAeronGateway": {},
-          "com/surprising/adl/provider/service/AdlAeronGateway": {}
+      "resolved_in_round": "forty_second_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除两个空close与AutoCloseable/PreDestroy声明；query成功直接返回，第三次或不可重试失败直接抛出，去掉last副本与不可达尾部。原分类、最多3次及前两次25ms等待保留，真实共享client源码不变。",
+        "tests_executed": false,
+        "services_started": false
+      }
+    },
+    {
+      "id": "A150",
+      "status": "confirmed",
+      "analysis_status": "native_risk_delivery_and_unproduced_legacy_kafka_branch_confirmed",
+      "topic": "风险推送已走原生Aeron，但旧Kafka风险事件、监听器与topic配置仍残留",
+      "source_basis_commit": "15b240f69545e836cd4c6ade685400237231a4d0",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 268,
+          "anchor": "public void onAccountRisk("
         },
-        "real_owner": "Gateway持有注入的共享DerivativesAeronClient；后者已有实际close，Gateway的PreDestroy方法体为空，不承担释放。",
-        "retry_state_proof": "query每次成功立即返回；不应重试或attempt==3时在catch内直接抛出；只有前两次可重试失败才继续。因此last赋值和循环后的throw last没有可达消费，可在原3次尝试条件内去掉异常副本。",
-        "boundaries_to_keep": "保留NOT_CONNECTED/ResultUnknown重试分类、最多3次、前两次25ms等待及原异常传播；不改变查询一致性或真实客户端释放。"
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/consumer/KafkaFanoutConsumer.java",
+          "line": 285,
+          "anchor": "public void onPositionRisk("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 203,
+          "anchor": "case RISK -> WsChannel.POSITION_RISK"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 235,
+          "anchor": "case RISK -> UserReadView.PositionRisk.decode(f)"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/websocket/provider/service/RealtimeWebSocketBridge.java",
+          "line": 264,
+          "anchor": "WsChannel.ACCOUNT_RISK,"
+        },
+        {
+          "file": "surprising-instrument-api/src/main/java/com/surprising/product/api/utils/ProductTopicNames.java",
+          "line": 132,
+          "anchor": "public String accountRiskEventsTopic()"
+        }
+      ],
+      "evidence": {
+        "native_path": "RealtimeStateCapture产生RISK帧；RealtimeWebSocketBridge解码UserReadView.PositionRisk并发布POSITION_RISK和ACCOUNT_RISK，使用VersionedEvent及原快照/就绪规则。",
+        "legacy_path": "KafkaFanoutConsumer的onAccountRisk/onPositionRisk是旧模型的唯一生产Java类引用；全仓配置/SQL/脚本及topic字面量只找到监听器、命名方法、测试造数和过期README，无Kafka发布者。realtime实际Kafka writer ReliableTradeKafkaSink只写trade。",
+        "legacy_record_components": {
+          "RiskAccountUpdatedEvent": 12,
+          "RiskPositionUpdatedEvent": 19
+        },
+        "frontend_review": "Web realtime.ts与Client realtime_state.dart通过version/value更新risk实体；快照positionRisks来自现有原生读视图。旧Kafka裸事件不提供这套版本/就绪契约，不是当前UI需要的消费格式。",
+        "reflection_review": "KafkaListener/SpEL是真实注册入口，删除须连带监听方法、topic getter、专属key校验、无用事件类型/默认构造及命名配置；不能只删除DTO。",
+        "preservation_requirement": "原生RISK帧、UserReadView、HTTP风险响应、WsChannel与VersionedEvent/快照的真实金融字段全部保留。"
       },
-      "proposed_cleanup": "删除两个空关闭钩子及AutoCloseable声明；重试循环保留原终止条件，去掉last异常副本和不可达尾部，不新增替代状态或包装。只编译相关模块。",
-      "verification_limit": "静态源码及4023份classfile核对；此项尚未修改、没有运行重试或关闭场景。"
+      "proposed_cleanup": "删除两条无当前生产者的旧Kafka风险投递树、31字段旧事件、专属topic元数据及仅为旧路径造数的测试；同步WebSocket中文说明，原生桥接及客户端订阅/消费契约保持原样，编译实际受影响模块。",
+      "verification_limit": "静态源码/客户端消费核对，尚未删除旧Kafka风险路径，也未运行Kafka、Aeron、UI。"
     }
   ],
   "preserve_verified_purposes": [
@@ -8263,9 +8340,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A149空关闭钩子和局部异常副本，保留真实共享client生命周期以及最多3次/25ms重试边界。",
-    "继续按风险、保险及ADL等业务操作核对命令生成、Core落地、恢复和查询用途，区分无用副本与真实业务事实缺少生产链。",
-    "A11继续维持当前领导者读、提交水位和查询会话约束，未有等价方案前不绕过Cluster。"
+    "解决A150旧Kafka风险投递树，保留原生Aeron风险推送与其版本/快照/就绪及HTTP契约；不把真实风险金融值删除。",
+    "继续沿各业务操作检查命令、状态、恢复与读端的字段用途和无效约束。",
+    "A11保持原领导者读、提交水位与查询会话边界，有等价方案前不绕过Cluster。"
   ],
   "rejected_false_positives": [
     {
@@ -8562,13 +8639,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "a3d6978b54f22042ef3ee0acafaffc6678f27f7c",
+    "source_basis_commit": "15b240f69545e836cd4c6ade685400237231a4d0",
     "status": "cleanup_compile_verified_followup_confirmed",
     "resolved_ids": [
-      "A148"
+      "A149"
     ],
     "confirmed_ids": [
-      "A149"
+      "A150"
     ],
     "candidate_ids": [
       "A11"
@@ -8580,12 +8657,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 143,
+      "resolved": 144,
       "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "forty_first_cleanup_round",
+    "evidence": "forty_second_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -10393,6 +10470,26 @@
       ],
       "counts": {
         "resolved": 143,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "tests_executed": false,
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "15b240f69545e836cd4c6ade685400237231a4d0",
+      "status": "cleanup_compile_verified_followup_confirmed",
+      "evidence": "forty_second_cleanup_round",
+      "resolved_ids": [
+        "A149"
+      ],
+      "new_confirmed_ids": [
+        "A150"
+      ],
+      "counts": {
+        "resolved": 144,
         "candidate": 1,
         "retained": 4,
         "confirmed": 1
@@ -31933,6 +32030,111 @@
           "path": "/tmp/aeron-liquidation-gateway-20261024-static.json",
           "bytes": 11092,
           "sha256": "bfe63dc9461765dc80961b03c11a4976cab28a7a4d2e1955cd254fec18227883"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "forty_second_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "15b240f69545e836cd4c6ade685400237231a4d0",
+    "resolved_ids": [
+      "A149"
+    ],
+    "new_confirmed_ids": [
+      "A150"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 144,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "previous_goal_turn_classification": "progress: two cleanup commits a3d6978b5/15b240f69 pushed, actual source compilations and A149 evidence recorded",
+    "implementation": [
+      "风险和ADL Gateway不再声明空资源释放接口/钩子；真正共享client继续由DerivativesAeronClient释放。",
+      "风险只读query删除无消费的last异常副本和不可达尾部，3次/25ms重试分类及原异常保持。"
+    ],
+    "verification": {
+      "command": "mvn -pl surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 16.648,
+      "log_sha256": "45598b8234c1b3c6669c51d09aeb1b4c3cd4d1daa3a8d4dbe54bbbee5dd05e6c",
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/README.md": "e3996f73b57bb8ef9e3d906c871d566387ef1a5325564326f1c489ae0fe61093",
+        "surprising-derivatives-lifecycle/README.md": "485695bc613eaeb76c99e163decda376a5042a85db699a4e85ab1dc4bd97b94e",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/service/AdlAeronGateway.java": "623e0525250c00a58f2ee9aaec84f80218b30ed07c2ad17b226815c7250e344a",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskAeronGateway.java": "e9ff89943e956f8f8803bf37a5f3ff33e4d6eac41f53aad9522b26eb0230fff9"
+      },
+      "tests_executed": false,
+      "sql_executed": false,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-realtime-api",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-derivatives-lifecycle"
+      ],
+      "reactor_module_count": 11
+    },
+    "static_verification": {
+      "gateway_classes": [
+        "com.surprising.risk.provider.service.RiskAeronGateway",
+        "com.surprising.adl.provider.service.AdlAeronGateway"
+      ],
+      "close_methods_and_AutoCloseable_interfaces_absent": true,
+      "javap_sha256": "3afb621843290f7cf9640d709e12bbfed475302fb2074b4e008fc2fb00ac28fb",
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/README.md": "e3996f73b57bb8ef9e3d906c871d566387ef1a5325564326f1c489ae0fe61093",
+        "surprising-derivatives-lifecycle/README.md": "485695bc613eaeb76c99e163decda376a5042a85db699a4e85ab1dc4bd97b94e",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/adl/provider/service/AdlAeronGateway.java": "623e0525250c00a58f2ee9aaec84f80218b30ed07c2ad17b226815c7250e344a",
+        "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/risk/provider/service/RiskAeronGateway.java": "e9ff89943e956f8f8803bf37a5f3ff33e4d6eac41f53aad9522b26eb0230fff9"
+      },
+      "application_classes_executed": false,
+      "real_shared_client_source_unchanged": true,
+      "git_diff_check": "passed"
+    },
+    "followup_analysis": {
+      "confirmed_id": "A150",
+      "candidate_id": "A11",
+      "overall_audit_completed": false
+    },
+    "limits": "仅HotSpot JDK27相关11模块clean test-compile和静态javap/源码核对，没有运行重试、关闭、测试、SQL、服务、Aeron/Kafka或UI。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-risk-gateway-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-risk-gateway-20261024-build.json",
+          "bytes": 1039,
+          "sha256": "363113f094c423ccb5f47d1392bc9fa8577b9c915f2afac1ae720a2b0ee0a8ee"
+        },
+        {
+          "path": "/tmp/aeron-risk-gateway-20261024-build.log",
+          "bytes": 21547,
+          "sha256": "45598b8234c1b3c6669c51d09aeb1b4c3cd4d1daa3a8d4dbe54bbbee5dd05e6c"
+        },
+        {
+          "path": "/tmp/aeron-risk-gateway-20261024-javap.txt",
+          "bytes": 21959,
+          "sha256": "3afb621843290f7cf9640d709e12bbfed475302fb2074b4e008fc2fb00ac28fb"
+        },
+        {
+          "path": "/tmp/aeron-risk-gateway-20261024-record.py",
+          "bytes": 7575,
+          "sha256": "1be2460b5b249d5b1e1d80402187a6cff10c7939049913ed2d9f2db9065ff55f"
+        },
+        {
+          "path": "/tmp/aeron-risk-gateway-20261024-static.json",
+          "bytes": 1104,
+          "sha256": "17398ba9a7dcefecbd132ad5e2429928ded910e55de970ea011f4a2d6be0d495"
         }
       ],
       "compiler_outputs_retained": true,

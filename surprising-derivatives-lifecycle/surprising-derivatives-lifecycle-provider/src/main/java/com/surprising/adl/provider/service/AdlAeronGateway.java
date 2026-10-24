@@ -9,13 +9,12 @@ import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
-import jakarta.annotation.PreDestroy;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
-public class AdlAeronGateway implements AutoCloseable {
+public class AdlAeronGateway {
 
     private final DerivativesAeronClient clients;
     private final ProductLine productLine;
@@ -51,9 +50,4 @@ public class AdlAeronGateway implements AutoCloseable {
         }
     }
 
-    @Override
-    @PreDestroy
-    public void close() {
-        // The shared lifecycle client is closed by DerivativesAeronClient.
-    }
 }
