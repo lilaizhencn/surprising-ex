@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 
 class CoreMessageCodecTest {
 
-    private static final String CURRENT_GOLDEN = "584558530900020a000148007766554433221100ffeeddccbbaa998808000000000000002a00000000000000e90300000000000015cd5b070000000063000000000000000e0000000400555344540700000000000000";
+    private static final String CURRENT_GOLDEN = "584558531000020a000148007766554433221100ffeeddccbbaa998808000000000000002a00000000000000e90300000000000015cd5b070000000063000000000000000e0000000400555344540700000000000000";
 
     @Test
     void matchesCurrentSchemaGoldenMessage() {
@@ -30,7 +30,7 @@ class CoreMessageCodecTest {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
 
         assertThat(CommandFingerprint.of(message).toString())
-                .isEqualTo("e20efc0cbf44de9558f87d9780097f707f2eb458dd95896ae758b2f2c86b66b6");
+                .isEqualTo("16485fe71c62ab2af309b348873c7ad0dab20ea1f5e894b6b2852c0c65284eb6");
     }
 
     @Test
@@ -43,7 +43,7 @@ class CoreMessageCodecTest {
         assertThat(producerB.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(second)).isEqualTo(CommandFingerprint.of(second));
         assertThat(producerA.of(first)).isEqualTo(retained);
-        assertThat(retained.toString()).isEqualTo("e20efc0cbf44de9558f87d9780097f707f2eb458dd95896ae758b2f2c86b66b6");
+        assertThat(retained.toString()).isEqualTo("16485fe71c62ab2af309b348873c7ad0dab20ea1f5e894b6b2852c0c65284eb6");
     }
 
     @Test
@@ -92,6 +92,31 @@ class CoreMessageCodecTest {
         assertThat(command.header().response(CoreMessageType.COMMAND_RESULT).kind())
                 .isEqualTo(WireMessageKind.RESPONSE);
         assertThat(CoreProtocol.HEADER_LENGTH).isEqualTo(72);
+    }
+
+    @Test
+    void initializesResponseHeaderOnFirstUseAndAfterDecoderSlotReuse() {
+        CoreMessage slot = CoreMessage.decoderSlot();
+        for (int sequence = 1; sequence <= 2; sequence++) {
+            CoreMessageHeader request = command(UUID.randomUUID(), sequence, sequence + 10, 7).header();
+            assertThat(slot.acquireDecoderSlot()).isTrue();
+            try {
+                slot.decoderHeader(request.schemaVersion(), request.messageType(), request.commandId(),
+                        request.productLine(), request.source(), request.sourceId(), request.sourceSequence(),
+                        request.userId(), request.submittedAtEpochMillis(), request.correlationId());
+
+                CoreMessageHeader response = slot.responseHeader(CoreMessageType.COMMAND_RESULT);
+
+                assertThat(response).isEqualTo(request.response(CoreMessageType.COMMAND_RESULT));
+                assertThat(response.kind()).isEqualTo(WireMessageKind.RESPONSE);
+                assertThat(slot.responseHeader(CoreMessageType.COMMAND_RESULT)).isSameAs(response);
+                assertThatThrownBy(() -> slot.responseHeader(CoreMessageType.STATE_HASH_RESULT))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("response header type changed");
+            } finally {
+                slot.releaseDecoderSlot();
+            }
+        }
     }
 
     @Test

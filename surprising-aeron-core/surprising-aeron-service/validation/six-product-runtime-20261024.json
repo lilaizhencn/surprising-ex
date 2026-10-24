@@ -1,0 +1,1104 @@
+{
+  "date": "2026-10-24",
+  "timezone": "Asia/Shanghai",
+  "source_base_commit": "17c544f6340209f37cd94bd85db13034e871f418",
+  "scope": "Six product lines, sequential real HTTP/WebSocket trading, funds reconciliation and cold Core snapshot recovery",
+  "toolchain": {
+    "java": "Amazon Corretto HotSpot 27+33-FR",
+    "maven": "3.9.16"
+  },
+  "environment": {
+    "postgres": "127.0.0.1:15432/sixline_live (owned isolated database)",
+    "kafka": "127.0.0.1:19092",
+    "redis": "127.0.0.1:16379",
+    "price_fixture": "REST 19195 / WS 19194",
+    "cluster_members": 1,
+    "execution_mode": "FUSED",
+    "wallet_started_by_this_task": false,
+    "jfr": false,
+    "jmh": false
+  },
+  "source_sha256": {
+    "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessage.java": "964011a3bad0956e1ef75b5d7a859c4379b4ca452cce1719281ab4a5eb771bc7",
+    "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/CoreMessageCodecTest.java": "6f105294f5e2cfce4c9e088003beb95f85d80df81b10a1e0d8741f72b34ccb5d",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java": "9a79624b86cdb6c9a15c844bc401311d179be7b36a89035cea2bed3552dd9225"
+  },
+  "build": {
+    "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks,surprising-price/surprising-price-provider,surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider,surprising-realtime/surprising-realtime-provider,surprising-gateway,surprising-maker -am -DskipTests package",
+    "exit_code": 0,
+    "elapsed_seconds": 282.135,
+    "log_sha256": "91d13342582bda28737ed045fe0d9c9c20158103b3fb161fa1b22da6660ef029"
+  },
+  "runtime_artifacts": [
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+      "size": 118087482,
+      "sha256": "4a7a9853d0df714a12ca759e063f7b2cda1c851d781e7653502bba94596344d5"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar",
+      "size": 119283995,
+      "sha256": "b30473e6838e0f9062fafb8cc3845de84f5df16b392a34e9c3489313922fa64c"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+      "size": 186843636,
+      "sha256": "d4122007c5a6b13d7f2e89025e70890db90431ad03dcac1e95c65de52038347d"
+    },
+    {
+      "path": "surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar",
+      "size": 78341329,
+      "sha256": "5d859019c61096967f0ab41bb36b2fd87bf7296c64727440270f76fe3acb73f7"
+    },
+    {
+      "path": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/target/surprising-derivatives-lifecycle-provider-1.0.0-SNAPSHOT-exec.jar",
+      "size": 78448513,
+      "sha256": "e1d32127abb0999a2a7e51e99aab271b26ec0bc0790dc7668fb254ad61b48856"
+    },
+    {
+      "path": "surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar",
+      "size": 188645359,
+      "sha256": "489402508e2ed33f7118074d58e707bd193c426c649779f6e14aa5fc23b4f58a"
+    },
+    {
+      "path": "surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar",
+      "size": 94669807,
+      "sha256": "5345e936232cb3fa0675df66c00d40ba2a54d0465d5cba5d93c4609806fec0fc"
+    },
+    {
+      "path": "surprising-maker/target/surprising-maker-1.0.0-SNAPSHOT-exec.jar",
+      "size": 62134913,
+      "sha256": "4e6345f2aea477939eeef84c2a4543d53dd41d03b30b3c1f0fb62a005118d800"
+    }
+  ],
+  "regression_attempts": [
+    {
+      "log": "response-header-red.log",
+      "exit_code": 1,
+      "cases": [
+        {
+          "tests": 10,
+          "failures": 3,
+          "errors": 1,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.protocol.CoreMessageCodecTest"
+        }
+      ],
+      "log_sha256": "a3581cf51c2fd990cd2ab596f83a1cbe47ef5747204db769099858ebb60c927f"
+    },
+    {
+      "log": "response-header-green.log",
+      "exit_code": 1,
+      "cases": [
+        {
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.protocol.BorrowedResponseSlotTest"
+        },
+        {
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.protocol.CoreMessageCodecTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.support.egress.OwnerSessionBoundaryTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.support.egress.DeferredSessionResponsesTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.support.egress.BorrowedHeaderEgressTest"
+        },
+        {
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.support.ingress.TradingOwnerInputReuseTest"
+        },
+        {
+          "tests": 45,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.service.core.TradingCoreOwnerTest"
+        },
+        {
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.service.core.CoreMessageFlyweightDecoderTest"
+        }
+      ],
+      "log_sha256": "88a90ddd9d45887ead8a5716b7ed636a148f79031c256128475c86631680cc89"
+    },
+    {
+      "log": "response-header-green-final.log",
+      "exit_code": 0,
+      "cases": [
+        {
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.protocol.BorrowedResponseSlotTest"
+        },
+        {
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.protocol.CoreMessageCodecTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.support.egress.OwnerSessionBoundaryTest"
+        },
+        {
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.support.egress.DeferredSessionResponsesTest"
+        },
+        {
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.support.egress.BorrowedHeaderEgressTest"
+        },
+        {
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.support.ingress.TradingOwnerInputReuseTest"
+        },
+        {
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.service.core.TradingCoreOwnerTest"
+        },
+        {
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "test_class": "com.surprising.aeron.service.core.CoreMessageFlyweightDecoderTest"
+        }
+      ],
+      "log_sha256": "b04898415d76f8b0c84964c55b8d2d11ce5c521ae62ecb6741d8502d4f9cc26d"
+    }
+  ],
+  "snapshot_unit": {
+    "product": "SNAPSHOT_UNIT",
+    "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=SnapshotFieldEvolutionTest,TradingStateSnapshotCodecTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "exit_code": 0,
+    "passed": true,
+    "elapsed_seconds": 16.565,
+    "reports": [
+      {
+        "class": "com.surprising.aeron.service.snapshot.state.SnapshotFieldEvolutionTest",
+        "tests": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.core.TradingStateSnapshotCodecTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "markers": "[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.943 s -- in com.surprising.aeron.service.snapshot.state.SnapshotFieldEvolutionTest\n[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.093 s -- in com.surprising.aeron.service.core.TradingStateSnapshotCodecTest\n[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0",
+    "log": "evidence/SNAPSHOT_UNIT/test-1792838062.log",
+    "log_sha256": "45706c39ec2902155e77fa86866954141527c13a2f075353fe0dfd317c53ee78"
+  },
+  "financial_unit": {
+    "product": "FINANCIAL_UNIT",
+    "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -Dtest=AsyncFundingCommandTest,CommittedFundingReplayTest,CoreOptionPremiumFeeFundingTest,AdlPositionIndexTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "exit_code": 0,
+    "passed": true,
+    "elapsed_seconds": 22.615,
+    "reports": [
+      {
+        "class": "com.surprising.aeron.service.core.AsyncFundingCommandTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.core.CommittedFundingReplayTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.core.CoreOptionPremiumFeeFundingTest",
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "com.surprising.aeron.service.core.index.AdlPositionIndexTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "markers": "[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 3.023 s -- in com.surprising.aeron.service.core.CoreOptionPremiumFeeFundingTest\n[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.967 s -- in com.surprising.aeron.service.core.AsyncFundingCommandTest\n[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.186 s -- in com.surprising.aeron.service.core.CommittedFundingReplayTest\n[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.018 s -- in com.surprising.aeron.service.core.index.AdlPositionIndexTest\n[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0",
+    "log": "evidence/FINANCIAL_UNIT/test-1792840849.log",
+    "log_sha256": "7ceb78fd9d5e65861438a37b4a59512b5b2a5c871da3599059d66cea5c8cd60c"
+  },
+  "verification_failures": {
+    "evidence/SPOT/attempt1-recovery-result.json": {
+      "product": "SPOT",
+      "passed": false,
+      "elapsed_seconds": 5.744,
+      "steps": [
+        {
+          "name": "recovery-before-probe",
+          "exit_code": 1,
+          "log_sha256": "b1ba1d7fb2ccc437eb3842b79428f608b7cd0cc02b112629b87b136facf14c24"
+        }
+      ]
+    },
+    "evidence/LINEAR_PERPETUAL/attempt1-test-result.json": {
+      "product": "LINEAR_PERPETUAL",
+      "command": "mvn -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "exit_code": 1,
+      "passed": false,
+      "elapsed_seconds": 81.387,
+      "reports": [
+        {
+          "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+          "tests": 1,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "markers": "[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 43.09 s <<< FAILURE! -- in com.surprising.gateway.provider.local.SixProductLineContractLiveTest\n[ERROR] com.surprising.gateway.provider.local.SixProductLineContractLiveTest.createListEditAndPauseThroughAdminRequestsWithoutRestart -- Time elapsed: 42.67 s <<< FAILURE!\n[ERROR] Failures: \n[ERROR]   SixProductLineContractLiveTest.createListEditAndPauseThroughAdminRequestsWithoutRestart:56->enableLocalProduct:229 [selected local Core activation] \n[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0\n[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.5.6:test (default-test) on project surprising-gateway: There are test failures.\n[ERROR] \n[ERROR] See /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surefire-reports for the individual test results.\n[ERROR] See dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.\n[ERROR] -> [Help 1]\n[ERROR] \n[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.\n[ERROR] Re-run Maven using the -X switch to enable full debug logging.\n[ERROR] \n[ERROR] For more information about the errors and possible solutions, please read the following articles:\n[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException\n[ERROR] \n[ERROR] After correcting the problems, you can resume the build with the command\n[ERROR]   mvn <args> -rf :surprising-gateway",
+      "log": "evidence/LINEAR_PERPETUAL/test-1792839374.log",
+      "log_sha256": "1f758bf235f0a40a6ebf0b128e86c21fefd8bec8db64d5ce00fb78fbdc2d1b64"
+    },
+    "evidence/LINEAR_PERPETUAL/attempt1-recovery-result.json": {
+      "product": "LINEAR_PERPETUAL",
+      "passed": false,
+      "elapsed_seconds": 12.831,
+      "steps": [
+        {
+          "name": "recovery-before-probe",
+          "exit_code": 0,
+          "log_sha256": "4dbb0f2ab3b48582fbfc8b8d5c27904ffc44fa2e1c9fae4eae1e8fdcad0f3022"
+        },
+        {
+          "name": "recording-log-before",
+          "exit_code": 0,
+          "log_sha256": "26f725477d83c89f8ee384e118a75768d7f761b48bd21a3ca007757b3cb52c55"
+        },
+        {
+          "name": "snapshot-request",
+          "exit_code": 0,
+          "log_sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3"
+        },
+        {
+          "name": "recording-log-after",
+          "exit_code": 0,
+          "log_sha256": "70d05b4cb1d61d6aa6979e12677f6b02bea483f1aa0092a49d51af063bbdceac"
+        },
+        {
+          "name": "recovery-after-snapshot-probe",
+          "exit_code": 0,
+          "log_sha256": "67d89697fc3af10d496410683bd43ee6921735b177664582c0945db7cfb4d65d"
+        },
+        {
+          "name": "recovery-stop",
+          "exit_code": 0,
+          "log_sha256": "4fd7516edd97ed40a66c73f2f5f35df513a06b8861ccd55968ae72ae66d33462"
+        },
+        {
+          "name": "recovery-restart",
+          "exit_code": 2,
+          "log_sha256": "e1da2916a15b90c7e7c926e013b66268b2078f1b0ee2c0d19ddc15589a855d39"
+        }
+      ]
+    }
+  },
+  "product_order": [
+    "SPOT",
+    "LINEAR_PERPETUAL",
+    "INVERSE_PERPETUAL",
+    "LINEAR_DELIVERY",
+    "INVERSE_DELIVERY",
+    "OPTION"
+  ],
+  "products": [
+    {
+      "product": "SPOT",
+      "startup": {
+        "action": "up",
+        "product": "SPOT",
+        "run_id": "qa-20261024-spot-uvvaxg47",
+        "exit_code": 0,
+        "elapsed_seconds": 102.131,
+        "log": "evidence/SPOT/up-1792838963.log",
+        "log_sha256": "ad485f4b4da3cf07a0095e4d980eea79e21d7696100ba41f2914cb6ca2f2436a"
+      },
+      "live": {
+        "product": "SPOT",
+        "command": "mvn -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+        "exit_code": 0,
+        "passed": true,
+        "elapsed_seconds": 69.021,
+        "reports": [
+          {
+            "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "markers": "SIX_LINE_SETTINGS_PASS productLine=SPOT price=true lifecycle=false\nSPOT_ORDER_HISTORY_PASS user=5 total=8 filled=6 canceled=2 rejected=0 pages=1 sort=updatedAt.desc\nSPOT_PRIVATE_FILLS_PASS user=5 maker=6 fills=6 ownOrderSideOnly=true\nSIX_LINE_REALTIME_PASS productLine=SPOT depthEvents=23 wsTrades=6 restTrades=6 identitiesMatch=true\nSIX_LINE_PUBLIC_QUERY_PASS productLine=SPOT terminalByOrderAndClient=true balancesMatch=true\nSIX_LINE_TRADING_PASS productLine=SPOT instrumentId=867 trader=5 maker=6 executions=6 fundsDifference=0\nSIX_LINE_CONTRACT_PASS productLine=SPOT instrumentId=867 version=8 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[37666, 37751, 38133, 39253, 39953]\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 27.08 s -- in com.surprising.gateway.provider.local.SixProductLineContractLiveTest\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0",
+        "log": "evidence/SPOT/test-1792839072.log",
+        "log_sha256": "25b3c6bb0140baa2cc7e03d0de657d0c0933318cadbc36c5a86a7f0af15db05a"
+      },
+      "recovery": {
+        "product": "SPOT",
+        "passed": true,
+        "before": {
+          "applied_command_count": 47,
+          "state_hash": "3dd8b3c9a626b9f4"
+        },
+        "restored": {
+          "applied_command_count": 47,
+          "state_hash": "3dd8b3c9a626b9f4"
+        },
+        "snapshot_records_before": 0,
+        "snapshot_records_after": 2,
+        "elapsed_seconds": 25.392,
+        "steps": [
+          {
+            "name": "recovery-before-probe",
+            "exit_code": 0,
+            "log_sha256": "1507adabe773ce5da1c3b0ca7ca8bee50539a61231f1dfa243e3959a3d90fbb0"
+          },
+          {
+            "name": "recording-log-before",
+            "exit_code": 0,
+            "log_sha256": "27abc28d65c90722504bee9a266d0b0a7f29eb37aad8cffa8dab868c592e9f37"
+          },
+          {
+            "name": "snapshot-request",
+            "exit_code": 0,
+            "log_sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3"
+          },
+          {
+            "name": "recording-log-after",
+            "exit_code": 0,
+            "log_sha256": "ad83682f98610d55d3a8b5e60ba7ab40c03b6db22acc601e77335023e386f524"
+          },
+          {
+            "name": "recovery-after-snapshot-probe",
+            "exit_code": 0,
+            "log_sha256": "a4045d879ed2ed753b31a60794c23d6fa165d060a1c309ca41e096ffac40792a"
+          },
+          {
+            "name": "recovery-stop",
+            "exit_code": 0,
+            "log_sha256": "184e6c1b95f33279f28f266effadb13ad371392ea0e446f9b72b11596f3a4a65"
+          },
+          {
+            "name": "recovery-restart",
+            "exit_code": 0,
+            "log_sha256": "7511c887488a1398e728c6af237bdd2b341d62be363872d4c90d108e8cbb96fe"
+          },
+          {
+            "name": "recovery-final-stop",
+            "exit_code": 0,
+            "log_sha256": "aaf4f733993ce82eadc8b77a5b4548c9ef345ffd9a70e7128af496a7955becb8"
+          }
+        ]
+      }
+    },
+    {
+      "product": "LINEAR_PERPETUAL",
+      "startup": {
+        "action": "up",
+        "product": "LINEAR_PERPETUAL",
+        "run_id": "qa-20261024-linear-perpetual-uvvaxg47",
+        "exit_code": 0,
+        "elapsed_seconds": 125.736,
+        "log": "evidence/LINEAR_PERPETUAL/up-1792839207.log",
+        "log_sha256": "412cd2fde8d419d0fec151931bea237937f2bff3ce8b6022d5b8c9dc070c3177"
+      },
+      "live": {
+        "product": "LINEAR_PERPETUAL",
+        "command": "mvn -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+        "exit_code": 0,
+        "passed": true,
+        "elapsed_seconds": 49.524,
+        "reports": [
+          {
+            "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "markers": "SIX_LINE_SETTINGS_PASS productLine=LINEAR_PERPETUAL price=true lifecycle=true\nSIX_LINE_RISK_PASS productLine=LINEAR_PERPETUAL instrumentId=868 pnl=-1020000 notional=5000750000 maintenance=25003750 equity=9999996479115\nSIX_LINE_REALTIME_PASS productLine=LINEAR_PERPETUAL depthEvents=13 wsTrades=2 restTrades=2 identitiesMatch=true\nSIX_LINE_PUBLIC_QUERY_PASS productLine=LINEAR_PERPETUAL terminalByOrderAndClient=true balancesMatch=true\nSIX_LINE_TRADING_PASS productLine=LINEAR_PERPETUAL instrumentId=868 trader=11 maker=12 executions=2 fundsDifference=0\nSIX_LINE_CONTRACT_PASS productLine=LINEAR_PERPETUAL instrumentId=868 version=13 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[45440, 45545, 45973, 46367, 47482, 48222]\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 16.47 s -- in com.surprising.gateway.provider.local.SixProductLineContractLiveTest\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0",
+        "log": "evidence/LINEAR_PERPETUAL/test-1792839627.log",
+        "log_sha256": "6da0693cbd6e55d5b9a4cc4003c1d20b64dc2f6d8510389047b3dab5f0a8f176"
+      },
+      "recovery": {
+        "product": "LINEAR_PERPETUAL",
+        "passed": true,
+        "before": {
+          "applied_command_count": 3101,
+          "state_hash": "25b34b2447a4192e"
+        },
+        "restored": {
+          "applied_command_count": 3101,
+          "state_hash": "25b34b2447a4192e"
+        },
+        "snapshot_records_before": 0,
+        "snapshot_records_after": 2,
+        "elapsed_seconds": 6.614,
+        "resumed_after_driver_handoff": true,
+        "steps": [
+          {
+            "name": "resume-driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "7816a72c043115b2d0fe4e8921d22d7938db94c69c7a567b62859bb4bb20fe99"
+          },
+          {
+            "name": "resume-restart",
+            "exit_code": 0,
+            "log_sha256": "454e78e36e948ca2fc6d5b6b5e9fc6755970643547adf379ccf8aabdd6778558"
+          },
+          {
+            "name": "resume-final-stop",
+            "exit_code": 0,
+            "log_sha256": "03dbfe1a9fc5db831f87d80b8595213c112c457fac339b7c75603ac854182462"
+          }
+        ]
+      },
+      "core_funding_liquidation_recovery": {
+        "product": "LINEAR_PERPETUAL",
+        "passed": true,
+        "scope": "real Core funding, liquidation, funds conservation and snapshot recovery",
+        "before": {
+          "applied_command_count": 14,
+          "state_hash": "71cf86b3029d3dd7"
+        },
+        "snapshot_records_before": 0,
+        "snapshot_records_after": 2,
+        "funds_difference": 0,
+        "elapsed_seconds": 25.462,
+        "steps": [
+          {
+            "name": "start-driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "7816a72c043115b2d0fe4e8921d22d7938db94c69c7a567b62859bb4bb20fe99"
+          },
+          {
+            "name": "start",
+            "exit_code": 0,
+            "log_sha256": "12d70067e9f01ea3f58f4bac124d8333061b6255d6c17bd2151d31d694ba418d"
+          },
+          {
+            "name": "execute",
+            "exit_code": 0,
+            "log_sha256": "ee91adc608edf0ba9d5e70460496daa6a5340062e917c90eddeca7e2eb180396"
+          },
+          {
+            "name": "before-probe",
+            "exit_code": 0,
+            "log_sha256": "b4b3274d1e236f8146e8c871f4624d2cb2ed1c9f2880af0eb2243af655a1a751"
+          },
+          {
+            "name": "recording-before",
+            "exit_code": 0,
+            "log_sha256": "4e5a140aef86281ef7bf479cf91b48e774a3bfaf83ba13a086c8a75ea20fd5c9"
+          },
+          {
+            "name": "snapshot-request",
+            "exit_code": 0,
+            "log_sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3"
+          },
+          {
+            "name": "recording-after",
+            "exit_code": 0,
+            "log_sha256": "fdbac4155c3da35afe65a7a72260d4cc7fa9a1ebdba3c001aa5e32ad65a6ef5a"
+          },
+          {
+            "name": "stop-for-recovery",
+            "exit_code": 0,
+            "log_sha256": "0ba54c42385ea6571c732b96cc3e1a64c9de651a1feb68737937eab092dce3c4"
+          },
+          {
+            "name": "restart-driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "7816a72c043115b2d0fe4e8921d22d7938db94c69c7a567b62859bb4bb20fe99"
+          },
+          {
+            "name": "restart",
+            "exit_code": 0,
+            "log_sha256": "e738d1256db42210b2b333d9944060a262490051fa453b6b4c66e617230f7718"
+          },
+          {
+            "name": "verify",
+            "exit_code": 0,
+            "log_sha256": "500c28c7dfe9598860e079a879354409fae0a4d53682c998b34e06f3e08efea3"
+          },
+          {
+            "name": "final-stop",
+            "exit_code": 0,
+            "log_sha256": "0ba54c42385ea6571c732b96cc3e1a64c9de651a1feb68737937eab092dce3c4"
+          }
+        ]
+      }
+    },
+    {
+      "product": "INVERSE_PERPETUAL",
+      "startup": {
+        "action": "up",
+        "product": "INVERSE_PERPETUAL",
+        "run_id": "qa-20261024-inverse-perpetual-uvvaxg47",
+        "exit_code": 0,
+        "elapsed_seconds": 57.329,
+        "log": "evidence/INVERSE_PERPETUAL/up-1792839868.log",
+        "log_sha256": "c2f4ed54c99993016cbac50e942ee52fecad89f89fa703e68cd96c8b6353f324"
+      },
+      "live": {
+        "product": "INVERSE_PERPETUAL",
+        "command": "mvn -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+        "exit_code": 0,
+        "passed": true,
+        "elapsed_seconds": 47.867,
+        "reports": [
+          {
+            "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "markers": "SIX_LINE_SETTINGS_PASS productLine=INVERSE_PERPETUAL price=true lifecycle=true\nSIX_LINE_RISK_PASS productLine=INVERSE_PERPETUAL instrumentId=869 pnl=-12 notional=1999732 maintenance=9999 equity=999998988\nSIX_LINE_REALTIME_PASS productLine=INVERSE_PERPETUAL depthEvents=18 wsTrades=2 restTrades=2 identitiesMatch=true\nSIX_LINE_PUBLIC_QUERY_PASS productLine=INVERSE_PERPETUAL terminalByOrderAndClient=true balancesMatch=true\nSIX_LINE_TRADING_PASS productLine=INVERSE_PERPETUAL instrumentId=869 trader=15 maker=16 executions=2 fundsDifference=0\nSIX_LINE_CONTRACT_PASS productLine=INVERSE_PERPETUAL instrumentId=869 version=18 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[53712, 53745, 53839, 53945, 54152, 54300]\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 14.98 s -- in com.surprising.gateway.provider.local.SixProductLineContractLiveTest\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0",
+        "log": "evidence/INVERSE_PERPETUAL/test-1792839967.log",
+        "log_sha256": "27b30b1f53c097d241fc0ccbf6eac4d33b2332e37bb57225d66d1dd0bf127098"
+      },
+      "recovery": {
+        "product": "INVERSE_PERPETUAL",
+        "passed": true,
+        "before": {
+          "applied_command_count": 601,
+          "state_hash": "4c25e0942d04e4e0"
+        },
+        "restored": {
+          "applied_command_count": 601,
+          "state_hash": "4c25e0942d04e4e0"
+        },
+        "snapshot_records_before": 0,
+        "snapshot_records_after": 2,
+        "elapsed_seconds": 31.143,
+        "steps": [
+          {
+            "name": "recovery-before-probe",
+            "exit_code": 0,
+            "log_sha256": "7b412e09d6a7c3021f1925a92e2b2803fe6ca091cd76d67cce1f32e70cfae2d8"
+          },
+          {
+            "name": "recording-log-before",
+            "exit_code": 0,
+            "log_sha256": "a43ba5c758593039f14ede3255fd44bd52e9491759efcce2b9d1b8386fe7d37e"
+          },
+          {
+            "name": "snapshot-request",
+            "exit_code": 0,
+            "log_sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3"
+          },
+          {
+            "name": "recording-log-after",
+            "exit_code": 0,
+            "log_sha256": "7788dd41572c051e68c2a7fc7291cda05534d0cba13270de943e4d37771fb334"
+          },
+          {
+            "name": "recovery-after-snapshot-probe",
+            "exit_code": 0,
+            "log_sha256": "258a41bcdc3ebc432e37d6afcb78016124bd7043969ab11d95e93fdeae27280b"
+          },
+          {
+            "name": "recovery-stop",
+            "exit_code": 0,
+            "log_sha256": "c2938d2f04add1c64f2fc6ca67507099ae8edb67fe8a0357d3cadc4cda8d6515"
+          },
+          {
+            "name": "driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "846a07e163eeb7cb95cdfaf13ac8ec5b49e28f8be321ee0499b701857d7e30e1"
+          },
+          {
+            "name": "recovery-restart",
+            "exit_code": 0,
+            "log_sha256": "b255b919a72dffaa5ae834abb05952f8fe7e832a20a5a17f8840548fd063c77f"
+          },
+          {
+            "name": "recovery-final-stop",
+            "exit_code": 0,
+            "log_sha256": "4cd8dcc45e8c0960e5425e8110798acbec1b6220298f6f0d36c05cb41223eec4"
+          }
+        ]
+      },
+      "core_funding_liquidation_recovery": {
+        "product": "INVERSE_PERPETUAL",
+        "passed": true,
+        "scope": "real Core funding, liquidation, funds conservation and snapshot recovery",
+        "before": {
+          "applied_command_count": 14,
+          "state_hash": "862d6556d100c4a3"
+        },
+        "snapshot_records_before": 0,
+        "snapshot_records_after": 2,
+        "funds_difference": 0,
+        "elapsed_seconds": 33.045,
+        "steps": [
+          {
+            "name": "start-driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "846a07e163eeb7cb95cdfaf13ac8ec5b49e28f8be321ee0499b701857d7e30e1"
+          },
+          {
+            "name": "start",
+            "exit_code": 0,
+            "log_sha256": "ecb2c40e3a5d1e8443e95512c7e9fb0ff7eac771e3854a0522916637a60708f1"
+          },
+          {
+            "name": "execute",
+            "exit_code": 0,
+            "log_sha256": "ca686b14654f6adef66a1b3964add348c2f00556d81486f57384017e8c1e793b"
+          },
+          {
+            "name": "before-probe",
+            "exit_code": 0,
+            "log_sha256": "368cee0b452e9151e04e4a443a7fc4752d38594ae007c7762a19278f36506fc5"
+          },
+          {
+            "name": "recording-before",
+            "exit_code": 0,
+            "log_sha256": "2542295a70e0747cf90679b9d1cf5e7b170902573587d49d04a79b1a2d05016a"
+          },
+          {
+            "name": "snapshot-request",
+            "exit_code": 0,
+            "log_sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3"
+          },
+          {
+            "name": "recording-after",
+            "exit_code": 0,
+            "log_sha256": "8e2f10557ceff290ff3fb2e7df615a8d00e54210f1a1a848e2d6f9f50b63a0a0"
+          },
+          {
+            "name": "stop-for-recovery",
+            "exit_code": 0,
+            "log_sha256": "111e175daa167162384a88b92b395fa54501eb9d6c9b504aef6e5199ecf7a785"
+          },
+          {
+            "name": "restart-driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "846a07e163eeb7cb95cdfaf13ac8ec5b49e28f8be321ee0499b701857d7e30e1"
+          },
+          {
+            "name": "restart",
+            "exit_code": 0,
+            "log_sha256": "f8ef372fb2ed83fcfc55c0854a389ab8087dbe292696e5a9614e6a17b3972b32"
+          },
+          {
+            "name": "verify",
+            "exit_code": 0,
+            "log_sha256": "bf1e6251bd1311a8c1784ad8c552471f4133c1c41ac9b288d90bb457684cf3b0"
+          },
+          {
+            "name": "final-stop",
+            "exit_code": 0,
+            "log_sha256": "111e175daa167162384a88b92b395fa54501eb9d6c9b504aef6e5199ecf7a785"
+          }
+        ]
+      }
+    },
+    {
+      "product": "LINEAR_DELIVERY",
+      "startup": {
+        "action": "up",
+        "product": "LINEAR_DELIVERY",
+        "run_id": "qa-20261024-linear-delivery-uvvaxg47",
+        "exit_code": 0,
+        "elapsed_seconds": 58.447,
+        "log": "evidence/LINEAR_DELIVERY/up-1792840093.log",
+        "log_sha256": "11b44d4b5064a4de22468bbcea7629038faed0451e779ddde64e6d0554e549ce"
+      },
+      "live": {
+        "product": "LINEAR_DELIVERY",
+        "command": "mvn -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+        "exit_code": 0,
+        "passed": true,
+        "elapsed_seconds": 97.507,
+        "reports": [
+          {
+            "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "markers": "SIX_LINE_SETTINGS_PASS productLine=LINEAR_DELIVERY price=true lifecycle=true\nSIX_LINE_RISK_PASS productLine=LINEAR_DELIVERY instrumentId=870 pnl=-1020000 notional=5000000000 maintenance=25000000 equity=9999996479490\nSIX_LINE_REALTIME_PASS productLine=LINEAR_DELIVERY depthEvents=22 wsTrades=2 restTrades=2 identitiesMatch=true\nSIX_LINE_PUBLIC_QUERY_PASS productLine=LINEAR_DELIVERY terminalByOrderAndClient=true balancesMatch=true\nSIX_LINE_TRADING_PASS productLine=LINEAR_DELIVERY instrumentId=870 trader=19 maker=20 executions=2 fundsDifference=0\nLINEAR_DELIVERY_EXPIRY_PASS instrumentId=871 userId=21 makerId=22 expiry=2026-10-24T11:10:54.996909Z status=CLOSED pnl=200000000 canceled=1 stopsCanceled=2 makerQuotes=true positions=0 locked=0 fundsDifference=0\nSIX_LINE_CONTRACT_PASS productLine=LINEAR_DELIVERY instrumentId=870 version=23 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[55647, 55678, 55795, 55907, 56093, 56184]\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 66.82 s -- in com.surprising.gateway.provider.local.SixProductLineContractLiveTest\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0",
+        "log": "evidence/LINEAR_DELIVERY/test-1792840163.log",
+        "log_sha256": "a63d30a176dba6431dbeab01a67c66f0afe4b595883566ccd4c1d54cf24047c3"
+      },
+      "recovery": {
+        "product": "LINEAR_DELIVERY",
+        "passed": true,
+        "before": {
+          "applied_command_count": 780,
+          "state_hash": "bc69d29ec454591c"
+        },
+        "restored": {
+          "applied_command_count": 780,
+          "state_hash": "bc69d29ec454591c"
+        },
+        "snapshot_records_before": 0,
+        "snapshot_records_after": 2,
+        "elapsed_seconds": 25.652,
+        "steps": [
+          {
+            "name": "recovery-before-probe",
+            "exit_code": 0,
+            "log_sha256": "93f12a1f96435e9446026eaf03bda47f367bbdffe4695e37d23384a542e085b6"
+          },
+          {
+            "name": "recording-log-before",
+            "exit_code": 0,
+            "log_sha256": "c0adaa7b5534cb2c11eaf94f67ae1a1648644e0636a39dcbe4d76172e7cfdc78"
+          },
+          {
+            "name": "snapshot-request",
+            "exit_code": 0,
+            "log_sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3"
+          },
+          {
+            "name": "recording-log-after",
+            "exit_code": 0,
+            "log_sha256": "cbf93b3323fb177d0704240f3b5a710974a6c03ae83a0cc283e808d9c431a2ac"
+          },
+          {
+            "name": "recovery-after-snapshot-probe",
+            "exit_code": 0,
+            "log_sha256": "ab49feea671542fe25af64ccdf52b4bc3706c14a9050d6559409cd439497dc18"
+          },
+          {
+            "name": "recovery-stop",
+            "exit_code": 0,
+            "log_sha256": "326bf6d528d58fb155cbf54752b1ceb19066e2e10e0af16058a7fa055424dde6"
+          },
+          {
+            "name": "driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "268502264ea619468d129f97f3d6599d1cff840615330b92ab18818a53047b3a"
+          },
+          {
+            "name": "recovery-restart",
+            "exit_code": 0,
+            "log_sha256": "c87b4ac92869fb7984950f18313790dae5f5d9d960cfca1f98d5597df70820fb"
+          },
+          {
+            "name": "recovery-final-stop",
+            "exit_code": 0,
+            "log_sha256": "55be2f0f2bd961a604e83edd1b00cff081f2787870cd06c3502a56ecdc1e6cae"
+          }
+        ]
+      }
+    },
+    {
+      "product": "INVERSE_DELIVERY",
+      "startup": {
+        "action": "up",
+        "product": "INVERSE_DELIVERY",
+        "run_id": "qa-20261024-inverse-delivery-uvvaxg47",
+        "exit_code": 0,
+        "elapsed_seconds": 62.128,
+        "log": "evidence/INVERSE_DELIVERY/up-1792840329.log",
+        "log_sha256": "a0e0df1f2ea1c0d12ed9c09b97d31d351d2a88af860a479e15266befa5ca33d8"
+      },
+      "live": {
+        "product": "INVERSE_DELIVERY",
+        "command": "mvn -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+        "exit_code": 0,
+        "passed": true,
+        "elapsed_seconds": 97.724,
+        "reports": [
+          {
+            "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "markers": "SIX_LINE_SETTINGS_PASS productLine=INVERSE_DELIVERY price=true lifecycle=true\nSIX_LINE_RISK_PASS productLine=INVERSE_DELIVERY instrumentId=872 pnl=-40 notional=2000000 maintenance=10000 equity=999998960\nSIX_LINE_REALTIME_PASS productLine=INVERSE_DELIVERY depthEvents=21 wsTrades=2 restTrades=2 identitiesMatch=true\nSIX_LINE_PUBLIC_QUERY_PASS productLine=INVERSE_DELIVERY terminalByOrderAndClient=true balancesMatch=true\nSIX_LINE_TRADING_PASS productLine=INVERSE_DELIVERY instrumentId=872 trader=25 maker=26 executions=2 fundsDifference=0\nINVERSE_DELIVERY_EXPIRY_PASS instrumentId=873 userId=27 makerId=28 expiry=2026-10-24T11:14:49.845828Z status=CLOSED pnl=78431 canceled=1 stopsCanceled=2 makerQuotes=true positions=0 locked=0 fundsDifference=0\nSIX_LINE_CONTRACT_PASS productLine=INVERSE_DELIVERY instrumentId=872 version=33 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[57645, 57676, 57782, 57897, 58093, 58197]\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 66.76 s -- in com.surprising.gateway.provider.local.SixProductLineContractLiveTest\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0",
+        "log": "evidence/INVERSE_DELIVERY/test-1792840398.log",
+        "log_sha256": "bfb63d06c266772d96d87f2764d0e7726235ec51f5a20388a85fd0357b28d24c"
+      },
+      "recovery": {
+        "product": "INVERSE_DELIVERY",
+        "passed": true,
+        "before": {
+          "applied_command_count": 735,
+          "state_hash": "4cf2de0cb5b97b7f"
+        },
+        "restored": {
+          "applied_command_count": 735,
+          "state_hash": "4cf2de0cb5b97b7f"
+        },
+        "snapshot_records_before": 0,
+        "snapshot_records_after": 2,
+        "elapsed_seconds": 27.484,
+        "steps": [
+          {
+            "name": "recovery-before-probe",
+            "exit_code": 0,
+            "log_sha256": "44805190f8236e4eaffbf89e682acf661794035d8efe432322c38f46fe78c337"
+          },
+          {
+            "name": "recording-log-before",
+            "exit_code": 0,
+            "log_sha256": "a7f7af8231ecbc4c3a35bc7a3ba081bbcdbc46446ea6172118e74653141cee67"
+          },
+          {
+            "name": "snapshot-request",
+            "exit_code": 0,
+            "log_sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3"
+          },
+          {
+            "name": "recording-log-after",
+            "exit_code": 0,
+            "log_sha256": "3b24227340c7fab60a1fd1ea90fb3bec1990e04669a61d6a162fd2232d4ec834"
+          },
+          {
+            "name": "recovery-after-snapshot-probe",
+            "exit_code": 0,
+            "log_sha256": "c51f9bc2d3da17f8cdb7ca7f8338fb2e7e817a75fe0e0364242461682d59996c"
+          },
+          {
+            "name": "recovery-stop",
+            "exit_code": 0,
+            "log_sha256": "932aa360eee8ca417873a65d7aba4e023d2f1480b9e374ec6d46eb4b27c2ca6b"
+          },
+          {
+            "name": "driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "8cebdd1e9b9a7ecb18e6cb764bed104623859a7c4f256b449c1445e89be98425"
+          },
+          {
+            "name": "recovery-restart",
+            "exit_code": 0,
+            "log_sha256": "5268e16eb32e9ed75e32b3ab2efd871c7eca375676a40b1393e4ff9afb9ff6db"
+          },
+          {
+            "name": "recovery-final-stop",
+            "exit_code": 0,
+            "log_sha256": "7423c51c3f693d2d2cfa7c9f1e951c8741477734f64a884f07127bc365a2087c"
+          }
+        ]
+      }
+    },
+    {
+      "product": "OPTION",
+      "startup": {
+        "action": "up",
+        "product": "OPTION",
+        "run_id": "qa-20261024-option-uvvaxg47",
+        "exit_code": 0,
+        "elapsed_seconds": 63.532,
+        "log": "evidence/OPTION/up-1792840543.log",
+        "log_sha256": "b6a47108cf4e226f3a96e3efa176f2c17a2e49a6d76fa00117ac5b0eebd43766"
+      },
+      "live": {
+        "product": "OPTION",
+        "command": "mvn -pl surprising-gateway -am -Dtest=SixProductLineContractLiveTest -Dsurefire.failIfNoSpecifiedTests=false test",
+        "exit_code": 0,
+        "passed": true,
+        "elapsed_seconds": 175.782,
+        "reports": [
+          {
+            "class": "com.surprising.gateway.provider.local.SixProductLineContractLiveTest",
+            "tests": 1,
+            "failures": 0,
+            "errors": 0,
+            "skipped": 0
+          }
+        ],
+        "markers": "SIX_LINE_SETTINGS_PASS productLine=OPTION price=true lifecycle=true\nSIX_LINE_RISK_PASS productLine=OPTION instrumentId=874 pnl=-100000 notional=100000000 maintenance=0 equity=9999999849950\nOPTION_TRIGGER_READ_PASS makerOcoReceipt=true terminalUserLookup=2 adminTimeline=2 source=LAST\nSIX_LINE_REALTIME_PASS productLine=OPTION depthEvents=16 wsTrades=2 restTrades=2 identitiesMatch=true\nSIX_LINE_PUBLIC_QUERY_PASS productLine=OPTION terminalByOrderAndClient=true balancesMatch=true\nSIX_LINE_TRADING_PASS productLine=OPTION instrumentId=874 trader=31 maker=32 executions=2 fundsDifference=0\nOPTION_EXPIRY_ROW_PASS instrumentId=876 buyer=33 maker=34 type=CALL moneyness=ITM exerciseCash=400000000 positions=0 locked=0\nOPTION_EXPIRY_ROW_PASS instrumentId=877 buyer=35 maker=36 type=CALL moneyness=ATM exerciseCash=0 positions=0 locked=0\nOPTION_EXPIRY_ROW_PASS instrumentId=878 buyer=37 maker=38 type=CALL moneyness=OTM exerciseCash=0 positions=0 locked=0\nOPTION_EXPIRY_ROW_PASS instrumentId=879 buyer=39 maker=40 type=PUT moneyness=ITM exerciseCash=400000000 positions=0 locked=0\nOPTION_EXPIRY_ROW_PASS instrumentId=880 buyer=41 maker=42 type=PUT moneyness=ATM exerciseCash=0 positions=0 locked=0\nOPTION_EXPIRY_ROW_PASS instrumentId=881 buyer=43 maker=44 type=PUT moneyness=OTM exerciseCash=0 positions=0 locked=0\nOPTION_EXPIRY_MATRIX_PASS rows=6 premiumPerPair=1000000000 takerFee=500000 makerFee=200000 fundsDifference=0\nSIX_LINE_CONTRACT_PASS productLine=OPTION instrumentId=874 version=46 transitions=DRAFT,PRE_TRADING,TRADING,EDIT,HALT processes=[59544, 59578, 59681, 59815, 60017, 60131]\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 144.6 s -- in com.surprising.gateway.provider.local.SixProductLineContractLiveTest\n[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0",
+        "log": "evidence/OPTION/test-1792840629.log",
+        "log_sha256": "9d91e85cdc1fdefd73a9a6c1b636dc252fe17097d354dead4be7871e0cf13aa2"
+      },
+      "recovery": {
+        "product": "OPTION",
+        "passed": true,
+        "before": {
+          "applied_command_count": 1994,
+          "state_hash": "4c77c10da7c1cad2"
+        },
+        "restored": {
+          "applied_command_count": 1994,
+          "state_hash": "4c77c10da7c1cad2"
+        },
+        "snapshot_records_before": 0,
+        "snapshot_records_after": 2,
+        "elapsed_seconds": 26.385,
+        "steps": [
+          {
+            "name": "recovery-before-probe",
+            "exit_code": 0,
+            "log_sha256": "4d7ced4bcf2c6a98c4ad00f3ca2c99566489ea3c757e30aa8b0df93a395a07c2"
+          },
+          {
+            "name": "recording-log-before",
+            "exit_code": 0,
+            "log_sha256": "18000aa2c8c548489d3c00f3e0878502fd82441ad3e07b33e667442e1467f83c"
+          },
+          {
+            "name": "snapshot-request",
+            "exit_code": 0,
+            "log_sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3"
+          },
+          {
+            "name": "recording-log-after",
+            "exit_code": 0,
+            "log_sha256": "9420be7cfba5ad60ed429f5c8944487a6949779511e7b4670547d068d85be7ba"
+          },
+          {
+            "name": "recovery-after-snapshot-probe",
+            "exit_code": 0,
+            "log_sha256": "4c6adfc6e863de07efb7258946bf05c10c678f4445e29ef0b813c0f086aa78ca"
+          },
+          {
+            "name": "recovery-stop",
+            "exit_code": 0,
+            "log_sha256": "f2aa2734342bb7506fbb8f16196927244c4974682c7fbac15bf1db319ec1e91e"
+          },
+          {
+            "name": "driver-inactive",
+            "exit_code": 0,
+            "log_sha256": "42e3f78ac63da77c0fcdde2ab0abe2e1642efa5741ecd38ca4ce5e90c6ed1bd1"
+          },
+          {
+            "name": "recovery-restart",
+            "exit_code": 0,
+            "log_sha256": "d40015845ce14fbaa987557b81cd60536ee37d73789816093fa1cea069d27f39"
+          },
+          {
+            "name": "recovery-final-stop",
+            "exit_code": 0,
+            "log_sha256": "2188a4a2d5edca655ff3add4ae5f76879d89bdbeed1f7a8583b1e619ff0a6d83"
+          }
+        ]
+      }
+    }
+  ],
+  "resolved_runtime_defect": "Reusable decoder response-header initialization dereferenced kind() before messageType was assigned; check messageType directly.",
+  "verification_adjustments": [
+    "Updated stale schema-9 golden bytes/fingerprint to current schema-16; independently recomputed canonical-v2 SHA-256.",
+    "Corrected snapshot-id corruption offset to product-code plus applied-count in the current 81-byte manifest header; refusal and unchanged live state passed.",
+    "Recovery harness initially selected system JDK 25 through java_home; switched to the verified HotSpot JDK 27 executable.",
+    "First LINEAR_PERPETUAL activation attempt timed out while previous SPOT remained enabled in the owned shared QA database; selected only the running product before retry and subsequent starts.",
+    "First LINEAR_PERPETUAL immediate restart encountered a fresh MediaDriver heartbeat. Verified inactivity using Aeron CommonContext.isDriverActive, then restarted with the original snapshot/log and verified the exact hash; subsequent restarts use this check."
+  ],
+  "not_covered": [
+    "Browser/Flutter interaction",
+    "Three-node leader failover or forced-kill recovery",
+    "Mid-page funding/ADL/settlement crash continuation",
+    "Automatic funding interval scheduling",
+    "End-to-end ADL and insurance dispatch workflows",
+    "Automatic stop-loss/take-profit execution",
+    "Wallet, load, JMH, JFR and performance conclusions"
+  ],
+  "cleanup": {
+    "status": "complete",
+    "owned_service_pid_records_remaining": 0,
+    "owned_launchd_labels_remaining": 0,
+    "dependencies": [
+      {
+        "service": "price-fixture",
+        "pid": 22150,
+        "stopped": true
+      },
+      {
+        "service": "kafka",
+        "pid": 21745,
+        "stopped": true
+      },
+      {
+        "service": "redis",
+        "pid": 21047,
+        "stopped": true
+      },
+      {
+        "service": "postgres",
+        "pid": 21035,
+        "stopped": true
+      }
+    ],
+    "owned_ports_released": [
+      15432,
+      16379,
+      19092,
+      19093,
+      19194,
+      19195
+    ],
+    "ipc_directories_removed": [
+      "/tmp/sixqa-uvvaxg47-core-surprising-linear_perpetual-0",
+      "/tmp/sixqa-uvvaxg47-app",
+      "/tmp/sixqa-uvvaxg47-core-surprising-inverse_perpetual-0",
+      "/tmp/sixqa-uvvaxg47-core-surprising-linear_delivery-0",
+      "/tmp/sixqa-uvvaxg47-core-surprising-inverse_delivery-0",
+      "/tmp/sixqa-uvvaxg47-core-surprising-option-0",
+      "/tmp/sixqa-uvvaxg47-core-surprising-spot-0"
+    ],
+    "temporary_root_removed": "/var/folders/hx/xjj38_ln7kq9t86kzh9jz_9h0000gn/T/surprising-sixline-functional-20261024-uvvaxg47",
+    "unrelated_processes_or_data_modified": false
+  }
+}

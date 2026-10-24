@@ -1756,9 +1756,9 @@ class TradingCoreOwnerTest {
             byte[] snapshot = before.snapshot(75);
             // 按现有快照结构进行小端故障修改的缓冲
             ByteBuffer manifest = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
-            // 当前格式 manifest 快照 ID 所在固定绝对偏移
+            // 当前格式快照 ID 位于产品码和应用命令计数之后
             int snapshotIdOffset = SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
-                    + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + 45;
+                    + SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH + Byte.BYTES + Long.BYTES;
             manifest.putLong(snapshotIdOffset, manifest.getLong(snapshotIdOffset) + 1);
             // 维护故障快照外层 CRC32C，使恢复必须检查内部配对身份
             CRC32C checksum = new CRC32C();

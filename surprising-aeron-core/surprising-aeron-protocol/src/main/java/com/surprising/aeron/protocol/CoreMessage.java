@@ -128,7 +128,7 @@ public final class CoreMessage {
     public CoreMessageHeader responseHeader(CoreMessageType responseType) {
         if (!decoderSlot) return header.response(responseType);
         if (!decoderLeased) throw new IllegalStateException("decoder slot is not leased");
-        if (decoderResponseHeader.kind() != null) {
+        if (decoderResponseHeader.messageType() != null) {
             if (decoderResponseHeader.messageType() != responseType)
                 throw new IllegalStateException("response header type changed within one command");
             return decoderResponseHeader;
