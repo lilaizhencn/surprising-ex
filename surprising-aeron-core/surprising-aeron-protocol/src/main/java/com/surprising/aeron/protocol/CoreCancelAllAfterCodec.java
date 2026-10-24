@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CoreCancelAllAfterCodec {
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
     private static final int COMMAND_VERSION = 5;
     private static final int MAX_TEXT_BYTES = 64;
 
@@ -64,15 +64,14 @@ public final class CoreCancelAllAfterCodec {
     public static byte[] encodeList(List<CoreCancelAllAfterView> values) {
         int length = Integer.BYTES * 2;
         for (CoreCancelAllAfterView value : values) {
-            length = Math.addExact(length, Long.BYTES * 5 + Integer.BYTES + textLength(value.symbolScope()));
+            length = Math.addExact(length, Long.BYTES * 4 + Integer.BYTES + textLength(value.symbolScope()));
         }
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION).putInt(values.size());
         for (CoreCancelAllAfterView value : values) {
             buffer.putLong(value.userId());
             CoreStateQueryCodec.putText(buffer, value.symbolScope(), true, MAX_TEXT_BYTES);
-            buffer.putLong(value.countdownMillis())
-                    .putInt(value.status().wireCode())
+            buffer.putInt(value.status().wireCode())
                     .putLong(value.triggerAtEpochMillis())
                     .putLong(value.updatedAtEpochMillis())
                     .putLong(value.revision());
@@ -86,7 +85,7 @@ public final class CoreCancelAllAfterCodec {
         int count = reader.count();
         List<CoreCancelAllAfterView> values = new ArrayList<>(count);
         for (int index = 0; index < count; index++) {
-            values.add(new CoreCancelAllAfterView(reader.longValue(), reader.text(), reader.longValue(),
+            values.add(new CoreCancelAllAfterView(reader.longValue(), reader.text(),
                     CoreCancelAllAfterStatus.fromWireCode(reader.intValue()), reader.longValue(), reader.longValue(),
                     reader.longValue()));
         }

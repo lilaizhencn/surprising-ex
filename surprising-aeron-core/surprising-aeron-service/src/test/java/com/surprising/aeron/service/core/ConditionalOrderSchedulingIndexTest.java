@@ -72,7 +72,7 @@ class ConditionalOrderSchedulingIndexTest {
 
     @Test
     void aPersistedClaimBecomesDueOnlyWhenItsLeaseExpires() {
-        var claimed = new CoreCancelAllAfterState(7, "1", 1000,
+        var claimed = new CoreCancelAllAfterState(7, "1",
                 CoreCancelAllAfterStatus.TRIGGERING, 2000, 2000, 2);
         var state = new TradingCoreState(ProductLine.SPOT, 0, java.util.Map.of(), java.util.Map.of(),
                 java.util.Map.of(), com.surprising.aeron.model.CoreRiskState.empty(),
@@ -95,7 +95,7 @@ class ConditionalOrderSchedulingIndexTest {
     private static CoreAlgoOrderState algo(long id, long user, String symbol, long due) {
         return new CoreAlgoOrderState(id, user, "algo-" + id, symbol, 0, CoreOrderSide.BUY, 100, 100, 10,
                 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET, false, CoreTimeInForce.GTC, 1,
-                0, "", 1, due, 0, 1, 1, 1, List.of());
+                0, "", 1, due, 1, 1, 1, List.of());
     }
 
     /**
@@ -105,6 +105,6 @@ class ConditionalOrderSchedulingIndexTest {
      * @param due 算法下一切片或计时器触发毫秒时间
      */
     private static CoreCancelAllAfterState timer(long user, String scope, long due) {
-        return new CoreCancelAllAfterState(user, scope, 100, CoreCancelAllAfterStatus.ACTIVE, due, 1, 1);
+        return new CoreCancelAllAfterState(user, scope, CoreCancelAllAfterStatus.ACTIVE, due, 1, 1);
     }
 }

@@ -26,12 +26,12 @@ public sealed interface CoreAlgoOrderCommand {
     }
 
     record Update(long algoOrderId, long expectedRevision, int statusCode, long currentOrderId,
-                  String rejectReason, long nextSliceAtEpochMillis, long completedAtEpochMillis,
+                  String rejectReason, long nextSliceAtEpochMillis,
                   long updatedAtEpochMillis, long appendedChildOrderId) implements CoreAlgoOrderCommand {
         public Update {
             rejectReason = rejectReason == null ? "" : rejectReason;
             if (algoOrderId <= 0 || expectedRevision < 1 || statusCode < 0 || currentOrderId < 0
-                    || nextSliceAtEpochMillis < 0 || completedAtEpochMillis < 0 || updatedAtEpochMillis <= 0
+                    || nextSliceAtEpochMillis < 0 || updatedAtEpochMillis <= 0
                     || appendedChildOrderId < 0) {
                 throw new IllegalArgumentException("invalid algo order update");
             }

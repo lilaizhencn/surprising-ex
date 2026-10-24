@@ -7,11 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CoreAlgoOrderCodec {
-    private static final int VERSION = 3;
-    private static final int COMMAND_VERSION = 5;
+    private static final int VERSION = 4;
+    private static final int COMMAND_VERSION = 6;
     private static final int MAX_TEXT_BYTES = 256;
     private static final int FIXED_ITEM_BYTES =
-            Long.BYTES * 16 + Integer.BYTES * 8 + Byte.BYTES;
+            Long.BYTES * 15 + Integer.BYTES * 8 + Byte.BYTES;
 
     private CoreAlgoOrderCodec() { }
 
@@ -21,7 +21,7 @@ public final class CoreAlgoOrderCodec {
                     - (value.algoTypeCode() == CoreAlgoOrderCommand.TWAP_TYPE_CODE ? Integer.BYTES : 0)
                     + (value.algoTypeCode() == CoreAlgoOrderCommand.ICEBERG_TYPE_CODE ? 0 : Long.BYTES)
                     + textLength(value.clientAlgoOrderId()) + textLength(value.instrumentId());
-            case CoreAlgoOrderCommand.Update value -> Integer.BYTES * 3 + Long.BYTES * 7
+            case CoreAlgoOrderCommand.Update value -> Integer.BYTES * 3 + Long.BYTES * 6
                     + textLength(value.rejectReason());
         };
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
@@ -44,7 +44,7 @@ public final class CoreAlgoOrderCodec {
                 buffer.putInt(2).putLong(value.algoOrderId()).putLong(value.expectedRevision())
                         .putInt(value.statusCode()).putLong(value.currentOrderId());
                 CoreStateQueryCodec.putText(buffer, value.rejectReason(), true, MAX_TEXT_BYTES);
-                buffer.putLong(value.nextSliceAtEpochMillis()).putLong(value.completedAtEpochMillis())
+                buffer.putLong(value.nextSliceAtEpochMillis())
                         .putLong(value.updatedAtEpochMillis()).putLong(value.appendedChildOrderId());
             }
         }
@@ -57,7 +57,7 @@ public final class CoreAlgoOrderCodec {
         CoreAlgoOrderCommand value = switch (reader.intValue()) {
             case 1 -> readCreate(reader);
             case 2 -> new CoreAlgoOrderCommand.Update(reader.longValue(), reader.longValue(), reader.intValue(),
-                    reader.longValue(), reader.text(), reader.longValue(), reader.longValue(), reader.longValue(),
+                    reader.longValue(), reader.text(), reader.longValue(), reader.longValue(),
                     reader.longValue());
             default -> throw new ProtocolException("unsupported algo command action");
         };
@@ -168,7 +168,7 @@ public final class CoreAlgoOrderCodec {
         buffer.putInt(value.statusCode()).putLong(value.currentOrderId());
         CoreStateQueryCodec.putText(buffer, value.rejectReason(), true, MAX_TEXT_BYTES);
         buffer.putLong(value.startAtEpochMillis()).putLong(value.nextSliceAtEpochMillis())
-                .putLong(value.completedAtEpochMillis()).putLong(value.createdAtEpochMillis())
+                .putLong(value.createdAtEpochMillis())
                 .putLong(value.updatedAtEpochMillis()).putLong(value.revision())
                 .putInt(value.childOrderIds().size());
         for (Long childOrderId : value.childOrderIds()) {
@@ -190,13 +190,13 @@ public final class CoreAlgoOrderCodec {
         CoreTimeInForce tif = type == CoreAlgoOrderCommand.TWAP_TYPE_CODE ? CoreTimeInForce.IOC
                 : CoreTimeInForce.fromWireCode(reader.intValue());
         int status = reader.intValue(); long current = reader.longValue(); String reason = reader.text();
-        long start = reader.longValue(), next = reader.longValue(), completed = reader.longValue();
+        long start = reader.longValue(), next = reader.longValue();
         long created = reader.longValue(), updated = reader.longValue(), revision = reader.longValue();
         int childCount = reader.count(); List<Long> children = new ArrayList<>(childCount);
         for (int index = 0; index < childCount; index++) children.add(reader.longValue());
         return new CoreAlgoOrderView(id, userId, clientId, instrumentId, type, side, price, quantity, childQuantity,
                 interval, duration, margin, position, reduce, tif, status, current, reason,
-                start, next, completed, created, updated, revision, children, reader.longValue(),
+                start, next, created, updated, revision, children, reader.longValue(),
                 reader.longValue(), reader.intValue());
     }
 

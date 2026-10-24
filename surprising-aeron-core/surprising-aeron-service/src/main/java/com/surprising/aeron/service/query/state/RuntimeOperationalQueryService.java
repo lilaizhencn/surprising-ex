@@ -162,7 +162,7 @@ public final class RuntimeOperationalQueryService {
                     state.childQuantitySteps(), state.intervalSeconds(), state.durationSeconds(), state.marginMode(),
                     state.positionSide(), state.reduceOnly(), state.timeInForce(), state.statusCode(),
                     state.currentOrderId(), state.rejectReason(), state.startAtEpochMillis(),
-                    state.nextSliceAtEpochMillis(), state.completedAtEpochMillis(), state.createdAtEpochMillis(),
+                    state.nextSliceAtEpochMillis(), state.createdAtEpochMillis(),
                     state.updatedAtEpochMillis(), state.revision(), children, executed, active, activeCount));
             if (result.size() == MAX_QUERY_ENTITIES) break;
         }

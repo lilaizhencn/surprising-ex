@@ -32,7 +32,6 @@ public record AlgoOrderRecord(
         String rejectReason,
         Instant startAt,
         Instant nextSliceAt,
-        Instant completedAt,
         Instant createdAt,
         Instant updatedAt) {
 

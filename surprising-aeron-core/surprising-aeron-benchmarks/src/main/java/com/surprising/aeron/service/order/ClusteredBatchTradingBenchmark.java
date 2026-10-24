@@ -729,7 +729,7 @@ public class ClusteredBatchTradingBenchmark {
             long runtimeRevision = runtime.revision();
             long revision = before.revision() + 1;
             var next = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
-                    9_000_000, before.revision(), 0, 0, "", 1, 0, revision, 0);
+                    9_000_000, before.revision(), 0, 0, "", 1, revision, 0);
             long terminalBefore = terminal;
             singleResponses = true;
             expectSingleRejection = true;
@@ -762,7 +762,7 @@ public class ClusteredBatchTradingBenchmark {
                                 CorePositionSide.NET, false, CoreTimeInForce.IOC, 1);
                     } else {
                         algo = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
-                                id, current.revision(), 0, 0, "", 1, 0, revision, 0);
+                                id, current.revision(), 0, 0, "", 1, revision, 0);
                     }
                     send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000 + i,
                             com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(algo)));

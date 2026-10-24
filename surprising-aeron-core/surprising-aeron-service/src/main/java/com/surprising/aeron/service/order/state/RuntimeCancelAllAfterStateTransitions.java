@@ -42,7 +42,7 @@ public final class RuntimeCancelAllAfterStateTransitions {
                 } catch (ArithmeticException overflow) {
                     throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_TRIGGER", "timer deadline overflow");
                 }
-                next = new CoreCancelAllAfterState(userId, command.symbolScope(), command.countdownMillis(), status,
+                next = new CoreCancelAllAfterState(userId, command.symbolScope(), status,
                         triggerAt,
                         command.updatedAtEpochMillis(),
                         current == null ? 1 : Math.incrementExact(current.revision()));
@@ -52,7 +52,7 @@ public final class RuntimeCancelAllAfterStateTransitions {
                 if (!current.claimableAt(command.updatedAtEpochMillis())) {
                     throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_DUE", "timer is not due");
                 }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
+                next = new CoreCancelAllAfterState(userId, current.symbolScope(),
                         CoreCancelAllAfterStatus.TRIGGERING, current.triggerAtEpochMillis(),
                         command.updatedAtEpochMillis(),
                         Math.incrementExact(current.revision()));
@@ -62,7 +62,7 @@ public final class RuntimeCancelAllAfterStateTransitions {
                 if (current.status() != CoreCancelAllAfterStatus.TRIGGERING) {
                     throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_CLAIMED", "timer is not claimed");
                 }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
+                next = new CoreCancelAllAfterState(userId, current.symbolScope(),
                         CoreCancelAllAfterStatus.TRIGGERED, current.triggerAtEpochMillis(),
                         command.updatedAtEpochMillis(),
                         Math.incrementExact(current.revision()));
@@ -72,7 +72,7 @@ public final class RuntimeCancelAllAfterStateTransitions {
                 if (current.status() != CoreCancelAllAfterStatus.TRIGGERING) {
                     throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_CLAIMED", "timer is not claimed");
                 }
-                next = new CoreCancelAllAfterState(userId, current.symbolScope(), current.countdownMillis(),
+                next = new CoreCancelAllAfterState(userId, current.symbolScope(),
                         CoreCancelAllAfterStatus.ACTIVE, current.triggerAtEpochMillis(),
                         command.updatedAtEpochMillis(),
                         Math.incrementExact(current.revision()));

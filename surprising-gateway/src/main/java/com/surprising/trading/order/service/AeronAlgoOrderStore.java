@@ -62,7 +62,7 @@ public class AeronAlgoOrderStore {
     private static CoreAlgoOrderCommand.Update updateCommand(AlgoOrderRecord value, long revision, long appendedChild) {
         return new CoreAlgoOrderCommand.Update(value.algoOrderId(), revision, value.status().ordinal(),
                 value.currentOrderId() == null ? 0 : value.currentOrderId(), text(value.rejectReason()),
-                epoch(value.nextSliceAt()), epoch(value.completedAt()), epoch(value.updatedAt()), appendedChild);
+                epoch(value.nextSliceAt()), epoch(value.updatedAt()), appendedChild);
     }
 
     public CoreAlgoOrderView get(long userId, long id) {
@@ -87,8 +87,7 @@ public class AeronAlgoOrderStore {
                 PositionSide.valueOf(value.positionSide().name()), value.reduceOnly(),
                 TimeInForce.valueOf(value.timeInForce().name()), AlgoOrderStatus.values()[value.statusCode()],
                 value.currentOrderId() == 0 ? null : value.currentOrderId(), empty(value.rejectReason()),
-                instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()),
-                instant(value.completedAtEpochMillis()), instant(value.createdAtEpochMillis()), instant(value.updatedAtEpochMillis()));
+                instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()), instant(value.createdAtEpochMillis()), instant(value.updatedAtEpochMillis()));
     }
     public AlgoOrderResponse response(CoreAlgoOrderView value) {
         AlgoOrderRecord record = record(value);
@@ -97,7 +96,7 @@ public class AeronAlgoOrderStore {
                 record.intervalSeconds(), record.durationSeconds(), record.marginMode(), record.positionSide(), record.reduceOnly(),
                 record.postOnly(), record.timeInForce(), record.status(), value.executedQuantitySteps(),
                 value.activeQuantitySteps(), value.childOrderIds().size(), record.currentOrderId(), record.rejectReason(),
-                record.startAt(), record.nextSliceAt(), record.completedAt(), record.createdAt(), record.updatedAt());
+                record.startAt(), record.nextSliceAt(), record.createdAt(), record.updatedAt());
     }
 
     private static long epoch(Instant value) { return value == null ? 0 : value.toEpochMilli(); }

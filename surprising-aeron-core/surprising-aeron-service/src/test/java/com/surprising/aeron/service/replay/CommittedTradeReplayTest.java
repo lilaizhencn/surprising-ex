@@ -280,7 +280,7 @@ class CommittedTradeReplayTest {
     private CoreAlgoOrderView algo(int status,long revision,List<Long> children) {
         return new CoreAlgoOrderView(701,7,"algo-client-701","604",0,CoreOrderSide.BUY,100,4,2,5,20,
                 CoreMarginMode.CROSS,CorePositionSide.NET,false,CoreTimeInForce.GTC,status,
-                children.isEmpty()?0:children.getLast(),"",TIME,TIME+5000,0,TIME,TIME+revision,revision,children,0,0,0);
+                children.isEmpty()?0:children.getLast(),"",TIME,TIME+5000,TIME,TIME+revision,revision,children,0,0,0);
     }
 
     /** 全组固定的业务毫秒基准时间，发送时按来源序号增加。 */
@@ -470,7 +470,7 @@ class CommittedTradeReplayTest {
                         value.reduceOnly(), value.timeInForce(), value.startAtEpochMillis())
                 : new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
                 value.algoOrderId(), value.revision() - 1, value.statusCode(), value.currentOrderId(),
-                        value.rejectReason(), value.nextSliceAtEpochMillis(), value.completedAtEpochMillis(),
+                        value.rejectReason(), value.nextSliceAtEpochMillis(),
                         value.updatedAtEpochMillis(), appendedChild);
         return com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(command);
     }

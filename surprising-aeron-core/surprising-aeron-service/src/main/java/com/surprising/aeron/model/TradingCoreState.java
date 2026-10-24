@@ -312,7 +312,6 @@ public record TradingCoreState(
         for (CoreCancelAllAfterState /* 当前变化槽对应计时器，或参与哈希的完整计时器状态 */ timer : cancelAllAfterTimers.values()) {
             hash = CoreStateHash.mix(hash, timer.userId());
             hash = CoreStateHash.mix(hash, timer.symbolScope());
-            hash = CoreStateHash.mix(hash, timer.countdownMillis());
             hash = CoreStateHash.mix(hash, timer.status().wireCode());
             hash = CoreStateHash.mix(hash, timer.triggerAtEpochMillis());
             hash = CoreStateHash.mix(hash, timer.updatedAtEpochMillis());

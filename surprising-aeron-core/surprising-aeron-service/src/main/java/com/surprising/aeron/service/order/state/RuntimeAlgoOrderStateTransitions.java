@@ -137,7 +137,7 @@ public final class RuntimeAlgoOrderStateTransitions {
                                 create.durationSeconds(),
                         create.marginMode(), create.positionSide(), create.reduceOnly(),
                                 create.timeInForce(),
-                        0, 0, "", start, start, 0, clusterTimestamp, clusterTimestamp, 1, java.util.List.of());
+                        0, 0, "", start, start, clusterTimestamp, clusterTimestamp, 1, java.util.List.of());
             }
             case CoreAlgoOrderCommand.Update update -> {
                 if (current == null) throw new CoreStateRejectedException("ENTITY_NOT_FOUND", "algo order is missing");
@@ -175,7 +175,7 @@ public final class RuntimeAlgoOrderStateTransitions {
                         current.marginMode(), current.positionSide(), current.reduceOnly(),
                                 current.timeInForce(),
                         update.statusCode(), update.currentOrderId(), update.rejectReason(), current.startAtEpochMillis(),
-                        update.nextSliceAtEpochMillis(), update.completedAtEpochMillis(), current.createdAtEpochMillis(),
+                        update.nextSliceAtEpochMillis(), current.createdAtEpochMillis(),
                         update.updatedAtEpochMillis(), Math.incrementExact(current.revision()), children,
                         current.retiredExecutedQuantitySteps(), pending);
             }

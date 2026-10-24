@@ -95,7 +95,6 @@ public class CancelAllAfterService {
         return new CancelAllAfterResponse(
                 timer.userId(),
                 publicSymbol(timer.symbolScope()),
-                timer.countdownMillis(),
                 timer.status() == CoreCancelAllAfterStatus.ACTIVE,
                 timer.triggerAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(timer.triggerAtEpochMillis()),
                 Instant.ofEpochMilli(timer.updatedAtEpochMillis()));

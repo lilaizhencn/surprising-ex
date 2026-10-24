@@ -13,7 +13,7 @@ class CoreCancelAllAfterCodecTest {
                 CoreCancelAllAfterCommand.claim("1", 4, 2001),
                 CoreCancelAllAfterCommand.complete("1", 4, 2001),
                 CoreCancelAllAfterCommand.retry("1", 4, 2001));
-        CoreCancelAllAfterView view = new CoreCancelAllAfterView(101, "1", 1_000,
+        CoreCancelAllAfterView view = new CoreCancelAllAfterView(101, "1",
                 CoreCancelAllAfterStatus.TRIGGERING, 2_000, 2_001, 5);
 
         assertThat(commands).allSatisfy(command -> {
@@ -24,7 +24,8 @@ class CoreCancelAllAfterCodecTest {
         assertThat(CoreCancelAllAfterCodec.decodeQuery(
                 CoreCancelAllAfterCodec.encodeQuery(101, "1", 2_000, 100)))
                 .isEqualTo(new CoreCancelAllAfterCodec.Query(101, "1", 2_000, 100));
-        assertThat(CoreCancelAllAfterCodec.decodeList(CoreCancelAllAfterCodec.encodeList(List.of(view))))
-                .containsExactly(view);
+        byte[] states = CoreCancelAllAfterCodec.encodeList(List.of(view));
+        assertThat(states).hasSize(Integer.BYTES * 4 + Long.BYTES * 4 + 1);
+        assertThat(CoreCancelAllAfterCodec.decodeList(states)).containsExactly(view);
     }
 }

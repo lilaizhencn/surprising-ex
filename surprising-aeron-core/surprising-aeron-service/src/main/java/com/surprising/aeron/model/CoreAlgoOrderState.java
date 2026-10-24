@@ -30,7 +30,6 @@ import java.util.List;
  * @param rejectReason 被拒绝时记录的原因；没有原因时保存为空字符串
  * @param startAtEpochMillis 计划开始执行母单的 Unix 毫秒时间戳
  * @param nextSliceAtEpochMillis 下一次计划发出切片子单的 Unix 毫秒时间戳
- * @param completedAtEpochMillis 母单结束时记录的 Unix 毫秒时间戳
  * @param createdAtEpochMillis 这份业务记录的创建时间，使用 Unix 毫秒时间戳
  * @param updatedAtEpochMillis 最后一次更新这份记录的 Unix 毫秒时间戳
  * @param revision 这份状态的修订号，供结果发布和后续更新判断版本
@@ -44,7 +43,7 @@ public record CoreAlgoOrderState(
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
         boolean reduceOnly, CoreTimeInForce timeInForce, int statusCode,
         long currentOrderId, String rejectReason, long startAtEpochMillis,
-        long nextSliceAtEpochMillis, long completedAtEpochMillis, long createdAtEpochMillis,
+        long nextSliceAtEpochMillis, long createdAtEpochMillis,
         long updatedAtEpochMillis, long revision, List<Long> childOrderIds,
         long retiredExecutedQuantitySteps, long pendingClosedChildId) {
 
@@ -70,7 +69,6 @@ public record CoreAlgoOrderState(
      * @param rejectReason 被拒绝时记录的原因；没有原因时保存为空字符串
      * @param startAtEpochMillis 计划开始执行母单的 Unix 毫秒时间戳
      * @param nextSliceAtEpochMillis 下一次计划发出切片子单的 Unix 毫秒时间戳
-     * @param completedAtEpochMillis 母单结束时记录的 Unix 毫秒时间戳
      * @param createdAtEpochMillis 这份业务记录的创建时间，使用 Unix 毫秒时间戳
      * @param updatedAtEpochMillis 最后一次更新这份记录的 Unix 毫秒时间戳
      * @param revision 这份状态的修订号，供结果发布和后续更新判断版本
@@ -82,12 +80,12 @@ public record CoreAlgoOrderState(
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
         boolean reduceOnly, CoreTimeInForce timeInForce, int statusCode,
         long currentOrderId, String rejectReason, long startAtEpochMillis,
-        long nextSliceAtEpochMillis, long completedAtEpochMillis, long createdAtEpochMillis,
+        long nextSliceAtEpochMillis, long createdAtEpochMillis,
         long updatedAtEpochMillis, long revision, List<Long> childOrderIds) {
         this(algoOrderId,userId,clientAlgoOrderId,instrumentId,algoTypeCode,side,priceTicks,quantitySteps,
                 childQuantitySteps,intervalSeconds,durationSeconds,marginMode,positionSide,reduceOnly,
                 timeInForce,statusCode,currentOrderId,rejectReason,startAtEpochMillis,nextSliceAtEpochMillis,
-                completedAtEpochMillis,createdAtEpochMillis,updatedAtEpochMillis,revision,childOrderIds,0,0);
+                createdAtEpochMillis,updatedAtEpochMillis,revision,childOrderIds,0,0);
     }
 
     /**
@@ -99,7 +97,7 @@ public record CoreAlgoOrderState(
         return new CoreAlgoOrderState(algoOrderId,userId,clientAlgoOrderId,instrumentId,algoTypeCode,side,
                 priceTicks,quantitySteps,childQuantitySteps,intervalSeconds,durationSeconds,marginMode,positionSide,
                 reduceOnly,timeInForce,statusCode,currentOrderId,rejectReason,startAtEpochMillis,
-                nextSliceAtEpochMillis,completedAtEpochMillis,createdAtEpochMillis,updatedAtEpochMillis,revision,
+                nextSliceAtEpochMillis,createdAtEpochMillis,updatedAtEpochMillis,revision,
                 childOrderIds,executed,pendingChild);
     }
 

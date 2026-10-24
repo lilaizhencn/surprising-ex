@@ -40,7 +40,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 52;
+    private static final int VERSION = 53;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -551,7 +551,7 @@ public final class TradingStateSnapshotCodec {
     }
 
     /**
-     * 写算法父单切片、关联子单、时间和状态，固定保留未使用的字段二十；字段二十八保存退休子单累计成交量，二十九保存等待父单关联的已关闭子单编号。
+     * 写算法父单实际切片、关联子单、时间和状态，退役编号不写；字段二十八保存退休子单累计成交量，二十九保存等待父单关联的已关闭子单编号。
      * @param value 当前要写入的算法父单业务值
      */
     private static byte[] writeCoreAlgoOrderState(CoreAlgoOrderState value) {
@@ -578,7 +578,6 @@ public final class TradingStateSnapshotCodec {
                 .text(19, value.rejectReason()) // 19：算法或触发操作保存的拒绝原因
                 .number(21, value.startAtEpochMillis()) // 21：算法单开始执行时刻，毫秒
                 .number(22, value.nextSliceAtEpochMillis()) // 22：算法单下个切片计划时刻，毫秒
-                .number(23, value.completedAtEpochMillis()) // 23：算法单完成时刻，毫秒
                 .number(24, value.createdAtEpochMillis()) // 24：记录创建时刻，毫秒
                 .number(25, value.updatedAtEpochMillis()) // 25：记录最近更新时刻，毫秒
                 .number(26, value.revision()) // 26：当前业务记录修订号
@@ -588,7 +587,7 @@ public final class TradingStateSnapshotCodec {
                 .encode();
     }
     /**
-     * 按固定编号恢复算法父单，包含字段二十八退休成交量和二十九待关联终态子单；这两字段在当前格式中为必填，最低读取需求由根字段十二声明。
+     * 按固定编号恢复算法父单，包含字段二十八退休成交量和二十九待关联终态子单；这两字段在当前格式中为必填，旧布局由外层版本拒绝。
      * @param encoded 当前算法父单的独立字段记录字节
      */
     private static CoreAlgoOrderState readCoreAlgoOrderState(byte[] encoded) {
@@ -618,7 +617,6 @@ public final class TradingStateSnapshotCodec {
                 r.text(19), // 19：算法或触发操作保存的拒绝原因
                 r.number(21), // 21：算法单开始执行时刻，毫秒
                 r.number(22), // 22：算法单下个切片计划时刻，毫秒
-                r.number(23), // 23：算法单完成时刻，毫秒
                 r.number(24), // 24：记录创建时刻，毫秒
                 r.number(25), // 25：记录最近更新时刻，毫秒
                 r.number(26), // 26：当前业务记录修订号
@@ -628,14 +626,13 @@ public final class TradingStateSnapshotCodec {
     }
 
     /**
-     * 按固定字段编号写入倒计时撤单状态，保存用户范围、倒计时、触发状态和修订号；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
+     * 按固定字段编号写入倒计时撤单状态，保存用户范围、触发状态和修订号；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的倒计时撤单状态业务值
      */
     private static byte[] writeCoreCancelAllAfterState(CoreCancelAllAfterState value) {
         return new SnapshotFields.Writer()
                 .number(1, value.userId()) // 1：所属用户编号
                 .text(2, value.symbolScope()) // 2：倒计时撤单的币对范围
-                .number(3, value.countdownMillis()) // 3：倒计时撤单等待时长，毫秒
                 .number(4, SnapshotEnumCodes.encode(value.status())) // 4：当前业务记录状态
                 .number(5, value.triggerAtEpochMillis()) // 5：倒计时撤单触发时刻，毫秒
                 .number(6, value.updatedAtEpochMillis()) // 6：记录最近更新时刻，毫秒
@@ -643,7 +640,7 @@ public final class TradingStateSnapshotCodec {
                 .encode();
     }
     /**
-     * 按固定字段编号读取并构造倒计时撤单状态，恢复用户范围、倒计时、触发状态和修订号；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
+     * 按固定字段编号读取并构造倒计时撤单状态，恢复用户范围、触发状态和修订号；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前倒计时撤单状态的独立字段记录字节
      */
     private static CoreCancelAllAfterState readCoreCancelAllAfterState(byte[] encoded) {
@@ -652,7 +649,6 @@ public final class TradingStateSnapshotCodec {
         return new CoreCancelAllAfterState(
                 r.number(1), // 1：所属用户编号
                 r.text(2), // 2：倒计时撤单的币对范围
-                r.number(3), // 3：倒计时撤单等待时长，毫秒
                 SnapshotEnumCodes.readCoreCancelAllAfterStatus(r.integer(4)), // 4：当前业务记录状态
                 r.number(5), // 5：倒计时撤单触发时刻，毫秒
                 r.number(6), // 6：记录最近更新时刻，毫秒

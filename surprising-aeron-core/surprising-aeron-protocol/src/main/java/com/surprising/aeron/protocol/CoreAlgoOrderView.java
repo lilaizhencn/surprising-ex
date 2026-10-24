@@ -8,7 +8,7 @@ public record CoreAlgoOrderView(
         long intervalSeconds, long durationSeconds, CoreMarginMode marginMode, CorePositionSide positionSide,
         boolean reduceOnly, CoreTimeInForce timeInForce, int statusCode,
         long currentOrderId, String rejectReason, long startAtEpochMillis,
-        long nextSliceAtEpochMillis, long completedAtEpochMillis, long createdAtEpochMillis,
+        long nextSliceAtEpochMillis, long createdAtEpochMillis,
         long updatedAtEpochMillis, long revision, List<Long> childOrderIds,
         long executedQuantitySteps, long activeQuantitySteps, int activeChildOrderCount) {
 

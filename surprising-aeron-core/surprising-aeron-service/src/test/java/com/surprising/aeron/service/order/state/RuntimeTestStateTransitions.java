@@ -234,7 +234,7 @@ public final class RuntimeTestStateTransitions {
                         view.durationSeconds(), view.marginMode(), view.positionSide(), view.reduceOnly(), view.timeInForce(), view.startAtEpochMillis())
                 : new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
                 view.algoOrderId(), view.revision() - 1, view.statusCode(), view.currentOrderId(), view.rejectReason(),
-                        view.nextSliceAtEpochMillis(), view.completedAtEpochMillis(), view.updatedAtEpochMillis(), appended);
+                        view.nextSliceAtEpochMillis(), view.updatedAtEpochMillis(), appended);
         return mutate(before, (runtime, identities) -> RuntimeAlgoOrderStateTransitions.upsert(
                 runtime, identities, userId, command, Math.max(1, view.createdAtEpochMillis())));
     }

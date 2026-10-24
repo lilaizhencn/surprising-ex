@@ -75,9 +75,9 @@ class CancelAllAfterServiceTest {
     @Test
     void aResetBetweenClaimAndReadDoesNotExecuteTheNewTimer() {
         var aeron = mock(OrderAeronGateway.class);
-        var active = new CoreCancelAllAfterView(1001, "1", 1000,
+        var active = new CoreCancelAllAfterView(1001, "1",
                 CoreCancelAllAfterStatus.ACTIVE, 2000, 1000, 1);
-        var reset = new CoreCancelAllAfterView(1001, "1", 1000,
+        var reset = new CoreCancelAllAfterView(1001, "1",
                 CoreCancelAllAfterStatus.ACTIVE, 5000, 4000, 3);
         when(aeron.cancelAllAfterTimers(org.mockito.ArgumentMatchers.eq(0L),
                 org.mockito.ArgumentMatchers.eq(""), org.mockito.ArgumentMatchers.anyLong(),
@@ -98,7 +98,7 @@ class CancelAllAfterServiceTest {
     void completionAndRetryKeepTheClaimedRevisionWithoutRequerying() {
         var aeron = mock(OrderAeronGateway.class);
         var store = new AeronCancelAllAfterStore(aeron);
-        var claimed = new CoreCancelAllAfterView(1001, "1", 1000,
+        var claimed = new CoreCancelAllAfterView(1001, "1",
                 CoreCancelAllAfterStatus.TRIGGERING, 2000, 2000, 2);
         store.complete(claimed, Instant.ofEpochMilli(2100));
         store.retry(claimed, Instant.ofEpochMilli(2200));
@@ -120,9 +120,9 @@ class CancelAllAfterServiceTest {
     void oneFailedClaimDoesNotLeaveOtherTimersPreclaimed() {
         var store = mock(AeronCancelAllAfterStore.class);
         var active = timer("ACTIVE", Instant.now().minusMillis(1));
-        var next = new CoreCancelAllAfterView(1002, "1", 1000,
+        var next = new CoreCancelAllAfterView(1002, "1",
                 CoreCancelAllAfterStatus.ACTIVE, 2000, 1000, 1);
-        var claimed = new CoreCancelAllAfterView(1002, "1", 1000,
+        var claimed = new CoreCancelAllAfterView(1002, "1",
                 CoreCancelAllAfterStatus.TRIGGERING, 2000, 2000, 2);
         when(store.due(any(), org.mockito.ArgumentMatchers.eq(100))).thenReturn(List.of(active, next));
         when(store.claim(org.mockito.ArgumentMatchers.eq(active), any())).thenThrow(new IllegalStateException("lost reply"));
@@ -148,7 +148,7 @@ class CancelAllAfterServiceTest {
     }
 
     private CoreCancelAllAfterView timer(String status, Instant triggerAt) {
-        return new CoreCancelAllAfterView(1001L, "1", "DISABLED".equals(status) ? 0 : 1000,
+        return new CoreCancelAllAfterView(1001L, "1",
                 CoreCancelAllAfterStatus.valueOf(status), triggerAt == null ? 0 : triggerAt.toEpochMilli(),
                 Instant.now().toEpochMilli(), 1);
     }

@@ -182,10 +182,12 @@ Topic 路由，再统一追加到用户分区 WAL/RocksDB，由 `OrderUserStateS
 - 正数 `countdownMs` 会刷新用户级倒计时；传 `instrumentId` 时只作用于该交易对，不传则作用于全部 instrumentId。
 - 倒计时到期后，Gateway分批读取所属Core的普通单并使用原批次撤单流程；条件单同样由其Core入口读取和取消。每类每轮最多1000笔，存在目标或失败时后续扫描继续；两类权威目标都为空才记录完成。
 - timer状态由Aeron Cluster命令裁决并随日志/快照恢复。认领、完成和重试使用任务自身修订；三十秒认领超时由现有更新时间判断，不在外围维护另一份状态。
-- 响应保留`userId`、`instrumentId`、`countdownMs`、`active`、`triggerAt`、`updatedAt`，删除没有独立消费的`canceledOrders`/`canceledTriggerOrders`。客户端不再解析这两个字段。
-- 当前倒计时命令v5、查询/状态v2、交易快照v52只读当前格式。相关17模块已干净编译，Java测试源码已编译，未执行实际撤单或恢复验证。
+- 响应保留`userId`、`instrumentId`、`active`、`triggerAt`、`updatedAt`，删除没有独立消费的`canceledOrders`/`canceledTriggerOrders`。客户端不再解析这两个字段；原`countdownMs`只属于SET输入，不再回显或保存到状态/快照。
+- 当前倒计时命令v5、查询/状态v3、交易快照v53只读当前格式。相关17模块已干净编译，Java测试源码已编译，未执行实际撤单或恢复验证。
 
 ## 算法单
+
+算法响应删除没有独立业务用途的`completedAt`；创建/更新时间仍用于查询和CSV，真实终态、子单执行与数量事实保持。当前算法命令v6、状态/投影v4及交易快照v53只读当前格式。
 
 `TWAP` 和 `ICEBERG` 在 trading provider 中作为 exchange-core 之前的算法单层实现。父算法单不会进入实时订单簿；被调度出来的子单是普通 trading provider 订单，继续走撮合、账户结算、风控、强平检查和 WebSocket fanout。
 

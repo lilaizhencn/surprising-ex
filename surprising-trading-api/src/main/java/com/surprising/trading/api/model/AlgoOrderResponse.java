@@ -27,7 +27,6 @@ public record AlgoOrderResponse(
         String rejectReason,
         Instant startAt,
         Instant nextSliceAt,
-        Instant completedAt,
         Instant createdAt,
         Instant updatedAt) {
 
