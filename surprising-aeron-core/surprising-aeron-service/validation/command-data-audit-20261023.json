@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第三十三轮：A127两个零调用冷状态构造删除37行，其余源码逐字不变；17模块干净编译57.023秒，4022classfile旧构造定义/引用归零。累计123解决。新确认A128强平前置检查两项无必要数组状态；A11一致性边界保留。",
+    "checkpoint": "第三十四轮：A128强平检查两数组删除/局部化，实例字段15->13；5模块干净编译23.139秒，4022classfile旧字段引用零，执行文件其余代码逐字不变。累计124解决。A129强平三项执行元数据与投影生产链候选待核对，A11一致性边界继续保留。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -6978,11 +6978,11 @@
     },
     {
       "id": "A128",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed_unnecessary_execution_check_storage",
       "topic": "强平前置检查保留只写合约数组和仅用于单次Lane循环的持仓键数组",
       "source_basis_commit": "32bc759f3a58685fa51bd39fa72fa3589517aad0",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java",
@@ -7008,7 +7008,114 @@
         "boundary": "ExecutionCheck是命令槽复用的IntFunction任务，不是业务持久化/快照/配置模型；真实liquidations结果、输入价/序号/游标、状态、Lane位和完成发布都保留。",
         "proposal": "删除instruments/positionKeys字段和对应构造/扩容/清理；持仓键在当前Lane显式局部读取，保持原executability函数及前置检查顺序、身份和完成语义。"
       },
-      "verification_limit": "已确认源码作用域和完整所属类/字段描述符引用，尚未实施；未执行资金或并发场景。"
+      "verification_limit": "已确认源码作用域和完整所属类/字段描述符引用，尚未实施；未执行资金或并发场景。",
+      "resolved_in_round": "thirty_fourth_cleanup_round",
+      "implementation": "删除只写instruments数组及扩容/清空，positionKeys数组改为所属Lane本次循环局部long；检查对象15->13实例字段，四处数组分配移除。完整执行文件只按归档替换移除数组和收回局部值，其他价格/游标/持仓判定、资金函数和线程发布逐字保留。"
+    },
+    {
+      "id": "A129",
+      "status": "candidate",
+      "analysis_status": "needs_projection_producer_and_business_consumer_trace",
+      "topic": "强平落地执行价、费率、实收费的独立消费及下游投影生产链路待核对",
+      "source_basis_commit": "a0b4e3d72e4e991515dfd8abca641e6e8ff79f72",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java",
+          "anchor": "runtime.replaceLiquidation(copy(liquidation, uncovered, command.executionPriceTicks()"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/service/LiquidationService.java",
+          "anchor": "value.closeQuantitySteps(), 0, value.executionPriceTicks(), value.liquidationFeeRatePpm()"
+        },
+        {
+          "file": "surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider/src/main/java/com/surprising/liquidation/provider/repository/CoreLiquidationProjectionRepository.java",
+          "anchor": "FROM core_liquidation_projection"
+        }
+      ],
+      "evidence": {
+        "fields": [
+          "executionPriceTicks",
+          "liquidationFeeRatePpm",
+          "liquidationFeeUnits"
+        ],
+        "classfile_getter_preselection": [
+          {
+            "owner": "com/surprising/aeron/model/CoreLiquidationState",
+            "member": "executionPriceTicks",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreLiquidationState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleStateTest.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreLiquidationState",
+            "member": "liquidationFeeRatePpm",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreLiquidationState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleStateTest.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreLiquidationState",
+            "member": "liquidationFeeUnits",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreLiquidationState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleStateTest.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/service/risk/LiquidationRuntime",
+            "member": "executionPriceTicks",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/LiquidationRuntime.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/service/risk/LiquidationRuntime",
+            "member": "liquidationFeeRatePpm",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/LiquidationRuntime.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/service/risk/LiquidationRuntime",
+            "member": "liquidationFeeUnits",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/LiquidationRuntime.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class"
+            ]
+          }
+        ],
+        "observed": "Core资金计算使用本次命令执行价/费率及实际LiquidationCash；保存后的三字段在当前Core调用点主要用于后续状态复制、物化、哈希和快照。下游模型/查询响应仍提供三值，不能据此直接删除真实财务查询字段。",
+        "missing_producer_check": "全仓库该表字面量搜索看到DDL、三处生产SELECT和测试INSERT；尚未完成通用动态投影、数据库函数/触发器或历史回放生产链核对，不能仅按未出现直接INSERT断言无生产者。",
+        "required_next": "从已提交事件/回放到SQL写入、公开强平查询及Web/客户端逐项确认三值实际职责与恢复需求；必要时修复或清理孤立投影，禁止删除实际结算输入、历史实收费或仅因字段被序列化就认定有独立消费。"
+      },
+      "verification_limit": "静态Getter和字面量预筛，不是字段可删结论；未运行数据库或真实强平/保险/ADL。"
     }
   ],
   "preserve_verified_purposes": [
@@ -7026,9 +7133,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A128强平前置检查两项数组：删除只写合约数组，持仓键收回当前Lane局部；保留真实线程交接及执行校验。",
-    "继续从强平命令到检查、撤单、资金/费用、终态、快照与恢复追踪字段及约束实际用途。",
-    "A11原有序查询边界保留；遵循只编译，不以静态或编译宣称运行资金/恢复已经验证。"
+    "深入A129：强平实际执行价/费率/实收费从命令和资金结算到Core快照、已提交导出、SQL投影、查询及客户端的用途；先查通用动态写入/数据库触发器，不能只按直接SQL字面量下结论。",
+    "继续检查强平撤单、最终执行、保险及ADL阶段的字段与约束，保留真实金额、幂等、游标和Owner/Lane完成边界。",
+    "按用户约定只编译相关模块，未执行运行验证；A11有序查询边界保留。"
   ],
   "rejected_false_positives": [
     {
@@ -7109,7 +7216,7 @@
     "status": "removed_after_results_archived",
     "new_temporary_services_or_files": false
   },
-  "evidence_basis_commit": "32bc759f3a58685fa51bd39fa72fa3589517aad0",
+  "evidence_basis_commit": "a0b4e3d72e4e991515dfd8abca641e6e8ff79f72",
   "cleanup_round": {
     "authorized_scope": [
       "A01",
@@ -7325,16 +7432,15 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "32bc759f3a58685fa51bd39fa72fa3589517aad0",
+    "source_basis_commit": "a0b4e3d72e4e991515dfd8abca641e6e8ff79f72",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A127"
-    ],
-    "confirmed_ids": [
       "A128"
     ],
+    "confirmed_ids": [],
     "candidate_ids": [
-      "A11"
+      "A11",
+      "A129"
     ],
     "retained_ids": [
       "A105",
@@ -7342,12 +7448,11 @@
       "A124"
     ],
     "counts": {
-      "resolved": 123,
-      "candidate": 1,
-      "retained": 3,
-      "confirmed": 1
+      "resolved": 124,
+      "candidate": 2,
+      "retained": 3
     },
-    "evidence": "thirty_third_cleanup_round",
+    "evidence": "thirty_fourth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -28036,6 +28141,264 @@
         "/tmp/aeron-cold-constructors-20261024.scan.py": "031ff638520d5ce4dfdd3e103469d98ad2bb660bb330ceeb29dc217f62a27715"
       },
       "files_removed": 6
+    },
+    "full_audit_complete": false
+  },
+  "thirty_fourth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "a0b4e3d72e4e991515dfd8abca641e6e8ff79f72",
+    "resolved_ids": [
+      "A128"
+    ],
+    "new_candidate_ids": [
+      "A129"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 124,
+      "candidate": 2,
+      "retained": 3
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4,
+      "algo_command": 6,
+      "algo_view": 5,
+      "cancel_all_after_command": 5,
+      "cancel_all_after_query_view": 3
+    },
+    "implementation": {
+      "removed_instance_fields": 2,
+      "execution_check_fields_before": 15,
+      "execution_check_fields_after": 13,
+      "removed_array_allocation_sites": 4,
+      "localized_action_values": [
+        "positionKey"
+      ],
+      "new_types_interfaces_fields_stages": 0,
+      "private_fields_only": true,
+      "persisted_command_snapshot_and_public_contract_changed": false,
+      "source_comparison": "归档整份执行源码并逐项执行确定替换，结果与当前全文逐字相等；未触碰其他检查条件、资金函数、价格/游标值或线程派发、发布和复用边界。",
+      "exact_replacements": [
+        {
+          "before": "        /** 各检查动作对应的合约配置引用，随本批输入一并回收。 */\n        private CoreInstrument[] instruments = new CoreInstrument[4];\n",
+          "after": ""
+        },
+        {
+          "before": "        /** 各动作由所属 Lane 定位的目标持仓整数键，0 表示没有有效持仓。 */\n        private long[] positionKeys = new long[4];\n",
+          "after": ""
+        },
+        {
+          "before": "                liquidations = new LiquidationRuntime[capacity]; instruments = new CoreInstrument[capacity];\n                positionKeys = new long[capacity]; laneIds = new int[capacity]; results = new byte[capacity];",
+          "after": "                liquidations = new LiquidationRuntime[capacity];\n                laneIds = new int[capacity]; results = new byte[capacity];"
+        },
+        {
+          "before": "                instruments[index] = instrument;\n",
+          "after": ""
+        },
+        {
+          "before": "                positionKeys[index] = identities.findPositionKeyValueInLane(runtime.currentLaneCommandScope(), value.userId(), instrument, value.positionSide());\n                results[index] = positionKeys[index] != 0 && RuntimeDerivativeLiquidationProcessor.executable(\n                        runtime, value, instrument, positionKeys[index]) ? EXECUTABLE : OBSOLETE;",
+          "after": "                long positionKey = identities.findPositionKeyValueInLane(runtime.currentLaneCommandScope(),\n                        value.userId(), instrument, value.positionSide());\n                results[index] = positionKey != 0 && RuntimeDerivativeLiquidationProcessor.executable(\n                        runtime, value, instrument, positionKey) ? EXECUTABLE : OBSOLETE;"
+        },
+        {
+          "before": "            java.util.Arrays.fill(instruments, 0, count, null);\n",
+          "after": ""
+        },
+        {
+          "before": "         * 释放本批强平和配置引用并清空参与标记，保留各数组容量供下次命令槽使用。",
+          "after": "         * 释放本批强平引用并清空参与标记，保留各数组容量供下次命令槽使用。"
+        }
+      ]
+    },
+    "verification": {
+      "java": "HotSpot Corretto27+33-FR",
+      "maven": "3.9.16",
+      "disk_available": "168GiB",
+      "build": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "wall_seconds": 23.139,
+        "log_sha256": "ce03fabe8bfe25f6d7bcc0a853ca7f29a66d79667d25fbefa3d16107983c194f"
+      },
+      "reactor_modules": 5,
+      "compiled_source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java": "770deac16a9f8582487e87915bd61c156465ac0c724c1b744433258225252356"
+      },
+      "before_source_sha256": "f929e2c3e287998462b16b0c31854bf029a56d4a8a1b65394050d2235cfbdd43",
+      "classfiles": {
+        "classfiles_scanned": 4022,
+        "execution_check_instance_fields": [
+          [
+            2,
+            "liquidations",
+            "[Lcom/surprising/aeron/service/risk/LiquidationRuntime;"
+          ],
+          [
+            2,
+            "laneIds",
+            "[I"
+          ],
+          [
+            2,
+            "liquidationIds",
+            "[J"
+          ],
+          [
+            2,
+            "priceSequences",
+            "[J"
+          ],
+          [
+            2,
+            "prices",
+            "[J"
+          ],
+          [
+            2,
+            "cursors",
+            "[J"
+          ],
+          [
+            2,
+            "identities",
+            "Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;"
+          ],
+          [
+            2,
+            "results",
+            "[B"
+          ],
+          [
+            2,
+            "runtime",
+            "Lcom/surprising/aeron/service/core/TradingAccountRuntime;"
+          ],
+          [
+            2,
+            "count",
+            "I"
+          ],
+          [
+            2,
+            "laneMask",
+            "J"
+          ],
+          [
+            2,
+            "dispatched",
+            "Z"
+          ],
+          [
+            2,
+            "done",
+            "Z"
+          ]
+        ],
+        "removed_array_references": [],
+        "liquidation_value_getter_preselection": [
+          {
+            "owner": "com/surprising/aeron/model/CoreLiquidationState",
+            "member": "executionPriceTicks",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreLiquidationState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleStateTest.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreLiquidationState",
+            "member": "liquidationFeeRatePpm",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreLiquidationState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleStateTest.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreLiquidationState",
+            "member": "liquidationFeeUnits",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreLiquidationState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateProjector.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleStateTest.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/service/risk/LiquidationRuntime",
+            "member": "executionPriceTicks",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/LiquidationRuntime.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/service/risk/LiquidationRuntime",
+            "member": "liquidationFeeRatePpm",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/LiquidationRuntime.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class"
+            ]
+          },
+          {
+            "owner": "com/surprising/aeron/service/risk/LiquidationRuntime",
+            "member": "liquidationFeeUnits",
+            "callers": [
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/adl/RuntimeAdlExecution.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$BatchExecutionStage.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution$ResolutionWork.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/risk/LiquidationRuntime.class",
+              "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/RuntimeStateMaterializer.class",
+              "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeSnapshotBuilder.class"
+            ]
+          }
+        ]
+      },
+      "tests_executed": false,
+      "services_started": false,
+      "new_tests_added": false,
+      "scope": "单个服务实现类两项private任务数组，不修改公共方法签名；5模块包含全部服务生产/Java测试源码，原17模块的公开契约保持。",
+      "not_executed": [
+        "tests",
+        "services",
+        "funds/trading",
+        "runtime recovery",
+        "database",
+        "browser/device",
+        "JMH/JFR"
+      ]
+    },
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-liquidation-check-fields-20261024",
+      "status": "archived_then_removed",
+      "compiler_outputs_retained": true,
+      "artifact_sha256": {
+        "/tmp/aeron-liquidation-check-fields-20261024.scan.py": "9ef28b7b11fc892892e68244b815b3fab4ed9625479d338f55fa93bf57cdfa1c",
+        "/tmp/aeron-liquidation-check-fields-20261024.before.json": "ffae546335370f688b1578cedfd6b21680df22c29838009bc292fdda89a4895d",
+        "/tmp/aeron-liquidation-check-fields-20261024.compiled-sources.json": "7c4a129c6d26aca3908b6b3b8953acdc51efa5fa502c1830a2e5a6a89790ba8c",
+        "/tmp/aeron-liquidation-check-fields-20261024.maven.log": "ce03fabe8bfe25f6d7bcc0a853ca7f29a66d79667d25fbefa3d16107983c194f",
+        "/tmp/aeron-liquidation-check-fields-20261024.build.json": "759d55a37b79554f3573a137615ef26a7bc221341f38116c52238f313652537f",
+        "/tmp/aeron-liquidation-check-fields-20261024.classfiles.json": "66ec4da95cd9b312905cc055e69ce35fd1ac2cd803ef56095cd2ca4ab5ff90dc"
+      },
+      "files_removed": 6,
+      "pyc_files_removed": 0
     },
     "full_audit_complete": false
   }

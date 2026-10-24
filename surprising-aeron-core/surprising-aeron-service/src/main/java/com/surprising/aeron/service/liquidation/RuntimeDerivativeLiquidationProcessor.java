@@ -78,10 +78,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private static final byte CHECK_LANE = 0, EXECUTABLE = 1, OBSOLETE = 2, STALE_PRICE = 3;
         /** 各检查动作从所属 Lane 捕获的强平记录引用，检查结束前不供 Owner 消费。 */
         private LiquidationRuntime[] liquidations = new LiquidationRuntime[4];
-        /** 各检查动作对应的合约配置引用，随本批输入一并回收。 */
-        private CoreInstrument[] instruments = new CoreInstrument[4];
-        /** 各动作由所属 Lane 定位的目标持仓整数键，0 表示没有有效持仓。 */
-        private long[] positionKeys = new long[4];
         /** 各动作归属的账户 Lane 编号，-1 表示没有有效源账户路由。 */
         private int[] laneIds = new int[4];
         /**
@@ -148,8 +144,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
             if (count > results.length) {
                 // 检查动作超出原数组容量时使用的新容量，至少翻倍，所有并行数组一起替换。
                 int capacity = Math.max(count, Math.multiplyExact(results.length, 2));
-                liquidations = new LiquidationRuntime[capacity]; instruments = new CoreInstrument[capacity];
-                positionKeys = new long[capacity]; laneIds = new int[capacity]; results = new byte[capacity];
+                liquidations = new LiquidationRuntime[capacity];
+                laneIds = new int[capacity]; results = new byte[capacity];
                 liquidationIds = new long[capacity]; priceSequences = new long[capacity]; prices = new long[capacity]; cursors = new long[capacity];
             }
             this.runtime = runtime; this.count = count; laneMask = 0; dispatched = done = false;
@@ -231,13 +227,13 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 }
                 // 当前源强平合约配置，最终执行时用于风险、持仓和结算资产核对。
                 CoreInstrument instrument = runtime.instrument(identities.instrumentId(value.symbolId()));
-                instruments[index] = instrument;
                 if (instrument == null || !CoreRiskPolicy.canLiquidate(instrument.contractType(), value.signedQuantitySteps())) {
                     results[index] = OBSOLETE; continue;
                 }
-                positionKeys[index] = identities.findPositionKeyValueInLane(runtime.currentLaneCommandScope(), value.userId(), instrument, value.positionSide());
-                results[index] = positionKeys[index] != 0 && RuntimeDerivativeLiquidationProcessor.executable(
-                        runtime, value, instrument, positionKeys[index]) ? EXECUTABLE : OBSOLETE;
+                long positionKey = identities.findPositionKeyValueInLane(runtime.currentLaneCommandScope(),
+                        value.userId(), instrument, value.positionSide());
+                results[index] = positionKey != 0 && RuntimeDerivativeLiquidationProcessor.executable(
+                        runtime, value, instrument, positionKey) ? EXECUTABLE : OBSOLETE;
             }
             return null;
         }
@@ -275,11 +271,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
         }
 
         /**
-         * 释放本批强平和配置引用并清空参与标记，保留各数组容量供下次命令槽使用。
+         * 释放本批强平引用并清空参与标记，保留各数组容量供下次命令槽使用。
          */
         public void clearReferences() {
             java.util.Arrays.fill(liquidations, 0, count, null);
-            java.util.Arrays.fill(instruments, 0, count, null);
             runtime = null; identities = null; count = 0; laneMask = 0; dispatched = done = false;
         }
     }
