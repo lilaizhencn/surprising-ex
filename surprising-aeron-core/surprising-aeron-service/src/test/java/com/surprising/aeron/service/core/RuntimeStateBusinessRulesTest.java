@@ -726,29 +726,29 @@ class RuntimeStateBusinessRulesTest {
     }
 
     /**
-     * 依次设置、认领和完成延时全撤计时器，核对状态、统计及快照往返；旧修订再次认领被拒。这里只更新计时器状态，没有实际撤三笔订单。
+     * 依次设置、认领和完成延时全撤计时器，核对状态、修订及快照往返；旧修订再次认领被拒。这里只更新计时器状态，不执行真实撤单。
      */
     @Test
     void cancelAllAfterUsesRevisionedAeronStateAndSurvivesSnapshot() {
         // 本用例从空现货状态开始，只推进延时全撤计时器，不创建真实订单
         TradingCoreState state = TradingCoreState.empty(ProductLine.SPOT);
         // 为用户一百零一设置标的一延时全撤计时器的命令
-        var set = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1_000, 0, 0, 0, 1_000);
+        var set = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1_000, 0, 1_000);
         // 计时器已设置为 ACTIVE 的冷状态
         TradingCoreState active = reducer.updateCancelAllAfter(state, 101, set);
         // 首个有效计时器及其修订，供认领命令做版本校验
         CoreCancelAllAfterState activeTimer = active.cancelAllAfterTimers()
                 .get(new CoreCancelAllAfterKey(101, "1"));
         // 按有效修订和到期时间认领计时器的命令
-        var claim = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.CLAIM, "1", 1_000, activeTimer.revision(), 0, 0, 2_000);
+        var claim = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.CLAIM, "1", 1_000, activeTimer.revision(), 2_000);
         // 计时器已认领为 TRIGGERING 的冷状态
         TradingCoreState triggering = reducer.updateCancelAllAfter(active, 101, claim);
         // 已认领计时器及其新修订，供完成命令校验
         CoreCancelAllAfterState triggeringTimer = triggering.cancelAllAfterTimers()
                 .get(new CoreCancelAllAfterKey(101, "1"));
-        // 按当前修订结束计时器并记录普通撤单三、触发撤单二的命令，未在此实际执行撤单
-        var complete = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.COMPLETE, "1", 1_000, triggeringTimer.revision(), 3, 2, 2_100);
-        // 计时器记录为已触发并保留完成统计的冷状态
+        // 按当前认领修订结束计时器的命令，未在此实际执行撤单
+        var complete = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.COMPLETE, "1", 1_000, triggeringTimer.revision(), 2_100);
+        // 计时器记录为已触发的冷状态
         TradingCoreState completed = reducer.updateCancelAllAfter(triggering, 101, complete);
 
         assertThat(activeTimer.status()).isEqualTo(com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE);
@@ -756,12 +756,31 @@ class RuntimeStateBusinessRulesTest {
                 .isEqualTo(com.surprising.aeron.protocol.CoreCancelAllAfterStatus.TRIGGERING);
         assertThat(completed.cancelAllAfterTimers().get(activeTimer.key()).status())
                 .isEqualTo(com.surprising.aeron.protocol.CoreCancelAllAfterStatus.TRIGGERED);
-        assertThat(completed.cancelAllAfterTimers().get(activeTimer.key()).canceledOrders()).isEqualTo(3);
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(completed), ProductLine.SPOT))
                 .isEqualTo(completed);
         assertThatThrownBy(() -> reducer.updateCancelAllAfter(triggering, 101, claim))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         /* 本次预期的业务拒绝异常，用稳定代码核对拒绝原因 */ exception -> assertThat(exception.code()).isEqualTo("STALE_CANCEL_ALL_AFTER_REVISION"));
+    }
+
+    @Test
+    void anExpiredTimerClaimAdvancesRevisionAndRejectsTheOldCompletion() {
+        var key = new CoreCancelAllAfterKey(101, "1");
+        var active = reducer.updateCancelAllAfter(TradingCoreState.empty(ProductLine.SPOT), 101,
+                com.surprising.aeron.protocol.CoreCancelAllAfterCommand.set("1", 1000, 1000));
+        var claimed = reducer.updateCancelAllAfter(active, 101,
+                com.surprising.aeron.protocol.CoreCancelAllAfterCommand.claim("1", 1, 2000));
+        assertThatThrownBy(() -> reducer.updateCancelAllAfter(claimed, 101,
+                com.surprising.aeron.protocol.CoreCancelAllAfterCommand.claim("1", 2, 31_999)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        ex -> assertThat(ex.code()).isEqualTo("CANCEL_ALL_AFTER_NOT_DUE"));
+        var reclaimed = reducer.updateCancelAllAfter(claimed, 101,
+                com.surprising.aeron.protocol.CoreCancelAllAfterCommand.claim("1", 2, 32_000));
+        assertThat(reclaimed.cancelAllAfterTimers().get(key).revision()).isEqualTo(3);
+        assertThatThrownBy(() -> reducer.updateCancelAllAfter(reclaimed, 101,
+                com.surprising.aeron.protocol.CoreCancelAllAfterCommand.complete("1", 2, 32_001)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        ex -> assertThat(ex.code()).isEqualTo("STALE_CANCEL_ALL_AFTER_REVISION"));
     }
 
     /**

@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第二十六轮累计106项已解决；算法包装9组件、不可达分支和重复查询清理，12模块干净编译通过。倒计时版本/恢复/完成条件继续处理；5项确认、2候选。",
+    "checkpoint": "第二十七轮：倒计时计数整链删除、Gateway单一Core视图/原版本、逐个认领、原时间事实支持超时恢复、权威双空页完成；17模块及两端编译通过。累计111解决，A105按实际职责保留，A106确认待清理，A11/A115候选。全量审查继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -6069,8 +6069,8 @@
     },
     {
       "id": "A105",
-      "status": "candidate",
-      "analysis_status": "candidate",
+      "status": "retained",
+      "analysis_status": "retained_business_boundary",
       "topic": "倒计时撤单State/View同形9字段和机械转换可能可合并",
       "fields": [
         "CoreCancelAllAfterState的9组件",
@@ -6087,7 +6087,9 @@
       ],
       "business_code_changed": false,
       "proposed_cleanup": "核对所有State/View消费者、Key/索引、Owner/Lane、查询冻结和恢复后决定是否共享同一不可变事实；保留ACTIVE触发时间及全部金额/身份/时间边界，不机械删除实际协议职责。",
-      "followup": "已核对9字段及现有生产者；State仍承担ACTIVE触发时间守卫和服务内Key职责。先解决版本/恢复与无用计数，不能仅凭同形就机械合并真实协议/状态边界。"
+      "followup": "已核对9字段及现有生产者；State仍承担ACTIVE触发时间守卫和服务内Key职责。先解决版本/恢复与无用计数，不能仅凭同形就机械合并真实协议/状态边界。",
+      "retained_in_round": "twenty_seventh_cleanup_round",
+      "retained_purpose": "清理计数后State/View各7组件，但State实际拥有供Owner状态机与调度索引复用的claimableAt规则、ACTIVE触发守卫及服务内Key；协议值负责跨模块只读契约，保留边界，不能机械合并。"
     },
     {
       "id": "A106",
@@ -6140,8 +6142,8 @@
     },
     {
       "id": "A107",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "倒计时撤单丢弃认领版本后重复查询最新版本，旧任务可采用新代际",
       "category": "correctness_and_redundant_query",
       "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
@@ -6172,14 +6174,17 @@
         "静态可达交错：CLAIM成功后、exact前用户SET，exact可返回新ACTIVE状态；cancelDueTimer不核对认领状态/版本就按同一用户和范围执行撤单，可能提前撤掉新倒计时保护的订单。",
         "多执行者交错下，旧执行者COMPLETE/RETRY若重查到另一代已认领的最新版本，可以通过原Core版本和TRIGGERING守卫；Core守卫仍有用，问题在生产者替换了预期版本。"
       ],
-      "business_code_changed": false,
+      "business_code_changed": true,
       "proposed_cleanup": "保留认领事实及其revision，去掉timerRevision额外查询；认领结果必须核对本次预期的下一版本和TRIGGERING状态。优先复用原不可变协议值，避免为修正遗漏再造状态副本；保留Core CAS、到期、归属和状态守卫。",
-      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。",
+      "resolved_in_round": "twenty_seventh_cleanup_round",
+      "implementation": "Gateway使用原Core视图及认领版本，删除Timer副本与版本重查；校验本次下一修订/TRIGGERING。逐个认领并执行，现有updatedAt支持三十秒超时重认领；失败或非空批次后重试，两类Owner Core目标都为空才完成。两项成功计数从命令、状态、哈希、快照和HTTP/客户端模型删除。",
+      "resolution_verification": "implemented_compile_verified_only; concurrent/recovery/live cancellation scenarios not executed"
     },
     {
       "id": "A108",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "倒计时撤单成功数量只被搬运并持久化，没有独立业务消费者",
       "category": "unused_persisted_fields",
       "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
@@ -6215,14 +6220,17 @@
         "公开cancel-all-after只有SET入口；SET状态转换把两数量清零，没有面向此前COMPLETE统计的公开查询入口。SET后exact可能竞态读到后续状态，不能宣称HTTP返回值永远为0；已检查消费者仍未据两计数决策。Web忽略返回体，移动端只解析字段，实际页面未消费。",
         "直接Core查询仍能看到计数，这是冗余数据的协议暴露，未发现仓库内独立业务用途；记录/哈希/序列化本身不构成保留依据。"
       ],
-      "business_code_changed": false,
+      "business_code_changed": true,
       "proposed_cleanup": "整链删除两项成功数量及其无用非负约束、命令COMPLETE统计参数和快照字段7/8，同步当前格式/HTTP模型/移动端解析。保留并正确消费真实批次失败与未撤尽信息（A113），不能连有用的失败结果也删掉。",
-      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。",
+      "resolved_in_round": "twenty_seventh_cleanup_round",
+      "implementation": "Gateway使用原Core视图及认领版本，删除Timer副本与版本重查；校验本次下一修订/TRIGGERING。逐个认领并执行，现有updatedAt支持三十秒超时重认领；失败或非空批次后重试，两类Owner Core目标都为空才完成。两项成功计数从命令、状态、哈希、快照和HTTP/客户端模型删除。",
+      "resolution_verification": "implemented_compile_verified_only; concurrent/recovery/live cancellation scenarios not executed"
     },
     {
       "id": "A109",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "倒计时撤单先批量认领且TRIGGERING无恢复入口",
       "category": "recovery_and_redundant_phase",
       "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
@@ -6253,9 +6261,12 @@
         "认领后进程退出会把TRIGGERING留在日志/快照中；到期查询只选ACTIVE，源码没有针对倒计时TRIGGERING的启动恢复或超时重认领入口，RETRY仅由当前执行的catch发送。",
         "触发条件单自身有独立TRIGGERING恢复流程，不能误把它当成倒计时撤单的恢复支持。"
       ],
-      "business_code_changed": false,
+      "business_code_changed": true,
       "proposed_cleanup": "在原调度职责内逐个认领并执行，消除整批先认领阶段；再用现有更新时间和版本定义可恢复的认领语义，核对多实例与旧执行者。不得直接删除CLAIM/RETRY守卫或无条件重置全部认领状态。",
-      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。",
+      "resolved_in_round": "twenty_seventh_cleanup_round",
+      "implementation": "Gateway使用原Core视图及认领版本，删除Timer副本与版本重查；校验本次下一修订/TRIGGERING。逐个认领并执行，现有updatedAt支持三十秒超时重认领；失败或非空批次后重试，两类Owner Core目标都为空才完成。两项成功计数从命令、状态、哈希、快照和HTTP/客户端模型删除。",
+      "resolution_verification": "implemented_compile_verified_only; concurrent/recovery/live cancellation scenarios not executed"
     },
     {
       "id": "A110",
@@ -6372,8 +6383,8 @@
     },
     {
       "id": "A113",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "倒计时撤单忽略批次失败与未撤尽状态，直接记录完成",
       "category": "missing_required_completion_condition",
       "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
@@ -6409,9 +6420,48 @@
         "定时器每类只调用一次limit=1000的取消，未再核对真实开放订单是否已撤尽。批次大小限制是有用的工作量边界，但不能用单页返回代替全部撤单完成。",
         "这些是静态可达失败/多页输入的逻辑结论，尚未用运行场景复现；不声称出现过线上遗漏。"
       ],
-      "business_code_changed": false,
+      "business_code_changed": true,
       "proposed_cleanup": "保留单批上限，按真实失败、剩余开放订单和命令结果推进重试/完成；只有满足完成条件才记录TRIGGERED。使用原版本和恢复规则，避免无界循环或把部分成功伪装成全部完成。",
-      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。",
+      "resolved_in_round": "twenty_seventh_cleanup_round",
+      "implementation": "Gateway使用原Core视图及认领版本，删除Timer副本与版本重查；校验本次下一修订/TRIGGERING。逐个认领并执行，现有updatedAt支持三十秒超时重认领；失败或非空批次后重试，两类Owner Core目标都为空才完成。两项成功计数从命令、状态、哈希、快照和HTTP/客户端模型删除。",
+      "resolution_verification": "implemented_compile_verified_only; concurrent/recovery/live cancellation scenarios not executed"
+    },
+    {
+      "id": "A114",
+      "status": "resolved",
+      "analysis_status": "resolved",
+      "topic": "移动端倒计时响应仍使用旧symbol字段名读取实际instrumentId",
+      "evidence_basis_commit": "a7dbe23ac20213211df22ff0aea89256013b1c4b",
+      "business_code_changed": true,
+      "resolved_in_round": "twenty_seventh_cleanup_round",
+      "fields": [
+        "CancelAllAfterResult.symbol",
+        "CancelAllAfterResult.fromJson中的symbol键"
+      ],
+      "evidence": [
+        "后端响应一直为instrumentId，当前移动模型解析symbol会丢失范围事实。已检查调用只有API绑定，没有页面或测试构造依赖旧属性名。"
+      ],
+      "implementation": "模型属性、可选构造参数和JSON读取统一为instrumentId，不新增别名或回退；删除两项无用成功数量。Flutter重新bundle编译通过，未执行设备交互。"
+    },
+    {
+      "id": "A115",
+      "status": "candidate",
+      "analysis_status": "candidate",
+      "topic": "倒计时原始时长在状态/快照中是否仅作无人消费回显",
+      "evidence_basis_commit": "a7dbe23ac20213211df22ff0aea89256013b1c4b",
+      "business_code_changed": false,
+      "fields": [
+        "CoreCancelAllAfterState/View.countdownMillis",
+        "倒计时快照字段3",
+        "CancelAllAfterResponse/Result.countdownMs"
+      ],
+      "evidence": [
+        "SET命令的时长仍真实参与状态启停与精确截止时间计算，不能删除该输入。",
+        "现有持久化时长的可见读取为状态复制、哈希、编码及SET回显；执行到期使用triggerAt，超时认领使用updatedAt。",
+        "Web以请求值展示设置反馈；移动端只解析回包时长，尚未发现独立展示/决策消费者。公开契约回显是否仍是必要职责须继续核对，不能直接按新更新时间推导原时长。"
+      ],
+      "proposed_cleanup": "继续核对全部Core/API/RPC消费者；若仅有无用回显，删除状态、快照和响应副本，保留SET真实倒计时参数、精确截止时间和认领更新时间。"
     }
   ],
   "preserve_verified_purposes": [
@@ -6429,9 +6479,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "A107/A109/A113倒计时认领版本、恢复和真实完成条件。",
-    "A108无用成功计数、A106完成时间继续整链清理。",
-    "A105模型/协议边界和A11查询一致性仍保留；全量审查未完成。"
+    "A106整链完成时间清理。",
+    "A115持久化时长与真实API回显消费。",
+    "继续逐业务操作检查所有字段/约束；运行正确性尚未验证，整体目标未完成。"
   ],
   "rejected_false_positives": [
     {
@@ -6728,30 +6778,32 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "755b4c3ba368def930431f027a037d572140a3cd",
+    "source_basis_commit": "a7dbe23ac20213211df22ff0aea89256013b1c4b",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A110",
-      "A111",
-      "A112"
-    ],
-    "confirmed_ids": [
-      "A106",
       "A107",
       "A108",
       "A109",
-      "A113"
+      "A113",
+      "A114"
+    ],
+    "retained_ids": [
+      "A105"
+    ],
+    "confirmed_ids": [
+      "A106"
     ],
     "candidate_ids": [
       "A11",
-      "A105"
+      "A115"
     ],
     "counts": {
-      "resolved": 106,
+      "resolved": 111,
       "candidate": 2,
-      "confirmed": 5
+      "retained": 1,
+      "confirmed": 1
     },
-    "evidence": "twenty_sixth_cleanup_round",
+    "evidence": "twenty_seventh_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -21333,6 +21385,428 @@
           "path": "/tmp/aeron-algo-wrappers-20261024-static.json",
           "bytes": 3705,
           "sha256": "9fde72330ea48e594e6e6ccf6ec22e3cb513513f61c3c5cb95df8f7ef63be176"
+        }
+      ],
+      "remaining_owned_files": [],
+      "compiler_outputs_retained": true
+    }
+  },
+  "twenty_seventh_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "a7dbe23ac20213211df22ff0aea89256013b1c4b",
+    "resolved_ids": [
+      "A107",
+      "A108",
+      "A109",
+      "A113",
+      "A114"
+    ],
+    "retained_ids": [
+      "A105"
+    ],
+    "new_candidate_ids": [
+      "A115"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 111,
+      "candidate": 2,
+      "retained": 1,
+      "confirmed": 1
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 52,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4,
+      "algo_command": 5,
+      "algo_view": 3,
+      "cancel_all_after_command": 5,
+      "cancel_all_after_query_view": 2
+    },
+    "flow": "SET原业务时间+倒计时 → Owner状态/索引 → 一个任务认领后执行一个批次 → 原Core查询目标及既有取消命令 → 非空/失败重试，权威双空页完成 → 原认领版本裁决 → 日志/快照恢复及超时重新认领。",
+    "implementation": {
+      "removed_persisted_counter_facts": 2,
+      "record_component_counts": {
+        "command": 5,
+        "core_state": 7,
+        "core_view": 7,
+        "http_response": 6,
+        "mobile_result": 6
+      },
+      "removed_gateway_record_components": 8,
+      "removed_local_record": "CancelAllAfterTimer",
+      "removed_private_mapping_and_version_methods": 3,
+      "removed_unused_reader_methods": 1,
+      "removed_batch_preclaim_phase": true,
+      "new_persisted_fields": 0,
+      "new_classes_interfaces_or_registries": 0,
+      "new_test_classes": 0,
+      "new_static_business_constants": {
+        "CoreCancelAllAfterState.CLAIM_LEASE_MILLIS": {
+          "value": 30000,
+          "purpose": "以已有更新时间限制认领占用，为中断/未知结果提供可恢复入口。"
+        }
+      },
+      "new_used_business_methods": {
+        "CoreCancelAllAfterState.claimableAt": "原状态机与原索引共用有效资格，不读时钟或框架。",
+        "OrderService.cancelTimerOrders": "内部撤单从原Owner Core选目标并复用既有批次取消；公开查询/用户cancel-open不变。"
+      },
+      "claim_write_read_race_guard": "本次expectedRevision+1且TRIGGERING，complete/retry沿原修订；不采用后来重新设置的版本。",
+      "work_bound": "每轮每个已认领范围各处理至多1000普通/条件单，无无界循环；处理过非空页后先重试，后续权威空页才完成。",
+      "old_format_policy": "用户确认尚未使用，无需旧日志/快照读取；当前命令v5/查询状态v2/交易快照v52，无新增legacy/fallback。",
+      "mobile_old_symbol_alias_removed": true
+    },
+    "verification": {
+      "java": "HotSpot Corretto27+33-FR",
+      "maven_version": "3.9.16",
+      "node": "22.23.1",
+      "npm": "10.9.8",
+      "flutter": "3.44.4",
+      "dart": "3.12.2",
+      "disk_available_before_build": "182GiB",
+      "commands": {
+        "maven": {
+          "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+          "exit_code": 0,
+          "wall_seconds": 60.819,
+          "log_sha256": "17f3e32d245e73fd2021054174d5d33ad4e34ac0d624297ad9581e7df3ee6a55",
+          "result": "BUILD SUCCESS",
+          "duration": "58.265 s",
+          "reactor_modules": [
+            "Surprising Parent",
+            "surprising-instrument-api",
+            "surprising-aeron-protocol",
+            "surprising-aeron-client",
+            "surprising-aeron-service",
+            "surprising-aeron-tools",
+            "surprising-trading-api",
+            "surprising-account-api",
+            "surprising-price-api",
+            "surprising-price-consumer",
+            "surprising-maker",
+            "surprising-realtime-api",
+            "surprising-price-provider",
+            "surprising-aeron-benchmarks",
+            "surprising-derivatives-lifecycle-api",
+            "surprising-realtime-provider",
+            "surprising-gateway"
+          ]
+        },
+        "web": {
+          "command": "npm run build",
+          "exit_code": 0,
+          "wall_seconds": 3.988,
+          "log_sha256": "3ecd117617d72e2ac5247b682faa663475ad7a83cc3b3994c0f2e3ab176f94ec"
+        },
+        "client": {
+          "command": "flutter build bundle --debug --no-pub",
+          "exit_code": 0,
+          "wall_seconds": 8.946,
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "earlier_client_compile_before_instrument_id_fix": {
+        "command": "flutter build bundle --debug --no-pub",
+        "exit_code": 0,
+        "wall_seconds": 12.162,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "tests_executed": false,
+      "test_sources_compiled": true,
+      "services_started": false,
+      "performance_executed": false,
+      "browser_or_device_started": false,
+      "unverified": [
+        "真实并发认领/重设交错",
+        "真实认领超时与Cluster日志/快照恢复",
+        "多页/部分失败撤单及做市运行",
+        "资金/冻结/持仓/终态运行核对",
+        "数据库、Web点击与网络闭环",
+        "移动端设备、原生打包和布局",
+        "Web lint/test、Flutter analyze/test（按只编译要求未运行）"
+      ]
+    },
+    "static_verification": {
+      "status": "passed",
+      "all_available_classfiles_scanned": 4022,
+      "old_gateway_type_refs": [],
+      "removed_count_field_and_getter_refs": [],
+      "constructor_refs": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-benchmarks/target/classes/com/surprising/aeron/service/order/ClusteredBatchTradingBenchmark$Workload.class",
+          "owner": "com/surprising/aeron/protocol/CoreCancelAllAfterCommand",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CoreCancelAllAfterAction;Ljava/lang/String;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest.class",
+          "owner": "com/surprising/aeron/protocol/CoreCancelAllAfterCommand",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CoreCancelAllAfterAction;Ljava/lang/String;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/ConditionalOrderSchedulingIndexTest.class",
+          "owner": "com/surprising/aeron/model/CoreCancelAllAfterState",
+          "descriptor": "(JLjava/lang/String;JLcom/surprising/aeron/protocol/CoreCancelAllAfterStatus;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TradingCoreOwnerTest.class",
+          "owner": "com/surprising/aeron/protocol/CoreCancelAllAfterCommand",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CoreCancelAllAfterAction;Ljava/lang/String;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/CoreCancelAllAfterState.class",
+          "owner": "com/surprising/aeron/protocol/CoreCancelAllAfterView",
+          "descriptor": "(JLjava/lang/String;JLcom/surprising/aeron/protocol/CoreCancelAllAfterStatus;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.class",
+          "owner": "com/surprising/aeron/model/CoreCancelAllAfterState",
+          "descriptor": "(JLjava/lang/String;JLcom/surprising/aeron/protocol/CoreCancelAllAfterStatus;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class",
+          "owner": "com/surprising/aeron/model/CoreCancelAllAfterState",
+          "descriptor": "(JLjava/lang/String;JLcom/surprising/aeron/protocol/CoreCancelAllAfterStatus;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/target/test-classes/com/surprising/aeron/protocol/CoreCancelAllAfterCodecTest.class",
+          "owner": "com/surprising/aeron/protocol/CoreCancelAllAfterView",
+          "descriptor": "(JLjava/lang/String;JLcom/surprising/aeron/protocol/CoreCancelAllAfterStatus;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreCancelAllAfterCommand.class",
+          "owner": "com/surprising/aeron/protocol/CoreCancelAllAfterCommand",
+          "descriptor": "(Lcom/surprising/aeron/protocol/CoreCancelAllAfterAction;Ljava/lang/String;JJJ)V"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.class",
+          "owner": "com/surprising/aeron/protocol/CoreCancelAllAfterView",
+          "descriptor": "(JLjava/lang/String;JLcom/surprising/aeron/protocol/CoreCancelAllAfterStatus;JJJ)V"
+        },
+        {
+          "file": "surprising-gateway/target/test-classes/com/surprising/trading/order/service/CancelAllAfterServiceTest.class",
+          "owner": "com/surprising/aeron/protocol/CoreCancelAllAfterView",
+          "descriptor": "(JLjava/lang/String;JLcom/surprising/aeron/protocol/CoreCancelAllAfterStatus;JJJ)V"
+        },
+        {
+          "file": "surprising-gateway/target/classes/com/surprising/trading/order/service/CancelAllAfterService.class",
+          "owner": "com/surprising/trading/api/model/CancelAllAfterResponse",
+          "descriptor": "(JLjava/lang/String;JZLjava/time/Instant;Ljava/time/Instant;)V"
+        }
+      ],
+      "record_shapes": {
+        "com/surprising/aeron/protocol/CoreCancelAllAfterCommand": {
+          "record_components": 5,
+          "class_sha256": "91531e5f6bd5b915c0056f1d4d46ad63f14fd4ba0ef8eb6fae0eab0224a835f3"
+        },
+        "com/surprising/aeron/protocol/CoreCancelAllAfterView": {
+          "record_components": 7,
+          "class_sha256": "19645cfa1941d2c80ce3bc8a6dcd55cfba975757da223f150972789d0ddbb6b9"
+        },
+        "com/surprising/aeron/model/CoreCancelAllAfterState": {
+          "record_components": 7,
+          "class_sha256": "af99fe0d116b3da69cbbf1d7b8f67656d0d6b8233b44f3367d18be7a714af7c5"
+        },
+        "com/surprising/trading/api/model/CancelAllAfterResponse": {
+          "record_components": 6,
+          "class_sha256": "e9cd824353124ccd0dd488a1d6d2c8f3072d765e6d5e3f5001b36c5ded1c1a45"
+        }
+      },
+      "other_snapshot_code_unchanged": true,
+      "public_order_selection_and_batch_logic_unchanged": true,
+      "existing_source_hashes_unchanged": {
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java": "f150cb2ad5d1e07445796f9aba8140d27003d1fb9c610713951d262c8a7e1c03",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java": "f57833a33502a58e1c9e7b9d76395d0c1f43ac2d1b6234e900be18164d2fe7b8",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderAeronGateway.java": "be893a5145ca9fabf58536b023e8164b2204725b92dca18198cc696bf7e5211f",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronOrderCommandService.java": "102483a4ee878d3dc2ee5da7f4de389b0a81c9eeec0f3a305baed9d3b2d0f53f",
+        "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderService.java": "ea2b403c90ad1771f7c2242f79ca1e72f8edcab1b27fb1ada9ed134fc4ad8a44",
+        "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java": "e1bbcdee20065d05aa275496fcb94b46be0df5315094343264f30a265637e2ac",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeAlgoOrderStateTransitions.java": "5cfa9a6c31c1d7b81f32f2a7247cb974948f6e50c76710d17c252088abd07d0e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java": "57dc997838b99b306dfd89f5b6d19b072a694f2e6acf93be1309bdd9a9070e0d",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java": "7e70feec8237ccdbda11bc1cab2da2092165909c0c03ff2d3420415d35bd592b",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java": "4c01c819b8718034ee17cac2326973f50166092626c5cc55e76dce41c1c0db77",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java": "f81aa3d05365ab6173cde1c05378e14d5822101d08c90f249919ec9783c7f22e"
+      },
+      "source_hashes": {
+        "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/order/ClusteredBatchTradingBenchmark.java": "0019d75e8690ae81fbc9d3bef068a3e3d88f91358a4e4c339d3e181d575e92d9",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.java": "6f5a5086445f28bb6a5f636e3e11350bfbef20dc3a2e0e4cfe7dbb0b08751d25",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterCommand.java": "59f7fe920f484d5652f0fb3e81d902698d571553790b4041b7ec3f9d7632c549",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterView.java": "3eb2d301e58f49b0ac3c306449adc7b690303b5aa0363d3e7db4f25c04542239",
+        "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/CoreCancelAllAfterCodecTest.java": "35459e5cba69a11f368197af7f01c10290cea129b5729f045872e22ca7c58d8f",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreCancelAllAfterState.java": "616e1ead5b901df1f3eee9986ecff21a8b5b1ba9a8f23a3ca156264d0d7dcac7",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "f7506cd645455635154d41436d4fae9c12ad3d3e1fdca0f18be6d00bcff5d4a7",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/CancelAllAfterIndex.java": "9fd3e59b61bfadde454939ae00eeb091cce65eb5f3afdce8c13c25fe440d26a9",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java": "2620cc0aeeffc898b8f4c611b49d1a8a46cd77c2ec9af8b7ac4baeaccdae9dd3",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "801b217ee87c96011596d135edd9a143cc980e21b35bd398d6d8d85f1a48b67b",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/ConditionalOrderSchedulingIndexTest.java": "87e33c111481764093592e0f74b9dafad110ad1fa60be7ceb368d6952f994899",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest.java": "c07f8c0280e955ce33d5569b0539d4596d25de435cf8e46cad6315783ced383f",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java": "b27a8fe83ff627a0149e61dc41bb53a47a9565a2e1ce609b163452091283918b",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/model/CancelAllAfterTimer.java": null,
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java": "40707eac9a860c1c1b4930f7fcfa469d474a405c82c0bed52bd9c760c0e3fc7a",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/CancelAllAfterService.java": "32ec7073a4e587c204d5c3b6d0a5bc1cc87f8263a1f1d41954c003580954ad65",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderService.java": "64906f256ca2f97c8a60582ee23d0cc23d5e93a98581e982781492d0e4c87c31",
+        "surprising-gateway/src/test/java/com/surprising/trading/order/service/CancelAllAfterServiceTest.java": "e1526de059325c2866ab7c7ab61fe6c118a826286ebf3c67c55ec9e54891417d",
+        "surprising-gateway/src/test/java/com/surprising/trading/order/service/OrderServiceTest.java": "3eca22bfdba3ba27cfd32428e179f5d28c5caa16040876833717eed60b07631f",
+        "surprising-trading-api/src/main/java/com/surprising/trading/api/model/CancelAllAfterResponse.java": "8939a881aee6e1949a0fcc10107002c853ca1783687a2b248fe5b4a5ecab1481"
+      },
+      "mobile_source_hash": "261a3b48da12132bad93565cc0bf8d04e11993a70b0f70228081263b2b7e9cee",
+      "flutter_kernel_hash": "d0c5ffadb8a41d4b90e432c409f941f1cccf56e45c7c34f36194c8a7e7b01031",
+      "byte_savings_static": {
+        "complete_command": 8,
+        "timer_view": 8,
+        "timer_snapshot": 32
+      },
+      "limits": "静态源码及字节码；未执行编解码、断言、交易或恢复场景。",
+      "compiled_versions": {
+        "timer": {
+          "VERSION": 2,
+          "COMMAND_VERSION": 5
+        },
+        "snapshot": {
+          "VERSION": 52
+        }
+      },
+      "resource_literal_check": {
+        "roots": [
+          "surprising-aeron-core/surprising-aeron-service/src/main/resources",
+          "surprising-gateway/src/main/resources"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "",
+        "limits": "仅所列字面量检查，不声称排除所有动态反射。"
+      },
+      "mobile_instrument_id_contract": {
+        "source_field": "instrumentId",
+        "json_key": "instrumentId",
+        "old_symbol_key_removed": true
+      }
+    },
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "537f27248aecc5c53bb13d254657395bd7faa3c55eeeffe811facc3e2214092b",
+      "surprising-aeron-core/surprising-aeron-protocol/README.md": "6b92e153dacd802f649789e99638cddc1cf4291469017dc081e7410b26c541a8",
+      "surprising-gateway/README.md": "cb1b386f61dee6707f78cd1e4e52cc72d82bd789950a463994e5e24b4495368a",
+      "surprising-trading-api/README.md": "a122acedee3e0297b3e96bddc400945b8acc6ca7b14c59c524daa9b1b9f10155"
+    },
+    "linked_client_repositories": {
+      "../surprising-ex-web": {
+        "base": "40a09ae9902b30d68469be2c83e147313611ee96",
+        "commit": "4f18a7deee7fc385f8c354b69f467d471f5cfa4e",
+        "branch": "main",
+        "files": {
+          "README.md": "cec9d5a0599068ff62330a303bb28f04911d102d8dd05e679a6ac5d3a0ca3ce7"
+        },
+        "pushed": true,
+        "working_tree_clean": true
+      },
+      "../surprising-client": {
+        "base": "2c8ba8c9ce47f93fd4691db03f02ec1513c290f2",
+        "commit": "94c551e4121534c1357282f31c3977eb92a268ea",
+        "branch": "main",
+        "files": {
+          "README.md": "a28433b11004efb06bfd7a58bc21cc9890e20a65330d962a73ff93d3452a47fd",
+          "lib/src/models.dart": "261a3b48da12132bad93565cc0bf8d04e11993a70b0f70228081263b2b7e9cee"
+        },
+        "pushed": true,
+        "working_tree_clean": true
+      }
+    },
+    "graph_verification": {
+      "mechanism": "initialized CLI and read-only graph; record/generated-member gaps supplemented by source and exact classfile members",
+      "files": 2238,
+      "nodes": 52627,
+      "edges": 146377,
+      "status": "up_to_date"
+    },
+    "followup_analysis": {
+      "A106": "算法完成时间仍确认待整链删除，取消路径不能假定等于更新时间。",
+      "A115": "原倒计时时长的持久化/回显独立消费继续核对，SET输入本身有用。",
+      "A105": "按当前实际State领域职责保留，停止机械合并。",
+      "A11": "原查询提交顺序与分页读栅栏保留，未绕过Cluster。",
+      "rejected_duplicate_key_guess": "当前timer快照根字段10已经只写values并重建Key，不存在另存一份Key的重复；不能据Map形态再删除身份。"
+    },
+    "remaining_scope": [
+      "A106整链完成时间清理。",
+      "A115持久化时长与真实API回显消费。",
+      "继续逐业务操作检查所有字段/约束；运行正确性尚未验证，整体目标未完成。"
+    ],
+    "temporary_resources": {
+      "archived_files": [
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-archive.py",
+          "bytes": 10885,
+          "sha256": "243092e8b1c5af647a1a7b1a2ee8c1abce553d63bd371ec0d56f6f892e867fc2"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-client-commits.json",
+          "bytes": 652,
+          "sha256": "fbd0b1829038da22a0bf8d9638cd8fa990e53046e8c1a6cc344b5176159eca5b"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-client-final-result.json",
+          "bytes": 184,
+          "sha256": "ef100a280dd6efcb3e82bae27ec5dbfd04cb177c2b8b893ebae9f5713caa2948"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-client-final.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-client-result.json",
+          "bytes": 185,
+          "sha256": "0212c4ef24b85efc66bba4b1678d319bbd5ce9e5464a14de895abca8180ea911"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-client.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-docs.py",
+          "bytes": 6428,
+          "sha256": "d2c98b7e2cfffd80842ec255b1206d5bb6802cba0410ed26e6c36da8c0279340"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-fixtures.json",
+          "bytes": 880,
+          "sha256": "fce88ea7af8d903cb23168f030135dceeaefc1e596515227661a25bb39d0ecdb"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-fixtures.py",
+          "bytes": 3168,
+          "sha256": "2850e2984ba04f90011c52724f8662845f7085ed61b1354d657ff32661a941a0"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-maven-result.json",
+          "bytes": 400,
+          "sha256": "7e0ce7e154dc4e21bf6ceddbe9d31a4b0ce2f6a331dcea9f5c3bbc2ba7703ac1"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-maven.log",
+          "bytes": 38150,
+          "sha256": "17f3e32d245e73fd2021054174d5d33ad4e34ac0d624297ad9581e7df3ee6a55"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-static.json",
+          "bytes": 11930,
+          "sha256": "87a701187a428ef14e4b448cb2ebce3353f842961c61c01eacfdf9816ccde61f"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-static.py",
+          "bytes": 7626,
+          "sha256": "3334e24dc70c83f444d906b744f649324bedec013977a27345ef9324cd8179ef"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-web-result.json",
+          "bytes": 160,
+          "sha256": "8225dfd0423dea1c9b89d8e0dd6f645dd100e8b0b300dd807546d1e487da8470"
+        },
+        {
+          "path": "/tmp/aeron-timer-lifecycle-20261024-web.log",
+          "bytes": 3504,
+          "sha256": "3ecd117617d72e2ac5247b682faa663475ad7a83cc3b3994c0f2e3ab176f94ec"
         }
       ],
       "remaining_owned_files": [],

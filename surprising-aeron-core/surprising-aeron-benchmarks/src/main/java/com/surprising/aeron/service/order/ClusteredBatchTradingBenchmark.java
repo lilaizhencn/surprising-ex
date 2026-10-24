@@ -777,7 +777,7 @@ public class ClusteredBatchTradingBenchmark {
             singleResponses = true;
             try {
                 for (int i = 0; i < 128; i++) {
-                    var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "10", 1000, 0, 0, 0, 1000);
+                    var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "10", 1000, 0, 1000);
                     send(command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 1000 + i,
                             com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
                 }

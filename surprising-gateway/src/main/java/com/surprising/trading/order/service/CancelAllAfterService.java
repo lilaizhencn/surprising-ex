@@ -2,16 +2,15 @@ package com.surprising.trading.order.service;
 
 import lombok.extern.slf4j.Slf4j;
 
+import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
+import com.surprising.aeron.protocol.CoreCancelAllAfterView;
 import com.surprising.trading.api.model.CancelAllAfterRequest;
 import com.surprising.trading.api.model.CancelAllAfterResponse;
-import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.CancelOpenTriggerOrdersRequest;
 import com.surprising.trading.api.model.OrderBatchResponse;
 import com.surprising.trading.api.model.TriggerOrderBatchResponse;
-import com.surprising.trading.order.model.CancelAllAfterTimer;
 import com.surprising.trading.trigger.service.TriggerOrderService;
 import java.time.Instant;
-import java.util.List;
 import java.util.Locale;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,46 +52,53 @@ public class CancelAllAfterService {
 
         String symbolScope = normalizeSymbolScope(request.instrumentId());
         Instant now = Instant.now();
-        CancelAllAfterTimer timer = timerStore.set(request.userId(), symbolScope, request.countdownMs(), now);
+        CoreCancelAllAfterView timer = timerStore.set(request.userId(), symbolScope, request.countdownMs(), now);
         return toResponse(timer);
     }
 
     public void scanDueTimers() {
         Instant now = Instant.now();
-        List<CancelAllAfterTimer> timers = timerStore.due(now, CLAIM_LIMIT).stream()
-                .map(timer -> timerStore.claim(timer, now))
-                .flatMap(java.util.Optional::stream)
-                .toList();
-        for (CancelAllAfterTimer timer : timers) {
-            cancelDueTimer(timer);
+        for (CoreCancelAllAfterView timer : timerStore.due(now, CLAIM_LIMIT)) {
+            try {
+                var claimed = timerStore.claim(timer, Instant.now());
+                if (claimed.isPresent()) cancelDueTimer(claimed.get());
+            } catch (RuntimeException failure) {
+                log.warn("cancel-all-after step awaits recovery userId={} symbolScope={}",
+                        timer.userId(), timer.symbolScope(), failure);
+            }
         }
     }
 
-    void cancelDueTimer(CancelAllAfterTimer timer) {
+    void cancelDueTimer(CoreCancelAllAfterView timer) {
         String instrumentId = publicSymbol(timer.symbolScope());
+        OrderBatchResponse orderResponse;
+        TriggerOrderBatchResponse triggerResponse;
         try {
-            OrderBatchResponse orderResponse = orderService.cancelOpenOrders(
-                    new CancelOpenOrdersRequest(timer.userId(), instrumentId, CANCEL_LIMIT));
-            TriggerOrderBatchResponse triggerResponse = triggerOrderService.cancelOpenOrders(
+            orderResponse = orderService.cancelTimerOrders(timer.userId(), instrumentId, CANCEL_LIMIT);
+            triggerResponse = triggerOrderService.cancelOpenOrders(
                     new CancelOpenTriggerOrdersRequest(timer.userId(), instrumentId, CANCEL_LIMIT));
-            timerStore.complete(timer, orderResponse.completed(), triggerResponse.completed(), Instant.now());
         } catch (RuntimeException ex) {
-            timerStore.retry(timer, Instant.now());
             log.warn("cancel-all-after execution failed for userId={} symbolScope={}",
                     timer.userId(), timer.symbolScope(), ex);
+            timerStore.retry(timer, Instant.now());
+            return;
+        }
+        if (orderResponse.failed() > 0 || triggerResponse.failed() > 0
+                || orderResponse.requested() > 0 || triggerResponse.requested() > 0) {
+            timerStore.retry(timer, Instant.now());
+        } else {
+            timerStore.complete(timer, Instant.now());
         }
     }
 
-    private static CancelAllAfterResponse toResponse(CancelAllAfterTimer timer) {
+    private static CancelAllAfterResponse toResponse(CoreCancelAllAfterView timer) {
         return new CancelAllAfterResponse(
                 timer.userId(),
                 publicSymbol(timer.symbolScope()),
-                timer.countdownMs(),
-                "ACTIVE".equals(timer.status()),
-                timer.triggerAt(),
-                timer.updatedAt(),
-                timer.canceledOrders(),
-                timer.canceledTriggerOrders());
+                timer.countdownMillis(),
+                timer.status() == CoreCancelAllAfterStatus.ACTIVE,
+                timer.triggerAtEpochMillis() == 0 ? null : Instant.ofEpochMilli(timer.triggerAtEpochMillis()),
+                Instant.ofEpochMilli(timer.updatedAtEpochMillis()));
     }
 
     private static String normalizeSymbolScope(String instrumentId) {

@@ -2,9 +2,9 @@ package com.surprising.trading.order.service;
 
 import com.surprising.aeron.protocol.CoreCancelAllAfterCodec;
 import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
+import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
 import com.surprising.aeron.protocol.CoreCancelAllAfterView;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.trading.order.model.CancelAllAfterTimer;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
@@ -20,35 +20,39 @@ public class AeronCancelAllAfterStore {
         this.aeron = aeron;
     }
 
-    public CancelAllAfterTimer set(long userId, String symbolScope, long countdownMillis,
+    public CoreCancelAllAfterView set(long userId, String symbolScope, long countdownMillis,
                                    Instant now) {
         command(userId, CoreCancelAllAfterCommand.set(symbolScope, countdownMillis, now.toEpochMilli()));
         return exact(userId, symbolScope).orElseThrow(() -> new IllegalStateException("Aeron timer write not visible"));
     }
 
-    public List<CancelAllAfterTimer> due(Instant now, int limit) {
-        return aeron.cancelAllAfterTimers(0, "", now.toEpochMilli(), limit).stream().map(this::timer).toList();
+    public List<CoreCancelAllAfterView> due(Instant now, int limit) {
+        return aeron.cancelAllAfterTimers(0, "", now.toEpochMilli(), limit);
     }
 
-    public Optional<CancelAllAfterTimer> claim(CancelAllAfterTimer timer, Instant now) {
+    public Optional<CoreCancelAllAfterView> claim(CoreCancelAllAfterView timer, Instant now) {
         boolean applied = aeron.tryCommand(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, UUID.randomUUID(), timer.userId(),
                 CoreCancelAllAfterCodec.encodeCommand(CoreCancelAllAfterCommand.claim(timer.symbolScope(),
-                        timerRevision(timer), now.toEpochMilli())));
-        return applied ? exact(timer.userId(), timer.symbolScope()) : Optional.empty();
+                        timer.revision(), now.toEpochMilli())));
+        if (!applied) return Optional.empty();
+        long claimedRevision = Math.incrementExact(timer.revision());
+        return exact(timer.userId(), timer.symbolScope())
+                .filter(value -> value.revision() == claimedRevision
+                        && value.status() == CoreCancelAllAfterStatus.TRIGGERING);
     }
 
-    public void complete(CancelAllAfterTimer timer, int canceledOrders, int canceledTriggerOrders, Instant now) {
-        command(timer.userId(), CoreCancelAllAfterCommand.complete(timer.symbolScope(), timerRevision(timer),
-                canceledOrders, canceledTriggerOrders, now.toEpochMilli()));
-    }
-
-    public void retry(CancelAllAfterTimer timer, Instant now) {
-        command(timer.userId(), CoreCancelAllAfterCommand.retry(timer.symbolScope(), timerRevision(timer),
+    public void complete(CoreCancelAllAfterView timer, Instant now) {
+        command(timer.userId(), CoreCancelAllAfterCommand.complete(timer.symbolScope(), timer.revision(),
                 now.toEpochMilli()));
     }
 
-    public Optional<CancelAllAfterTimer> exact(long userId, String symbolScope) {
-        return aeron.cancelAllAfterTimers(userId, symbolScope, 0, 1).stream().findFirst().map(this::timer);
+    public void retry(CoreCancelAllAfterView timer, Instant now) {
+        command(timer.userId(), CoreCancelAllAfterCommand.retry(timer.symbolScope(), timer.revision(),
+                now.toEpochMilli()));
+    }
+
+    private Optional<CoreCancelAllAfterView> exact(long userId, String symbolScope) {
+        return aeron.cancelAllAfterTimers(userId, symbolScope, 0, 1).stream().findFirst();
     }
 
     private void command(long userId, CoreCancelAllAfterCommand command) {
@@ -62,17 +66,4 @@ public class AeronCancelAllAfterStore {
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
     }
 
-    private CancelAllAfterTimer timer(CoreCancelAllAfterView view) {
-        return new CancelAllAfterTimer(view.userId(), view.symbolScope(), view.countdownMillis(),
-                view.status().name(), instant(view.triggerAtEpochMillis()), instant(view.updatedAtEpochMillis()),
-                view.canceledOrders(), view.canceledTriggerOrders());
-    }
-
-    private long timerRevision(CancelAllAfterTimer timer) {
-        CoreCancelAllAfterView view = aeron.cancelAllAfterTimers(timer.userId(), timer.symbolScope(), 0, 1).stream()
-                .findFirst().orElseThrow(() -> new IllegalStateException("Aeron timer not found"));
-        return view.revision();
-    }
-
-    private static Instant instant(long epochMillis) { return epochMillis == 0 ? null : Instant.ofEpochMilli(epochMillis); }
 }

@@ -70,6 +70,21 @@ class ConditionalOrderSchedulingIndexTest {
         assertThat(index.query(0, "", 0, 10, values)).isEmpty();
     }
 
+    @Test
+    void aPersistedClaimBecomesDueOnlyWhenItsLeaseExpires() {
+        var claimed = new CoreCancelAllAfterState(7, "1", 1000,
+                CoreCancelAllAfterStatus.TRIGGERING, 2000, 2000, 2);
+        var state = new TradingCoreState(ProductLine.SPOT, 0, java.util.Map.of(), java.util.Map.of(),
+                java.util.Map.of(), com.surprising.aeron.model.CoreRiskState.empty(),
+                com.surprising.aeron.service.treasury.CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(),
+                java.util.Map.of(claimed.key(), claimed));
+        var recovered = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.decode(
+                com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(state), ProductLine.SPOT);
+        var index = new CancelAllAfterIndex(recovered);
+        assertThat(index.query(7, "1", 31_999, 1, recovered.cancelAllAfterTimers())).isEmpty();
+        assertThat(index.query(7, "1", 32_000, 1, recovered.cancelAllAfterTimers())).containsExactly(claimed.key());
+    }
+
     /**
      * 构造指定 ID、用户、标的及下一切片时间的非终态算法单，其余用固定买单及持续期参数，供调度索引测试。
      * @param id 算法单业务 ID
@@ -84,12 +99,12 @@ class ConditionalOrderSchedulingIndexTest {
     }
 
     /**
-     * 构造指定用户、范围和触发时间的 ACTIVE 全撤计时器，其他版本和统计使用固定值。
+     * 构造指定用户、范围和触发时间的 ACTIVE 全撤计时器，其他版本使用固定值。
      * @param user 算法或计时器所属用户
      * @param scope 计时器标的范围文本，星号也是具体存储文本
      * @param due 算法下一切片或计时器触发毫秒时间
      */
     private static CoreCancelAllAfterState timer(long user, String scope, long due) {
-        return new CoreCancelAllAfterState(user, scope, 100, CoreCancelAllAfterStatus.ACTIVE, due, 1, 0, 0, 1);
+        return new CoreCancelAllAfterState(user, scope, 100, CoreCancelAllAfterStatus.ACTIVE, due, 1, 1);
     }
 }

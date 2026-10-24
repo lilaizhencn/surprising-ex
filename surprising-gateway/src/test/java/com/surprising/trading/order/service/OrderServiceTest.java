@@ -436,6 +436,17 @@ class OrderServiceTest {
                 null, null, null, null, null, null);
     }
 
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void timerCompletionChecksTheOwnerCoreWithoutPublicReadProjections(ProductLine line) {
+        var service = service(line, aeronOrders);
+        when(aeronOrders.openOrders(1001L, "1", 0L, 1000)).thenReturn(List.of());
+
+        assertThat(service.cancelTimerOrders(1001L, "1", 1000).requested()).isZero();
+
+        verify(aeronOrders).openOrders(1001L, "1", 0L, 1000);
+        verifyNoInteractions(realtimeQueries, projection);
+    }
+
     @Test
     void cancelOpenOrdersSelectsFromRealtimeAndSendsOnlyCancelCommandToAeron() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);

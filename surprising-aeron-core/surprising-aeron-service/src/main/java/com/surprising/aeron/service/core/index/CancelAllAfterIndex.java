@@ -35,7 +35,7 @@ public final class CancelAllAfterIndex {
      * 把调用方计时器映射的 get 作为正文读取函数，复用同一套候选查询。
      * @param userId 计时器所属用户，查询零表示不过滤用户
      * @param symbolScope 计时器标的范围文本，查询空文本表示不过滤范围
-     * @param dueAtEpochMillis 到期筛选包含上界，零表示不按时间和 ACTIVE 状态筛选
+     * @param dueAtEpochMillis 到期筛选包含上界，零表示不按执行资格筛选
      * @param limit 希望返回数量，统一夹在一至一万
      * @param values 调用方当前计时器正文映射，按候选业务键读取
      */
@@ -45,10 +45,10 @@ public final class CancelAllAfterIndex {
     }
 
     /**
-     * 要求 lookup 非空，把数量夹在一到一万，按时间及用户取候选后再读真实值过滤范围。到期时间为零时不限制状态；非零时仅返回 ACTIVE 且已经到期的值，输出键按时间、用户、范围文本排序。
+     * 要求 lookup 非空，把数量夹在一到一万，按时间及用户取候选后再读真实值过滤范围。到期时间为零时不限制状态；非零时返回已到期 ACTIVE 或认领超过三十秒的 TRIGGERING，输出键按时间、用户、范围文本排序。
      * @param userId 计时器所属用户，查询零表示不过滤用户
      * @param symbolScope 计时器标的范围文本，查询空文本表示不过滤范围
-     * @param dueAtEpochMillis 到期筛选包含上界，零表示不按时间和 ACTIVE 状态筛选
+     * @param dueAtEpochMillis 到期筛选包含上界，零表示不按执行资格筛选
      * @param limit 希望返回数量，统一夹在一至一万
      * @param lookup 按计时器业务键读取当前正文的函数，必须非空
      */
@@ -72,8 +72,7 @@ public final class CancelAllAfterIndex {
             CoreCancelAllAfterState value = lookup.apply(key);
             if (value == null || (userId != 0 && value.userId() != userId)
                     || (!symbolScope.isEmpty() && !value.symbolScope().equals(symbolScope))
-                    || (dueAtEpochMillis != 0 && (value.status() != com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE
-                    || value.triggerAtEpochMillis() > dueAtEpochMillis))) {
+                    || (dueAtEpochMillis != 0 && !value.claimableAt(dueAtEpochMillis))) {
                 continue;
             }
             result.add(key);

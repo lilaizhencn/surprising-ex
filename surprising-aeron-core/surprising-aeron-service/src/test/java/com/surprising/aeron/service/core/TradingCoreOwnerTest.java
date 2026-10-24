@@ -942,7 +942,7 @@ class TradingCoreOwnerTest {
                     command(CoreMessageType.CONTINUE_RISK_SCAN, 2, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeContinueRiskScan(new com.surprising.aeron.protocol.ContinueRiskScanCommand(1))));
             finishCommands(service);
             // 原用户标的一延时全撤 SET 命令
-            var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1000, 0, 0, 0, 1000);
+            var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, "1", 1000, 0, 1000);
             onSessionMessage(service, responses, command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 3, 1001,
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
             finishCommands(service);

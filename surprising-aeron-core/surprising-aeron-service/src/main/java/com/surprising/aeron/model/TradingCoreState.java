@@ -316,8 +316,6 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, timer.status().wireCode());
             hash = CoreStateHash.mix(hash, timer.triggerAtEpochMillis());
             hash = CoreStateHash.mix(hash, timer.updatedAtEpochMillis());
-            hash = CoreStateHash.mix(hash, timer.canceledOrders());
-            hash = CoreStateHash.mix(hash, timer.canceledTriggerOrders());
             hash = CoreStateHash.mix(hash, timer.revision());
         }
         for (CoreTriggerOrderState /* 当前待校验或混合的触发单状态，哈希只纳入仍 open 的项 */ trigger : triggerOrders.values()) {

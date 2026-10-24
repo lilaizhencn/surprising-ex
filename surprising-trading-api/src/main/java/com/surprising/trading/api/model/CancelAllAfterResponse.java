@@ -8,7 +8,5 @@ public record CancelAllAfterResponse(
         long countdownMs,
         boolean active,
         Instant triggerAt,
-        Instant updatedAt,
-        int canceledOrders,
-        int canceledTriggerOrders) {
+        Instant updatedAt) {
 }

@@ -7,29 +7,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class CoreCancelAllAfterCodec {
-    private static final int VERSION = 1;
-    private static final int COMMAND_VERSION = 4;
+    private static final int VERSION = 2;
+    private static final int COMMAND_VERSION = 5;
     private static final int MAX_TEXT_BYTES = 64;
 
     private CoreCancelAllAfterCodec() {
     }
 
     public static byte[] encodeCommand(CoreCancelAllAfterCommand command) {
-        int actionBytes = switch (command.action()) {
-            case COMPLETE -> Long.BYTES * 2;
-            case SET -> Long.BYTES;
-            case CLAIM, RETRY -> Long.BYTES;
-        };
-        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 2 + Long.BYTES
-                + textLength(command.symbolScope()) + actionBytes).order(ByteOrder.LITTLE_ENDIAN);
+        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 2 + Long.BYTES * 2
+                + textLength(command.symbolScope())).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(COMMAND_VERSION).putInt(command.action().wireCode());
         CoreStateQueryCodec.putText(buffer, command.symbolScope(), true, MAX_TEXT_BYTES);
         buffer.putLong(command.updatedAtEpochMillis());
         switch (command.action()) {
             case SET -> buffer.putLong(command.countdownMillis());
-            case CLAIM, RETRY -> buffer.putLong(command.expectedRevision());
-            case COMPLETE -> buffer.putLong(command.expectedRevision())
-                    .putInt(command.canceledOrders()).putInt(command.canceledTriggerOrders());
+            case CLAIM, RETRY, COMPLETE -> buffer.putLong(command.expectedRevision());
         }
         return buffer.array();
     }
@@ -44,8 +37,7 @@ public final class CoreCancelAllAfterCodec {
             case SET -> CoreCancelAllAfterCommand.set(scope, reader.longValue(), now);
             case CLAIM -> CoreCancelAllAfterCommand.claim(scope, reader.longValue(), now);
             case RETRY -> CoreCancelAllAfterCommand.retry(scope, reader.longValue(), now);
-            case COMPLETE -> CoreCancelAllAfterCommand.complete(scope, reader.longValue(), reader.intValue(),
-                    reader.intValue(), now);
+            case COMPLETE -> CoreCancelAllAfterCommand.complete(scope, reader.longValue(), now);
         };
         reader.consumed();
         return command;
@@ -72,7 +64,7 @@ public final class CoreCancelAllAfterCodec {
     public static byte[] encodeList(List<CoreCancelAllAfterView> values) {
         int length = Integer.BYTES * 2;
         for (CoreCancelAllAfterView value : values) {
-            length = Math.addExact(length, Long.BYTES * 5 + Integer.BYTES * 3 + textLength(value.symbolScope()));
+            length = Math.addExact(length, Long.BYTES * 5 + Integer.BYTES + textLength(value.symbolScope()));
         }
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION).putInt(values.size());
@@ -83,8 +75,6 @@ public final class CoreCancelAllAfterCodec {
                     .putInt(value.status().wireCode())
                     .putLong(value.triggerAtEpochMillis())
                     .putLong(value.updatedAtEpochMillis())
-                    .putInt(value.canceledOrders())
-                    .putInt(value.canceledTriggerOrders())
                     .putLong(value.revision());
         }
         return buffer.array();
@@ -98,7 +88,7 @@ public final class CoreCancelAllAfterCodec {
         for (int index = 0; index < count; index++) {
             values.add(new CoreCancelAllAfterView(reader.longValue(), reader.text(), reader.longValue(),
                     CoreCancelAllAfterStatus.fromWireCode(reader.intValue()), reader.longValue(), reader.longValue(),
-                    reader.nonNegativeInt(), reader.nonNegativeInt(), reader.longValue()));
+                    reader.longValue()));
         }
         reader.consumed();
         return List.copyOf(values);
@@ -130,7 +120,6 @@ public final class CoreCancelAllAfterCodec {
         }
         void version() { if (intValue() != VERSION) throw new ProtocolException("unsupported cancel-all-after codec version"); }
         int intValue() { require(4); return buffer.getInt(); }
-        int nonNegativeInt() { int value = intValue(); if (value < 0) throw new ProtocolException("negative value"); return value; }
         long longValue() { require(8); return buffer.getLong(); }
         int count() { int value = intValue(); if (value < 0 || value > 1_000_000) throw new ProtocolException("invalid count"); return value; }
         String text() {

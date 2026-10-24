@@ -382,6 +382,14 @@ public class OrderService {
         return orderBatchResponse(cancelOrderChunks(requests));
     }
 
+    /** 定时撤单从所属Core读取本批目标，完成判断不依赖公开查询投影的进度。 */
+    OrderBatchResponse cancelTimerOrders(long userId, String instrumentId, int limit) {
+        List<CancelOrderRequest> requests = requireAeron().openOrders(userId, instrumentId, 0, limit).stream()
+                .map(order -> new CancelOrderRequest(userId, order.orderId()))
+                .toList();
+        return orderBatchResponse(cancelOrderChunks(requests));
+    }
+
     public OrderResponse get(long userId, long orderId) {
         return get(userId, orderId, null);
     }

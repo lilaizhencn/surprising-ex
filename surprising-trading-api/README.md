@@ -180,9 +180,10 @@ Topic 路由，再统一追加到用户分区 WAL/RocksDB，由 `OrderUserStateS
 
 - `countdownMs=0` 关闭倒计时。
 - 正数 `countdownMs` 会刷新用户级倒计时；传 `instrumentId` 时只作用于该交易对，不传则作用于全部 instrumentId。
-- 倒计时到期后，trading provider 复用现有 `cancel-open` 路径撤用户开放普通单，并在进程内撤 pending TP/SL 条件单。
-- timer 状态保存在订单用户分区的本地 WAL/RocksDB；数据库不参与倒计时、到期判断或撤单裁决。
-  数据库若配置了订单投影，只用于后台查询和审计，投影落后不会影响倒计时执行。
+- 倒计时到期后，Gateway分批读取所属Core的普通单并使用原批次撤单流程；条件单同样由其Core入口读取和取消。每类每轮最多1000笔，存在目标或失败时后续扫描继续；两类权威目标都为空才记录完成。
+- timer状态由Aeron Cluster命令裁决并随日志/快照恢复。认领、完成和重试使用任务自身修订；三十秒认领超时由现有更新时间判断，不在外围维护另一份状态。
+- 响应保留`userId`、`instrumentId`、`countdownMs`、`active`、`triggerAt`、`updatedAt`，删除没有独立消费的`canceledOrders`/`canceledTriggerOrders`。客户端不再解析这两个字段。
+- 当前倒计时命令v5、查询/状态v2、交易快照v52只读当前格式。相关17模块已干净编译，Java测试源码已编译，未执行实际撤单或恢复验证。
 
 ## 算法单
 

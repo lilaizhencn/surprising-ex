@@ -7,14 +7,11 @@ public record CoreCancelAllAfterView(
         CoreCancelAllAfterStatus status,
         long triggerAtEpochMillis,
         long updatedAtEpochMillis,
-        int canceledOrders,
-        int canceledTriggerOrders,
         long revision) {
 
     public CoreCancelAllAfterView {
         if (userId <= 0 || symbolScope == null || symbolScope.isBlank() || countdownMillis < 0 || status == null
-                || triggerAtEpochMillis < 0 || updatedAtEpochMillis <= 0 || canceledOrders < 0
-                || canceledTriggerOrders < 0 || revision <= 0) {
+                || triggerAtEpochMillis < 0 || updatedAtEpochMillis <= 0 || revision <= 0) {
             throw new IllegalArgumentException("invalid cancel-all-after view");
         }
     }
