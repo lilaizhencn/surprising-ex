@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第二十五轮：算法内部四份PostOnly副本、固定TWAP TIF存储、临时请求/UUID及Web无效普通字段清理；后端17模块、Web、Flutter bundle编译通过。累计103项解决，A11/A105/A106三候选。Core16/registerV10/algoCommand5/algoView3/snapshot51，全量审查继续。",
+    "checkpoint": "第二十五轮103项清理已提交；新一轮仅扫描，确认8项未实施（A106至A113），候选A11/A105继续保留。版本/恢复/完成语义先于字段删除；全量审查未结束。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -6086,12 +6086,13 @@
         }
       ],
       "business_code_changed": false,
-      "proposed_cleanup": "核对所有State/View消费者、Key/索引、Owner/Lane、查询冻结和恢复后决定是否共享同一不可变事实；保留ACTIVE触发时间及全部金额/身份/时间边界，不机械删除实际协议职责。"
+      "proposed_cleanup": "核对所有State/View消费者、Key/索引、Owner/Lane、查询冻结和恢复后决定是否共享同一不可变事实；保留ACTIVE触发时间及全部金额/身份/时间边界，不机械删除实际协议职责。",
+      "followup": "已核对9字段及现有生产者；State仍承担ACTIVE触发时间守卫和服务内Key职责。先解决版本/恢复与无用计数，不能仅凭同形就机械合并真实协议/状态边界。"
     },
     {
       "id": "A106",
-      "status": "candidate",
-      "analysis_status": "candidate",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
       "topic": "算法完成时间的独立消费仍需核对，不能简单按更新时间推导",
       "fields": [
         "算法completedAt/completedAtEpochMillis的命令、状态、视图和响应"
@@ -6105,7 +6106,306 @@
         }
       ],
       "business_code_changed": false,
-      "proposed_cleanup": "继续判断是否存在独立业务用途；若确属无人消费元数据，再整链删除，而不是凭字段相似强行派生。当前不改时间语义。"
+      "proposed_cleanup": "继续判断是否存在独立业务用途；若确属无人消费元数据，再整链删除，而不是凭字段相似强行派生。当前不改时间语义。",
+      "confirmed_in_round": "next_operation_analysis_20261024",
+      "confirmation": {
+        "source_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+        "conclusion": "当前仓库内算法完成时间仅复制/编码/持久化/响应，无独立业务读取；可整链删除，不是按更新时间推导。",
+        "source_references": [
+          {
+            "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java",
+            "line": 67,
+            "anchor": "epoch(value.nextSliceAt()), epoch(value.completedAt())"
+          },
+          {
+            "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java",
+            "line": 111,
+            "anchor": "record.startAt(), record.nextSliceAt(), record.completedAt()"
+          },
+          {
+            "file": "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedAlgoRepository.java",
+            "line": 23,
+            "anchor": "byte[] raw = CoreAlgoOrderCodec.encode(value);"
+          },
+          {
+            "file": "surprising-gateway/src/main/java/com/surprising/trading/order/repository/AlgoOrderProjectionRepository.java",
+            "line": 57,
+            "anchor": "value.createdAtEpochMillis() != rs.getLong"
+          }
+        ],
+        "contract_scope": "HTTP响应会变化，需要同步契约与前端编译；现有Web和移动端业务代码不使用该字段，未知外部消费者未纳入本仓库审查。",
+        "binary_response_getter_consumers": 0,
+        "counterexample_retained": "取消路径completedAt和updatedAt不同，因此不允许保留字段却假造等值；只讨论删除无人使用的元数据。"
+      }
+    },
+    {
+      "id": "A107",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "倒计时撤单丢弃认领版本后重复查询最新版本，旧任务可采用新代际",
+      "category": "correctness_and_redundant_query",
+      "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java",
+          "line": 71,
+          "anchor": "private long timerRevision"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java",
+          "line": 37,
+          "anchor": "return applied ? exact"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/CancelAllAfterService.java",
+          "line": 71,
+          "anchor": "void cancelDueTimer"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java",
+          "line": 97,
+          "anchor": "command.expectedRevision() != current.revision()"
+        }
+      ],
+      "evidence": [
+        "Gateway Timer的8字段不含revision，claim/complete/retry每次都重新查最新版本，而非使用被处理状态自身的版本。",
+        "静态可达交错：CLAIM成功后、exact前用户SET，exact可返回新ACTIVE状态；cancelDueTimer不核对认领状态/版本就按同一用户和范围执行撤单，可能提前撤掉新倒计时保护的订单。",
+        "多执行者交错下，旧执行者COMPLETE/RETRY若重查到另一代已认领的最新版本，可以通过原Core版本和TRIGGERING守卫；Core守卫仍有用，问题在生产者替换了预期版本。"
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "保留认领事实及其revision，去掉timerRevision额外查询；认领结果必须核对本次预期的下一版本和TRIGGERING状态。优先复用原不可变协议值，避免为修正遗漏再造状态副本；保留Core CAS、到期、归属和状态守卫。",
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+    },
+    {
+      "id": "A108",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "倒计时撤单成功数量只被搬运并持久化，没有独立业务消费者",
+      "category": "unused_persisted_fields",
+      "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/CancelAllAfterService.java",
+          "line": 86,
+          "anchor": "private static CancelAllAfterResponse toResponse"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java",
+          "line": 34,
+          "anchor": "case SET ->"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java",
+          "line": 61,
+          "anchor": "case COMPLETE ->"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "line": 642,
+          "anchor": ".number(7, value.canceledOrders())"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+          "line": 319,
+          "anchor": "hash = CoreStateHash.mix(hash, timer.canceledOrders())"
+        }
+      ],
+      "evidence": [
+        "两项成功数量存在Command、State、View、Gateway Timer、HTTP Response和移动端模型中；源码和精确成员描述符引用仅为复制/编解码/哈希/测试断言。",
+        "公开cancel-all-after只有SET入口；SET状态转换把两数量清零，没有面向此前COMPLETE统计的公开查询入口。SET后exact可能竞态读到后续状态，不能宣称HTTP返回值永远为0；已检查消费者仍未据两计数决策。Web忽略返回体，移动端只解析字段，实际页面未消费。",
+        "直接Core查询仍能看到计数，这是冗余数据的协议暴露，未发现仓库内独立业务用途；记录/哈希/序列化本身不构成保留依据。"
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "整链删除两项成功数量及其无用非负约束、命令COMPLETE统计参数和快照字段7/8，同步当前格式/HTTP模型/移动端解析。保留并正确消费真实批次失败与未撤尽信息（A113），不能连有用的失败结果也删掉。",
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+    },
+    {
+      "id": "A109",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "倒计时撤单先批量认领且TRIGGERING无恢复入口",
+      "category": "recovery_and_redundant_phase",
+      "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/CancelAllAfterService.java",
+          "line": 62,
+          "anchor": "List<CancelAllAfterTimer> timers = timerStore.due"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/CancelAllAfterIndex.java",
+          "line": 75,
+          "anchor": "value.status() != com.surprising.aeron.protocol.CoreCancelAllAfterStatus.ACTIVE"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java",
+          "line": 50,
+          "anchor": "case CLAIM ->"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java",
+          "line": 71,
+          "anchor": "case RETRY ->"
+        }
+      ],
+      "evidence": [
+        "扫描先认领整批并收集列表，随后才逐个撤单；前面已认领、后面claim发生异常时，本轮甚至不会进入执行循环。",
+        "认领后进程退出会把TRIGGERING留在日志/快照中；到期查询只选ACTIVE，源码没有针对倒计时TRIGGERING的启动恢复或超时重认领入口，RETRY仅由当前执行的catch发送。",
+        "触发条件单自身有独立TRIGGERING恢复流程，不能误把它当成倒计时撤单的恢复支持。"
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "在原调度职责内逐个认领并执行，消除整批先认领阶段；再用现有更新时间和版本定义可恢复的认领语义，核对多实例与旧执行者。不得直接删除CLAIM/RETRY守卫或无条件重置全部认领状态。",
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+    },
+    {
+      "id": "A110",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "算法进度和子单本地包装重复复制权威视图，三个子单字段无读取",
+      "category": "redundant_wrappers",
+      "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java",
+          "line": 95,
+          "anchor": "public AlgoOrderProgress progress"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java",
+          "line": 99,
+          "anchor": "public List<AlgoOrderChild> children"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "line": 296,
+          "anchor": "for (AlgoOrderChild child : store.children(current))"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "line": 136,
+          "anchor": ".map(store::response)"
+        }
+      ],
+      "evidence": [
+        "Progress的5组件全部来自同一CoreAlgoOrderView，childOrderCount与nextSliceIndex更是同一个childOrderIds.size()；没有独立状态、精度转换、线程或持久化边界。",
+        "Child的4组件仅orderId被取消流程读取；algoOrderId、sliceIndex、quantitySteps getter在4025份可用classfile中外部引用为零，构造和校验依赖已校验的母单/编号列表。",
+        "children仅由cancelRecord调用，额外IntStream、List和逐子单record没有独立消费目的；cancelOpen还先构建完整HTTP response，仅取用户/母单身份再次取消。"
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "直接从原不可变视图读取进度、片序号和子单编号，删除两个包装类型及其工厂/不必要集合；HTTP response依然在真实响应边界构造。保留Core对子单身份、数量、顺序、退役进度和Lane的权威校验。",
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+    },
+    {
+      "id": "A111",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "算法执行中的remainingTarget<=0分支被前置完成和活动子单判断覆盖",
+      "category": "unreachable_branch",
+      "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "line": 243,
+          "anchor": "if (progress.executedQuantitySteps() >= record.quantitySteps()"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "line": 253,
+          "anchor": "if (progress.activeChildOrderCount() > 0)"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "line": 261,
+          "anchor": "if (remainingTarget <= 0L)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreAlgoOrderView.java",
+          "line": 27,
+          "anchor": "activeChildOrderCount < 0"
+        }
+      ],
+      "evidence": [
+        "本次progress不可变且activeChildOrderCount非负。执行到remainingTarget计算时，活动数必为0；若executed>=target，第一完成分支已经return。",
+        "因此此处executed<target，remainingTarget必须>0，后面的第二完成态写入没有可达有效输入；并非删除真实资金/数量校验。"
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "删除第二个不可达完成分支，保留首个完成判断、活动子单等待、到期取消、精确减法及真实子单数量边界。",
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+    },
+    {
+      "id": "A112",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "算法创建提交后连续查询同一权威母单两次并复制临时记录",
+      "category": "redundant_read_and_copy",
+      "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java",
+          "line": 48,
+          "anchor": "return record(get(record.userId(), record.algoOrderId()));"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "line": 108,
+          "anchor": "var persisted = store.create(record);"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+          "line": 109,
+          "anchor": "return store.response(store.get(persisted.userId(), persisted.algoOrderId()));"
+        }
+      ],
+      "evidence": [
+        "Store.create已在提交后get一次并转换成AlgoOrderRecord，place只取结果的userId/algoOrderId，又get同一母单构造响应；第一次读取的其他字段无人使用。",
+        "CodeGraph生产调用方只有place；创建不是异步追加阶段，不需要通过第二份查询维持另一业务边界。"
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "创建提交后只读取一次权威视图并在真实响应边界转换；保留命令回执/读栅栏与稳定身份，不直接用未落地的请求拼接成功响应。",
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+    },
+    {
+      "id": "A113",
+      "status": "confirmed",
+      "analysis_status": "confirmed",
+      "topic": "倒计时撤单忽略批次失败与未撤尽状态，直接记录完成",
+      "category": "missing_required_completion_condition",
+      "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/CancelAllAfterService.java",
+          "line": 78,
+          "anchor": "timerStore.complete(timer, orderResponse.completed()"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderService.java",
+          "line": 717,
+          "anchor": "private List<OrderBatchItemResponse> cancelOrderChunks"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderService.java",
+          "line": 741,
+          "anchor": "response = failedCancelBatch"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderService.java",
+          "line": 300,
+          "anchor": "public TriggerOrderBatchResponse cancelOpenOrders"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/CancelAllAfterService.java",
+          "line": 23,
+          "anchor": "private static final int CANCEL_LIMIT = 1000"
+        }
+      ],
+      "evidence": [
+        "普通批次可捕获异常并返回failed>0，触发单批次也可返回逐项失败；它们不保证对调用方抛异常。定时器只读取completed，忽略failed后仍发送COMPLETE。",
+        "定时器每类只调用一次limit=1000的取消，未再核对真实开放订单是否已撤尽。批次大小限制是有用的工作量边界，但不能用单页返回代替全部撤单完成。",
+        "这些是静态可达失败/多页输入的逻辑结论，尚未用运行场景复现；不声称出现过线上遗漏。"
+      ],
+      "business_code_changed": false,
+      "proposed_cleanup": "保留单批上限，按真实失败、剩余开放订单和命令结果推进重试/完成；只有满足完成条件才记录TRIGGERED。使用原版本和恢复规则，避免无界循环或把部分成功伪装成全部完成。",
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
     }
   ],
   "preserve_verified_purposes": [
@@ -6123,9 +6423,11 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "A105:倒计时撤单State/View职责、9项事实、ACTIVE守卫、Key/Lane与恢复边界。",
-    "A106:算法完成时间独立消费者，保留目前不能与更新时间等值的语义，确认前不删除。",
-    "A11查询一致性边界保留；全量字段/约束审查和运行验证仍未完成，只编译相关模块。"
+    "A107/A109/A113同一撤单操作先确定版本、恢复和真实完成规则，避免删除有用约束。",
+    "A108整链删除无业务用途的成功计数，保留真实失败信息。",
+    "A110/A111/A112收敛算法执行搬运、不可达分支与重复查询。",
+    "A106整链删除无人消费完成元数据并同步当前契约。",
+    "A105先复核真实模型/协议边界；A11保留已提交读一致性。"
   ],
   "rejected_false_positives": [
     {
@@ -6422,24 +6724,28 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "7fd4c724de85fbae672b1284952e88fe61f75b8a",
-    "status": "cleanup_and_followup_analysis",
-    "resolved_ids": [
-      "A102",
-      "A103",
-      "A104"
+    "source_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+    "status": "analysis_only_findings_recorded",
+    "new_confirmed_ids": [
+      "A106",
+      "A107",
+      "A108",
+      "A109",
+      "A110",
+      "A111",
+      "A112",
+      "A113"
     ],
-    "new_confirmed_ids": [],
     "candidate_ids": [
       "A11",
-      "A105",
-      "A106"
+      "A105"
     ],
     "counts": {
       "resolved": 103,
-      "candidate": 3
+      "candidate": 2,
+      "confirmed": 8
     },
-    "evidence": "twenty_fifth_cleanup_round",
+    "evidence": "next_operation_analysis_20261024",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -8110,6 +8416,32 @@
         "confirmed": 1
       },
       "evidence": "twelfth_cleanup_round",
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+      "status": "analysis_only_findings_recorded",
+      "new_confirmed_ids": [
+        "A106",
+        "A107",
+        "A108",
+        "A109",
+        "A110",
+        "A111",
+        "A112",
+        "A113"
+      ],
+      "candidate_ids": [
+        "A11",
+        "A105"
+      ],
+      "counts": {
+        "resolved": 103,
+        "candidate": 2,
+        "confirmed": 8
+      },
+      "evidence": "next_operation_analysis_20261024",
       "overall_audit_completed": false
     }
   ],
@@ -20494,6 +20826,387 @@
       "cleanup_errors": [],
       "remaining_owned_files": [],
       "compiler_outputs_retained": true
+    }
+  },
+  "next_operation_analysis_20261024": {
+    "date": "2026-10-24",
+    "source_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
+    "status": "analysis_only_findings_recorded",
+    "new_ids": [
+      "A107",
+      "A108",
+      "A109",
+      "A110",
+      "A111",
+      "A112",
+      "A113"
+    ],
+    "newly_confirmed_prior_ids": [
+      "A106"
+    ],
+    "business_code_changed": false,
+    "counts": {
+      "resolved": 103,
+      "candidate": 2,
+      "confirmed": 8
+    },
+    "source_hashes": {
+      "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java": "0d615f9510cf821c0f4595a66e23a56bf7d26ade0b26e5071bdb0c200f889886",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java": "66ea6df076af7b6817868b87d8db11adcf7c72d23f3fc9eee1d672be81d3ebb4",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/service/CancelAllAfterService.java": "b59b0e92d4528140d21115f93a8c1d874e631874ca4041f38e9cf098aae2ba57",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java": "5b97c9083e31c8b5709526eb0493f973188610dfc9d9ab8b38491771744d8e46",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreCancelAllAfterState.java": "2def770e31ae33b8bb75ed76f3d42b1daec865625113fab88bcb12f82abaf951",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterView.java": "af16f073bbdd3e948ad90062c823dce9a1581a37dde6d3bea3ed355d0e2dbcd2",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.java": "c714d4c02c80a06cc7f9f6f25d51f83cd1b46d2536fe76d6c55922a4f4b96935",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/CancelAllAfterIndex.java": "491d294a0748328f0fd9199344f52efc93f597cdea96c6c51974db961d363529",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterCommand.java": "56375d4ddb7a76b373edd132ba00097e537fb24b0f8812158ed91f7fbcb38d85",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.java": "e953b4f825d825d23d92bc282dfc0f181fae5637c395effde4b812ea09332650",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/model/CancelAllAfterTimer.java": "403b787c9fba38f974a863f71fbb35fda7d1ecdfc0cb71b1e7c674186c4ea6ae",
+      "surprising-trading-api/src/main/java/com/surprising/trading/api/model/CancelAllAfterResponse.java": "3c531ac68ec5c7f0e0400e19ce7dbfd68466087c46f771bc1057ded451a418cf",
+      "surprising-trading-api/src/main/java/com/surprising/trading/api/model/AlgoOrderResponse.java": "8f5fedbf9e6adcf3ebad0dcdfc2dca8807ad64689472f13d7b616888ee4b5414",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "041dfc3eba6312f7b0ad0f9ca3222d29e8a5c5cbfeff7b12bad7484156d6b525",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "d52f7bd8e8da25ab78f28e27d8b321d3da184b5cd0f2506f1f8e1a2aa63ca833",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/model/AlgoOrderProgress.java": "48d1a6bba81dc6d358069f64c6f20b35406e24db1aa54d8bc4ce4b4749010e29",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/model/AlgoOrderChild.java": "a95a9f7854cf890f63c042ef78c0daae543026c6694a7e778132874826db2489",
+      "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreAlgoOrderView.java": "5ef9abd7a635319bc8783e3112b2a8b3733349966d446bb4a176e298101f42fc",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderService.java": "feb4759d300d934049f0db9f7af3498f41ad0517ed89462753b09127ecf564db",
+      "surprising-gateway/src/main/java/com/surprising/trading/trigger/service/TriggerOrderService.java": "ea2b403c90ad1771f7c2242f79ca1e72f8edcab1b27fb1ada9ed134fc4ad8a44",
+      "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeOperationalQueryService.java": "c72e180ea5c20804238d5fc392d43dff98269251671f808695e1d61d5388612c",
+      "surprising-gateway/src/main/java/com/surprising/trading/order/repository/AlgoOrderProjectionRepository.java": "0aea86e0fbec2d0c09615e6feb339428a4475f3beb2b4032eb6cdd4aee71a331",
+      "surprising-realtime/surprising-realtime-provider/src/main/java/com/surprising/realtime/provider/export/repository/CommittedAlgoRepository.java": "906ae8e2f3c77499b3bf991fdb465a2a1eabf7901e56c11de6218d44250a61b5",
+      "../surprising-ex-web/src/features/orders/OrdersPage.tsx": "d10dac229f71e7f31a21aad55eb9d60d330a6df3b054431b028bd1aeea529e95",
+      "../surprising-client/lib/src/models.dart": "301d2c011cfcd879e34ccd888f2f859aa5ed6a3568dca7193b745a58d50a584d"
+    },
+    "evidence": {
+      "codegraph": {
+        "available_via": "initialized CLI + read-only SQLite (MCP tools unavailable)",
+        "files": 2241,
+        "nodes": 52634,
+        "edges": 146762,
+        "record_and_generated_member_gaps": "Supplemented by exact classfile owner/name/descriptor and source contract reads, not absent-edge inference."
+      },
+      "binary_member_audit": {
+        "basis": "exact constant-pool member owner/name/descriptor; own record fields excluded; generic reflection/JSON handled separately by source/contract audit",
+        "available_classfiles_scanned": 4025,
+        "targets": {
+          "com/surprising/aeron/protocol/CoreAlgoOrderCommand$Update": [
+            "completedAtEpochMillis"
+          ],
+          "com/surprising/aeron/protocol/CoreAlgoOrderView": [
+            "completedAtEpochMillis"
+          ],
+          "com/surprising/aeron/model/CoreAlgoOrderState": [
+            "completedAtEpochMillis"
+          ],
+          "com/surprising/trading/order/model/AlgoOrderRecord": [
+            "completedAt"
+          ],
+          "com/surprising/trading/api/model/AlgoOrderResponse": [
+            "completedAt"
+          ],
+          "com/surprising/aeron/protocol/CoreCancelAllAfterCommand": [
+            "canceledOrders",
+            "canceledTriggerOrders"
+          ],
+          "com/surprising/aeron/protocol/CoreCancelAllAfterView": [
+            "canceledOrders",
+            "canceledTriggerOrders"
+          ],
+          "com/surprising/aeron/model/CoreCancelAllAfterState": [
+            "canceledOrders",
+            "canceledTriggerOrders"
+          ],
+          "com/surprising/trading/order/model/CancelAllAfterTimer": [
+            "canceledOrders",
+            "canceledTriggerOrders"
+          ],
+          "com/surprising/trading/api/model/CancelAllAfterResponse": [
+            "canceledOrders",
+            "canceledTriggerOrders"
+          ],
+          "com/surprising/trading/order/model/AlgoOrderChild": [
+            "<init>",
+            "algoOrderId",
+            "orderId",
+            "quantitySteps",
+            "sliceIndex"
+          ],
+          "com/surprising/trading/order/model/AlgoOrderProgress": [
+            "<init>",
+            "activeChildOrderCount",
+            "activeQuantitySteps",
+            "childOrderCount",
+            "executedQuantitySteps",
+            "nextSliceIndex"
+          ]
+        },
+        "external_member_refs": {
+          "com/surprising/aeron/model/CoreAlgoOrderState.completedAtEpochMillis()J": [
+            {
+              "caller": "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+            },
+            {
+              "caller": "com/surprising/aeron/service/query/state/RuntimeOperationalQueryService",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/query/state/RuntimeOperationalQueryService.class"
+            }
+          ],
+          "com/surprising/aeron/model/CoreCancelAllAfterState.canceledOrders()I": [
+            {
+              "caller": "com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest.class"
+            },
+            {
+              "caller": "com/surprising/aeron/model/TradingCoreState",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class"
+            },
+            {
+              "caller": "com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.class"
+            },
+            {
+              "caller": "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+            }
+          ],
+          "com/surprising/aeron/model/CoreCancelAllAfterState.canceledTriggerOrders()I": [
+            {
+              "caller": "com/surprising/aeron/model/TradingCoreState",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/model/TradingCoreState.class"
+            },
+            {
+              "caller": "com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.class"
+            },
+            {
+              "caller": "com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.class"
+            }
+          ],
+          "com/surprising/aeron/protocol/CoreAlgoOrderCommand$Update.completedAtEpochMillis()J": [
+            {
+              "caller": "com/surprising/aeron/service/order/state/RuntimeAlgoOrderStateTransitions",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeAlgoOrderStateTransitions.class"
+            },
+            {
+              "caller": "com/surprising/aeron/protocol/CoreAlgoOrderCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreAlgoOrderCodec.class"
+            },
+            {
+              "caller": "com/surprising/trading/order/service/AlgoOrderCancellationTest$Fixture",
+              "classfile": "surprising-gateway/target/test-classes/com/surprising/trading/order/service/AlgoOrderCancellationTest$Fixture.class"
+            }
+          ],
+          "com/surprising/aeron/protocol/CoreAlgoOrderView.completedAtEpochMillis()J": [
+            {
+              "caller": "com/surprising/aeron/service/order/state/RuntimeTestStateTransitions",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/order/state/RuntimeTestStateTransitions.class"
+            },
+            {
+              "caller": "com/surprising/aeron/service/core/TradingCoreOwnerTest",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TradingCoreOwnerTest.class"
+            },
+            {
+              "caller": "com/surprising/aeron/service/replay/CommittedTradeReplayTest",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/replay/CommittedTradeReplayTest.class"
+            },
+            {
+              "caller": "com/surprising/aeron/protocol/CoreAlgoOrderCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreAlgoOrderCodec.class"
+            },
+            {
+              "caller": "com/surprising/trading/order/service/AlgoOrderCancellationTest$Fixture",
+              "classfile": "surprising-gateway/target/test-classes/com/surprising/trading/order/service/AlgoOrderCancellationTest$Fixture.class"
+            },
+            {
+              "caller": "com/surprising/trading/order/service/AeronAlgoOrderStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronAlgoOrderStore.class"
+            }
+          ],
+          "com/surprising/aeron/protocol/CoreCancelAllAfterCommand.canceledOrders()I": [
+            {
+              "caller": "com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.class"
+            },
+            {
+              "caller": "com/surprising/aeron/protocol/CoreCancelAllAfterCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.class"
+            }
+          ],
+          "com/surprising/aeron/protocol/CoreCancelAllAfterCommand.canceledTriggerOrders()I": [
+            {
+              "caller": "com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions",
+              "classfile": "surprising-aeron-core/surprising-aeron-service/target/classes/com/surprising/aeron/service/order/state/RuntimeCancelAllAfterStateTransitions.class"
+            },
+            {
+              "caller": "com/surprising/aeron/protocol/CoreCancelAllAfterCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.class"
+            }
+          ],
+          "com/surprising/aeron/protocol/CoreCancelAllAfterView.canceledOrders()I": [
+            {
+              "caller": "com/surprising/aeron/protocol/CoreCancelAllAfterCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.class"
+            },
+            {
+              "caller": "com/surprising/trading/order/service/AeronCancelAllAfterStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronCancelAllAfterStore.class"
+            }
+          ],
+          "com/surprising/aeron/protocol/CoreCancelAllAfterView.canceledTriggerOrders()I": [
+            {
+              "caller": "com/surprising/aeron/protocol/CoreCancelAllAfterCodec",
+              "classfile": "surprising-aeron-core/surprising-aeron-protocol/target/classes/com/surprising/aeron/protocol/CoreCancelAllAfterCodec.class"
+            },
+            {
+              "caller": "com/surprising/trading/order/service/AeronCancelAllAfterStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronCancelAllAfterStore.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderChild.<init>(JIJJ)V": [
+            {
+              "caller": "com/surprising/trading/order/service/AeronAlgoOrderStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronAlgoOrderStore.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderChild.orderId()J": [
+            {
+              "caller": "com/surprising/trading/order/service/AlgoOrderService",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AlgoOrderService.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderProgress.<init>(JJIII)V": [
+            {
+              "caller": "com/surprising/trading/order/service/AeronAlgoOrderStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronAlgoOrderStore.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderProgress.activeChildOrderCount()I": [
+            {
+              "caller": "com/surprising/trading/order/service/AlgoOrderService",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AlgoOrderService.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderProgress.activeQuantitySteps()J": [
+            {
+              "caller": "com/surprising/trading/order/service/AeronAlgoOrderStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronAlgoOrderStore.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderProgress.childOrderCount()I": [
+            {
+              "caller": "com/surprising/trading/order/service/AeronAlgoOrderStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronAlgoOrderStore.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderProgress.executedQuantitySteps()J": [
+            {
+              "caller": "com/surprising/trading/order/service/AeronAlgoOrderStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronAlgoOrderStore.class"
+            },
+            {
+              "caller": "com/surprising/trading/order/service/AlgoOrderService",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AlgoOrderService.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderProgress.nextSliceIndex()I": [
+            {
+              "caller": "com/surprising/trading/order/service/AlgoOrderService",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AlgoOrderService.class"
+            }
+          ],
+          "com/surprising/trading/order/model/AlgoOrderRecord.completedAt()Ljava/time/Instant;": [
+            {
+              "caller": "com/surprising/trading/order/service/AeronAlgoOrderStore",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AeronAlgoOrderStore.class"
+            },
+            {
+              "caller": "com/surprising/trading/order/service/AlgoOrderService",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/AlgoOrderService.class"
+            }
+          ],
+          "com/surprising/trading/order/model/CancelAllAfterTimer.canceledOrders()I": [
+            {
+              "caller": "com/surprising/trading/order/service/CancelAllAfterService",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/CancelAllAfterService.class"
+            }
+          ],
+          "com/surprising/trading/order/model/CancelAllAfterTimer.canceledTriggerOrders()I": [
+            {
+              "caller": "com/surprising/trading/order/service/CancelAllAfterService",
+              "classfile": "surprising-gateway/target/classes/com/surprising/trading/order/service/CancelAllAfterService.class"
+            }
+          ]
+        }
+      },
+      "resource_literal_audit": {
+        "command": [
+          "rg",
+          "-n",
+          "getRecordComponents|getDeclaredField|getDeclaredMethod|AlgoOrderChild|AlgoOrderProgress|CoreCancelAllAfterState|CoreCancelAllAfterView|CancelAllAfterTimer",
+          "surprising-aeron-core/surprising-aeron-service/src/main/resources",
+          "surprising-gateway/src/main/resources"
+        ],
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    "verification": {
+      "new_java_or_frontend_sources_changed": false,
+      "compilation_repeated": false,
+      "reason": "本轮仅分析和文档，上一清理提交e3651eafb的相关模块编译结果已归档；不把已有编译当作本轮并发/恢复验证。",
+      "tests_executed": false,
+      "services_started": false,
+      "performance_executed": false,
+      "unverified": [
+        "静态交错的实际运行复现",
+        "倒计时故障与恢复",
+        "真实多页/部分失败撤单",
+        "未知外部API消费者"
+      ],
+      "documentation_diff_check": {
+        "command": "git diff --check",
+        "exit_code": 0
+      }
+    },
+    "proposed_order": [
+      "A107/A109/A113同一撤单操作先确定版本、恢复和真实完成规则，避免删除有用约束。",
+      "A108整链删除无业务用途的成功计数，保留真实失败信息。",
+      "A110/A111/A112收敛算法执行搬运、不可达分支与重复查询。",
+      "A106整链删除无人消费完成元数据并同步当前契约。",
+      "A105先复核真实模型/协议边界；A11保留已提交读一致性。"
+    ],
+    "overall_audit_completed": false,
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "1f02c1ae3adf9c612ee8a86053132e2f69662fec87f9746b5e9c69d0d07205e2"
+    },
+    "temporary_resources": {
+      "owned_prefix": "aeron-next-operation-audit-20261024-",
+      "archived_files": [
+        {
+          "path": "/tmp/aeron-next-operation-audit-20261024-archive.py",
+          "bytes": 16736,
+          "sha256": "a7862fe356b7a145bd5f201a08a97067d10586c36c296331b8d2637b4e86f1a3"
+        },
+        {
+          "path": "/tmp/aeron-next-operation-audit-20261024-binary.json",
+          "bytes": 12827,
+          "sha256": "94206ecd362c268cfc24dbc4c46f31f3492a1a61c6d4d96cc6a2f2821da5866b"
+        },
+        {
+          "path": "/tmp/aeron-next-operation-audit-20261024-binary.py",
+          "bytes": 3192,
+          "sha256": "7343ae8177143f0d20922f4922bad9f2674108fafc185af5829e8eaae3da5e59"
+        },
+        {
+          "path": "/tmp/aeron-next-operation-audit-20261024-resources.json",
+          "bytes": 372,
+          "sha256": "7ec0988d32985f0e3816b3ffa377588ec45878cc9132cd891cb7a77932808640"
+        }
+      ],
+      "errors": [],
+      "remaining_owned_files": []
     }
   }
 }
