@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第三十二轮：A123扫描摘要整链删除，冷/热25->16，Page5->3，测试投影24->15；A126哈希纳入真实Lane进度及轮转。17模块干净编译61.789秒，4022classfile旧字段/八项getter/旧构造引用为零。累计122解决；A127两处零调用构造待处理，A11候选保留原一致性边界。",
+    "checkpoint": "第三十三轮：A127两个零调用冷状态构造删除37行，其余源码逐字不变；17模块干净编译57.023秒，4022classfile旧构造定义/引用归零。累计123解决。新确认A128强平前置检查两项无必要数组状态；A11一致性边界保留。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -6941,11 +6941,11 @@
     },
     {
       "id": "A127",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed_no_current_constructor_callers",
       "topic": "完整风险冷状态和根冷状态保留两个零调用便利构造",
       "source_basis_commit": "f9b62b9d47942112d84bbbb1bfd9c807537f0dcf",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskState.java",
@@ -6972,7 +6972,43 @@
         ],
         "role_check": "均为未注解的便利构造；当前快照/恢复使用完整记录构造。单扫描构造还包含无人使用的null/idle转Map路径。",
         "proposed_cleanup": "核对全部当前源码构造后删除这两个重载及无用分支，保留当前canonical/其他实际构造和风险、客户端索引校验；不改状态字段/布局。"
-      }
+      },
+      "resolved_in_round": "thirty_third_cleanup_round",
+      "implementation": "删除根冷状态8参杠杆重载和风险冷状态单扫描5参重载，共37行；同时删除无人使用的null/idle转Map分支。其余源码逐字不变，17模块干净编译，旧完整描述符定义/引用为零。"
+    },
+    {
+      "id": "A128",
+      "status": "confirmed",
+      "analysis_status": "confirmed_unnecessary_execution_check_storage",
+      "topic": "强平前置检查保留只写合约数组和仅用于单次Lane循环的持仓键数组",
+      "source_basis_commit": "32bc759f3a58685fa51bd39fa72fa3589517aad0",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java",
+          "anchor": "private CoreInstrument[] instruments = new CoreInstrument[4];"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java",
+          "anchor": "positionKeys[index] = identities.findPositionKeyValueInLane"
+        }
+      ],
+      "evidence": {
+        "classfiles_scanned": 4022,
+        "exact_field_reference_owners": {
+          "instruments": [
+            "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck"
+          ],
+          "positionKeys": [
+            "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck"
+          ]
+        },
+        "instrument_array": "只在定义、扩容、Lane写入和清空处使用，无结果读取/Getter；检查实际使用的是同一循环内的instrument局部变量。",
+        "position_array": "每动作在所属Lane查出一个long，随后同一表达式核对非零并传executable；没有跨线程消费者，可改为循环局部long。",
+        "boundary": "ExecutionCheck是命令槽复用的IntFunction任务，不是业务持久化/快照/配置模型；真实liquidations结果、输入价/序号/游标、状态、Lane位和完成发布都保留。",
+        "proposal": "删除instruments/positionKeys字段和对应构造/扩容/清理；持仓键在当前Lane显式局部读取，保持原executability函数及前置检查顺序、身份和完成语义。"
+      },
+      "verification_limit": "已确认源码作用域和完整所属类/字段描述符引用，尚未实施；未执行资金或并发场景。"
     }
   ],
   "preserve_verified_purposes": [
@@ -6990,9 +7026,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "清理A127两个零调用便利构造，先核对当前源码与反射/快照入口，不删除实际字段及约束。",
-    "继续逐业务操作追踪命令、状态、约束和恢复；风险扫描控制名称/操作者/原因有明确管理API读写职责，不能只因不参与计算删除。",
-    "A11有序查询边界保持；未执行运行测试，不能宣布所有资金和恢复路径完整验证。"
+    "处理A128强平前置检查两项数组：删除只写合约数组，持仓键收回当前Lane局部；保留真实线程交接及执行校验。",
+    "继续从强平命令到检查、撤单、资金/费用、终态、快照与恢复追踪字段及约束实际用途。",
+    "A11原有序查询边界保留；遵循只编译，不以静态或编译宣称运行资金/恢复已经验证。"
   ],
   "rejected_false_positives": [
     {
@@ -7073,7 +7109,7 @@
     "status": "removed_after_results_archived",
     "new_temporary_services_or_files": false
   },
-  "evidence_basis_commit": "f9b62b9d47942112d84bbbb1bfd9c807537f0dcf",
+  "evidence_basis_commit": "32bc759f3a58685fa51bd39fa72fa3589517aad0",
   "cleanup_round": {
     "authorized_scope": [
       "A01",
@@ -7289,14 +7325,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "f9b62b9d47942112d84bbbb1bfd9c807537f0dcf",
+    "source_basis_commit": "32bc759f3a58685fa51bd39fa72fa3589517aad0",
     "status": "cleanup_and_followup_analysis",
     "resolved_ids": [
-      "A123",
-      "A126"
+      "A127"
     ],
     "confirmed_ids": [
-      "A127"
+      "A128"
     ],
     "candidate_ids": [
       "A11"
@@ -7307,12 +7342,12 @@
       "A124"
     ],
     "counts": {
-      "resolved": 122,
+      "resolved": 123,
       "candidate": 1,
       "retained": 3,
       "confirmed": 1
     },
-    "evidence": "thirty_second_cleanup_round",
+    "evidence": "thirty_third_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -27797,6 +27832,210 @@
       },
       "files_removed": 15,
       "pyc_files_removed": 0
+    },
+    "full_audit_complete": false
+  },
+  "thirty_third_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "32bc759f3a58685fa51bd39fa72fa3589517aad0",
+    "resolved_ids": [
+      "A127"
+    ],
+    "new_confirmed_ids": [
+      "A128"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 123,
+      "candidate": 1,
+      "retained": 3,
+      "confirmed": 1
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 54,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4,
+      "algo_command": 6,
+      "algo_view": 5,
+      "cancel_all_after_command": 5,
+      "cancel_all_after_query_view": 3
+    },
+    "implementation": {
+      "removed_constructors": 2,
+      "removed_source_lines": 37,
+      "removed_blocks": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+          "signature": "public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,\n                            Map<Long, CoreOrderState> orders,\n                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,\n                            CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages)",
+          "source": "    /**\n     * 构造带杠杆的冷状态，条件任务为空，从订单推导客户端单号索引。\n     * @param productLine 本状态唯一所属产品线\n     * @param revision 本状态非负业务修订\n     * @param users 按用户 ID 保存的冷用户正文\n     * @param orders 按订单号保存的冷订单正文，可包含保留终态\n     * @param instruments 按永久数字标的文本保存的合约配置\n     * @param riskState 标记价、风险快照、强平及扫描的冷状态\n     * @param treasuryState 系统财库余额、资金费及到期结算进度\n     * @param leverages 按用户、标的及保证金模式保存的杠杆值\n     */\n    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,\n                            Map<Long, CoreOrderState> orders,\n                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,\n                            CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages) {\n        this(productLine, revision, users, orders, instruments, riskState, treasuryState,\n                leverages, Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());\n    }\n\n"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskState.java",
+          "signature": "public CoreRiskState(Map<String, CoreMarkPriceState> markPrices,\n                         Map<String, CoreRiskSnapshot> snapshots,\n                         Map<Long, CoreLiquidationState> liquidations,\n                         RiskScan scan,\n                         long nextLiquidationId)",
+          "source": "    /**\n     * 把一份扫描游标放进按币对索引的映射；空游标或空闲标记不加入映射，其余配置使用默认值。\n     * @param markPrices 按币对编号保存的行情状态，构造时冻结并排序，供恢复和状态查看使用\n     * @param snapshots 按用户、币对及持仓腿组合键保存的风险估值记录\n     * @param liquidations 按强平编号保存的强平流程记录\n     * @param scan 要放入状态的单份扫描游标，null 或币对为短横线表示没有待加入的扫描\n     * @param nextLiquidationId 下一次新建强平计划时使用的编号，初始值为 1\n     */\n    public CoreRiskState(Map<String, CoreMarkPriceState> markPrices,\n                         Map<String, CoreRiskSnapshot> snapshots,\n                         Map<Long, CoreLiquidationState> liquidations,\n                         RiskScan scan,\n                         long nextLiquidationId) {\n        this(markPrices, snapshots, liquidations,\n                scan == null || \"-\".equals(scan.instrumentId()) ? Map.of() : Map.of(scan.instrumentId(), scan),\n                nextLiquidationId, defaultScanControl());\n    }\n\n"
+        }
+      ],
+      "source_difference": "只移除两份完整构造和说明块，与当前两文件逐字相等；其余构造、状态字段、风险/客户索引校验和所有哈希/格式不变。",
+      "new_fields_types_interfaces_stages": 0
+    },
+    "verification": {
+      "java": "HotSpot Corretto27+33-FR",
+      "maven": "3.9.16",
+      "disk_available": "168GiB",
+      "build": {
+        "command": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "wall_seconds": 57.023,
+        "log_sha256": "f0f4e6a1a2f0c3f9591788c4d0b6771373ea1b6633c76e18775626c14c11f7b6"
+      },
+      "reactor_modules": 17,
+      "compiled_source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskState.java": "58fe3fb20abff7ccdc678e713f925cd7fadf54f3900eede9a06cf50680d024f0",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "0050eb67729ce12504cb840bf04e51a801dde9173f792bddb582f321492f30ef"
+      },
+      "before_source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java": "b68e79e855600af530c830cc7fd8a69086c727b209bae01e9b06a22693417b6e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskState.java": "28e43ac50557cdcda1ae1f0a5e608dba031bdc12d642abd8f88a4ae5437e31a8"
+      },
+      "classfiles": {
+        "classfiles_scanned": 4022,
+        "removed_constructor_declarations": [],
+        "removed_constructor_references": [],
+        "execution_check_fields": [
+          [
+            26,
+            "CHECK_LANE",
+            "B"
+          ],
+          [
+            26,
+            "EXECUTABLE",
+            "B"
+          ],
+          [
+            26,
+            "OBSOLETE",
+            "B"
+          ],
+          [
+            26,
+            "STALE_PRICE",
+            "B"
+          ],
+          [
+            2,
+            "liquidations",
+            "[Lcom/surprising/aeron/service/risk/LiquidationRuntime;"
+          ],
+          [
+            2,
+            "instruments",
+            "[Lcom/surprising/aeron/service/instrument/CoreInstrument;"
+          ],
+          [
+            2,
+            "positionKeys",
+            "[J"
+          ],
+          [
+            2,
+            "laneIds",
+            "[I"
+          ],
+          [
+            2,
+            "liquidationIds",
+            "[J"
+          ],
+          [
+            2,
+            "priceSequences",
+            "[J"
+          ],
+          [
+            2,
+            "prices",
+            "[J"
+          ],
+          [
+            2,
+            "cursors",
+            "[J"
+          ],
+          [
+            2,
+            "identities",
+            "Lcom/surprising/aeron/service/core/identity/RuntimeIdentityRegistry;"
+          ],
+          [
+            2,
+            "results",
+            "[B"
+          ],
+          [
+            2,
+            "runtime",
+            "Lcom/surprising/aeron/service/core/TradingAccountRuntime;"
+          ],
+          [
+            2,
+            "count",
+            "I"
+          ],
+          [
+            2,
+            "laneMask",
+            "J"
+          ],
+          [
+            2,
+            "dispatched",
+            "Z"
+          ],
+          [
+            2,
+            "done",
+            "Z"
+          ]
+        ],
+        "candidate_field_reference_owners": {
+          "instruments": [
+            "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck"
+          ],
+          "positionKeys": [
+            "com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor$ExecutionCheck"
+          ]
+        }
+      },
+      "tests_executed": false,
+      "services_started": false,
+      "new_test_source_added": false,
+      "reason": "无调用构造删除无需镜像测试；已有Java测试源码随相关模块干净编译。",
+      "not_executed": [
+        "tests",
+        "services",
+        "funds/trading",
+        "runtime recovery",
+        "database",
+        "browser/device",
+        "JMH/JFR"
+      ]
+    },
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-cold-constructors-20261024",
+      "status": "archived_then_removed",
+      "compiler_outputs_retained": true,
+      "artifact_sha256": {
+        "/tmp/aeron-cold-constructors-20261024.before.json": "4dd807ef2fc382c313848143dabb37ae3548332d698019e07b56a55727c0552b",
+        "/tmp/aeron-cold-constructors-20261024.build.json": "d610295ec8b7f63259bd39228c9acc26474da86f2dfb49a374f6ccc4e61c71be",
+        "/tmp/aeron-cold-constructors-20261024.classfiles.json": "1689c2d17fca0ab266d317b789a4cfa49d8c4abb72ede217844494f72b7fddc5",
+        "/tmp/aeron-cold-constructors-20261024.compiled-sources.json": "af7099298e089781816f11614311e477f318128971e1ef0ef4d0d09345815f02",
+        "/tmp/aeron-cold-constructors-20261024.maven.log": "f0f4e6a1a2f0c3f9591788c4d0b6771373ea1b6633c76e18775626c14c11f7b6",
+        "/tmp/aeron-cold-constructors-20261024.scan.py": "031ff638520d5ce4dfdd3e103469d98ad2bb660bb330ceeb29dc217f62a27715"
+      },
+      "files_removed": 6
     },
     "full_audit_complete": false
   }

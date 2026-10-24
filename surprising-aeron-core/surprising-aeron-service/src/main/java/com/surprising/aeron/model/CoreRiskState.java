@@ -77,24 +77,6 @@ public record CoreRiskState(
     }
 
     /**
-     * 把一份扫描游标放进按币对索引的映射；空游标或空闲标记不加入映射，其余配置使用默认值。
-     * @param markPrices 按币对编号保存的行情状态，构造时冻结并排序，供恢复和状态查看使用
-     * @param snapshots 按用户、币对及持仓腿组合键保存的风险估值记录
-     * @param liquidations 按强平编号保存的强平流程记录
-     * @param scan 要放入状态的单份扫描游标，null 或币对为短横线表示没有待加入的扫描
-     * @param nextLiquidationId 下一次新建强平计划时使用的编号，初始值为 1
-     */
-    public CoreRiskState(Map<String, CoreMarkPriceState> markPrices,
-                         Map<String, CoreRiskSnapshot> snapshots,
-                         Map<Long, CoreLiquidationState> liquidations,
-                         RiskScan scan,
-                         long nextLiquidationId) {
-        this(markPrices, snapshots, liquidations,
-                scan == null || "-".equals(scan.instrumentId()) ? Map.of() : Map.of(scan.instrumentId(), scan),
-                nextLiquidationId, defaultScanControl());
-    }
-
-    /**
      * 创建默认启用的扫描控制配置，调度间隔为 25 毫秒，每批工作量为 64。
      */
     public static CoreRiskScanControlView defaultScanControl() {

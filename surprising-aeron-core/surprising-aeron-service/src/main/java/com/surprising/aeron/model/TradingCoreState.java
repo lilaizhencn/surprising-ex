@@ -91,25 +91,6 @@ public record TradingCoreState(
     }
 
     /**
-     * 构造带杠杆的冷状态，条件任务为空，从订单推导客户端单号索引。
-     * @param productLine 本状态唯一所属产品线
-     * @param revision 本状态非负业务修订
-     * @param users 按用户 ID 保存的冷用户正文
-     * @param orders 按订单号保存的冷订单正文，可包含保留终态
-     * @param instruments 按永久数字标的文本保存的合约配置
-     * @param riskState 标记价、风险快照、强平及扫描的冷状态
-     * @param treasuryState 系统财库余额、资金费及到期结算进度
-     * @param leverages 按用户、标的及保证金模式保存的杠杆值
-     */
-    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
-                            CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages) {
-        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
-                leverages, Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
-    }
-
-    /**
      * 构造带杠杆及算法单的冷状态，其余条件任务为空，推导客户端单号索引。
      * @param productLine 本状态唯一所属产品线
      * @param revision 本状态非负业务修订
