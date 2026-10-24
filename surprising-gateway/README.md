@@ -45,6 +45,9 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 
 算法委托规范化删除不可达的TWAP/postOnly拒绝：postOnly仍只在ICEBERG下按原规则计算，原TIF、数量及范围校验保留。Core算法母单也删除列表不可变复制后重复的null判断，空值仍由原List.copyOf拒绝。
 ICEBERG创建请求可省略intervalSeconds，若提供则在请求/状态类型绑定时清除；只有TWAP校验间隔范围及执行时长与间隔的关系。ICEBERG仍按原扫描配置推进下一片，执行时长和子单数量继续有独立作用。命令v5、状态/投影v3和快照v51不保存ICEBERG间隔。
+算法执行和取消直接读取原Core视图的进度及子单编号，删除AlgoOrderProgress/AlgoOrderChild两种包装和工厂，不再为取消临时构造HTTP响应。创建提交后只查询一次权威母单；不可达的第二完成分支删除。
+本轮`mvn -pl surprising-gateway -am -DskipTests clean test-compile`在HotSpot JDK27下通过（12模块，34.874秒），只编译测试源码；未运行服务、测试、恢复、交互或性能场景。
+
 算法创建直接完成原校验、字符串规范化、稳定订单身份和提交，不再复制一份完整请求或计算无人读取的命令UUID。内部算法记录只保存TIF，PostOnly结果按GTX读取；用户选择PostOnly的ICEBERG在入口统一为GTX，GTC/GTX之外的无效选择仍拒绝。TWAP按类型采用IOC，不再要求请求提供固定选项。Web和移动端同步删除无用请求字段。
 本轮后端17个相关模块及依赖执行`-am -DskipTests clean test-compile`通过，Web build与Flutter bundle编译通过；未运行测试、服务、交易、恢复或设备/浏览器交互。详见[Aeron字段审计](../surprising-aeron-core/surprising-aeron-service/validation/command-data-audit-20261023.json)。
 

@@ -15,8 +15,6 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TimeInForce;
-import com.surprising.trading.order.model.AlgoOrderChild;
-import com.surprising.trading.order.model.AlgoOrderProgress;
 import com.surprising.trading.order.model.AlgoOrderRecord;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -35,7 +33,7 @@ public class AeronAlgoOrderStore {
         this.properties = properties;
     }
 
-    public AlgoOrderRecord create(AlgoOrderRecord record) {
+    public CoreAlgoOrderView create(AlgoOrderRecord record) {
         var command = new CoreAlgoOrderCommand.Create(record.algoOrderId(), text(record.clientAlgoOrderId()),
                 record.instrumentId(), record.algoType().ordinal(), CoreOrderSide.valueOf(record.side().name()),
                 record.priceTicks(), record.quantitySteps(), record.childQuantitySteps(), record.intervalSeconds(),
@@ -45,7 +43,7 @@ public class AeronAlgoOrderStore {
         aeron.command(CoreMessageType.UPSERT_ALGO_ORDER,
                 StableOrderIdentity.algoCommandId(record.productLine(), record.userId(), record.clientAlgoOrderId()),
                 record.userId(), CoreAlgoOrderCodec.encodeCommand(command));
-        return record(get(record.userId(), record.algoOrderId()));
+        return get(record.userId(), record.algoOrderId());
     }
 
     public void update(AlgoOrderRecord record, long expectedRevision, long appendedChildOrderId) {
@@ -92,22 +90,13 @@ public class AeronAlgoOrderStore {
                 instant(value.startAtEpochMillis()), instant(value.nextSliceAtEpochMillis()),
                 instant(value.completedAtEpochMillis()), instant(value.createdAtEpochMillis()), instant(value.updatedAtEpochMillis()));
     }
-    public AlgoOrderProgress progress(CoreAlgoOrderView value) {
-        return new AlgoOrderProgress(value.executedQuantitySteps(), value.activeQuantitySteps(),
-                value.childOrderIds().size(), value.activeChildOrderCount(), value.childOrderIds().size());
-    }
-    public List<AlgoOrderChild> children(CoreAlgoOrderView value) {
-        return java.util.stream.IntStream.range(0, value.childOrderIds().size())
-                .mapToObj(index -> new AlgoOrderChild(value.algoOrderId(), index, value.childOrderIds().get(index),
-                        value.childQuantitySteps())).toList();
-    }
     public AlgoOrderResponse response(CoreAlgoOrderView value) {
-        AlgoOrderRecord record = record(value); AlgoOrderProgress progress = progress(value);
+        AlgoOrderRecord record = record(value);
         return new AlgoOrderResponse(record.algoOrderId(), record.userId(), record.clientAlgoOrderId(), record.instrumentId(),
                 record.algoType(), record.side(), record.priceTicks(), record.quantitySteps(), record.childQuantitySteps(),
                 record.intervalSeconds(), record.durationSeconds(), record.marginMode(), record.positionSide(), record.reduceOnly(),
-                record.postOnly(), record.timeInForce(), record.status(), progress.executedQuantitySteps(),
-                progress.activeQuantitySteps(), progress.childOrderCount(), record.currentOrderId(), record.rejectReason(),
+                record.postOnly(), record.timeInForce(), record.status(), value.executedQuantitySteps(),
+                value.activeQuantitySteps(), value.childOrderIds().size(), record.currentOrderId(), record.rejectReason(),
                 record.startAt(), record.nextSliceAt(), record.completedAt(), record.createdAt(), record.updatedAt());
     }
 

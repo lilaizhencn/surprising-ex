@@ -17,8 +17,6 @@ import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.order.config.TradingOrderProperties;
-import com.surprising.trading.order.model.AlgoOrderChild;
-import com.surprising.trading.order.model.AlgoOrderProgress;
 import com.surprising.trading.order.model.AlgoOrderRecord;
 import java.time.Duration;
 import java.time.Instant;
@@ -105,8 +103,7 @@ public class AlgoOrderService {
                 request.durationSeconds(), request.marginMode(), request.positionSide(), request.reduceOnly(),
                 tif, AlgoOrderStatus.PENDING, null, null,
                 request.startAt(), null, null, null, null);
-        var persisted = store.create(record);
-        return store.response(store.get(persisted.userId(), persisted.algoOrderId()));
+        return store.response(store.create(record));
     }
 
     public AlgoOrderResponse cancel(CancelAlgoOrderRequest request) {
@@ -133,7 +130,6 @@ public class AlgoOrderService {
                 ? null : normalizeSymbol(request.instrumentId());
         List<AlgoOrderResponse> canceled = store.query(request.userId(), instrumentId, 0, limit).stream()
                 .filter(value -> !isTerminal(AlgoOrderStatus.values()[value.statusCode()]))
-                .map(store::response)
                 .map(value -> cancel(new CancelAlgoOrderRequest(value.userId(), value.algoOrderId())))
                 .toList();
         List<AlgoOrderBatchItemResponse> results = new ArrayList<>(canceled.size());
@@ -239,9 +235,8 @@ public class AlgoOrderService {
         if (isTerminal(AlgoOrderStatus.values()[current.statusCode()])) return;
         current = recoverUnlinkedChild(current);
         record = store.record(current);
-        AlgoOrderProgress progress = store.progress(current);
-        if (progress.executedQuantitySteps() >= record.quantitySteps()
-                && progress.activeChildOrderCount() == 0) {
+        if (current.executedQuantitySteps() >= record.quantitySteps()
+                && current.activeChildOrderCount() == 0) {
             store.update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
                     null, now, now, record.currentOrderId()), current.revision(), 0);
             return;
@@ -250,21 +245,16 @@ public class AlgoOrderService {
             cancelRecord(record, "执行时长已结束");
             return;
         }
-        if (progress.activeChildOrderCount() > 0) {
+        if (current.activeChildOrderCount() > 0) {
             store.update(withStatus(record, AlgoOrderStatus.RUNNING, null,
                     now.plusMillis(properties.getAlgo().getScanDelayMs()), null, now, record.currentOrderId()),
                             current.revision(), 0);
             return;
         }
 
-        long remainingTarget = Math.subtractExact(record.quantitySteps(), progress.executedQuantitySteps());
-        if (remainingTarget <= 0L) {
-            store.update(withStatus(record, AlgoOrderStatus.COMPLETED, null,
-                    null, now, now, record.currentOrderId()), current.revision(), 0);
-            return;
-        }
+        long remainingTarget = Math.subtractExact(record.quantitySteps(), current.executedQuantitySteps());
         long childQuantity = Math.min(record.childQuantitySteps(), remainingTarget);
-        PlaceOrderRequest childRequest = childRequest(record, progress.nextSliceIndex(), childQuantity);
+        PlaceOrderRequest childRequest = childRequest(record, current.childOrderIds().size(), childQuantity);
         OrderResponse child = orderService.placeAlgoChild(childRequest);
         if (child.status() == OrderStatus.REJECTED) {
             store.update(withStatus(record, AlgoOrderStatus.FAILED, child.rejectReason(),
@@ -293,9 +283,9 @@ public class AlgoOrderService {
         store.update(requested, current.revision(), 0);
         current = recoverUnlinkedChild(store.get(record.userId(), record.algoOrderId()));
         RuntimeException cancellationFailure = null;
-        for (AlgoOrderChild child : store.children(current)) {
+        for (long childOrderId : current.childOrderIds()) {
             try {
-                orderService.cancel(new CancelOrderRequest(record.userId(), child.orderId()));
+                orderService.cancel(new CancelOrderRequest(record.userId(), childOrderId));
             } catch (RuntimeException failure) {
                 cancellationFailure = failure;
             }

@@ -112,7 +112,7 @@ class AlgoOrderServiceTest {
         properties.getKafka().setProductLine(ProductLine.SPOT);
         var store = mock(AeronAlgoOrderStore.class);
         org.mockito.Mockito.when(store.create(org.mockito.ArgumentMatchers.any()))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+                .thenReturn(mock(com.surprising.aeron.protocol.CoreAlgoOrderView.class));
         var service = new AlgoOrderService(properties, mock(OrderService.class), store,
                 mock(com.surprising.trading.order.repository.AlgoOrderProjectionRepository.class),
                 mock(com.surprising.trading.order.repository.AeronOrderProjectionRepository.class));

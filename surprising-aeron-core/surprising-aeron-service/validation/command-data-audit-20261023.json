@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第二十五轮103项清理已提交；新一轮仅扫描，确认8项未实施（A106至A113），候选A11/A105继续保留。版本/恢复/完成语义先于字段删除；全量审查未结束。",
+    "checkpoint": "第二十六轮累计106项已解决；算法包装9组件、不可达分支和重复查询清理，12模块干净编译通过。倒计时版本/恢复/完成条件继续处理；5项确认、2候选。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -6259,8 +6259,8 @@
     },
     {
       "id": "A110",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "算法进度和子单本地包装重复复制权威视图，三个子单字段无读取",
       "category": "redundant_wrappers",
       "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
@@ -6291,14 +6291,16 @@
         "Child的4组件仅orderId被取消流程读取；algoOrderId、sliceIndex、quantitySteps getter在4025份可用classfile中外部引用为零，构造和校验依赖已校验的母单/编号列表。",
         "children仅由cancelRecord调用，额外IntStream、List和逐子单record没有独立消费目的；cancelOpen还先构建完整HTTP response，仅取用户/母单身份再次取消。"
       ],
-      "business_code_changed": false,
+      "business_code_changed": true,
       "proposed_cleanup": "直接从原不可变视图读取进度、片序号和子单编号，删除两个包装类型及其工厂/不必要集合；HTTP response依然在真实响应边界构造。保留Core对子单身份、数量、顺序、退役进度和Lane的权威校验。",
-      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。",
+      "resolved_in_round": "twenty_sixth_cleanup_round",
+      "implementation": "删除Progress/Child和工厂，用原Core视图的进度及子单列表；删除不可达完成分支；创建仅查询一次已提交母单后转换响应。普通子单身份、数量、退役进度、Core准入和协议/快照不变。"
     },
     {
       "id": "A111",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "算法执行中的remainingTarget<=0分支被前置完成和活动子单判断覆盖",
       "category": "unreachable_branch",
       "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
@@ -6328,14 +6330,16 @@
         "本次progress不可变且activeChildOrderCount非负。执行到remainingTarget计算时，活动数必为0；若executed>=target，第一完成分支已经return。",
         "因此此处executed<target，remainingTarget必须>0，后面的第二完成态写入没有可达有效输入；并非删除真实资金/数量校验。"
       ],
-      "business_code_changed": false,
+      "business_code_changed": true,
       "proposed_cleanup": "删除第二个不可达完成分支，保留首个完成判断、活动子单等待、到期取消、精确减法及真实子单数量边界。",
-      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。",
+      "resolved_in_round": "twenty_sixth_cleanup_round",
+      "implementation": "删除Progress/Child和工厂，用原Core视图的进度及子单列表；删除不可达完成分支；创建仅查询一次已提交母单后转换响应。普通子单身份、数量、退役进度、Core准入和协议/快照不变。"
     },
     {
       "id": "A112",
-      "status": "confirmed",
-      "analysis_status": "confirmed",
+      "status": "resolved",
+      "analysis_status": "resolved",
       "topic": "算法创建提交后连续查询同一权威母单两次并复制临时记录",
       "category": "redundant_read_and_copy",
       "evidence_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
@@ -6360,9 +6364,11 @@
         "Store.create已在提交后get一次并转换成AlgoOrderRecord，place只取结果的userId/algoOrderId，又get同一母单构造响应；第一次读取的其他字段无人使用。",
         "CodeGraph生产调用方只有place；创建不是异步追加阶段，不需要通过第二份查询维持另一业务边界。"
       ],
-      "business_code_changed": false,
+      "business_code_changed": true,
       "proposed_cleanup": "创建提交后只读取一次权威视图并在真实响应边界转换；保留命令回执/读栅栏与稳定身份，不直接用未落地的请求拼接成功响应。",
-      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。"
+      "verification_limit": "静态源码/结构/已有编译classfile审查；未执行并发、恢复、交易或测试场景。",
+      "resolved_in_round": "twenty_sixth_cleanup_round",
+      "implementation": "删除Progress/Child和工厂，用原Core视图的进度及子单列表；删除不可达完成分支；创建仅查询一次已提交母单后转换响应。普通子单身份、数量、退役进度、Core准入和协议/快照不变。"
     },
     {
       "id": "A113",
@@ -6423,11 +6429,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "A107/A109/A113同一撤单操作先确定版本、恢复和真实完成规则，避免删除有用约束。",
-    "A108整链删除无业务用途的成功计数，保留真实失败信息。",
-    "A110/A111/A112收敛算法执行搬运、不可达分支与重复查询。",
-    "A106整链删除无人消费完成元数据并同步当前契约。",
-    "A105先复核真实模型/协议边界；A11保留已提交读一致性。"
+    "A107/A109/A113倒计时认领版本、恢复和真实完成条件。",
+    "A108无用成功计数、A106完成时间继续整链清理。",
+    "A105模型/协议边界和A11查询一致性仍保留；全量审查未完成。"
   ],
   "rejected_false_positives": [
     {
@@ -6724,16 +6728,18 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "e3651eafb6804dd4b12d9602759cd1573fae7369",
-    "status": "analysis_only_findings_recorded",
-    "new_confirmed_ids": [
+    "source_basis_commit": "755b4c3ba368def930431f027a037d572140a3cd",
+    "status": "cleanup_and_followup_analysis",
+    "resolved_ids": [
+      "A110",
+      "A111",
+      "A112"
+    ],
+    "confirmed_ids": [
       "A106",
       "A107",
       "A108",
       "A109",
-      "A110",
-      "A111",
-      "A112",
       "A113"
     ],
     "candidate_ids": [
@@ -6741,11 +6747,11 @@
       "A105"
     ],
     "counts": {
-      "resolved": 103,
+      "resolved": 106,
       "candidate": 2,
-      "confirmed": 8
+      "confirmed": 5
     },
-    "evidence": "next_operation_analysis_20261024",
+    "evidence": "twenty_sixth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -21207,6 +21213,130 @@
       ],
       "errors": [],
       "remaining_owned_files": []
+    }
+  },
+  "twenty_sixth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "755b4c3ba368def930431f027a037d572140a3cd",
+    "resolved_ids": [
+      "A110",
+      "A111",
+      "A112"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 106,
+      "candidate": 2,
+      "confirmed": 5
+    },
+    "implementation": {
+      "deleted_records": [
+        "AlgoOrderProgress",
+        "AlgoOrderChild"
+      ],
+      "deleted_record_components": 9,
+      "deleted_factory_methods": 2,
+      "unreachable_branches_removed": 1,
+      "duplicate_reads_removed_per_create": 1,
+      "intermediate_http_response_mapping_removed_from_cancel_open": true,
+      "new_fields_classes_interfaces_or_stages": 0,
+      "formats_changed": false,
+      "verification_limit": "只编译；未执行交易、恢复、HTTP交互或性能场景。"
+    },
+    "verification": {
+      "command": "mvn -pl surprising-gateway -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "wall_seconds": 36.415,
+      "log_sha256": "19ae29bccf5dee8a6e2bad730f8866295f2e607233fb7d2a9de9770dbd43a95d",
+      "result": "BUILD SUCCESS",
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-realtime-api",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-gateway"
+      ],
+      "duration": "34.874 s",
+      "tests_executed": false,
+      "test_sources_compiled": true
+    },
+    "static_verification": {
+      "source_paths": [
+        "surprising-gateway/src/main/java/com/surprising/trading/order/model/AlgoOrderChild.java",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/model/AlgoOrderProgress.java",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java",
+        "surprising-gateway/src/test/java/com/surprising/trading/order/service/AlgoOrderServiceTest.java"
+      ],
+      "source_hashes": {
+        "surprising-gateway/src/main/java/com/surprising/trading/order/model/AlgoOrderChild.java": null,
+        "surprising-gateway/src/main/java/com/surprising/trading/order/model/AlgoOrderProgress.java": null,
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronAlgoOrderStore.java": "f57833a33502a58e1c9e7b9d76395d0c1f43ac2d1b6234e900be18164d2fe7b8",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AlgoOrderService.java": "f150cb2ad5d1e07445796f9aba8140d27003d1fb9c610713951d262c8a7e1c03",
+        "surprising-gateway/src/test/java/com/surprising/trading/order/service/AlgoOrderServiceTest.java": "b806c5559487a971a2e0aa6aeef12070198df401c57ae2f34540ee2187807848"
+      },
+      "compiled_gateway_classfiles_scanned": 1282,
+      "removed_type_and_old_descriptor_references": {
+        "com/surprising/trading/order/model/AlgoOrderProgress": [],
+        "com/surprising/trading/order/model/AlgoOrderChild": [],
+        "(Lcom/surprising/trading/order/model/AlgoOrderRecord;)Lcom/surprising/trading/order/model/AlgoOrderRecord;": []
+      },
+      "unchanged_business_source_hashes": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeAlgoOrderStateTransitions.java": "5cfa9a6c31c1d7b81f32f2a7247cb974948f6e50c76710d17c252088abd07d0e",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/OrderRuntime.java": "57dc997838b99b306dfd89f5b6d19b072a694f2e6acf93be1309bdd9a9070e0d",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java": "7e70feec8237ccdbda11bc1cab2da2092165909c0c03ff2d3420415d35bd592b",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java": "041dfc3eba6312f7b0ad0f9ca3222d29e8a5c5cbfeff7b12bad7484156d6b525",
+        "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreAlgoOrderCodec.java": "ff6f8bdf3f5b6ffc79c0d6c9d9f2b2672481f9928e6014fff4ce93856d7261cf",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java": "4c01c819b8718034ee17cac2326973f50166092626c5cc55e76dce41c1c0db77",
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java": "f81aa3d05365ab6173cde1c05378e14d5822101d08c90f249919ec9783c7f22e",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/StableOrderIdentity.java": "f9a7a5d4b3d78ff55593708da68cd6b28ea70c909826ac40286667801788f712",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/OrderAeronGateway.java": "be893a5145ca9fabf58536b023e8164b2204725b92dca18198cc696bf7e5211f",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java": "5b97c9083e31c8b5709526eb0493f973188610dfc9d9ab8b38491771744d8e46"
+      },
+      "unreachable_branch_removed": true,
+      "read_fences_and_wire_unchanged": true,
+      "status": "passed"
+    },
+    "remaining_scope": [
+      "A107/A109/A113倒计时认领版本、恢复和真实完成条件。",
+      "A108无用成功计数、A106完成时间继续整链清理。",
+      "A105模型/协议边界和A11查询一致性仍保留；全量审查未完成。"
+    ],
+    "documentation_hashes": {
+      "surprising-aeron-core/surprising-aeron-service/README.md": "152a30026a94a2cf0c5473be8db933ba6f19dde3a102a1538b98215150864ba6",
+      "surprising-gateway/README.md": "e3d52920848877b653c5a21493170834acaf5a001cec7c740bfe8fcb99081efb"
+    },
+    "temporary_resources": {
+      "archived_files": [
+        {
+          "path": "/tmp/aeron-algo-wrappers-20261024-archive.py",
+          "bytes": 6184,
+          "sha256": "93c2eb31604d57d0b09e7b833090bac2904cbc67fa28f0d591820f95657ce455"
+        },
+        {
+          "path": "/tmp/aeron-algo-wrappers-20261024-maven-result.json",
+          "bytes": 209,
+          "sha256": "4fe271aa3c661d208eb928701ded37b76c5a1cd149db963aeb5c2543b9d2ee96"
+        },
+        {
+          "path": "/tmp/aeron-algo-wrappers-20261024-maven.log",
+          "bytes": 25744,
+          "sha256": "19ae29bccf5dee8a6e2bad730f8866295f2e607233fb7d2a9de9770dbd43a95d"
+        },
+        {
+          "path": "/tmp/aeron-algo-wrappers-20261024-static.json",
+          "bytes": 3705,
+          "sha256": "9fde72330ea48e594e6e6ccf6ec22e3cb513513f61c3c5cb95df8f7ef63be176"
+        }
+      ],
+      "remaining_owned_files": [],
+      "compiler_outputs_retained": true
     }
   }
 }
