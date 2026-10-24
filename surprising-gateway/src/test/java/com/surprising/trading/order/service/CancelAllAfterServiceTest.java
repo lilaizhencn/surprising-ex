@@ -21,6 +21,32 @@ import org.junit.jupiter.api.Test;
 class CancelAllAfterServiceTest {
 
     @Test
+    void sameMillisecondTimerChangesHaveDistinctIdentitiesWhileAnExactRetryKeepsItsIdentity() {
+        var aeron = mock(OrderAeronGateway.class);
+        var store = new AeronCancelAllAfterStore(aeron);
+        var now = Instant.ofEpochMilli(1000);
+        when(aeron.cancelAllAfterTimers(1001, "1", 0, 1)).thenReturn(List.of(
+                new CoreCancelAllAfterView(1001, "1", CoreCancelAllAfterStatus.ACTIVE, 2000, 1000, 1)));
+
+        store.set(1001, "1", 1000, now);
+        store.set(1001, "1", 2000, now);
+        store.set(1001, "1", 1000, now);
+        store.set(1001, "1", 0, now);
+
+        var ids = org.mockito.ArgumentCaptor.forClass(java.util.UUID.class);
+        var payloads = org.mockito.ArgumentCaptor.forClass(byte[].class);
+        verify(aeron, org.mockito.Mockito.times(4)).command(
+                org.mockito.ArgumentMatchers.eq(com.surprising.aeron.protocol.CoreMessageType.UPDATE_CANCEL_ALL_AFTER),
+                ids.capture(), org.mockito.ArgumentMatchers.eq(1001L), payloads.capture());
+        var identities = ids.getAllValues();
+        assertThat(identities.get(0)).isNotEqualTo(identities.get(1)).isEqualTo(identities.get(2));
+        assertThat(identities.get(3)).isNotIn(identities.get(0), identities.get(1));
+        assertThat(payloads.getAllValues()).extracting(payload ->
+                com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(payload).countdownMillis())
+                .containsExactly(1000L, 2000L, 1000L, 0L);
+    }
+
+    @Test
     void zeroCountdownDisablesAuthoritativeTimer() {
         AeronCancelAllAfterStore store = mock(AeronCancelAllAfterStore.class);
         CancelAllAfterService service = service(store, mock(OrderService.class), mock(TriggerOrderService.class));

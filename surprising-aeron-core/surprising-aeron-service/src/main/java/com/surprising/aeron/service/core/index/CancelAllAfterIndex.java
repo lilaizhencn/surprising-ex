@@ -32,19 +32,6 @@ public final class CancelAllAfterIndex {
     }
 
     /**
-     * 把调用方计时器映射的 get 作为正文读取函数，复用同一套候选查询。
-     * @param userId 计时器所属用户，查询零表示不过滤用户
-     * @param symbolScope 计时器标的范围文本，查询空文本表示不过滤范围
-     * @param dueAtEpochMillis 到期筛选包含上界，零表示不按执行资格筛选
-     * @param limit 希望返回数量，统一夹在一至一万
-     * @param values 调用方当前计时器正文映射，按候选业务键读取
-     */
-    public List<CoreCancelAllAfterKey> query(long userId, String symbolScope, long dueAtEpochMillis, int limit,
-                                             Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> values) {
-        return query(userId, symbolScope, dueAtEpochMillis, limit, values::get);
-    }
-
-    /**
      * 要求 lookup 非空，把数量夹在一到一万，按时间及用户取候选后再读真实值过滤范围。到期时间为零时不限制状态；非零时返回已到期 ACTIVE 或认领超过三十秒的 TRIGGERING，输出键按时间、用户、范围文本排序。
      * @param userId 计时器所属用户，查询零表示不过滤用户
      * @param symbolScope 计时器标的范围文本，查询空文本表示不过滤范围

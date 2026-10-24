@@ -62,7 +62,7 @@ public class AeronCancelAllAfterStore {
 
     private UUID commandId(long userId, CoreCancelAllAfterCommand command) {
         String key = "CANCEL_AFTER:" + command.action() + ':' + userId + ':' + command.symbolScope()
-                + ':' + command.expectedRevision() + ':' + command.updatedAtEpochMillis();
+                + ':' + command.countdownMillis() + ':' + command.expectedRevision() + ':' + command.updatedAtEpochMillis();
         return UUID.nameUUIDFromBytes(key.getBytes(StandardCharsets.UTF_8));
     }
 

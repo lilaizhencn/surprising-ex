@@ -34,7 +34,7 @@ Lombok只处理直接样板，校验、复制和状态转换显式实现，可�
 查询、实时事件和数据库模型保留各自消费的完整业务字段。按用户确认，旧命令与快照格式不再读取。
 
 清理及逐字段证据见[命令与持久化数据审计](validation/command-data-audit-20261023.json)，
-当前累计115项已解决。撮合普通/池化结算回执不再复制无人消费的行情；原生事件、真实成功撤单前缀和命令证据保留。
+当前累计117项已解决。撮合普通/池化结算回执不再复制无人消费的行情；原生事件、真实成功撤单前缀和命令证据保留。
 结果完整构造从16参减为13参，去掉仅重复校验的前缀计数、时间副本和无用行情参数，并删除两个无外部调用的构造重载。
 单币对盘口读取直接返回档位；单Matcher初始化在原提交栅栏内复用分片读取，多Matcher仍分别读取后合并。
 不再为同步读取创建已完成Future集合、allOf或临时BookResult，也不先计算无人消费的全引擎哈希；实际快照对账哈希保留。
@@ -87,10 +87,10 @@ Gateway直接使用含原revision的不可变Core视图，删除8组件Timer副�
 第二十六轮执行`mvn -pl surprising-gateway -am -DskipTests clean test-compile`，12个相关模块干净编译通过（34.874秒），只编译测试源码。
 此前倒计时版本隔离、认领超时、旧修订完成拒绝、快照后索引重建、单步失败隔离和六产品Core目标查询的断言均已补入现有测试源码，仅编译、未执行。
 本轮既有协议用例同步删除两项元数据并补充长度断言，只编译、未执行；每条算法更新/状态和倒计时状态各少8字节，对应快照各少16字节，仅为编码结构计算。
-下一轮已确认：SET稳定命令身份遗漏countdown可造成同毫秒不同意图冲突；CancelAllAfterIndex的Map查询重载只有测试使用且纯转发。全量字段及业务约束审查仍在进行。
+第三十轮SET稳定命令身份纳入真实countdown，保留Core指纹检查及准确截止；删除CancelAllAfterIndex只有测试调用的Map转发重载，7处测试直接传Map::get。`mvn -pl surprising-gateway -am -DskipTests clean test-compile`12模块通过（35.400秒），只编译测试源码。首次编译漏迁移两处快照测试调用，修正后完整重编译。下一轮已确认六个无调用风险扫描复制/推进方法和一个无调用冷状态客户端单号查询；另有扫描标量摘要与Lane进度重复保存候选，需继续核对初始化、运行及恢复，尚未删除字段。全量字段及业务约束审查仍在进行。
 历史字段、索引和运行时清理过程也保存在审计及[早期验证记录](validation/simplify-20261022.json)，不以无引用扫描代替业务用途判断。
 
-最近一批清理使用HotSpot JDK27、Maven3.9.16执行：
+第二十九轮关联清理使用HotSpot JDK27、Maven3.9.16执行：
 
 ```bash
 mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks,surprising-aeron-core/surprising-aeron-tools,surprising-gateway,surprising-realtime/surprising-realtime-provider \

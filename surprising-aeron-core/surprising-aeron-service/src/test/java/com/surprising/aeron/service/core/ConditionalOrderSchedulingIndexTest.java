@@ -61,17 +61,17 @@ class ConditionalOrderSchedulingIndexTest {
         for (var /* 本轮需要加入索引和正文映射的计时器值 */ timer : List.of(timer(7, "2", 100), timer(7, "10", 100), timer(8, "*", 50))) {
             values.put(timer.key(), timer); index.apply(timer.key(), timer);
         }
-        assertThat(index.query(0, "", 100, 10, values)).containsExactly(
+        assertThat(index.query(0, "", 100, 10, values::get)).containsExactly(
                 timer(8, "*", 50).key(), timer(7, "10", 100).key(), timer(7, "2", 100).key());
-        assertThat(index.query(7, "2", 100, 10, values)).containsExactly(timer(7, "2", 100).key());
+        assertThat(index.query(7, "2", 100, 10, values::get)).containsExactly(timer(7, "2", 100).key());
         // 把用户七、标的二改期到二十五的新计时器值
         var changed = timer(7, "2", 25);
         values.put(changed.key(), changed); index.apply(changed.key(), changed);
-        assertThat(index.query(0, "", 25, 1, values)).containsExactly(changed.key());
+        assertThat(index.query(0, "", 25, 1, values::get)).containsExactly(changed.key());
         values.remove(changed.key()); index.apply(changed.key(), null);
-        assertThat(index.query(7, "2", 0, 10, values)).isEmpty();
+        assertThat(index.query(7, "2", 0, 10, values::get)).isEmpty();
         index.rebuild(TradingCoreState.empty(ProductLine.SPOT));
-        assertThat(index.query(0, "", 0, 10, values)).isEmpty();
+        assertThat(index.query(0, "", 0, 10, values::get)).isEmpty();
     }
 
     @Test
@@ -85,8 +85,8 @@ class ConditionalOrderSchedulingIndexTest {
         var recovered = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.decode(
                 com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(state), ProductLine.SPOT);
         var index = new CancelAllAfterIndex(recovered);
-        assertThat(index.query(7, "1", 31_999, 1, recovered.cancelAllAfterTimers())).isEmpty();
-        assertThat(index.query(7, "1", 32_000, 1, recovered.cancelAllAfterTimers())).containsExactly(claimed.key());
+        assertThat(index.query(7, "1", 31_999, 1, recovered.cancelAllAfterTimers()::get)).isEmpty();
+        assertThat(index.query(7, "1", 32_000, 1, recovered.cancelAllAfterTimers()::get)).containsExactly(claimed.key());
     }
 
     /**

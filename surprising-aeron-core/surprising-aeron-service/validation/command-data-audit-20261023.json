@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第二十九轮：A118恢复关联与A116索引回退已实施，17模块干净编译；13处构造、4022 classfile及5份权威源码不变证据入档。累计115解决；新确认A119命令身份和A120测试专用转发，A11候选及两项实际用途保留，全量审查未结束。",
+    "checkpoint": "第三十轮：A119完整SET身份与A120测试专用Map转发已实施；一次测试源码编译漏迁移已修正，12模块干净编译通过。累计117解决；新确认A121六个死方法、A122冷查询入口；A123扫描摘要重复候选待链路审查，全量未完成。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -6648,11 +6648,11 @@
     },
     {
       "id": "A119",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed",
       "topic": "倒计时SET命令身份遗漏真实时长，可能触发无用幂等冲突",
       "source_basis_commit": "733c25d00ffda75558c3be3b0cd009045aadefea",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java",
@@ -6675,15 +6675,17 @@
         "static_counterexample": "同用户、scope和毫秒的SET，expectedRevision都为0；countdown=1000与2000得到同UUID，当前命令载荷和精确截止不同，Core指纹比较会拒绝第二个。属于静态可达反例，未运行复现。",
         "proposal": "稳定身份纳入真实countdown；保持相同完整业务命令重试同ID，不删除Core幂等防护或真实时长输入。"
       },
-      "verification_limit": "只核对源码和编译产物，未运行并发/真实SET。"
+      "verification_limit": "只核对源码和编译产物，未运行并发/真实SET。",
+      "resolved_in_round": "thirtieth_cleanup_round",
+      "implementation": "稳定身份增加countdownMillis；同一完整命令保留同身份，不同真实时长及禁用不再与同毫秒SET互相冲突；不改Core指纹与命令/快照编码。"
     },
     {
       "id": "A120",
-      "status": "confirmed",
+      "status": "resolved",
       "analysis_status": "confirmed_test_only_forwarder",
       "topic": "全撤索引Map查询重载仅转发且只有测试调用",
       "source_basis_commit": "733c25d00ffda75558c3be3b0cd009045aadefea",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
         {
           "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/CancelAllAfterIndex.java",
@@ -6697,7 +6699,139 @@
         ],
         "proposal": "删除Map重载，测试直接传values::get，保留生产的真实lookup入口与所有筛选/认领规则。"
       },
-      "verification_limit": "完整owner+name+descriptor的classfile引用扫描，不以CodeGraph未记录record/重载认定无调用。"
+      "verification_limit": "完整owner+name+descriptor的classfile引用扫描，不以CodeGraph未记录record/重载认定无调用。",
+      "resolved_in_round": "thirtieth_cleanup_round",
+      "implementation": "删除13行Map重载及说明；7处测试调用直接传Map::get，唯一生产Function入口正文不变；4022个classfile中旧重载定义/引用为零。"
+    },
+    {
+      "id": "A121",
+      "status": "confirmed",
+      "analysis_status": "confirmed_no_current_callers",
+      "topic": "风险扫描冷状态保留五个无调用复制/推进方法，运行时另有无调用顺序Lane推进入口",
+      "source_basis_commit": "3a2c69975cee307ec6d6f0486635e59ac67b692b",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreRiskState.java",
+          "anchor": "public RiskScan withLastScheduledRevision(long revision)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanRuntime.java",
+          "anchor": "public RiskScanRuntime nextAccountLane(int laneId)"
+        }
+      ],
+      "evidence": {
+        "classfiles_scanned": 4022,
+        "cold_methods": [
+          {
+            "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+            "method": "withLastScheduledRevision",
+            "descriptor": "(J)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+            "access": 1,
+            "test_callers": []
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+            "method": "withLaneProgress",
+            "descriptor": "(Ljava/util/List;)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+            "access": 1,
+            "test_callers": []
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+            "method": "withRiskProgress",
+            "descriptor": "(ZJILjava/lang/String;JJJJJJ)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+            "access": 1,
+            "test_callers": []
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+            "method": "withTriggerOcoProgress",
+            "descriptor": "(JJ)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+            "access": 1,
+            "test_callers": []
+          },
+          {
+            "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+            "method": "nextAccountLane",
+            "descriptor": "(I)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+            "access": 1,
+            "test_callers": []
+          }
+        ],
+        "runtime_method": {
+          "member": [
+            "com/surprising/aeron/service/risk/RiskScanRuntime",
+            "nextAccountLane",
+            "(I)Lcom/surprising/aeron/service/risk/RiskScanRuntime;"
+          ],
+          "callers": []
+        },
+        "role": "生产RiskLaneProcessor/Coordinator更新RiskScanRuntime；快照readRiskScan直接构造冷记录，五个冷修改方法不是读取入口。方法无注解/Bean入口，配置格式中未发现这些方法名。",
+        "proposed_cleanup": "删除这六个零调用方法；不要同时删除有真实消费的扫描字段、Lane轮转指针或金钱累计。"
+      }
+    },
+    {
+      "id": "A122",
+      "status": "confirmed",
+      "analysis_status": "confirmed_no_current_callers",
+      "topic": "TradingCoreState保留无调用的按用户及客户端单号查询入口",
+      "source_basis_commit": "3a2c69975cee307ec6d6f0486635e59ac67b692b",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+          "anchor": "public CoreOrderState order(long userId, String clientOrderId)"
+        }
+      ],
+      "evidence": {
+        "member": [
+          "com/surprising/aeron/model/TradingCoreState",
+          "order",
+          "(JLjava/lang/String;)Lcom/surprising/aeron/model/CoreOrderState;"
+        ],
+        "main_and_test_callers": [],
+        "classfiles_scanned": 4022,
+        "proposed_cleanup": "仅删无调用双参入口，原clientOrderIndex用于冷状态一致性验证和其他恢复边界，不能顺带删表；按orderId入口保留。"
+      }
+    },
+    {
+      "id": "A123",
+      "status": "candidate",
+      "analysis_status": "needs_operation_and_restore_audit",
+      "topic": "风险扫描全局记录中的单Lane摘要可能重复保存laneProgress内容",
+      "source_basis_commit": "3a2c69975cee307ec6d6f0486635e59ac67b692b",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java",
+          "anchor": "RiskScanRuntime progress = laneInput(initial, nextLane, cursors.get(nextLane)).withLaneProgress(cursors);"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java",
+          "anchor": "cursors.isEmpty() ? initialCursor(initial, lane) : cursors.get(lane)"
+        },
+        {
+          "file": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+          "anchor": "r.list(25,"
+        }
+      ],
+      "evidence": {
+        "observed": "Coordinator把选中Lane游标复制到标量摘要，同时保存全部Lane进度列表；快照两组都写。标量字段还实际用于Lane任务输入和空列表初始化，不能仅因重复外观删除运行时字段。",
+        "fields_to_trace": [
+          "lastUserId",
+          "riskUserId",
+          "riskPhase",
+          "riskPositionCursor",
+          "riskReservationCursor",
+          "riskUnrealizedPnlUnits",
+          "riskMaintenanceMarginUnits",
+          "riskIsolatedMarginUnits",
+          "riskIsolatedReservationUnits"
+        ],
+        "required_next": "追踪新扫描、同轮行情变更、分片继续、完成/重启及冷物化，区分真正恢复事实与可重建摘要；accountLaneId承担预算轮转，不直接列为无用。"
+      },
+      "verification_limit": "只确认重复写入形态，尚未证明可删，未运行风险或恢复。"
     }
   ],
   "preserve_verified_purposes": [
@@ -6715,9 +6849,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A119：完整SET业务意图参与稳定命令身份，不删除Core幂等检查。",
-    "处理A120：删除只有测试使用的Map查询纯转发。",
-    "继续逐业务操作检查字段、约束、状态和恢复用途；A11有序读取边界保留。"
+    "删除A121六个当前零调用风险扫描修改方法，保留生产转换和实际状态事实。",
+    "删除A122无调用冷状态客户端单号查询入口，保留真实索引/恢复用途。",
+    "深入A123：扫描摘要与Lane游标写入是否重复，逐新建、继续、行情变更、完成、快照和恢复检查；A11有序读取边界保留。"
   ],
   "rejected_false_positives": [
     {
@@ -25800,6 +25934,345 @@
       "status": "archived_then_removed",
       "compiler_outputs_retained": true,
       "files_removed": 7
+    },
+    "full_audit_complete": false
+  },
+  "thirtieth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "3a2c69975cee307ec6d6f0486635e59ac67b692b",
+    "resolved_ids": [
+      "A119",
+      "A120"
+    ],
+    "new_confirmed_ids": [
+      "A121",
+      "A122"
+    ],
+    "new_candidate_ids": [
+      "A123"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 117,
+      "candidate": 2,
+      "retained": 2,
+      "confirmed": 2
+    },
+    "versions": {
+      "core_schema": 16,
+      "register_instrument": "V10",
+      "trading_snapshot": 53,
+      "sectioned_snapshot": 29,
+      "matcher_snapshot": 10,
+      "terminal_retention": 4,
+      "algo_command": 6,
+      "algo_view": 5,
+      "cancel_all_after_command": 5,
+      "cancel_all_after_query_view": 3
+    },
+    "implementation": {
+      "removed_pure_forwarding_overloads": 1,
+      "migrated_test_calls": 7,
+      "new_cluster_fields_or_formats": 0,
+      "new_classes_interfaces_stages": 0,
+      "stable_identity": "SET身份包含真实时长；相同完整意图重试稳定，时长变化与禁用有独立身份；生命周期动作的版本及业务时间保留。"
+    },
+    "verification": {
+      "java": "HotSpot Corretto27+33-FR",
+      "maven": "3.9.16",
+      "disk_available": "169GiB",
+      "reactor_modules": 12,
+      "successful_build": {
+        "command": "mvn -pl surprising-gateway -am -DskipTests clean test-compile",
+        "exit_code": 0,
+        "wall_seconds": 35.4,
+        "log_sha256": "3a0d2d8fc8a9de861f672c5f2a153fd19d85a8e11bd8d6c6e9c82ccbcfbf5815"
+      },
+      "failed_first_build": {
+        "command": "mvn -pl surprising-gateway -am -DskipTests clean test-compile",
+        "exit_code": 1,
+        "wall_seconds": 20.878,
+        "log_sha256": "85f08e62bd91d5c524993eee744640731e65e72243613a81421a8c129b9d0aa1",
+        "reason": "删除Map重载后漏迁移同一测试类中两处快照读取调用；修正为recovered.cancelAllAfterTimers()::get后重做完整干净编译。"
+      },
+      "compiled_source_sha256": {
+        "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/CancelAllAfterIndex.java": "ab408b8a2236b7f67c35f4e406ca0eaf131271d29662f520e51d28790aedaf4f",
+        "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/ConditionalOrderSchedulingIndexTest.java": "c460e750fa9dc8d21a05ee12cebb73ba3719dfd89f63274cac265861f2cffd8a",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/AeronCancelAllAfterStore.java": "e87471978dc89fc44cd2a65ea2f461c3a9e23c97bbcb1eab800595a15b12fd0a",
+        "surprising-gateway/src/test/java/com/surprising/trading/order/service/CancelAllAfterServiceTest.java": "cf600f65727db7d819b04f57e721f1e832e7c0364ff30380d35974ef8d4a8d8b"
+      },
+      "map_overload_definition_count": 0,
+      "map_overload_reference_count": 0,
+      "remaining_query_methods": [
+        [
+          1,
+          "query",
+          "(JLjava/lang/String;JILjava/util/function/Function;)Ljava/util/List;"
+        ]
+      ],
+      "classfiles_scanned": 4022,
+      "next_scan_cold_model_preselection": [
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskStatus",
+          "method": "valueOf",
+          "descriptor": "(Ljava/lang/String;)Lcom/surprising/aeron/model/CoreRiskStatus;",
+          "access": 9,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreOrderState",
+          "method": "<init>",
+          "descriptor": "(JLcom/surprising/product/api/ProductLine;JLjava/lang/String;Lcom/surprising/aeron/protocol/CoreOrderSide;JJJZLcom/surprising/aeron/protocol/CoreMarginMode;Lcom/surprising/aeron/protocol/CorePositionSide;Lcom/surprising/aeron/model/CoreOrderStatus;J)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/index/ActiveOrderIndexTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/TradingCoreState",
+          "method": "<init>",
+          "descriptor": "(Lcom/surprising/product/api/ProductLine;JLjava/util/Map;Ljava/util/Map;Ljava/util/Map;Lcom/surprising/aeron/model/CoreRiskState;Lcom/surprising/aeron/service/treasury/CoreTreasuryState;Ljava/util/Map;)V",
+          "access": 1,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/TradingCoreState",
+          "method": "<init>",
+          "descriptor": "(Lcom/surprising/product/api/ProductLine;JLjava/util/Map;Ljava/util/Map;Ljava/util/Map;Lcom/surprising/aeron/model/CoreRiskState;Lcom/surprising/aeron/service/treasury/CoreTreasuryState;Ljava/util/Map;Ljava/util/Map;)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreAlgoLaneQueryTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/TradingCoreState",
+          "method": "<init>",
+          "descriptor": "(Lcom/surprising/product/api/ProductLine;JLjava/util/Map;Ljava/util/Map;Ljava/util/Map;Lcom/surprising/aeron/model/CoreRiskState;Lcom/surprising/aeron/service/treasury/CoreTreasuryState;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/ConditionalOrderSchedulingIndexTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/TradingCoreState",
+          "method": "order",
+          "descriptor": "(JLjava/lang/String;)Lcom/surprising/aeron/model/CoreOrderState;",
+          "access": 1,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/TradingCoreState",
+          "method": "userStateHash",
+          "descriptor": "(J)J",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeStateQueryServiceTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/TradingCoreState",
+          "method": "orderStateHash",
+          "descriptor": "(J)J",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/RuntimeStateQueryServiceTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState",
+          "method": "<init>",
+          "descriptor": "(Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;J)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleWorkTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreRiskLaneQueryTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreRiskStateTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/query/CoreLedgerQueryTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/replay/CommittedPortfolioSnapshotTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/snapshot/state/SnapshotFieldEvolutionTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState",
+          "method": "<init>",
+          "descriptor": "(Ljava/util/Map;Ljava/util/Map;Ljava/util/Map;Lcom/surprising/aeron/model/CoreRiskState$RiskScan;J)V",
+          "access": 1,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState",
+          "method": "hasPendingScans",
+          "descriptor": "()Z",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreRiskStateTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreMarkPriceState",
+          "method": "<init>",
+          "descriptor": "(Ljava/lang/String;JJJ)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleWorkTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreRiskLaneQueryTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreRiskStateTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/query/CoreLedgerQueryTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CorePositionState",
+          "method": "<init>",
+          "descriptor": "(Ljava/lang/String;Ljava/lang/String;JJJJJ)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleStateTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreRiskStateTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/index/PositionUserIndexTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/replay/CommittedPortfolioSnapshotTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessorTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/AssetBalance",
+          "method": "reserve",
+          "descriptor": "(J)Lcom/surprising/aeron/model/AssetBalance;",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreLiquidationState$Status",
+          "method": "valueOf",
+          "descriptor": "(Ljava/lang/String;)Lcom/surprising/aeron/model/CoreLiquidationState$Status;",
+          "access": 9,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreLiquidationState",
+          "method": "<init>",
+          "descriptor": "(JJLjava/lang/String;Lcom/surprising/aeron/protocol/CoreMarginMode;Lcom/surprising/aeron/protocol/CorePositionSide;JJJJJJJLcom/surprising/aeron/model/CoreLiquidationState$Status;)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreLifecycleWorkTest.class",
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreLiquidationState",
+          "method": "<init>",
+          "descriptor": "(JJLjava/lang/String;JJJLcom/surprising/aeron/model/CoreLiquidationState$Status;)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/query/CoreLedgerQueryTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreLiquidationState",
+          "method": "ordered",
+          "descriptor": "(J)Lcom/surprising/aeron/model/CoreLiquidationState;",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CorePerpetualFinancialMatrixTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreOrderStatus",
+          "method": "valueOf",
+          "descriptor": "(Ljava/lang/String;)Lcom/surprising/aeron/model/CoreOrderStatus;",
+          "access": 9,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+          "method": "<init>",
+          "descriptor": "(Ljava/lang/String;JJJZJILjava/lang/String;JJJJJZIJJJJJJJ)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/TradingStateSnapshotCodecTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+          "method": "<init>",
+          "descriptor": "(Ljava/lang/String;JJZ)V",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/query/CoreLedgerQueryTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+          "method": "withLastScheduledRevision",
+          "descriptor": "(J)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+          "access": 1,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+          "method": "withLaneProgress",
+          "descriptor": "(Ljava/util/List;)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+          "access": 1,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+          "method": "withRiskProgress",
+          "descriptor": "(ZJILjava/lang/String;JJJJJJ)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+          "access": 1,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+          "method": "withTriggerProgress",
+          "descriptor": "(ZIJJJJJ)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+          "access": 1,
+          "test_callers": [
+            "surprising-aeron-core/surprising-aeron-service/target/test-classes/com/surprising/aeron/service/core/CoreRiskStateTest.class"
+          ]
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+          "method": "withTriggerOcoProgress",
+          "descriptor": "(JJ)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+          "access": 1,
+          "test_callers": []
+        },
+        {
+          "owner": "com/surprising/aeron/model/CoreRiskState$RiskScan",
+          "method": "nextAccountLane",
+          "descriptor": "(I)Lcom/surprising/aeron/model/CoreRiskState$RiskScan;",
+          "access": 1,
+          "test_callers": []
+        }
+      ],
+      "meaningful_test_source": "同用户/scope/毫秒下1000与2000时长身份不同，同一1000意图重试身份相同，禁用0不复用前两者身份；仅编译未执行。",
+      "tests_executed": false,
+      "services_started": false,
+      "no_runtime_or_performance_claim": true,
+      "frontend": "公开请求/响应/单位/交互不变，未重复编译前端。"
+    },
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-timer-intent-20261024",
+      "status": "archived_then_removed",
+      "compiler_outputs_retained": true,
+      "artifact_sha256": {
+        "/tmp/aeron-timer-intent-20261024.compiled-sources.json": "cd8e2c7f4720874e159adbcd1ad0aa77c00d7de380ca536ad3255ed4fede2425",
+        "/tmp/aeron-timer-intent-20261024.maven.log": "3a0d2d8fc8a9de861f672c5f2a153fd19d85a8e11bd8d6c6e9c82ccbcfbf5815",
+        "/tmp/aeron-timer-intent-20261024.build.json": "13166a2c97f19735f4a466bdd9d7f2aaa61e8b128496a8eb30582804f6a3a65e",
+        "/tmp/aeron-timer-intent-20261024.failed-build.json": "5fa825c25d8f6d78e4799e7a663039adae8edd0a537e186dd0a44d3d59950f8f",
+        "/tmp/aeron-timer-intent-20261024.failed-maven.log": "85f08e62bd91d5c524993eee744640731e65e72243613a81421a8c129b9d0aa1",
+        "/tmp/aeron-timer-intent-20261024.scan.py": "01d81596a2d2a3c061181d0e9907db779001b88185cdf600e93ab01a6a7e13be",
+        "/tmp/aeron-timer-intent-20261024.classfiles.json": "dff57a6f18de1064f99b653a8396b0e176efc108b3ffb8e51f643c03a0a4674a"
+      },
+      "files_removed": 7,
+      "pyc_files_removed": 1
     },
     "full_audit_complete": false
   }
