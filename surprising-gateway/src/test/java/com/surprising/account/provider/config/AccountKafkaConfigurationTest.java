@@ -6,12 +6,9 @@ import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
-import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
-import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -48,53 +45,12 @@ class AccountKafkaConfigurationTest {
     }
 
     @Test
-    void producerUsesIdempotentOutboxSettings() {
-        AccountProperties properties = new AccountProperties();
-        properties.getKafka().setBootstrapServers("kafka-d:9092");
-
-        AccountKafkaConfiguration configuration = new AccountKafkaConfiguration();
-        var producerFactory = (DefaultKafkaProducerFactory<String, String>)
-                configuration.accountProducerFactory(properties);
-
-        Map<String, Object> config = producerFactory.getConfigurationProperties();
-        assertThat(config).containsEntry(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "kafka-d:9092");
-        assertThat(config).containsEntry(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        assertThat(config).containsEntry(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        assertThat(config).containsEntry(ProducerConfig.ACKS_CONFIG, "all");
-        assertThat(config).containsEntry(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        assertThat(config).containsEntry(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
-        assertThat(config).containsEntry(ProducerConfig.LINGER_MS_CONFIG, 2);
-        assertThat(config).containsEntry(ProducerConfig.BATCH_SIZE_CONFIG, 65_536);
-        assertThat(config).containsEntry(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
-    }
-
-    @Test
-    void resolvesAllTopicsFromConfiguredProductLine() {
-        AccountProperties properties = new AccountProperties();
-        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
-
-        assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-linear-perp-account-v1");
-        assertThat(properties.getKafka().getOrderCommandsTopic())
-                .isEqualTo("surprising.linear-perp.order.commands.v1");
-        assertThat(properties.getKafka().getLiquidationFeeEventsTopic())
-                .isEqualTo("surprising.linear-perp.account.liquidation-fee.events.v1");
-        assertThat(properties.getKafka().getDeliverySettlementsTopic())
-                .isEqualTo("surprising.linear-perp.delivery.settlements.v1");
-        assertThat(properties.getKafka().getOptionExercisesTopic())
-                .isEqualTo("surprising.linear-perp.option.exercises.v1");
-    }
-
-    @Test
     void canResolveSettlementTopicsAndGroupFromProductLine() {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
 
         assertThat(properties.getKafka().getGroupId())
                 .isEqualTo("surprising-linear-perp-account-v1");
-        assertThat(properties.getKafka().getOrderCommandsTopic())
-                .isEqualTo("surprising.linear-perp.order.commands.v1");
-        assertThat(properties.getKafka().getLiquidationFeeEventsTopic())
-                .isEqualTo("surprising.linear-perp.account.liquidation-fee.events.v1");
         assertThat(properties.getKafka().isDeliverySettlementsTopicEnabled()).isFalse();
         assertThat(properties.getKafka().isOptionExercisesTopicEnabled()).isFalse();
         assertThat(properties.getKafka().getDeliverySettlementsTopic())

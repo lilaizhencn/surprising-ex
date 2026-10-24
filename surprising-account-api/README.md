@@ -160,18 +160,17 @@ surprising:
   account:
     kafka:
       product-line: LINEAR_PERPETUAL
-      liquidation-fee-events-topic: surprising.linear-perp.account.liquidation-fee.events.v1
-      account-state-events-topic: surprising.linear-perp.account.state.events.v1
-      concurrency: 2
+      bootstrap-servers: localhost:9092
+      client-id: account-${HOSTNAME:node}
       max-poll-records: 500
-    cache:
-      contract-spec-max-entries: 4096
 ```
 
 启动独立产品线实例时，把 `product-line` 设置为 `SPOT`、`LINEAR_PERPETUAL`、
 `LINEAR_DELIVERY`、`INVERSE_PERPETUAL`、`INVERSE_DELIVERY`或`OPTION`。实际交割/行权消费者仍按产品线隔离。
 
 当前持仓推送使用Core提交后的原生POSITION帧及用户读视图；旧`PositionUpdatedEvent`、其无人读取的`PositionCacheEvent`和旧持仓Kafka topic入口已删除，共35项包装字段及专属版本/修订约束不再保留。Core持仓、保证金、REST响应和快照字段没有因此删除。账户到期结算Kafka消费者与工厂仍有实际职责，继续保留。本轮仅编译相关生产/测试源码，没有执行资金或恢复场景。
+
+账户Kafka装配保留真实交割/行权consumer工厂、记录确认和失败关闭重试；删除没有发布者的account producer/template及专属`unscoped`兜底。账户侧无读端的订单命令、未平仓量、强平费、账户状态topic别名和排空group/字段也已清理；交易模块实际使用的排空设置与发布者保持原样。消费者仍使用显式产品、bootstrap、clientId和maxPoll配置。本轮只编译相关模块，没有启动Spring/Kafka或执行结算。
 
 本地缓存只用于不可变读快照：
 

@@ -5,5 +5,4 @@ surprising:
     kafka:
       bootstrap-servers: localhost:9092
       client-id: surprising-account-${HOSTNAME:${random.uuid}}
-      instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
       max-poll-records: 500

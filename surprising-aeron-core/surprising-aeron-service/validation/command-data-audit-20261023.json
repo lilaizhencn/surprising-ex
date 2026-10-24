@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第四十五轮：A152三参测试构造、默认产品工厂及多余Autowired删除，消费者单一显式配置构造；实际handler源码保持，12模块test-compile通过。累计147解决，无测试/上下文执行。A153账户无注入producer/template和无读端主题别名/排空字段待删，真实交割/行权consumer工厂及其他发布者保留。",
+    "checkpoint": "第四十六轮：A153账户无消费者producer/template、5无读端别名和排空字段/YAML删除，实际交割/行权consumer工厂及产品矩阵断言保留；12模块干净源码编译通过。累计148解决，无测试/服务/SQL执行。确认A154管理员调账身份被丢弃且审计历史未见生产写链，需从批准/命令/回执/余额事实继续分析修复，不能误删必要审计字段。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -8523,12 +8523,49 @@
     },
     {
       "id": "A153",
-      "status": "confirmed",
-      "analysis_status": "unused_account_producer_beans_and_owned_metadata_confirmed",
+      "status": "resolved",
+      "analysis_status": "unused_producer_and_owned_metadata_removed_clean_compile_verified",
       "topic": "账户Kafka配置保留无人注入的producer/template和无业务读端的主题元数据",
       "source_basis_commit": "387e4118fb2be05d2c4696a3816cfa732a726715",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountKafkaConfiguration.java",
+          "line": 21,
+          "anchor": "public ConsumerFactory<String, String> accountConsumerFactory("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountKafkaConfiguration.java",
+          "line": 39,
+          "anchor": "public ConcurrentKafkaListenerContainerFactory<String, String> accountInstrumentLifecycleKafkaListenerContainerFactory("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountProperties.java",
+          "line": 34,
+          "anchor": "private int maxPollRecords"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/consumer/ExpiringContractSettlementConsumer.java",
+          "line": 39,
+          "anchor": "containerFactory = \"accountInstrumentLifecycleKafkaListenerContainerFactory\""
+        }
+      ],
+      "evidence": {
+        "producer_consumers": "全仓accountKafkaTemplate/accountProducerFactory名字、代码图调用及KafkaTemplate注入点核对：account template无实际注入者；交易发布器显式Qualifier(orderKafkaTemplate)，InstrumentOutboxPublisher显式Qualifier(instrumentKafkaTemplate)，没有隐式选择account模板。两个其他producer/template仍在，不因删除account分支引入默认bean。",
+        "unused_derived_metadata": [
+          "AccountProperties.Kafka.getOrderCommandsTopic",
+          "AccountProperties.Kafka.getOpenInterestEventsTopic",
+          "AccountProperties.Kafka.getLiquidationFeeEventsTopic",
+          "AccountProperties.Kafka.getAccountStateEventsTopic",
+          "AccountProperties.Kafka.getInstrumentLifecycleGroupId"
+        ],
+        "unused_bound_field": "AccountProperties.Kafka.instrumentLifecycleDrainTopic仅旧YAML绑定和Lombok访问器，实际排空发布与消费使用TradingOrderProperties中的同名设置，不能全仓删除同名字段。",
+        "actual_boundary": "ExpiringContractSettlementConsumer仍通过accountInstrumentLifecycleKafkaListenerContainerFactory消费交割/行权，保留accountConsumerFactory、产品隔离、bootstrap/clientId/maxPoll及失败关闭重试。",
+        "shared_topic_note": "某些Shared ProductTopicNames方法仍供其他配置或真实消费者使用；先删除AccountProperties中无读端的别名，不按名字批量删其他所有者。"
+      },
+      "proposed_cleanup": "删除account producer/template及专属productLineName兜底、旧producer断言、无读端账户主题别名和本账户排空YAML/字段；保留真实结算consumer工厂与配置、订单排空/费率和合约outbox发布器。",
+      "verification_limit": "当前源码与代码图/配置注入核对，尚未删除此项，也未启动Spring/Kafka。",
+      "historical_source_references": [
         {
           "file": "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountKafkaConfiguration.java",
           "line": 26,
@@ -8565,21 +8602,72 @@
           "anchor": "containerFactory = \"accountInstrumentLifecycleKafkaListenerContainerFactory\""
         }
       ],
+      "resolved_in_round": "forty_sixth_cleanup_round",
+      "resolution": {
+        "state": "implemented_compile_verified",
+        "change": "删除account producer/template两Bean及productLineName/unscoped专属兜底；删除5个无读端账户主题/group别名、本账户排空字段及YAML。真实consumer工厂和listener源码保持。只移除旧producer用例及主题弱重复，剩余结算配置和产品矩阵断言保持。",
+        "tests_executed": false,
+        "spring_or_kafka_started": false
+      }
+    },
+    {
+      "id": "A154",
+      "status": "confirmed",
+      "analysis_status": "admin_adjustment_metadata_discarded_and_audit_write_chain_missing_in_current_source",
+      "topic": "管理员调账身份参数未消费，既有调整审计查询缺少实际写入链路",
+      "source_basis_commit": "cc2cf992d95ee74435eb3ea8dd374120a09513ab",
+      "business_code_changed": false,
+      "source_references": [
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountRequestHandler.java",
+          "line": 59,
+          "anchor": "public BalanceResponse adminAdjustBalance("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountRequestHandler.java",
+          "line": 62,
+          "anchor": "return commandGateway.adjustBalance(AccountInputBinding.adjustment(request), adminUserId, adminUsername)"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 50,
+          "anchor": "public BalanceResponse adjustBalance("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountCommandGateway.java",
+          "line": 59,
+          "anchor": "public ProductBalanceResponse adjustProductBalance("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/repository/AdminBalanceAdjustmentRepository.java",
+          "line": 23,
+          "anchor": "public AdminBalanceAdjustmentRecord record("
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/repository/AdminBalanceAdjustmentRepository.java",
+          "line": 36,
+          "anchor": "INSERT INTO account_admin_balance_adjustments"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/repository/AdminBalanceAdjustmentRepository.java",
+          "line": 82,
+          "anchor": "FROM account_admin_balance_adjustments"
+        },
+        {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/controller/AccountRequestHandler.java",
+          "line": 301,
+          "anchor": "public AdminBalanceAdjustmentQueryResponse adminBalanceAdjustments("
+        }
+      ],
       "evidence": {
-        "producer_consumers": "全仓accountKafkaTemplate/accountProducerFactory名字、代码图调用及KafkaTemplate注入点核对：account template无实际注入者；交易发布器显式Qualifier(orderKafkaTemplate)，InstrumentOutboxPublisher显式Qualifier(instrumentKafkaTemplate)，没有隐式选择account模板。两个其他producer/template仍在，不因删除account分支引入默认bean。",
-        "unused_derived_metadata": [
-          "AccountProperties.Kafka.getOrderCommandsTopic",
-          "AccountProperties.Kafka.getOpenInterestEventsTopic",
-          "AccountProperties.Kafka.getLiquidationFeeEventsTopic",
-          "AccountProperties.Kafka.getAccountStateEventsTopic",
-          "AccountProperties.Kafka.getInstrumentLifecycleGroupId"
-        ],
-        "unused_bound_field": "AccountProperties.Kafka.instrumentLifecycleDrainTopic仅旧YAML绑定和Lombok访问器，实际排空发布与消费使用TradingOrderProperties中的同名设置，不能全仓删除同名字段。",
-        "actual_boundary": "ExpiringContractSettlementConsumer仍通过accountInstrumentLifecycleKafkaListenerContainerFactory消费交割/行权，保留accountConsumerFactory、产品隔离、bootstrap/clientId/maxPoll及失败关闭重试。",
-        "shared_topic_note": "某些Shared ProductTopicNames方法仍供其他配置或真实消费者使用；先删除AccountProperties中无读端的别名，不按名字批量删其他所有者。"
+        "unused_parameter_flow": "公开/本地管理员入口校验adminUserId并把adminUserId/adminUsername传至AccountCommandGateway两调账方法，后者只提交asset/amount命令并读用户状态，不消费身份；内部普通调账传null/null。",
+        "typed_record_callers": {},
+        "write_chain_check": "4015份当前classfile中AdminBalanceAdjustmentRepository.record没有生产调用。全仓Java/SQL/配置中该表仅DDL/约束、repository唯一INSERT与SELECT，以及测试INSERT；当前源码未找到其他生产写入。不是部署数据库内容结论。",
+        "existing_business_read": "AccountLocalRoutes仍暴露管理员adjustments历史，AccountRequestHandler/AccountQueryService真实分页读取该表。身份、reference/reason和金额有审计用途，不能仅因当前链路未接通当作无用字段删掉。",
+        "consistency_risks_to_resolve": "不能简单在Core资金成功后写一条非原子SQL再声称可靠；也不能把后续实时查询余额或重放时的墙钟当成本命令原始事后余额/业务时间。需要核对原命令回执、持久请求审计或已提交回放中的现有事实。"
       },
-      "proposed_cleanup": "删除account producer/template及专属productLineName兜底、旧producer断言、无读端账户主题别名和本账户排空YAML/字段；保留真实结算consumer工厂与配置、订单排空/费率和合约outbox发布器。",
-      "verification_limit": "当前源码与代码图/配置注入核对，尚未删除此项，也未启动Spring/Kafka。"
+      "required_next": "先追踪管理员批准/通用审计、reference与commandId、原已提交余额变化/回执和SQL查询契约；明确幂等、拒绝/未知结果、故障恢复和原始时间/余额来源，再修复现有审计写链。优先复用现有数据边界，避免向Cluster加入仅为展示搬运的副本。",
+      "verification_limit": "静态源码及当前classfile确认；未执行管理员调账、数据库、交易或恢复。"
     }
   ],
   "preserve_verified_purposes": [
@@ -8597,9 +8685,9 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A153账户无消费者producer及专属元数据，保留实际到期结算Kafka工厂、client配置及其他所有者同名排空设置。",
-    "继续从命令生成到Core处理、持久化、恢复和读端逐字段检查真实用途，保持Owner/Lane、资金/预占/终态和产品边界。",
-    "A11保持领导者读取、提交水位与查询会话语义，未有等价方案前不绕过Cluster。"
+    "处理A154管理员调账审计缺口：先核对现有批准/通用审计及已提交回放事实，明确原始余额/时间、幂等、拒绝/未知结果和恢复边界，再修复真实写链。",
+    "继续按每项业务操作检查命令、Core处理、持久化和读端字段的真实用途，保留自有资源生命周期及真正消费的配置。",
+    "A11保持原领导者读、提交水位与查询会话语义。"
   ],
   "rejected_false_positives": [
     {
@@ -8896,13 +8984,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-24",
-    "source_basis_commit": "387e4118fb2be05d2c4696a3816cfa732a726715",
+    "source_basis_commit": "cc2cf992d95ee74435eb3ea8dd374120a09513ab",
     "status": "cleanup_compile_verified_followup_confirmed",
     "resolved_ids": [
-      "A152"
+      "A153"
     ],
     "confirmed_ids": [
-      "A153"
+      "A154"
     ],
     "candidate_ids": [
       "A11"
@@ -8914,12 +9002,12 @@
       "A129"
     ],
     "counts": {
-      "resolved": 147,
+      "resolved": 148,
       "candidate": 1,
       "retained": 4,
       "confirmed": 1
     },
-    "evidence": "forty_fifth_cleanup_round",
+    "evidence": "forty_sixth_cleanup_round",
     "overall_audit_completed": false
   },
   "proposed_cleanup_batches": [
@@ -10807,6 +10895,26 @@
       ],
       "counts": {
         "resolved": 147,
+        "candidate": 1,
+        "retained": 4,
+        "confirmed": 1
+      },
+      "tests_executed": false,
+      "overall_audit_completed": false
+    },
+    {
+      "date": "2026-10-24",
+      "source_basis_commit": "cc2cf992d95ee74435eb3ea8dd374120a09513ab",
+      "status": "cleanup_compile_verified_followup_confirmed",
+      "evidence": "forty_sixth_cleanup_round",
+      "resolved_ids": [
+        "A153"
+      ],
+      "new_confirmed_ids": [
+        "A154"
+      ],
+      "counts": {
+        "resolved": 148,
         "candidate": 1,
         "retained": 4,
         "confirmed": 1
@@ -33055,6 +33163,187 @@
           "path": "/tmp/aeron-fanout-constructor-20261024-static.json",
           "bytes": 1552,
           "sha256": "b44090c488de09086efdf07b95f2aca6a882d62d6db9c8400d88b8dcf9a9c107"
+        }
+      ],
+      "compiler_outputs_retained": true,
+      "remaining_current_round_resources": []
+    }
+  },
+  "forty_sixth_cleanup_round": {
+    "date": "2026-10-24",
+    "source_basis_commit": "cc2cf992d95ee74435eb3ea8dd374120a09513ab",
+    "resolved_ids": [
+      "A153"
+    ],
+    "new_confirmed_ids": [
+      "A154"
+    ],
+    "counts_after_cleanup": {
+      "resolved": 148,
+      "candidate": 1,
+      "retained": 4,
+      "confirmed": 1
+    },
+    "previous_goal_turn_classification": "progress: 387e4118f/cc2cf992d pushed, 70 legacy record fields and test-only fallback removed, affected clean/incremental compiles completed",
+    "implementation": [
+      "删除AccountKafkaConfiguration的unused producer/template两Bean及仅用于其事务前缀的productLineName兜底。",
+      "删除AccountProperties五个无人消费的主题/group别名及instrumentLifecycleDrainTopic字段/访问器和本账户YAML键。其他所有者真实排空设置保持。",
+      "保留consumer工厂/记录确认/失败关闭重试源码，消费者clientId、bootstrap、maxPoll及产品隔离不变；更新clientId注释。",
+      "删除旧producer镜像测试；删除与已有结算矩阵重复的主题用例，其剩余有效断言已被原矩阵覆盖。现有consumer Ack测试源码及产品矩阵剩余断言保持。",
+      "同步中文账户README，移除不存在的旧配置示例，实际结算资源边界保留。"
+    ],
+    "verification": {
+      "command": "mvn -pl surprising-gateway -am -DskipTests clean test-compile",
+      "exit_code": 0,
+      "elapsed_seconds": 36.022,
+      "log_sha256": "f8908996544660fe71ef8b30d5b609e8139d91fa3222ed018ab252fc6fa38dc9",
+      "source_hashes": {
+        "surprising-account-api/README.md": "ace02204a0102c1bc04a161c949d9e1f24df580210a54bb226c8bd29b636b8be",
+        "surprising-aeron-core/surprising-aeron-service/README.md": "9a555a7b5bb8f338d7ac9b2f069c7eb957ef1ce3b55b151b66f57c85102ffea6",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountKafkaConfiguration.java": "4d6f587f56a7b6167d6e32055f6e0744a935cf2413dbb2ac8af5e2f4df448c55",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountProperties.java": "376f837ed81559502157fec5c85cd131381ab490cbcbdfdba1401406d7b9857b",
+        "surprising-gateway/src/main/resources/application-account.yml": "869ab674bad184ee919eba1c6e6f9cae6288af57a8767c685d9d6116e2dd7c4b",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/config/AccountKafkaConfigurationTest.java": "a7dd874699698c96f2353e12552bc5de1b88a44d83d5063d19f7283a004fbcb0"
+      },
+      "tests_executed": false,
+      "sql_executed": false,
+      "reactor_modules": [
+        "Surprising Parent",
+        "surprising-instrument-api",
+        "surprising-aeron-protocol",
+        "surprising-aeron-client",
+        "surprising-aeron-service",
+        "surprising-trading-api",
+        "surprising-account-api",
+        "surprising-price-api",
+        "surprising-price-consumer",
+        "surprising-realtime-api",
+        "surprising-derivatives-lifecycle-api",
+        "surprising-gateway"
+      ],
+      "reactor_module_count": 12
+    },
+    "static_verification": {
+      "classfiles": 4015,
+      "removed_bean_references": [],
+      "removed_account_getter_references": [],
+      "followup_admin_adjustment_record_calls": {},
+      "retained_account_aeron_getter_calls": {
+        "com/surprising/account/provider/config/AccountProperties$Aeron::getHostnames": {
+          "()Ljava/util/List;": [
+            "surprising-gateway/target/classes/com/surprising/account/provider/service/AccountAeronGateway.class"
+          ]
+        },
+        "com/surprising/account/provider/config/AccountProperties$Aeron::getEgressHostname": {
+          "()Ljava/lang/String;": [
+            "surprising-gateway/target/classes/com/surprising/account/provider/service/AccountAeronGateway.class"
+          ]
+        },
+        "com/surprising/account/provider/config/AccountProperties$Aeron::getResponseTimeout": {
+          "()Ljava/time/Duration;": [
+            "surprising-gateway/target/classes/com/surprising/account/provider/service/AccountAeronGateway.class"
+          ]
+        },
+        "com/surprising/account/provider/config/AccountProperties$Aeron::getClientConnections": {
+          "()I": [
+            "surprising-gateway/target/classes/com/surprising/account/provider/service/AccountAeronGateway.class"
+          ]
+        },
+        "com/surprising/account/provider/config/AccountProperties$Aeron::getSourceIdentity": {
+          "()Ljava/lang/String;": [
+            "surprising-gateway/target/classes/com/surprising/account/provider/service/AccountAeronGateway.class"
+          ]
+        }
+      },
+      "settlement_consumer_factory_and_listener_source_unchanged": true,
+      "settlement_consumer_ack_config_test_source_unchanged": true,
+      "surviving_product_topic_assertion_sequence_preserved": true,
+      "removed_topic_only_test_surviving_assertions_covered_by_existing_matrix": true,
+      "protected_source_hashes": {
+        "surprising-gateway/src/main/java/com/surprising/account/provider/consumer/ExpiringContractSettlementConsumer.java": "af913df6a85e095480ee5d1ffb12cc7a59ad964abc8f0548788182013b8c9ee0",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/service/ExpiringContractSettlementFanoutService.java": "7e9b181ce6e44fcd0f090f1c821a01653fb08138687f762fd3f4ebbccfa0f947",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountAeronGateway.java": "fe3b505acb4526aef43f67a543c70cda3be0dfa2bf05862aac87f9c457ef80ba",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/config/TradingOrderProperties.java": "e869894ecedeaa87851078b7b6e115027407d71b70475ed1c88b9e9c01f06abb",
+        "surprising-gateway/src/main/resources/application-trading.yml": "4d5cb25fc7d8cdeab8fb29557dfd5cb652eee43f5683a263ac85537e632aa66c",
+        "surprising-gateway/src/main/java/com/surprising/trading/order/service/InstrumentOrderDrainService.java": "9dc7cee4d4a572837b44612fbc4b56cf5e284c6277f49423290299ad731bd94f",
+        "surprising-gateway/src/main/java/com/surprising/instrument/provider/service/InstrumentOutboxPublisher.java": "6ac3fe552943e8cec72fbecc781a57d916589c0a74e89698df56eb4d4877031b"
+      },
+      "source_hashes": {
+        "surprising-account-api/README.md": "ace02204a0102c1bc04a161c949d9e1f24df580210a54bb226c8bd29b636b8be",
+        "surprising-aeron-core/surprising-aeron-service/README.md": "9a555a7b5bb8f338d7ac9b2f069c7eb957ef1ce3b55b151b66f57c85102ffea6",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountKafkaConfiguration.java": "4d6f587f56a7b6167d6e32055f6e0744a935cf2413dbb2ac8af5e2f4df448c55",
+        "surprising-gateway/src/main/java/com/surprising/account/provider/config/AccountProperties.java": "376f837ed81559502157fec5c85cd131381ab490cbcbdfdba1401406d7b9857b",
+        "surprising-gateway/src/main/resources/application-account.yml": "869ab674bad184ee919eba1c6e6f9cae6288af57a8767c685d9d6116e2dd7c4b",
+        "surprising-gateway/src/test/java/com/surprising/account/provider/config/AccountKafkaConfigurationTest.java": "a7dd874699698c96f2353e12552bc5de1b88a44d83d5063d19f7283a004fbcb0"
+      },
+      "tests_executed": false,
+      "applications_started": false,
+      "git_diff_check": "passed"
+    },
+    "followup_analysis": {
+      "confirmed_id": "A154",
+      "candidate_id": "A11",
+      "overall_audit_completed": false
+    },
+    "rejected_false_positives": [
+      {
+        "topic": "AccountProperties.Aeron五项配置及关闭边界",
+        "evidence": "AccountAeronGateway实际使用sourceIdentity/hostnames/egressHostname/responseTimeout/clientConnections创建自有AeronClientPool，GatewayProductServices按产品注入连接信息，close真实释放pool；这些不是同Lifecycle共享client无消费配置。",
+        "source": {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountAeronGateway.java",
+          "line": 39,
+          "anchor": "this.clients = new AeronClientPool("
+        }
+      },
+      {
+        "topic": "AccountAeronGateway.awaitCommandResult的last异常",
+        "evidence": "last最终被addSuppressed使用，保留未知结果的诊断与40次查询边界；与先前RiskGateway不可达异常副本不同。",
+        "source": {
+          "file": "surprising-gateway/src/main/java/com/surprising/account/provider/service/AccountAeronGateway.java",
+          "line": 75,
+          "anchor": "failure.addSuppressed(last)"
+        }
+      }
+    ],
+    "limits": "仅HotSpot JDK27相关12模块clean test-compile及静态源码/classfile核对；没有执行测试、Spring/Kafka、Aeron、SQL、服务、资金或恢复场景。",
+    "temporary_resources": {
+      "prefix": "/tmp/aeron-account-kafka-20261024",
+      "status": "removed_after_results_archived",
+      "file_manifest": [
+        {
+          "path": "/tmp/aeron-account-kafka-20261024-build.json",
+          "bytes": 1196,
+          "sha256": "9bab8dd1c71fc366cad4c0ee53e1cca38b363d893f974c1ab64214eece81251f"
+        },
+        {
+          "path": "/tmp/aeron-account-kafka-20261024-build.log",
+          "bytes": 25744,
+          "sha256": "f8908996544660fe71ef8b30d5b609e8139d91fa3222ed018ab252fc6fa38dc9"
+        },
+        {
+          "path": "/tmp/aeron-account-kafka-20261024-edit.py",
+          "bytes": 2841,
+          "sha256": "d8dd0a46ecfbf1a093b8a290e0c83862f5d29798cccda8351bf105370b759bf1"
+        },
+        {
+          "path": "/tmp/aeron-account-kafka-20261024-inspect.py",
+          "bytes": 5969,
+          "sha256": "3097d40b264c25dea68202a64da873dc87b3bf931b9e66a1c902e1589c1aff93"
+        },
+        {
+          "path": "/tmp/aeron-account-kafka-20261024-javap.txt",
+          "bytes": 1096,
+          "sha256": "5839b3b4306c093d29aef2069b958774e613a91de531aca2a844e4cbf23ac058"
+        },
+        {
+          "path": "/tmp/aeron-account-kafka-20261024-record.py",
+          "bytes": 9518,
+          "sha256": "47c30ef7c006b74a06d5e5f6b419239b906134536ee65edae721ee450b0a00c7"
+        },
+        {
+          "path": "/tmp/aeron-account-kafka-20261024-static.json",
+          "bytes": 3949,
+          "sha256": "e5f432d4a796f0648ac288d97cbeebdb10534aa344c32604d92358b0334542e4"
         }
       ],
       "compiler_outputs_retained": true,

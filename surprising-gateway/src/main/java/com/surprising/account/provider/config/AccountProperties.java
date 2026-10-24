@@ -17,13 +17,9 @@ public class AccountProperties {
     private Kafka kafka = new Kafka();
     private Aeron aeron = new Aeron();
 
-
-
     public void setAeron(Aeron aeron) {
         this.aeron = aeron == null ? new Aeron() : aeron;
     }
-
-
 
     @Getter
     public static class Kafka {
@@ -32,17 +28,14 @@ public class AccountProperties {
         /** 必须由部署配置显式指定，禁止缺省落到永续产品线。 */
         @Setter
         private ProductLine productLine;
-        /** 账户 Kafka 客户端及事务 producer 前缀使用的实例标识。 */
+        /** 账户 Kafka 消费者的实例标识。 */
         private String clientId = "account-provider-" + UUID.randomUUID();
-        @Setter
-        private String instrumentLifecycleDrainTopic = "surprising.instrument.lifecycle-drain.v1";
         @Setter
         private int maxPollRecords = 500;
 
         public String getGroupId() {
             return productTopics().consumerGroup("account");
         }
-
 
         public void setClientId(String clientId) {
             if (clientId == null || clientId.isBlank()) {
@@ -51,34 +44,9 @@ public class AccountProperties {
             this.clientId = clientId.trim();
         }
 
-        public String getOrderCommandsTopic() {
-            return productTopics().orderCommandsTopic();
-        }
-
-
-
-
-        public String getOpenInterestEventsTopic() {
-            return productTopics().accountOpenInterestEventsTopic();
-        }
-
-
-        public String getLiquidationFeeEventsTopic() {
-            return productTopics().accountLiquidationFeeEventsTopic();
-        }
-
-
-        public String getAccountStateEventsTopic() {
-            return productTopics().accountStateEventsTopic();
-        }
-
-
-
-
         public String getDeliverySettlementsTopic() {
             return productTopics().deliverySettlementsTopic();
         }
-
 
         public boolean isDeliverySettlementsTopicEnabled() {
             return productLine == ProductLine.LINEAR_DELIVERY
@@ -89,15 +57,9 @@ public class AccountProperties {
             return productTopics().optionExercisesTopic();
         }
 
-
         public boolean isOptionExercisesTopicEnabled() {
             return productLine.isOptionProduct();
         }
-
-        public String getInstrumentLifecycleGroupId() {
-            return productTopics().consumerGroup("account-instrument-lifecycle");
-        }
-
 
         private ProductTopicNames productTopics() {
             return ProductTopicNames.of(productLine);
