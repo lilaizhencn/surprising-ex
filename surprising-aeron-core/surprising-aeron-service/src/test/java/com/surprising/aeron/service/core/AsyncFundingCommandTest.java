@@ -37,6 +37,12 @@ class AsyncFundingCommandTest {
                                     100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000)))),
                             0, 0, 0, -1, 0), line)));
+            // 首轮即使游标也错误，仍先拒绝缺失行情。
+            var missingMark = CoreTestCompletion.applyAsynchronously(state, message(line,
+                    CoreMessageType.APPLY_FUNDING, 0, TradingCommandCodec.encodeApplyFunding(
+                            new ApplyFundingCommand(900, "1", 10_000, 1, 1))));
+            assertThat(missingMark.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(missingMark.resultCode().name()).isEqualTo("MARK_PRICE_NOT_FOUND");
             applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), line)));
             for (/* 正在初始化余额并提交相向订单的用户编号。 */ long user = 1; user <= 8; user++) {
@@ -73,10 +79,48 @@ class AsyncFundingCommandTest {
                 assertThat(progress.settlementId()).isEqualTo(900);
                 assertThat(state.runtimeState.treasury().incompleteFundingCount()).isEqualTo(1);
                 cursor = progress.nextCursorUserId();
+                if (pages == 0) {
+                    // 续页只能使用首轮固定的100，不能跟随新行情200。
+                    applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
+                            TradingCommandCodec.encodeApplyMarkPrice(
+                                    new ApplyMarkPriceCommand("1", 200, 2, TIME), line)));
+                } else if (pages == 1) {
+                    // 模拟恢复后行情尚未补齐；进度已保存完整的资金费计算输入。
+                    state.runtimeState.markPrices.removeKey(symbolId);
+                    for (var invalid : java.util.List.of(
+                            new ApplyFundingCommand(901, "1", 10_000, cursor, 1),
+                            new ApplyFundingCommand(900, "1", 20_000, cursor, 1),
+                            new ApplyFundingCommand(900, "1", 10_000, cursor + 1, 1))) {
+                        var rejected = CoreTestCompletion.applyAsynchronously(state, message(line,
+                                CoreMessageType.APPLY_FUNDING, 0, TradingCommandCodec.encodeApplyFunding(invalid)));
+                        assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                        assertThat(rejected.resultCode().name()).isEqualTo("INVALID_COMMAND");
+                    }
+                    var original = state.runtimeState.instrument("1");
+                    state.runtimeState.instruments.put(original.instrumentIdValue(), original.captureForQuery());
+                    try {
+                        var validPage = new ApplyFundingCommand(900, "1", 10_000, cursor, 1);
+                        assertThatThrownBy(() -> com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor
+                                .prepare(null, validPage, java.util.List.of(), state.runtimeState, state.identities))
+                                .isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
+                                .hasMessage("funding cursor does not match progress");
+                    } finally {
+                        state.runtimeState.instruments.put(original.instrumentIdValue(), original);
+                    }
+                    // 拒绝命令会记录幂等结果，但不能改变业务状态。
+                    assertThat(state.runtimeState.treasury().fundingProgress(symbolId)).isEqualTo(progress);
+                }
             }
             assertThat(pages).isEqualTo(7);
             assertThat(state.runtimeState.treasury().fundingSettlement(symbolId)).isEqualTo(900);
             assertThat(state.runtimeState.treasury().incompleteFundingCount()).isZero();
+            long payment = type.isInverse() ? 1 : 10;
+            for (long user = 1; user <= 8; user++) {
+                assertThat(state.tradingState().users().get(user).totalUnits(asset))
+                        .isEqualTo(100_000 + (user % 2 == 1 ? payment : -payment));
+            }
+            applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 3, TIME), line)));
             // 下一结算编号采用反向费率的命令。
             var next = message(line, CoreMessageType.APPLY_FUNDING, 0,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(901, "1", -10_000)));
@@ -142,8 +186,35 @@ class AsyncFundingCommandTest {
                     var progress = state.runtimeState.treasury().fundingProgress(state.identities.symbolId("1"));
                     if (progress == null) break;
                     cursor = progress.nextCursorUserId();
+                    if (page == 0) {
+                        state.runtimeState.markPrices.clear();
+                        restored.runtimeState.markPrices.clear();
+                        var cold = state.tradingState();
+                        var risk = cold.riskState();
+                        var noMark = new com.surprising.aeron.model.TradingCoreState(line, cold.revision(),
+                                cold.users(), cold.orders(), cold.instruments(), new com.surprising.aeron.model.CoreRiskState(
+                                        java.util.Map.of(), risk.snapshots(), risk.liquidations(), risk.scans(),
+                                        risk.nextLiquidationId(), risk.scanControl(), risk.marketRevision()),
+                                cold.treasuryState(), cold.leverages(), cold.algoOrders(), cold.cancelAllAfterTimers(),
+                                cold.clientOrderIndex(), cold.triggerOrders());
+                        try (var source = new TradingCoreRuntime(line, 0, new java.util.LinkedHashMap<>(),
+                                new java.util.LinkedHashMap<>(), noMark,
+                                new com.surprising.aeron.service.retention.TerminalStateRetention(), null, 0,
+                                java.util.Map.of(), java.util.Map.of(), null, null);
+                                var withoutMark = TradingCoreRuntime.fromSnapshot(line, source.snapshot(101))) {
+                            assertThat(withoutMark.runtimeState.markPrice(withoutMark.identities.symbolId("1"))).isNull();
+                            applied(withoutMark, message(line, CoreMessageType.APPLY_FUNDING, 0,
+                                    TradingCommandCodec.encodeApplyFunding(
+                                            new ApplyFundingCommand(900, "1", 10_000, cursor, 1))));
+                            assertThat(withoutMark.runtimeState.treasury().fundingProgress(
+                                    withoutMark.identities.symbolId("1")).markPriceTicks()).isEqualTo(100);
+                            assertThat(economicUnits(withoutMark, asset)).isEqualTo(funds);
+                        }
+                    }
                 }
                 assertThat(state.tradingState().treasuryState().fundingSettlements()).containsEntry("1", 900L);
+                applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
+                        TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 2, TIME), line)));
                 try (/* 整轮结束后从新快照恢复的下一轮对照运行时。 */ var after = TradingCoreRuntime.fromSnapshot(line, state.snapshot(200))) {
                     assertThat(after.stateHash()).isEqualTo(state.stateHash());
                     // 下一结算编号采用反向费率的命令。

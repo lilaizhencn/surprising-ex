@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第六十轮解决A189–A192：删除18处Core模式分流、29个旧编排/同步驱动/便利方法，生产净减765行；测试改推进实际工作对象，17模块干净编译及38类837个不同用例通过。实际Lane/账本、财务范围/回滚和异步禁阻塞守卫保留。186解决、A181确认、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第六十一轮解决A181：仅资金费首轮要求当前mark，续页沿用保存价格；67项相关回归、18模块构建、六线真实HTTP/WS及8次Cluster冷恢复通过。187解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -9787,11 +9787,11 @@
     },
     {
       "id": "A181",
-      "status": "confirmed",
+      "status": "resolved",
       "source_basis_commit": "9bdf0e5324d8a99259f26384a02a61564a1ac3ae",
-      "business_code_changed": false,
+      "business_code_changed": true,
       "analysis_round": "fifty_sixth_cleanup_round",
-      "analysis_status": "first_page_and_resume_price_lifetimes_distinguished_constraint_not_yet_removed",
+      "analysis_status": "first_page_requires_current_mark_resume_uses_persisted_price",
       "topic": "资金费续页只用已保存固定价格，却仍无条件要求当前行情存在",
       "fields_or_methods": [
         "RuntimePerpetualFundingProcessor.prepare的无条件markPrice读取/缺价拒绝"
@@ -9812,7 +9812,9 @@
       ],
       "evidence": "A180删除后，当前行情只在previousProgress为空的首轮取得计算价格；续页只消费进度中已校验为正的markPriceTicks，无价格序号对比或其他计算依赖这份当前mark，但入口仍先无条件拒绝缺失当前行情。",
       "proposed_cleanup": "准备阶段先取已有进度，只有首轮读取并要求当前mark；续页直接使用原固定价格，保持首轮MARK_PRICE_NOT_FOUND拒绝及其错误优先级、旧结算号、费率/游标、配置身份和产品/维护守卫。增加相应场景源码并只编译相关模块。",
-      "verification_limit": "本轮只确认约束生命周期及下一步范围，未改该判断；缺当前行情但有合法固定进度的续页场景尚未实现或执行。"
+      "verification_limit": "本轮67项回归、六线真实HTTP/WS和8次Cluster冷恢复通过；缺行情恢复为分块快照单元场景。端到端及故障范围限制见round61-runtime-20261025.json。",
+      "resolved_in_round": "sixty_first_cleanup_round",
+      "resolution": "仅首轮读取当前mark；续页直接使用已保存固定价格，保留其他业务守卫。"
     },
     {
       "id": "A182",
@@ -10834,11 +10836,11 @@
     "独立查询、事件和数据库主键的产品线/用户归属继续有用；重复序列化身份与业务身份本身必须区分。"
   ],
   "next_steps": [
-    "处理A181：资金费已有合法固定进度时不再要求当前mark存在，首轮仍读取并要求mark；保持原首轮拒绝优先级及其他续页匹配/资金守卫，补相应场景源码并只编译相关模块。",
-    "固定计算价格、轮次、费率、游标、幂等、溢出和恢复语义继续保留；旧日志/快照格式无需读取的用户确认持续有效，不增加兼容层。",
+    "继续从业务命令产生到Lane/账本、提交/回滚、持久化、恢复与回放检查实际消费，集中下一轮可证明冗余项。",
+    "每轮清理完成后运行相关回归和六产品线顺序业务验收，通过后才开始下一轮；不以单测替代真实交易。",
     "A11继续候选，明确领导者读、提交水位和会话语义前不删QUERY路由。",
-    "继续沿命令、Lane、系统账本、提交/回滚、快照恢复和回放导出检查实际消费；仅按完整类型和生命周期删除无用状态，不把真实线程边界当冗余。",
-    "本轮837个不同用例已通过，后续变更另按实际影响验证；未启动独立服务或运行性能工具，不外推为全功能/性能结论。"
+    "固定计算价、轮次、费率、游标、资金正确性及恢复语义继续保留；旧格式无需读取，不增加兼容层。",
+    "本轮未测范围见round61-runtime-20261025.json，不外推为所有可选分支、故障场景或性能通过。"
   ],
   "rejected_false_positives": [
     {
@@ -10913,7 +10915,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A189_to_A192_cleaned_compile_and_837_unique_related_cases_verified; A181_remains_confirmed; overall_audit_in_progress",
+  "analysis_round_status": "A181_cleaned_67_related_cases_six_live_products_eight_cold_recoveries_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11134,18 +11136,13 @@
     }
   ],
   "latest_analysis_round": {
-    "date": "2026-10-24",
-    "source_basis_commit": "802b39ba5ddac53dc6b89b0262a4ff4b7919a42e",
-    "status": "four_groups_cleaned_and_verified",
+    "date": "2026-10-25",
+    "source_basis_commit": "f181569550fc9214b393d7fb7b621596cd3bd51f",
+    "status": "A181_cleaned_and_six_product_runtime_verified",
     "resolved_ids": [
-      "A189",
-      "A190",
-      "A191",
-      "A192"
-    ],
-    "confirmed_ids": [
       "A181"
     ],
+    "confirmed_ids": [],
     "candidate_ids": [
       "A11"
     ],
@@ -11156,17 +11153,16 @@
       "A129"
     ],
     "counts": {
-      "resolved": 186,
+      "resolved": 187,
       "candidate": 1,
-      "retained": 4,
-      "confirmed": 1
+      "retained": 4
     },
-    "evidence": "sixtieth_cleanup_round",
+    "evidence": "sixty_first_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
     "tests_run": true,
-    "services_started": false
+    "services_started": true
   },
   "proposed_cleanup_batches": [
     {
@@ -44016,5 +44012,23 @@
       "services_started": false,
       "own_processes_completed": true
     }
+  },
+  "sixty_first_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "f181569550fc9214b393d7fb7b621596cd3bd51f",
+    "resolved_ids": [
+      "A181"
+    ],
+    "report": "deep-code-cleanup-20261025-round61.md",
+    "evidence": "round61-runtime-20261025.json",
+    "unit_tests": 67,
+    "runtime_products": 6,
+    "cold_recoveries": 8,
+    "counts": {
+      "resolved": 187,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
   }
 }

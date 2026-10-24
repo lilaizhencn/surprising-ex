@@ -58,10 +58,17 @@ public final class RuntimePerpetualFundingProcessor {
         }
         // 本币对内部编号。
         int symbolId = identities.symbolId(instrument.instrumentIdValue());
-        // 当前运行时标记价，即使续页使用原固定价也要求其存在。
-        MarkPriceRuntime mark = runtime.markPrice(symbolId);
-        if (mark == null) {
-            throw new CoreStateRejectedException("MARK_PRICE_NOT_FOUND", "funding requires mark price");
+        // 续页已有完整计算输入；只有首轮需要当前行情。
+        TreasuryRuntime.FundingProgressRuntime previousProgress = runtime.treasury().fundingProgress(symbolId);
+        long fundingMark;
+        if (previousProgress == null) {
+            MarkPriceRuntime mark = runtime.markPrice(symbolId);
+            if (mark == null) {
+                throw new CoreStateRejectedException("MARK_PRICE_NOT_FOUND", "funding requires mark price");
+            }
+            fundingMark = mark.markPriceTicks();
+        } else {
+            fundingMark = previousProgress.markPriceTicks();
         }
 
         // 本币对结算资产内部编号。
@@ -72,10 +79,6 @@ public final class RuntimePerpetualFundingProcessor {
             throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "funding settlement id must increase");
         }
 
-        // 当前未完成的资金费进度，保存固定价格与续页参数。
-        TreasuryRuntime.FundingProgressRuntime previousProgress = runtime.treasury().fundingProgress(symbolId);
-        // 首轮取当前标记价，续页取进度中原固定价。
-        long fundingMark = previousProgress == null ? mark.markPriceTicks() : previousProgress.markPriceTicks();
         if (previousProgress == null && command.cursorUserId() != 0) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
         }
