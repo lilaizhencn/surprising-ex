@@ -19,7 +19,6 @@ import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.risk.CoreRiskPolicy;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.aeron.support.math.*;
@@ -53,8 +52,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
         runtime.assertOwner();
         // 当前命令新建或复用的单笔强平续步，准备后派发源账户 Lane。
         ExecutionWork work = reuse == null || !reuse.reusable() ? new ExecutionWork() : reuse;
-        work.prepare(command, canceledOrders, nextCursorOrderId, runtime, identities);
-        runtime.dispatchControlLanes(1L << work.laneId, work);
+        long laneMask = work.prepare(command, canceledOrders, nextCursorOrderId, runtime, identities);
+        runtime.dispatchControlLanes(laneMask, work);
         return work;
     }
 
@@ -73,13 +72,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private LiquidationRuntime[] liquidations = new LiquidationRuntime[4];
         /** 各动作归属的账户 Lane 编号，-1 表示没有有效源账户路由。 */
         private int[] laneIds = new int[4];
-        /**
-         * liquidationIds：与动作同下标的强平编号数组。
-         * priceSequences：与动作同下标的命令触发价格序号数组。
-         * prices：与动作同下标的命令执行价 tick 数组。
-         * cursors：与动作同下标的命令撤单游标数组。
-         */
-        private long[] liquidationIds = new long[4], priceSequences = new long[4], prices = new long[4], cursors = new long[4];
+        /** 单笔检查直接读取原不可变命令；与批命令互斥，检查清理时释放。 */
+        private ExecuteLiquidationCommand singleCommand;
+        /** 批检查直接读取原不可变动作列表，不复制价格、编号和游标。 */
+        private ExecuteLiquidationBatchCommand batchCommand;
         /** 本命令共用的业务编号与运行时整数身份映射。 */
         private RuntimeIdentityRegistry identities;
         /** 各动作的检查结果字节，Lane 写入后通过既有控制完成位发布给 Owner。 */
@@ -97,41 +93,42 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private boolean dispatched, done;
 
         /**
-         * 为单笔强平初始化一个检查槽，保存其强平编号、触发价格、执行价和撤单游标，再定位需要读取的 Lane。
+         * 为单笔强平初始化一个检查槽，保留原命令并定位需要读取的 Lane。
          * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
         public void prepare(ExecuteLiquidationCommand command, TradingAccountRuntime runtime,
                             RuntimeIdentityRegistry identities) {
-            initialize(runtime, 1);
-            prepareAction(0, command.liquidationId(), command.triggerPriceSequence(),
-                    command.executionPriceTicks(), command.cursorOrderId(), identities);
+            initialize(runtime, identities, 1);
+            singleCommand = command;
+            prepareAction(0, command.liquidationId());
         }
 
         /**
-         * 按批命令动作数量准备检查槽，逐项保存输入与 Lane 路由，让一批动作共用一次账户检查派发。
+         * 按批命令动作数量准备检查槽，保留原动作列表并定位 Lane 路由，让一批动作共用一次账户检查派发。
          * @param command 本次多个强平动作组成的批命令，每项分别保存检查结果
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
         public void prepare(ExecuteLiquidationBatchCommand command, TradingAccountRuntime runtime,
                             RuntimeIdentityRegistry identities) {
-            initialize(runtime, command.actions().size());
+            initialize(runtime, identities, command.actions().size());
+            batchCommand = command;
             for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < count; index++) {
-                // 本批命令当前动作，逐项保存它的强平、价格和游标输入。
+                // 本批命令当前动作，只定位所属 Lane，不复制输入。
                 var action = command.actions().get(index);
-                prepareAction(index, action.liquidationId(), action.triggerPriceSequence(),
-                        action.executionPriceTicks(), action.cursorOrderId(), identities);
+                prepareAction(index, action.liquidationId());
             }
         }
 
         /**
          * Owner 确认旧输入已释放，按需一起扩容所有并行数组，再清空本次参与 Lane 和完成标记，避免把两条命令混在一起。
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
+         * @param identities 业务编号与运行时整数键的映射，供所属 Lane 定位持仓
          * @param count 本命令需要校验的强平动作数量，用作并行数组的有效长度
          */
-        private void initialize(TradingAccountRuntime runtime, int count) {
+        private void initialize(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, int count) {
             runtime.assertOwner();
             if (this.runtime != null) throw new IllegalStateException("liquidation checks already prepared");
             if (count > results.length) {
@@ -139,25 +136,17 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 int capacity = Math.max(count, Math.multiplyExact(results.length, 2));
                 liquidations = new LiquidationRuntime[capacity];
                 laneIds = new int[capacity]; results = new byte[capacity];
-                liquidationIds = new long[capacity]; priceSequences = new long[capacity]; prices = new long[capacity]; cursors = new long[capacity];
             }
-            this.runtime = runtime; this.count = count; laneMask = 0; dispatched = done = false;
+            this.runtime = runtime; this.identities = identities;
+            this.count = count; laneMask = 0; dispatched = done = false;
         }
 
         /**
-         * 保存一个动作输入，先标为失效；找到源用户后再标为待 Lane 检查并并入 Lane 位集合，同步运行环境可直接定位尚无路由的强平记录。
+         * 定位一个动作的源 Lane，先标为失效；找到源用户后再标为待 Lane 检查并并入 Lane 位集合，同步运行环境可直接定位尚无路由的强平记录。
          * @param index 本批动作在检查或结果数组中的下标，必须在有效数量内
          * @param liquidationId 当前待校验动作的强平编号
-         * @param priceSequence 本动作声明的触发行情序号，正值时必须与强平计划一致
-         * @param executionPriceTicks 本动作要求的执行价格 tick，必须与当前标记价一致
-         * @param cursor 本动作声明的当前撤单游标，必须与计划阶段或已保存继续位置一致
-         * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
-        private void prepareAction(int index, long liquidationId, long priceSequence,
-                                   long executionPriceTicks, long cursor, RuntimeIdentityRegistry identities) {
-            this.identities = identities;
-            liquidationIds[index] = liquidationId; priceSequences[index] = priceSequence;
-            prices[index] = executionPriceTicks; cursors[index] = cursor;
+        private void prepareAction(int index, long liquidationId) {
             results[index] = OBSOLETE; laneIds[index] = -1;
             // Owner 持有的源强平路由，用它确定源用户和账户 Lane。
             var route = runtime.liquidationRoute(liquidationId);
@@ -201,34 +190,46 @@ public final class RuntimeDerivativeLiquidationProcessor {
         @Override public Object apply(int laneId) {
             for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < count; index++) {
                 if (laneIds[index] != laneId || results[index] != CHECK_LANE) continue;
-                // 当前 Lane 上读到的强平记录，缺失或阶段不再可执行时把动作标为失效。
-                LiquidationRuntime value = runtime.liquidation(liquidationIds[index]);
-                liquidations[index] = value;
-                if (value == null || (value.status() != CoreLiquidationState.Status.PLANNED
-                        && value.status() != CoreLiquidationState.Status.ORDERED)) {
-                    results[index] = OBSOLETE; continue;
+                if (singleCommand != null) {
+                    checkAction(index, singleCommand.liquidationId(), singleCommand.triggerPriceSequence(),
+                            singleCommand.executionPriceTicks(), singleCommand.cursorOrderId());
+                } else {
+                    var action = batchCommand.actions().get(index);
+                    checkAction(index, action.liquidationId(), action.triggerPriceSequence(),
+                            action.executionPriceTicks(), action.cursorOrderId());
                 }
-                if (value.status() == CoreLiquidationState.Status.PLANNED && cursors[index] != 0
-                        || value.status() == CoreLiquidationState.Status.ORDERED && cursors[index] != value.nextCancelOrderId())
-                    throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT", "liquidation cursor does not match state");
-                // 强平目标币对当前行情，触发序号和执行价都必须与它一致。
-                MarkPriceRuntime mark = runtime.markPrice(value.symbolId());
-                if (mark == null || mark.priceSequence() != value.triggerPriceSequence()
-                        || priceSequences[index] > 0 && priceSequences[index] != value.triggerPriceSequence()
-                        || prices[index] != mark.markPriceTicks()) {
-                    results[index] = STALE_PRICE; continue;
-                }
-                // 当前源强平合约配置，最终执行时用于风险、持仓和结算资产核对。
-                CoreInstrument instrument = runtime.instrument(identities.instrumentId(value.symbolId()));
-                if (instrument == null || !CoreRiskPolicy.canLiquidate(instrument.contractType(), value.signedQuantitySteps())) {
-                    results[index] = OBSOLETE; continue;
-                }
-                long positionKey = identities.findPositionKeyValueInLane(runtime.currentLaneCommandScope(),
-                        value.userId(), instrument, value.positionSide());
-                results[index] = positionKey != 0 && RuntimeDerivativeLiquidationProcessor.executable(
-                        runtime, value, instrument, positionKey) ? EXECUTABLE : OBSOLETE;
             }
             return null;
+        }
+
+        /** 核对原命令的一项强平输入，把所属 Lane 的资格检查结果写入对应动作槽。 */
+        private void checkAction(int index, long liquidationId, long priceSequence, long executionPriceTicks, long cursor) {
+            // 当前 Lane 上读到的强平记录，缺失或阶段不再可执行时把动作标为失效。
+            LiquidationRuntime value = runtime.liquidation(liquidationId);
+            liquidations[index] = value;
+            if (value == null || (value.status() != CoreLiquidationState.Status.PLANNED
+                    && value.status() != CoreLiquidationState.Status.ORDERED)) {
+                results[index] = OBSOLETE; return;
+            }
+            if (value.status() == CoreLiquidationState.Status.PLANNED && cursor != 0
+                    || value.status() == CoreLiquidationState.Status.ORDERED && cursor != value.nextCancelOrderId())
+                throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT", "liquidation cursor does not match state");
+            // 强平目标币对当前行情，触发序号和执行价都必须与它一致。
+            MarkPriceRuntime mark = runtime.markPrice(value.symbolId());
+            if (mark == null || mark.priceSequence() != value.triggerPriceSequence()
+                    || priceSequence > 0 && priceSequence != value.triggerPriceSequence()
+                    || executionPriceTicks != mark.markPriceTicks()) {
+                results[index] = STALE_PRICE; return;
+            }
+            // 当前源强平合约配置，最终执行时用于风险、持仓和结算资产核对。
+            CoreInstrument instrument = runtime.instrument(identities.instrumentId(value.symbolId()));
+            if (instrument == null || !CoreRiskPolicy.canLiquidate(instrument.contractType(), value.signedQuantitySteps())) {
+                results[index] = OBSOLETE; return;
+            }
+            long positionKey = identities.findPositionKeyValueInLane(runtime.currentLaneCommandScope(),
+                    value.userId(), instrument, value.positionSide());
+            results[index] = positionKey != 0 && RuntimeDerivativeLiquidationProcessor.executable(
+                    runtime, value, instrument, positionKey) ? EXECUTABLE : OBSOLETE;
         }
 
         /**
@@ -268,6 +269,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          */
         public void clearReferences() {
             java.util.Arrays.fill(liquidations, 0, count, null);
+            singleCommand = null; batchCommand = null;
             runtime = null; identities = null; count = 0; laneMask = 0; dispatched = done = false;
         }
     }
@@ -316,19 +318,17 @@ public final class RuntimeDerivativeLiquidationProcessor {
             laneIds[index] = runtime.topology().accountLaneId(route.userId());
             laneMask |= 1L << laneIds[index];
         }
-        // 各请求账户阶段返回的资金差额数组，最后一并交账本续步。
-        RuntimeTreasuryDelta[] results = new RuntimeTreasuryDelta[stages.length];
         runtime.dispatchControlLanes(laneMask, /* 当前批量回调正在执行的账户 Lane，只准备和应用属于自己的步骤。 */ lane -> {
             for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < stages.length; index++) {
                 if (laneIds[index] != lane) continue;
                 var request = requests.get(index);
                 stages[index] = new BatchExecutionStage();
-                results[index] = stages[index].execute(request.command(), request.canceledOrders(),
+                stages[index].execute(request.command(), request.canceledOrders(),
                         request.nextCursorOrderId(), runtime, identities);
             }
-            return results;
+            return null;
         });
-        return new BatchFinancialWork(runtime, stages, results);
+        return new BatchFinancialWork(runtime, stages);
     }
 
     /**
@@ -338,8 +338,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
             implements java.util.function.BooleanSupplier {
         /** 本批各请求的账户执行步骤，所属 Lane 完成后 Owner 读取其用户与修订信息。 */
         private final BatchExecutionStage[] stages;
-        /** 本批账户资金回执数组，Owner 收集完成后由账本按原请求顺序应用。 */
-        private final RuntimeTreasuryDelta[] results;
         /**
          * accountsCollected：Owner 是否已经收集并登记账户阶段结果，防止重复登记变更。
          * ledgerDispatched：资金账本命令是否已经成功入队，防止重复记账。
@@ -350,15 +348,13 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private long revisionDelta;
 
         /**
-         * 绑定这批账户步骤和资金结果数组，初始化一次账本命令，供 Owner 后续轮询完成。
+         * 绑定这批包含资金回执的账户步骤，初始化一次账本命令，供 Owner 后续轮询完成。
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param stages 与请求同下标的账户执行步骤，由所属 Lane 准备并写入
-         * @param results 与账户步骤同下标的资金结果数组，账户阶段完成后供 Owner 和账本读取
          */
-        private BatchFinancialWork(TradingAccountRuntime runtime, BatchExecutionStage[] stages,
-                                   RuntimeTreasuryDelta[] results) {
+        private BatchFinancialWork(TradingAccountRuntime runtime, BatchExecutionStage[] stages) {
             initializeLedgerCommand(runtime);
-            this.stages = stages; this.results = results;
+            this.stages = stages;
         }
 
         /**
@@ -371,9 +367,9 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < stages.length; index++) {
                     // Owner 正在收集的一笔账户步骤，用它定位结算变化并累计修订号增量。
                     BatchExecutionStage stage = stages[index];
-                    if (results[index] != null)
+                    if (stage.liquidated)
                         runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
-                    revisionDelta = Math.addExact(revisionDelta, stage.canceledCount == 0 ? 1 : 2);
+                    revisionDelta = Math.addExact(revisionDelta, stage.canceledOrdersApplied ? 2 : 1);
                 }
                 Math.addExact(runtime.revision(), revisionDelta);
                 accountsCollected = true;
@@ -393,22 +389,28 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param ledger 当前账本线程持有的资金总账，强平差额在此应用
          */
         @Override protected void applyLedger(TreasuryRuntime ledger) {
-            for (RuntimeTreasuryDelta /* 账本本轮要应用的一个账户资金差额，空回执不产生资金记账。 */ delta : results) if (delta != null) delta.apply(ledger);
+            for (BatchExecutionStage stage : stages) {
+                stage.applyLedger(ledger);
+            }
         }
     }
 
     /**
-     * 一笔强平在所属账户 Lane 内完成校验、撤单解冻及平仓，只保留 Owner 随后需要的强平身份、结算资产、持仓键和实际撤单数量。
+     * 一笔强平在所属账户 Lane 内完成校验、撤单解冻及平仓，保留 Owner 所需身份和撤单标记、账本所需两项金额。
      */
     private static final class BatchExecutionStage {
-        /** 本笔实际需要应用的撤单数量，失效计划会把它清零。 */
-        private int canceledCount;
+        /** 本笔是否应用过撤单，失效计划不撤单；Owner 据此确定修订增量。 */
+        private boolean canceledOrdersApplied;
         /** 本次账户执行的源用户身份，Owner 据此登记结算变更。 */
         private long userId;
         /** 源持仓的结算资产整数编号，用于现金修改及登记结算变更。 */
         private int assetId;
         /** 源用户当前持仓腿的运行时整数键。 */
         private long positionKey;
+        /** 只有实际平仓完成才登记结算变化并记账；金额为零的平仓也保留这个事实。 */
+        private boolean liquidated;
+        /** 保险基金的有符号变化额，以及同时计入保险亏空和清算对手项的未覆盖亏空。 */
+        private long insuranceDelta, deficitUnits;
 
         /**
          * 在当前账户范围读取并校验强平、撤单、持仓与结算资产，再执行本批撤单或最终平仓；临时输入仅在本次调用中使用，Owner 所需结果写回本对象。
@@ -418,11 +420,12 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
-        private RuntimeTreasuryDelta execute(ExecuteLiquidationCommand command,
-                                             Collection<CancellationOrder> canceledOrders,
-                                             long nextCursorOrderId,
-                                             TradingAccountRuntime runtime,
-                                             RuntimeIdentityRegistry identities) {
+        private void execute(ExecuteLiquidationCommand command,
+                             Collection<CancellationOrder> canceledOrders,
+                             long nextCursorOrderId,
+                             TradingAccountRuntime runtime,
+                             RuntimeIdentityRegistry identities) {
+            liquidated = false;
             if (!runtime.productLine().isDerivative()) {
                 throw new IllegalArgumentException("liquidation requires derivative product");
             }
@@ -446,18 +449,14 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 }
                 validatePrice(runtime, liquidation, command);
             }
-            // 本笔 Matcher 撤单回执数量，用于分配并填充订单编号数组。
-            int count = canceledOrders == null ? 0 : canceledOrders.size();
-            // 本笔待应用账户解冻的撤单编号数组，没有撤单时留空。
-            long[] orderIds = count == 0 ? null : new long[count];
-            if (count != 0) {
-                // 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。
-                int index = 0;
-                for (var /* 当前 Matcher 撤单回执，必须属于源强平同一用户才能装入编号数组。 */ order : canceledOrders) {
+            // 本笔是否包含 Matcher 撤单回执，不保留没有其他消费者的精确数量。
+            boolean hasCancellations = canceledOrders != null && !canceledOrders.isEmpty();
+            if (hasCancellations) {
+                // 全部回执先校验用户，再读取持仓或修改任何订单，保持拒绝先后顺序。
+                for (var order : canceledOrders) {
                     if (order == null || order.userId() != liquidation.userId()) {
                         throw new IllegalArgumentException("liquidation cancellation must belong to its account");
                     }
-                    orderIds[index++] = order.orderId();
                 }
             }
             // 当前源强平合约配置，最终执行时用于风险、持仓和结算资产核对。
@@ -478,13 +477,12 @@ public final class RuntimeDerivativeLiquidationProcessor {
             this.userId = liquidation.userId();
             this.assetId = assetId;
             this.positionKey = positionKey;
-            this.canceledCount = count;
             // 本笔已经到最终阶段，但当前持仓或风险不再符合强平计划，因此不应应用撤单或平仓。
             boolean obsolete = !advance && !executable(runtime, liquidation, instrument, positionKey);
-            if (obsolete) canceledCount = 0;
-            for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < canceledCount; index++) {
+            canceledOrdersApplied = !obsolete && hasCancellations;
+            if (canceledOrdersApplied) for (var canceledOrder : canceledOrders) {
                 // 本轮已在 Matcher 撤销、需要在账户中确认取消并解冻的订单编号。
-                long orderId = orderIds[index];
+                long orderId = canceledOrder.orderId();
                 // 源用户该订单的当前状态，必须仍有效且有未成交量才能应用账户撤单。
                 OrderRuntime order = runtime.order(orderId);
                 if (order == null || order.userId() != liquidation.userId() || order.canceled()
@@ -501,7 +499,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             if (obsolete) {
                 runtime.replaceLiquidation(copy(liquidation, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
                 runtime.advanceUserRevision(liquidation.userId());
-                return null;
+                return;
             }
             if (advance) {
                 runtime.replaceLiquidation(new LiquidationRuntime(liquidation.liquidationId(), liquidation.userId(),
@@ -510,9 +508,92 @@ public final class RuntimeDerivativeLiquidationProcessor {
                         liquidation.signedQuantitySteps(), liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
                         liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
                         liquidation.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
-                return null;
+                return;
             }
-            return executeAccountLiquidation(command, runtime, liquidation, instrument, assetId, positionKey);
+            executeAccountLiquidation(command, runtime, liquidation, instrument);
+        }
+
+        /**
+         * 所属 Lane 按计划平仓量分摊保证金，计算期货盈亏或期权现金市值及强平费，按全仓逐仓边界应用现金，再更新余额、剩余持仓和亏空状态，保存账本需要的保险变化额和未覆盖亏空。
+         * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
+         * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
+         * @param liquidation 源账户当前强平记录，提供用户、币对、持仓腿和计划平仓量
+         * @param instrument 经前置校验的强平合约配置，用于持仓和金额计算
+         */
+        private void executeAccountLiquidation(ExecuteLiquidationCommand command,
+                TradingAccountRuntime runtime, LiquidationRuntime liquidation, CoreInstrument instrument) {
+            // 源账户最新持仓，实际强平数量、剩余入场信息和保证金都从它计算。
+            PositionRuntime position = runtime.position(positionKey);
+            // 源用户当前结算资产余额，必须存在才能计算实际扣款及释放保证金。
+            BalanceRuntime balance = runtime.balance(liquidation.userId(), assetId);
+            if (position == null || balance == null) {
+                throw new IllegalStateException("runtime liquidation entities are missing");
+            }
+
+            // 源持仓原绝对数量步数，用作本次平仓比例分摊的分母。
+            long currentAbs = Math.absExact(position.signedQuantitySteps());
+            // 强平计划指定的本次平仓绝对数量步数。
+            long closeQuantity = liquidation.closeQuantitySteps();
+            // 强平之后剩余的绝对持仓步数，归零时清空入场价和入场价格量。
+            long remainingAbs = Math.subtractExact(currentAbs, closeQuantity);
+            // 本次平仓对应可释放的持仓保证金，按平仓占原数量比例分摊。
+            long releasedMargin = position.positionMarginUnits() == 0 ? 0
+                    : proportional(position.positionMarginUnits(), closeQuantity, currentAbs);
+            // 带原持仓多空方向的平仓数量，用于计算盈亏或期权现金市值。
+            long signedCloseQuantity = position.signedQuantitySteps() > 0
+                    ? closeQuantity : Math.negateExact(closeQuantity);
+            // 本次平仓的现金估值，期货为已平部分盈亏，期权为该部分带方向市值。
+            long pnl = instrument.contractType().isOption()
+                    ? OptionContractMath.optionMarketValueUnits(instrument, signedCloseQuantity,
+                    command.executionPriceTicks())
+                    : CoreContractMath.pnlUnits(instrument, signedCloseQuantity,
+                    position.entryPriceTicks(), command.executionPriceTicks());
+            // 按执行价、平仓量及费率计算的应收强平费，后续还要受实际可扣资金限制。
+            long feeDue = Math.negateExact(CoreContractMath.feeDeltaUnits(instrument,
+                    command.executionPriceTicks(), closeQuantity, command.liquidationFeeRatePpm()));
+            // 按全仓或逐仓资金边界算出的新余额、实际应用盈亏和实收费。
+            LiquidationCash cash = applyCash(balance, liquidation.marginMode(), releasedMargin, pnl, feeDue);
+            // 本次现金亏损绝对额中未实际从账户扣到的部分，仅比较亏损与实际扣款。
+            long uncovered = pnl < 0 ? Math.subtractExact(Math.negateExact(pnl),
+                    Math.negateExact(Math.min(0, cash.appliedPnl()))) : 0;
+
+            // 剩余持仓保留原多空方向，全部强平时为 0。
+            long nextQuantity = remainingAbs == 0 ? 0
+                    : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
+            // 按剩余数量保留的入场价格量，空仓时归零。
+            long nextEntryValue = remainingAbs == 0 ? 0
+                    : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
+            // 平仓后的持仓新值，剩余保证金相应减少，期货累计原始平仓盈亏，期权不在此累加该字段。
+            PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
+                    position.marginMode(), position.positionSide(), position.instrument(),
+                    nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
+                    Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : pnl),
+                    Math.subtractExact(position.positionMarginUnits(), releasedMargin));
+            // 保险基金应记的差额：实际账户盈亏的反向值加已收强平费，可能为收入或支出。
+            long insuranceDelta = Math.addExact(Math.negateExact(cash.appliedPnl()), cash.collectedFee());
+            // 仍有未覆盖亏空时待保险基金，否则本笔强平执行完成。
+            CoreLiquidationState.Status nextStatus = uncovered > 0
+                    ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED;
+
+            runtime.replaceBalance(cash.balance());
+            runtime.replacePosition(positionKey, nextPosition);
+            runtime.replaceLiquidation(copy(liquidation, uncovered, command.executionPriceTicks(),
+                    command.liquidationFeeRatePpm(), nextStatus, cash.collectedFee()));
+            runtime.advanceUserRevision(liquidation.userId());
+            // 所属 Lane 保存实际两项金额，Owner 收齐账户完成位后交原账本消费。
+            this.insuranceDelta = insuranceDelta;
+            this.deficitUnits = uncovered;
+            this.liquidated = true;
+        }
+
+        /** 账本按原次序预先算好全部新值，再写保险、亏空和清算；仅撤单或失效计划没有金额。 */
+        private void applyLedger(TreasuryRuntime ledger) {
+            if (!liquidated) return;
+            long nextInsurance = Math.addExact(ledger.insurance(assetId), insuranceDelta);
+            long nextDeficit = Math.addExact(ledger.insuranceDeficit(assetId), deficitUnits);
+            long nextClearing = Math.addExact(ledger.clearingPnl(assetId), deficitUnits);
+            ledger.setInsurance(assetId, nextInsurance, nextDeficit);
+            ledger.setClearingPnl(assetId, nextClearing);
         }
 
     }
@@ -532,26 +613,22 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private long nextCursorOrderId;
         /** 本命令共用的业务编号与运行时整数身份映射。 */
         private RuntimeIdentityRegistry identities;
-        /** 源用户所属的账户 Lane 编号，账户工作只在该 Lane 执行。 */
-        private int laneId;
         /**
          * done：本阶段已经完成的标记，Owner 重复轮询时可直接结束。
          * accountsCollected：Owner 是否已经收集并登记账户阶段结果，防止重复登记变更。
          * ledgerDispatched：资金账本命令是否已经成功入队，防止重复记账。
          */
         private boolean done, accountsCollected, ledgerDispatched;
-        /** Owner 从账户 Lane 收到的资金差额，账本完成前保持有效引用。 */
-        private RuntimeTreasuryDelta treasuryDelta;
 
         /**
-         * 绑定本次命令、撤单回执及下一游标，通过源强平路由定位 Lane，重置账户和账本完成标记并清掉旧资金回执。
+         * 绑定本次命令、撤单回执及下一游标，通过源强平路由定位 Lane，重置账户和账本完成标记并返回派发位图。
          * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
          * @param canceledOrders Matcher 已完成的撤单回执集合，账户步骤据此解除源用户订单和资金冻结
          * @param nextCursorOrderId 本批后仍待撤的下一订单编号，0 表示已经到最终强平执行阶段
          * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
          * @param identities 业务编号与运行时整数键的映射，用来定位配置、持仓和结算资产
          */
-        private void prepare(ExecuteLiquidationCommand command, Collection<CancellationOrder> canceledOrders,
+        private long prepare(ExecuteLiquidationCommand command, Collection<CancellationOrder> canceledOrders,
                 long nextCursorOrderId, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
             initializeLedgerCommand(runtime);
             this.command = command; this.canceledOrders = canceledOrders;
@@ -560,20 +637,19 @@ public final class RuntimeDerivativeLiquidationProcessor {
             var route = runtime.liquidationRoute(command.liquidationId());
             // 从强平路由或同步强平记录得到的源用户编号，没有记录时为 0。
             long userId = route == null ? runtime.liquidation(command.liquidationId()).userId() : route.userId();
-            laneId = runtime.topology().accountLaneId(userId);
-
             this.done = accountsCollected = ledgerDispatched = false;
-            treasuryDelta = null;
+            return runtime.topology().accountLaneMask(userId);
         }
 
         /**
-         * 所属账户 Lane 创建或复用本笔执行步骤，应用撤单解冻或最终平仓，并返回需要交账本的资金差额。
+         * 所属账户 Lane 创建或复用本笔执行步骤，应用撤单解冻或最终平仓，由步骤保存需要交账本的资金差额。
          * @param ignored 统一账户回调签名中的 Lane 参数；当前步骤已在准备阶段绑定所属 Lane
          */
         @Override
         public Object apply(int ignored) {
             if (stage == null) stage = new BatchExecutionStage();
-            return stage.execute(command, canceledOrders, nextCursorOrderId, runtime, identities);
+            stage.execute(command, canceledOrders, nextCursorOrderId, runtime, identities);
+            return null;
         }
 
         /**
@@ -584,10 +660,9 @@ public final class RuntimeDerivativeLiquidationProcessor {
             if (done) return true;
             if (!accountsCollected) {
                 if (!runtime.pollControlLanes()) return false;
-                treasuryDelta = (RuntimeTreasuryDelta) runtime.controlLaneResult(laneId);
-                if (treasuryDelta != null)
+                if (stage.liquidated)
                     runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
-                Math.addExact(runtime.revision(), stage.canceledCount == 0 ? 1 : 2);
+                Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1);
                 accountsCollected = true;
             }
             if (!ledgerDispatched) {
@@ -595,7 +670,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 ledgerDispatched = true;
             }
             if (!ledgerCommandCompleted()) return false;
-            runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), stage.canceledCount == 0 ? 1 : 2));
+            runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1));
             done = true;
             return true;
         }
@@ -605,7 +680,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
          * @param ledger 当前账本线程持有的资金总账，强平差额在此应用
          */
         @Override protected void applyLedger(TreasuryRuntime ledger) {
-            if (treasuryDelta != null) treasuryDelta.apply(ledger);
+            stage.applyLedger(ledger);
         }
 
         /**
@@ -618,84 +693,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
             nextCursorOrderId = 0;
             done = false;
         }
-    }
-
-    /**
-     * 所属 Lane 按计划平仓量分摊保证金，计算期货盈亏或期权现金市值及强平费，按全仓逐仓边界应用现金，再更新余额、剩余持仓和亏空状态，返回保险与清算总账差额。
-     * @param command 本次强平执行命令，包含强平编号、触发序号、执行价、费率及当前撤单游标
-     * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
-     * @param liquidation 源账户当前强平记录，提供用户、币对、持仓腿和计划平仓量
-     * @param instrument 目标合约配置，最终强平时用于验证产品和计算金额，只推进撤单时可为空
-     * @param settleAssetId 强平结算资产的整数编号，余额、手续费和保险差额使用同一资产
-     * @param positionKey 源强平目标持仓腿的运行时整数键，0 表示尚未定位到有效持仓
-     */
-    private static RuntimeTreasuryDelta executeAccountLiquidation(ExecuteLiquidationCommand command,
-            TradingAccountRuntime runtime, LiquidationRuntime liquidation, CoreInstrument instrument,
-            int settleAssetId, long positionKey) {
-        // 源账户最新持仓，实际强平数量、剩余入场信息和保证金都从它计算。
-        PositionRuntime position = runtime.position(positionKey);
-        // 源用户当前结算资产余额，必须存在才能计算实际扣款及释放保证金。
-        BalanceRuntime balance = runtime.balance(liquidation.userId(), settleAssetId);
-        if (position == null || balance == null) {
-            throw new IllegalStateException("runtime liquidation entities are missing");
-        }
-
-        // 源持仓原绝对数量步数，用作本次平仓比例分摊的分母。
-        long currentAbs = Math.absExact(position.signedQuantitySteps());
-        // 强平计划指定的本次平仓绝对数量步数。
-        long closeQuantity = liquidation.closeQuantitySteps();
-        // 强平之后剩余的绝对持仓步数，归零时清空入场价和入场价格量。
-        long remainingAbs = Math.subtractExact(currentAbs, closeQuantity);
-        // 本次平仓对应可释放的持仓保证金，按平仓占原数量比例分摊。
-        long releasedMargin = position.positionMarginUnits() == 0 ? 0
-                : proportional(position.positionMarginUnits(), closeQuantity, currentAbs);
-        // 带原持仓多空方向的平仓数量，用于计算盈亏或期权现金市值。
-        long signedCloseQuantity = position.signedQuantitySteps() > 0
-                ? closeQuantity : Math.negateExact(closeQuantity);
-        // 本次平仓的现金估值，期货为已平部分盈亏，期权为该部分带方向市值。
-        long pnl = instrument.contractType().isOption()
-                ? OptionContractMath.optionMarketValueUnits(instrument, signedCloseQuantity,
-                command.executionPriceTicks())
-                : CoreContractMath.pnlUnits(instrument, signedCloseQuantity,
-                position.entryPriceTicks(), command.executionPriceTicks());
-        // 按执行价、平仓量及费率计算的应收强平费，后续还要受实际可扣资金限制。
-        long feeDue = Math.negateExact(CoreContractMath.feeDeltaUnits(instrument,
-                command.executionPriceTicks(), closeQuantity, command.liquidationFeeRatePpm()));
-        // 按全仓或逐仓资金边界算出的新余额、实际应用盈亏和实收费。
-        LiquidationCash cash = applyCash(balance, liquidation.marginMode(), releasedMargin, pnl, feeDue);
-        // 本次现金亏损绝对额中未实际从账户扣到的部分，仅比较亏损与实际扣款。
-        long uncovered = pnl < 0 ? Math.subtractExact(Math.negateExact(pnl),
-                Math.negateExact(Math.min(0, cash.appliedPnl()))) : 0;
-
-        // 剩余持仓保留原多空方向，全部强平时为 0。
-        long nextQuantity = remainingAbs == 0 ? 0
-                : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
-        // 按剩余数量保留的入场价格量，空仓时归零。
-        long nextEntryValue = remainingAbs == 0 ? 0
-                : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
-        // 平仓后的持仓新值，剩余保证金相应减少，期货累计原始平仓盈亏，期权不在此累加该字段。
-        PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
-                position.marginMode(), position.positionSide(), position.instrument(),
-                nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
-                Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : pnl),
-                Math.subtractExact(position.positionMarginUnits(), releasedMargin));
-        // 保险基金应记的差额：实际账户盈亏的反向值加已收强平费，可能为收入或支出。
-        long insuranceDelta = Math.addExact(Math.negateExact(cash.appliedPnl()), cash.collectedFee());
-        // 仍有未覆盖亏空时待保险基金，否则本笔强平执行完成。
-        CoreLiquidationState.Status nextStatus = uncovered > 0
-                ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED;
-
-        runtime.replaceBalance(cash.balance());
-        runtime.replacePosition(positionKey, nextPosition);
-        runtime.replaceLiquidation(copy(liquidation, uncovered, command.executionPriceTicks(),
-                command.liquidationFeeRatePpm(), nextStatus, cash.collectedFee()));
-        runtime.advanceUserRevision(liquidation.userId());
-        // 本笔返回给账本的保险基金、亏空及清算对手项变化。
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-        treasuryDelta.addInsurance(settleAssetId, insuranceDelta);
-        treasuryDelta.addDeficit(settleAssetId, uncovered);
-        treasuryDelta.addClearing(settleAssetId, uncovered);
-        return treasuryDelta;
     }
 
     /**

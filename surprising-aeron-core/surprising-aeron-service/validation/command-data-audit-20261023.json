@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第六十四轮清理ADL恒空准备参数、重复Lane缓存和多资产差额搬运，Work净减2字段；18模块干净构建、140回归、六线实测、两种永续实际保险/ADL及12次Cluster恢复通过。196解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第六十五轮清理强平四组输入数组、撤单编号副本、单笔/批量资金搬运及无消费精确计数，改为原命令/回执与两项真实金额；净减2字段。最终18模块干净构建、146不同回归及PIPELINED6例、六线实测、保险/ADL和12次冷恢复通过。200解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -10944,6 +10944,64 @@
       ],
       "evidence": "保留必要long清算交接，资产与亏空抵减取已有身份/命令；精确运算顺序、账本所有权及回滚保留。",
       "verification": "18模块干净构建、140回归、六线真实HTTP/WS、保险及实际ADL、12次Cluster冷恢复，见round64-runtime-20261025.json。"
+    },
+    {
+      "id": "A202",
+      "status": "resolved",
+      "source_basis_commit": "99ebb9c32ddc41e5a3a8bef772be382a2f166e08",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_fifth_cleanup_round",
+      "topic": "强平资格检查四组命令副本数组",
+      "fields_or_methods": [
+        "ExecutionCheck.liquidationIds",
+        "priceSequences",
+        "prices",
+        "cursors"
+      ],
+      "evidence": "直接读取原不可变单笔/批命令，清理释放引用，Lane检查正文和发布边界保留。",
+      "verification": "最终18模块干净构建、146不同回归及PIPELINED 6例、六线真实HTTP/WS、保险及实际ADL、12次冷恢复；首次测试启动失败与复验见round65-runtime-20261025.json。"
+    },
+    {
+      "id": "A203",
+      "status": "resolved",
+      "source_basis_commit": "99ebb9c32ddc41e5a3a8bef772be382a2f166e08",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_fifth_cleanup_round",
+      "topic": "撤单回执编号临时数组",
+      "fields_or_methods": [
+        "BatchExecutionStage.execute orderIds"
+      ],
+      "evidence": "先完整校验原回执，再直接迭代原稳定集合；删除只搬运编号的数组，拒绝顺序保留。",
+      "verification": "最终18模块干净构建、146不同回归及PIPELINED 6例、六线真实HTTP/WS、保险及实际ADL、12次冷恢复；首次测试启动失败与复验见round65-runtime-20261025.json。"
+    },
+    {
+      "id": "A204",
+      "status": "resolved",
+      "source_basis_commit": "99ebb9c32ddc41e5a3a8bef772be382a2f166e08",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_fifth_cleanup_round",
+      "topic": "强平单笔/批量多余资金结果搬运",
+      "fields_or_methods": [
+        "ExecutionWork.laneId",
+        "ExecutionWork.treasuryDelta",
+        "BatchFinancialWork.results",
+        "RuntimeTreasuryDelta per-liquidation"
+      ],
+      "evidence": "实际仅两项金额，保留在已有账户步骤直接交原账本；金额预检、完整资产前值、按原请求顺序记账及零金额平仓事实保留。",
+      "verification": "最终18模块干净构建、146不同回归及PIPELINED 6例、六线真实HTTP/WS、保险及实际ADL、12次冷恢复；首次测试启动失败与复验见round65-runtime-20261025.json。"
+    },
+    {
+      "id": "A205",
+      "status": "resolved",
+      "source_basis_commit": "99ebb9c32ddc41e5a3a8bef772be382a2f166e08",
+      "business_code_changed": true,
+      "resolved_in_round": "sixty_fifth_cleanup_round",
+      "topic": "强平精确撤单数的非零用途",
+      "fields_or_methods": [
+        "BatchExecutionStage.canceledCount"
+      ],
+      "evidence": "实际消费者只判断是否撤过单，改为布尔结果；失效计划为false、原修订增量1/2保持。",
+      "verification": "最终18模块干净构建、146不同回归及PIPELINED 6例、六线真实HTTP/WS、保险及实际ADL、12次冷恢复；首次测试启动失败与复验见round65-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11039,7 +11097,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A199_to_A201_cleaned_140_cases_six_live_products_actual_adl_twelve_cold_recoveries_verified; overall_audit_in_progress",
+  "analysis_round_status": "A202_to_A205_cleaned_146_distinct_cases_and_6_pipelined_six_live_products_twelve_cold_recoveries_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11261,12 +11319,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "a66951c3def3f28d0da785ecb11ec851b86cde88",
-    "status": "adl_work_state_cleaned_and_verified",
+    "source_basis_commit": "99ebb9c32ddc41e5a3a8bef772be382a2f166e08",
+    "status": "liquidation_command_and_financial_results_simplified_and_verified",
     "resolved_ids": [
-      "A199",
-      "A200",
-      "A201"
+      "A202",
+      "A203",
+      "A204",
+      "A205"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11279,11 +11338,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 196,
+      "resolved": 200,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "sixty_fourth_cleanup_round",
+    "evidence": "sixty_fifth_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44216,6 +44275,30 @@
     "cold_recoveries": 12,
     "counts": {
       "resolved": 196,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "sixty_fifth_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "99ebb9c32ddc41e5a3a8bef772be382a2f166e08",
+    "resolved_ids": [
+      "A202",
+      "A203",
+      "A204",
+      "A205"
+    ],
+    "removed_instance_fields_net": 2,
+    "production_net_lines_removed": 3,
+    "report": "deep-code-cleanup-20261025-round65.md",
+    "evidence": "round65-runtime-20261025.json",
+    "distinct_unit_tests": 146,
+    "additional_pipelined_executions": 6,
+    "runtime_products": 6,
+    "cold_recoveries": 12,
+    "counts": {
+      "resolved": 200,
       "candidate": 1,
       "retained": 4
     },

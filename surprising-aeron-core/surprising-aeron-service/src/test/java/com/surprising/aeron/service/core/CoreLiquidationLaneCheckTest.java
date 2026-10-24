@@ -4,6 +4,7 @@ import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
+import com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck;
 import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -20,6 +21,85 @@ class CoreLiquidationLaneCheckTest {
     private static final long TIME = 1_700_000_000_000L;
     /** 当前测试实例已经分配的消息序号，下次发送前递增一次。 */
     private long sequence;
+
+    /** 扩容批检查后复用为单笔，分别核对每个动作的输入及过期结果，且前置检查不能修改业务状态。 */
+    @Test
+    void expandedBatchCheckCanBeReusedForSingleWithDifferentPriceInputs() {
+        try (var core = prepared()) {
+            var original = ExecuteLiquidationBatchCommand.fromWork(work(core), 0, 0).actions();
+            var first = original.getFirst();
+            var second = original.getLast();
+            var actions = new java.util.ArrayList<ExecuteLiquidationBatchAction>();
+            actions.add(first);
+            actions.add(new ExecuteLiquidationBatchAction(second.liquidationId(), second.userId(), second.instrumentId(),
+                    second.triggerPriceSequence(), Math.incrementExact(second.executionPriceTicks()), second.cursorOrderId()));
+            for (long id = 100; id < 104; id++)
+                actions.add(new ExecuteLiquidationBatchAction(id, first.userId(), first.instrumentId(),
+                        first.triggerPriceSequence(), first.executionPriceTicks(), 0));
+            var before = core.tradingState();
+            var runtime = core.runtimeState;
+            if (!runtime.accountLanesStarted()) runtime.startAccountLanes();
+            assertThat(runtime.accountLanesStarted()).isTrue();
+            var check = new ExecutionCheck();
+            try {
+                check.prepare(new ExecuteLiquidationBatchCommand(actions, 4, 0, null, 0), runtime, core.identities);
+                LedgerControlTestSupport.await(runtime, check::poll);
+                assertThat(check.cancelsOrders(0)).isTrue();
+                assertThat(check.liquidation(0).liquidationId()).isEqualTo(first.liquidationId());
+                assertThat(check.cancelsOrders(1)).isFalse();
+                assertThatThrownBy(() -> check.executable(1)).isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
+                        .hasMessageContaining("mark price changed");
+                for (int index = 2; index < 6; index++) {
+                    assertThat(check.executable(index)).isFalse();
+                    assertThat(check.liquidation(index)).isNull();
+                }
+                check.clearReferences();
+                assertThat(check.prepared()).isFalse();
+                check.prepare(new ExecuteLiquidationCommand(second.liquidationId(), second.triggerPriceSequence(),
+                        second.executionPriceTicks(), 0), runtime, core.identities);
+                LedgerControlTestSupport.await(runtime, check::poll);
+                assertThat(check.executable(0)).isTrue();
+                assertThat(check.liquidation(0).liquidationId()).isEqualTo(second.liquidationId());
+                assertThatThrownBy(() -> check.liquidation(1)).isInstanceOf(IllegalStateException.class);
+            } finally { check.clearReferences(); }
+            assertThat(core.tradingState()).isEqualTo(before);
+        }
+    }
+
+    /** 同批两账户均撤完并平仓，原账本必须各记一次保险、亏空和清算结果。 */
+    @Test
+    void batchPublishesBothAccountFinancialResultsExactlyOnce() throws Exception {
+        try (var core = prepared()) {
+            assertThat(core.runtimeState.topology().accountLaneId(1))
+                    .isNotEqualTo(core.runtimeState.topology().accountLaneId(7));
+            long beforeFunds = funds(core);
+            var batch = ExecuteLiquidationBatchCommand.fromWork(work(core), 0, 0);
+            CoreResponse result;
+            try (var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+                result = applied(core, CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
+                        TradingCommandCodec.encodeExecuteLiquidationBatch(batch));
+            }
+            var summary = CoreLiquidationBatchResultCodec.decode(result.data());
+            assertThat(summary.appliedActions()).isEqualTo(2);
+            assertThat(summary.processedOrders()).isEqualTo(4);
+            assertThat(summary.pendingActions()).isZero();
+            var after = core.tradingState();
+            assertThat(after.treasuryState().insuranceBalances().get("USDT")).isEqualTo(220);
+            assertThat(after.treasuryState().insuranceDeficits().get("USDT")).isEqualTo(1_760);
+            assertThat(after.treasuryState().clearingPnlBalances().get("USDT")).isEqualTo(1_760);
+            for (long userId : new long[]{1, 7}) {
+                assertThat(after.users().get(userId).totalUnits("USDT")).isZero();
+                assertThat(after.users().get(userId).positions().values())
+                        .allSatisfy(position -> assertThat(position.signedQuantitySteps()).isZero());
+            }
+            assertThat(after.orders().values()).hasSize(4)
+                    .allSatisfy(order -> assertThat(order.status()).isEqualTo(CoreOrderStatus.CANCELED));
+            assertThat(after.riskState().liquidations().values()).hasSize(2)
+                    .allSatisfy(value -> assertThat(value.status()).isEqualTo(CoreLiquidationState.Status.INSURANCE_REQUIRED));
+            assertThat(funds(core)).isEqualTo(beforeFunds);
+            core.assertClusterCallbackComplete();
+        }
+    }
 
     /**
      * 为两账户强平每批只给一笔撤单预算，在 Owner 读表哨兵下分四批完成，检查 Lane 所有权不转移、资金守恒、四笔挂单撤销和两用户持仓归零。
