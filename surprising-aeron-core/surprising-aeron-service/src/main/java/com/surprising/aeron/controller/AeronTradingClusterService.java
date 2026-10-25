@@ -28,9 +28,9 @@ import org.springframework.stereotype.Component;
 /**
  * Aeron Cluster 生命周期回调适配器。
  *
- * <p>本类接收 Cluster 消息、会话、选主和快照回调，并把交易命令交给 {@link TradingOwnerLoop}；
+ * <p>本类接收 Cluster 消息、会话、选主和快照回调，内联调用 {@link TradingOwnerLoop} 推进交易命令生命周期；
  * 响应通过 {@link ClusterServiceEgress} 发回客户端。本类不直接修改账户、订单或撮合业务状态。
- * Cluster 回调线程负责 Aeron 会话及快照发布，Owner 线程负责交易状态处理，两者通过队列交接。</p>
+ * Cluster 服务线程内联执行交易命令与快照发布，消除跨核交接开销。</p>
  */
 @Component
 public final class AeronTradingClusterService implements ClusteredService {
@@ -194,17 +194,18 @@ public final class AeronTradingClusterService implements ClusteredService {
     }
 
     /**
-     * Cluster 空闲轮询时发送 Owner 已发布的不可变响应，不读取或推进交易状态。
+     * Cluster 空闲轮询时推进 Owner 命令生命周期与完成信号，并发送已就绪响应。
      *
      * @param nowNs Cluster 提供的当前纳秒时间
-     * @return 本次发送出口处理的工作数量
+     * @return 本次处理的工作数量
      */
     @Override
     public int doBackgroundWork(long nowNs) {
         owner.checkFailure();
         unflushedInboundMessages = 0;
         try {
-            return owner.drainResponses();
+            int work = owner.pollCommands();
+            return work + owner.drainResponses();
         } catch (/* 让 Cluster 看见后台响应处理失败，不能让故障 Owner 悄悄继续服务。 */ RuntimeException fatal) {
             throw new AgentTerminationException(fatal);
         }
