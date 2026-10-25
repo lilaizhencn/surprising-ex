@@ -1,6 +1,5 @@
 package com.surprising.aeron.bootstrap.account;
 
-import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.account.AccountLaneState;
@@ -15,7 +14,6 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     private final AccountLaneState[] lanes;
     private final SettlementLaneWorker[] workers;
     private final LaneTopology topology;
-    private final CoreRuntimeConfiguration configuration;
     private final Runnable assertOwner;
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private boolean started;
@@ -26,11 +24,9 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     private SystemLedgerLane ledger;
     private Consumer<Thread> ledgerOwner;
 
-    public AccountLaneLifecycle(AccountLaneState[] lanes, LaneTopology topology,
-            CoreRuntimeConfiguration configuration, Runnable assertOwner) {
+    public AccountLaneLifecycle(AccountLaneState[] lanes, LaneTopology topology, Runnable assertOwner) {
         this.lanes = lanes;
         this.topology = topology;
-        this.configuration = configuration;
         this.assertOwner = assertOwner;
         workers = new SettlementLaneWorker[lanes.length];
     }
@@ -50,7 +46,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
             for (int laneId = 0; laneId < lanes.length; laneId++) {
                 workers[laneId] = new SettlementLaneWorker("account", lanes[laneId],
                         topology.accountLaneQueueCapacity(), this::recordFailure,
-                        topology.matchingEngineCount(), affinity, configuration);
+                        topology.matchingEngineCount(), affinity);
             }
             started = true;
             ownerHasAccess = false;

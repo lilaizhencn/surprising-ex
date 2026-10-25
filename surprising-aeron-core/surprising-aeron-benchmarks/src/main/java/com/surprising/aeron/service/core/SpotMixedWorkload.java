@@ -20,7 +20,7 @@ import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Harness
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.aeron.support.metrics.CoreLaneMetrics;
+import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -136,7 +136,7 @@ public final class SpotMixedWorkload {
             private long terminalCoreMessages;
             private long maxBacklog;
             private long laneOperations;
-            private final long[] laneOperationsByType = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
+            private final long[] laneOperationsByType = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
             private Set<Long> latestLifecycleOrders = Set.of();
 
             @Override
@@ -345,10 +345,10 @@ public final class SpotMixedWorkload {
     }
 
     private static long[] completedLaneOperations(TradingCoreRuntime state) {
-        long[] total = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
+        long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
         long[] completed = state.laneMetrics().accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
-            total[index % CoreLaneMetrics.OPERATION_TYPE_COUNT] += completed[index];
+            total[index % CoreLaneMetricsView.OPERATION_TYPE_COUNT] += completed[index];
         }
         return total;
     }

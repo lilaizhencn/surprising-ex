@@ -1,7 +1,5 @@
 package com.surprising.aeron.service.matcher.pipeline;
 
-import com.surprising.aeron.config.CoreRuntimeConfiguration;
-
 import com.surprising.aeron.bootstrap.matcher.MatcherThread;
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;

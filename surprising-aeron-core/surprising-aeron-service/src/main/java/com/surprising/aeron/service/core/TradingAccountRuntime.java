@@ -510,7 +510,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] routedUsers =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
-        this.laneLifecycle = new AccountLaneLifecycle(accountLanes, topology, configuration,
+        this.laneLifecycle = new AccountLaneLifecycle(accountLanes, topology,
                 this::assertOwner);
         this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.matcherSettlementReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
@@ -1898,7 +1898,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (event == null) throw new IllegalArgumentException("place admission event is required");
         event.prepare(
                 coreSequence, userId, commandId, settlementStatus,
-                assetId, laneId, asynchronousCommands(), this, identities, timestamp, position);
+                assetId, laneId, this, identities, timestamp, position);
         try {
             if (accountLanesStarted() && !laneLifecycle.worker(laneId).hasAdmissionCapacity())
                 throw new java.util.concurrent.RejectedExecutionException("account admission mailbox is full");

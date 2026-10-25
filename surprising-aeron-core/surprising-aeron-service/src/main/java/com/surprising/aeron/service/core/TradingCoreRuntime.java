@@ -76,7 +76,7 @@ import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotWriter;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
-import com.surprising.aeron.support.metrics.CoreLaneMetrics;
+import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
@@ -1739,25 +1739,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 把当前 Lane 指标编码后再解码成独立观测对象，避免把复用编码缓冲直接交给调用方。
+     * 把当前 Lane 指标编码后再解码成独立观测视图，避免把复用编码缓冲直接交给调用方。
      */
-    public CoreLaneMetrics laneMetrics() {
-        // 先解码出缓冲视图，再用于构造独立指标对象
-        var metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encodeLaneMetrics());
-        return new CoreLaneMetrics(
-                metrics.matchingEngineCount(), metrics.accountLaneCount(),
-                metrics.matcherDispatchDepth(), metrics.matcherDispatchCapacity(),
-                metrics.matcherDispatchHighWaterMark(), metrics.matchingCompletionDepth(),
-                metrics.matchingCompletionCapacity(), metrics.matchingCompletionHighWaterMark(),
-                metrics.commandContextDepth(), metrics.commandContextCapacity(),
-                metrics.commandContextHighWaterMark(), metrics.committedCoreSequence(),
-                metrics.accountLaneRevisions(), metrics.accountLaneAppliedSequences(),
-                metrics.accountLaneCommittedSequences(), metrics.accountLaneQueueDepths(),
-                metrics.accountLaneQueueCapacities(), metrics.accountLaneQueueHighWaterMarks(),
-                metrics.accountLaneRejectedSubmissions(), metrics.accountLaneOldestPendingSequences(),
-                metrics.accountLaneCompletedOperations(), metrics.accountLaneLatencySamples(),
-                metrics.accountLaneTotalLatencyNanos(),
-                metrics.accountLaneMaxLatencyNanos());
+    public CoreLaneMetricsView laneMetrics() {
+        return com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encodeLaneMetrics());
     }
 
     /**

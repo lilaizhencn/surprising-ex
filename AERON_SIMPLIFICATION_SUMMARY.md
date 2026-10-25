@@ -367,7 +367,35 @@
 
 ---
 
-## 10. 累计重构成果统计与系统现状
+## 10. 深度消除镜像类、死方法及防御性伪参数
+
+在独立 worktree（分支 `cleanup/aeron-deep`）中实施了针对协议镜像过度设计、死方法及旧同步模式残留伪参数的专项彻底清理：
+
+### 10.1 镜像类 `CoreLaneMetrics` 物理消除与直通优化
+- **问题根因**：`surprising-aeron-protocol` 中已有完整的 [`CoreLaneMetricsView.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreLaneMetricsView.java)，但 `surprising-aeron-service` 形式主义地定义了字段完全相同的 184 行镜像类 `CoreLaneMetrics.java`，并在 `laneMetrics()` 中解码后再逐字段搬运 new 一遍，导致额外的 24 字段开销和数组二次深拷贝。
+- **重构落地**：
+  1. `TradingCoreRuntime.java` 中的 `laneMetrics()` 方法直接返回 `CoreLaneMetricsView`；
+  2. 物理删除 `CoreLaneMetrics.java`（彻底减少 184 行重复代码）；
+  3. 全工程测试、基准测试及工作负载类统一替换为 `CoreLaneMetricsView`。
+
+### 10.2 拔除 `SettlementLaneWorker` 与 `AccountLaneLifecycle` 的死参数与死方法
+- **死方法删除**：物理删除 `SettlementLaneWorker.java` 中全工程 0 引用的 `admissionDepthIfAvailable()`。
+- **死参数与透传链拔除**：移除 `SettlementLaneWorker` 构造函数中无用的 `CoreRuntimeConfiguration` 死形参，并将 `AccountLaneLifecycle` 中的死字段 `configuration` 与导入彻底拔除，简化构造签名。
+- **清理死 import**：清理 `MatcherCommandPipeline.java` 与 `SystemLedgerLane.java` 中遗留的未使用的 `CoreRuntimeConfiguration` 导入。
+
+### 10.3 删除 `ClusterCommandWindow.java` 孤立死方法
+- 物理删除重构后全工程 0 引用的 `hasRoute()` 和 `routeUserId()`。
+
+### 10.4 `PlaceAdmissionEvent` 伪参数与防御分支彻底收敛
+- **问题根因**：`prepare` 方法中接收 `boolean matcherWaitRequired`，并在类内部维护该字段和做多个分支判断。而调用方传入的恒为 `asynchronousCommands()`。在固定为单一异步流水线模式后，所有普通下单准入必须等待 Matcher 消费。
+- **重构落地**：
+  1. 移除 `prepare` 方法中无意义的 `boolean matcherWaitRequired` 形参；
+  2. 移除 `PlaceAdmissionEvent` 内部的 `matcherWaitRequired` 字段及防御性条件判断，`matcherConsumed()` 直接返回状态位；
+  3. 简化 `TradingAccountRuntime.java:2013` 调用处，不再透传多余参数。
+
+---
+
+## 11. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -375,8 +403,10 @@
 | **等待策略** | `BUSY_SPIN`, `PARKING`, `YIELDING` 等多策略与 CAS 自适应休眠唤醒 | 固定纯粹 `BUSY_SPIN` 忙等自旋，消除锁与伪共享状态机 |
 | **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
-| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`loadSnapshot` 胶水接口、`pollBackgroundWork` | 物理彻底清除，精简 `idleCommand` 签名 |
+| **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
+| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute` 等 | 物理彻底清除所有孤立死方法，精简方法签名 |
 | **流水线空转计数器** | 4 个仅递增从不查询的 long 计数器（`drainedCommands`、`*Fences`） | 连同调用方埋点彻底拔除，消除纯空转开销 |
+| **准入伪参数** | 透传 `matcherWaitRequired`，内部多处防御分支 | 固定为异步流水线语义，彻底消除多余参数与防御分支 |
 | **快照超时配置** | 区分独立快照超时与集群快照超时，多重冗余参数 | 统一收敛为单一 `snapshot-timeout-seconds` |
 | **Feign 接口形式主义** | 声明了 8 个 `@FeignClient` 接口，全工程零装配零调用 | 物理全量删除，消除微服务假架构残留 |
 | **Gateway 孤岛计算** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件，净减少 ~1,000 行纯死代码 |

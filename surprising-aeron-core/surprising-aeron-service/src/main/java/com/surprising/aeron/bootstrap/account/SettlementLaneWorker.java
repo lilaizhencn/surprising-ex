@@ -1,7 +1,5 @@
 package com.surprising.aeron.bootstrap.account;
 
-import com.surprising.aeron.config.CoreRuntimeConfiguration;
-
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
@@ -127,15 +125,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * @param affinity 工作线程使用的 CPU 亲和配置
      */
     public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
-                         java.util.function.Consumer<Throwable> failurePublisher,
-                         int matcherShardCount, TradingCpuAffinity affinity) {
-        this(role, lane, requestedCapacity, failurePublisher, matcherShardCount, affinity,
-                CoreRuntimeConfiguration.standalone());
-    }
-
-    public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
             java.util.function.Consumer<Throwable> failurePublisher, int matcherShardCount,
-            TradingCpuAffinity affinity, CoreRuntimeConfiguration configuration) {
+            TradingCpuAffinity affinity) {
         this.failurePublisher = java.util.Objects.requireNonNull(failurePublisher);
         if (role == null || role.isBlank() || lane == null || requestedCapacity <= 0
                 || matcherShardCount <= 0) {
@@ -280,24 +271,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
      */
     public boolean hasCapacity() {
         return running && failure == null && depth() < commands.length;
-    }
-
-    /**
-     * 先检查运行与故障及准入物理容量，再采样总深度；符合准入预算时返回深度，否则返回负一，不预留队列位置。
-     */
-    public int admissionDepthIfAvailable() {
-        if (!running || failure != null) return -1;
-        // 生产者本次准备写入的零起始位置
-        long next = admissionProducerSequence.value;
-        if (next - cachedAdmissionConsumerSequence >= admissionCommands.length) {
-            cachedAdmissionConsumerSequence = admissionConsumerSequence.value;
-            if (next - cachedAdmissionConsumerSequence >= admissionCommands.length) {
-                return -1;
-            }
-        }
-        // 本轮普通、准入及直接结算总采样深度
-        int currentDepth = depth();
-        return currentDepth < admissionCommands.length ? currentDepth : -1;
     }
 
     /**

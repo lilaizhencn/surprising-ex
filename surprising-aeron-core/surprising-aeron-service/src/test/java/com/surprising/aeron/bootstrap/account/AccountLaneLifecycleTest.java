@@ -1,6 +1,5 @@
 package com.surprising.aeron.bootstrap.account;
 
-import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.account.AccountLaneState;
@@ -13,7 +12,7 @@ class AccountLaneLifecycleTest {
         var lanes = new AccountLaneState[topology.accountLaneCount()];
         lanes[0] = new AccountLaneState(0, topology.accountLaneQueueCapacity());
         // 第二条 Lane 的非法输入模拟创建中途失败；第一条工作线程已经实际启动。
-        var lifecycle = new AccountLaneLifecycle(lanes, topology, CoreRuntimeConfiguration.standalone(),
+        var lifecycle = new AccountLaneLifecycle(lanes, topology,
                 () -> { });
         assertThatThrownBy(() -> lifecycle.start(TradingCpuAffinity.disabled()))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -27,7 +26,7 @@ class AccountLaneLifecycleTest {
         var lanes = new AccountLaneState[topology.accountLaneCount()];
         for (int laneId = 0; laneId < lanes.length; laneId++)
             lanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
-        try (var lifecycle = new AccountLaneLifecycle(lanes, topology, CoreRuntimeConfiguration.standalone(),
+        try (var lifecycle = new AccountLaneLifecycle(lanes, topology,
                 () -> { })) {
             lifecycle.start(TradingCpuAffinity.disabled());
             assertThat(lifecycle.ownerHasAccess()).isFalse();
@@ -47,7 +46,7 @@ class AccountLaneLifecycleTest {
             lanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
         var rejectOwner = new java.util.concurrent.atomic.AtomicBoolean();
         var first = new IllegalStateException("ownership release failed");
-        var lifecycle = new AccountLaneLifecycle(lanes, topology, CoreRuntimeConfiguration.standalone(),
+        var lifecycle = new AccountLaneLifecycle(lanes, topology,
                 () -> { if (rejectOwner.get()) throw first; });
         lifecycle.start(TradingCpuAffinity.disabled());
         rejectOwner.set(true);

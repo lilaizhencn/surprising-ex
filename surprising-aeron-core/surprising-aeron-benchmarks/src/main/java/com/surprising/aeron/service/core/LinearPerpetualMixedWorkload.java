@@ -42,7 +42,7 @@ import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Scenari
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.aeron.support.metrics.CoreLaneMetrics;
+import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -281,7 +281,7 @@ public final class LinearPerpetualMixedWorkload {
             private long terminalLifecycleOperations;
             private long maxBacklog;
             private long laneOperations;
-            private long[] laneOperationsByType = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
+            private long[] laneOperationsByType = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
             private long liquidationId;
             private boolean lossLifecycleExecuted;
             private boolean lossLifecycleCompleted;
@@ -595,10 +595,10 @@ public final class LinearPerpetualMixedWorkload {
     }
 
     private static long[] completedLaneOperations(TradingCoreRuntime state) {
-        long[] total = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
+        long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
         long[] completed = state.laneMetrics().accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
-            int type = index % CoreLaneMetrics.OPERATION_TYPE_COUNT;
+            int type = index % CoreLaneMetricsView.OPERATION_TYPE_COUNT;
             total[type] = Math.addExact(total[type], completed[index]);
         }
         return total;

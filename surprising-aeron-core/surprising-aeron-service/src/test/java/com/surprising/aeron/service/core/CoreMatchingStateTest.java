@@ -27,7 +27,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.support.metrics.CoreLaneMetrics;
+import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -286,7 +286,7 @@ class CoreMatchingStateTest {
             int takerLane = state.runtimeState.topology().accountLaneId(9);
             assertThat(makerLane).isNotEqualTo(takerLane);
             // 完成后读取的 Lane 应用与提交水位指标。
-            CoreLaneMetrics metrics = state.laneMetrics();
+            CoreLaneMetricsView metrics = state.laneMetrics();
             assertThat(metrics.accountLaneAppliedSequences()[makerLane]).isEqualTo(state.snapshotProjectionSequence());
             assertThat(metrics.accountLaneCommittedSequences()[makerLane]).isEqualTo(state.snapshotProjectionSequence());
             assertThat(metrics.accountLaneAppliedSequences()[takerLane]).isEqualTo(state.snapshotProjectionSequence());

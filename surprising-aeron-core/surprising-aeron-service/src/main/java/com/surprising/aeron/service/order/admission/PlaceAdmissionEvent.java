@@ -45,8 +45,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private boolean inputQueued;
     /** Owner 固定并借用的不可变账本事实，供 Lane 检查资金费及到期结算冲突。 */
     private TreasuryRuntime.SettlementStatus settlementStatus;
-    /** Matcher 是否会借用此事件等待准入回执，要求消费后才能归还对象池。 */
-    private boolean matcherWaitRequired;
     /** 本订单实际冻结资产的运行时编号。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -127,7 +125,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
      * @param settlementStatus 准入前固定的非空账本结算事实
      * @param assetId 订单冻结资产的运行时编号
      * @param laneId 所属账户 Lane 编号
-     * @param matcherWaitRequired 是否需要保留事件直到 Matcher 消费其准入回执
      * @param runtime 所属交易运行时，提供原账户写入与完成交接
      * @param identities 当前产品身份表，供所属 Lane 查找持仓和准备客户键
      * @param timestamp 本命令固定的集群业务时间
@@ -135,7 +132,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
      */
     public PlaceAdmissionEvent prepare(long coreSequence, long userId, UUID commandId,
                                 TreasuryRuntime.SettlementStatus settlementStatus,
-                                int assetId, int laneId, boolean matcherWaitRequired,
+                                int assetId, int laneId,
                                 TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
                                 long timestamp, long position) {
         if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0
@@ -156,7 +153,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         this.identities = identities;
         this.assetId = assetId;
         this.laneId = laneId;
-        this.matcherWaitRequired = matcherWaitRequired;
         this.runtime = runtime;
         rejection = null;
         closeCapacityCancellations = List.of();
@@ -171,7 +167,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     @Override
     public void clear() {
         if (!complete()) throw new IllegalStateException("cannot recycle an incomplete place admission");
-        if (matcherWaitRequired && !matcherConsumed) {
+        if (!matcherConsumed) {
             throw new IllegalStateException("cannot recycle a place admission before matcher handoff");
         }
         clearResolvedOrder();
@@ -184,7 +180,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         decisionTimestamp = 0;
         rejection = null;
         closeCapacityCancellations = List.of();
-        matcherWaitRequired = false;
         matcherConsumed = false;
         inputQueued = false;
         inputReady = true;
@@ -305,7 +300,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         inputQueued = false;
         inputReady = true;
         openInterestSteps = 0;
-        matcherWaitRequired = false;
         matcherConsumed = false;
         completed = false;
     }
@@ -344,9 +338,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     /**
-     * 无需 Matcher 等待的事件直接视为可消费完成，否则读取实际消费发布位。
+     * 读取实际消费发布位。
      */
-    public boolean matcherConsumed() { return !matcherWaitRequired || matcherConsumed; }
+    public boolean matcherConsumed() { return matcherConsumed; }
 
     /**
      * 要求准入已完成；成功返回撮合前撤单编号，拒绝时返回空列表，不能执行失败准入的撤单建议。
@@ -360,7 +354,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
      * 已完成的准入不再需要进入 Matcher 等待路径时，显式发布消费完成；重复取消或条件不符视为内部错误。
      */
     public void cancelMatcherWait() {
-        if (!complete() || !matcherWaitRequired || matcherConsumed) {
+        if (!complete() || matcherConsumed) {
             throw new IllegalStateException("invalid matcher admission cancellation");
         }
         matcherConsumed = true;

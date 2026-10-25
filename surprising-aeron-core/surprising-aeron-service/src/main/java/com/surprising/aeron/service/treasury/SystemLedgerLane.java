@@ -1,7 +1,5 @@
 package com.surprising.aeron.service.treasury;
 
-import com.surprising.aeron.config.CoreRuntimeConfiguration;
-
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;

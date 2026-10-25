@@ -28,7 +28,7 @@ import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Harness
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.Scenario;
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.aeron.support.metrics.CoreLaneMetrics;
+import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
@@ -159,7 +159,7 @@ public final class DerivativeMixedWorkload {
             private long terminalCoreMessages;
             private long maxBacklog;
             private long laneOperations;
-            private final long[] laneOperationsByType = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
+            private final long[] laneOperationsByType = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
             private final long[] markSequences = new long[template.symbols().size()];
             private final long[] fundingIds = new long[template.symbols().size()];
             private final long[] fundingCursors = new long[template.symbols().size()];
@@ -350,10 +350,10 @@ public final class DerivativeMixedWorkload {
     }
 
     private static long[] completedLaneOperations(TradingCoreRuntime state) {
-        long[] total = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
+        long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
         long[] completed = state.laneMetrics().accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
-            total[index % CoreLaneMetrics.OPERATION_TYPE_COUNT] += completed[index];
+            total[index % CoreLaneMetricsView.OPERATION_TYPE_COUNT] += completed[index];
         }
         return total;
     }

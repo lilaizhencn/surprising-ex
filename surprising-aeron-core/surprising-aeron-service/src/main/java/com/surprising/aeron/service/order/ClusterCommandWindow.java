@@ -126,14 +126,6 @@ public final class ClusterCommandWindow {
     }
 
     /**
-     * 返回当前候选是否已保存静态路由。
-     */
-    public boolean hasRoute() { return candidateRouted; }
-    /**
-     * 已路由时返回候选用户，否则返回零。
-     */
-    public long routeUserId() { return candidateRouted ? candidateUser : 0; }
-    /**
      * 已路由时返回候选 Matcher 分片，否则返回负一。
      */
     public int routeMatcherShard() { return candidateRouted ? candidateMatcherShard : -1; }
