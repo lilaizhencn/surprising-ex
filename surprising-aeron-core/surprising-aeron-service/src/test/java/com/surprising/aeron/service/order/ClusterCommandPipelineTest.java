@@ -380,18 +380,18 @@ class ClusterCommandPipelineTest {
                         var pending = state.pendingMatching().get(sequence);
                         // 普通、批量或当前子项持有的直达结算事件
                         var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
-                        // 撮合前已经可见的准入回执，测试保留它检查身份及稳定输入
-                        var receipt = batch
-                                ? pending.orderBatch.preparedAdmittedOrders[0]
-                                : pending.admittedPlaceOrder();
-                        return event != null && event.dispatched() && receipt != null;
+                        // 等待原准入收据就绪；普通单观察 Owner 已收齐标记，随后读取原准入事件
+                        boolean receiptReady = batch
+                                ? pending.orderBatch.preparedAdmittedOrders[0] != null
+                                : pending.placeAdmissionOwnerCollected();
+                        return event != null && event.dispatched() && receiptReady;
                     });
                     // 仍在生命周期中的原命令槽
                     var pending = state.pendingMatching().get(sequence);
                     // 批次所属项保存的可空准入订单副本
                     var admitted = batch ? pending.orderBatch.preparedAdmittedOrders[0] : null;
                     // 普通下单已解析的准入输入，批次分支为空
-                    var resolved = batch ? null : pending.admittedPlaceOrder();
+                    var resolved = batch ? null : pending.placeAdmission().resolvedOrder();
                     assertThat(batch ? admitted : resolved).isNotNull();
                     // 普通准入时确定的订单编号，后续不能重新分配
                     long resolvedOrderId = batch ? 0 : resolved.orderId();
@@ -475,11 +475,11 @@ class ClusterCommandPipelineTest {
                     var pending = state.pendingMatching().get(sequence);
                     // 普通、批量或当前子项持有的直达结算事件
                     var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
-                    // 撮合前已经可见的准入回执，测试保留它检查身份及稳定输入
-                    var receipt = batch
-                            ? pending.orderBatch.preparedAdmittedOrders[0]
-                            : pending.admittedPlaceOrder();
-                    return event != null && event.dispatched() && receipt != null;
+                    // 等待原准入收据就绪；普通单观察 Owner 已收齐标记，随后读取原准入事件
+                    boolean receiptReady = batch
+                            ? pending.orderBatch.preparedAdmittedOrders[0] != null
+                            : pending.placeAdmissionOwnerCollected();
+                    return event != null && event.dispatched() && receiptReady;
                 });
                 // 仍在生命周期中的原命令槽
                 var pending = state.pendingMatching().get(sequence);
@@ -491,7 +491,7 @@ class ClusterCommandPipelineTest {
                 // 批量准入保存的订单副本，普通单分支为空
                 var admittedOrder = batch ? pending.orderBatch.preparedAdmittedOrders[0] : null;
                 // 普通单已解析的准入输入，批次分支为空
-                var resolvedOrder = batch ? null : pending.admittedPlaceOrder();
+                var resolvedOrder = batch ? null : pending.placeAdmission().resolvedOrder();
                 assertThat(batch ? admittedOrder : resolvedOrder).isNotNull();
                 // 撮合前保存的批量准入订单值，用于比较结算没有改写该回执
                 var orderBeforeSettlement = batch ? admittedOrder.snapshot() : null;

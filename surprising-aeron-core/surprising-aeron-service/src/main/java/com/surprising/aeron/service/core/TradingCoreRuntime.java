@@ -2680,9 +2680,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
         // 在途命令此前保存的可空 taker 订单引用
         OrderRuntime taker = pending.realtimeTakerOrder();
         // 此前保存的已解析 taker 信息，存在时优先用于实时成交捕获
-        ResolvedPlaceOrder resolvedTaker = pending.place().realtimeResolvedTakerOrder();
+        ResolvedPlaceOrder resolvedTaker = pending.realtimeResolvedTakerOrder();
         pending.realtimeTakerOrder(null);
-        pending.place().realtimeResolvedTakerOrder(null);
+        pending.realtimeResolvedTakerOrder(null);
         if (realtimeCapture == null || !realtimeCapture.active()) return;
         try {
             for (/* 当前数组或事件列表的遍历下标 */ int index = 0; index < plan.matcherEventCount(); index++) {

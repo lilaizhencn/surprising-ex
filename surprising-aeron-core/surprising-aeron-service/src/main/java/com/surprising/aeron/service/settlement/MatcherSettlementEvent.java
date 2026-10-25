@@ -456,18 +456,15 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * Matcher 校验 Lane 固定收据槽的预留、版本及金额，只保存接受标记和结果码，最后通过 volatile 标记发布回执；同代不允许重复发布。
+     * Matcher 校验 Lane 固定收据槽的订单身份，只保存接受标记和结果码，最后通过 volatile 标记发布回执；同代不允许重复发布。
      * @param reservationId 准入回执中的预留编号，必须等于本代准入订单编号
-     * @param accountVersion 准入回执中的非负账户版本
-     * @param reservedAmount 准入回执中的非负冻结金额
      * @param accepted 账户准入是否接受本单
      * @param resultCode 准入编码或合成拒绝业务码，类型及约束以对应入口为准
      */
-    public void admissionReceipt(long reservationId, long accountVersion, long reservedAmount,
-                          boolean accepted, int resultCode) {
+    public void admissionReceipt(long reservationId, boolean accepted, int resultCode) {
         if (batchPlanCount == 0 || !admissionRequired || admissionResolved || reservationId <= 0
                 || reservationId != admissionOrderId
-                || accountVersion < 0 || reservedAmount < 0 || resultCode < 0) {
+                || resultCode < 0) {
             throw new IllegalStateException("invalid place admission receipt");
         }
         admissionAccepted = accepted;

@@ -2563,8 +2563,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (pendingReservations.hasPendingUser(orderId)) {
             throw new IllegalStateException("place admission was collected twice");
         }
-        // 按用户计算出的 Lane 编号；当前实现没有继续使用这个局部值
-        int laneId = topology.accountLaneId(userId);
         pendingReservations.indexPendingReservation(userId, orderId, event.coreSequence(),
                 Math.incrementExact(pendingReservations.totalPendingReservations()));
         revision = Math.incrementExact(revision);

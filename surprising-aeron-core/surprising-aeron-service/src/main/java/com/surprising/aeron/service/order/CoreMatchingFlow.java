@@ -450,8 +450,7 @@ public final class CoreMatchingFlow {
             } else {
                 // Lane 完成准入后收集的普通下单输入。
                 ResolvedPlaceOrder admitted = owner.runtimeState().collectPlaceAdmission(admission);
-                pending.admissionCompleted(admitted);
-                if (owner.realtimeCapture() != null) pending.place.realtimeResolvedTakerOrder = admitted;
+                if (owner.realtimeCapture() != null) pending.realtimeResolvedTakerOrder(admitted);
             }
             pending.markPlaceAdmissionOwnerCollected();
         }

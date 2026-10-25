@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.*;
  */
 class PlaceLaneDecisionTest {
     /**
-     * 阻塞真实账户 Lane 后派发过期价格准入，确认尚无解析结果或撮合价格；放行得到 freshness 拒绝并归还，再复用同一槽以有效时间准入，检查撮合价及 maker、taker 费率。
+     * 阻塞真实账户 Lane 后检查价格拒绝，再用有效价格制造准入拒绝并核对身份索引回退；复用同一槽成功准入，检查真实客户键、撮合价及费率。
      */
     @Test void priceAndFeeResolveOnlyAfterLaneConsumesAndRejectedSlotsAreReusable() throws Exception {
         // 标的一的 U 本位永续测试合约
@@ -90,20 +90,38 @@ class PlaceLaneDecisionTest {
                 await(runtime, rejected);
                 assertThat(rejected.rejection()).isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class)
                         .hasMessageContaining("freshness");
-                assertThat(rejected.clientKey()).isZero();
+                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.findClientKeyValueInLane(
+                        runtime.accountLane(laneId), 7, "client"))).isZero();
                 rejected.cancelMatcherWait();
                 runtime.releasePlaceAdmission(rejected);
+                var insufficient = runtime.acquirePlaceAdmission();
+                assertThat(insufficient).isSameAs(rejected);
+                var oversized = new PlaceOrderCommand(12, "1", CoreOrderSide.BUY, 0, 1_000_000, false,
+                        CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
+                        CoreTimeInForce.IOC, false, "client");
+                CoreOrderDecisionResolver.prepare(insufficient, runtime, identities, 7, oversized, 1_001);
+                runtime.dispatchPlaceAdmission(3, 7, insufficient, new UUID(1, 3), runtime.treasury().settlementStatus(symbol), asset,
+                        identities, 1_001, 3);
+                await(runtime, insufficient);
+                assertThat(insufficient.resolvedOrderInitialized()).isTrue();
+                assertThat(insufficient.rejection()).isInstanceOf(com.surprising.aeron.exception.CoreStateRejectedException.class);
+                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.findClientKeyValueInLane(
+                        runtime.accountLane(laneId), 7, "client"))).isZero();
+                insufficient.cancelMatcherWait();
+                runtime.releasePlaceAdmission(insufficient);
                 // 拒绝槽归还后再次借出的同一实例，本轮使用有效价格时间
                 var accepted = runtime.acquirePlaceAdmission();
                 assertThat(accepted).isSameAs(rejected);
                 CoreOrderDecisionResolver.prepare(accepted, runtime, identities, 7, command, 1_001);
-                runtime.dispatchPlaceAdmission(3, 7, accepted, new UUID(1, 3), runtime.treasury().settlementStatus(symbol), asset,
-                        identities, 1_001, 3);
+                runtime.dispatchPlaceAdmission(4, 7, accepted, new UUID(1, 4), runtime.treasury().settlementStatus(symbol), asset,
+                        identities, 1_001, 4);
                 await(runtime, accepted);
                 assertThat(accepted.rejection()).isNull();
                 assertThat(accepted.resolvedOrder().matchingPriceTicks()).isEqualTo(101);
                 assertThat(accepted.makerFeeRatePpm()).isEqualTo(-10);
                 assertThat(accepted.takerFeeRatePpm()).isEqualTo(20);
+                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.findClientKeyValueInLane(
+                        runtime.accountLane(laneId), 7, "client"))).isPositive();
                 accepted.cancelMatcherWait();
                 runtime.releasePlaceAdmission(accepted);
             } finally { release.countDown(); }

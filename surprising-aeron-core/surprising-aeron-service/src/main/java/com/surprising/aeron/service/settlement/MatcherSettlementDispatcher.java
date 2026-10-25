@@ -134,7 +134,7 @@ public final class MatcherSettlementDispatcher {
         owner.assertOwner();
         if (admission == null) throw new IllegalArgumentException("place admission is missing");
         // 准入已解析的订单输入，用于填充替换命令槽或保存币对信息。
-        ResolvedPlaceOrder resolved = admission.preparedOrder();
+        ResolvedPlaceOrder resolved = admission.matchingOrder();
         owner.ensureMatcherSettlementDispatchCapacity(laneMask);
         // 本次从对象池借用或新建的结算事件。
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();

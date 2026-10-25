@@ -45,8 +45,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private boolean inputQueued;
     /** Owner 固定并借用的不可变账本事实，供 Lane 检查资金费及到期结算冲突。 */
     private TreasuryRuntime.SettlementStatus settlementStatus;
-    /** Lane 为当前客户端订单标识准备的实际客户键，拒绝时回退并清零。 */
-    private long preparedClientKey;
     /** Matcher 是否会借用此事件等待准入回执，要求消费后才能归还对象池。 */
     private boolean matcherWaitRequired;
     /** 本订单实际冻结资产的运行时编号。 */
@@ -67,10 +65,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private FeePolicyBook decisionPolicies;
     /** Owner 固定的决策业务时间，价格鲜度、费率及到期检查使用此值。 */
     private long decisionTimestamp;
-    /** 账户准入计算的应预留金额，回执连同是否获准一起交给 Matcher。 */
-    private long reservedAmount;
-    /** 成功写入订单后用户账户版本，用于 Matcher 结算回执核对。 */
-    private long admittedAccountVersion;
     /** Lane 捕获的业务拒绝、算术或参数异常，完成后由 Owner 或 Matcher 读取。 */
     private RuntimeException rejection;
     /** 撮合前应执行的撤单编号，合并平仓容量冲突和原账户前置撤单规则，不交出可变订单实体。 */
@@ -159,16 +153,13 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         inputQueued = false;
         inputReady = !instrument().usesOpenInterestForUserLimit() || reduceOnly();
         this.settlementStatus = settlementStatus;
-        this.preparedClientKey = 0;
         this.identities = identities;
         this.assetId = assetId;
         this.laneId = laneId;
         this.matcherWaitRequired = matcherWaitRequired;
         this.runtime = runtime;
-        admittedAccountVersion = 0;
         rejection = null;
         closeCapacityCancellations = List.of();
-        reservedAmount = 0;
         completed = false;
         matcherConsumed = false;
         return this;
@@ -186,16 +177,13 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         clearResolvedOrder();
         commandId = null;
         settlementStatus = null;
-        preparedClientKey = 0;
         runtime = null;
         identities = null;
         decisionMark = null;
         decisionPolicies = null;
         decisionTimestamp = 0;
-        admittedAccountVersion = 0;
         rejection = null;
         closeCapacityCancellations = List.of();
-        reservedAmount = 0;
         matcherWaitRequired = false;
         matcherConsumed = false;
         inputQueued = false;
@@ -214,6 +202,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         if (lane.laneId() != runtime.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place admission reached the wrong Account Lane");
         }
+        long preparedClientKey = 0;
         try {
             runtime.enterLaneCommandScope(lane);
             try {
@@ -236,7 +225,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                         runtime, lane, userId, this, openInterestSteps,
                         lane.admissionOrderIndex(symbolId), preparedClientKey, positionKey,
                         lifecycleSettled, fundingInProgress);
-                reservedAmount = requiredReservation;
                 // 当前已有持仓，逆向非只减仓新单可能需要先撤冲突平仓委托。
                 PositionRuntime currentPosition = positionKey == 0 ? null : lane.position(positionKey);
                 if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
@@ -251,13 +239,11 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                         side(), matchingPriceTicks(), orderId(), orderId(), closeCapacityCancellations);
                 runtime.placeOrderInLane(lane, userId, this, commandId,
                         requiredReservation, preparedClientKey, symbolId, assetId, coreSequence, null, timestamp, position);
-                admittedAccountVersion = lane.user(userId).revision();
             } finally {
                 runtime.exitLaneCommandScope(lane);
             }
         } catch (/* 本次准入的业务拒绝、溢出或参数错误，回退客户身份准备并保存到拒绝回执。 */ CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             identities.rollbackClientKeyInLane(lane, userId, clientOrderId(), preparedClientKey);
-            preparedClientKey = 0;
             rejection = failure;
         }
         // 完成位可见前先取得通知所需的运行时引用；排队事件仍保留到本命令的 Matcher 续步消费完回执。
@@ -316,16 +302,13 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         clearResolvedOrder();
         commandId = null;
         settlementStatus = null;
-        preparedClientKey = 0;
         runtime = null;
         identities = null;
         decisionMark = null;
         decisionPolicies = null;
         decisionTimestamp = 0;
-        admittedAccountVersion = 0;
         rejection = null;
         closeCapacityCancellations = List.of();
-        reservedAmount = 0;
         coreSequence = 0;
         userId = 0;
         laneId = 0;
@@ -339,7 +322,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
 
     /**
      * Matcher 最多等待三十秒取得 Lane 回执，区分成功、业务拒绝、溢出及非法参数并填入原结算事件；读取完撤单编号后先捕获通知对象，再发布消费位，之后不再访问本事件字段。
-     * @param target Matcher 已准备的原结算事件，接收准入成功标记、金额、版本和前置撤单编号
+     * @param target Matcher 已准备的原结算事件，接收订单身份、准入结果及前置撤单编号
      */
     public void awaitMatcherReceipt(MatcherSettlementEvent target) {
         if (target == null) {
@@ -347,8 +330,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         }
         // Matcher 等待 Lane 回执的三十秒单调时钟上限，不参与订单业务时间判断。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-        // 原实现保留的局部计数，当前等待循环没有读取或递增它。
-        int spins = 0;
         while (!completed) {
             if (System.nanoTime() >= deadline) {
                 throw new IllegalStateException("timed out waiting for place admission sequence="
@@ -365,8 +346,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
                 ? CoreResultCode.fromRejectionCode(stateRejected.code())
                 : rejection instanceof ArithmeticException ? CoreResultCode.ARITHMETIC_OVERFLOW
                 : CoreResultCode.INVALID_COMMAND;
-        target.admissionReceipt(orderId(), admittedAccountVersion, reservedAmount,
-                rejection == null, resultCode.wireCode());
+        target.admissionReceipt(orderId(), rejection == null, resultCode.wireCode());
         if (rejection == null) target.addAdmissionCancellations(closeCapacityCancellations);
         // 先取得通知目标，再发布消费位。Owner 可能立即清空池化事件；消费位可见后 Matcher 只使用已捕获引用，不再读取事件字段。
         // 发布完成或消费位之前先取得的通知目标，避免对象回收清理 runtime 后再读取该字段。
@@ -399,10 +379,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     /**
-     * 返回本次准入准备的实际客户端订单身份键，读取前由调用方遵守完成边界。
-     */
-    public long clientKey() { return preparedClientKey; }
-    /**
      * 只有完整决策已完成且准入成功才交出本对象作为订单输入，不能把半成品或拒单当获准订单。
      */
     public ResolvedPlaceOrder resolvedOrder() {
@@ -413,17 +389,9 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     /**
-     * 路由准备好就允许 Matcher 保留同一输入引用，但读取 Lane 补齐的价格和费率前仍必须等准入回执。
+     * 返回已绑定的路由输入，供 Owner 预构建结算或 Matcher 借用；读取 Lane 补齐的价格和费率前仍必须等准入回执。
      */
     public ResolvedPlaceOrder matchingOrder() {
-        if (intent() == null) throw new IllegalStateException("place admission is not prepared");
-        return this;
-    }
-
-    /**
-     * Owner 仅使用已经绑定的路由输入预构建结算事件，不代表账户已准入或价格字段已经可跨线程读取。
-     */
-    public ResolvedPlaceOrder preparedOrder() {
         if (intent() == null) throw new IllegalStateException("place admission is not prepared");
         return this;
     }

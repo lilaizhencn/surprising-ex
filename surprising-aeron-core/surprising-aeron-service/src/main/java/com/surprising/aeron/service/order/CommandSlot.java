@@ -85,10 +85,12 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     @Getter(value = AccessLevel.PACKAGE)
     private CoreMatchingOrder admittedMatchingOrder;
 
-    /**  普通下单专有事件、准入结果和收据标记。 返回本槽固定的普通下单专有上下文。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final PlaceSlotContext place = new PlaceSlotContext();
+    /** 普通下单在所属 Lane 执行的准入事件。 */
+    private PlaceAdmissionEvent placeAdmission;
+    /** Owner 是否已收取本次准入收据。 */
+    private boolean placeAdmissionOwnerCollected;
+    /** 实时成交捕获仍需借用的准入输入。 */
+    private ResolvedPlaceOrder realtimeResolvedTakerOrder;
     /** 触发子单已经完成冻结准入的订单引用。 */
     private OrderRuntime triggerAdmissionOrder;
     /** 触发续步已绑定的唯一源触发单收据。 */
@@ -679,7 +681,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         commitFenceClusterPosition = 0;
         commitFenceEstablished = false;
         settlementContinuation = null;
-        place.clear();
+        clearPlaceReferences();
         replacementAdmission = null;
         settlementPlan = null;
         admittedMatchingOrder = null;
@@ -813,7 +815,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      * 返回普通下单的 Lane 准入事件。
      */
     public PlaceAdmissionEvent placeAdmission() {
-        return place.admission();
+        return placeAdmission;
     }
     /**
      * 返回是否仍保留结算事件引用。
@@ -833,8 +835,8 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     PlaceAdmissionEvent takePlaceAdmission() {
         // 当前方法准备取走并清引用的原值。
-        PlaceAdmissionEvent value = place.admission;
-        place.admission = null;
+        PlaceAdmissionEvent value = placeAdmission;
+        placeAdmission = null;
         return value;
     }
     /**
@@ -842,43 +844,28 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      * @param event 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
      */
     public void placeAdmission(PlaceAdmissionEvent event) {
-        if (event == null || place.admission != null || operation != Operation.PLACE) {
+        if (event == null || placeAdmission != null || operation != Operation.PLACE) {
             throw new IllegalStateException("invalid place admission continuation");
         }
-        place.admission(event);
-    }
-    /**
-     * 要求已有 PLACE 准入事件且没有旧准入结果或独立撮合输入，再保存 Lane 返回的非空准入订单。
-     * @param resolvedOrder 已经完成准入的下单对象
-     */
-    void admissionCompleted(ResolvedPlaceOrder resolvedOrder) {
-        if (resolvedOrder == null || placeAdmission() == null || place.admittedOrder != null
-                || admittedMatchingOrder != null) {
-            throw new IllegalStateException("invalid completed place admission");
-        }
-        place.admittedOrder(resolvedOrder);
+        placeAdmission = event;
     }
     /**
      * 返回 Owner 是否已收集本次下单准入收据。
      */
-    boolean placeAdmissionOwnerCollected() { return place.ownerCollected(); }
+    boolean placeAdmissionOwnerCollected() { return placeAdmissionOwnerCollected; }
     /**
      * 标记下单准入已由 Owner 收集，不在此重新读 Lane。
      */
-    void markPlaceAdmissionOwnerCollected() { place.markOwnerCollected(); }
-    /**
-     * 返回 Lane 已完成下单准入后保存的订单引用。
-     */
-    ResolvedPlaceOrder admittedPlaceOrder() { return place.admittedOrder(); }
+    void markPlaceAdmissionOwnerCollected() { placeAdmissionOwnerCollected = true; }
     /**
      * 返回为实时推送保留的准入订单引用。
      */
-    ResolvedPlaceOrder realtimeResolvedTakerOrder() { return place.realtimeResolvedTakerOrder; }
+    public ResolvedPlaceOrder realtimeResolvedTakerOrder() { return realtimeResolvedTakerOrder; }
     /**
      * 保存可空实时准入订单引用，不复制对象。
      * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
      */
-    void realtimeResolvedTakerOrder(ResolvedPlaceOrder order) { place.realtimeResolvedTakerOrder = order; }
+    public void realtimeResolvedTakerOrder(ResolvedPlaceOrder order) { realtimeResolvedTakerOrder = order; }
     /**
      * 返回触发续步已经冻结的源触发单收据，避免再回读 Lane 客户端索引。
      */
@@ -965,7 +952,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         decodedCommand = null;
         admission = null;
         settlementContinuation = null;
-        place.clear();
+        clearPlaceReferences();
         replacementAdmission = null;
         settlementPlan = null;
         admittedMatchingOrder = null;
@@ -1441,7 +1428,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         commitSnapshotProvisionalOnly = false;
         commitContextActive = false;
         matchingRejection = null;
-        place.clear();
+        clearPlaceReferences();
         replacementAdmission = null;
         matchingLifecycle = MATCHING_ADMITTED;
         clearDeferredMatching();
@@ -2208,61 +2195,12 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         }
     }
 
-    /**
-     * 普通下单专有的 Lane 准入事件、已收取标记和准入订单引用，外层命令槽负责阶段约束。
-     */
-    public static final class PlaceSlotContext {
-        /**
-         *  普通下单的 Lane 准入事件。
-         * 返回当前下单准入事件。
-         * 直接保存下单准入事件引用，操作及重复绑定检查由外层入口执行。
-         * @param admission 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
-         */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        @Setter(value = AccessLevel.PACKAGE)
-        PlaceAdmissionEvent admission;
-        /**  Owner 是否已经收取普通下单准入收据。 返回 Owner 已收取准入收据标记。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        boolean ownerCollected;
-        /**
-         *  Lane 完成准入后保存的下单输入。
-         * 返回已准入订单引用。
-         * 直接保存已准入订单引用，不复制对象。
-         * @param admittedOrder 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
-         */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        @Setter(value = AccessLevel.PACKAGE)
-        ResolvedPlaceOrder admittedOrder;
-        /**
-         *  实时推送借用的已准入订单引用。
-         * 返回实时推送借用的准入订单。
-         * 保存可空实时推送准入订单引用。
-         * @param realtimeResolvedTakerOrder 要保存或返回的当前字段值，方法本身不复制引用
-         */
-        @Accessors(fluent = true, chain = false)
-        @Getter
-        @Setter
-        ResolvedPlaceOrder realtimeResolvedTakerOrder;
-
-        /**
-         * 将已收取标记置真。
-         */
-        void markOwnerCollected() { this.ownerCollected = true; }
-
-        /**
-         * 清下单事件、收取标记、准入订单及实时推送借用引用。
-         */
-        void clear() {
-            admission = null;
-            ownerCollected = false;
-            admittedOrder = null;
-            realtimeResolvedTakerOrder = null;
-        }
-
-}
+    /** 解除普通下单的准入和实时引用，收据交接由调用方先完成。 */
+    private void clearPlaceReferences() {
+        placeAdmission = null;
+        placeAdmissionOwnerCollected = false;
+        realtimeResolvedTakerOrder = null;
+    }
 
     /** 清强平工作内部引用，保留工作对象供下一次复用。 */
     private void clearLiquidationReferences() {
