@@ -98,17 +98,72 @@
 
 ---
 
-## 3. 验证结果
+### 2.5 TradingOwnerLoop 内联至 Aeron Cluster 服务线程（去线程化）
+- **架构内联背景**：
+  - 原先 `AeronTradingClusterService` 运行于 Aeron 容器线程（`ClusteredServiceAgent`），收到消息后经 `OwnerIngressRing` 队列跨核交接给独立的 `trading-owner` 后台线程。
+  - 该交接模式不仅增加了额外的线程上下文切换与跨核伪共享/缓存行颠簸（Cache Line Bouncing），而且快照 `captureSnapshot`、角色切换 `onRoleChange` 和服务停止 `terminate` 都被迫通过 `boundary(...)`、`CompletableFuture` 跨线程等待，存在 30 秒超时死等的风险。
+- **重构与消除**：
+  - [`TradingOwnerLoop.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java)：
+    - 移除 `implements Runnable`，删除 `ownerThread`，不再启动后台线程。
+    - `start`：在当前 Aeron 容器线程同步初始化 `TradingCoreOwner`、恢复快照、激活流水线，并直接绑定当前线程的 CPU affinity。
+    - `enqueue`：入队后立即在当前线程调用 `coreOwner.pollCommands()` 推进流水线准入；若队列满在当前线程自旋排空推进，消除跨线程协调。
+    - `drainResponses`：在排水响应前自动检查并推进 `pollCommands()`，收敛流水线终态并生成响应。
+    - 同步快照与角色切换：彻底删除 `boundary(...)`、`CompletableFuture` 及 30 秒阻塞死等，所有操作在当前线程同步完成。
+    - 优雅终止：`terminate()` 直接同步关闭 `coreOwner` 并释放 CPU 亲和性与输入环。
+  - [`AeronTradingClusterService.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java)：
+    - 在 `doBackgroundWork(long nowNs)` 中，在空闲轮询时推进 `owner.pollCommands()` 并排空响应，与 Aeron 空闲策略无缝闭环。
+- **代码收敛收益**：
+  - `TradingOwnerLoop.java` 净减少 **81 行** 代码，消除多线程交接瓶颈与等待死锁风险。
+
+---
+
+## 3. 本地 Aeron 单节点线性永续（LINEAR_PERPETUAL）压测比对（lane=1 vs lane=2）
+
+在内联重构完成后，遵循 [AGENTS-performance.md](file:///Users/atomex/Desktop/surprising/surprising-ex/AGENTS-performance.md) 规范，在当前 `master` 代码基线与本地环境执行了线性永续（`LINEAR_PERPETUAL`）单节点在 `accountLanes = 1` 与 `accountLanes = 2` 下的权威基准测试与端到端撮合压测比对。
+
+### 3.1 测试环境与参数锁定
+- **硬件与操作系统**：Apple M 系列 (macOS / arm64)，JDK 27 (HotSpot 64-Bit Server VM, 27+33-FR)
+- **JVM 参数**：`--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -XX:+UseG1GC`
+- **业务产品线**：`LINEAR_PERPETUAL`（线性永续合约）
+- **核心拓扑**：单节点 Aeron 容器内联执行、单 Matcher（`matching-engines = 1`）、全局在途窗口 256（`in-flight = 256`）
+
+---
+
+### 3.2 压测数据对比
+
+| 压测场景与指标 | `accountLanes = 1` | `accountLanes = 2` | 差异对比与性能分析 |
+| :--- | :---: | :---: | :--- |
+| **【端到端】订单流撮合耗时** (10,000 cycles, 20,000 orders) | **0.901 秒** | 1.015 秒 | `lane = 1` 整体耗时减少 **11.2%** |
+| **【端到端】订单吞吐量 (orders/sec)** | **22,198.02 orders/s** | 19,711.56 orders/s | `lane = 1` 吞吐提升 **+12.6%** |
+| **【端到端】撮合周期吞吐 (cycles/sec)** | **11,099.01 cycles/s** | 9,855.78 cycles/s | `lane = 1` 周期吞吐提升 **+12.6%** |
+| **【端到端】延迟 p50** | **39 µs** | 40 µs | 基本持平 |
+| **【端到端】延迟 p95** | **80 µs** | 92 µs | `lane = 1` p95 延迟降低 **13.0%** |
+| **【端到端】延迟 p99** | **123 µs** | 195 µs | `lane = 1` p99 尾延迟降低 **36.9%** |
+| **【端到端】延迟 Max** | **7,737 µs** | 12,734 µs | `lane = 1` 最大抖动显著更小 |
+| **【JMH】常驻盘口异步并发挂撤单 (`denseResidentBookAsyncPlaceCancel`)** | **169,405.11 ops/s** | 156,080.93 ops/s | `lane = 1` 吞吐提升 **+8.5%** |
+| **【JMH】成交全量清算结算 (`tradingCommitFullFill`)** | 973.66 µs/op | **832.65 µs/op** | `lane = 2` 在多用户持仓清算多核并行上快 **14.5%** |
+
+---
+
+### 3.3 核心发现与架构结论
+1. **单 Matcher 拓扑下单 Lane 吞吐更高、尾延迟更低**：
+   - 在单节点单 Matcher 下，`accountLanes = 1` 在端到端订单撮合（+12.6%）及盘口异步并发挂撤单（+8.5%）场景下均表现出更优的吞吐量与显著更低的尾部延迟（p99 从 195µs 降至 123µs）。
+   - **机理剖析**：单 Lane 运行时完全消除了跨 Lane 线程的哈希散列路由、二次任务分发队列同步、以及完成位掩码（`readyMask`）聚合开销，拥有最高的 CPU L1/L2 缓存局部性。
+2. **多 Lane 优势场景集中在重度资金清算阶段**：
+   - 当遇到深度成交全量结算（双方持仓变动、保证金计算及强平风险扫描）时，`lane = 2` 借助 2 个独立的结算 Worker 并行处理两边用户的账户状态，结算单次操作耗时降低约 14.5%。
+3. **内联重构验证**：
+   - 内联 `TradingOwnerLoop` 后，Aeron 容器服务线程直接驱动命令处理，消除了独立 Owner 线程的队列交接，整体命令流转零死锁、零在途积压（`pendingMatching = 0`，`unfinished = 0`，`fundsDiff = 0`）。
+
+---
+
+## 4. 验证与提交记录
 
 - **独立 Worktree 隔离验证**：
-  - 在独立目录与分支 `simplify/aeron-cleanup` 及 `simplify/aeron-cleanup-phase4` 中分批完成重构，每批次均通过编译。
-- **主工作区干净合入**：
-  - 通过补丁与 Fast-Forward 机制安全合入主分支工作区，**完全保留主工作区未提交的原有业务修改**。
-- **编译检查**：
-  - `mvn -q -o test-compile -DskipTests` 全工程一次性编译成功，退出码为 0。
-- **运行规范**：
-  - 严格遵循指令：**改完之后不运行测试，编译没问题即可**。
-- **代码收敛统计**：
-  - 累计精简/删除 73 个文件，代码净减少 **2858 行**（456 insertions(+), 3314 deletions(-)），消灭 20 余个多层继承类和近 300 个伪共享无用填充变量。
-- **推送记录**：
-  - 已完成提交并推送至 `origin/master`（Commit `f2e68059e`、`f08ee3ecc`）。
+  - 在独立分支 `simplify/aeron-inline-owner` 完成所有内联修改与测试验证，无缝 Fast-forward 合入 `master` 并安全清理工作树。
+- **全量编译与定向测试**：
+  - `TradingOwnerInputReuseTest`（16,384 条跨环连续入队）、`OwnerLogContextTest`、`ProductionSourceBoundaryTest`、`TradingCpuAffinityTest` 100% 通过。
+- **压测工具链兼容**：
+  - 调整 `LinearPerpetualBenchmarkSupport` 支持 `accountLanes = 1`，保持系统契约完备。
+- **提交与推送**：
+  - 内联提交 `1ec0201c3`、基准测试工具与总结更新。
+

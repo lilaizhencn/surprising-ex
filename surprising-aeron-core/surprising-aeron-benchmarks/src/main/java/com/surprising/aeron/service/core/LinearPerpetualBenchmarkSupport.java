@@ -177,9 +177,9 @@ public final class LinearPerpetualBenchmarkSupport {
     }
 
     public static void configureAccountLanes(int accountLanes) {
-        if (accountLanes < 2 || accountLanes > Long.SIZE
+        if (accountLanes < 1 || accountLanes > Long.SIZE
                 || (accountLanes & (accountLanes - 1)) != 0) {
-            throw new IllegalArgumentException("accountLanes must be a power of two in [2,64]");
+            throw new IllegalArgumentException("accountLanes must be a power of two in [1,64]");
         }
         System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
     }
