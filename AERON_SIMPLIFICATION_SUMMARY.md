@@ -441,7 +441,41 @@
 
 ---
 
-## 13. 累计重构成果统计与系统现状
+## 13. Round 3: 全工程深度排查与跨模块无用代码彻底清理
+
+### 13.1 核心服务与撮合链路死代码拔除
+- **`DeterministicExchangeCoreAdapter` 孤立死方法 `ensureSymbolAsync`**：
+  - 撮合引擎原生品种初始化已全量走同步 `ensureSymbol`，Future 包装的 `ensureSymbolAsync` 全工程零引用，彻底删除。
+- **`BalanceRuntime` 孤立资金扣减方法 `consumeLocked`**：
+  - 核心资金扣减由 `SystemLedgerLane` 与 `RuntimeTreasuryDelta` 权威统一管理，未进入事务的 `consumeLocked` 零调用，彻底删除。
+- **`AccountLaneState` 用户列表快照方法 `userIdsSnapshot`**：
+  - 快照与用户审计统一通过 `AccountLaneSnapshot` 保证水位对齐，临时复制 `LongHashSet` 的包私有方法无调用，彻底删除。
+- **`ControlLaneDispatcher` 孤立路由判断方法 `targetsLane`**：
+  - 控制任务派发与完成位图直接由原子/位图机制判定，`targetsLane` 无任何生产或测试调用，彻底删除。
+- **`RuntimeIdentityRegistry` 装箱查询方法 `findPositionKeyInLane`**：
+  - 系统持仓身份查找统一走原生零装箱方法 `findPositionKeyValueInLane` 返回 `long`，删除接受 String key 的装箱死方法。
+- **`SystemLedgerCommand` 账本关闭状态方法 `scopeClosed`**：
+  - 财库作用域生命周期内联判定，外部无调用的 `scopeClosed` 彻底删除。
+
+### 13.2 跨模块孤立模型与无用代码物理清理
+- **`InsuranceFundLedgerRepository` 死查询与孤立模型 `InsuranceLedgerReference`**：
+  - 物理删除 0 调用的 `findReference` 数据库查询方法；
+  - 物理删除仅为该死查询存在的孤立 record 类 `InsuranceLedgerReference.java`。
+- **`SubscriptionTopic` 死衍生方法收敛**：
+  - 物理删除全工程无调用的 `withUserId` 和 `withProductLine`，仅保留真实使用的 `withInstrumentId`。
+- **`ProductTopicNames` 冗余 Topic 名称生成器拔除**：
+  - 物理删除已弃用/未使用的 `orderBookDepthTopic()` 与 `accountStateEventsTopic()`。
+- **`ReferenceOrderBookSnapshot` 死方法 `commonDepth`**：
+  - 做市策略行情快照中无引用的 `commonDepth()` 物理删除。
+- **`Gateway` 网关层死私有方法清理**：
+  - `InstrumentRepository`：删除死方法 `asset(String)`、`symbolOrNull(String)`；
+  - `AuthService`：删除死方法 `isAdmin(List<String>)`；
+  - `UserSecurityService`：删除死方法 `requireUser(long)`；
+  - `GatewayProperties`：删除死方法 `readLongMap(String)`。
+
+---
+
+## 14. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |

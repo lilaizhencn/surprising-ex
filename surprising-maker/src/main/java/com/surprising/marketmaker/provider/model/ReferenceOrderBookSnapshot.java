@@ -46,10 +46,6 @@ public record ReferenceOrderBookSnapshot(
         return 0L;
     }
 
-    public int commonDepth() {
-        return Math.min(bids.size(), asks.size());
-    }
-
     public long spreadTicks() {
         long bestBid = bestBidTicks();
         long bestAsk = bestAskTicks();

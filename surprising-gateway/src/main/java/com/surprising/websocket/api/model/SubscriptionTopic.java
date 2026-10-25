@@ -34,15 +34,7 @@ public record SubscriptionTopic(
                 parseProductLine(command.productLine()));
     }
 
-    public SubscriptionTopic withUserId(long userId) {
-        return new SubscriptionTopic(channel, instrumentId, period, userId, productLine);
-    }
-
     public SubscriptionTopic withInstrumentId(String instrumentId) {
-        return new SubscriptionTopic(channel, instrumentId, period, userId, productLine);
-    }
-
-    public SubscriptionTopic withProductLine(ProductLine productLine) {
         return new SubscriptionTopic(channel, instrumentId, period, userId, productLine);
     }
 

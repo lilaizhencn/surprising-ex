@@ -117,10 +117,6 @@ public class UserSecurityService {
         }
     }
 
-    private AuthenticatedUser requireUser(long userId) {
-        return persistence.user(userId).orElseThrow(() -> new IllegalArgumentException("user not found"));
-    }
-
     private String normalizeScene(String sceneCode) {
         String normalized = sceneCode == null ? "" : sceneCode.trim().toUpperCase();
         if (!SCENE_CODES.contains(normalized)) {

@@ -1805,18 +1805,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return topology.matcherShardId(reserveSymbolId(instrumentId));
     }
     /**
-     * 在当前线程同步确保原生品种已注册，用完成或失败 Future 包装，不另外调度。
-     * @param instrumentId 外部永久数字品种字符串
-     */
-    private CompletableFuture<Integer> ensureSymbolAsync(String instrumentId) {
-        try {
-            return CompletableFuture.completedFuture(ensureSymbol(instrumentId));
-        } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
-            return CompletableFuture.failedFuture(failure);
-        }
-    }
-
-    /**
      * 把外部数字品种字符串解析成永久编号，再走当前线程的原生品种注册路径。
      * @param instrumentId 外部永久数字品种字符串
      */

@@ -3,7 +3,6 @@ package com.surprising.insurance.provider.repository;
 import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.insurance.provider.model.InsuranceHistoryPageQuery;
 import com.surprising.insurance.api.model.InsuranceFundLedgerResponse;
-import com.surprising.insurance.provider.model.InsuranceLedgerReference;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -41,22 +40,6 @@ public class InsuranceFundLedgerRepository {
                 ON CONFLICT (reference_type, reference_id, account_type, asset) DO NOTHING
                 """, entryId, accountType, asset, amountUnits, balanceAfterUnits,
                 referenceType, referenceId, reason, Timestamp.from(now)) == 1;
-    }
-
-    public Optional<InsuranceLedgerReference> findReference(String referenceType,
-                                                            String referenceId,
-                                                            String accountType,
-                                                            String asset) {
-        return jdbcTemplate.query("""
-                SELECT amount_units, reason
-                  FROM insurance_fund_ledger
-                 WHERE reference_type = ?
-                   AND reference_id = ?
-                   AND account_type = ?
-                   AND asset = ?
-                """, (rs, rowNum) -> new InsuranceLedgerReference(
-                rs.getLong("amount_units"), rs.getString("reason")),
-                referenceType, referenceId, accountType, asset).stream().findFirst();
     }
 
     public AdminCursorPage.CursorPage<InsuranceFundLedgerResponse> page(String accountType,

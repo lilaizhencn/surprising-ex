@@ -543,23 +543,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * 核对所属 Lane 后按用户和原持仓名查身份；无结果返回空，不分配。
-     * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
-     * @param userId 该身份所属用户
-     * @param key 用户原持仓名文本
-     */
-    Long findPositionKeyInLane(AccountLaneState lane, long userId, String key) {
-        lane.assertOwner();
-        if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("position identity crossed account Lane");
-        // 只供本调用者使用的正向或反向查询探针
-        PositionLookup lookup = lane.identityLookupScratch().position;
-        lookup.userId = userId;
-        lookup.key = key;
-        try { return positionKeys.get(lookup); }
-        finally { lookup.key = null; }
-    }
-
-    /**
      * 核对 Lane、标的和方向，用确定性键及反向身份匹配查已准备的持仓；未命中返回零。
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
      * @param userId 该身份所属用户

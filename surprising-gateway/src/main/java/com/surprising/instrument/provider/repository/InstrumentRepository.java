@@ -351,14 +351,6 @@ public class InstrumentRepository {
         return String.join(",", values.stream().map(String::trim).map(String::toUpperCase).toList());
     }
 
-    private String asset(String value) {
-        return value == null ? null : value.trim().toUpperCase();
-    }
-
-    private String symbolOrNull(String value) {
-        return value == null || value.isBlank() ? null : value.trim().toUpperCase();
-    }
-
     private Timestamp timestampOrNull(Instant value) {
         return value == null ? null : Timestamp.from(value);
     }

@@ -388,10 +388,6 @@ public class AuthService {
         return authResponse(user, httpRequest, now);
     }
 
-    private boolean isAdmin(List<String> roles) {
-        return roles != null && roles.stream().anyMatch(properties.getSecurity().getAdminRoles()::contains);
-    }
-
     private boolean matchesPermission(List<String> permissions, String required) {
         if (permissions == null || permissions.isEmpty()) {
             return false;

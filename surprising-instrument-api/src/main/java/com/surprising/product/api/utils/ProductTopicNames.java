@@ -28,10 +28,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
         return topic("match.trades");
     }
 
-    public String orderBookDepthTopic() {
-        return topic("orderbook.depth");
-    }
-
     public String priceEventsTopic() {
         return topic("price.events");
     }
@@ -75,11 +71,6 @@ public record ProductTopicNames(ProductLine productLine, String namespace) {
 
     public String accountLiquidationFeeEventsTopic() {
         return topic("account.liquidation-fee.events");
-    }
-
-    /** 永续账户单写者发布的完整用户状态快照事件。 */
-    public String accountStateEventsTopic() {
-        return topic("account.state.events");
     }
 
     public String accountUserCommandsTopic() {

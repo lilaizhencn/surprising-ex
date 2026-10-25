@@ -83,15 +83,6 @@ public final class BalanceRuntime {
     }
 
     /**
-     * 从锁定扣除非负金额，不把它退到可用；成交或结算的其他资金去向由调用方处理。
-     * @param units 本次要从锁定实际消耗的非负金额
-     */
-    public void consumeLocked(long units) {
-        if (units < 0 || lockedUnits < units) throw new IllegalArgumentException("invalid runtime locked consumption");
-        lockedUnits -= units;
-    }
-
-    /**
      * 把非负金额精确加入可用余额，不改变锁定，允许零操作。
      * @param units 本次要增加到可用的非负金额
      */

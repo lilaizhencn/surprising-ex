@@ -1441,14 +1441,6 @@ public final class AccountLaneState {
     }
 
     /**
-     * 核对所属线程后复制用户成员集合，避免调用方直接修改原成员表。
-     */
-    LongHashSet userIdsSnapshot() {
-        assertOwner();
-        return new LongHashSet(userIds);
-    }
-
-    /**
      * 确认没有未完成提交或预留后对齐水位，按用户编号排序，构造仅含 Lane 元数据与用户成员的快照记录。
      * @param fenceSequence 完整恢复或快照流程选定的已完成命令边界
      */

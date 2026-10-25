@@ -119,11 +119,6 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
      */
     public final boolean complete() { return completed; }
     /**
-     * 返回关闭回执是否已完成，此时原财库前值已按提交或回滚决定处理。
-     */
-    final boolean scopeClosed() { return close.completed; }
-
-    /**
      * 仅当前阶段及财务计算都完成、尚未排队关闭时允许继续风险输入估值，沿用强平批次原业务边界。
      */
     public final boolean allowsRiskInput() { return completed && scopeCompleted && !closeQueued; }

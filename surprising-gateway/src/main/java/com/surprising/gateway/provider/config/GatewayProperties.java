@@ -256,18 +256,6 @@ public class GatewayProperties implements EnvironmentAware {
         return result;
     }
 
-    private static Map<String, Long> readLongMap(String value) {
-        Map<String, Long> result = new LinkedHashMap<>();
-        readJsonObject(value).forEach((key, item) -> {
-            try {
-                result.put(key.toString(), Long.valueOf(item.toString()));
-            } catch (NumberFormatException ex) {
-                throw new IllegalArgumentException("configuration map contains invalid integer", ex);
-            }
-        });
-        return result;
-    }
-
     private static Map<String, BackendRoute> defaultRoutes() {
         Map<String, BackendRoute> routes = new LinkedHashMap<>();
         routes.put("instrument", new BackendRoute("local:", "/api/v1/instruments", false));

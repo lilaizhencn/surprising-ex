@@ -82,12 +82,6 @@ public final class ControlLaneDispatcher {
     }
 
     /**
-     * 判断当前未完成派发是否包含指定 Lane，不表示该 Lane 已经开始执行。
-     * @param laneId 当前要检查、执行或读取的账户 Lane 编号
-     */
-    boolean targetsLane(int laneId) { return pending && (requiredLaneMask & (1L << laneId)) != 0; }
-
-    /**
      * 要求当前没有在途控制命令，检查非空合法 Lane 位图和输入；工作线程模式先保证容量并交出 Lane 访问，再逐目标内联执行或入队。
      * @param laneMask 本次要执行的非空合法 Lane 位图
      * @param type 本次控制工作的操作分类
