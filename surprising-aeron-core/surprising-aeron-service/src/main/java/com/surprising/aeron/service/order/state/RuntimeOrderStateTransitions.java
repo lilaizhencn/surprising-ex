@@ -17,33 +17,6 @@ import lombok.NoArgsConstructor;
 public final class RuntimeOrderStateTransitions {
 
     /**
-     * 校验基本下单输入，在原所有权范围准备客户端、币对及资产身份，再进入已准备身份的账户写入。
-     * @param runtime 提供原账户所有权、订单与资金写入入口的所属运行时
-     * @param identities 当前产品运行时身份表，普通控制入口可准备身份，Lane 入口查已有持仓键
-     * @param userId 订单与冻结所属用户编号
-     * @param command 已经解析价格、费率和冻结资产的下单输入
-     * @param commandId 原业务命令 UUID，用于订单和冻结归属
-     * @param requiredReservation 已经计算的正数应冻结金额，账户写入时仍核对可用余额
-     */
-    public static void place(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                      long userId, ResolvedPlaceOrder command, UUID commandId,
-                      long requiredReservation) {
-        if (runtime == null || identities == null || command == null || commandId == null || userId <= 0
-                || requiredReservation <= 0) {
-            throw new IllegalArgumentException("invalid runtime place order");
-        }
-        runtime.assertOwner();
-        // 按用户及客户端标识准备的客户身份键，后续核对唯一性并与订单关联。
-        long clientKey = identities.clientKey(userId, command.clientOrderId());
-        // 从永久币对编号取得的稠密身份。
-        int symbolId = identities.symbolId(command.instrumentId());
-        // 从预留资产代码取得的整数身份。
-        int assetId = identities.assetId(command.reservationAsset());
-        placePrepared(runtime, userId, command, commandId, requiredReservation,
-                clientKey, symbolId, assetId);
-    }
-
-    /**
      * 再次核对订单和客户端标识未占用、用户及资产余额存在且可用金额足够，准备订单和冻结，调用原 reserveOrder 写入，再推进用户和命令版本。
      * @param runtime 提供原账户所有权、订单与资金写入入口的所属运行时
      * @param userId 订单与冻结所属用户编号
@@ -122,43 +95,6 @@ public final class RuntimeOrderStateTransitions {
         if (receipt == null) throw new IllegalStateException("trigger admission receipt is missing");
         // 每个排队触发子单独自保留此输入直到 Matcher 准入；后续触发可能提前复用控制 worker 及其输出缓冲，不能直接借用该缓冲回执。
         return receipt.copyIntoCommandSlot(null);
-    }
-
-    /**
-     * 顺序批次项在目标 Lane 写订单并标记待完成预留；已有命令范围直接使用，没有范围则进入原目标 Lane 范围，Owner 路由等原控制回执发布后再登记。
-     * @param runtime 提供原账户所有权、订单与资金写入入口的所属运行时
-     * @param userId 订单与冻结所属用户编号
-     * @param command 已经解析价格、费率和冻结资产的下单输入
-     * @param commandId 原业务命令 UUID，用于订单和冻结归属
-     * @param requiredReservation 已经计算的正数应冻结金额，账户写入时仍核对可用余额
-     * @param clientKey 当前用户客户端订单标识的已准备整数身份，0 表示没有标识
-     * @param assetId 订单冻结资产的运行时编号
-     * @param coreSequence 触发、批次或拒单所属的正数 Core 命令序号，用来核对待完成预留
-     */
-    public static void reserveBatchOrderInLane(TradingAccountRuntime runtime, long userId,
-            ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
-            long clientKey, int assetId, long coreSequence) {
-        // 当前命令实际持有的账户 Lane，必须与用户拓扑一致。
-        AccountLaneState lane = runtime.currentLaneCommandScope();
-        if (lane == null) {
-            // 当前批次项用户所属的目标 Lane 编号。
-            int laneId = runtime.topology().accountLaneId(userId);
-            // 没有现成命令范围时需要进入的原账户 Lane，不另建 worker。
-            AccountLaneState targetLane = runtime.accountLane(laneId);
-            runtime.inLaneCommandScope(targetLane, /* 原命令范围回调传入的参数，内部沿用已经选好的 targetLane 写待完成标记。 */ ignored -> {
-                placePrepared(runtime, userId, command, commandId, requiredReservation,
-                        clientKey, command.symbolId(), assetId);
-                targetLane.markPendingReservation(command.orderId(), coreSequence);
-                return null;
-            });
-            return;
-        }
-        if (lane.laneId() != runtime.topology().accountLaneId(userId))
-            throw new IllegalStateException("batch reservation requires its Account Lane");
-        placePrepared(runtime, userId, command, commandId, requiredReservation,
-                clientKey, command.symbolId(), assetId);
-        // Lane 先保留真实待完成标记；原控制调度器发布固定准入回执后，Owner 才登记路由。
-        lane.markPendingReservation(command.orderId(), coreSequence);
     }
 
     /**

@@ -35,8 +35,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     private long sequence, userId, openInterestSteps;
     /** 原批次业务命令 UUID。 */
     private UUID commandId;
-    /** 按产品和买卖方向选定的冻结资产运行时编号。 */
-    private int assetId;
     /** 原批次命令槽保存的获准订单租约，寿命长于本项可复用任务。 */
     private OrderRuntime admittedOrder;
     /** 原批次项槽访问入口，Lane 把获准订单租约写回它，不增加 Owner 订单副本。 */
@@ -140,7 +138,8 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         long identity = 0;
         try {
             CoreOrderDecisionResolver.resolveInto(this, decision.context(), userId, intent());
-            assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
+            // 本次 Lane 回调选定的冻结资产，不需要跨任务保存。
+            int assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
                     : side() == CoreOrderSide.BUY ? decision.quoteAssetId() : decision.baseAssetId();
             identity = identities.prepareClientKeyInLane(lane, userId, clientOrderId());
             // 从准备返回值取出的实际客户身份键，后续账户准入和冻结使用它。
@@ -159,8 +158,10 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
                 closeCapacityCancellations = PositionCloseCapacity.inspectLane(lane, userId, symbolId(),
                         positionKey, positionSide(), side(), orderId()).conflictsFor(quantitySteps());
             }
-            RuntimeOrderStateTransitions.reserveBatchOrderInLane(runtime, userId, this, commandId,
-                    required, clientKey, assetId, sequence);
+            RuntimeOrderStateTransitions.placePrepared(runtime, userId, this, commandId,
+                    required, clientKey, symbolId(), assetId);
+            // Lane 先登记待完成预留；Owner 等控制回执发布后再登记路由。
+            lane.markPendingReservation(orderId(), sequence);
             // 所属 Lane 变更缓冲中刚写出的获准订单，必须存在才能把租约交给批次项槽。
             OrderRuntime admitted = runtime.laneDelta(laneId).orders().get(orderId());
             if (admitted == null) throw new IllegalStateException("batch admission order is missing");
@@ -195,7 +196,6 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
         decision = null;
         commandId = null;
         sequence = userId = openInterestSteps = 0;
-        assetId = 0;
         admittedOrder = null;
         source = null;
         sourceIndex = 0;

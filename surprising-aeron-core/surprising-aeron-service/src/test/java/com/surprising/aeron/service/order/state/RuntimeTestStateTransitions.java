@@ -190,7 +190,9 @@ public final class RuntimeTestStateTransitions {
                     runtime, identities, userId, command, decisionTimestamp);
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
                     resolved, 0, runtime.admissionOrders(userId, identities.symbolId(resolved.instrumentId())));
-            RuntimeOrderStateTransitions.place(runtime, identities, userId, resolved, commandId, required);
+            RuntimeOrderStateTransitions.placePrepared(runtime, userId, resolved, commandId, required,
+                    identities.clientKey(userId, resolved.clientOrderId()),
+                    identities.symbolId(resolved.instrumentId()), identities.assetId(resolved.reservationAsset()));
         });
     }
 
@@ -205,7 +207,9 @@ public final class RuntimeTestStateTransitions {
             // 生产账户准入根据本单和原运行态挂单算出的应预留金额。
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
                     command, 0, runtime.admissionOrders(userId, identities.symbolId(command.instrumentId())));
-            RuntimeOrderStateTransitions.place(runtime, identities, userId, command, UUID.randomUUID(), required);
+            RuntimeOrderStateTransitions.placePrepared(runtime, userId, command, UUID.randomUUID(), required,
+                    identities.clientKey(userId, command.clientOrderId()),
+                    identities.symbolId(command.instrumentId()), identities.assetId(command.reservationAsset()));
         });
     }
 

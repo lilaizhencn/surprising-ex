@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第七十一轮A227-A228：风险/ADL查询去同步汇总、全Lane扫描、5处空行情备用来源和2处重复计数；生产净减128行，实例字段未改。18模块干净构建、默认/PIPELINED各262例、六线实测及12次恢复通过。223解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第七十二轮A229-A230：批次冻结直接调用原placePrepared，去无Lane备用分支/重复路由检查及测试专用place转发，资产编号改局部，任务自身字段16→15，生产净减64行。18模块干净构建、默认/PIPELINED各271例、六线实测及12次恢复通过。225解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -11335,6 +11335,33 @@
       ],
       "evidence": "单用户估值直接在原userSnapshots中展开，ADL单仓计算并入原账户入口；统一使用Owner捕获的配置/行情/资产编号，删除5处备用读。保留初始持仓、钱包冻结记录和最终响应上限，取消两个已被调用路径证明重复的计数。",
       "verification": "CodeGraph和完整owner/name/descriptor引用；18模块干净构建，默认与PIPELINED各262例，六线顺序HTTP/WS和12次Cluster冷恢复。见round71-runtime-20261025.json。"
+    },
+    {
+      "id": "A229",
+      "status": "resolved",
+      "source_basis_commit": "784ad7ca9d2f79689345ebc1cd63f623a82909bd",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_second_cleanup_round",
+      "topic": "批量下单仅回调使用的资产字段和重复冻结包装层",
+      "fields_or_methods": [
+        "BatchPlaceReservation.assetId",
+        "RuntimeOrderStateTransitions.reserveBatchOrderInLane"
+      ],
+      "evidence": "资产编号改为回调局部变量；原Lane检查后的账户回调直接placePrepared并标记待完成预留，删除无调用路径的无Lane备用分支与重复路由检查。",
+      "verification": "CodeGraph及完整classfile owner/name/descriptor；18模块干净构建，默认/PIPELINED各271例，六线顺序HTTP/WS与12次Cluster冷恢复，见round72-runtime-20261025.json。"
+    },
+    {
+      "id": "A230",
+      "status": "resolved",
+      "source_basis_commit": "784ad7ca9d2f79689345ebc1cd63f623a82909bd",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_second_cleanup_round",
+      "topic": "仅供冷测试调用的普通下单身份转发入口",
+      "fields_or_methods": [
+        "RuntimeOrderStateTransitions.place"
+      ],
+      "evidence": "生产删除仅供测试调用的身份准备转发；测试按原顺序准备客户/币对/资产编号后调用原placePrepared，未复制冻结或业务校验。",
+      "verification": "CodeGraph及完整classfile owner/name/descriptor；18模块干净构建，默认/PIPELINED各271例，六线顺序HTTP/WS与12次Cluster冷恢复，见round72-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11430,7 +11457,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A227_to_A228_risk_query_cold_aggregate_removed_262_distinct_cases_262_pipelined_six_live_products_twelve_cold_recoveries_verified; overall_audit_in_progress",
+  "analysis_round_status": "A229_to_A230_batch_freeze_forwarding_and_test_only_place_removed_271_distinct_cases_271_pipelined_six_live_products_twelve_cold_recoveries_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11652,11 +11679,11 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "23ddfc5b28302d65006b40798027fdba7a1ef9fc",
-    "status": "risk_query_cold_aggregate_and_nullable_market_paths_removed_and_verified",
+    "source_basis_commit": "784ad7ca9d2f79689345ebc1cd63f623a82909bd",
+    "status": "batch_freeze_forwarding_and_callback_local_field_cleanup_verified",
     "resolved_ids": [
-      "A227",
-      "A228"
+      "A229",
+      "A230"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11669,11 +11696,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 223,
+      "resolved": 225,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "seventy_first_cleanup_round",
+    "evidence": "seventy_second_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44817,6 +44844,32 @@
     "command_snapshot_http_ws_contracts_changed": false,
     "counts": {
       "resolved": 223,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "seventy_second_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "784ad7ca9d2f79689345ebc1cd63f623a82909bd",
+    "resolved_ids": [
+      "A229",
+      "A230"
+    ],
+    "removed_instance_fields_net": 1,
+    "production_net_lines_removed": 64,
+    "removed_public_forwarders": 2,
+    "removed_unreachable_lane_fallbacks": 1,
+    "new_classes_interfaces_or_business_stages": 0,
+    "report": "deep-code-cleanup-20261025-round72.md",
+    "evidence": "round72-runtime-20261025.json",
+    "distinct_unit_tests": 271,
+    "additional_pipelined_executions": 271,
+    "runtime_products": 6,
+    "cold_recoveries": 12,
+    "command_snapshot_http_ws_contracts_changed": false,
+    "counts": {
+      "resolved": 225,
       "candidate": 1,
       "retained": 4
     },
