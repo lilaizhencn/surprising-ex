@@ -107,8 +107,8 @@ public final class RuntimeDerivativeMatchFixture {
         validateAndPrepare(takerOrderId, matches, runtime, identities);
         // 当前币对结算资产的稠密编号。
         int settleAssetId = identities.assetId(instrument.settleAsset());
-        // 当前通用结算借用的系统资金差额缓冲。
-        RuntimeTreasuryDelta treasuryDelta = runtime.scratchTreasuryDelta();
+        // 本次冷测试结算独占的系统资金差额缓冲。
+        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (/* 通用事件列表当前遍历下标。 */ int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {
             // 当前原始 Matcher 事件，非 TRADE 跳过。
             MatcherEvent match = matches.get(matchIndex);

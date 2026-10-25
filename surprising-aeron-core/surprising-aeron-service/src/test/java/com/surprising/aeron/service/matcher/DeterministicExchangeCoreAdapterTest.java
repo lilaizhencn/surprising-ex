@@ -67,7 +67,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(target.accepted()).isFalse();
             assertThat(target.plan().preCancellationCount()).isEqualTo(1);
             assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.FATAL_DIVERGENCE);
-            assertThat(target.nativeMatches(id)).isTrue();
+            assertThat(target.nativeMatches(id.getMostSignificantBits(), id.getLeastSignificantBits())).isTrue();
             assertThat(target.plan().takerOrderId()).isEqualTo(3);
             assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
         }
@@ -170,7 +170,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(rejected.accepted()).isFalse();
             assertThat(rejected.outcome()).isEqualTo(MatchingResult.Outcome.REJECTED_UNCHANGED);
             assertThat(rejected.nativeCoreSequence()).isEqualTo(4);
-            assertThat(rejected.nativeMatches(new java.util.UUID(7, 4))).isTrue();
+            assertThat(rejected.nativeMatches(7, 4)).isTrue();
             assertThat(rejected.plan().takerOrderId()).isEqualTo(901);
             assertThat(rejected.nativeMatcherSequence()).isGreaterThan(accepted.nativeMatcherSequence());
             assertThat(accepted.matcherEvents()).extracting(MatcherResult.MatcherEvent::size).containsExactly(6L);
@@ -219,7 +219,7 @@ class DeterministicExchangeCoreAdapterTest {
                 var actual = placeDirect(adapter, i, id, 1000 + i, i == 2 ? 8 : 7, order);
                 assertThat(actual.accepted()).isTrue();
                 assertThat(actual.nativeCoreSequence()).isEqualTo(i);
-                assertThat(actual.nativeMatches(id)).isTrue();
+                assertThat(actual.nativeMatches(id.getMostSignificantBits(), id.getLeastSignificantBits())).isTrue();
                 assertThat(actual.plan().takerOrderId()).isEqualTo(i);
                 assertThat(actual.nativeMatcherSequence()).isEqualTo(i);
                 assertThat(actual.nativeMatcherShardId()).isEqualTo(adapter.matcherShardId("21"));

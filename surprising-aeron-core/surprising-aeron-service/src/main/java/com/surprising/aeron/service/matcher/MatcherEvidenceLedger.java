@@ -141,7 +141,7 @@ final class MatcherEvidenceLedger {
         advanceStrictly(shardSequences, matcherIndex, sequence,
                 "matcher shard sequence is not strictly increasing");
         return result.bindEvidenceInPlace(coreSequence, commandIdMsb, commandIdLsb,
-                nativeSequence, sequence, matcherShardId);
+                sequence, matcherShardId);
     }
 
     /**

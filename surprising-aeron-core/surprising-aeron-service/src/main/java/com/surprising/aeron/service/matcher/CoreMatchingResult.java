@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.RandomAccess;
-import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
@@ -41,15 +40,9 @@ public final class CoreMatchingResult implements MatchingResult {
     @Getter
     private long nativeCoreSequence;
     /**  原命令 UUID 高六十四位，发布前绑定。 返回保存的命令 UUID 高六十四位。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
     private long nativeCommandIdMostSignificantBits;
     /**  原命令 UUID 低六十四位，发布前绑定。 返回保存的命令 UUID 低六十四位。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
     private long nativeCommandIdLeastSignificantBits;
-    /** 显式保存的原生 exchange-core 序号，零时可从原生结果回读。 */
-    private long nativeSequenceValue;
     /**  此回执在证据分片内的业务序号。 返回此结果发布到所属证据分片时的业务序号。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -69,53 +62,29 @@ public final class CoreMatchingResult implements MatchingResult {
 
     /** 仅保存接受状态和结果码，其余证据尚未绑定且没有撤单或成交事件。 */
     public CoreMatchingResult(boolean accepted, String resultCode) {
-        this(accepted, resultCode, List.of(), false,
-                0, 0, 0, 0, 0, -1, null, List.of());
+        this(accepted, resultCode, List.of(), false, List.of());
     }
 
     /**
-     * 检查结果码、列表及原生证据标量后保存并分类。撤单列表按 immutable 的现规则处理，事件直接保留引用。
+     * 保存控制撤单的状态、成功前缀和事件；命令证据由 Matcher 发布前统一绑定。
      * @param accepted 引擎是否接受当前请求
      * @param resultCode 非空撮合结果码文本
      * @param cancellations 本次有序撤单结果列表
-     * @param matcherStateChanged 是否明确知道已有状态变化，例如撤单前缀已执行
-     * @param nativeCoreSequence 已绑定的 Core 序号，零可表示未绑定
-     * @param nativeCommandIdMostSignificantBits 原命令 UUID 高六十四位
-     * @param nativeCommandIdLeastSignificantBits 原命令 UUID 低六十四位
-     * @param nativeSequence 原生 exchange-core 序号，零允许稍后从原生结果取得
-     * @param nativeMatcherSequence 业务证据分片发布序号
-     * @param nativeMatcherShardId 业务证据分片编号，控制分片为负一
-     * @param nativeMatcherResult 可空的原生结果引用
-     * @param matcherEvents 后续账户处理使用的原生事件列表引用
+     * @param matcherStateChanged 是否已执行撤单前缀
+     * @param matcherEvents 后续账户处理使用的原生事件列表
      */
-    public CoreMatchingResult(boolean accepted, String resultCode,
-                              List<CoreCancellationResult> cancellations,
-                              boolean matcherStateChanged,
-                              long nativeCoreSequence,
-                              long nativeCommandIdMostSignificantBits,
-                              long nativeCommandIdLeastSignificantBits,
-                              long nativeSequence,
-                              long nativeMatcherSequence,
-                              int nativeMatcherShardId,
-                              MatcherResult nativeMatcherResult,
-                              List<MatcherResult.MatcherEvent> matcherEvents) {
-        if (resultCode == null || resultCode.isBlank() || cancellations == null
-                || nativeCoreSequence < 0 || nativeSequence < 0
-                || nativeMatcherSequence < 0 || nativeMatcherShardId < -1
-                || matcherEvents == null) {
+    CoreMatchingResult(boolean accepted, String resultCode,
+                       List<CoreCancellationResult> cancellations,
+                       boolean matcherStateChanged, List<MatcherResult.MatcherEvent> matcherEvents) {
+        if (resultCode == null || resultCode.isBlank() || cancellations == null || matcherEvents == null) {
             throw new IllegalArgumentException("invalid matching result");
         }
         this.accepted = accepted;
         this.resultCode = resultCode;
         this.cancellations = immutable(cancellations);
         this.outcome = classify(accepted, resultCode, matcherStateChanged);
-        this.nativeCoreSequence = nativeCoreSequence;
-        this.nativeCommandIdMostSignificantBits = nativeCommandIdMostSignificantBits;
-        this.nativeCommandIdLeastSignificantBits = nativeCommandIdLeastSignificantBits;
-        this.nativeSequenceValue = nativeSequence;
-        this.nativeMatcherSequence = nativeMatcherSequence;
-        this.nativeMatcherShardId = nativeMatcherShardId;
-        this.nativeMatcherResult = nativeMatcherResult;
+        this.nativeMatcherShardId = -1;
+        this.nativeMatcherResult = null;
         this.matcherEvents = matcherEvents;
     }
 
@@ -147,17 +116,15 @@ public final class CoreMatchingResult implements MatchingResult {
      * @param coreSequence 要保存或补齐的 Core 命令序号
      * @param commandIdMostSignificantBits 待绑定命令 UUID 高六十四位
      * @param commandIdLeastSignificantBits 待绑定命令 UUID 低六十四位
-     * @param nativeSequence 原生 exchange-core 序号，零允许稍后从原生结果取得
      * @param matcherSequence 要绑定的业务分片证据序号
      * @param matcherShardId 要绑定的业务证据分片编号
      */
     CoreMatchingResult bindEvidenceInPlace(
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
-            long nativeSequence, long matcherSequence, int matcherShardId) {
+            long matcherSequence, int matcherShardId) {
         nativeCoreSequence = coreSequence;
         nativeCommandIdMostSignificantBits = commandIdMostSignificantBits;
         nativeCommandIdLeastSignificantBits = commandIdLeastSignificantBits;
-        nativeSequenceValue = nativeSequence;
         nativeMatcherSequence = matcherSequence;
         nativeMatcherShardId = matcherShardId;
         return this;
@@ -215,11 +182,10 @@ public final class CoreMatchingResult implements MatchingResult {
     }
 
     /**
-     * 优先返回显式证据中的原生序号；其为零且有原生结果时读取原生 sequence，不新建占位身份。
+     * 直接读取原生回执的序号；聚合或合成结果没有原生回执时返回零。
      */
     long nativeSequence() {
-        return nativeSequenceValue == 0 && nativeMatcherResult != null
-                ? nativeMatcherResult.sequence() : nativeSequenceValue;
+        return nativeMatcherResult == null ? 0 : nativeMatcherResult.sequence();
     }
     /**
      * 逐半部比较原命令 UUID，不额外检查 Core 序号、订单编号或事件内容。
@@ -230,15 +196,6 @@ public final class CoreMatchingResult implements MatchingResult {
         return nativeCommandIdMostSignificantBits == most
                 && nativeCommandIdLeastSignificantBits == least;
     }
-    /**
-     * 命令 UUID 非空时再比较高低半部，空值直接返回 false。
-     * @param commandId 待比较的可空命令 UUID
-     */
-    @Override public boolean nativeMatches(java.util.UUID commandId) {
-        return commandId != null
-                && nativeMatches(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
-    }
-
     /**
      * 先把 EXCHANGE_CORE_FAILURE 与 MATCHING_TIMEOUT 归为致命分歧；其他接受结果为 APPLIED，拒绝结果再根据显式状态变化区分已执行前缀或完全未改。
      * @param accepted 引擎是否接受当前请求

@@ -56,15 +56,6 @@ public interface MatchingResult {
      */
     boolean nativeMatches(long most, long least);
     /**
-     * 命令 UUID 非空时再比较高低半部，空值直接返回 false。
-     * @param commandId 待比较的可空命令 UUID
-     */
-    boolean nativeMatches(java.util.UUID commandId);
-    /**
-     * 返回底层 exchange-core 原生结果引用，没有原生结果时可为空。
-     */
-    MatcherResult nativeMatcherResult();
-    /**
      * 返回当前结果关联的原生成交、撤量或拒单事件序列；它是账户结算事实输入，不能据此再次撮合。
      */
     List<MatcherResult.MatcherEvent> matcherEvents();

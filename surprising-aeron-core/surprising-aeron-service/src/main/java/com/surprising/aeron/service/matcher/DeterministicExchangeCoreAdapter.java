@@ -1312,8 +1312,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 是否所有撤单项都接受，空列表也没有失败。
         boolean accepted = failure == null;
         return new CoreMatchingResult(accepted, accepted ? "SUCCESS" : failure.resultCode(), cancellations,
-                !accepted && successfulPrefix != 0, 0, 0, 0, 0, 0, -1,
-                null, CoreMatchingResult.concatenateEvents(results));
+                !accepted && successfulPrefix != 0, CoreMatchingResult.concatenateEvents(results));
     }
 
     /**

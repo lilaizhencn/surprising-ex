@@ -134,8 +134,6 @@ public final class MatcherSettlementEvent implements
     /** 本代原生结果引用，可能借用事件命令槽，只在事件租约内有效。 */
     private exchange.core2.core.common.MatcherResult directNativeResult;
     /**  本代首项原生或合成结果的 Matcher 证据序号。 返回本代首项 Matcher 证据序号。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
     private long directMatcherSequence;
     /**  本代最后保存项的 Matcher 序号，批次输入必须递增。 返回本代最后已保存项的 Matcher 序号，批量构建据此要求递增。 */
     @Accessors(fluent = true, chain = false)
@@ -158,8 +156,6 @@ public final class MatcherSettlementEvent implements
     /** 交给传输释放回调的 Matcher 分片编号。 */
     private int matcherCompletionShard;
     /**  本代是否要求复制普通下单的账户准入回执。 返回本代是否登记了普通下单准入回执边界。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
     private boolean admissionRequired;
     /** 事件租约内保存的普通下单不可变准入输入。 */
     private ResolvedPlaceOrder admissionOrder;
@@ -777,33 +773,9 @@ public final class MatcherSettlementEvent implements
      */
     public boolean hasDirectNativeResult() { return directNativeResult != null; }
     /**
-     * 要求直达结果已发布且无故障，再借用本代原生结果；只有合成拒绝码时明确拒绝。
-     */
-    public exchange.core2.core.common.MatcherResult directNativeResult() {
-        requireDirectResult();
-        if (directNativeResult == null) throw new IllegalStateException("direct native result is missing");
-        return directNativeResult;
-    }
-    /**
-     * 要求结果已发布且无故障后返回接受标记；批量事件该标记代表首项。
-     */
-    public boolean directNativeAccepted() { requireDirectResult(); return directNativeAccepted; }
-    /**
      * 返回本代结果证据所属 Matcher 分片。
      */
     public int directMatcherShard() { return directShard; }
-    /**
-     * 返回本代结果关联的 Core 序号。
-     */
-    public long directResultCoreSequence() { return directCoreSequence; }
-    /**
-     * 比较给定命令 UUID 是否与本代保存的命令相同，未准备时返回 false。
-     * @param commandId 本代复制命令 UUID
-     */
-    public boolean directCommandMatches(java.util.UUID commandId) {
-        return directCommandId != null && directCommandId.equals(commandId);
-    }
-
     /**
      * 合并各有效计划的实际业务 Lane 与订单数量，核对原依赖范围；单 Lane 初始路由允许扩展，固定多 Lane 路由保留所有票据。准备财务差额及变化容量，未延后时立即交接发布。
      */
@@ -958,16 +930,9 @@ public final class MatcherSettlementEvent implements
                 && directCommandId.getLeastSignificantBits() == least;
     }
     /**
-     * 非空 UUID 拆成高低位后核对本代命令身份。
-     * @param commandId 本代复制命令 UUID
-     */
-    @Override public boolean nativeMatches(java.util.UUID commandId) {
-        return commandId != null && nativeMatches(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
-    }
-    /**
      * 为结果接口借用本代原生结果引用，合成拒绝时为空；调用方负责先遵守发布边界。
      */
-    @Override public exchange.core2.core.common.MatcherResult nativeMatcherResult() {
+    public exchange.core2.core.common.MatcherResult nativeMatcherResult() {
         return directNativeResult;
     }
     /**
@@ -1369,14 +1334,6 @@ public final class MatcherSettlementEvent implements
      */
     public int planCount() { return batchPlanCount; }
     /**
-     * 校验本代有效项下标后借用相应准入订单引用，可能为空。
-     * @param index 本代有效计划或原生成交结果槽的下标
-     */
-    OrderRuntime admittedOrder(int index) {
-        if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
-        return batchStorage.admittedOrders[index];
-    }
-    /**
      * 校验下标位于本代有效项前缀后借用对应计划，不暴露旧容量尾部。
      * @param index 本代有效计划或原生成交结果槽的下标
      */
@@ -1384,22 +1341,6 @@ public final class MatcherSettlementEvent implements
         if (index < 0 || index >= planCount()) throw new IndexOutOfBoundsException(index);
         return batchStorage.plans[index];
     }
-    /**
-     * 借用首项规范币对，只有已经准备该元数据的有效事件入口才能使用。
-     */
-    CoreInstrument instrument() { return batchStorage.instruments[0]; }
-    /**
-     * 返回首项预先解析的基础资产编号，撤单等无资产元数据路径不得依赖它。
-     */
-    int baseAssetId() { return batchStorage.baseAssetIds[0]; }
-    /**
-     * 返回首项预先解析的计价资产编号。
-     */
-    int quoteAssetId() { return batchStorage.quoteAssetIds[0]; }
-    /**
-     * 返回首项预先解析的结算资产编号。
-     */
-    int settleAssetId() { return batchStorage.settleAssetIds[0]; }
     /**
      * 借用本代保留的结算变化缓冲，已交出或未准备时失败。
      */
@@ -1420,13 +1361,6 @@ public final class MatcherSettlementEvent implements
         MatcherSettlementChanges value = changes();
         changes = null;
         return value;
-    }
-
-    /**
-     * 不提供资金接收参数，委托完整入口收集本代财务结果。
-     */
-    public RuntimeTreasuryDelta collectTreasuryDelta() {
-        return collectTreasuryDelta(null);
     }
 
     /**

@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第七十六轮A242-A245：删除无生产调用的通用结算构建器、跨项暂存、Owner缓存、空准入副本、装箱视图和重复撤单筛选。净减9实例字段/2内部类/544生产行。18模块、1986(1Linux跳过)、PIPELINED377、六线12改单/12恢复通过。240解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第七十七轮A246-A248：控制回执只保留5项真实构造输入，删除原生序号副本、仅测试财库缓存和无人消费的读取契约/重复入口。净减2实例字段/130生产行；18模块、1986(1Linux跳过)、PIPELINED418、六线12改单/12恢复通过。243解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -11579,6 +11579,49 @@
       ],
       "evidence": "生产按orderCount/orderId读取原语身份；前置撤单已经由Matcher按执行顺序确认成功并追加有效前缀。删除多余视图与重复筛选，保留原语读取、acceptedReplacementCancellation/acceptedPreCancellations、复制边界及容量复用。",
       "verification": "18模块干净构建；核心全量1986(1Linux跳过)，附加PIPELINED31类377例；六线顺序HTTP/WS、12次改单和12次真实Cluster冷恢复。见round76-runtime-20261025.json。"
+    },
+    {
+      "id": "A246",
+      "status": "resolved",
+      "source_basis_commit": "fbc29606ea5f2074fa41f28e498b8a2184bc8371",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_seventh_cleanup_round",
+      "topic": "控制撮合回执未使用的证据构造参数及原生序号副本",
+      "fields_or_methods": [
+        "CoreMatchingResult.nativeSequenceValue",
+        "CoreMatchingResult12参数构造器",
+        "bindEvidenceInPlace原生序号参数"
+      ],
+      "evidence": "唯一外部生产构造调用为控制撤单聚合，7项证据输入全部为零/负一/null；构造器缩为真实5项业务输入。原生序号直接读取本次新建原生结果；原UUID/Core/分片证据仍由原账本发布前绑定，严格递增及实际订单簿分片区分保留。",
+      "verification": "18模块干净构建；核心全量1986例(1Linux跳过)，显式PIPELINED34类418例；六线顺序HTTP/WS、12次改单、12次真实Cluster冷恢复通过。见round77-runtime-20261025.json。"
+    },
+    {
+      "id": "A247",
+      "status": "resolved",
+      "source_basis_commit": "fbc29606ea5f2074fa41f28e498b8a2184bc8371",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_seventh_cleanup_round",
+      "topic": "仅冷测试借用的Runtime财库暂存",
+      "fields_or_methods": [
+        "TradingAccountRuntime.scratchTreasuryDelta字段及getter"
+      ],
+      "evidence": "完整classfile确认只有衍生品冷测试夹具调用；夹具改用本次局部RuntimeTreasuryDelta，保留原金额应用、系统差额、资金守恒和修订行为。生产不增加对象、集合、状态副本或阶段。",
+      "verification": "18模块干净构建；核心全量1986例(1Linux跳过)，显式PIPELINED34类418例；六线顺序HTTP/WS、12次改单、12次真实Cluster冷恢复通过。见round77-runtime-20261025.json。"
+    },
+    {
+      "id": "A248",
+      "status": "resolved",
+      "source_basis_commit": "fbc29606ea5f2074fa41f28e498b8a2184bc8371",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_seventh_cleanup_round",
+      "topic": "未被消费的撮合读取契约与重复接口",
+      "fields_or_methods": [
+        "MatchingResult.nativeMatches(UUID)/nativeMatcherResult",
+        "MatcherSettlementEvent旧读取/转发入口及两个无人调用的getter",
+        "CoreMatchingResult两个UUIDgetter和UUID转发"
+      ],
+      "evidence": "删除接口中无人使用的UUID对象比较和原生对象读取成员；保留真实生产读取的UUID双long比较及事件列表。移除无调用的重复入口，序号别名读端改用同字段coreSequence；3处既有非空UUID断言直接比较原高低位，所有用例保留。",
+      "verification": "18模块干净构建；核心全量1986例(1Linux跳过)，显式PIPELINED34类418例；六线顺序HTTP/WS、12次改单、12次真实Cluster冷恢复通过。见round77-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11674,7 +11717,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A242_to_A245_dormant_generic_settlement_path_and_support_state_removed_and_verified; overall_audit_in_progress",
+  "analysis_round_status": "A246_to_A248_control_receipt_unused_proof_copy_test_cache_and_readers_removed_and_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11896,13 +11939,12 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "99e505217ce60f6a426a8784ff3d9973d33a4b5c",
-    "status": "unused_generic_settlement_builders_and_support_state_removed",
+    "source_basis_commit": "fbc29606ea5f2074fa41f28e498b8a2184bc8371",
+    "status": "control_receipt_unused_proof_inputs_and_test_cache_removed",
     "resolved_ids": [
-      "A242",
-      "A243",
-      "A244",
-      "A245"
+      "A246",
+      "A247",
+      "A248"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11915,11 +11957,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 240,
+      "resolved": 243,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "seventy_sixth_cleanup_round",
+    "evidence": "seventy_seventh_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -14168,6 +14210,29 @@
       "topic": "未核对契约就直接令postOnly等于timeInForce==GTX",
       "reason": "PlaceOrderCommand只强制postOnly=>LIMIT+GTX，Gateway另外校验GTX=>postOnly；改单分别继承TIF和postOnly。现阶段未证明所有可接受Core状态都可等价派生，不能机械删除标记或改变改单错误路径。当前只记录分析，本轮未改动该字段/契约。",
       "review_round": "nineteenth_cleanup_round"
+    },
+    {
+      "round": 77,
+      "source_basis_commit": "fbc29606ea5f2074fa41f28e498b8a2184bc8371",
+      "items": [
+        {
+          "field": "MatcherSettlementEvent.admissionOrderId",
+          "reason": "CoreMatchingFlow.releasePlaceAdmissionIfConsumed可在结算结束前回收并清空准入意图；Lane发布最终订单/预留需独立保存原订单身份，不能延后读取已清理的admissionOrder。"
+        },
+        {
+          "field": "MatcherSettlementEvent.matcherCompletionShard",
+          "reason": "释放回调针对实际传输占用，故障路径也必须释放提交分片，不能把业务结果证据分片强当成同一所有权。"
+        },
+        {
+          "field": "OrderBatchItem.resultCode",
+          "reason": "OrderBatchPending.resultCode(index)经TradingOrderBatchCodec.ResultSource被真实响应编码读取；接口读取不能按具体类直接调用数误判。"
+        },
+        {
+          "field": "MatcherPrefixFailure JFR fields / inherited sequence and padding fields",
+          "reason": "JFR、VarHandle、继承字段和接口分派不能用直接getfield数判定无用；未修改这些类或进行性能采样。"
+        }
+      ],
+      "evidence": "round77-runtime-20261025.json"
     }
   ],
   "third_cleanup_round": {
@@ -45251,6 +45316,48 @@
     "evidence": "round76-runtime-20261025.json",
     "counts": {
       "resolved": 240,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "seventy_seventh_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "fbc29606ea5f2074fa41f28e498b8a2184bc8371",
+    "resolved_ids": [
+      "A246",
+      "A247",
+      "A248"
+    ],
+    "production_net_lines_removed": 130,
+    "net_instance_fields_removed": 2,
+    "retired_classes": 0,
+    "old_signatures_removed": 21,
+    "narrowed_signatures": 2,
+    "CoreMatchingResult_fields": [
+      12,
+      11
+    ],
+    "TradingAccountRuntime_fields": [
+      75,
+      74
+    ],
+    "core_full_test_counts": {
+      "tests": 1986,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "additional_pipelined_executions": 418,
+    "pipelined_classes": 34,
+    "runtime_products": 6,
+    "native_amendments": 12,
+    "cold_recoveries": 12,
+    "protocol_and_persisted_business_state_unchanged": true,
+    "report": "deep-code-cleanup-20261025-round77.md",
+    "evidence": "round77-runtime-20261025.json",
+    "counts": {
+      "resolved": 243,
       "candidate": 1,
       "retained": 4
     },

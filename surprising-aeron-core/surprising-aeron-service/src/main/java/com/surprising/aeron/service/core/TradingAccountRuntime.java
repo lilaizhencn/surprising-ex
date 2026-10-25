@@ -417,8 +417,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
     /** 唯一系统财库，账本激活后由账本线程写入，不建立 Owner 财库副本。 */
     final TreasuryRuntime treasury = new TreasuryRuntime();
-    /** 既有结算应用路径复用的财库变化累加器。 */
-    final RuntimeTreasuryDelta scratchTreasuryDelta = new RuntimeTreasuryDelta();
     /** 当前唯一财务控制命令槽，普通撮合事件使用各自已有的财务交接槽。 */
     private SystemLedgerCommand ledgerControl;
     /** 按标的内部身份保存的配置对象，控制边界内更新并保持已有标的对象身份稳定。 */
@@ -4364,15 +4362,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             throw new IllegalStateException("Account Lane cannot access SystemLedger-owned Treasury");
         }
         return treasury;
-    }
-
-    /**
-     * 先清空再借出复用财库变化对象，下一次调用会覆盖此前内容。
-     */
-    public RuntimeTreasuryDelta scratchTreasuryDelta() {
-        assertOwner();
-        scratchTreasuryDelta.clear();
-        return scratchTreasuryDelta;
     }
 
     /**

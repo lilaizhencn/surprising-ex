@@ -72,7 +72,7 @@ public class MatcherTreasuryReceiptBenchmark {
         event.completeMatcherPublication();
         while (!event.complete()) { ledger.assertHealthy(); runtime.assertAccountLanesHealthy(); Thread.onSpinWait(); }
         runtime.collectMatcherSettlement(event, null, null);
-        long sequence = event.directResultCoreSequence();
+        long sequence = event.coreSequence();
         runtime.releaseMatcherSettlement(event);
         return sequence;
     }

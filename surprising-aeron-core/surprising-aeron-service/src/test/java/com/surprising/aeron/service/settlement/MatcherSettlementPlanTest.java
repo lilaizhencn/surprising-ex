@@ -206,7 +206,7 @@ class MatcherSettlementPlanTest {
             assertThat(failure.get()).isNull();
             assertThat(reused.ready()).isFalse();
             assertThat(reused.dispatched()).isFalse();
-            assertThat(reused.directResultCoreSequence()).isEqualTo(2);
+            assertThat(reused.coreSequence()).isEqualTo(2);
             runtime.ownerCompletionSignal(null);
             reused.reserveMatcherPublication();
             reused.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
