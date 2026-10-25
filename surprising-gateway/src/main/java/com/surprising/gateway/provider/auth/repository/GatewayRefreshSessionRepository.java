@@ -104,10 +104,6 @@ public class GatewayRefreshSessionRepository {
                 """, Timestamp.from(now), Timestamp.from(now), sessionId, Timestamp.from(now));
     }
 
-    public List<AdminRefreshSessionResponse> find(Long userId, Boolean active, int limit) {
-        return findPage(userId, active, new AuthPageQuery(limit, null, AuthPageQuery.Order.CREATED_DESC)).items();
-    }
-
     public AdminCursorPage.CursorPage<AdminRefreshSessionResponse> findPage(Long userId,
                                                                             Boolean active,
                                                                             AuthPageQuery pageQuery) {

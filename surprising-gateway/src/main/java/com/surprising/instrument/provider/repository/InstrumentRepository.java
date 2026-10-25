@@ -129,18 +129,6 @@ public class InstrumentRepository {
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
-    public List<InstrumentResponse> listByProductLine(ProductLine productLine) {
-        if (productLine == null) {
-            return List.of();
-        }
-        return jdbcTemplate.query("""
-                SELECT i.*, (SELECT a.asset FROM assets a WHERE a.asset_id=i.base_asset_id) AS base_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.quote_asset_id) AS quote_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.settle_asset_id) AS settle_asset, (SELECT a.asset FROM assets a WHERE a.asset_id=i.contract_value_asset_id) AS contract_value_asset
-                  FROM instruments i
-                 WHERE contract_type = ?
-                 ORDER BY symbol ASC
-                """, (rs, rowNum) -> toResponse(rs), productLine.contractTypeCode());
-    }
-
     public InstrumentPage listPage(ProductLine productLine,
                                    InstrumentType type,
                                    InstrumentStatus status,

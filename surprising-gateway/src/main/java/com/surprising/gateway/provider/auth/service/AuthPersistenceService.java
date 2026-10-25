@@ -251,10 +251,6 @@ public class AuthPersistenceService {
         return refreshSessionRepository.consume(sessionId, now);
     }
 
-    public List<AdminRefreshSessionResponse> refreshSessions(Long userId, Boolean active, int limit) {
-        return refreshSessionRepository.find(userId, active, limit);
-    }
-
     public AdminCursorPage.CursorPage<AdminRefreshSessionResponse> refreshSessionsPage(Long userId,
                                                                                       Boolean active,
                                                                                       AuthPageQuery pageQuery) {
@@ -275,14 +271,6 @@ public class AuthPersistenceService {
 
     public int revokeRefreshSessionForUser(long userId, long sessionId, Instant now) {
         return refreshSessionRepository.revokeActiveForUserSession(userId, sessionId, now);
-    }
-
-    public int revokeDeviceSessions(long userId, String deviceId, Instant now) {
-        return refreshSessionRepository.revokeActiveForDevice(userId, deviceId, now);
-    }
-
-    public int revokeIpSessions(long userId, String ipAddress, Instant now) {
-        return refreshSessionRepository.revokeActiveForIp(userId, ipAddress, now);
     }
 
     public Optional<String> deviceIdForSession(long userId, long sessionId) {

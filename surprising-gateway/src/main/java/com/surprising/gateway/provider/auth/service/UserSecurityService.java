@@ -133,9 +133,6 @@ public class UserSecurityService {
     public record UserMfaStatus(boolean enabled, Instant verifiedAt, Instant withdrawalsRestrictedUntil) {
     }
 
-    public record UserMfaEnrollment(boolean enabled, String secret, String provisioningUri) {
-    }
-
     public record Scene(String sceneCode, String label, boolean enabled) {
     }
 }

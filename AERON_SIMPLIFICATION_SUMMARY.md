@@ -500,7 +500,31 @@
 
 ---
 
-## 15. 累计重构成果统计与系统现状
+## 15. Round 5: 消除期权规则机械拆类与网关认证孤立死代码
+
+在 Round 4 完成现货规则内联与跨模块死参数清理后，Round 5 针对期权交易规则和网关/认证链路进行了纵深清理：
+
+### 15.1 消除过度拆类：期权规则直接内联与物理删除 `OptionOrderAdmission`
+- **问题现象**：期权订单准入预留金额计算（权利金计算、买卖持仓冲抵、卖方风险保证金与手续费覆盖）总共 81 行，全工程仅被 `OptionTradingRules.java` 的 `reservationUnits` 方法单行转调，属于典型的机械拆类过度设计。
+- **重构落地**：
+  1. 将 `OptionOrderAdmission.java` 的预留计算逻辑与 `proportional` 辅助方法直接内联进 `OptionTradingRules.java`；
+  2. 物理删除 `OptionOrderAdmission.java` 孤立文件，期权业务顺着读即可。
+
+### 15.2 网关与认证层孤立死方法与死模型清理
+- **`InstrumentRepository` 孤立死方法 `listByProductLine`**：
+  - 品种查询已全量统一采用游标分页 `listPage`，遗留的列表查询方法全工程 0 引用，物理删除。
+- **`UserSecurityService` 孤立死模型 `UserMfaEnrollment`**：
+  - MFA 注册信息流已收敛，遗留的内部 record `UserMfaEnrollment` 全工程 0 引用，物理删除。
+- **`AuthPersistenceService` 孤立死方法彻底拔除**：
+  - 物理删除已被分页方法 `refreshSessionsPage` 替代的 `refreshSessions(Long, Boolean, int)`；
+  - 物理删除已被底层 `sessions.revokeActiveForDevice` 替代的代理方法 `revokeDeviceSessions`；
+  - 物理删除已被底层 `sessions.revokeActiveForIp` 替代的代理方法 `revokeIpSessions`。
+- **`GatewayRefreshSessionRepository` 孤立死查询 `find` 物理删除**：
+  - 彻底删除被 `findPage` 取代、且仅供已删方法调用的 `find(Long userId, Boolean active, int limit)`。
+
+---
+
+## 16. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -509,16 +533,18 @@
 | **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
 | **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
+| **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission` 抽离独立类，仅单行转发 | 彻底内联回 `SpotTradingRules` 与 `OptionTradingRules`，物理删除独立类 |
 | **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`ensureInstrumentAsync` 等 | 物理彻底清除所有孤立死方法，精简方法签名 |
+| **死参数与无用转发** | `OrderBatchExecutor`、`LaneCommitDelta`、`DeterministicExchangeCoreAdapter` 等带死参数 | 彻底拔除方法死参数与 Lambda 冗余强引用闭包 |
 | **流水线空转计数器** | 4 个仅递增从不查询的 long 计数器（`drainedCommands`、`*Fences`） | 连同调用方埋点彻底拔除，消除纯空转开销 |
 | **准入伪参数** | 透传 `matcherWaitRequired`，内部多处防御分支 | 固定为异步流水线语义，彻底消除多余参数与防御分支 |
-| **快照超时配置** | 区分独立快照超时与集群快照超时，多重冗余参数 | 统一收敛为单一 `snapshot-timeout-seconds` |
 | **跨模块协议冗余别名** | Codec 中重复定义 `encodeBatchResult`、`trySubmit` 等假抽象别名 | 彻底清理冗余别名包装，直调权威方法 |
 | **Feign 接口形式主义** | 声明了 8 个 `@FeignClient` 接口，全工程零装配零调用 | 物理全量删除，消除微服务假架构残留 |
-| **Gateway 孤岛计算** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件，净减少 ~1,000 行纯死代码 |
+| **Gateway 孤岛计算与死代码** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件及多个死方法/模型，净减少死代码 |
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
-| **死命令与死 Record** | `AccountUserCommand`, `ExpiringPositionSettlementAccountCommand` 等遗留 | 物理彻底清除所有死命令与死 Record |
+| **死命令与死 Record** | `AccountUserCommand`, `UserMfaEnrollment` 等遗留 | 物理彻底清除所有死命令与死 Record |
 | **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，相关核心测试全绿** |
+
 
 
 ---
