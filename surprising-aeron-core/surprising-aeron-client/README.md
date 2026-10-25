@@ -31,6 +31,13 @@ Cluster log position、回调内 ordinal、事件时间、快照标识和实体�
 跨线程可见性，以及真实 Media Driver 上的大消息分片重组和目标 stream 隔离。
 当前测试不构成完整交易主链路性能验收。
 
+### 响应分发与轮询预算（2026-10-25）
+
+`Session.drainResponses` 是连接池唯一的响应消费契约。Dispatcher 按收到的关联号取出在途请求并完成，
+不再提供负数哨兵或逐个扫描在途请求的备用实现。独立直连客户端的同步 `submit` 仍自行按关联号取响应。
+测试 Session 和回环基准使用相同批量契约；片段预算测试通过 `ClusterOperations` 调用真实 `pollEgress`，
+已删除单独复制给测试的轮询算法。
+
 ### 命令池线程归属与请求槽复用（2026-10-15）
 
 池化连接在既有 `EgressDispatcher` 完成异步握手时绑定 I/O 线程。该线程顺序执行

@@ -54,7 +54,7 @@ HotSpot JDK 27 单线程组件采样：同一解码器读取直接缓冲区，�
 
 ### 借用命令的终态响应生命周期（2026-10-14）
 
-解码槽通过 `CoreMessage.ownedResponse` 生成一份只读终态响应，并通过 `responseHeader` 生成独立的RESPONSE Header；两者共享输入帧的租约，响应Header不会改写请求Header。异步发布者在交接前调用 `retainForEgress`，编码或丢弃后调用 `releaseFromEgress`。最后一个消费者释放前，解码器不能复用输入、响应Header或响应元数据。调用 `CoreResponse.data()` 得到的独立字节副本可长期保留。
+解码槽通过 `CoreMessage.ownedResponse` 生成一份只读终态响应，通过 `responseHeader` 生成独立的 RESPONSE Header，响应 Header 不改写请求 Header。两者借用同一命令解码租约；Cluster 回调内同步完成响应编码，背压出口只保留编码字节。Owner 在 Matcher/Lane 完成且编码返回后归还唯一租约，清除响应与 Header 引用，再允许解码器复用。不再维护 egress 读者引用计数。调用 `CoreResponse.data()` 得到的独立字节副本可长期保留。
 
 独立构造的 `CoreMessage` 继续生成独立响应值；只有显式租用的解码槽允许复用。一个租约只能准备一次终态响应，重复准备会拒绝。验证见 [响应槽及跨模块功能记录](../../docs/validation/leased-response-position-slots-20261014.json)。
 

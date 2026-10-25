@@ -544,7 +544,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
         var response = state.apply(request, timestamp, position);
         if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
             // 当前内部异步查询的序号，只从该序号接回查询结果
-            long id = state.bookQueries.querySequence(request.header().commandId());
+            var id = request.header().commandId();
             // 当前撮合或内部读取阶段单独计算的纳秒截止时间
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while ((response = state.bookQueries.takeQueryResult(id)) == null) {

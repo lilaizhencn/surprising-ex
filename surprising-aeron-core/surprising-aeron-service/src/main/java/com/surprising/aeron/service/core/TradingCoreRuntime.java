@@ -967,8 +967,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         currentClusterTimestamp = clusterTimestamp;
         currentClusterPosition = clusterPosition;
         assertHealthy();
-        if (snapshots.snapshotFence() != null
-                && snapshots.snapshotFence().encodedSnapshot() == null) {
+        if (snapshots.inFlightMatcherSnapshot().get() != null
+                || snapshots.snapshotFence() != null && snapshots.snapshotFence().encodedSnapshot() == null) {
             throw new IllegalStateException("snapshot fence is active");
         }
         if (!pendingMatching.isEmpty()

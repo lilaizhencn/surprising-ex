@@ -1,5 +1,11 @@
 # aeron-service 代码导航
 
+2026-10-25 运行路径收敛：`AeronTradingClusterService` 只保留 Spring 与完整参数两个装配入口；
+`CoreSnapshotLifecycle` 统一按分片提交栅栏捕获，删除适配器内部快照注册表及同步 Matcher 调用包装；
+`CoreQueryService` 以 UUID 关联任务自身的完成 Future；`ClusterServiceEgress` 当场编码，背压只排字节。
+订单元数据与预留回滚直接使用已有 Lane 作用域，保留线程归属、回滚、提交与恢复检查。
+验证范围及结果见 [七项简化验收](validation/seven-item-simplification-20261025.md)。
+
 本模块是交易 Core 的执行服务。每个节点只服务一条产品线，处理 Cluster 已复制的命令；
 HTTP接入、价格生产、生命周期调度和外部查询投影由其他服务承担。六条产品线的账户、订单簿和风险事实分别隔离。
 

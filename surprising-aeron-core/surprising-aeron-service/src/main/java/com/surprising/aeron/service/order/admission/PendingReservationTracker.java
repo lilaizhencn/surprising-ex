@@ -310,16 +310,21 @@ public final class PendingReservationTracker {
         // 本次多项完成的准备列表，包含已核对路由及原冻结引用。
         List<PendingReservationBatchCompletion> completions = preflightPendingReservationCompletions(
                 coreSequence, refs);
-        owner.executeOwnerSettlements(completions, PendingReservationBatchCompletion::userId, /* 当前回调或逐 Lane 核对正在处理的账户分区编号。 */ laneId -> {
-            // 通过原账户访问范围进入的 Lane，只处理属于本 Lane 的用户和预留。
-            AccountLaneState lane = owner.currentLaneCommandScope();
-            for (PendingReservationBatchCompletion /* 当前 Lane 负责的已预检完成项，其他 Lane 的项在本回调跳过。 */ completion : completions) {
-                if (owner.topology().accountLaneId(completion.userId()) != laneId) continue;
-                lane.completePendingReservation(completion.orderId(), coreSequence);
-                owner.accountRollback().captureBalanceAfter(lane, completion.userId(), completion.reservation().assetId());
-            }
-            return null;
-        });
+        long selectedLanes = 0;
+        for (var completion : completions) selectedLanes |= owner.topology().accountLaneMask(completion.userId());
+        while (selectedLanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(selectedLanes);
+            selectedLanes &= selectedLanes - 1;
+            owner.onLane(laneId, lane -> {
+                for (var completion : completions) {
+                    if (owner.topology().accountLaneId(completion.userId()) != laneId) continue;
+                    lane.completePendingReservation(completion.orderId(), coreSequence);
+                    owner.accountRollback().captureBalanceAfter(lane, completion.userId(), completion.reservation().assetId());
+                }
+                lane.recordSettlementOperation();
+                return null;
+            });
+        }
         for (PendingReservationBatchCompletion /* Lane 工作完成后供 Owner 标记变化并删除路由的一项交接值。 */ completion : completions) {
             owner.changedOrder(completion.orderId());
             owner.changedReservation(completion.orderId());

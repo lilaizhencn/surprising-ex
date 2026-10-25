@@ -21,6 +21,21 @@ public final class TradingCoreRuntimeRestoreTestSupport {
     private TradingCoreRuntimeRestoreTestSupport() {
     }
 
+    /** 为独立原生订单簿夹具捕获真实分片模块，不建立第二套生产快照流程。 */
+    public static MatcherSnapshot matcherSnapshot(DeterministicExchangeCoreAdapter adapter,
+            long snapshotId, long sequence, long businessStateHash, TradingCoreState state,
+            Iterable<com.surprising.aeron.model.CoreOrderState> activeOrders) {
+        var shards = new java.util.ArrayList<DeterministicExchangeCoreAdapter.MatcherShardSnapshot>();
+        try {
+            for (int shardId = 0; shardId < adapter.topology().matchingEngineCount(); shardId++)
+                shards.add(adapter.captureShardSnapshot(shardId, snapshotId, sequence, activeOrders));
+            return adapter.finishShardedSnapshot(snapshotId, sequence, businessStateHash, state, shards);
+        } catch (RuntimeException | Error failure) {
+            adapter.discardSnapshot(snapshotId);
+            throw failure;
+        }
+    }
+
     /**
      * 没有 Matcher 快照时要求账户不存在未结束订单；用临时确定性适配器生成空 Matcher 快照，再交给完整参数入口恢复。
      * @param productLine 当前夹具所属产品线
@@ -41,8 +56,8 @@ public final class TradingCoreRuntimeRestoreTestSupport {
         // 为无未结束订单夹具构造的 Matcher 快照
         MatcherSnapshot matcherSnapshot;
         try (/* 本方法临时持有并自动关闭的确定性撮合适配器 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            matcherSnapshot = adapter.snapshotAsync(1, appliedCommandCount,
-                    snapshotState.businessStateHash(), snapshotState, List.of()).join();
+            matcherSnapshot = matcherSnapshot(adapter, 1, appliedCommandCount,
+                    snapshotState.businessStateHash(), snapshotState, List.of());
         }
         return restore(productLine, appliedCommandCount, commandResults, lastSourceSequences,
                 snapshotState, matcherSnapshot);

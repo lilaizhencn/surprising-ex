@@ -32,16 +32,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.experimental.Accessors;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
@@ -87,8 +82,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
     /** 永久编号到原字符串的并发反向表，用于拒绝同编号字符串冲突。 */
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
-    /** 快照号到正在进行操作的并发表，同号请求共享底层 Future，完成后移除。 */
-    private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     /**  启动配置或恢复快照确定的账户与 Matcher 分片拓扑。 返回本适配器启动或恢复时确定的线程分片拓扑。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -1468,7 +1461,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public MatcherSnapshot finishShardedSnapshot(
             long snapshotId, long coreSequence, long businessStateHash, TradingCoreState state,
             List<MatcherShardSnapshot> shardSnapshots) {
-        if (state == null || shardSnapshots == null || shardSnapshots.size() != topology.matchingEngineCount()) {
+        if (snapshotId <= 0 || coreSequence < 0 || businessStateHash == 0 || state == null
+                || shardSnapshots == null || shardSnapshots.size() != topology.matchingEngineCount()) {
             throw new IllegalArgumentException("incomplete matcher shard snapshot set");
         }
         // 当前冷态读取或汇总出的引擎与订单簿哈希。
@@ -1489,102 +1483,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
-    /**
-     * 校验快照参数，按快照号合并正在进行的操作，同号重试须有相同 Core 序号和业务哈希；每次返回独立且拒绝 cancel 的视图，底层持久化只启动一次，结束后移除登记。
-     * @param snapshotId 正的快照编号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param businessStateHash 冻结点的 Core 业务哈希
-     * @param state 对应恢复或快照点的 Core 状态，具体读取边界见方法说明
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
-     */
-    public CompletableFuture<MatcherSnapshot> snapshotAsync(
-            long snapshotId,
-            long coreSequence,
-            long businessStateHash,
-            TradingCoreState state,
-            Iterable<CoreOrderState> activeOrders) {
-        if (snapshotId <= 0 || coreSequence < 0 || businessStateHash == 0
-                || state == null || activeOrders == null) {
-            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher snapshot request"));
-        }
-        // 当前正在共享的快照操作，或等待结束的在途操作。
-        SnapshotOperation operation = snapshotOperations.get(snapshotId);
-        if (operation == null) {
-            // 尝试成为同号在途操作所有者的新快照记录。
-            SnapshotOperation candidate = new SnapshotOperation(coreSequence, businessStateHash);
-            operation = snapshotOperations.putIfAbsent(snapshotId, candidate);
-            if (operation == null) {
-                operation = candidate;
-                startSnapshotOperation(operation, snapshotId, coreSequence, businessStateHash, state, activeOrders);
-            }
-        }
-        if (operation.coreSequence != coreSequence || operation.businessStateHash != businessStateHash) {
-            return CompletableFuture.failedFuture(
-                    new IllegalStateException("snapshot retry does not match in-flight core state"));
-        }
-        return operation.view();
-    }
-
-    /**
-     * 依次完成活动订单对账、状态哈希、注入的持久化和模块导出，构造快照后清掉模块；成功或失败都完成共享 Future 并移除在途登记。同步启动异常直接失败，外层视图取消不取消这条流水。
-     * @param operation 对账操作名称或正在进行的快照对象，具体类型见签名
-     * @param snapshotId 正的快照编号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param businessStateHash 冻结点的 Core 业务哈希
-     * @param state 对应恢复或快照点的 Core 状态，具体读取边界见方法说明
-     * @param activeOrders 同一冻结点的 Core 活动订单序列
-     */
-    private void startSnapshotOperation(
-            SnapshotOperation operation,
-            long snapshotId,
-            long coreSequence,
-            long businessStateHash,
-            TradingCoreState state,
-            Iterable<CoreOrderState> activeOrders) {
-        // 真实快照流水的最终 Future，最终结果转发到共享完成对象。
-        CompletableFuture<MatcherSnapshot> pipeline;
-        try {
-            pipeline = reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshotId,
-                    "matcher snapshot").thenCompose(/* 此回调不读取的上一步结果或按现有约定忽略的异常，具体含义见所在语句。 */ ignored -> currentStateHashesAsync()).thenCompose(/* 当前冷态读取或汇总出的引擎与订单簿哈希。 */ hashes ->
-                    snapshotPersistence.apply(() -> CompletableFuture.completedFuture(
-                                    storeMatcherShards(snapshotId, coreSequence)
-                                            ? CommandResultCode.SUCCESS
-                                            : CommandResultCode.STATE_PERSIST_MATCHING_ENGINE_FAILED))
-                            .thenApply(/* 全部原生分片快照的持久化状态码，非 SUCCESS 使共享操作失败。 */ result -> {
-                                if (result != CommandResultCode.SUCCESS) {
-                                    throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence,
-                                            snapshotId, "exchange-core persist failed: " + result);
-                                }
-                                try {
-                                    // 从当前快照号导出的原生模块字节，构造后删除内存存储副本。
-                                    List<InMemorySerializationProcessor.SerializedModule> modules =
-                                            serializationProcessor.exportSnapshot(snapshotId);
-                                    // 导出模块中最大的原生持久化序号。
-                                    long matcherSequence = maxMatcherSequence(modules);
-                                    // 在冷态边界汇总并排序的已见用户集合。
-                                    Set<Long> userSnapshot = snapshotUsers();
-                                    return new MatcherSnapshot(state.productLine(), topology,
-                                            snapshotId, coreSequence, matcherSequence,
-                                            matcherEvidence.snapshot(), businessStateHash,
-                                            hashes.engineHash(),
-                                            symbols, userSnapshot, modules);
-                                } finally {
-                                    serializationProcessor.removeSnapshot(snapshotId);
-                                }
-                            }));
-        } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
-            operation.result.completeExceptionally(exception);
-            snapshotOperations.remove(snapshotId, operation);
-            return;
-        }
-        pipeline.whenComplete((/* 当前快照值或冷态汇总容器，具体类型见声明。 */ snapshot, /* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ failure) -> {
-            if (failure == null) {
-                operation.result.complete(snapshot);
-            } else {
-                operation.result.completeExceptionally(failure);
-            }
-            snapshotOperations.remove(snapshotId, operation);
-        });
+    /** 全部分片捕获结束后释放失败快照的原生模块。 */
+    public void discardSnapshot(long snapshotId) {
+        serializationProcessor.removeSnapshot(snapshotId);
     }
 
     /**
@@ -2008,18 +1909,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 按数组顺序同步存储全部分片，首个返回 false 就停止；此前已写入的模块不在这里回滚。
-     * @param snapshotId 正的快照编号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     */
-    private boolean storeMatcherShards(long snapshotId, long coreSequence) {
-        for (SynchronousMatchingEngine /* 当前遍历或关闭的同步引擎实例。 */ matcher : engines) {
-            if (!matcher.storeSnapshot(snapshotId, coreSequence, coreSequence)) return false;
-        }
-        return true;
-    }
-
-    /**
      * 按字符执行固定的 FNV 风格 int 哈希并清掉符号位，仅给原生占位资产编号使用；不保证无碰撞，也不排除结果为零。
      * @param value 待计算占位资产编号的字符串
      */
@@ -2078,54 +1967,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
-    /** 按快照号共享的在途操作，保存重试校验身份和唯一底层完成对象；结束后从并发表移除。 构造约定：登记同一在途快照号对应的 Core 序号和业务哈希，共享底层完成 Future。 参数 coreSequence：当前逻辑命令或冻结点的 Core 序号 参数 businessStateHash：冻结点的 Core 业务哈希 */
-    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-    private static final class SnapshotOperation {
-        /** 该在途快照开始时的 Core 序号，用来核对重试身份。 */
-        private final long coreSequence;
-        /** 该在途快照的 Core 业务哈希，用来核对重试是否仍指同一状态。 */
-        private final long businessStateHash;
-        /** 所有同号请求共用的快照底层 Future，外层视图不传播 cancel。 */
-        private final CompletableFuture<MatcherSnapshot> result = new CompletableFuture<>();
-
-        /**
-         * 创建独立的不可取消 Future，将共享底层成功值或异常转发给该视图；调用方在视图上自行完成也不会改变底层结果。
-         */
-        private CompletableFuture<MatcherSnapshot> view() {
-            // 当前请求独立的不可取消外层 Future，共享结果只向它单向转发。
-            NonCancellableFuture<MatcherSnapshot> view = new NonCancellableFuture<>();
-            result.whenComplete((/* 当前快照值或冷态汇总容器，具体类型见声明。 */ snapshot, /* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ failure) -> {
-                if (failure == null) {
-                    view.complete(snapshot);
-                } else {
-                    view.completeExceptionally(failure);
-                }
-            });
-            return view;
-        }
-    }
-
     /**
-     * 阻止外层 cancel 传播的完成视图。它只覆盖 cancel，并未禁止调用方手动 complete、超时完成或强制改写自己的视图。
-     * @param <T> 外层只读取消语义视图的结果类型
-     */
-    private static final class NonCancellableFuture<T> extends CompletableFuture<T> {
-        /**
-         * 始终拒绝取消，忽略中断意图参数；持久化继续完成并由共享结果通知其他视图。
-         * @param mayInterruptIfRunning 调用方的中断意图，本实现忽略且始终拒绝取消
-         */
-        @Override
-        public boolean cancel(boolean mayInterruptIfRunning) {
-            return false;
-        }
-    }
-
-    /**
-     * 有引擎时先有限等待在途快照，再依次读取非故障引擎哈希并关闭，汇总关闭异常后清空数组并抛出首个异常；哈希读取与关闭共用 try，前者抛出会跳过该实例 close，不承诺所有资源必已关闭。
+     * 独立调用者在快照捕获返回后关闭；依次读取非故障引擎哈希并关闭，汇总关闭异常后清空数组并抛出首个异常；哈希读取与关闭共用 try，前者抛出会跳过该实例 close，不承诺所有资源必已关闭。
      */
     private void stop() {
         if (engines != null) {
-            awaitSnapshotOperations();
             // 关闭循环遇到的首个运行异常，后续异常作为 suppressed 附上。
             RuntimeException failure = null;
             for (SynchronousMatchingEngine /* 当前遍历或关闭的同步引擎实例。 */ matcher : engines) {
@@ -2162,23 +2008,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 逐个在途操作最多等待三十秒；中断恢复中断标记后返回，执行失败或超时也立即结束全部等待，不是全局固定三十秒截止。
-     */
-    private void awaitSnapshotOperations() {
-        for (SnapshotOperation /* 当前正在共享的快照操作，或等待结束的在途操作。 */ operation : snapshotOperations.values()) {
-            try {
-                operation.result.get(30, TimeUnit.SECONDS);
-            } catch (/* 等待快照被中断，恢复当前线程中断标记后结束等待。 */ InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                return;
-            } catch (/* 此回调不读取的上一步结果或按现有约定忽略的异常，具体含义见所在语句。 */ ExecutionException | TimeoutException ignored) {
-                return;
-            }
-        }
-    }
-
-    /**
-     * 执行整体停止流程，可能传播快照等待后出现的引擎关闭异常。
+     * 执行整体停止流程，传播引擎关闭异常。
      */
     @Override
     public void close() {

@@ -18,7 +18,6 @@ public final class CoreMessage {
     /** Internal waiting metadata must not occupy the independent terminal-response lease. */
     private final CoreResponse decoderPendingResponse;
     private final CommandFingerprint decoderFingerprint;
-    private final java.util.concurrent.atomic.AtomicInteger decoderReaders;
 
     public CoreMessage(CoreMessageHeader header, byte[] payload) {
         this(header, payload, false);
@@ -35,7 +34,6 @@ public final class CoreMessage {
         decoderResponse = null;
         decoderPendingResponse = null;
         decoderFingerprint = null;
-        decoderReaders = null;
         this.header = Objects.requireNonNull(header, "header").immutableValue();
         this.payload = owned
                 ? Objects.requireNonNull(payload, "payload")
@@ -50,7 +48,6 @@ public final class CoreMessage {
         decoderResponse = new CoreResponse();
         decoderPendingResponse = new CoreResponse();
         decoderFingerprint = CommandFingerprint.reusableSlot();
-        decoderReaders = new java.util.concurrent.atomic.AtomicInteger();
     }
     public static CoreMessage decoderSlot() { return new CoreMessage(); }
 
@@ -58,7 +55,6 @@ public final class CoreMessage {
     public boolean acquireDecoderSlot() {
         if (!decoderSlot) throw new IllegalStateException("message is not a decoder slot");
         if (decoderLeased) return false;
-        decoderReaders.set(1);
         decoderLeased = true;
         return true;
     }
@@ -94,28 +90,17 @@ public final class CoreMessage {
         header = decoderHeader;
     }
 
-    void retainDecoderReader() {
-        if (!decoderLeased || decoderReaders.get() <= 0) throw new IllegalStateException("decoder slot is not leased");
-        decoderReaders.incrementAndGet();
-    }
-
-    void releaseDecoderReader() {
-        int remaining = decoderReaders.decrementAndGet();
-        if (remaining < 0) throw new IllegalStateException("decoder slot was released twice");
-        if (remaining == 0) {
-            decoderHeader.clearDecoderReferences();
-            decoderResponseHeader.clearDecoderReferences();
-            decoderResponse.clearCommandSlot();
-            decoderPendingResponse.clearCommandSlot();
-            decoderFingerprint.clearSlot();
-            header = null;
-            decoderLeased = false;
-        }
-    }
-
+    /** Owner 在命令和响应编码均完成后归还唯一解码租约。 */
     public void releaseDecoderSlot() {
         if (!decoderSlot) return;
-        releaseDecoderReader();
+        if (!decoderLeased) throw new IllegalStateException("decoder slot was released twice");
+        decoderHeader.clearDecoderReferences();
+        decoderResponseHeader.clearDecoderReferences();
+        decoderResponse.clearCommandSlot();
+        decoderPendingResponse.clearCommandSlot();
+        decoderFingerprint.clearSlot();
+        header = null;
+        decoderLeased = false;
     }
 
     CommandFingerprint fingerprintSlot() {

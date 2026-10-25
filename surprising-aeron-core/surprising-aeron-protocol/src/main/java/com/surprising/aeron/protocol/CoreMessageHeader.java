@@ -111,10 +111,6 @@ public final class CoreMessageHeader {
     public long submittedAtEpochMillis() { return submittedAtEpochMillis; }
     public long correlationId() { return correlationId; }
 
-    /** Queue an asynchronous response reader before releasing the command's decoder lease. */
-    public void retainForEgress() { if (decoderOwner != null) decoderOwner.retainDecoderReader(); }
-    public void releaseFromEgress() { if (decoderOwner != null) decoderOwner.releaseDecoderReader(); }
-
     public CoreMessageHeader immutableValue() {
         if (decoderOwner == null) return this;
         CoreMessageHeader copy = new CoreMessageHeader(schemaVersion, messageType, commandIdMsb, commandIdLsb, productLine,

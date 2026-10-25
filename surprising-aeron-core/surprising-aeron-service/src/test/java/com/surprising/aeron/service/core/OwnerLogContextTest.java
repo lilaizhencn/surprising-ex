@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.RealtimeConfiguration;
+import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.protocol.*;
@@ -42,7 +46,9 @@ class OwnerLogContextTest {
         var egress = new ClusterServiceEgress();
         egress.start(cluster);
         // 创建实际服务的生产对象
-        var service = new AeronTradingClusterService(product, egress);
+        var service = new AeronTradingClusterService(product, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         try {
             service.onStart(cluster, null);
             service.enqueue(probe(product, 1), ClusterServiceEgress.NO_SESSION_ID, 70, 700, null);

@@ -999,9 +999,9 @@ class TradingCoreOwnerTest {
                         encoded.length, aeronHeader());
                 // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (service.state().bookQueries.querySequence(request.header().commandId()) == 0 && System.nanoTime() < deadline)
+                while (!service.state().bookQueries.hasPendingQuery(request.header().commandId()) && System.nanoTime() < deadline)
                     service.pollCommands();
-                assertThat(service.state().bookQueries.querySequence(request.header().commandId())).isNotZero();
+                assertThat(service.state().bookQueries.hasPendingQuery(request.header().commandId())).isTrue();
                 assertThat(responses).isEmpty();
                 assertThat(release.getCount()).isOne();
                 release.countDown();
@@ -1055,11 +1055,11 @@ class TradingCoreOwnerTest {
                     encoded.length, aeronHeader());
             // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (service.state().bookQueries.querySequence(query.header().commandId()) == 0 && System.nanoTime() < deadline) {
+            while (!service.state().bookQueries.hasPendingQuery(query.header().commandId()) && System.nanoTime() < deadline) {
                 service.pollCommands();
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             }
-            assertThat(service.state().bookQueries.querySequence(query.header().commandId())).isNotZero();
+            assertThat(service.state().bookQueries.hasPendingQuery(query.header().commandId())).isTrue();
             assertThat(responses).isEmpty();
             assertThat(release.getCount()).isOne();
             release.countDown();
@@ -1396,7 +1396,7 @@ class TradingCoreOwnerTest {
                     com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOrderBookQuery(
                             new com.surprising.aeron.protocol.CoreOrderBookQuery("1", 10)));
             replayWithoutSession(service, query);
-            assertThat(service.state().bookQueries.querySequence(query.header().commandId())).isZero();
+            assertThat(service.state().bookQueries.hasPendingQuery(query.header().commandId())).isFalse();
             assertThat(service.doBackgroundWork(0)).isZero();
         } finally {
             service.onTerminate(null);

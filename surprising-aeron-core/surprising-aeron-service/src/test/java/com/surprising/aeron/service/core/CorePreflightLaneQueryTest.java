@@ -175,7 +175,7 @@ class CorePreflightLaneQueryTest {
                 var request = message(core, 1, TradingCommandCodec.encodePlaceOrder(intent));
                 assertThat(core.apply(request).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 // 慢 Lane 查询的内部编号，未放行时无结果，放行后按此编号消费一次。
-                long id = core.bookQueries.querySequence(request.header().commandId());
+                var id = request.header().commandId();
                 assertThat(core.bookQueries.takeQueryResult(id)).isNull();
                 assertThat(release.getCount()).isOne();
                 // 测试直接更新的在线规范币对，与早先捕获的查询配置区分。
@@ -272,7 +272,7 @@ class CorePreflightLaneQueryTest {
         // 核心直接返回的预检提交状态，待完成时继续等待最终结果。
         var response = core.apply(request);
         return response.resultCode() == CoreResultCode.MATCHING_PENDING
-                ? await(core, request, core.bookQueries.querySequence(request.header().commandId())) : response;
+                ? await(core, request, request.header().commandId()) : response;
     }
 
     /**
@@ -281,8 +281,8 @@ class CorePreflightLaneQueryTest {
      * @param request 已经提交的预检消息，用其命令 UUID 核对内部关联清理
      * @param id 本次预检内部异步编号，要求非零并只消费一次
      */
-    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, long id) {
-        assertThat(id).isNotZero();
+    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, java.util.UUID id) {
+        assertThat(core.bookQueries.hasPendingQuery(id)).isTrue();
         // 异步预检的五秒单调时钟等待上限，不作为业务价格时间。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         // 持续尝试消费的最终预检结果，成功取得后不允许再次返回。
@@ -293,7 +293,7 @@ class CorePreflightLaneQueryTest {
             Thread.onSpinWait();
         }
         assertThat(core.bookQueries.takeQueryResult(id)).isNull();
-        assertThat(core.bookQueries.querySequence(request.header().commandId())).isZero();
+        assertThat(core.bookQueries.hasPendingQuery(request.header().commandId())).isFalse();
         return response;
     }
 

@@ -217,7 +217,7 @@ class CoreAccountLaneQueryTest {
                 assertThat(response.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 assertThat(release.getCount()).isOne();
                 // 当前查询的内部异步编号，用于等待最终结果并核对只能消费一次。
-                long id = core.bookQueries.querySequence(request.header().commandId());
+                var id = request.header().commandId();
                 assertThat(core.bookQueries.takeQueryResult(id)).isNull();
                 release.countDown();
                 assertThat(await(core, request, id).status()).isEqualTo(ResponseStatus.OK);
@@ -319,8 +319,7 @@ class CoreAccountLaneQueryTest {
             var request = message(CoreMessageType.USER_STATE_QUERY, 1, new byte[0]);
             assertThat(core.apply(request).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         } finally { core.close(); }
-        assertThat(core.bookQueries.queryIds).isEmpty();
-        assertThat(core.bookQueries.completedBookQueries).isEmpty();
+        assertThat(core.bookQueries.hasPendingQueries()).isFalse();
     }
 
     /**
@@ -402,7 +401,7 @@ class CoreAccountLaneQueryTest {
         // 提交查询的直接响应，已终态就返回，否则继续消费异步结果。
         var response = core.apply(request);
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
-        return await(core, request, core.bookQueries.querySequence(request.header().commandId()));
+        return await(core, request, request.header().commandId());
     }
 
     /**
@@ -411,8 +410,8 @@ class CoreAccountLaneQueryTest {
      * @param request 已经提交的查询消息，用它的命令 UUID 核对查询关联清理
      * @param id 本次账户异步查询的内部编号，要求非零且只消费一次
      */
-    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, long id) {
-        assertThat(id).isNotZero();
+    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, java.util.UUID id) {
+        assertThat(core.bookQueries.hasPendingQuery(id)).isTrue();
         // 本次异步查询或只读回调的五秒单调时钟等待上限，不用于交易时间计算。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         // 持续尝试消费的最终账户查询响应，成功取走后不能再次得到同一结果。
@@ -423,7 +422,7 @@ class CoreAccountLaneQueryTest {
             Thread.onSpinWait();
         }
         assertThat(core.bookQueries.takeQueryResult(id)).isNull();
-        assertThat(core.bookQueries.querySequence(request.header().commandId())).isZero();
+        assertThat(core.bookQueries.hasPendingQuery(request.header().commandId())).isFalse();
         return response;
     }
 

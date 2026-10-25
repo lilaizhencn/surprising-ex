@@ -200,10 +200,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final LaneSequenceQueue[] placeAdmissionReadyQueues;
     /** 各账户 Lane 到 Owner 的普通结算完成序号队列。 */
     final LaneSequenceQueue[] matcherSettlementReadyQueues;
-    /** 同步执行按 Lane 写入的复用结果数组，下一次调用可能覆盖返回内容。 */
-    final Object[] laneMutationResultsScratch;
-    /** 上一次结果数组实际写过的 Lane 位，下一轮只清这些旧结果。 */
-    long laneMutationResultsMask;
 
     /** Owner 采样到的账户队列高水位，不保证捕获每一次入队峰值。 */
     final int[] accountLaneQueueHighWaterMarks;
@@ -518,7 +514,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 this::assertOwner);
         this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.matcherSettlementReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
-        this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
         this.publishedLaneCommittedSlots = new PaddedCommittedSequenceSlot[topology.accountLaneCount()];
         for (/* 当前预建对象或工作线程数组的下标 */ int i = 0; i < topology.accountLaneCount(); i++) {
@@ -1202,115 +1197,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (Thread.currentThread() == owner) ownerMatcherSettlementChangesScope = null;
         lane.matcherSettlementChanges(null);
         exitLaneCommandScope(lane, false);
-    }
-
-    /**
-     * 同步执行指定用户所属 Lane 的结算操作，并从复用结果数组取得返回值；活动阶段必须已经持有 Owner 账户访问权。
-     * @param <T> 该账户操作返回值的类型
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public <T> T executeUserSettlement(long userId, java.util.function.Supplier<T> operation) {
-        assertOwner();
-        if (userId <= 0 || operation == null) {
-            throw new IllegalArgumentException("invalid user settlement command");
-        }
-        // 当前按拓扑选中或从掩码取出的账户 Lane 编号
-        int laneId = topology.accountLaneId(userId);
-        executeLaneMutations(1L << laneId, 1, /* 回调传入但本操作不需要的 Lane 参数，实际使用已捕获的业务操作 */ ignored -> operation.get());
-        // 从本 Lane 复用结果数组取出的本次业务返回值
-        @SuppressWarnings("unchecked") T result = (T) laneMutationResultsScratch[laneId];
-        return result;
-    }
-
-    /**
-     * 把用户列表按用户身份映射到目标 Lane，再走同步结算执行。
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public Object[] executeOwnerSettlements(Iterable<Long> userIds,
-                                            java.util.function.IntFunction<Object> operation) {
-        return executeOwnerSettlements(userIds, Long::longValue, operation);
-    }
-
-    /**
-     * 从非空业务项提取正用户身份并合并目标 Lane 位，每条选中 Lane 执行一次操作；本重载用 Lane 数作为工作数量。
-     * @param <E> 待路由业务项的类型
-     * @param values 本次待路由的业务项，空项由对应集合入口跳过
-     * @param ownerUserId 从业务项提取所属用户身份的函数
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public <E> Object[] executeOwnerSettlements(Iterable<E> values,
-                                                java.util.function.ToLongFunction<E> ownerUserId,
-                                                java.util.function.IntFunction<Object> operation) {
-        assertOwner();
-        if (values == null || ownerUserId == null || operation == null) {
-            throw new IllegalArgumentException("invalid owner settlement command");
-        }
-        // 由本轮有效业务用户合并得到的目标 Lane 位集合
-        long selectedLaneMask = 0;
-        for (E /* 本轮正在提取所属用户的业务项，空项直接跳过 */ value : values) {
-            if (value == null) continue;
-            // 本轮读出的用户身份，按对应入口过滤或路由
-            long userId = ownerUserId.applyAsLong(value);
-            if (userId > 0) selectedLaneMask |= topology.accountLaneMask(userId);
-        }
-        return executeLaneMutations(selectedLaneMask, Long.bitCount(selectedLaneMask), operation);
-    }
-
-    /**
-     * 使用调用方已经分好的 Lane 掩码与工作量，避免再次遍历业务项，进入同步修改入口。
-     * @param selectedLaneMask 调用方已经按业务项合并的目标 Lane 位集合
-     * @param workItems 本次实际工作数量，非空 Lane 掩码要求大于零
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public Object[] executeOwnerSettlements(long selectedLaneMask, int workItems,
-                                            java.util.function.IntFunction<Object> operation) {
-        assertOwner();
-        return executeLaneMutations(selectedLaneMask, workItems, operation);
-    }
-
-    /**
-     * 同步修改入口：校验掩码、工作量及访问权，先清上轮结果，再按 Lane 编号逐个执行并记结算次数；返回复用数组，后续调用会改写它。这里不派发并行工作。
-     * @param selectedLaneMask 调用方已经按业务项合并的目标 Lane 位集合
-     * @param workItems 本次实际工作数量，非空 Lane 掩码要求大于零
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public Object[] executeLaneMutations(long selectedLaneMask, int workItems,
-                                          java.util.function.IntFunction<Object> operation) {
-        assertOwner();
-        // 当前实际账户数量允许的位集合，64 条时所有位均有效
-        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
-        if ((selectedLaneMask & ~validMask) != 0 || workItems < 0 || operation == null) {
-            throw new IllegalArgumentException("invalid account lane mutation");
-        }
-        if (accountLanesStarted() && !ownerLaneAccess()) {
-            throw new IllegalStateException("active Account Lane mutations must be dispatched to their workers");
-        }
-        // 本运行时复用的按 Lane 结果数组，返回后下一次调用可能改写
-        Object[] results = laneMutationResultsScratch;
-        // 上轮结果数组实际写过且本轮需要清空的 Lane 位集合
-        long staleResults = laneMutationResultsMask;
-        while (staleResults != 0) {
-            // 当前按拓扑选中或从掩码取出的账户 Lane 编号
-            int laneId = Long.numberOfTrailingZeros(staleResults);
-            results[laneId] = null;
-            staleResults &= staleResults - 1;
-        }
-        laneMutationResultsMask = selectedLaneMask;
-        if (selectedLaneMask == 0) {
-            return results;
-        }
-        if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
-        for (/* 当前按拓扑选中或从掩码取出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((selectedLaneMask & 1L << laneId) == 0) continue;
-            // 供本轮回调捕获的稳定 Lane 下标
-            int currentLaneId = laneId;
-            results[laneId] = inLaneCommandScope(accountLanes[currentLaneId],
-                    /* 回调传入但本操作不需要的 Lane 参数，实际使用已捕获的业务操作 */ ignored -> operation.apply(currentLaneId));
-            accountLanes[laneId].recordSettlementOperation();
-        }
-        return results;
     }
 
     /**

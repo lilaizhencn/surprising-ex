@@ -178,45 +178,6 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     }
 
     /**
-     * 在指定分片提交控制动作并等待限时结果，超时不撤销已提交工作。
-     * @param <T> 查询或控制动作返回值的类型
-     * @param shardId 目标全局 Matcher 分片号
-     * @param command 目标分片执行的业务或控制动作，具体形式由方法决定
-     * @param timeoutNanos 单次分片控制调用的纳秒等待上限
-     */
-    public <T> T call(int shardId, Supplier<T> command, long timeoutNanos) {
-        return shard(shardId).call(command, timeoutNanos);
-    }
-
-    /**
-     * 在分片零执行控制动作并等待结果，不代表广播全部分片。
-     * @param <T> 查询或控制动作返回值的类型
-     * @param command 目标分片执行的业务或控制动作，具体形式由方法决定
-     * @param timeoutNanos 单次分片控制调用的纳秒等待上限
-     */
-    public <T> T call(Supplier<T> command, long timeoutNanos) {
-        return call(0, command, timeoutNanos);
-    }
-
-    /**
-     * 按分片号依次提交并等待控制调用，全部成功后返回不可修改的结果列表；每个分片分别使用传入超时，不是并行读取，也没有整体统一截止。
-     * @param <T> 查询或控制动作返回值的类型
-     * @param command 目标分片执行的业务或控制动作，具体形式由方法决定
-     * @param timeoutNanos 单次分片控制调用的纳秒等待上限
-     */
-    public <T> java.util.List<T> callEach(IntFunction<T> command, long timeoutNanos) {
-        if (command == null) throw new IllegalArgumentException("matcher shard control is required");
-        // 按分片顺序保存的串行控制调用结果。
-        java.util.ArrayList<T> results = new java.util.ArrayList<>(shards.length);
-        for (/* 当前遍历的全局 Matcher 分片号。 */ int shardId = 0; shardId < shards.length; shardId++) {
-            // 当前回调固定捕获的分片号，避免依赖下一轮循环。
-            int currentShardId = shardId;
-            results.add(call(shardId, () -> command.apply(currentShardId), timeoutNanos));
-        }
-        return java.util.List.copyOf(results);
-    }
-
-    /**
      * 精确累加各分片已提交但未执行完成的深度。
      */
     public int submissionDepth() {

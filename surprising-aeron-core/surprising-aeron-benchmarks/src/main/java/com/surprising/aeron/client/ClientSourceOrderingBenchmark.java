@@ -92,14 +92,9 @@ public class ClientSourceOrderingBenchmark {
         }
         @Override public long offer(CoreMessage message) { return client.offer(message); }
         @Override public int pollEgress(int limit) { return client.pollEgress(limit); }
-        @Override public CoreResponse takeResponse(long correlation) {
-            CoreResponse response = client.takeResponse(correlation);
-            if (response != null) terminal.incrementAndGet();
-            return response;
-        }
         @Override
-        public int drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
-            return client.drainResponses((correlation, response) -> {
+        public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+            client.drainResponses((correlation, response) -> {
                 terminal.incrementAndGet();
                 consumer.accept(correlation, response);
             });

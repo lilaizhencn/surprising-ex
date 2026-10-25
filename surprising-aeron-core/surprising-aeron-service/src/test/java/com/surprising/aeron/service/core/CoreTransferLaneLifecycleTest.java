@@ -181,7 +181,7 @@ class CoreTransferLaneLifecycleTest {
         var response = core.apply(request);
         if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
             // 原查询 UUID 对应的待完成查询身份
-            long queryId = core.bookQueries.querySequence(request.header().commandId());
+            var queryId = request.header().commandId();
             // 异步查询等待五秒的单调纳秒截止时间
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while ((response = core.bookQueries.takeQueryResult(queryId)) == null) {

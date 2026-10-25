@@ -271,11 +271,11 @@ class CoreLedgerQueryTest {
                 var first = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
                 assertThat(CoreTestCompletion.applyAsynchronously(core, first).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 // 本次查询对应的内部异步编号，完成后只能取一次结果。
-                long id = core.bookQueries.querySequence(first.header().commandId());
+                var id = first.header().commandId();
                 // 已有待投递查询时继续提交的第二笔查询，应被拒绝并清除编号关联。
                 var second = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
                 assertThat(CoreTestCompletion.applyAsynchronously(core, second).resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
-                assertThat(core.bookQueries.querySequence(second.header().commandId())).isZero();
+                assertThat(core.bookQueries.hasPendingQuery(second.header().commandId())).isFalse();
                 release.set(true);
                 // 本次查询消费到的最终响应，按场景核对成功、响应超限或页内容。
                 CoreResponse response;
@@ -288,7 +288,7 @@ class CoreLedgerQueryTest {
                 }
                 assertThat(CoreLiquidationWorkCodec.decodeWork(response.data()).complete()).isTrue();
                 assertThat(core.bookQueries.takeQueryResult(id)).isNull();
-                assertThat(core.bookQueries.querySequence(first.header().commandId())).isZero();
+                assertThat(core.bookQueries.hasPendingQuery(first.header().commandId())).isFalse();
                 core.assertHealthy();
             } finally { release.set(true); }
         }
@@ -307,11 +307,10 @@ class CoreLedgerQueryTest {
             // 已经构造的查询消息，用其命令 UUID 核对内部查询关联。
             var message = message(CoreMessageType.TREASURY_STATE_QUERY, new byte[0]);
             assertThat(CoreTestCompletion.applyAsynchronously(core, message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThat(core.bookQueries.querySequence(message.header().commandId())).isNotZero();
+            assertThat(core.bookQueries.hasPendingQuery(message.header().commandId())).isTrue();
         } finally { core.close(); }
         assertThat(core.runtimeState().systemLedgerStarted()).isFalse();
-        assertThat(core.bookQueries.queryIds).isEmpty();
-        assertThat(core.bookQueries.completedBookQueries).isEmpty();
+        assertThat(core.bookQueries.hasPendingQueries()).isFalse();
     }
 
     /**
@@ -352,8 +351,8 @@ class CoreLedgerQueryTest {
         var response = CoreTestCompletion.applyAsynchronously(core, message);
         assertThat(response.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         // 本次查询对应的内部异步编号，完成后只能取一次结果。
-        long id = core.bookQueries.querySequence(message.header().commandId());
-        assertThat(id).isNotZero();
+        var id = message.header().commandId();
+        assertThat(core.bookQueries.hasPendingQuery(id)).isTrue();
         // 异步账本查询的五秒单调时钟等待上限，不参与业务定序。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while ((response = core.bookQueries.takeQueryResult(id)) == null) {
@@ -362,7 +361,7 @@ class CoreLedgerQueryTest {
             Thread.onSpinWait();
         }
         assertThat(core.bookQueries.takeQueryResult(id)).isNull();
-        assertThat(core.bookQueries.querySequence(message.header().commandId())).isZero();
+        assertThat(core.bookQueries.hasPendingQuery(message.header().commandId())).isFalse();
         return response;
     }
 

@@ -122,7 +122,7 @@ public final class CoreTestCompletion {
         CoreResponse response = applyAsynchronously(owner, request);
         if (response.resultCode() == com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING) {
             // 该异步查询在查询协作器登记的序号。
-            long id = owner.bookQueries.querySequence(request.header().commandId());
+            var id = request.header().commandId();
             // 当前辅助阶段的 nanoTime 截止点，不覆盖内部所有嵌套等待。
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while ((response = owner.bookQueries.takeQueryResult(id)) == null) {

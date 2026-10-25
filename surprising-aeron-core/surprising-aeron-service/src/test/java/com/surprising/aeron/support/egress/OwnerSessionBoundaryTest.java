@@ -1,5 +1,9 @@
 package com.surprising.aeron.support.egress;
 
+import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.RealtimeConfiguration;
+import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
@@ -100,7 +104,9 @@ class OwnerSessionBoundaryTest {
         });
         egress.start(cluster);
         // 启动真实服务对象
-        var loop = new AeronTradingClusterService(product, egress);
+        var loop = new AeronTradingClusterService(product, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         try {
             loop.onStart(cluster, null);
             // 已注册到实际出口的传输句柄

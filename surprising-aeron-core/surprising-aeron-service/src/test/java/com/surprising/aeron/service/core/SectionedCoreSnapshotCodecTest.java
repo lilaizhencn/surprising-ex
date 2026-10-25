@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import static com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
@@ -338,9 +339,9 @@ class SectionedCoreSnapshotCodecTest {
         MatcherSnapshot matcherSnapshot;
         try (/* 本测试创建的真实同步订单簿适配器，资源退出时关闭。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(com.surprising.aeron.service.core.DirectMatcherTestInputs.placeDirect(adapter, 7, bid()).accepted()).isTrue();
-            matcherSnapshot = adapter.snapshotAsync(
+            matcherSnapshot = matcherSnapshot(adapter,
                     43, 1, tradingState.businessStateHash(), tradingState,
-                    tradingState.orders().values()).join();
+                    tradingState.orders().values());
         }
         // 只执行验证命令以取得幂等结果与消费水位的辅助运行时。
         TradingCoreRuntime source = new TradingCoreRuntime(ProductLine.SPOT);
@@ -452,8 +453,8 @@ class SectionedCoreSnapshotCodecTest {
         try (/* 本测试创建的真实同步订单簿适配器，资源退出时关闭。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             // 用于预建固定 MatcherSnapshot 的现货空状态。
             TradingCoreState empty = TradingCoreState.empty(ProductLine.SPOT);
-            matcherSnapshot = adapter.snapshotAsync(
-                    73, 1, empty.businessStateHash(), empty, List.of()).join();
+            matcherSnapshot = matcherSnapshot(adapter,
+                    73, 1, empty.businessStateHash(), empty, List.of());
         }
         try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT,
                 (/* 捕获接口传入的快照编号；本固定结果桩未读取它。 */ snapshotId, /* 捕获接口传入的 Core 水位；本固定结果桩未读取它。 */ coreSequence, /* 捕获接口传入的业务哈希；本固定结果桩未读取它。 */ businessStateHash, /* 捕获接口传入的冻结状态；本固定结果桩未读取它。 */ tradingState, /* 捕获接口传入的活动订单；本固定结果桩未读取它。 */ activeOrders) ->

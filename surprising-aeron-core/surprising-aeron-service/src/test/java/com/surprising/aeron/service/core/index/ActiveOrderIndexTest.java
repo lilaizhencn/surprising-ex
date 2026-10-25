@@ -314,7 +314,7 @@ class ActiveOrderIndexTest {
             assertThat(summary.pendingQuantity()).isEqualTo(5);
             assertThat(summary.reduceOnlyQuantity()).isZero();
             assertThat(summary.marginModeCount()).isEqualTo(1);
-            runtime.executeUserSettlement(11, () -> {
+            runtime.onLane(11L, lane -> {
                 var filled = runtime.order(7).withFill(3, 2, 0, CoreOrderStatus.OPEN, 2);
                 filled.executionValue(-1, 0); // 原夹具未提供累计成交额，保留同一哨兵。
                 runtime.replaceOrder(filled);

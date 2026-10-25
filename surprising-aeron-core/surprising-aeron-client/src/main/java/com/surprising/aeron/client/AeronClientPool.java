@@ -56,10 +56,7 @@ public final class AeronClientPool implements AutoCloseable {
     interface Session extends AutoCloseable {
         long offer(CoreMessage message);
         int pollEgress(int fragmentLimit);
-        CoreResponse takeResponse(long correlationId);
-        default int drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
-            return -1;
-        }
+        void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer);
         RuntimeException sessionFailure();
         default boolean connected() {
             return true;
@@ -1074,22 +1071,12 @@ public final class AeronClientPool implements AutoCloseable {
 
         private void dispatchResponses(Session session, Map<Long, Request> pending) {
             if (pending.isEmpty()) return;
-            int drained = session.drainResponses((correlationId, response) -> {
+            session.drainResponses((correlationId, response) -> {
                 Request request = pending.remove(correlationId);
                 if (request != null) {
                     request.terminal(response);
                 }
             });
-            if (drained >= 0) return;
-            var iterator = pending.entrySet().iterator();
-            while (iterator.hasNext()) {
-                Map.Entry<Long, Request> entry = iterator.next();
-                CoreResponse response = session.takeResponse(entry.getKey());
-                if (response != null) {
-                    iterator.remove();
-                    entry.getValue().terminal(response);
-                }
-            }
         }
 
         private void rejectQueuedAsClosed() {

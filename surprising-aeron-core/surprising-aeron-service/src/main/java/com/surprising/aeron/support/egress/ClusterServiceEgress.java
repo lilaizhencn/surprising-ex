@@ -18,7 +18,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.springframework.stereotype.Component;
 
 /**
- * 交易步骤 6：把 Owner 已完成响应交给 Cluster 回调线程编码和发送。Owner 单写有界输出环，回调线程持有会话、Publication 和背压重试队列；原 Header 与响应在编码前保留租约，出口失败不能改变已提交业务。
+ * 交易步骤 6：在 Cluster 回调线程立即编码和发送 Owner 已完成的响应；只有背压会话排队保存编码字节，返回前归还业务响应。
  */
 @Component
 public final class ClusterServiceEgress {
@@ -28,13 +28,6 @@ public final class ClusterServiceEgress {
     private static final byte[] EMPTY = new byte[0];
     /** 单条响应允许编码的最大载荷（十六 MiB 预算）。 */
     private static final int MAX_RESPONSE_PAYLOAD = 16 * 1024 * 1024;
-    /** 输出环固定两千零四十八个槽。 */
-    private static final int OUTPUT_SLOTS = 2048;
-    /** 输出环二次幂下标掩码。 */
-    private static final int OUTPUT_MASK = OUTPUT_SLOTS - 1;
-
-    /** 预分配的响应交接槽。 */
-    private final Output[] outputs = new Output[OUTPUT_SLOTS];
     /** 编码后遇背压的会话 FIFO。 */
     private final DeferredSessionResponses deferred = new DeferredSessionResponses();
     /** 编码和首次发送时复用的发送缓冲视图。 */
@@ -51,9 +44,6 @@ public final class ClusterServiceEgress {
     /** 存在实际会话关闭请求的遍历提示。 */
     private boolean closeRequests;
 
-    /** 单线程生产与消费游标。 */
-    private long producedCount;
-    private long consumedCount;
     /** 出口当前角色代次，旧代响应在排出时丢弃。 */
     private long epoch;
     /** 实际 Aeron 会话头使用的领导任期 ID。 */
@@ -99,16 +89,15 @@ public final class ClusterServiceEgress {
     }
 
     /**
-     * 要求会话出口工厂非空，并一次建立全部响应槽；暂不创建网络 Publication。
+     * 保存会话出口工厂；会话连接时才创建 Publication。
      * @param egressFactory 必须存在的会话响应发送器工厂
      */
     public ClusterServiceEgress(EgressFactory egressFactory) {
         this.egressFactory = Objects.requireNonNull(egressFactory);
-        for (/* 当前创建的预分配输出槽下标 */ int i = 0; i < OUTPUT_SLOTS; i++) outputs[i] = new Output();
     }
 
     /**
-     * 接入非空 Cluster，把响应角色代次和任期字段置零；本方法不清空已有环、会话或重试队列，资源清理由 clear 承担。
+     * 接入非空 Cluster，把响应角色代次和任期字段置零；本方法不清空已有会话或重试队列，资源清理由 clear 承担。
      * @param cluster 仅在回调侧访问的当前 Cluster
      */
     public void start(Cluster cluster) {
@@ -156,7 +145,7 @@ public final class ClusterServiceEgress {
     }
 
     /**
-     * 递增出口代次并清背压重试字节；Leader 连接现有会话通道，其他角色断开通道。旧输出环仍留给 drain 按代次丢弃并释放租约。
+     * 递增出口代次并清背压重试字节；Leader 连接现有会话通道，其他角色断开通道。后续旧 Owner 代次的响应直接丢弃。
      * @param role 日志边界确定的新角色
      */
     public long onRoleChange(Cluster.Role role) {
@@ -178,98 +167,35 @@ public final class ClusterServiceEgress {
         leadershipTermId = termId;
     }
 
-    /**
-     * 单线程内核直发模式：检查角色与容量后填入输出槽，若输出槽满先就地排空一轮再填入，无需多线程屏障。
-     * @param processor 对应 Core Owner，排出或丢弃时通过它归还响应
-     * @param sessionId 目标会话 ID，无会话为 NO_SESSION_ID
-     * @param header 需要保持 egress 租约到编码结束的响应头
-     * @param response 需要发送或归还的业务终态响应
-     * @param committedSequence 响应对应的已提交 Core 序号
-     * @param ownerEpoch 产生本终态时的 Owner 角色代次
-     */
+    /** 在当前回调内完成编码，背压队列只借用并复制有效字节，不持有业务对象。 */
     public void publishResponse(TradingCoreOwner processor, long sessionId, CoreMessageHeader header, CoreResponse response,
-                         long committedSequence, long ownerEpoch) {
-        if (cluster == null || cluster.role() != Cluster.Role.LEADER) {
-            if (processor != null) processor.releaseResponse(response);
-            return;
-        }
-        int length = CoreMessageCodec.encodedResponseLength(header, response);
-        if (length > MAX_RESPONSE_PAYLOAD) {
+            long committedSequence, long ownerEpoch) {
+        try {
+            if (ownerEpoch != epoch || cluster == null || cluster.role() != Cluster.Role.LEADER) return;
             TransportSession session = sessions.get(sessionId);
-            if (session != null) session.close();
-            if (processor != null) processor.releaseResponse(response);
-            return;
-        }
-        long currentCount = producedCount;
-        if (currentCount - consumedCount >= OUTPUT_SLOTS) {
-            drainOutputs(processor, 256);
-            if (currentCount - consumedCount >= OUTPUT_SLOTS) {
-                if (processor != null) processor.releaseResponse(response);
+            if (session == null || session.isClosing()) return;
+            int length = CoreMessageCodec.encodedResponseLength(header, response);
+            if (length > MAX_RESPONSE_PAYLOAD) {
+                session.close();
                 return;
             }
-        }
-        Output slot = outputs[(int) currentCount & OUTPUT_MASK];
-        header.retainForEgress();
-        slot.prepare(processor, sessionId, header, response, committedSequence, length, ownerEpoch);
-        producedCount = currentCount + 1L;
-    }
-
-    /**
-     * 单线程直发与慢会话轮询：顺序编码并发送就绪响应，再轮询 deferred 队列推进慢会话。
-     * @param processor 对应 Core Owner，排出或丢弃时通过它归还响应
-     */
-    public int drainResponses(TradingCoreOwner processor) {
-        int work = drainOutputs(processor, 256);
-        return work + (deferred.size() == 0 ? 0 : deferred.poll(System.nanoTime(), 256));
-    }
-
-    private int drainOutputs(TradingCoreOwner processor, int limit) {
-        long consumed = consumedCount;
-        long produced = producedCount;
-        int work = 0;
-        for (; work < limit && consumed != produced; work++) {
-            Output next = outputs[(int) consumed & OUTPUT_MASK];
-            consumed++;
-            consumedCount = consumed;
-            try {
-                if (next.epoch != epoch || cluster == null || cluster.role() != Cluster.Role.LEADER) continue;
-                TransportSession session = sessions.get(next.sessionId);
-                if (session == null || session.isClosing()) continue;
-                if (sendScratch.length < next.length) {
-                    sendScratch = new byte[next.length];
-                    sendBuffer.wrap(sendScratch);
-                }
-                CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
-                deferred.offer(session, sendBuffer, next.length);
-            } finally {
-                try {
-                    if (next.processor != null) next.processor.releaseResponse(next.response);
-                } finally {
-                    if (next.header != null) next.header.releaseFromEgress();
-                    next.clear();
-                }
+            if (sendScratch.length < length) {
+                sendScratch = new byte[length];
+                sendBuffer.wrap(sendScratch);
             }
+            CoreMessageCodec.encodeResponse(header, response, committedSequence, sendScratch);
+            deferred.offer(session, sendBuffer, length);
+        } finally {
+            if (processor != null) processor.releaseResponse(response);
         }
-        return work;
     }
 
-    /**
-     * 在生命周期清理边界逐槽归还响应与 Header，清掉背压记录，断开全部会话通道。
-     */
+    /** 每次回调最多重试 256 条慢会话响应。 */
+    public int drainResponses() {
+        return deferred.size() == 0 ? 0 : deferred.poll(System.nanoTime(), 256);
+    }
+
     public void clear() {
-        long consumed = consumedCount;
-        long produced = producedCount;
-        while (consumed != produced) {
-            Output next = outputs[(int) consumed & OUTPUT_MASK];
-            consumed++;
-            consumedCount = consumed;
-            try {
-                if (next.processor != null) next.processor.releaseResponse(next.response);
-            } finally {
-                if (next.header != null) next.header.releaseFromEgress();
-                next.clear();
-            }
-        }
         deferred.clear();
         sessions.forEachValue(TransportSession::disconnect);
         sessions.clear();
@@ -338,58 +264,6 @@ public final class ClusterServiceEgress {
         long offer(DirectBuffer buffer, int offset, int length) {
             return egress == null ? io.aeron.Publication.NOT_CONNECTED
                     : egress.offer(leadershipTermId, cluster.time(), buffer, offset, length);
-        }
-    }
-
-    /**
-     * 有界响应环中的复用槽，Owner 填好后到回调侧释放前不再改动；保留响应及 Header 的跨线程租约。
-     */
-    private static final class Output {
-        /** 产生该响应的 Core Owner，清理时用它归还响应。 */
-        private TradingCoreOwner processor;
-        /** 本槽终态的目标会话 ID。 */
-        private long sessionId = NO_SESSION_ID;
-        /** 编码前保留 egress 租约的响应头。 */
-        private CoreMessageHeader header;
-        /** 本槽持有到编码或丢弃的响应缓冲租约。 */
-        private CoreResponse response;
-        /**
-         * committedSequence：本响应的已提交 Core 序号。
-         * epoch：本槽填入时的 Owner 角色代次，用于淘汰旧角色输出。
-         */
-        private long committedSequence, epoch;
-        /** 本槽完整业务响应的预计编码字节数。 */
-        private int length;
-
-        /**
-         * 在 Owner 发布生产游标前填好本代响应的全部引用、长度、提交序号和角色代次。
-         * @param processor 对应 Core Owner，排出或丢弃时通过它归还响应
-         * @param sessionId 目标会话 ID，无会话为 NO_SESSION_ID
-         * @param header 需要保持 egress 租约到编码结束的响应头
-         * @param response 需要发送或归还的业务终态响应
-         * @param committedSequence 响应对应的已提交 Core 序号
-         * @param length 当前有效业务字节数或输出槽编码长度
-         * @param epoch 填槽时的响应角色代次
-         */
-        void prepare(TradingCoreOwner processor, long sessionId, CoreMessageHeader header,
-                CoreResponse response, long committedSequence, int length, long epoch) {
-            this.processor = processor;
-            this.sessionId = sessionId;
-            this.header = header;
-            this.response = response;
-            this.committedSequence = committedSequence;
-            this.length = length;
-            this.epoch = epoch;
-        }
-
-        /**
-         * 编码或丢弃结束后移除强引用并恢复无会话值，长度与代次等数值留待下一次 prepare 覆盖。
-         */
-        void clear() {
-            processor = null;
-            sessionId = NO_SESSION_ID;
-            header = null;
-            response = null;
         }
     }
 

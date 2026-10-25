@@ -1,7 +1,6 @@
 package com.surprising.aeron.controller;
 
 import com.surprising.aeron.config.ClusterTopology;
-import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.RealtimeConfiguration;
@@ -81,10 +80,6 @@ public final class AeronTradingClusterService implements ClusteredService {
     /** 复用的命令指纹计算器，用来区分正常重试与同一命令编号携带不同内容的冲突。 */
     private final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
 
-    /** 连续收到这么多输入后主动发送一轮响应，减少逐条输入都排水的开销。 */
-    private static final int INBOUND_DRAIN_THRESHOLD = 16;
-    /** 上一次响应排水之后已接收的输入数，到达阈值或后台轮询时归零。 */
-    private int unflushedInboundMessages;
     /** Aeron 提供的当前集群句柄，供快照发布和空闲等待使用，终止时释放引用。 */
     private Cluster cluster;
 
@@ -99,61 +94,10 @@ public final class AeronTradingClusterService implements ClusteredService {
             LaneTopology laneTopology,
             CoreRuntimeConfiguration configuration,
             RealtimeConfiguration realtimeConfiguration) {
-        this.affinityConfiguration = java.util.Objects.requireNonNull(affinity);
-        this.egress = java.util.Objects.requireNonNull(egress);
-        this.snapshotTimeoutNanos = TimeUnit.SECONDS.toNanos(configuration.snapshotTimeoutSeconds());
-        this.maximumSnapshotBytes = configuration.snapshot().maxBytes();
-        this.messageDecoder = new CoreMessageFlyweightDecoder(configuration.decoderCacheSlots());
-        this.coreOwner = new TradingCoreOwner(
-                topology.productLine(),
-                this::publishResponse,
-                laneTopology,
-                configuration,
-                realtimeConfiguration);
-        this.input = coreOwner.ingress();
+        this(topology.productLine(), egress, affinity, laneTopology, configuration, realtimeConfiguration);
     }
 
-    /**
-     * 为测试、工具等独立入口创建服务，同时创建默认响应出口。
-     * @param productLine 本服务唯一处理的产品线
-     */
-    public AeronTradingClusterService(ProductLine productLine) {
-        this(productLine, new ClusterServiceEgress());
-    }
-
-    /**
-     * 创建独立服务，指定响应出口，默认关闭 CPU 绑定。
-     * @param productLine 本服务唯一处理的产品线
-     * @param egress 调用方提供的响应出口
-     */
-    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress) {
-        this(productLine, egress, TradingCpuAffinity.disabled());
-    }
-
-    /**
-     * 创建独立服务，并允许测试或工具替换每个会话的响应发送端。
-     * @param productLine 本服务唯一处理的产品线
-     * @param egressFactory 根据客户端会话创建响应发送端的工厂
-     */
-    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress.EgressFactory egressFactory) {
-        this(productLine, new ClusterServiceEgress(egressFactory));
-    }
-
-    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
-            TradingCpuAffinity affinity) {
-        this(productLine, egress, affinity, CoreConfiguration.standaloneLaneTopology());
-    }
-
-    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
-            TradingCpuAffinity affinity, LaneTopology laneTopology) {
-        this(productLine, egress, affinity, laneTopology, CoreRuntimeConfiguration.standalone());
-    }
-
-    public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
-            TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration) {
-        this(productLine, egress, affinity, laneTopology, configuration, RealtimeConfiguration.standalone());
-    }
-
+    /** 独立工具与测试的完整装配入口，与 Spring 使用同一组初始化逻辑。 */
     public AeronTradingClusterService(ProductLine productLine, ClusterServiceEgress egress,
             TradingCpuAffinity affinity, LaneTopology laneTopology, CoreRuntimeConfiguration configuration,
             RealtimeConfiguration realtimeConfiguration) {
@@ -171,23 +115,6 @@ public final class AeronTradingClusterService implements ClusteredService {
         this.input = coreOwner.ingress();
     }
 
-    /**
-     * 测试或显式装配入口：直接组合 CoreOwner 与 Egress。
-     */
-    public AeronTradingClusterService(TradingCoreOwner coreOwner, ClusterServiceEgress egress) {
-        this(coreOwner, egress, CoreRuntimeConfiguration.standalone());
-    }
-
-    public AeronTradingClusterService(TradingCoreOwner coreOwner, ClusterServiceEgress egress,
-            CoreRuntimeConfiguration configuration) {
-        this.affinityConfiguration = TradingCpuAffinity.disabled();
-        this.egress = java.util.Objects.requireNonNull(egress);
-        this.snapshotTimeoutNanos = TimeUnit.SECONDS.toNanos(configuration.snapshotTimeoutSeconds());
-        this.maximumSnapshotBytes = configuration.snapshot().maxBytes();
-        this.messageDecoder = new CoreMessageFlyweightDecoder(configuration.decoderCacheSlots());
-        this.coreOwner = java.util.Objects.requireNonNull(coreOwner);
-        this.input = coreOwner.ingress();
-    }
 
     /**
      * Cluster 启动入口：保存 Cluster 句柄、启动响应出口，读取可用快照后启动 Owner。
@@ -253,10 +180,6 @@ public final class AeronTradingClusterService implements ClusteredService {
         }
 
         // 批量阈值触发响应排水，避免每条命令被打断；剩余响应由 doBackgroundWork 兜底发送
-        if (++unflushedInboundMessages >= INBOUND_DRAIN_THRESHOLD) {
-            unflushedInboundMessages = 0;
-            drainResponses();
-        }
     }
 
     /**
@@ -324,7 +247,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         if (started) {
             work = pollCommands();
         }
-        return work + egress.drainResponses(coreOwner);
+        return work + egress.drainResponses();
     }
 
     /**
@@ -373,7 +296,6 @@ public final class AeronTradingClusterService implements ClusteredService {
     @Override
     public int doBackgroundWork(long nowNs) {
         checkFailure();
-        unflushedInboundMessages = 0;
         try {
             return drainResponses();
         } catch (/* 让 Cluster 看见后台响应处理失败，不能让故障 Owner 悄悄继续服务。 */ RuntimeException fatal) {
@@ -434,7 +356,6 @@ public final class AeronTradingClusterService implements ClusteredService {
      */
     @Override
     public void onTakeSnapshot(ExclusivePublication publication) {
-        unflushedInboundMessages = 0;
         drainResponses();
         checkFailure();
         if (logContext != null) {
@@ -530,7 +451,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         if (started) {
             pollCommands();
         }
-        egress.drainResponses(coreOwner);
+        egress.drainResponses();
         if (cluster != null && cluster.idleStrategy() != null) {
             cluster.idleStrategy().idle();
             return;

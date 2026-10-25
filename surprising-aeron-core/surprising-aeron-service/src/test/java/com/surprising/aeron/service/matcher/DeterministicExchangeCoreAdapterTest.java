@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.matcher;
 
+import static com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.CoreOrderStatus;
@@ -475,8 +476,8 @@ class DeterministicExchangeCoreAdapterTest {
             beforeSnapshot = placeDirect(adapter, 1, new java.util.UUID(0, 100), 1000, 7,
                     bid(1, instrumentId, 100));
             assertThat(beforeSnapshot.accepted()).isTrue();
-            snapshot = adapter.snapshotAsync(
-                    91, 1, state.businessStateHash(), state, activeOrders(state)).join();
+            snapshot = matcherSnapshot(adapter,
+                    91, 1, state.businessStateHash(), state, activeOrders(state));
             bookHash = adapter.orderBooksStateHashAsync().join();
         }
 
@@ -524,52 +525,33 @@ class DeterministicExchangeCoreAdapterTest {
         }
     }
 
-    /**
-     * 用可控 future 暂缓真正原生持久化，要求外层取消返回 false，同快照重试得到不同 future 但共用一次底层提交；释放后两者取得相同清单。信号及完成使用 join，当前用例没有另加本地等待截止点。
-     */
     @Test
-    void snapshotPipelineCompletesPersistAndExportWithoutCallerCancellation() {
-        // 只为配对原生挂单快照构造的 Core 元数据，未真实冻结账户资金。
+    void shardSnapshotWaitsForPersistenceBeforeExport() throws Exception {
         TradingCoreState state = stateWithOpenBid(100);
-        // 测试钩子已经接到持久化提交的信号 future。
-        CompletableFuture<Void> persistEntered = new CompletableFuture<>();
-        // 由测试显式完成、随后才允许实际原生持久化开始的 future。
-        CompletableFuture<Void> releasePersist = new CompletableFuture<>();
-        // 测试钩子收到实际持久化提交次数的原子计数器。
-        AtomicInteger persistSubmissions = new AtomicInteger();
-        try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(/* 钩子收到的真正原生持久化任务提供器，释放门闩后才调用 get。 */ nativePersist -> {
-            persistSubmissions.incrementAndGet();
-            persistEntered.complete(null);
-            return releasePersist.thenCompose(/* 门闩 future 的空完成值，回调不读取它。 */ ignored -> nativePersist.get());
-        })) {
-            assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
-            // 第一次快照请求返回的不可取消外层 future。
-            CompletableFuture<MatcherSnapshot> first =
-                    adapter.snapshotAsync(94, 1, state.businessStateHash(), state, activeOrders(state));
-
-            persistEntered.join();
-            assertThat(first.isDone()).isFalse();
-            assertThat(first.cancel(false))
-                    .as("caller cancellation must not cancel the nested persist/export operation")
-                    .isFalse();
-            assertThat(first.isCancelled()).isFalse();
-
-            // 同快照重试得到的另一外层 future，共享相同底层持久化。
-            CompletableFuture<MatcherSnapshot> retry =
-                    adapter.snapshotAsync(94, 1, state.businessStateHash(), state, activeOrders(state));
-            assertThat(retry).isNotSameAs(first);
-            assertThat(retry.isDone()).isFalse();
-            assertThat(persistSubmissions).hasValue(1);
-
+        var persistEntered = new CompletableFuture<Void>();
+        var releasePersist = new CompletableFuture<Void>();
+        var persistSubmissions = new AtomicInteger();
+        var capture = CompletableFuture.supplyAsync(() -> {
+            try (var adapter = new DeterministicExchangeCoreAdapter(nativePersist -> {
+                persistSubmissions.incrementAndGet();
+                persistEntered.complete(null);
+                releasePersist.join();
+                return nativePersist.get();
+            })) {
+                assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
+                return matcherSnapshot(adapter, 94, 1, state.businessStateHash(), state, activeOrders(state));
+            }
+        });
+        try {
+            persistEntered.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(capture).isNotDone();
+        } finally {
             releasePersist.complete(null);
-            // 门闩释放后首次快照请求最终取得的完整清单。
-            MatcherSnapshot completed = first.join();
-
-            assertThat(retry.join()).isEqualTo(completed);
-            assertThat(completed.snapshotId()).isEqualTo(94);
-            assertThat(completed.modules()).isNotEmpty();
-            assertThat(persistSubmissions).hasValue(1);
         }
+        MatcherSnapshot completed = capture.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(completed.snapshotId()).isEqualTo(94);
+        assertThat(completed.modules()).hasSize(completed.matchingEngineCount());
+        assertThat(persistSubmissions).hasValue(completed.matchingEngineCount());
     }
 
     /**
@@ -583,8 +565,8 @@ class DeterministicExchangeCoreAdapterTest {
         MatcherSnapshot snapshot;
         try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
-            snapshot = adapter.snapshotAsync(
-                    92, 1, original.businessStateHash(), original, activeOrders(original)).join();
+            snapshot = matcherSnapshot(adapter,
+                    92, 1, original.businessStateHash(), original, activeOrders(original));
         }
         // 故意把同笔 Core 买价改为一百零一的分歧元数据。
         TradingCoreState divergent = stateWithOpenBid(101);
@@ -613,8 +595,8 @@ class DeterministicExchangeCoreAdapterTest {
         byte[] encoded;
         try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
-            encoded = MatcherSnapshotCodec.encode(adapter.snapshotAsync(
-                    93, 1, state.businessStateHash(), state, activeOrders(state)).join());
+            encoded = MatcherSnapshotCodec.encode(matcherSnapshot(adapter,
+                    93, 1, state.businessStateHash(), state, activeOrders(state)));
         }
         encoded[encoded.length / 2] ^= 1;
 

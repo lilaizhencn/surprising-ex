@@ -73,7 +73,7 @@ class CoreAdmissionInputOwnershipTest {
                 var response = core.apply(request);
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
                     // 预检查询等待的盘口查询序号
-                    long id = core.bookQueries.querySequence(request.header().commandId());
+                    var id = request.header().commandId();
                     // 本次等待查询或异步终态的五秒单调截止时间
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                     while ((response = core.bookQueries.takeQueryResult(id)) == null) {

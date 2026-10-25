@@ -668,7 +668,7 @@ public class ClusteredBatchTradingBenchmark {
             var owner = service.state();
             var runtime = owner.runtimeState();
             int assetId = owner.identities().assetId("USDT");
-            var before = runtime.balance(1000, assetId);
+            var before = readAccountAtRest(1000, () -> runtime.balance(1000, assetId));
             long available = before == null ? 0 : before.availableUnits();
             long locked = before == null ? 0 : before.lockedUnits();
             var request = command(CoreMessageType.ADJUST_BALANCE, 1000,
@@ -702,7 +702,7 @@ public class ClusteredBatchTradingBenchmark {
             } finally { runtime.exitAsynchronousCommandScope(); }
             if (result.status() != ResponseStatus.REJECTED || result.resultCode() != CoreResultCode.MATCHING_BACKPRESSURE)
                 throw new IllegalStateException("terminal capacity failure was not rejected");
-            var after = runtime.balance(1000, assetId);
+            var after = readAccountAtRest(1000, () -> runtime.balance(1000, assetId));
             if ((after == null ? 0 : after.availableUnits()) != available
                     || (after == null ? 0 : after.lockedUnits()) != locked)
                 throw new IllegalStateException("terminal failure changed account funds");
@@ -711,7 +711,7 @@ public class ClusteredBatchTradingBenchmark {
 
         public void runAlgoRollbackFailure() {
             var runtime = service.state().runtimeState();
-            var before = runtime.algoOrder(9_000_000);
+            var before = readAccountAtRest(1000, () -> runtime.algoOrder(9_000_000));
             long runtimeRevision = runtime.revision();
             long revision = before.revision() + 1;
             var next = new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
@@ -724,7 +724,7 @@ public class ClusteredBatchTradingBenchmark {
                 send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000,
                         com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeCommand(next)));
                 drain();
-                if (terminal != terminalBefore + 1 || !before.equals(runtime.algoOrder(9_000_000)))
+                if (terminal != terminalBefore + 1 || !before.equals(readAccountAtRest(1000, () -> runtime.algoOrder(9_000_000))))
                     throw new IllegalStateException("failed algo update was not restored");
             } finally {
                 runtime.setMetadata(productLine, runtimeRevision);
@@ -739,7 +739,7 @@ public class ClusteredBatchTradingBenchmark {
             try {
                 for (int i = 0; i < 64; i++) {
                     long id = 9_000_000L + i;
-                    var current = service.state().runtimeState().algoOrder(id);
+                    var current = readAccountAtRest(1000 + i, () -> service.state().runtimeState().algoOrder(id));
                     long revision = current == null ? 1 : current.revision() + 1;
                     com.surprising.aeron.protocol.CoreAlgoOrderCommand algo;
                     if (current == null) {
@@ -825,7 +825,8 @@ public class ClusteredBatchTradingBenchmark {
                     for (CoreMessage message : wave) send(message);
                     drain();
                     if (partialFirst && phase == 5) for (int user = 0; user < maxInFlight; user++) {
-                        var trigger = service.state().runtimeState().triggerOrder(firstOrders[user]);
+                        long id = firstOrders[user];
+                        var trigger = readAccountAtRest(1000 + user, () -> service.state().runtimeState().triggerOrder(id));
                         if (trigger == null || trigger.status() != CoreTriggerOrderStatus.PENDING)
                             throw new IllegalStateException("partial close canceled protective trigger");
                     }
@@ -834,7 +835,7 @@ public class ClusteredBatchTradingBenchmark {
                     throw new IllegalStateException("trigger terminal mismatch");
                 if (automaticClose) for (int user = 0; user < maxInFlight; user++) {
                     long id = firstOrders[user];
-                    var trigger = service.state().runtimeState().triggerOrder(id);
+                    var trigger = readAccountAtRest(1000 + user, () -> service.state().runtimeState().triggerOrder(id));
                     if (trigger == null || trigger.status() != CoreTriggerOrderStatus.CANCELED)
                         throw new IllegalStateException("closed position trigger must retain canceled identity: " + id);
                 }
@@ -1065,6 +1066,19 @@ public class ClusteredBatchTradingBenchmark {
             while (!service.ingress().offer(command, sessionId, timestamp, position, fingerprint)) {
                 if (System.nanoTime() >= deadline) throw new IllegalStateException("owner input did not advance");
                 service.pollCommands();
+            }
+        }
+
+        /** 功能核对先排空命令，再临时接管账户读取；不绕过活动 Lane 所有权。 */
+        private <T> T readAccountAtRest(long userId, java.util.function.Supplier<T> read) {
+            drain();
+            var runtime = service.state().runtimeState();
+            boolean acquired = !runtime.ownerLaneAccess();
+            if (acquired) runtime.acquireOwnerLaneAccess();
+            try {
+                return runtime.readAccountLane(runtime.accountLaneForUserReadOnly(userId), ignored -> read.get());
+            } finally {
+                if (acquired) runtime.releaseOwnerLaneAccess();
             }
         }
 

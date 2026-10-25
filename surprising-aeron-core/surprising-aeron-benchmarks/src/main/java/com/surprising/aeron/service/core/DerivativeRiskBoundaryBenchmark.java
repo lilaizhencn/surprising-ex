@@ -129,7 +129,7 @@ public class DerivativeRiskBoundaryBenchmark {
                     CoreAdlQueryCodec.encodeQuery(asset, 256));
             var response = harness.state().apply(request);
             if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                long id = harness.state().bookQueries.querySequence(request.header().commandId());
+                var id = request.header().commandId();
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
                 while ((response = harness.state().bookQueries.takeQueryResult(id)) == null) {
                     harness.state().assertHealthy();

@@ -100,13 +100,14 @@ public final class MatcherCommandPipeline implements AutoCloseable {
      */
     private record BackgroundRead<T>(long fence,Supplier<T> read,java.util.concurrent.CompletableFuture<T> future) {
         /**
-         * 在 Matcher 线程执行读取函数，将值或运行异常写入请求自己的 Future；不捕获 Error，也不取消已执行读取。
+         * 发布读取结果或异常；致命 Error 完成 Future 后继续交给 worker 故障边界。
          */
         void execute() {
             try {
                 future.complete(read.get());
-            } catch (/* 当前读取函数抛出的运行异常，只使本次读取 Future 失败。 */ RuntimeException failure) {
+            } catch (RuntimeException | Error failure) {
                 future.completeExceptionally(failure);
+                if (failure instanceof Error fatal) throw fatal;
             }
         }
     }
@@ -211,27 +212,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         if (coreSequence <= 0 || resultTarget == null || settlement != null && settlement.direct())
             throw new IllegalArgumentException("invalid command result target");
         submitInternal(coreSequence, command, settlement, resultTarget);
-    }
-
-    /**
-     * 校验参数后提交一个负 token 控制调用，按限时等待结果并转换类型；超时抛异常但不撤销已提交命令，调用方仍需处理该分片未收集的队头。
-     * @param <T> 读取或控制调用返回值的类型
-     * @param command 需要在 Matcher 拥有线程执行的非空函数
-     * @param timeoutNanos 等待本次控制结果的正纳秒上限，不会取消已提交动作
-     */
-    public <T> T call(Supplier<T> command, long timeoutNanos) {
-        if (command == null || timeoutNanos <= 0) {
-            throw new IllegalArgumentException("matcher control call is invalid");
-        }
-        // 当前控制请求生成的负 token。
-        long token = submitControl(command);
-        // 当前业务动作返回或队头读取的结果引用。
-        Object result = awaitResult(token, timeoutNanos);
-        if (result == null) throw new IllegalStateException("matcher control call timed out");
-        // 经调用方泛型契约转换的控制结果，运行时不另验证具体类型。
-        @SuppressWarnings("unchecked")
-        T typed = (T) result;
-        return typed;
     }
 
     /**
@@ -413,35 +393,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             }
             slot.clear();
             consumedPosition.value = position + 1;
-        }
-    }
-
-    /**
-     * 先轮询自旋，空闲后短暂 park，按 nanoTime 截止返回结果或空；等待中断抛异常，不取消队列内任务。只检查与当前预期 token 相同的队头。
-     * @param expectedToken 只允许消费的目标队头 token
-     * @param timeoutNanos 等待本次控制结果的正纳秒上限，不会取消已提交动作
-     */
-    private Object awaitResult(long expectedToken, long timeoutNanos) {
-        if (timeoutNanos <= 0) return null;
-        // 当前等待的 nanoTime 截止点。
-        long deadline = System.nanoTime() + timeoutNanos;
-        // 连续空闲次数，决定自旋还是短暂等待。
-        int idle = 0;
-        while (true) {
-            // 当前业务动作返回或队头读取的结果引用。
-            Object result = pollResult(expectedToken);
-            if (result != null) return result;
-            // 距当前等待截止点尚余的纳秒数。
-            long remaining = deadline - System.nanoTime();
-            if (remaining <= 0) return null;
-            if (idle++ < IDLE_SPINS) {
-                Thread.onSpinWait();
-            } else {
-                LockSupport.parkNanos(this, Math.min(remaining, IDLE_PARK_NANOS));
-                if (Thread.currentThread().isInterrupted()) {
-                    throw new IllegalStateException("matcher pipeline wait was interrupted");
-                }
-            }
         }
     }
 

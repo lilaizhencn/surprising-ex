@@ -122,7 +122,7 @@ class MultiProductMoneyIntegrationTest {
                 if (response == null) Thread.onSpinWait();
             }
             if (response != null && response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                long queryId = state.bookQueries.querySequence(message.header().commandId());
+                var queryId = message.header().commandId();
                 do {
                     response = state.bookQueries.takeQueryResult(queryId);
                     if (System.nanoTime() >= deadline) throw new AssertionError("funds query timeout");

@@ -1,5 +1,9 @@
 package com.surprising.aeron.support.ingress;
 
+import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.RealtimeConfiguration;
+import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
@@ -26,7 +30,9 @@ class TradingOwnerInputReuseTest {
     @Test void fullQueueKeepsHeadStableUntilOwnerAdvancesTheActualRing() throws Exception {
         var waiting = new CountDownLatch(1);
         var egress = new ClusterServiceEgress();
-        var loop = new AeronTradingClusterService(ProductLine.SPOT, egress);
+        var loop = new AeronTradingClusterService(ProductLine.SPOT, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         Cluster cluster = cluster(waiting);
         egress.start(cluster); set(loop, "cluster", cluster);
         var input = input(loop);
@@ -72,7 +78,9 @@ class TradingOwnerInputReuseTest {
      */
     @Test void saturatedRingRejectsWithoutLosingInputSlot() throws Exception {
         var egress = new ClusterServiceEgress();
-        var loop = new AeronTradingClusterService(ProductLine.SPOT, egress);
+        var loop = new AeronTradingClusterService(ProductLine.SPOT, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         Cluster cluster = cluster(new CountDownLatch(1));
         egress.start(cluster); set(loop, "cluster", cluster);
         var input = input(loop);
@@ -93,7 +101,9 @@ class TradingOwnerInputReuseTest {
      */
     @Test void failedServiceEnqueueReturnsTheBorrowedDecoderLease() throws Exception {
         var egress = new ClusterServiceEgress();
-        var service = new AeronTradingClusterService(ProductLine.SPOT, egress);
+        var service = new AeronTradingClusterService(ProductLine.SPOT, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         set(service, "failure", new IllegalStateException("stopped Owner"));
         byte[] bytes = CoreMessageCodec.encode(probe(1));
         var buffer = new org.agrona.concurrent.UnsafeBuffer(bytes);
@@ -118,7 +128,9 @@ class TradingOwnerInputReuseTest {
         var cluster = cluster(new CountDownLatch(1));
         var egress = new ClusterServiceEgress();
         egress.start(cluster);
-        var loop = new AeronTradingClusterService(ProductLine.SPOT, egress);
+        var loop = new AeronTradingClusterService(ProductLine.SPOT, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         try {
             loop.onStart(cluster, null);
             loop.onTerminate(cluster);
@@ -144,7 +156,9 @@ class TradingOwnerInputReuseTest {
             }
             public void close() { }
         }); egress.start(cluster);
-        var loop = new AeronTradingClusterService(ProductLine.SPOT, egress);
+        var loop = new AeronTradingClusterService(ProductLine.SPOT, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         long[] received = {0};
         var session = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
                 new Class<?>[]{ClientSession.class}, (proxy, method, args) -> switch (method.getName()) {

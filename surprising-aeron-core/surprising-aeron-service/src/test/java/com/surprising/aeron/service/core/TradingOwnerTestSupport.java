@@ -171,7 +171,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
         while (!owner.ingress().offer(request, sessionId, timestamp, position, fingerprint)) {
             if (System.nanoTime() >= deadline) throw new AssertionError("Owner ingress did not advance");
             owner.pollCommands();
-            egress.drainResponses(owner);
+            egress.drainResponses();
         }
     }
 
@@ -264,7 +264,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
     @Override
     public void onSessionOpen(ClientSession session, long timestamp) {
         owner.pollCommands();
-        egress.drainResponses(owner);
+        egress.drainResponses();
     }
 
     /**
@@ -306,12 +306,12 @@ public final class TradingOwnerTestSupport implements ClusteredService {
     public int pollCommands() {
         // 本轮 Owner 推进报告的进展，随后加上出口排出量
         int work = owner.pollCommands();
-        return work + egress.drainResponses(owner);
+        return work + egress.drainResponses();
     }
     /**
      * 先完成当前业务前缀，再排出已有终态响应。
      */
-    public void finishCommands() { owner.finishCommands(); egress.drainResponses(owner); }
+    public void finishCommands() { owner.finishCommands(); egress.drainResponses(); }
     /**
      * 读取真实流水窗口当前占用。
      */

@@ -43,25 +43,28 @@ public final class RuntimeOrderCommitStateTransitions {
         boolean hasCandidates = false;
         for (Long /* 当前候选订单编号，允许空项并在实际补写时跳过。 */ orderId : changedOrderIds) hasCandidates |= orderId != null;
         if (!hasCandidates) return false;
-        // 原账户同步阶段按 Lane 返回的是否修改标记，最后只归并布尔结果。
-        Object[] results = runtime.executeOwnerSettlements(changedUserIds, /* 原 Lane 阶段回调参数，实际订单读取沿用运行时当前合法账户范围。 */ ignored -> {
-            // 当前 Lane 是否至少给一笔订单补写了不同的提交时间或日志位置。
-            boolean changed = false;
-            for (Long /* 当前候选订单编号，允许空项并在实际补写时跳过。 */ orderId : changedOrderIds) {
-                if (orderId == null) continue;
-                // 当前 Lane 能读取到的订单，缺失或元数据已经相同就跳过。
-                OrderRuntime order = runtime.order(orderId);
-                if (order == null || order.updatedAtEpochMillis() == timestamp
-                        && order.clusterPosition() == clusterPosition) continue;
-                runtime.replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
-                changed = true;
-            }
-            return changed;
-        });
-        for (Object /* 当前检查的 Lane 修改结果，任一值为 Boolean.TRUE 就说明发生过补写。 */ result : results) {
-            if (Boolean.TRUE.equals(result)) return true;
+        long selectedLanes = 0;
+        for (Long userId : changedUserIds)
+            if (userId != null && userId > 0) selectedLanes |= runtime.topology().accountLaneMask(userId);
+        boolean changed = false;
+        while (selectedLanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(selectedLanes);
+            selectedLanes &= selectedLanes - 1;
+            changed |= runtime.onLane(laneId, lane -> {
+                boolean laneChanged = false;
+                for (Long orderId : changedOrderIds) {
+                    if (orderId == null) continue;
+                    OrderRuntime order = runtime.order(orderId);
+                    if (order == null || order.updatedAtEpochMillis() == timestamp
+                            && order.clusterPosition() == clusterPosition) continue;
+                    runtime.replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
+                    laneChanged = true;
+                }
+                lane.recordSettlementOperation();
+                return laneChanged;
+            });
         }
-        return false;
+        return changed;
     }
 
 }

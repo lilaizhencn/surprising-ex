@@ -696,15 +696,13 @@ class ClusterCommandPipelineTest {
                     registeredField.get(scope);
             // 故障注入使 native 返回真实的 ORDER_BOOK_ID 拒绝；不伪造成交或资金结果。
             int instrumentId = symbols.get("1");
-            live.service.state().matcherPipeline().call(shardId, () -> registered.add(instrumentId),
-                    TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
+            live.service.state().matcherPipeline().readAtSubmissionFence(shardId, () -> registered.add(instrumentId)).join();
             // 故障注入前的请求账户全部余额，拒单后应完全恢复
             var before = live.service.state().tradingState().user(11).balances();
             // 需要触发原生拒绝的原始下单消息
             var request = live.place(11, "1", 1000, 80, 1, CoreOrderSide.BUY);
             try { live.apply(request); }
-            finally { live.service.state().matcherPipeline().call(shardId, () -> registered.remove(instrumentId),
-                    TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS); }
+            finally { live.service.state().matcherPipeline().readAtSubmissionFence(shardId, () -> registered.remove(instrumentId)).join(); }
             assertThat(live.responses).hasSize(1);
             assertThat(live.responses.getFirst().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(live.responses.getFirst().resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
@@ -2146,10 +2144,14 @@ class ClusterCommandPipelineTest {
             });
             try {
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                long committedBefore = live.service.state().committedCoreSequence();
                 live.send(first); live.send(second);
                 assertThat(live.service.commandWindowSize()).isEqualTo(2);
                 assertThat(live.responses).isEmpty();
-                assertThat(live.service.doBackgroundWork(Long.MAX_VALUE)).isZero();
+                live.service.doBackgroundWork(Long.MAX_VALUE);
+                assertThat(live.service.commandWindowSize()).isEqualTo(2);
+                assertThat(live.service.state().committedCoreSequence()).isEqualTo(committedBefore);
+                assertThat(live.responses).isEmpty();
             } finally { release.countDown(); }
             live.tick(); assertThat(blocked.join()).isOne();
             serial.send(first); serial.tick(); serial.send(second); serial.tick();

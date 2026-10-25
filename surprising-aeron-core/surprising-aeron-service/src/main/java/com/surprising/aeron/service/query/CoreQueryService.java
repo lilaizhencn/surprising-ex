@@ -29,7 +29,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
@@ -41,24 +41,11 @@ public final class CoreQueryService {
     /** 提供业务路由、线程投递和提交水位的所属运行时，查询仍遵守实际状态所有权。 */
     final TradingCoreRuntime owner;
 
-    /** 读取线程写入、Owner 消费后移除的并发完成结果表，键为内部查询编号。 */
-    final Map<Long, CompletedBookQuery> completedBookQueries
-            = new ConcurrentHashMap<>();
-
-    /** Matcher 异步盘口读取失败的并发标记表，Owner 消费时转换为拒绝响应。 */
-    final Map<Long, Boolean> failedQueries = new ConcurrentHashMap<>();
-
-    /** 仅由 Owner 管理的待账户投递风险查询，账本路由就绪且 Lane 邮件投递成功后移除。 */
-    private final Map<Long, RiskAccountQuery> pendingRiskQueries = new java.util.HashMap<>();
-
-    /** 外部命令 UUID 到内部异步编号的并发关联表，最终结果消费或关闭时清除。 */
-    final Map<UUID, Long> queryIds = new ConcurrentHashMap<>();
+    /** 只有 Owner 访问关联表；工作线程只完成请求自己的 Future。 */
+    private final Map<UUID, CompletableFuture<QueryResult>> pendingQueries = new java.util.HashMap<>();
 
     /** Owner 持有的有界盘口初始化会话，按插入顺序淘汰最早会话，各页共用固定快照。 */
     final LinkedHashMap<String, BookBootstrapSession> bookBootstrapSessions = new LinkedHashMap<>();
-
-    /** 从 Long.MIN_VALUE 起递增的内部查询编号，不使用交易命令序号。 */
-    long nextAsyncQueryId = Long.MIN_VALUE;
 
     /**
      * 判断协议类型是否属于普通账户、订单、挂单或算法父单查询，用于选择账户 Lane 读取入口。
@@ -80,7 +67,7 @@ public final class CoreQueryService {
     }
 
     /**
-     * 从 Owner 的待完成划转路由取一页，空页直接返回；有数据则登记内部编号并投递对应 Lane，投递失败清除关联，成功后完成本次路由页选择并返回待完成。
+     * 从 Owner 的待完成划转路由取一页，空页直接返回；有数据则登记请求完成状态并投递对应 Lane，投递失败清除关联，成功后完成本次路由页选择并返回待完成。
      * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      * @param limit 本次待完成划转查询最多选择的路由条数
      */
@@ -92,21 +79,19 @@ public final class CoreQueryService {
             return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount(),
                     com.surprising.aeron.protocol.CorePendingTransferCodec.encode(List.of()));
         }
-        // 为本次异步读取新分配的内部查询编号，与外部命令 UUID 另行关联。
-        long id = nextAsyncQueryId++;
         // 保存这次划转路由及 DTO 槽的账户查询任务，空页不创建任务。
-        var query = new AccountQuery(id, owner.appliedCommandCount(), CoreMessageType.PENDING_TRANSFER_QUERY,
+        var query = new AccountQuery(owner.appliedCommandCount(), CoreMessageType.PENDING_TRANSFER_QUERY,
                 0, 0, null, page.laneMask(), null, null);
         query.transferPage = new PendingTransferQueryPage(page.ids(), page.users(),
                 new com.surprising.aeron.protocol.TransferFundsCommand[page.ids().length]);
-        queryIds.put(message.header().commandId(), id);
+        registerQuery(message, query);
         try {
             if (!owner.runtimeState().dispatchAccountQuery(page.laneMask(), query)) {
-                queryIds.remove(message.header().commandId());
+                pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
-        } catch (/* 投递任务时发生的原始异常，先移除外部命令与查询编号的关联，再继续上抛。 */ RuntimeException failure) {
-            queryIds.remove(message.header().commandId());
+        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) {
+            pendingQueries.remove(message.header().commandId());
             throw failure;
         }
         owner.runtimeState().completePendingTransferPage(page);
@@ -130,22 +115,20 @@ public final class CoreQueryService {
         // Owner 为当前预检取得的币对决策输入，避免 Lane 任意回读变化中的产品元数据。
         var context = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.queryContext(
                 owner.runtimeState(), owner.identities(), command.instrumentId(), timestamp);
-        // 为本次异步读取新分配的内部查询编号，与外部命令 UUID 另行关联。
-        long id = nextAsyncQueryId++;
         // 可等待账本 OI 输入的预检任务，之后只读用户账户计算所需预留。
-        var query = new PreflightQuery(id, owner.appliedCommandCount(), userId, command, context);
-        queryIds.put(message.header().commandId(), id);
+        var query = new PreflightQuery(owner.appliedCommandCount(), userId, command, context);
+        registerQuery(message, query);
         try {
             if (!query.accountReady() && !owner.runtimeState().dispatchLedgerQuery(query)) {
-                queryIds.remove(message.header().commandId());
+                pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
             if (!owner.runtimeState().dispatchAccountQuery(owner.runtimeState().topology().accountLaneMask(userId), query)) {
-                queryIds.remove(message.header().commandId());
+                pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
-        } catch (/* 投递任务时发生的原始异常，先移除外部命令与查询编号的关联，再继续上抛。 */ RuntimeException failure) {
-            queryIds.remove(message.header().commandId());
+        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) {
+            pendingQueries.remove(message.header().commandId());
             throw failure;
         }
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
@@ -154,14 +137,13 @@ public final class CoreQueryService {
     /**
      * 一次下单预检的查询任务：必要时先由账本提供未平仓量，再由用户所属 Lane 检查订单和所需预留，只返回估算结果，不创建真实订单或冻结。
      */
-    private final class PreflightQuery implements SettlementLaneWorker.Command,
+    private final class PreflightQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command,
             java.util.function.Function<AccountLaneState, CoreResponse>, SystemLedgerLane.Entry {
         /**
-         * id：本次任务的内部查询编号，用于保存最终响应和完成外部关联消费。
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
          * userId：必须存在的预检用户编号，只在其所属 Lane 读取账户。
          */
-        private final long id, commandCount, userId;
+        private final long commandCount, userId;
         /** 账本准备的准入未平仓量，在 inputReady 发布后供账户预检使用。 */
         private long openInterest;
         /** 预检的 OI 输入就绪标记；不依赖 OI 的订单创建时即为 true，否则由账本写值后发布。 */
@@ -173,15 +155,14 @@ public final class CoreQueryService {
 
         /**
          * 保存本次预检的订单和固定决策输入；产品不依赖未平仓量或为只减仓单时可直接读账户，否则等待账本发布输入就绪。
-         * @param id 本次异步查询的内部编号，完成响应用它写入结果表
          * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
          * @param userId 查询目标用户编号，具体查询类型决定是否允许用 0 表示未指定
          * @param command 已解码的普通下单意图，本次只做只读预检，不提交真实订单
          * @param context Owner 固定的币对、价格、费率和生命周期决策输入
          */
-        private PreflightQuery(long id, long commandCount, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command,
+        private PreflightQuery(long commandCount, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command,
                 com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.Context context) {
-            this.id = id; this.commandCount = commandCount; this.userId = userId;
+            this.commandCount = commandCount; this.userId = userId;
             this.command = command; this.context = context;
             inputReady = !context.instrument().usesOpenInterestForUserLimit() || command.reduceOnly();
         }
@@ -212,7 +193,7 @@ public final class CoreQueryService {
                 response = rejected(CoreResultCode.fromRejectionCode(failure.code()));
             } catch (/* 预检金额计算发生算术溢出，返回 ARITHMETIC_OVERFLOW。 */ ArithmeticException failure) { response = rejected(CoreResultCode.ARITHMETIC_OVERFLOW); }
             catch (/* 预检输入非法，返回 INVALID_COMMAND，不使查询一直等待。 */ IllegalArgumentException failure) { response = rejected(CoreResultCode.INVALID_COMMAND); }
-            completedBookQueries.put(id, CompletedBookQuery.encoded(response));
+            complete(QueryResult.encoded(response));
         }
 
         /**
@@ -244,25 +225,22 @@ public final class CoreQueryService {
     }
 
     /**
-     * 创建风险查询对象并先投递账本选路由，登记外部命令与内部编号；投递成功后保留待账户交接对象，Owner 消费查询时继续投递 Lane。
+     * 创建风险查询对象并先投递账本选路由，登记外部命令与请求完成状态；投递成功后保留待账户交接对象，Owner 消费查询时继续投递 Lane。
      * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     public CoreResponse beginRiskAccountQuery(CoreMessage message) {
-        // 为本次异步读取新分配的内部查询编号，与外部命令 UUID 另行关联。
-        long id = nextAsyncQueryId++;
         // Owner 创建的风险或 ADL 查询交接对象，先让账本选择路由。
-        var query = RiskAccountQuery.prepare(owner, message, id);
-        queryIds.put(message.header().commandId(), id);
+        var query = RiskAccountQuery.prepare(owner, message);
+        registerQuery(message, query);
         try {
             if (!owner.runtimeState().dispatchLedgerQuery(query)) {
-                queryIds.remove(message.header().commandId());
+                pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
-        } catch (/* 投递任务时发生的原始异常，先移除外部命令与查询编号的关联，再继续上抛。 */ RuntimeException failure) {
-            queryIds.remove(message.header().commandId());
+        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) {
+            pendingQueries.remove(message.header().commandId());
             throw failure;
         }
-        pendingRiskQueries.put(id, query);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
@@ -319,11 +297,9 @@ public final class CoreQueryService {
             laneMask = route != null ? owner.runtimeState().topology().accountLaneMask(route.userId())
                     : count == Long.SIZE ? -1L : (1L << count) - 1;
         } else laneMask = owner.runtimeState().topology().accountLaneMask(userId);
-        // 为本次异步读取新分配的内部查询编号，与外部命令 UUID 另行关联。
-        long id = nextAsyncQueryId++;
         // 已经确定身份条件和目标 Lane 的账户查询任务，负责所属线程读取与编码。
-        var query = new AccountQuery(id, owner.appliedCommandCount(), type, userId, orderId, clientName, laneMask, openOrderIds, null);
-        return dispatchAccountQuery(message, id, laneMask, query);
+        var query = new AccountQuery(owner.appliedCommandCount(), type, userId, orderId, clientName, laneMask, openOrderIds, null);
+        return dispatchAccountQuery(message, laneMask, query);
     }
 
     /**
@@ -372,14 +348,12 @@ public final class CoreQueryService {
         }
         if (selected.isEmpty()) return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount(),
                 com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(List.of()));
-        // 本次查询的内部编号，用于登记异步完成、失败或后续消费。
-        long queryId = nextAsyncQueryId++;
         // 保存固定触发单路由及 DTO 槽的账户查询任务。
-        var query = new AccountQuery(queryId, owner.appliedCommandCount(), message.header().messageType(),
+        var query = new AccountQuery(owner.appliedCommandCount(), message.header().messageType(),
                 0, 0, null, laneMask, null, null);
         query.triggerPage = new TriggerQueryPage(selected.toArray(), users.toArray(),
                 new com.surprising.aeron.protocol.CoreTriggerOrderStateView[selected.size()]);
-        return dispatchAccountQuery(message, queryId, laneMask, query);
+        return dispatchAccountQuery(message, laneMask, query);
     }
 
     /**
@@ -410,33 +384,30 @@ public final class CoreQueryService {
             selectedIds[index] = selected; users[index] = route.userId();
             laneMask |= owner.runtimeState().topology().accountLaneMask(route.userId());
         }
-        // 为本次异步读取新分配的内部查询编号，与外部命令 UUID 另行关联。
-        long id = nextAsyncQueryId++;
         // 已经固定父单及用户路由的本次查询页，各 Lane 后续填入汇总视图。
         var page = new AlgoQueryPage(selectedIds, users,
                 new com.surprising.aeron.protocol.CoreAlgoOrderView[selectedIds.length]);
         // 携带算法父单页的账户查询任务，不在 Owner 汇总真实账户子订单。
-        var query = new AccountQuery(id, owner.appliedCommandCount(), CoreMessageType.ALGO_ORDER_QUERY,
+        var query = new AccountQuery(owner.appliedCommandCount(), CoreMessageType.ALGO_ORDER_QUERY,
                 0, 0, null, laneMask, null, page);
-        return dispatchAccountQuery(message, id, laneMask, query);
+        return dispatchAccountQuery(message, laneMask, query);
     }
 
     /**
      * 登记外部命令 UUID 到内部查询编号并投递目标 Lane；邮箱拒收或投递异常先清除关联，成功只返回待完成状态。
      * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
-     * @param id 本次异步查询的内部编号，完成响应用它写入结果表
      * @param laneMask 本次查询需要访问的账户 Lane 位集合，全部完成后才归并
      * @param query 已经固定身份、结果槽和目标 Lane 的账户查询任务
      */
-    private CoreResponse dispatchAccountQuery(CoreMessage message, long id, long laneMask, AccountQuery query) {
-        queryIds.put(message.header().commandId(), id);
+    private CoreResponse dispatchAccountQuery(CoreMessage message, long laneMask, AccountQuery query) {
+        registerQuery(message, query);
         try {
             if (!owner.runtimeState().dispatchAccountQuery(laneMask, query)) {
-                queryIds.remove(message.header().commandId());
+                pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
-        } catch (/* 投递任务时发生的原始异常，先移除外部命令与查询编号的关联，再继续上抛。 */ RuntimeException failure) {
-            queryIds.remove(message.header().commandId());
+        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) {
+            pendingQueries.remove(message.header().commandId());
             throw failure;
         }
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
@@ -480,16 +451,15 @@ public final class CoreQueryService {
     /**
      * 一笔普通账户或业务列表查询的跨 Lane 任务，保存本次响应槽和原子完成位；所属 Lane 读实体并编码，最后完成者归并结果，消费或关闭后释放引用。
      */
-    private final class AccountQuery implements SettlementLaneWorker.Command,
+    private final class AccountQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command,
             java.util.function.Function<AccountLaneState, CoreResponse> {
         /**
-         * id：本次任务的内部查询编号，用于保存最终响应和完成外部关联消费。
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
          * userId：单用户查询的用户编号，列表或仅订单编号查询可为 0。
          * orderId：按普通订单编号读取的目标编号，其他查询分支可为 0。
          * laneMask：本次任务全部目标账户 Lane 的位集合，用于投递和完成条件核对。
          */
-        private final long id, commandCount, userId, orderId, laneMask;
+        private final long commandCount, userId, orderId, laneMask;
         /** 客户端订单标识，配合用户编号在所属 Lane 查询订单。 */
         private final String clientName;
         /** 任务固定的协议查询类型，决定读取对象和响应编码。 */
@@ -513,7 +483,6 @@ public final class CoreQueryService {
 
         /**
          * 固定查询类型、身份和目标 Lane 集合，按拓扑创建各 Lane 响应槽，挂单页另外分配与所选编号对齐的 DTO 槽。
-         * @param id 本次异步查询的内部编号，完成响应用它写入结果表
          * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
          * @param type 本次查询的协议消息类型，用来选择账户、账本或编码分支
          * @param userId 查询目标用户编号，具体查询类型决定是否允许用 0 表示未指定
@@ -523,9 +492,9 @@ public final class CoreQueryService {
          * @param openOrderIds 按索引页顺序固定的活动订单编号，非挂单页为 null
          * @param algoPage 本次算法父单查询的固定路由及结果槽，其他查询为 null
          */
-        private AccountQuery(long id, long commandCount, CoreMessageType type, long userId,
+        private AccountQuery(long commandCount, CoreMessageType type, long userId,
                              long orderId, String clientName, long laneMask, long[] openOrderIds, AlgoQueryPage algoPage) {
-            this.id = id; this.commandCount = commandCount; this.type = type;
+            this.commandCount = commandCount; this.type = type;
             this.userId = userId; this.orderId = orderId; this.clientName = clientName; this.laneMask = laneMask;
             // 当前拓扑的账户 Lane 总数，按此分配响应与命中槽。
             int count = owner.runtimeState().topology().accountLaneCount();
@@ -569,7 +538,7 @@ public final class CoreQueryService {
                 completed = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.INVALID_COMMAND, commandCount);
             }
-            completedBookQueries.put(id, CompletedBookQuery.encoded(completed));
+            complete(QueryResult.encoded(completed));
         }
 
         /**
@@ -720,13 +689,11 @@ public final class CoreQueryService {
         if (requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE
                 && candidates.size() > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
             throw new RuntimeOperationalQueryService.QueryTooLargeException();
-        // 本次查询的内部编号，用于登记异步完成、失败或后续消费。
-        long queryId = nextAsyncQueryId++;
         // 已经固定候选、市场输入和结果槽的工作页查询，先投账户再等账本归并。
-        var query = new LiquidationWorkQuery(queryId, owner.appliedCommandCount(), requested, candidates);
-        queryIds.put(message.header().commandId(), queryId);
+        var query = new LiquidationWorkQuery(owner.appliedCommandCount(), requested, candidates);
+        registerQuery(message, query);
         if (query.laneMask != 0 && !owner.runtimeState().dispatchAccountQuery(query.laneMask, query)) {
-            queryIds.remove(message.header().commandId());
+            pendingQueries.remove(message.header().commandId());
             return owner.rejected(CoreResultCode.MATCHING_REJECTED);
         }
         if (!owner.runtimeState().dispatchLedgerQuery(query)) deferredLiquidationWorkQuery = query;
@@ -736,13 +703,12 @@ public final class CoreQueryService {
     /**
      * 一次强平执行、保险或 ADL 工作页的交接任务。Owner 固定候选和市场输入，Lane 读取计划事实，账本等待所有 Lane 后计算保险建议并编码有界页，不实际执行强平或赔付。
      */
-    private final class LiquidationWorkQuery implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
+    private final class LiquidationWorkQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
         /**
-         * id：本次任务的内部查询编号，用于保存最终响应和完成外部关联消费。
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
          * laneMask：本次任务全部目标账户 Lane 的位集合，用于投递和完成条件核对。
          */
-        private final long id, commandCount, laneMask;
+        private final long commandCount, laneMask;
         /** 固定的强平工作类型、游标、条数和字节预算，Lane 与账本共用。 */
         private final CoreLiquidationWorkView.Query requested;
         /** 按强平编号顺序选择的本次扫描候选，保险分支包括最终返回页以外的相关计划。 */
@@ -772,13 +738,12 @@ public final class CoreQueryService {
         private final java.util.concurrent.atomic.AtomicLong completed = new java.util.concurrent.atomic.AtomicLong();
         /**
          * 按扫描上限固定候选编号、所属 Lane、币对、结算资产和标记价，并记录是否已选完来源及风险续扫信息；各 Lane 的结果槽只属于本次查询。
-         * @param id 本次异步查询的内部编号，完成响应用它写入结果表
          * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
          * @param requested 强平工作类型、排他游标、页条数及编码字节预算
          * @param candidates 已按强平编号排序的候选集合，保险分支含当前页游标之外的相关计划
          */
-        LiquidationWorkQuery(long id, long commandCount, CoreLiquidationWorkView.Query requested, java.util.NavigableSet<Long> candidates) {
-            this.id = id; this.commandCount = commandCount; this.requested = requested;
+        LiquidationWorkQuery(long commandCount, CoreLiquidationWorkView.Query requested, java.util.NavigableSet<Long> candidates) {
+            this.commandCount = commandCount; this.requested = requested;
             // 本次实际选择的候选数量，取来源数量和全局扫描上限的较小值。
             int count = Math.min(candidates.size(), RuntimeOperationalQueryService.MAX_INDEX_SCAN);
             sourceComplete = count == candidates.size();
@@ -871,7 +836,7 @@ public final class CoreQueryService {
             try {
                 for (CoreResultCode /* 按 Lane 编号检查到的失败码，有失败就立即返回拒绝，不生成部分成功页。 */ failure : failures) {
                     if (failure == null) continue;
-                    completedBookQueries.put(id, CompletedBookQuery.encoded(new CoreResponse(
+                    complete(QueryResult.encoded(new CoreResponse(
                             ResponseStatus.REJECTED, ResponseStatus.REJECTED, failure, commandCount)));
                     return;
                 }
@@ -891,7 +856,7 @@ public final class CoreQueryService {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.INVALID_COMMAND, commandCount);
             }
-            completedBookQueries.put(id, CompletedBookQuery.encoded(response));
+            complete(QueryResult.encoded(response));
         }
     }
 
@@ -904,37 +869,31 @@ public final class CoreQueryService {
     public CoreResponse beginPositionIndexQuery(CoreMessage message,
             com.surprising.aeron.protocol.CoreMaintenanceCodec.Query page,
             com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
-        // 为本次异步读取新分配的内部查询编号，与外部命令 UUID 另行关联。
-        long id = nextAsyncQueryId++;
-        queryIds.put(message.header().commandId(), id);
-        // 在账本所属索引上读取 OI 或合约维护用户页的任务。
-        var query = new LedgerQuery(id, owner.appliedCommandCount(), message.header().messageType(), page, maintenance);
+        var query = new LedgerQuery(owner.appliedCommandCount(), message.header().messageType(), page, maintenance);
+        registerQuery(message, query);
         try {
             if (!owner.runtimeState().dispatchLedgerQuery(query)) {
-                queryIds.remove(message.header().commandId());
+                pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
-        } catch (/* 投递任务时发生的原始异常，先移除外部命令与查询编号的关联，再继续上抛。 */ RuntimeException failure) { queryIds.remove(message.header().commandId()); throw failure; }
+        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) { pendingQueries.remove(message.header().commandId()); throw failure; }
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
-     * 为财库读取分配内部编号并投递账本，邮箱满时拒绝本次查询，投递异常不留下外部命令关联。
+     * 创建财库查询并投递账本，邮箱满时拒绝本次查询，投递异常不留下外部命令关联。
      * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     private CoreResponse beginLedgerQuery(CoreMessage message) {
-        // 为本次异步读取新分配的内部查询编号，与外部命令 UUID 另行关联。
-        long id = nextAsyncQueryId++;
-        queryIds.put(message.header().commandId(), id);
-        // 只读原财库并编码响应的账本任务，与账户查询使用同一结果登记表。
-        LedgerQuery query = new LedgerQuery(id, owner.appliedCommandCount());
+        LedgerQuery query = new LedgerQuery(owner.appliedCommandCount());
+        registerQuery(message, query);
         try {
             if (!owner.runtimeState().dispatchLedgerQuery(query)) {
-                queryIds.remove(message.header().commandId());
+                pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
             }
-        } catch (/* 投递任务时发生的原始异常，先移除外部命令与查询编号的关联，再继续上抛。 */ RuntimeException failure) {
-            queryIds.remove(message.header().commandId());
+        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) {
+            pendingQueries.remove(message.header().commandId());
             throw failure;
         }
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
@@ -943,16 +902,13 @@ public final class CoreQueryService {
     /**
      * 在系统账本线程读取财库、未平仓量或合约维护用户页的单次任务，直接消费原账本或其索引，编码后通知 Owner。
      * 构造约定：固定本次账本查询的协议类型，以及可选的合约维护分页条件和维护状态。
-     * 参数 id：本次异步查询的内部编号，完成响应用它写入结果表
      * 参数 commandCount：查询进入时固定的已应用命令计数，作为响应计数
      * 参数 type：本次查询的协议消息类型，用来选择账户、账本或编码分支
      * 参数 page：可选的合约维护用户分页条件，财库或 OI 查询不使用
      * 参数 maintenance：查询进入时取得的合约维护状态，随用户页一起编码返回
      */
     @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-    private final class LedgerQuery implements SystemLedgerLane.Entry {
-        /** 本次任务的内部查询编号，用于保存最终响应和完成外部关联消费。 */
-        private final long id;
+    private final class LedgerQuery extends CompletableFuture<QueryResult> implements SystemLedgerLane.Entry {
         /** 任务创建时固定的已应用命令计数，响应沿用此值。 */
         private final long commandCount;
         /** 任务固定的协议查询类型，决定读取对象和响应编码。 */
@@ -963,11 +919,10 @@ public final class CoreQueryService {
         private final com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance;
         /**
          * 创建只读取财库的账本任务，页条件与合约维护信息均不需要。
-         * @param id 本次异步查询的内部编号，完成响应用它写入结果表
          * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
          */
-        private LedgerQuery(long id, long commandCount) {
-            this(id, commandCount, CoreMessageType.TREASURY_STATE_QUERY, null, null);
+        private LedgerQuery(long commandCount) {
+            this(commandCount, CoreMessageType.TREASURY_STATE_QUERY, null, null);
         }
         /**
          * 在账本线程读取 OI 索引、按用户游标的合约维护页或财库资产，检查响应规模并编码；参数或规模错误只拒绝本次查询，随后保存响应通知 Owner。
@@ -1013,7 +968,7 @@ public final class CoreQueryService {
             } catch (/* 账本查询条件或编码参数非法，转换为 INVALID_COMMAND。 */ IllegalArgumentException failure) {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.INVALID_COMMAND, commandCount);
             }
-            completedBookQueries.put(id, CompletedBookQuery.encoded(response));
+            complete(QueryResult.encoded(response));
         }
     }
 
@@ -1027,19 +982,18 @@ public final class CoreQueryService {
         }
         // 已解码的单币对编号和盘口深度条件，必须提供非空载荷。
         var query = CoreStateQueryCodec.decodeOrderBookQuery(message.payloadUnsafe());
-        // 本次查询的内部编号，用于登记异步完成、失败或后续消费。
-        long queryId = nextAsyncQueryId++;
+        var result = new CompletableFuture<QueryResult>();
+        registerQuery(message, result);
         try {
             owner.matcherPipeline().readAtSubmissionFence(owner.matchingAdapter().matcherShardId(query.instrumentId()),
                     () -> owner.matchingAdapter().orderBookLevels(query.instrumentId(), query.depth()))
                     .whenComplete((/* Matcher 在对应提交栅栏后读取出的盘口层级，包装后交给 Owner 编码。 */ levels, /* Matcher 盘口读取或投递失败，登记内部失败标记，随后由 Owner 消费为拒绝响应。 */ failure) -> {
-                        if (failure != null) failedQueries.put(queryId, true);
-                        else completedBookQueries.put(queryId, CompletedBookQuery.single(levels));
+                        if (failure != null) result.completeExceptionally(failure);
+                        else result.complete(QueryResult.single(levels));
                     });
         } catch (/* Matcher 盘口读取或投递失败，登记内部失败标记，随后由 Owner 消费为拒绝响应。 */ RuntimeException failure) {
-            failedQueries.put(queryId, true);
+            result.completeExceptionally(failure);
         }
-        queryIds.put(message.header().commandId(), queryId);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING,
                 owner.appliedCommandCount());
     }
@@ -1059,8 +1013,9 @@ public final class CoreQueryService {
             }
             return bootstrapPageResponse(session, query);
         }
-        // 本次查询的内部编号，用于登记异步完成、失败或后续消费。
-        long queryId = nextAsyncQueryId++;
+        var result = new CompletableFuture<QueryResult>();
+        String snapshotId = message.header().commandId().toString();
+        registerQuery(message, result);
         try {
             // 异步取得的初始化快照凭据；单 Matcher 读栅栏，多 Matcher 分别读取后合并。
             var snapshot = owner.matchingAdapter().topology().matchingEngineCount() == 1
@@ -1070,62 +1025,48 @@ public final class CoreQueryService {
                     /* 当前要读取初始化盘口的 Matcher 分片编号。 */ shardId -> owner.matchingAdapter().orderBookBootstrapShard(shardId, query.depth()))
                     .thenApply(owner.matchingAdapter()::mergeBookBootstrapShards);
             snapshot.whenComplete((/* 所有 Matcher 初始化读取及合并完成的快照内容，先包装完成结果，Owner 稍后创建会话。 */ value, /* 初始化读取、分片合并或任务投递失败，登记标记供 Owner 消费时返回拒绝。 */ failure) -> {
-                if (failure != null) failedQueries.put(queryId, true);
-                else completedBookQueries.put(queryId, CompletedBookQuery.bootstrap(
-                        message.header().commandId().toString(), query, value));
+                if (failure != null) result.completeExceptionally(failure);
+                else result.complete(QueryResult.bootstrap(
+                        snapshotId, query, value));
             });
         } catch (/* 初始化读取、分片合并或任务投递失败，登记标记供 Owner 消费时返回拒绝。 */ RuntimeException failure) {
-            failedQueries.put(queryId, true);
+            result.completeExceptionally(failure);
         }
-        queryIds.put(message.header().commandId(), queryId);
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING,
                 owner.appliedCommandCount());
     }
 
-    /**
-     * 按外部命令到内部编号的关联表判断是否还有未消费的查询。
-     */
-    public boolean hasPendingQueries() {
-        return !queryIds.isEmpty();
+    private void registerQuery(CoreMessage message, CompletableFuture<QueryResult> query) {
+        if (pendingQueries.putIfAbsent(message.header().commandId(), query) != null)
+            throw new IllegalArgumentException("query is already pending");
     }
 
-    /**
-     * 按外部命令 UUID 查找内部异步编号，没有登记时返回 0。
-     * @param queryId 外部查询请求的命令 UUID，用来查找内部异步编号
-     */
-    public long querySequence(UUID queryId) {
-        return queryIds.getOrDefault(queryId, 0L);
-    }
+    public boolean hasPendingQueries() { return !pendingQueries.isEmpty(); }
 
-    /**
-     * 在账户和财务读取者已经停止后清理完成结果、失败标记、编号关联及待投递引用，防止工作线程在清理后又写回结果。
-     */
+    public boolean hasPendingQuery(UUID commandId) { return pendingQueries.containsKey(commandId); }
+
+    /** 消费者停止后解除 Owner 对查询任务的引用。 */
     public void clearPendingQueries() {
-        completedBookQueries.clear();
-        failedQueries.clear();
-        queryIds.clear();
+        pendingQueries.clear();
         deferredLiquidationWorkQuery = null;
-        pendingRiskQueries.clear();
     }
 
-    /**
-     * 由 Owner 继续尝试风险账户交接和延迟账本投递，再消费一次性结果及编号关联；已编码响应直接返回，盘口原始结果在此编码或建立有界初始化会话。尚未完成返回 null。
-     * @param queryId 需要继续投递并尝试消费结果的内部异步编号
-     */
-    public CoreResponse takeQueryResult(long queryId) {
-        // 该内部编号仍等待账本路由或账户投递的风险查询，尝试投递成功后从待交接表移除。
-        var riskQuery = pendingRiskQueries.get(queryId);
-        if (riskQuery != null && riskQuery.dispatchAccounts()) pendingRiskQueries.remove(queryId);
-        if (deferredLiquidationWorkQuery != null && deferredLiquidationWorkQuery.id == queryId
-                && owner.runtimeState().dispatchLedgerQuery(deferredLiquidationWorkQuery)) deferredLiquidationWorkQuery = null;
-        if (failedQueries.remove(queryId) != null) {
-            queryIds.values().removeIf(/* 关联表当前保存的内部编号，与正在消费的编号一致时删除该关联。 */ value -> value == queryId);
+    /** Owner 继续必要投递，并按外部请求 UUID 一次性消费结果。 */
+    public CoreResponse takeQueryResult(UUID commandId) {
+        var query = pendingQueries.get(commandId);
+        if (query == null) return null;
+        if (query instanceof RiskAccountQuery riskQuery) riskQuery.dispatchAccounts();
+        if (query == deferredLiquidationWorkQuery && owner.runtimeState().dispatchLedgerQuery(deferredLiquidationWorkQuery))
+            deferredLiquidationWorkQuery = null;
+        if (!query.isDone()) return null;
+        pendingQueries.remove(commandId);
+        QueryResult completed;
+        try {
+            completed = query.join();
+        } catch (java.util.concurrent.CompletionException failure) {
+            if (failure.getCause() instanceof Error fatal) throw fatal;
             return owner.rejected(CoreResultCode.MATCHING_REJECTED);
         }
-        // 按内部编号一次性移出的完成结果，尚未产生结果时为 null。
-        CompletedBookQuery completed = completedBookQueries.remove(queryId);
-        if (completed == null) return null;
-        queryIds.values().removeIf(/* 关联表当前保存的内部编号，与正在消费的编号一致时删除该关联。 */ value -> value == queryId);
         if (completed.encodedResponse() != null) return completed.encodedResponse();
         // Owner 此刻已发布的实时序号，包装盘口响应或初始化会话时固定。
         long exportSequence = owner.commits.publication.publishedSequence();
@@ -1204,7 +1145,7 @@ public final class CoreQueryService {
      * @param bootstrapSnapshot 从 Matcher 取得的多币对初始化快照，普通或已编码响应分支为 null
      * @param encodedResponse 读取线程已经构造的最终查询响应，盘口原始结果分支为 null
      */
-    record CompletedBookQuery(
+    record QueryResult(
             List<com.surprising.aeron.protocol.CoreBookLevelView> levels,
             String snapshotId,
             CoreOrderBookBootstrapQuery bootstrapQuery,
@@ -1218,7 +1159,7 @@ public final class CoreQueryService {
          * @param bootstrapQuery 多币对盘口初始化请求，普通层级或已编码响应分支为 null
          * @param bootstrapSnapshot 从 Matcher 取得的多币对初始化快照，普通或已编码响应分支为 null
          */
-        CompletedBookQuery(List<com.surprising.aeron.protocol.CoreBookLevelView> levels, String snapshotId,
+        QueryResult(List<com.surprising.aeron.protocol.CoreBookLevelView> levels, String snapshotId,
                            CoreOrderBookBootstrapQuery bootstrapQuery, BookBootstrapSnapshot bootstrapSnapshot) {
             this(levels, snapshotId, bootstrapQuery, bootstrapSnapshot, null);
         }
@@ -1227,15 +1168,15 @@ public final class CoreQueryService {
          * 把所属读取线程已经编码的响应包装为可一次消费的完成结果，无须 Owner 再读实体。
          * @param response 所属读取线程已经完成编码的最终查询响应
          */
-        static CompletedBookQuery encoded(CoreResponse response) { return new CompletedBookQuery(List.of(), "", null, null, response); }
+        static QueryResult encoded(CoreResponse response) { return new QueryResult(List.of(), "", null, null, response); }
 
         /**
          * 复制单币对盘口层级列表作为不可修改的查询交接内容，Owner 稍后补导出水位并编码。
          * @param levels 单币对盘口查询返回的层级列表，初始化分支使用独立快照
          */
-        static CompletedBookQuery single(
+        static QueryResult single(
                 List<com.surprising.aeron.protocol.CoreBookLevelView> levels) {
-            return new CompletedBookQuery(List.copyOf(levels), "", null, null);
+            return new QueryResult(List.copyOf(levels), "", null, null);
         }
 
         /**
@@ -1244,11 +1185,11 @@ public final class CoreQueryService {
          * @param query 创建这份快照的原始初始化请求，Owner 据此返回第一页
          * @param snapshot Matcher 读取及合并后的初始化快照，包含币对集合和对应层级
          */
-        static CompletedBookQuery bootstrap(
+        static QueryResult bootstrap(
                 String snapshotId,
                 CoreOrderBookBootstrapQuery query,
                 BookBootstrapSnapshot snapshot) {
-            return new CompletedBookQuery(List.of(), snapshotId, query, snapshot);
+            return new QueryResult(List.of(), snapshotId, query, snapshot);
         }
     }
 

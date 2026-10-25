@@ -145,7 +145,7 @@ class CoreAlgoLaneQueryTest {
                 var request = message(CoreAlgoOrderCodec.encodeQuery(0, 0, "", 0, 10));
                 assertThat(core.requiresOwnerLaneAccessForPreparation(request)).isFalse();
                 assertThat(CoreTestCompletion.querySynchronously(core, request).resultCode()).isEqualTo(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
-                assertThat(core.bookQueries.querySequence(request.header().commandId())).isZero();
+                assertThat(core.bookQueries.hasPendingQuery(request.header().commandId())).isFalse();
                 // 超限之后精确查询无子单父单 503 的响应，应正常成功。
                 var response = query(core, 0, 503, "", 0, 10);
                 assertThat(response.status()).isEqualTo(ResponseStatus.OK);
@@ -182,7 +182,7 @@ class CoreAlgoLaneQueryTest {
                 var request = message(CoreAlgoOrderCodec.encodeQuery(0, 0, "", 0, 10));
                 assertThat(core.apply(request).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 // 本次父单查询的内部编号，用来检查未完成、首次消费和关联清理。
-                long id = core.bookQueries.querySequence(request.header().commandId());
+                var id = request.header().commandId();
                 assertThat(core.bookQueries.takeQueryResult(id)).isNull();
                 assertThat(release.getCount()).isOne();
                 release.countDown();
@@ -287,7 +287,7 @@ class CoreAlgoLaneQueryTest {
         // 核心提交查询后的直接响应，若仍待完成则继续等待内部编号。
         var response = core.apply(request);
         return response.resultCode() == CoreResultCode.MATCHING_PENDING
-                ? await(core, request, core.bookQueries.querySequence(request.header().commandId())) : response;
+                ? await(core, request, request.header().commandId()) : response;
     }
 
     /**
@@ -296,8 +296,8 @@ class CoreAlgoLaneQueryTest {
      * @param request 已经提交的查询消息，用其命令编号核对关联清理
      * @param id 内部异步查询编号，必须非零且只消费一次
      */
-    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, long id) {
-        assertThat(id).isNotZero();
+    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, java.util.UUID id) {
+        assertThat(core.bookQueries.hasPendingQuery(id)).isTrue();
         // 使用单调时钟计算的五秒等待上限，不参与任何业务时间判断。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         // 不断尝试消费的最终响应，成功读取后同一查询不能再返回结果。
@@ -308,7 +308,7 @@ class CoreAlgoLaneQueryTest {
             Thread.onSpinWait();
         }
         assertThat(core.bookQueries.takeQueryResult(id)).isNull();
-        assertThat(core.bookQueries.querySequence(request.header().commandId())).isZero();
+        assertThat(core.bookQueries.hasPendingQuery(request.header().commandId())).isFalse();
         return response;
     }
 

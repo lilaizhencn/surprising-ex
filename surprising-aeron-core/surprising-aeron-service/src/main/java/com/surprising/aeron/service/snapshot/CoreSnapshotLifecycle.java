@@ -25,7 +25,7 @@ public final class CoreSnapshotLifecycle {
     final TradingCoreRuntime owner;
 
     /**
-     *  已建立屏障后调用的原生撮合快照捕获函数，默认实现通过 Matcher 控制队列执行。
+     *  已建立屏障后调用的原生撮合快照捕获函数，默认实现通过 Matcher 提交栅栏读取执行。
      * 替换原生撮合快照捕获入口，不在此检查非空，调用方负责初始化和线程使用边界。
      * @param matcherSnapshotCapture 后续屏障使用的 Matcher 捕获实现
      */
@@ -67,32 +67,17 @@ public final class CoreSnapshotLifecycle {
     @Setter
     long lastSnapshotId;
 
-    /**
-     * 默认捕获实现：单分片用限时控制调用执行 snapshotAsync 并 join，多分片按分片依次控制捕获，再汇总模块。这里同步等待后包装完成 Future，运行异常包装失败 Future；各控制调用超时不会撤销已提交工作。
-     * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
-     * @param coreSequence 快照覆盖的已应用 Core 命令水位
-     * @param businessStateHash Core 状态连同费率、待完成划转的业务哈希
-     * @param state 已经建立读取边界的 Core 状态
-     * @param activeOrders 同一冻结点的 Core OPEN 订单列表
-     */
+    /** 在各 Matcher 提交栅栏捕获原生模块，全部完成后汇总；屏障释放不取消捕获。 */
     public CompletableFuture<MatcherSnapshot> captureMatcherSnapshot(
             long snapshotId, long coreSequence, long businessStateHash,
             TradingCoreState state, Iterable<CoreOrderState> activeOrders) {
-        try {
-            if (owner.matchingAdapter().topology().matchingEngineCount() == 1) {
-                return CompletableFuture.completedFuture(owner.matcherPipeline().call(
-                        () -> owner.matchingAdapter().snapshotAsync(snapshotId, coreSequence,
-                                businessStateHash, state, activeOrders).join(),
-                        TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS));
-            }
-            // 依次在各 Matcher 分片完成捕获后收集的哈希结果列表。
-            var shards = owner.matcherPipeline().callEach(/* 当前控制调用负责捕获的全局 Matcher 分片号。 */ shardId -> owner.matchingAdapter().captureShardSnapshot(
-                    shardId, snapshotId, coreSequence, activeOrders), TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
-            return CompletableFuture.completedFuture(owner.matchingAdapter().finishShardedSnapshot(
-                    snapshotId, coreSequence, businessStateHash, state, shards));
-        } catch (/* 捕获、屏障轮询或异步编码产生的异常，所在边界决定包装、释放或登记审计失败。 */ RuntimeException failure) {
-            return CompletableFuture.failedFuture(failure);
-        }
+        return owner.matcherPipeline().readEachAsync(shardId ->
+                        owner.matchingAdapter().captureShardSnapshot(shardId, snapshotId, coreSequence, activeOrders))
+                .thenApply(shards -> owner.matchingAdapter().finishShardedSnapshot(
+                        snapshotId, coreSequence, businessStateHash, state, shards))
+                .whenComplete((snapshot, failure) -> {
+                    if (failure != null) owner.matchingAdapter().discardSnapshot(snapshotId);
+                });
     }
 
     /**

@@ -31,8 +31,9 @@ class AeronClientAgentTest {
                     responses.add(m.header().correlationId()); return 1;
                 }
                 public int pollEgress(int limit) { return 0; }
-                public CoreResponse takeResponse(long id) {
-                    return responses.remove(id) ? new CoreResponse(ResponseStatus.APPLIED, 1) : null;
+                public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+                    for (long id : responses) if (responses.remove(id))
+                        consumer.accept(id, new CoreResponse(ResponseStatus.APPLIED, 1));
                 }
                 public RuntimeException sessionFailure() { return null; }
                 public boolean keepAlive() { return true; }
@@ -68,8 +69,10 @@ class AeronClientAgentTest {
                         accepted.add(message.header().correlationId());offers.incrementAndGet();admitted.countDown();return 1;
                     }
                     public int pollEgress(int limit){return 0;}
-                    public CoreResponse takeResponse(long id) {
-                        return release.get()&&accepted.remove(id)?new CoreResponse(ResponseStatus.APPLIED,1):null;
+                    public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+                        if (!release.get()) return;
+                        for (long id : accepted) if (accepted.remove(id))
+                            consumer.accept(id, new CoreResponse(ResponseStatus.APPLIED, 1));
                     }
                     public RuntimeException sessionFailure(){return null;}
                     public boolean keepAlive(){return true;}
@@ -103,7 +106,10 @@ class AeronClientAgentTest {
                 accepted.add(message);responses.add(message.header().correlationId());return 1;
             }
             public int pollEgress(int limit) { if(adminSeen.getCount()==0)polled.countDown();return 0; }
-            public CoreResponse takeResponse(long id) { return responses.remove(id)?new CoreResponse(ResponseStatus.APPLIED,1):null; }
+            public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
+                for (long id : responses) if (responses.remove(id))
+                    consumer.accept(id, new CoreResponse(ResponseStatus.APPLIED, 1));
+            }
             public RuntimeException sessionFailure(){return null;}
             public boolean keepAlive(){return true;}
             public void close(){}
@@ -229,7 +235,7 @@ class AeronClientAgentTest {
                 polled.countDown();
                 return 0;
             }
-            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
             @Override public RuntimeException sessionFailure() { return null; }
             @Override public boolean keepAlive() { return true; }
             @Override public void close() { }
@@ -245,13 +251,18 @@ class AeronClientAgentTest {
     @Test
     void productionEgressAdapterNeverExceedsTheConfiguredFragmentLimit() {
         AtomicInteger polls = new AtomicInteger();
-        int fragments = SurprisingAeronClient.pollEgressBounded(32, () -> {
-            polls.incrementAndGet();
-            return 10;
-        });
-
-        assertThat(fragments).isEqualTo(30);
-        assertThat(polls).hasValue(3);
+        var cluster = new SurprisingAeronClient.ClusterOperations() {
+            @Override public long offer(org.agrona.DirectBuffer buffer, int offset, int length) {
+                throw new UnsupportedOperationException();
+            }
+            @Override public int pollEgress() { polls.incrementAndGet(); return 10; }
+            @Override public boolean sendKeepAlive() { return true; }
+            @Override public void close() { }
+        };
+        try (var client = new SurprisingAeronClient(ProductLine.SPOT, Duration.ofSeconds(1), cluster)) {
+            assertThat(client.pollEgress(32)).isEqualTo(30);
+            assertThat(polls).hasValue(3);
+        }
     }
 
     @Test
@@ -264,7 +275,7 @@ class AeronClientAgentTest {
                 return 1;
             }
             @Override public int pollEgress(int fragmentLimit) { return 0; }
-            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
             @Override public RuntimeException sessionFailure() { return null; }
             @Override public boolean keepAlive() { return true; }
             @Override public void close() { closes.incrementAndGet(); }
@@ -344,7 +355,7 @@ class AeronClientAgentTest {
                 return new AeronClientPool.Session() {
                     @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
                     @Override public int pollEgress(int fragmentLimit) { return 0; }
-                    @Override public CoreResponse takeResponse(long correlationId) { return null; }
+                    public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
                     @Override public RuntimeException sessionFailure() {
                         return new IllegalStateException("session failed");
                     }
@@ -358,7 +369,7 @@ class AeronClientAgentTest {
                     recovered.countDown();
                     return 0;
                 }
-                @Override public CoreResponse takeResponse(long correlationId) { return null; }
+                public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
                 @Override public RuntimeException sessionFailure() { return null; }
                 @Override public boolean keepAlive() { return true; }
                 @Override public void close() { }
@@ -406,7 +417,7 @@ class AeronClientAgentTest {
                 }
                 return 0;
             }
-            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
             @Override public RuntimeException sessionFailure() { return null; }
             @Override public boolean connected() { return connected.get(); }
             @Override public boolean keepAlive() { return connected.get(); }
@@ -467,11 +478,10 @@ class AeronClientAgentTest {
                 @Override public int pollEgress(int fragmentLimit) {
                     return correlation.get() == null ? 0 : 1;
                 }
-                @Override public CoreResponse takeResponse(long correlationId) {
+                @Override public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
                     Long offeredCorrelation = correlation.getAndSet(null);
-                    return offeredCorrelation != null && offeredCorrelation == correlationId
-                            ? new CoreResponse(ResponseStatus.OK, 42)
-                            : null;
+                    if (offeredCorrelation != null)
+                        consumer.accept(offeredCorrelation, new CoreResponse(ResponseStatus.OK, 42));
                 }
                 @Override public RuntimeException sessionFailure() { return null; }
                 @Override public boolean keepAlive() { return true; }
@@ -493,7 +503,7 @@ class AeronClientAgentTest {
         AeronClientPool.SessionFactory factory = () -> new AeronClientPool.Session() {
             @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
             @Override public int pollEgress(int fragmentLimit) { return 0; }
-            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
             @Override public RuntimeException sessionFailure() { return null; }
             @Override public boolean keepAlive() {
                 keepAlives.countDown();
@@ -519,7 +529,7 @@ class AeronClientAgentTest {
             return new AeronClientPool.Session() {
                 @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
                 @Override public int pollEgress(int fragmentLimit) { throw new IllegalStateException("poll failed"); }
-                @Override public CoreResponse takeResponse(long correlationId) { return null; }
+                public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
                 @Override public RuntimeException sessionFailure() { return null; }
                 @Override public boolean keepAlive() { return true; }
                 @Override public void close() {
@@ -606,7 +616,7 @@ class AeronClientAgentTest {
             return new AeronClientPool.Session() {
                 @Override public long offer(CoreMessage message) { return Publication.NOT_CONNECTED; }
                 @Override public int pollEgress(int fragmentLimit) { return 0; }
-                @Override public CoreResponse takeResponse(long correlationId) { return null; }
+                public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
                 @Override public RuntimeException sessionFailure() { return null; }
                 @Override public boolean keepAlive() { return true; }
                 @Override public void close() { sessionsClosed.countDown(); }
@@ -655,7 +665,7 @@ class AeronClientAgentTest {
         return new AeronClientPool.Session() {
             @Override public long offer(CoreMessage message) { return offer.applyAsLong(message); }
             @Override public int pollEgress(int fragmentLimit) { return 0; }
-            @Override public CoreResponse takeResponse(long correlationId) { return null; }
+            public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) { }
             @Override public RuntimeException sessionFailure() { return null; }
             @Override public boolean keepAlive() { return true; }
             @Override public void close() { }

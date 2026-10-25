@@ -14,7 +14,7 @@ import org.agrona.DirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.openjdk.jmh.annotations.*;
 
-/** Actual leased ingress -> Owner publisher -> output queue -> encoder, without Aeron I/O.
+/** Actual leased ingress -> Owner publisher -> inline encoder, without Aeron I/O.
  * Allocation is per Core message, not per batch item or whole-Core business operation. */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
@@ -69,6 +69,7 @@ public class ReplySlotAllocationBenchmark {
 
     @Benchmark @OperationsPerInvocation(WINDOW)
     public long publishMixedReplies() {
+        long offeredBefore = session.offered;
         for (int i = 0; i < WINDOW; i++) {
             var frame = frames[i];
             var message = decoder.decodeBorrowed(frame, 0, frame.capacity());
@@ -77,7 +78,8 @@ public class ReplySlotAllocationBenchmark {
             TradingCoreOwner.publishResponse(publisher, sessionId, message, response, runtime.committedCoreSequence());
             message.releaseDecoderSlot();
         }
-        if (egress.drainResponses(processor) != WINDOW) throw new IllegalStateException("response handoff did not drain");
+        egress.drainResponses();
+        if (session.offered - offeredBefore != WINDOW) throw new IllegalStateException("response handoff did not send");
         return session.checksum;
     }
 
@@ -85,9 +87,11 @@ public class ReplySlotAllocationBenchmark {
 
     private static final class SinkSession implements ClusterServiceEgress.SessionEgress {
         private long checksum;
+        private long offered;
         public void close() { }
         public long offer(long term, long timestamp, DirectBuffer buffer, int offset, int length) {
-            checksum += buffer.getLong(offset + 24);
+            checksum += buffer.getLong(offset + 20, java.nio.ByteOrder.LITTLE_ENDIAN);
+            offered++;
             return length;
         }
     }

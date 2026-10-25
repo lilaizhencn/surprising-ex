@@ -344,15 +344,10 @@ public final class TradingCoreOwner {
             }
             commandPipeline.controlResponse(commandPipeline.matchingResponse());
         }
-        if (state.bookQueries.hasPendingQueries()) {
-            // 该请求 UUID 对应的盘口查询序号
-            long querySequence = state.bookQueries.querySequence(request.header().commandId());
-            if (querySequence != 0) {
-                // 本次运行时执行或查询得到的结果，可能尚待提交
-                CoreResponse result = state.bookQueries.takeQueryResult(querySequence);
-                if (result == null) { checkProgressDeadline(); return false; }
-                commandPipeline.controlResponse(result);
-            }
+        if (state.bookQueries.hasPendingQuery(request.header().commandId())) {
+            CoreResponse result = state.bookQueries.takeQueryResult(request.header().commandId());
+            if (result == null) { checkProgressDeadline(); return false; }
+            commandPipeline.controlResponse(result);
         }
         state.assertClusterCallbackComplete();
         if (realtimeBoundary.enabled()) {

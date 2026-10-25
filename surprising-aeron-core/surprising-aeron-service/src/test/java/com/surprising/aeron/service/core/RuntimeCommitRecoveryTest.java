@@ -972,7 +972,7 @@ class RuntimeCommitRecoveryTest {
         CoreResponse response = state.apply(query);
         if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
             // 该原只读请求在异步查询队列中的序号
-            long queryId = state.bookQueries.querySequence(query.header().commandId());
+            var queryId = query.header().commandId();
             // 当前撮合、结算或回调推进阶段的五秒截止时间，各阶段分别计算
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             while ((response = state.bookQueries.takeQueryResult(queryId)) == null) {

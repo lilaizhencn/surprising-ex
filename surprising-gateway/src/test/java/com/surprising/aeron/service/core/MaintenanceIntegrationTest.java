@@ -410,7 +410,7 @@ class MaintenanceIntegrationTest {
             response = completed[0];
             if (message.header().kind() == WireMessageKind.QUERY
                     && response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                long id = state.bookQueries.querySequence(message.header().commandId());
+                var id = message.header().commandId();
                 while ((response = state.bookQueries.takeQueryResult(id)) == null) {
                     state.assertHealthy();
                     if (System.nanoTime() >= deadline) throw new AssertionError("query timeout");

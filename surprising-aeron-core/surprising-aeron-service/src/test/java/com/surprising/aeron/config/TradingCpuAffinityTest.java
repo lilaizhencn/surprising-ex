@@ -137,7 +137,9 @@ class TradingCpuAffinityTest {
         var egress = new com.surprising.aeron.support.egress.ClusterServiceEgress();
         // 启动真实服务，检查 CPU 配置进入工作线程启动边界后仍然正确。
         var service = new com.surprising.aeron.controller.AeronTradingClusterService(
-                com.surprising.product.api.ProductLine.SPOT, egress, configuration);
+                com.surprising.product.api.ProductLine.SPOT, egress, configuration,
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         egress.start(cluster);
         try {
             service.onStart(cluster, null);

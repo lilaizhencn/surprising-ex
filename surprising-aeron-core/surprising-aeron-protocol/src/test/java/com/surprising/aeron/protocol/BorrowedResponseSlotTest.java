@@ -12,7 +12,7 @@ class BorrowedResponseSlotTest {
                 CommandSource.GATEWAY, 1, id, 7, 1, id);
     }
 
-    @Test void terminalResponseAndHeaderRemainLeasedThroughTheLastTransportReader() {
+    @Test void terminalResponseIsEncodedBeforeDecoderSlotIsReused() {
         var slot = CoreMessage.decoderSlot();
         assertThat(slot.acquireDecoderSlot()).isTrue();
         initialize(slot, 1);
@@ -22,15 +22,10 @@ class BorrowedResponseSlotTest {
         assertThat(slot.header().kind()).isEqualTo(WireMessageKind.COMMAND);
         assertThat(header.kind()).isEqualTo(WireMessageKind.RESPONSE);
         byte[] retainedValue = response.data();
-        header.retainForEgress();
-        header.retainForEgress();
+        byte[] encoded = new byte[CoreMessageCodec.encodedResponseLength(header, response)];
+        CoreMessageCodec.encodeResponse(header, response, 1, encoded);
         slot.releaseDecoderSlot();
-        assertThat(slot.acquireDecoderSlot()).isFalse();
-        header.releaseFromEgress();
-        assertThat(slot.acquireDecoderSlot()).isFalse();
-        assertThat(response.data()).containsExactly(1, 2, 3);
-        assertThat(header.commandId()).isEqualTo(new UUID(1, 1));
-        header.releaseFromEgress();
+        assertThatThrownBy(slot::releaseDecoderSlot).isInstanceOf(IllegalStateException.class);
         assertThat(response.dataUnsafe()).isEmpty();
         assertThat(slot.acquireDecoderSlot()).isTrue();
         initialize(slot, 2);
@@ -38,6 +33,9 @@ class BorrowedResponseSlotTest {
                 2, new byte[]{4, 5}, 0, 2);
         assertThat(next).isSameAs(response);
         assertThat(slot.responseHeader(CoreMessageType.COMMAND_RESULT)).isSameAs(header);
+        CoreMessage sent = CoreMessageCodec.decode(encoded);
+        assertThat(sent.header().commandId()).isEqualTo(new UUID(1, 1));
+        assertThat(CoreProtocol.decodeResponse(sent.payloadUnsafe()).data()).containsExactly(1, 2, 3);
         assertThat(retainedValue).containsExactly(1, 2, 3);
         assertThat(next.appliedCommandCount()).isEqualTo(2);
         assertThatThrownBy(() -> slot.ownedResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,

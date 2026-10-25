@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.RealtimeConfiguration;
+import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
@@ -91,13 +95,16 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
                     if (method.getName().equals("id")) return 1L;
                     return zero(method.getReturnType());
                 });
-        service = new AeronTradingClusterService(productLine, (clusterContext, target) ->
+        var egress = new ClusterServiceEgress((clusterContext, target) ->
                 new ClusterServiceEgress.SessionEgress() {
                     public long offer(long term, long timestamp, org.agrona.DirectBuffer source, int offset, int length) {
                         return target.offer(source, offset, length);
                     }
                     public void close() { assertTransportThread(); }
                 });
+        service = new AeronTradingClusterService(productLine, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         service.onStart(cluster, null);
         service.onSessionOpen(session, TIME);
         send(CoreMessageType.REGISTER_INSTRUMENT, 0, TradingCommandCodec.encodeRegisterInstrument(

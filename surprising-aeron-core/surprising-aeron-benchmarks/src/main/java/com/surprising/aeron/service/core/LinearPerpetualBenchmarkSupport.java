@@ -1521,7 +1521,7 @@ public final class LinearPerpetualBenchmarkSupport {
 
         private CoreResponse awaitQueryResponse(CoreMessage query, CoreResponse response) {
             if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                long queryId = state.bookQueries.querySequence(query.header().commandId());
+                var queryId = query.header().commandId();
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
                 while ((response = state.bookQueries.takeQueryResult(queryId)) == null) {
                     state.assertHealthy();

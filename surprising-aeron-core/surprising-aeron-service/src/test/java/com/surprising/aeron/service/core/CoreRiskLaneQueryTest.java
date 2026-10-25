@@ -176,9 +176,9 @@ class CoreRiskLaneQueryTest {
                 assertThat(core.apply(riskRequest).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 assertThat(core.apply(adlRequest).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
                 // 风险查询在异步结果表里的序号，用于后续单次领取结果。
-                long riskId = core.bookQueries.querySequence(riskRequest.header().commandId());
+                var riskId = riskRequest.header().commandId();
                 // ADL 查询在异步结果表里的序号，与风险查询分开领取。
-                long adlId = core.bookQueries.querySequence(adlRequest.header().commandId());
+                var adlId = adlRequest.header().commandId();
                 assertThat(core.bookQueries.takeQueryResult(riskId)).isNull();
                 assertThat(core.bookQueries.takeQueryResult(adlId)).isNull();
                 // 修改Owner拥有的市场事实，不进入Lane或触碰账户。配置规范对象本身会原位更新。
@@ -362,7 +362,7 @@ class CoreRiskLaneQueryTest {
         // 提交后立即返回的响应，可能是最终结果，也可能表示查询还在等待账户 Lane。
         var response = core.apply(request);
         return response.resultCode() == CoreResultCode.MATCHING_PENDING
-                ? await(core, request, core.bookQueries.querySequence(request.header().commandId())) : response;
+                ? await(core, request, request.header().commandId()) : response;
     }
 
     /**
@@ -371,8 +371,8 @@ class CoreRiskLaneQueryTest {
      * @param request 正在等待结果的原始查询消息，完成后用它核对命令索引已清理
      * @param id 需要领取结果的异步查询序号，必须非零
      */
-    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, long id) {
-        assertThat(id).isNotZero();
+    private CoreResponse await(TradingCoreRuntime core, CoreMessage request, java.util.UUID id) {
+        assertThat(core.bookQueries.hasPendingQuery(id)).isTrue();
         // 本次等待的单调时钟截止值，最多等待五秒，避免未完成查询让测试无限自旋。
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         // 从异步结果表取到的最终响应，尚未完成时循环继续检查健康状态和超时。
@@ -383,7 +383,7 @@ class CoreRiskLaneQueryTest {
             Thread.onSpinWait();
         }
         assertThat(core.bookQueries.takeQueryResult(id)).isNull();
-        assertThat(core.bookQueries.querySequence(request.header().commandId())).isZero();
+        assertThat(core.bookQueries.hasPendingQuery(request.header().commandId())).isFalse();
         return response;
     }
 

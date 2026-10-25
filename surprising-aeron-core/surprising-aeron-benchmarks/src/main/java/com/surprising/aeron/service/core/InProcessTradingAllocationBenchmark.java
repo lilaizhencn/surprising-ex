@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.config.CoreConfiguration;
+import com.surprising.aeron.config.CoreRuntimeConfiguration;
+import com.surprising.aeron.config.RealtimeConfiguration;
+import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
@@ -92,7 +96,9 @@ public class InProcessTradingAllocationBenchmark {
                     default -> throw new AssertionError(method.getName());
                 });
         sessionId = egress.transportSession(actual).id();
-        owner = new AeronTradingClusterService(ProductLine.LINEAR_PERPETUAL, egress);
+        owner = new AeronTradingClusterService(ProductLine.LINEAR_PERPETUAL, egress, TradingCpuAffinity.disabled(),
+                CoreConfiguration.standaloneLaneTopology(), CoreRuntimeConfiguration.standalone(),
+                RealtimeConfiguration.standalone());
         owner.onStart(cluster, null);
         if (!oiLimitMode.equals("FIXED") && !oiLimitMode.equals("PROPORTIONAL"))
             throw new IllegalArgumentException("invalid OI input mode");
@@ -314,7 +320,7 @@ public class InProcessTradingAllocationBenchmark {
         private byte[] userData;
         public void close() { }
         public long offer(long term, long timestamp, DirectBuffer buffer, int offset, int length) {
-            int body = offset + Short.toUnsignedInt(buffer.getShort(offset + 12, ByteOrder.LITTLE_ENDIAN));
+            int body = offset + CoreProtocol.HEADER_LENGTH;
             int status = buffer.getInt(body + 4, ByteOrder.LITTLE_ENDIAN);
             if (status != (readUser ? ResponseStatus.OK : ResponseStatus.APPLIED).wireCode())
                 throw new IllegalStateException("non-applied terminal response status=" + status

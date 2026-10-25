@@ -13,6 +13,19 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class MatcherCommandPipelineTest {
 
+    @Test
+    void fatalReadCompletesItsFutureBeforeTheWorkerStops() {
+        try (var pipeline = new MatcherCommandPipeline(4)) {
+            var failed = pipeline.readAtSubmissionFence(() -> { throw new AssertionError("capture failed"); });
+            assertThatThrownBy(() -> failed.get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(AssertionError.class);
+            pipeline.close();
+            assertThat(pipeline.workerStopped()).isTrue();
+            assertThatThrownBy(() -> pipeline.poll(1)).isInstanceOf(AssertionError.class)
+                    .hasMessage("capture failed");
+        }
+    }
+
     /**
      * 阻塞第一条命令，由同一 Owner 依次投递同栅栏与后栅栏读请求，验证各自看到一或二且第五次读取因信箱满失败；名称中的并发指 worker 与请求交错，不是多个生产者并发提交。
      */

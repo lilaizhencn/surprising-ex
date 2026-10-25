@@ -1570,18 +1570,18 @@ class TradingAccountRuntimeTest {
             Thread owner = Thread.currentThread();
             // 启动账户工作前原 Owner 线程名
             String originalName = owner.getName();
-            assertThat(state.executeUserSettlement(8, Thread::currentThread)).isSameAs(owner);
+            Thread inlineThread = state.onLane(8L, lane -> Thread.currentThread());
+            assertThat(inlineThread).isSameAs(owner);
             assertThat(owner.getName()).isEqualTo(originalName);
             state.startAccountLanes();
             assertThat(state.asynchronousCommands()).isTrue();
             assertThat(state.ownerLaneAccess()).isFalse();
             // 通知两 Lane 已执行的门闩，或检查被拒绝内联回调没有执行的原子计数
             var executed = new java.util.concurrent.atomic.AtomicInteger();
-            assertThatThrownBy(() -> state.executeLaneMutations(
-                    state.topology().accountLaneMask(203) | state.topology().accountLaneMask(8), 2, /* 本不允许内联调用的生命周期回调参数，若执行会错误增加计数 */ laneId -> executed.incrementAndGet()))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
-            assertThatThrownBy(() -> state.executeUserSettlement(8, executed::incrementAndGet))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
+            assertThatThrownBy(() -> state.onLane(203L, lane -> executed.incrementAndGet()))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("owning Lane thread");
+            assertThatThrownBy(() -> state.onLane(8L, lane -> executed.incrementAndGet()))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("owning Lane thread");
             assertThat(executed.get()).isZero();
             assertThat(owner.getName()).isEqualTo(originalName);
             state.dispatchControlLanes(state.topology().accountLaneMask(8), /* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ id -> Thread.currentThread());

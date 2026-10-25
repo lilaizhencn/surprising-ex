@@ -62,8 +62,8 @@ public final class OfflineReplayMain {
                     drainMatching(state, pendingBefore, message, position);
                 }
                 if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                    long queryId = state.bookQueries.querySequence(message.header().commandId());
-                    if (queryId != 0) {
+                    var queryId = message.header().commandId();
+                    if (state.bookQueries.hasPendingQuery(queryId)) {
                         drainQuery(state, queryId);
                     }
                 }
@@ -89,7 +89,7 @@ public final class OfflineReplayMain {
         }
     }
 
-    private static void drainQuery(TradingCoreRuntime state, long queryId) {
+    private static void drainQuery(TradingCoreRuntime state, java.util.UUID queryId) {
         CoreResponse result = null;
         long deadline = System.nanoTime() + 30_000_000_000L;
         while (result == null && System.nanoTime() < deadline) {

@@ -70,9 +70,7 @@ class AeronClientCapacityTest {
         return new AeronClientPool.Session() {
             @Override public long offer(com.surprising.aeron.protocol.CoreMessage message) { return 1; }
             @Override public int pollEgress(int fragmentLimit) { return 0; }
-            @Override public com.surprising.aeron.protocol.CoreResponse takeResponse(long correlationId) {
-                return null;
-            }
+            @Override public void drainResponses(java.util.function.BiConsumer<Long, com.surprising.aeron.protocol.CoreResponse> consumer) { }
             @Override public RuntimeException sessionFailure() { return null; }
             @Override public boolean keepAlive() { return true; }
             @Override public void close() { }

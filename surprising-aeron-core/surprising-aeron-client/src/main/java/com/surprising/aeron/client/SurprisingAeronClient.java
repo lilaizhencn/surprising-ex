@@ -31,7 +31,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.function.IntSupplier;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.IdleStrategy;
@@ -288,38 +287,12 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         return workCount;
     }
 
-    static int pollEgressBounded(int fragmentLimit, IntSupplier poller) {
-        if (fragmentLimit <= 0) {
-            throw new IllegalArgumentException("fragmentLimit must be positive");
-        }
-        Objects.requireNonNull(poller, "poller");
-        int workCount = 0;
-        int remainingFragments = fragmentLimit;
-        while (remainingFragments >= AERON_EGRESS_POLL_LIMIT) {
-            int polled = poller.getAsInt();
-            if (polled < 0) {
-                throw new IllegalStateException("Aeron egress poll returned invalid fragment count: " + polled);
-            }
-            workCount += polled;
-            remainingFragments -= AERON_EGRESS_POLL_LIMIT;
-            if (polled < AERON_EGRESS_POLL_LIMIT) {
-                break;
-            }
-        }
-        return workCount;
-    }
-
-    @Override
     public CoreResponse takeResponse(long correlationId) {
         return responses.remove(correlationId);
     }
 
     @Override
-    public int drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
-        if (responses.isEmpty()) {
-            return 0;
-        }
-        int count = 0;
+    public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
         var iterator = responses.entrySet().iterator();
         while (iterator.hasNext()) {
             var entry = iterator.next();
@@ -327,9 +300,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             CoreResponse response = entry.getValue();
             iterator.remove();
             consumer.accept(correlationId, response);
-            count++;
         }
-        return count;
     }
 
     @Override
@@ -608,15 +579,9 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         }
 
         @Override
-        public CoreResponse takeResponse(long correlationId) {
+        public void drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
             SurprisingAeronClient current = client;
-            return current == null ? null : current.takeResponse(correlationId);
-        }
-
-        @Override
-        public int drainResponses(java.util.function.BiConsumer<Long, CoreResponse> consumer) {
-            SurprisingAeronClient current = client;
-            return current == null ? 0 : current.drainResponses(consumer);
+            if (current != null) current.drainResponses(consumer);
         }
 
         @Override
