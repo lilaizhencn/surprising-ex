@@ -2729,7 +2729,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param hash 混入当前值之前的摘要
      * @param value 要按 UTF-8 规则混入的可空文本
      */
-    public static long mixText(long hash, String value) {
+    private static long mixText(long hash, String value) {
         if (value == null || value.isEmpty()) return mix(hash, 0);
         // 当前文本的 UTF-16 字符单元数量，不等于 UTF-8 字节数
         int length = value.length();
