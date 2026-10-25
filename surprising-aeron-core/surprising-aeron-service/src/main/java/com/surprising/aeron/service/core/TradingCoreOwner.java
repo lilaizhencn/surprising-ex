@@ -188,7 +188,7 @@ public final class TradingCoreOwner {
         while (admittedInputs < configuration.ownerInputBatchSize() && window.size() < window.capacity() && !commandPipeline.hasActiveControl()) {
             // 当前输入环借出的队首条目，取走或释放后不能继续访问
             var next = ingress.first();
-            if (next == null || next.action() != null) break;
+            if (next == null) break;
             if (commandPipeline.isIngressBlocked(next.command())) break;
             commandPipeline.clearBlockedIngress();
             logContext.timestamp(next.timestamp());
@@ -420,7 +420,7 @@ public final class TradingCoreOwner {
                 + " pending=" + (pending == null ? "none" : pending.sequence() + "/"
                         + pending.command().header().messageType() + "/"
                         + pending.matchingLifecycleName())
-                + " ingressHead=" + (ingressHead == null ? "none" : ingressHead.action() != null ? "BOUNDARY" : ingressHead.command().header().messageType()
+                + " ingressHead=" + (ingressHead == null || ingressHead.command() == null ? "none" : ingressHead.command().header().messageType()
                         + "/" + ingressHead.command().header().commandId())
                 + " matcherSubmissionDepth=" + state.matcherPipeline().submissionDepth()
                 + " matcherCompletionDepth=" + state.matcherPipeline().completionDepth()
@@ -458,12 +458,12 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 判断业务队首是否有窗口容量，且未被已记住的冲突前缀挡住；动作边界交给外层线程循环处理。
+     * 判断业务队首是否有窗口容量，且未被已记住的冲突前缀挡住。
      */
     private boolean pendingIngressReady() {
         // 当前输入环借出的队首条目，取走或释放后不能继续访问
         var next = ingress.first();
-        if (next == null || next.action() != null) return false;
+        if (next == null) return false;
         // 当前 Owner 持有的流水命令窗口
         ClusterCommandWindow window = commandPipeline.commandWindow();
         if (window.size() == window.capacity()) return false;
@@ -471,12 +471,10 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 只判断输入环队首是不是业务命令；空环和框架动作边界都返回假。
+     * 判断输入环是否有未处理的业务命令。
      */
     private boolean hasCommandIngress() {
-        // 当前输入环借出的队首条目，取走或释放后不能继续访问
-        var next = ingress.first();
-        return next != null && next.action() == null;
+        return ingress.first() != null;
     }
 
     /**

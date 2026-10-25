@@ -42,8 +42,6 @@ public final class TradingOwnerLoop {
     private final TradingCoreOwner coreOwner;
     /** 跨调用可见的首个故障，后续调用据此终止。 */
     private volatile Throwable failure;
-    /** 停止标记。 */
-    private volatile boolean stopping;
     /** 是否已完成初始化启动。 */
     private volatile boolean started;
     /** 不可变交易线程 CPU 配置，构造时要求非空。 */
@@ -134,7 +132,6 @@ public final class TradingOwnerLoop {
     public void start(Cluster cluster, SectionedCoreSnapshotCodec.RecoveryBuffer restored) {
         this.cluster = cluster;
         failure = null;
-        stopping = false;
         ownerEpoch = 0;
         logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition(),
                 new BusySpinIdleStrategy());
@@ -159,7 +156,7 @@ public final class TradingOwnerLoop {
     public void enqueue(CoreMessage command, long sessionId, long timestamp, long position,
                         CommandFingerprint fingerprint) {
         checkFailure();
-        if (input.offer(command, sessionId, timestamp, position, null, fingerprint)) {
+        if (input.offer(command, sessionId, timestamp, position, fingerprint)) {
             if (started) {
                 pollCommands();
             }
@@ -171,7 +168,7 @@ public final class TradingOwnerLoop {
         while (true) {
             awaitProgress(deadline);
             checkFailure();
-            if (input.offer(command, sessionId, timestamp, position, null, fingerprint)) {
+            if (input.offer(command, sessionId, timestamp, position, fingerprint)) {
                 if (started) {
                     pollCommands();
                 }
@@ -201,13 +198,15 @@ public final class TradingOwnerLoop {
     }
 
     /**
-     * 推进完成信号并由 Cluster 回调线程消费 egress 队列，实际发送 Owner 已交出的响应。
+     * 推进 Core 命令生命周期及完成信号，并由 Cluster 回调线程消费 egress 队列实际发送响应。
+     * @return 产生推进与发送的工作单元总数
      */
     public int drainResponses() {
+        int work = 0;
         if (started) {
-            pollCommands();
+            work = pollCommands();
         }
-        return egress.drainResponses(coreOwner);
+        return work + egress.drainResponses(coreOwner);
     }
 
     /**
@@ -228,15 +227,12 @@ public final class TradingOwnerLoop {
     }
 
     /**
-     * 先同步完成已有命令前缀，再固定请求的日志位置与时间，返回合并成单数组的快照。
+     * 固定请求的日志位置与时间，并由 Core Owner 同步完成前缀命令后返回合并快照。
      * @param position 来自复制日志的位置
      * @param timestamp 来自复制日志的业务时间
      */
     public byte[] captureSnapshot(long position, long timestamp) {
         checkFailure();
-        if (started) {
-            coreOwner.finishCommands();
-        }
         if (logContext != null) {
             logContext.position(position);
             logContext.timestamp(timestamp);
@@ -251,9 +247,6 @@ public final class TradingOwnerLoop {
      */
     public SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(long position, long timestamp) {
         checkFailure();
-        if (started) {
-            coreOwner.finishCommands();
-        }
         if (logContext != null) {
             logContext.position(position);
             logContext.timestamp(timestamp);
@@ -265,7 +258,6 @@ public final class TradingOwnerLoop {
      * 在当前服务线程同步关闭 Core Owner 并恢复 CPU 绑定。
      */
     public void terminate() {
-        stopping = true;
         try {
             coreOwner.terminate();
         } catch (Throwable fatal) {

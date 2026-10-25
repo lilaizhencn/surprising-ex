@@ -12,7 +12,6 @@ surprising:
     max-pending-matching: 4096
     standalone-snapshot-timeout-seconds: 300
     snapshot-timeout-seconds: 300
-    owner-role-change-timeout-seconds: 600
     owner-input-batch-size: 64
     owner-command-window: 256
     decoder-cache-slots: 4096

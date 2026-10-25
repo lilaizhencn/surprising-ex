@@ -281,10 +281,10 @@ flowchart TD
     C --> D[Driver / Archive / Consensus]
     D --> E[ClusteredServiceContainer / AeronTradingClusterService.onStart]
     E --> F[6–8. 读取快照分块 / TradingOwnerLoop.start]
-    F --> G[trading-owner 线程: TradingCoreOwner.start / restoreSnapshot]
+    F --> G[服务线程: TradingCoreOwner.start / restoreSnapshot]
     G --> H[9. TradingCoreRuntime.activate]
     H --> I[按执行模式启动 Matcher / Account Lane，启动 System Ledger]
-    I --> J[绑定 Owner CPU，完成启动边界]
+    I --> J[绑定服务线程 CPU，完成启动边界]
     J --> K[10. 回放快照后日志，再处理在线命令]
 ```
 
@@ -292,8 +292,8 @@ flowchart TD
 | --- | --- | --- |
 | 1–2 配置 | [`SurprisingCoreApplication`](src/main/java/com/surprising/aeron/bootstrap/SurprisingCoreApplication.java)、[`CoreConfiguration`](src/main/java/com/surprising/aeron/config/CoreConfiguration.java) | 加载 Spring 配置，绑定 `surprising.aeron`，创建集群拓扑、交易拓扑和 CPU 配置；不创建初始业务余额 |
 | 3–5 Aeron 资源 | [`AeronCoreLifecycle`](src/main/java/com/surprising/aeron/bootstrap/AeronCoreLifecycle.java) | 启动 Driver、Archive、Consensus 和 Service Container，等待关闭并逆序释放资源 |
-| 6–8 恢复与 Owner | [`AeronTradingClusterService`](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java)、[`TradingOwnerLoop`](src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java)、[`TradingCoreOwner`](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | 回调线程读取快照分块；在 Owner 线程创建或恢复交易运行时 |
-| 9 工作资源 | [`TradingCoreRuntime`](src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java)、[`TradingAccountRuntime`](src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) | 激活恢复后的拓扑与状态；启动工作资源后才收窄 Owner 的 CPU mask |
+| 6–8 恢复与 Owner | [`AeronTradingClusterService`](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java)、[`TradingOwnerLoop`](src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java)、[`TradingCoreOwner`](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | 回调线程读取快照分块；直接在当前服务线程创建或恢复交易运行时 |
+| 9 工作资源 | [`TradingCoreRuntime`](src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java)、[`TradingAccountRuntime`](src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) | 激活恢复后的拓扑与状态；启动工作资源后才收窄服务线程的 CPU mask |
 | 10 回放 | `AeronTradingClusterService.onSessionMessage` → `TradingOwnerLoop.enqueue` | 把已复制日志及其时间、位置交给 Owner；回放与在线命令沿用同一交易规则 |
 
 `CoreConfiguration` 统一装配拓扑、CPU、执行、网络和实时配置 Bean。
@@ -314,15 +314,16 @@ Matcher/Ledger 等待、原生 batching、Lane 初始容量、资金索引目录
 
 | 线程 / 模式 | 负责的状态或工作 |
 | --- | --- |
-| Cluster Service agent | 会话、解码、快照 Publication 和真正的网络回包；不直接修改账户 |
-| `trading-owner-<memberId>` | 按日志顺序推进命令、依赖、完成条件和提交水位 |
+| Cluster Service agent | 会话、解码、快照、网络回包，以及内联推进交易流水线与提交水位；不启动独立后台 Owner 线程 |
 | PIPELINED | `core-matcher-<id>` 持有分片订单簿；`core-account-lane-<id>` 按用户持有账户、订单和持仓 |
 | `core-system-ledger-lane`，两种模式均有 | Treasury、系统资金和持久化资金索引；其完成回执参与业务完成条件 |
 | 可选实时 sender / receiver | 配置实时通道后启动；发送已提交帧或把控制请求交给 Owner |
 
-### Owner：输入、等待与退出怎样衔接
+### Owner：输入、推进与退出怎样衔接
 
-启动后，先顺着 `TradingOwnerLoop.run` 看线程循环，再进入
+由 Cluster 服务线程直接驱动 `TradingOwnerLoop` 与
+`TradingCoreOwner.pollCommands` 推进业务，消除跨线程交接与上下文切换。
+账户状态仍归所属 Lane；不要把它们看成两份交易状态。
 `TradingCoreOwner.pollCommands` 看业务推进。两者分别管理线程和命令生命周期，
 账户状态仍归所属 Lane；不要把它们看成两份交易状态。
 
@@ -337,51 +338,45 @@ Matcher/Ledger 等待、原生 batching、Lane 初始容量、资金索引目录
 flowchart TD
     C[Cluster 回调: enqueue] --> I[OwnerIngressRing: 命令或框架动作]
     I --> R[TradingOwnerLoop.run: 读取队首]
-    R --> A{框架动作?}
-    A -->|是| B[boundary: 按需先完成业务前缀，再执行动作]
-    A -->|否且有可推进工作| P[TradingCoreOwner.pollCommands]
+    P[TradingCoreOwner.pollCommands]
     P --> W[接纳无冲突输入，按窗口队首提交]
     W --> E[满足撮合、账户与账本条件，交出终态]
-    B --> D[OwnerIdleStrategy: 按实际进展决定等待]
-    E --> D
-    N[输入或完成通知: signal] --> D
-    D --> R
+    E --> D[ClusterService: 推进命令与响应排空]
+    D --> P
 ```
 
 | 阅读顺序 | 类与方法 | 数据、完成条件和异常 |
 | --- | --- | --- |
-| 1 交入命令 | [`TradingOwnerLoop.enqueue`](src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java) → `OwnerIngressRing` | 交接请求租约、会话 ID、原业务时间、日志位置和指纹；入队成功只表示 Owner 可以接手 |
-| 2 选择工作 | `TradingOwnerLoop.run / ownerWorkAvailable` | 动作在 Owner 线程执行；普通业务经 Core Owner 门禁推进。窗口非空和在途数量不能单独证明有进展 |
+| 1 交入命令 | [`TradingOwnerLoop.enqueue`](src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java) → `OwnerIngressRing` | 交接请求租约、会话 ID、原业务时间、日志位置和指纹；入队成功后直接内联推进流水线 |
+| 2 选择工作 | `TradingOwnerLoop.pollCommands` | 内联于 Cluster 服务线程推进，消除跨核交接与缓存颠簸 |
 | 3 推进与提交 | [`TradingCoreOwner.progressCommands / pollControl / pollCommandCommitBatch`](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | 将独立输入租约交给窗口；终态必须等待实际业务完成条件，再交实时边界和 egress |
-| 4 等待与唤醒 | [`OwnerIdleStrategy.idle / signal`](src/main/java/com/surprising/aeron/bootstrap/OwnerIdleStrategy.java) | 默认自旋，可选逐步退避；休眠前登记通知再复查工作。通知只是重查提示，原队列和完成位仍是事实来源 |
-| 5 快照与角色边界 | `TradingOwnerLoop.boundary` → `TradingCoreOwner.finishCommands` | 先完成动作之前的命令；快照再固定日志位置及时间，角色切换再更新角色与响应 epoch。等待方通过 Future 收结果或异常 |
-| 6 停止与释放 | `TradingOwnerLoop.terminate / run` → `TradingCoreOwner.terminate` | 正常退出先完成前缀；Owner 最终关闭运行时、工作资源，再释放借用输入并恢复 CPU 绑定。外层确认线程已退出后才清理余留输入 |
+| 4 等待策略 | 固定忙等自旋（BusySpin） | 消除线程休眠/唤醒延迟与竞态开销 |
+| 5 快照与角色边界 | `TradingOwnerLoop.captureSnapshot / onRoleChange` | 先由 `TradingCoreOwner` 同步完成前缀命令，再固定快照或更新角色代次 |
+| 6 停止与释放 | `TradingOwnerLoop.terminate` → `TradingCoreOwner.terminate` | 同步关闭运行时、工作资源，释放借用输入并恢复 CPU 绑定 |
 
 以下执行参数在启动时统一绑定；默认值见 `application.yml`，可由外部 YAML、环境变量、JVM 属性或命令行覆盖：
 
 | 属性 | 读取时机与含义 |
 | --- | --- |
 | `surprising.aeron.owner-input-batch-size` | 每轮输入预算默认 64，范围 1–256 |
-| `surprising.aeron.wait-strategy` | 默认 `BUSY_SPIN`，可选 `PARKING`，所有工作线程统一使用 |
-| `surprising.aeron.owner-role-change-timeout-seconds` | 角色切换动作预算默认 600 秒，范围 30–1800 秒 |
+| `surprising.aeron.wait-strategy` | 默认 `BUSY_SPIN`，所有工作线程统一使用 |
 | `surprising.aeron.snapshot-timeout-seconds` | 快照及内部完成前缀的预算默认 300 秒，必须为正 |
 | `surprising.aeron.max-pending-matching` | 在途撮合上限默认 4096，与 Matcher 窗口取较小值 |
 | `surprising.aeron.lane-completion-spins` | 同步 Lane 完成等待的自旋预算默认 1024，不允许负值 |
-| `surprising.aeron.settlement-spin-limit` | PARKING 等待策略在 park 前的自旋预算，默认 0 |
 | `surprising.aeron.standalone-snapshot-timeout-seconds` | 独立快照等待预算默认 300 秒，必须为正 |
 | `surprising.aeron.owner-command-window / decoder-cache-slots` | 固定响应窗口与复用解码容量，启动前校验，不在类初始化时固定 |
 | `surprising.aeron.matcher-group-size / matcher-group-nanos` | 原生同步 Matcher batching，默认 256 / 10000 ns |
 | `surprising.aeron.lane-initial-entities / funds-index-directory` | 每 Lane 实体表初始容量与资金索引根目录，在分配/开库前固定 |
 | `surprising.aeron.snapshot.max-bytes` | 部署预算默认 1 GiB，在编解码边界使用；协议硬界限仍为数组允许上限 |
 
-外层普通动作的等待预算默认 30 秒；输入入队等待和动作完成等待分别计时，
+外层普通动作的等待预算默认 30 秒；输入入队等待分别计时，
 内部完成前缀还使用快照预算，不能把它们理解成一个统一的端到端超时。
-动作执行失败会同时通知等待方并终止 Owner；业务拒单继续走原业务结果。
+业务拒单继续走原业务结果。
 
-测试导航：`OwnerLogContextTest` 检查日志元数据交接，`OwnerIdleStrategyTest` 检查唤醒竞态，
+测试导航：`OwnerLogContextTest` 检查日志元数据交接，
 `TradingRuntimeOwnershipTest` 检查错误线程关闭，`CoreActiveLaneIngressTest` 检查六产品线实际账户入口。
 [`TradingOwnerTestSupport`](src/test/java/com/surprising/aeron/service/core/TradingOwnerTestSupport.java)
-在测试调用线程直接推进 Core Owner；涉及独立 Owner 线程的边界应读实际 `TradingOwnerLoop` 测试。
+在测试调用线程直接推进 Core Owner。
 
 ## 下单：按六步顺着源码读
 

@@ -47,16 +47,15 @@ public final class OwnerIngressRing {
 
     /**
      * 先检查条目容量和载荷字节预算，必要时刷新消费游标；无空间返回假且不占槽。成功时先填完整字段和字节进度，再发布条目游标，让 Owner 接手。
-     * @param command 需要交给 Owner 的原请求，动作条目可为 null
+     * @param command 需要交给 Owner 的原请求
      * @param sessionId 原会话纯 ID，无会话使用 NO_SESSION_ID
      * @param timestamp 本条复制日志的业务时间
      * @param position 本条复制日志位置
-     * @param action 可空框架动作，普通业务条目不传动作
      * @param fingerprint 与原请求对应的可空指纹
      */
     public boolean offer(CoreMessage command, long sessionId, long timestamp, long position,
-                  Runnable action, CommandFingerprint fingerprint) {
-        // 当前请求的有效载荷字节数，动作条目为零
+                  CommandFingerprint fingerprint) {
+        // 当前请求的有效载荷字节数
         int bytes = command == null ? 0 : command.payloadLength();
         if (bytes > MAX_BYTES) throw new IllegalStateException("command exceeds ingress byte budget");
         // 生产者本轮开始时的累计发布条数
@@ -78,7 +77,7 @@ public final class OwnerIngressRing {
         Entry entry = entries[(int) currentProduced & MASK];
         entry.command = command; entry.sessionId = sessionId;
         entry.timestamp = timestamp; entry.position = position;
-        entry.action = action; entry.fingerprint = fingerprint;
+        entry.fingerprint = fingerprint;
         producedBytes = currentProducedBytes + bytes;
         producedEntries = currentProduced + 1;
         return true;
@@ -160,7 +159,7 @@ public final class OwnerIngressRing {
      * 可复用输入条目。生产者填好后交给 Owner，Owner 移除时清空；后续窗口若仍需请求，须自行保留请求租约，不能保留这份可立即复用的条目。
      */
     public static final class Entry {
-        /**  当前借给 Owner 的请求，动作条目通常为空。 借看当前请求，框架动作条目通常为 null；条目移除后不得再从这里取请求。 */
+        /**  当前借给 Owner 的请求。条目移除后不得再从这里取请求。 */
         @Accessors(fluent = true, chain = false)
         @Getter
         CoreMessage command;
@@ -173,10 +172,6 @@ public final class OwnerIngressRing {
          * position：原复制日志位置。
          */
         long timestamp, position;
-        /**  要在 Owner 执行的框架动作，普通命令通常为空。 借看当前条目的框架动作，业务命令通常为 null。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter
-        Runnable action;
         /**
          *  Owner 对当前代条目的观察标记，清槽时复位。
          * 读取 Owner 是否已经观察过当前代条目。
@@ -193,10 +188,10 @@ public final class OwnerIngressRing {
         CommandFingerprint fingerprint;
 
         /**
-         * 清掉请求、指纹、动作、观察标记及日志字段，恢复无会话默认值；只清槽内容，不释放命令自己的解码租约。
+         * 清掉请求、指纹、观察标记及日志字段，恢复无会话默认值；只清槽内容，不释放命令自己的解码租约。
          */
         private void clear() {
-            command = null; fingerprint = null; action = null; ownerObserved = false;
+            command = null; fingerprint = null; ownerObserved = false;
             sessionId = NO_SESSION_ID;
             timestamp = position = 0;
         }

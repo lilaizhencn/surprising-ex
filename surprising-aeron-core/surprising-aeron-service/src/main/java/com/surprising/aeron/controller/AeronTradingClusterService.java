@@ -204,8 +204,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         owner.checkFailure();
         unflushedInboundMessages = 0;
         try {
-            int work = owner.pollCommands();
-            return work + owner.drainResponses();
+            return owner.drainResponses();
         } catch (/* 让 Cluster 看见后台响应处理失败，不能让故障 Owner 悄悄继续服务。 */ RuntimeException fatal) {
             throw new AgentTerminationException(fatal);
         }

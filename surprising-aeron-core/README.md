@@ -60,7 +60,7 @@ sequenceDiagram
     Life->>Aeron: 4. 启动 ClusteredMediaDriver
     Life->>Service: 5. 启动 ClusteredServiceContainer
     Service->>Service: 6. onStart：启动 egress，读取快照
-    Service->>Owner: 7. start：启动 trading-owner 线程
+    Service->>Owner: 7. start：服务线程初始化并内联 Core Owner
     Owner->>Runtime: 8. 创建或恢复运行时、索引和账户 / Matcher 状态
     Owner->>Runtime: 9. activate：按执行模式激活工作资源
     Note over Owner,Runtime: 工作资源启动后才绑定 Owner CPU
@@ -108,7 +108,7 @@ YAML、标准环境变量、JVM `-D` 和 Spring 命令行服从 Spring 优先级
 | `surprising.aeron.matcher-group-size` / `matcher-group-nanos` / `lane-initial-entities` | 同上 | `256` / `10000 ns` / `1024`，必须为有效正值，实体容量至少 16 |
 | `surprising.aeron.funds-index-directory` | 同上 | 默认平台临时目录；资金索引首次 I/O 前已固定根目录，恢复使用同一配置 |
 | `surprising.aeron.snapshot.max-bytes` / `snapshot-timeout-seconds` / `standalone-snapshot-timeout-seconds` | 同上 | `1 GiB` / `300s` / `300s`，部署上限与协议硬上限分开 |
-| `surprising.aeron.owner-role-change-timeout-seconds` / `decoder-cache-slots` | 同上 | `600s` / `4096`，启动前校验 |
+| `surprising.aeron.decoder-cache-slots` | 同上 | `4096`，启动前校验 |
 | `surprising.realtime.channel` / `control-channel` | `RealtimeConfiguration`，Spring 统一绑定 | 默认空；先配置输出通道，控制通道才会启用 |
 | `surprising.realtime.directory` / `stream` / `control-stream` | 同上 | directory 默认 `CommonContext` 目录，部署时需与目标 Driver 一致；stream 默认 `2101` / `2102` |
 
@@ -141,8 +141,7 @@ java --enable-native-access=ALL-UNNAMED \
 | --- | --- | --- |
 | 主线程 | `SurprisingCoreApplication` → `AeronCoreLifecycle` | 装配资源并等待关闭，不执行交易 |
 | Driver / Archive / Consensus agents | `ClusteredMediaDriver.launch` | 网络、录制、复制、选主；Archive 使用 `SHARED` 模式，与 Driver 配置分开 |
-| Cluster Service agent | `ClusteredServiceContainer.launch` | Session、解码槽、回包、快照 Publication；向输入环交接命令、sessionId、Cluster 时间、日志位置与指纹 |
-| `trading-owner-<memberId>` | `TradingOwnerLoop.start` | 命令生命周期、产品元数据与提交水位；复制时间/顺序决定业务，系统纳秒时钟用于等待和观测 |
+| Cluster Service agent | `ClusteredServiceContainer.launch` → `AeronTradingClusterService` | 内联推进 `TradingOwnerLoop` 与 `TradingCoreOwner`；Session、解码槽、命令生命周期、回包与快照；不再启动独立 Owner 线程 |
 | `core-matcher-<id>`，仅 PIPELINED | `MatcherPipelineGroup.start` → `MatcherCommandPipeline.start` | 分片订单簿与 Matcher 序号；接收确定性输入，发布撮合证据/结算事件 |
 | `core-account-lane-<id>`，仅 PIPELINED | `TradingAccountRuntime` → `AccountLaneLifecycle.start` → `SettlementLaneWorker` | 按 userId 路由的余额、冻结、持仓、订单和风险；同用户跨币对全仓状态在同一 Lane |
 | `core-system-ledger-lane`，两种模式均有 | `TradingAccountRuntime` → `AccountLaneLifecycle.startLedger` → `SystemLedgerLane` | 系统资金、Treasury 与持久化资金索引；完成回执参与业务完成条件 |

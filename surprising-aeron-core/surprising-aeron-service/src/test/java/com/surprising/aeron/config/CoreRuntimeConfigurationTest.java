@@ -15,7 +15,6 @@ class CoreRuntimeConfigurationTest {
 
     @Test void defaultsAreBoundWithoutAContainer() {
         var configuration = bind(Map.of());
-        assertThat(configuration.ownerRoleChangeTimeoutSeconds()).isEqualTo(600);
         assertThat(configuration.maxPendingMatching()).isEqualTo(4096);
         assertThat(configuration.laneCompletionSpins()).isEqualTo(1024);
     }
@@ -23,14 +22,14 @@ class CoreRuntimeConfigurationTest {
     @Test void bindsCapacityTogether() {
         var configuration = bind(Map.of(
                 "surprising.aeron.max-pending-matching", "64",
-                "surprising.aeron.owner-role-change-timeout-seconds", "900"));
+                "surprising.aeron.snapshot-timeout-seconds", "900"));
         assertThat(configuration.maxPendingMatching()).isEqualTo(64);
-        assertThat(configuration.ownerRoleChangeTimeoutSeconds()).isEqualTo(900);
+        assertThat(configuration.snapshotTimeoutSeconds()).isEqualTo(900);
     }
 
     @Test void rejectsInvalidValuesBeforeAnyThreadStarts() {
         for (var invalid : Map.of(
-                "owner-role-change-timeout-seconds", "29", "max-pending-matching", "0",
+                "max-pending-matching", "0",
                 "lane-completion-spins", "-1",
                 "snapshot-timeout-seconds", "0", "standalone-snapshot-timeout-seconds", "-1",
                 "owner-command-window", "65", "owner-input-batch-size", "257").entrySet()) {

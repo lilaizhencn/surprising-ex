@@ -98,7 +98,32 @@
 
 ---
 
-### 2.5 TradingOwnerLoop 内联至 Aeron Cluster 服务线程（去线程化）
+### 2.6 内联后残留死代码与死字段的深度清理
+- **清理背景与目标**：
+  在 `TradingOwnerLoop` 完成去线程化与内联重构后，系统不再存在独立的 `trading-owner` 平台线程，原有跨线程边界协调、死等超时参数以及死字段彻底失效。本次在 `master` 分支完成全面拔除：
+- **具体清理成果**：
+  1. **彻底删除孤立死类 `OwnerIdleStrategy.java` 与对应测试**：
+     - 删除 [`OwnerIdleStrategy.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/bootstrap/OwnerIdleStrategy.java) 与 `OwnerIdleStrategyTest.java`（生产代码 0 引用，退避策略已统一固定为忙等自旋）。
+     - 同步更新工程架构文档与 README 中的陈旧流程图。
+  2. **拔除 `TradingOwnerLoop.stopping` volatile 死字段**：
+     - 全工程只有赋值而零读取，彻底删除。
+  3. **拔除 `OwnerIngressRing` 的 `Runnable action` 及关联僵尸防御代码**：
+     - 在 [`OwnerIngressRing.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/ingress/OwnerIngressRing.java) 中移除 `Entry.action` 字段与 `offer(...)` 中的 `action` 参数。
+     - 在 [`TradingCoreOwner.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) 中拔除 4 处针对 `next.action() != null` 的僵尸判断（L191, L423, L466, L479）。
+     - 同步精简 `TradingOwnerLoop.enqueue`、`ClusteredBatchTradingBenchmark`、`TradingOwnerTestSupport`、`TradingOwnerInputReuseTest`。
+     - 重构 [`OwnerIngressRingTest.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/support/ingress/OwnerIngressRingTest.java)：删除针对旧 boundary 动作的专有测试，保留多圈并发纯业务命令入队及按序完成断言。
+  4. **消除快照与空闲推进的重复冗余调用**：
+     - 移除 `TradingOwnerLoop.captureSnapshot` 与 `captureSnapshotSections` 外部冗余的 `coreOwner.finishCommands()`（内部 `finishSnapshotPrefix` 已严格包含）。
+     - 明确 `drainResponses` 职责为“推进 Core 流水线提交并排空 egress 响应”，并将 `AeronTradingClusterService.doBackgroundWork` 简化为单行调用 `owner.drainResponses()`，消除每轮连续调用两次 `pollCommands()` 的重复冗余开销。
+  5. **清除废弃配置 `ownerRoleChangeTimeoutSeconds`**：
+     - 在 [`CoreRuntimeConfiguration.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/config/CoreRuntimeConfiguration.java) 中移除字段及取值范围校验。
+     - 在 `application.yml` 中移除该配置项，并同步更新配置测试 `CoreRuntimeConfigurationTest` 与各模块 README。
+  6. **更新基准脚本与监控**：
+     - 更新 `summarize-aeron-async-stage.py`，支持匹配内联后的 Cluster 服务线程，消除对独立 `trading-owner` 线程名的单一硬编码依赖。
+
+---
+
+## 3. 本地 Aeron 单节点线性永续（LINEAR_PERPETUAL）压测比对（lane=1 vs lane=2）
 - **架构内联背景**：
   - 原先 `AeronTradingClusterService` 运行于 Aeron 容器线程（`ClusteredServiceAgent`），收到消息后经 `OwnerIngressRing` 队列跨核交接给独立的 `trading-owner` 后台线程。
   - 该交接模式不仅增加了额外的线程上下文切换与跨核伪共享/缓存行颠簸（Cache Line Bouncing），而且快照 `captureSnapshot`、角色切换 `onRoleChange` 和服务停止 `terminate` 都被迫通过 `boundary(...)`、`CompletableFuture` 跨线程等待，存在 30 秒超时死等的风险。

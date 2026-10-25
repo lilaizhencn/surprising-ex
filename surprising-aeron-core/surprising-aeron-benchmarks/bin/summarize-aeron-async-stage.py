@@ -153,7 +153,7 @@ def main():
         "pipelineHighWater": ({"matcher": int(high.group(1)), "completion": int(high.group(2)), "context": int(high.group(3)), "lanes": [int(x.strip()) for x in high.group(4).split(",") if x.strip()]} if high else None),
         "laneWork": lane_work,
         "cpu": {
-            "ownerSingleCorePercent": cpu("trading-owner"),
+            "ownerSingleCorePercent": cpu("trading-owner") if math.isfinite(cpu("trading-owner")) else cpu("service"),
             "matcherSingleCorePercent": cpu("core-matcher"),
             "laneSingleCorePercentMax": max(lanes) if lanes else float("nan"),
             "laneSingleCorePercentByThread": lanes,

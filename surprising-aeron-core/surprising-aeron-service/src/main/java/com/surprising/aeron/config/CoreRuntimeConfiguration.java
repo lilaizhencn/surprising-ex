@@ -13,7 +13,6 @@ public record CoreRuntimeConfiguration(
         @DefaultValue("4096") int maxPendingMatching,
         @DefaultValue("300") int standaloneSnapshotTimeoutSeconds,
         @DefaultValue("300") int snapshotTimeoutSeconds,
-        @DefaultValue("600") int ownerRoleChangeTimeoutSeconds,
         @DefaultValue("64") int ownerInputBatchSize,
         @DefaultValue("256") int ownerCommandWindow,
         @DefaultValue("4096") int decoderCacheSlots,
@@ -28,7 +27,6 @@ public record CoreRuntimeConfiguration(
         requireRange("max-pending-matching", maxPendingMatching, 1, 1 << 20);
         requireRange("standalone-snapshot-timeout-seconds", standaloneSnapshotTimeoutSeconds, 1, 1800);
         requireRange("snapshot-timeout-seconds", snapshotTimeoutSeconds, 1, 1800);
-        requireRange("owner-role-change-timeout-seconds", ownerRoleChangeTimeoutSeconds, 30, 1800);
         requireRange("owner-input-batch-size", ownerInputBatchSize, 1, 256);
         requireRange("owner-command-window", ownerCommandWindow, 64, 4096);
         if (Integer.bitCount(ownerCommandWindow) != 1)
