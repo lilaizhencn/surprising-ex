@@ -6,7 +6,7 @@ import com.surprising.adl.api.model.AdlQueueQueryResponse;
 import com.surprising.adl.provider.service.AdlRuntimeConfigService;
 import com.surprising.adl.provider.service.AdlService;
 import java.util.Map;
-import com.surprising.adl.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.adl.provider.model.AdlEventPageQuery;
 import java.time.DateTimeException;
 import org.springframework.http.HttpStatus;

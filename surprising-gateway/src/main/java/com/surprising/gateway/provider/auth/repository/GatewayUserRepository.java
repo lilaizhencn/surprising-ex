@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.repository;
 
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.UserQueryFilter;
 

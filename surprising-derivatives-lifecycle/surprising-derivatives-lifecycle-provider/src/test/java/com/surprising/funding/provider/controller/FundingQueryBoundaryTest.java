@@ -5,7 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.surprising.funding.api.FundingApiPaths;
-import com.surprising.funding.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.funding.provider.model.FundingPageQuery;
 import com.surprising.funding.provider.service.FundingRuntimeConfigService;
 import com.surprising.funding.provider.service.FundingService;

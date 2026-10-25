@@ -4,7 +4,7 @@ import com.surprising.gateway.provider.auth.controller.AdminComplianceController
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.service.ComplianceService;
 
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;

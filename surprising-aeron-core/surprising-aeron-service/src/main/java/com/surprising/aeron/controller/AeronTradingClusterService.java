@@ -30,7 +30,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.LongConsumer;
 import org.agrona.DirectBuffer;
 import org.agrona.concurrent.AgentTerminationException;
-import org.agrona.concurrent.BusySpinIdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -203,8 +202,7 @@ public final class AeronTradingClusterService implements ClusteredService {
         ownerEpoch = 0;
         messageDecoder.reset();
         egress.start(cluster);
-        logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition(),
-                new BusySpinIdleStrategy());
+        logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition());
         coreOwner.start(logContext);
         var recovery = readSnapshot(snapshot, cluster);
         if (recovery != null) {
@@ -278,6 +276,10 @@ public final class AeronTradingClusterService implements ClusteredService {
             }
             return;
         }
+        // 输入环满时，先在当前线程尝试推进排空已有就绪命令
+        if (started) {
+            pollCommands();
+        }
         long startedNs = System.nanoTime();
         long deadline = startedNs + DEADLINE_NS;
         boolean reported = false;
@@ -291,8 +293,8 @@ public final class AeronTradingClusterService implements ClusteredService {
                 return;
             }
             if (!reported && System.nanoTime() - startedNs >= TimeUnit.SECONDS.toNanos(5)) {
-                LOG.error("Core owner input has made no capacity for 5 seconds queued={} bytes={} ownerFailure={}",
-                        input.size(), input.retainedBytes(), failure);
+                LOG.error("Core owner input has made no capacity for 5 seconds queued={} ownerFailure={}",
+                        input.size(), failure);
                 reported = true;
             }
         }

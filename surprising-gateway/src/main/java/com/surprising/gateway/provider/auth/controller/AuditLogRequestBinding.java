@@ -1,7 +1,7 @@
 package com.surprising.gateway.provider.auth.controller;
 
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import java.util.Locale;
 
 /** 登录与管理操作审计入口的参数绑定；不访问身份或持久化状态。 */

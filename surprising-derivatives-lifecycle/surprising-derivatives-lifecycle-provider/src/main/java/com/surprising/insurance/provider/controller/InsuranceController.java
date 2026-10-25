@@ -10,7 +10,7 @@ import com.surprising.insurance.provider.service.InsuranceService;
 import com.surprising.insurance.provider.service.InsuranceRuntimeConfigService;
 import jakarta.validation.Valid;
 import java.util.Map;
-import com.surprising.insurance.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.insurance.provider.model.InsuranceHistoryPageQuery;
 import java.time.DateTimeException;
 import org.springframework.http.HttpStatus;

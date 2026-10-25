@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.product.api.ProductLine;
-import com.surprising.risk.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.risk.api.model.LiquidationCandidateQueryResponse;
 import com.surprising.risk.api.model.LiquidationCandidateResponse;
 import com.surprising.risk.api.model.LiquidationCandidateStatus;

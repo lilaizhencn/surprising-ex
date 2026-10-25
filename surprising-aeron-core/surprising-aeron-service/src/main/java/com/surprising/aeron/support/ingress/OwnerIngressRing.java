@@ -8,45 +8,32 @@ import lombok.experimental.Accessors;
 import static com.surprising.aeron.support.egress.ClusterServiceEgress.NO_SESSION_ID;
 
 /**
- * 交易步骤 1：Cluster 回调单写、Owner 单读的唯一输入环。固定槽保存请求、动作和原日志元数据，槽数及载荷字节都有上限；消费前保持字段稳定，移除槽本身不等于归还命令的解码租约。
+ * 交易输入环：单线程内联模式下的原位待办命令环。
+ * 固定槽保存待处理请求、来源会话及日志元数据；移除槽本身不等于归还命令的解码租约。
  */
 public final class OwnerIngressRing {
-    /** 输入环固定 8192 个条目。 */
-    static final int CAPACITY = 8192;
+    /** 输入环容量收敛至 2048 原位槽，与出口环对齐。 */
+    public static final int CAPACITY = 2048;
     /** 固定二次幂容量的环形下标掩码。 */
     private static final int MASK = CAPACITY - 1;
-    /** 输入环载荷字节预算六十四 MiB，不包含协议头字节。 */
-    static final long MAX_BYTES = 64L * 1024 * 1024;
-    /** 累计消费六十四 KiB 后公布一次字节进度。 */
-    private static final long BATCH_CONSUMED_BYTES_THRESHOLD = 64 * 1024;
     /** 启动时分配并循环复用的输入条目数组。 */
     private final Entry[] entries = new Entry[CAPACITY];
-    /** 生产者填写条目后公布的累计条数，Owner 通过它看到新输入。 */
-    private volatile long producedEntries;
-    /** 生产者已交入的累计载荷字节数。 */
-    private volatile long producedBytes;
-    /** 生产者缓存的消费条数，仅容量不足时刷新。 */
-    private long cachedConsumedEntries;
-    /** 生产者缓存的已公布消费字节，仅字节预算不足时刷新。 */
-    private long cachedConsumedBytes;
-    /** Owner 清掉条目后公布的累计消费条数。 */
-    private volatile long consumedEntries;
-    /** Owner 已批量公布的累计消费载荷字节。 */
-    private volatile long consumedBytes;
-    /** Owner 缓存的已发布前缀，读完才刷新。 */
-    private long cachedProducedEntries;
-    /** Owner 已移除但尚未公布给生产者的载荷字节增量。 */
-    private long uncommittedConsumedBytes;
+    /** 累计生产条数（单线程原位推进）。 */
+    private long producedEntries;
+    /** 累计消费条数（单线程原位推进）。 */
+    private long consumedEntries;
 
     /**
      * 启动时一次创建全部输入条目，之后按环形下标复用，不逐命令分配输入条目。
      */
     public OwnerIngressRing() {
-        for (/* 当前预分配输入条目的数组下标 */ int i = 0; i < entries.length; i++) entries[i] = new Entry();
+        for (int i = 0; i < entries.length; i++) {
+            entries[i] = new Entry();
+        }
     }
 
     /**
-     * 先检查条目容量和载荷字节预算，必要时刷新消费游标；无空间返回假且不占槽。成功时先填完整字段和字节进度，再发布条目游标，让 Owner 接手。
+     * 检查条目容量；无空间返回 false 且不占槽。成功时填充条目字段并推进游标。
      * @param command 需要交给 Owner 的原请求
      * @param sessionId 原会话纯 ID，无会话使用 NO_SESSION_ID
      * @param timestamp 本条复制日志的业务时间
@@ -54,155 +41,117 @@ public final class OwnerIngressRing {
      * @param fingerprint 与原请求对应的可空指纹
      */
     public boolean offer(CoreMessage command, long sessionId, long timestamp, long position,
-                  CommandFingerprint fingerprint) {
-        // 当前请求的有效载荷字节数
-        int bytes = command == null ? 0 : command.payloadLength();
-        if (bytes > MAX_BYTES) throw new IllegalStateException("command exceeds ingress byte budget");
-        // 生产者本轮开始时的累计发布条数
-        long currentProduced = producedEntries;
-        if (currentProduced - cachedConsumedEntries >= CAPACITY) {
-            cachedConsumedEntries = consumedEntries;
-            if (currentProduced - cachedConsumedEntries >= CAPACITY) return false;
+                         CommandFingerprint fingerprint) {
+        if (producedEntries - consumedEntries >= CAPACITY) {
+            return false;
         }
-        // 本轮入队前累计发布的载荷字节
-        long currentProducedBytes = producedBytes;
-        // 扣除尚未公布消费进度后的可用字节预算
-        long availableBytes = MAX_BYTES - (currentProducedBytes - cachedConsumedBytes);
-        if (bytes > availableBytes) {
-            cachedConsumedBytes = consumedBytes;
-            availableBytes = MAX_BYTES - (currentProducedBytes - cachedConsumedBytes);
-            if (bytes > availableBytes) return false;
-        }
-        // 容量校验通过后，生产者本轮可以填写的空闲输入槽
-        Entry entry = entries[(int) currentProduced & MASK];
-        entry.command = command; entry.sessionId = sessionId;
-        entry.timestamp = timestamp; entry.position = position;
+        Entry entry = entries[(int) producedEntries & MASK];
+        entry.command = command;
+        entry.sessionId = sessionId;
+        entry.timestamp = timestamp;
+        entry.position = position;
         entry.fingerprint = fingerprint;
-        producedBytes = currentProducedBytes + bytes;
-        producedEntries = currentProduced + 1;
+        entry.ownerObserved = false;
+        producedEntries++;
         return true;
     }
 
     /**
-     * Owner 借看当前队首；已缓存的发布前缀用完才刷新生产游标，空环返回 null，不在此移除或释放对象。
+     * 借看当前队首条目；空环返回 null，不在此移除或释放对象。
      */
     public Entry first() {
-        // Owner 当前队首的累计消费游标
-        long currentConsumed = consumedEntries;
-        if (currentConsumed >= cachedProducedEntries) {
-            cachedProducedEntries = producedEntries;
-            if (currentConsumed >= cachedProducedEntries) return null;
+        if (consumedEntries >= producedEntries) {
+            return null;
         }
-        return entries[(int) currentConsumed & MASK];
+        return entries[(int) consumedEntries & MASK];
     }
 
     /**
-     * 采样已发布与已消费条目之差，最少为零；包含框架动作，不是精确的未回包业务数。
+     * 采样已发布与已消费条目之差。
      */
-    public int size() { return (int) Math.max(0L, producedEntries - consumedEntries); }
-    /**
-     * 返回已发布字节减去已公布消费字节；消费字节批量公布，因此可能暂时包含刚移除的载荷。
-     */
-    public long retainedBytes() { return producedBytes - consumedBytes; }
+    public int size() {
+        return (int) Math.max(0L, producedEntries - consumedEntries);
+    }
 
     /**
-     * Owner 完成当前动作或交出请求租约后移除队首；先清字段再发布消费游标，防止生产者复用时被旧消费者覆盖。字节进度达到阈值或看完已缓存前缀时公布。
+     * 返回输入环固定容量。
+     */
+    public int capacity() {
+        return CAPACITY;
+    }
+
+    /**
+     * 保留兼容方法：单线程无锁模式下无需跨线程核算载荷字节。
+     */
+    public long retainedBytes() {
+        return 0L;
+    }
+
+    /**
+     * Owner 完成当前动作或交出请求租约后移除队首并推进消费游标。
      */
     public void remove() {
-        // Owner 当前队首的累计消费游标
-        long currentConsumed = consumedEntries;
-        if (currentConsumed >= cachedProducedEntries) {
-            cachedProducedEntries = producedEntries;
-            if (currentConsumed >= cachedProducedEntries) throw new IllegalStateException("empty owner ingress");
+        if (consumedEntries >= producedEntries) {
+            throw new IllegalStateException("empty owner ingress");
         }
-        // 当前借出的输入条目，清空并发布消费游标后可能立即复用
-        Entry entry = entries[(int) currentConsumed & MASK];
-        // 当前请求的有效载荷字节数，动作条目为零
-        int bytes = entry.command == null ? 0 : entry.command.payloadLength();
+        Entry entry = entries[(int) consumedEntries & MASK];
         entry.clear();
-        // 先清槽再公布消费条数，生产者看到新游标后就可能立即复用这个条目。
-        // 清完当前槽后要发布的下一消费游标
-        long nextConsumed = currentConsumed + 1;
-        consumedEntries = nextConsumed;
-        uncommittedConsumedBytes += bytes;
-        if (uncommittedConsumedBytes >= BATCH_CONSUMED_BYTES_THRESHOLD || nextConsumed >= cachedProducedEntries) {
-            commitConsumedBytes();
-        }
+        consumedEntries++;
     }
 
     /**
-     * 将 Owner 本地累计的消费字节一次公布给生产者，再清本地增量；不改变条目游标或命令解码租约。
+     * 保留兼容方法：单线程无锁模式下无需跨线程公布字节。
      */
     public void commitConsumedBytes() {
-        if (uncommittedConsumedBytes > 0) {
-            consumedBytes += uncommittedConsumedBytes;
-            uncommittedConsumedBytes = 0;
-        }
+        // 单线程内联原位模式无跨线程字节进度提交需求
     }
 
     /**
-     * 停机时逐条移除并归还仍属于输入环的解码租约，最后公布消费字节；必须先停止可能借用这些输入的工作资源及命令窗口，已转交的命令不在这里重复释放。
+     * 停机时逐条移除并归还仍属于输入环的解码租约；已转交的命令不在这里重复释放。
      */
     public void discard() {
-        // 当前借出的输入条目，清空并发布消费游标后可能立即复用
         Entry entry;
         while ((entry = first()) != null) {
-            // 移除条目前保存的请求引用，用于只归还仍归输入环的解码租约
             CoreMessage command = entry.command;
             remove();
-            if (command != null) command.releaseDecoderSlot();
+            if (command != null) {
+                command.releaseDecoderSlot();
+            }
         }
-        commitConsumedBytes();
     }
 
     /**
-     * 可复用输入条目。生产者填好后交给 Owner，Owner 移除时清空；后续窗口若仍需请求，须自行保留请求租约，不能保留这份可立即复用的条目。
+     * 可复用输入条目。
      */
     public static final class Entry {
-        /**  当前借给 Owner 的请求。条目移除后不得再从这里取请求。 */
         @Accessors(fluent = true, chain = false)
         @Getter
         CoreMessage command;
-        /**  原会话 ID，空槽默认 NO_SESSION_ID。 读取原会话纯 ID，不把 Cluster 会话对象传入 Owner。 */
+
         @Accessors(fluent = true, chain = false)
         @Getter
         long sessionId = NO_SESSION_ID;
-        /**
-         * timestamp：原复制日志业务时间。
-         * position：原复制日志位置。
-         */
+
         long timestamp, position;
-        /**
-         *  Owner 对当前代条目的观察标记，清槽时复位。
-         * 读取 Owner 是否已经观察过当前代条目。
-         * 记录 Owner 已观察当前代条目，供原命令推进边界使用；槽复用前会清零。
-         * @param ownerObserved 当前代条目是否已被 Owner 观察
-         */
+
         @Accessors(fluent = true, chain = false)
         @Getter
         @Setter
         boolean ownerObserved;
-        /**  请求内容指纹，随请求交接并在清槽时移除引用。 借看原请求指纹，移除条目前须交给后续实际持有者。 */
+
         @Accessors(fluent = true, chain = false)
         @Getter
         CommandFingerprint fingerprint;
 
-        /**
-         * 清掉请求、指纹、观察标记及日志字段，恢复无会话默认值；只清槽内容，不释放命令自己的解码租约。
-         */
         private void clear() {
-            command = null; fingerprint = null; ownerObserved = false;
+            command = null;
+            fingerprint = null;
+            ownerObserved = false;
             sessionId = NO_SESSION_ID;
             timestamp = position = 0;
         }
 
-    /**
-     * 读取原复制日志的业务时间，不用系统时间重新生成。
-     */
-    public long timestamp() { return timestamp; }
-    /**
-     * 读取原复制日志位置，保持业务推进与恢复顺序一致。
-     */
-    public long position() { return position; }
-}
+        public long timestamp() { return timestamp; }
+        public long position() { return position; }
+    }
 }

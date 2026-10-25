@@ -11,7 +11,7 @@ import com.surprising.gateway.provider.auth.service.LoginVerificationService;
 import com.surprising.gateway.provider.auth.service.SensitiveActionVerificationService;
 import com.surprising.gateway.provider.auth.service.UserSecurityService;
 
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;

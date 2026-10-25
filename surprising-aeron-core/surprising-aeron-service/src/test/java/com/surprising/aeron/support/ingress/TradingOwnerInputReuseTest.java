@@ -68,30 +68,21 @@ class TradingOwnerInputReuseTest {
     }
 
     /**
-     * 用六十四个一 MiB 载荷填满字节预算，让已中断生产者尝试再入队；要求明确终止且条目与字节数未变，清理后仍可用满全部条目容量。
+     * 填满输入环全部容量后尝试再入队，要求明确抛出饱和异常且条目数保持不变，清理后仍可用满全部条目容量。
      */
-    @Test void interruptedByteBudgetWaitDoesNotClaimOrLoseAnInputSlot() throws Exception {
+    @Test void saturatedRingRejectsWithoutLosingInputSlot() throws Exception {
         var egress = new ClusterServiceEgress();
         var loop = new AeronTradingClusterService(ProductLine.SPOT, egress);
         Cluster cluster = cluster(new CountDownLatch(1));
         egress.start(cluster); set(loop, "cluster", cluster);
         var input = input(loop);
-        var megabyte = CoreMessage.owned(probe(1).header(), new byte[1024 * 1024]);
-        for (int i = 0; i < 64; i++) loop.enqueue(megabyte, -1, i, i, null);
-        assertThat(input.retainedBytes()).isEqualTo(OwnerIngressRing.MAX_BYTES);
-        var failure = new AtomicReference<Throwable>();
-        Thread producer = new Thread(() -> {
-            Thread.currentThread().interrupt();
-            try { loop.enqueue(megabyte, -1, 99, 99, null); }
-            catch (Throwable fatal) { failure.set(fatal); }
-        });
-        producer.start(); producer.join(5_000);
-        assertThat(failure.get()).isInstanceOf(org.agrona.concurrent.AgentTerminationException.class);
-        assertThat(input.size()).isEqualTo(64);
-        assertThat(input.retainedBytes()).isEqualTo(OwnerIngressRing.MAX_BYTES);
-        for (int i = 0; i < 64; i++) input.remove();
+        for (int i = 0; i < OwnerIngressRing.CAPACITY; i++) loop.enqueue(probe(i), -1, i, i, null);
+        assertThat(input.size()).isEqualTo(OwnerIngressRing.CAPACITY);
+        assertThatThrownBy(() -> loop.enqueue(probe(9999), -1, 9999, 9999, null))
+                .isInstanceOf(org.agrona.concurrent.AgentTerminationException.class);
+        assertThat(input.size()).isEqualTo(OwnerIngressRing.CAPACITY);
+        input.discard(); egress.clear();
         assertThat(input.size()).isZero();
-        assertThat(input.retainedBytes()).isZero();
         for (int i = 0; i < OwnerIngressRing.CAPACITY; i++) loop.enqueue(probe(i), -1, i, i, null);
         assertThat(input.size()).isEqualTo(OwnerIngressRing.CAPACITY);
         input.discard(); egress.clear();

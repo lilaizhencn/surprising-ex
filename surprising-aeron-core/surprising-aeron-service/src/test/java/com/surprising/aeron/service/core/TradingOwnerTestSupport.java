@@ -86,8 +86,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
         this.cluster = cluster;
         egress.start(cluster);
         epoch = 0;
-        logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition(),
-                cluster.idleStrategy());
+        logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition());
         owner.start(logContext);
         if (snapshotImage != null) {
             owner.loadSnapshot(snapshotImage::poll, snapshotImage::isEndOfStream);

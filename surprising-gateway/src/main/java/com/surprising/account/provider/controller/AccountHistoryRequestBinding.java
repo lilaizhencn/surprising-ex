@@ -1,6 +1,6 @@
 package com.surprising.account.provider.controller;
 
-import com.surprising.account.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.account.provider.model.AccountHistoryPageQuery;
 
 /** 只绑定历史HTTP查询参数，不访问资金、产品状态或持久化。 */

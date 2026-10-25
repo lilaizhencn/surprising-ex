@@ -3,7 +3,7 @@ package com.surprising.gateway.provider.auth.controller;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery.Order;
 import com.surprising.gateway.provider.auth.model.UserQueryFilter;
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import java.time.DateTimeException;
 import java.util.List;
 import java.util.Locale;

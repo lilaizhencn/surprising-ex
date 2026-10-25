@@ -20,7 +20,7 @@ import com.surprising.gateway.provider.auth.service.LoginVerificationService;
 import com.surprising.gateway.provider.auth.service.PasswordHasher;
 import com.surprising.gateway.provider.auth.service.TotpService;
 
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.isNull;

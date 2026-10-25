@@ -13,7 +13,7 @@ import com.surprising.marketmaker.provider.model.MarketMakerAdminModels.MarketMa
 import com.surprising.product.api.ProductLine;
 import java.util.Locale;
 import com.surprising.marketmaker.provider.model.MarketMakerRunEventPageQuery;
-import com.surprising.marketmaker.provider.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import java.time.DateTimeException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;

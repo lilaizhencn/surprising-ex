@@ -3,7 +3,7 @@ package com.surprising.funding.provider.repository;
 import static org.assertj.core.api.Assertions.*;
 import com.surprising.funding.api.model.FundingRateResponse;
 import com.surprising.funding.provider.model.FundingPageQuery;
-import com.surprising.funding.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.funding.provider.config.FundingProperties;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;

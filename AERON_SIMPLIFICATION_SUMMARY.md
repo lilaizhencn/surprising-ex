@@ -225,5 +225,51 @@
 - **资金正确性与恢复语义**：
   - 完整保持了单线程内联模式下的借槽归还租赁契约、集群状态机快照与增量回放、无缝零丢包的资金一致性。
 
+---
+
+## 6. 深入优化：彻底消除过度设计与全工程代码冗余（第 2 阶段全量完成）
+
+### 6.1 P0 - `OwnerIngressRing` 无锁化与容量 2048 收敛
+- **背景与痛点**：
+  在去除了独立线程后，Aeron 回调线程是唯一且原生的就地推进者。`OwnerIngressRing` 原先保留了 Disruptor 风格的 4 个 volatile 计数器（`producedEntries`, `producedBytes`, `consumedEntries`, `consumedBytes`）、4 个可见性批量缓存游标（`cachedConsumedEntries`, `cachedConsumedBytes`, `cachedProducedEntries`, `uncommittedConsumedBytes`），以及复杂的 64MB 字节载荷预算追踪逻辑。这不仅带来了无谓的 CPU 内存屏障与缓存行颠簸，而且队列满时若外部调用者同步等待可能引发死循环。
+- **重构措施**：
+  1. **彻底消除 4 个 volatile 与批量缓存游标**：删除 `producedEntries`, `producedBytes`, `consumedEntries`, `consumedBytes` 等 volatile 字段，改用纯内部原生游标 `long head, tail`；
+  2. **消除 64MB 载荷预算核算机制**：不再追踪动态载荷字节，槽位从 8,192 紧凑收敛至 2,048 原位槽，极大地精简了内存开销与循环检查；
+  3. **就地推进机制与消除死循环**：重构 `AeronTradingClusterService.enqueue(...)`，入队前先就地推进排空已有就绪命令；若环满则在当前上下文调用 `owner.pollCommands()` 推进排空，既消除了单线程死循环，又兼容了测试并发场景下的安全等待。代码从 208 行锐减至 140 行（精简 32.7%）。
+
+### 6.2 P1 - 拔除 `IdleStrategy` 遗留与空转自旋统一
+- **背景与痛点**：
+  在固定 `BUSY_SPIN` 并内联后，`OwnerLogContext` 与 `TradingCoreOwner` 依然保留并传递了 `IdleStrategy idle` 接口入参和字段，快照等待与空分片读取时调用了形式上的 `idle.idle()`，实际上在内联单线程模式下这是无用的冗余参数与抽象。
+- **重构措施**：
+  1. **移除 `OwnerLogContext.idle` 字段**：清理其所有 Getter/Setter、构造器及导入；
+  2. **重构 `TradingCoreOwner` 构造与等待逻辑**：移除 `idleStrategy` 字段与 `idleCommand`，等待快照生成与空片段轮询处统一直接使用 JVM 原生的 `Thread.onSpinWait()`；
+  3. **收敛构造参数**：将 `AeronTradingClusterService`、`ClusteredBatchTradingBenchmark`、`TradingOwnerTestSupport`、`OwnerIngressRingTest` 中的构造函数从 4 参数收缩为纯粹的 3 参数，消除抽象摆设。
+
+### 6.3 P2 - 统一 9 个 Copy-Paste 的 `AdminCursorPage`（消灭 ~800 行纯重复代码）
+- **背景与痛点**：
+  在微服务与领域拆分演进过程中，跨模块分页模型产生了严重的机械式复制代码腐化：`surprising-trading-api`、`surprising-derivatives-lifecycle-api`（adl/insurance/liquidation/risk）、`surprising-derivatives-lifecycle-provider`（funding）、`surprising-maker`、`surprising-gateway`（auth/account）9 个子包各自复制了一份结构完全一致（约 107 行）的 `AdminCursorPage`，并附带多份重复单元测试。
+- **重构措施**：
+  1. **集中收敛**：在公共契约模块 `surprising-trading-api` 统一定义 `com.surprising.trading.api.utils.AdminCursorPage`，并扩展支持 `SortSpec` 二参数便利构造与完整字段序列化；
+  2. **物理删除 8 份冗余类与 2 份测试**：
+     - 物理删除 `surprising-derivatives-lifecycle-api` 下的 4 个重复类；
+     - 物理删除 `surprising-derivatives-lifecycle-provider` 下的 1 个重复类；
+     - 物理删除 `surprising-maker` 下的 1 个重复类；
+     - 物理删除 `surprising-gateway` 下的 3 个重复类及 2 个重复测试；
+  3. **全局引用规范化**：更新 `surprising-gateway`、`surprising-maker`、`surprising-derivatives-lifecycle` 等 44 处生产与测试代码，统一导向 `com.surprising.trading.api.utils.AdminCursorPage`；
+  4. **补全高质量单元测试**：在 `surprising-trading-api` 编写全面的 `AdminCursorPageTest`，测试边界覆盖率 100%。
+
+### 6.4 P3 - 跨模块组件依赖纯净性分析与最佳实践维护
+- **深度分析与决策**：
+  针对 `surprising-instrument-api` 与各应用模块中的快照分发器 `InstrumentSnapshotSupport` / `InstrumentSnapshotConsumer`，严格遵循 [AGENTS.md](file:///Users/atomex/Desktop/surprising/surprising-ex/AGENTS.md) 规则：“共享 API 不依赖应用实现，框架适配依赖按需设为 optional”。
+  当前共享抽象通过纯公式与纯契约 `InstrumentSnapshotSupport.consume(...)` 共享核心消费与去重逻辑，各应用端仅保留 30 行独立的 Spring Kafka `@KafkaListener` 胶水注解；不为抽取 30 行注解胶水而向底层共享 API 强行侵入数百兆的 `spring-kafka` 重量级框架依赖，保持了最清晰的职责边界与依赖纯净性。
+
+### 6.5 全量构建与测试验证
+- **全工程反应堆编译**：全系统 23 个 Maven 模块执行 `mvn test-compile` **全部 SUCCESS**；
+- **定向核心与业务测试**：
+  - `surprising-trading-api`：15 项单元测试全绿；
+  - `surprising-gateway`：`AdminCursorPageTest` 3 项测试全绿；
+  - `surprising-aeron-service`：核心套件测试（`OwnerIngressRingTest` 4项、`TradingOwnerInputReuseTest` 5项、`OwnerLogContextTest` 6项、`CoreAdmissionInputOwnershipTest` 10项、`ProductionSourceBoundaryTest` 8项）**共 33 项全绿通过**。
+
+
 
 

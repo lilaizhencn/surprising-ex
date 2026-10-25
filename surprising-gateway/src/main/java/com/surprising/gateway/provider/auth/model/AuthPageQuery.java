@@ -1,6 +1,6 @@
 package com.surprising.gateway.provider.auth.model;
 
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage.Cursor;
+import com.surprising.trading.api.utils.AdminCursorPage.Cursor;
 
 /** HTTP绑定后的原生分页；排序只表示业务字段/方向，不包含SQL列名。 */
 public record AuthPageQuery(int limit, Cursor after, Order order) {

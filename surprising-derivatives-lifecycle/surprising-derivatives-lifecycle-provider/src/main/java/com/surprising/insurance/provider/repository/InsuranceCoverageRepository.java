@@ -1,6 +1,6 @@
 package com.surprising.insurance.provider.repository;
 
-import com.surprising.insurance.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.insurance.provider.model.InsuranceHistoryPageQuery;
 import com.surprising.insurance.api.model.InsuranceCoverageResponse;
 import com.surprising.insurance.provider.model.CoreLiquidationProjection;

@@ -1,7 +1,7 @@
 package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.AccountLedgerEntryResponse;
-import com.surprising.account.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.account.provider.model.AccountHistoryPageQuery;
 import java.sql.ResultSet;
 import java.sql.SQLException;

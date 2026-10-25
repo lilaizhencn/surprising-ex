@@ -1,7 +1,7 @@
 package com.surprising.funding.provider.controller;
 
 import com.surprising.funding.api.FundingApiPaths;
-import com.surprising.funding.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.funding.provider.model.FundingPageQuery;
 import com.surprising.funding.api.model.FundingPaymentQueryResponse;
 import com.surprising.funding.api.model.FundingRateQueryResponse;

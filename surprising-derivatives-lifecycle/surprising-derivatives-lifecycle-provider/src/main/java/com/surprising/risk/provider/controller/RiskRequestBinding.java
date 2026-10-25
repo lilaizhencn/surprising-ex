@@ -1,7 +1,7 @@
 package com.surprising.risk.provider.controller;
 
 import com.surprising.risk.api.model.LiquidationCandidateStatus;
-import com.surprising.risk.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.risk.provider.model.LiquidationCandidatePageQuery;
 import com.surprising.risk.provider.model.RiskRuleModels.RiskRuleUpdateCommand;
 import java.util.Locale;

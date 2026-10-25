@@ -25,7 +25,6 @@ import java.util.function.BooleanSupplier;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
-import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import static com.surprising.aeron.support.egress.ClusterServiceEgress.NO_SESSION_ID;
 
@@ -75,8 +74,6 @@ public final class TradingCoreOwner {
     private TradingCoreRuntime state;
     /** 外层交接的角色、复制时间及日志位置，不含网络发送能力。 */
     private OwnerLogContext logContext;
-    /** 等待业务完成及快照分片时使用的等待策略。 */
-    private IdleStrategy idleStrategy;
     /** 保护推进期间的背景工作重入，结束推进后复位。 */
     private boolean processingLogCallback;
 
@@ -137,7 +134,6 @@ public final class TradingCoreOwner {
         if (state == null) state = new TradingCoreRuntime(productLine, startupTopology, configuration);
         processingLogCallback = false;
         commandPipeline.reset();
-        idleStrategy = logContext.idle();
         log.info("Aeron core role productLine={} role={}", productLine, logContext.role());
         realtimeBoundary.start(logContext.role(), logContext.position(), state);
     }
@@ -512,7 +508,7 @@ public final class TradingCoreOwner {
             throw new IllegalStateException("cluster log callback completion interrupted or timed out: "
                     + stalledCommandDiagnostics());
         }
-        idleStrategy.idle(work);
+        Thread.onSpinWait();
     }
 
     /**
@@ -560,7 +556,6 @@ public final class TradingCoreOwner {
             finishSnapshotPrefix(deadlineNanos);
             state.assertClusterCallbackComplete();
             state.snapshots.beginSnapshot(snapshotId, deadlineNanos);
-            idleStrategy.reset();
             while (true) {
                 // 已准备好的分块快照，空表示需要继续收集
                 SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = state.snapshots.pollSnapshotSections(
@@ -568,7 +563,7 @@ public final class TradingCoreOwner {
                         logContext == null ? 0 : logContext.position(),
                         System.nanoTime());
                 if (snapshot != null) return snapshot;
-                idleStrategy.idle();
+                Thread.onSpinWait();
             }
         } finally {
             processingLogCallback = false;
@@ -741,7 +736,7 @@ public final class TradingCoreOwner {
             // 本轮实际读取的快照片段数
             int fragments = snapshotSource.poll(
                     (/* 当前快照片段所在的原输入缓冲 */ buffer, /* 片段在输入缓冲中的起始字节偏移 */ offset, /* 当前片段的有效字节数 */ length, /* 快照片段附带的 Aeron 头，恢复字节收集不读取该值 */ header) -> recovery.accept(buffer, offset, length), 10);
-            idleStrategy.idle(fragments);
+            if (fragments == 0) Thread.onSpinWait();
         }
         replaceState(recovery.decodePassive(productLine, configuration, startupTopology));
     }

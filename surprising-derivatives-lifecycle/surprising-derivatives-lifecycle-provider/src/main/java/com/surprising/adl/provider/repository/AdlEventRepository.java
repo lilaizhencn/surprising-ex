@@ -1,6 +1,6 @@
 package com.surprising.adl.provider.repository;
 
-import com.surprising.adl.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.adl.provider.model.AdlEventPageQuery;
 import com.surprising.adl.api.model.AdlEventResponse;
 import com.surprising.adl.api.model.AdlSide;

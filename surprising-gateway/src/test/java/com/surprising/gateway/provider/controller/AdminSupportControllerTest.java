@@ -7,7 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.surprising.gateway.provider.auth.model.SupportModels.CursorPage;
 import com.surprising.gateway.provider.auth.model.AuthPageQuery;
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportComplianceSummary;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportOverview;
 import com.surprising.gateway.provider.auth.model.SupportModels.SupportTicket;

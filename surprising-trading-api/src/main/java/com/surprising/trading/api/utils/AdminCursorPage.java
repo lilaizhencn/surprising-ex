@@ -1,4 +1,4 @@
-package com.surprising.liquidation.api.utils;
+package com.surprising.trading.api.utils;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 
+/**
+ * 统一管理端基于时间戳与主键 ID 的 Base64 URL 安全游标分页工具。
+ */
 public final class AdminCursorPage {
 
     private AdminCursorPage() {
@@ -34,13 +37,13 @@ public final class AdminCursorPage {
         }
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            int split = decoded.indexOf(':');
+            int split = decoded.lastIndexOf('|');
             if (split <= 0 || split == decoded.length() - 1) {
                 throw new IllegalArgumentException("invalid cursor");
             }
-            long epochMillis = Long.parseLong(decoded.substring(0, split));
+            Instant timestamp = Instant.parse(decoded.substring(0, split));
             long id = Long.parseLong(decoded.substring(split + 1));
-            return new Cursor(Instant.ofEpochMilli(epochMillis), id);
+            return new Cursor(timestamp, id);
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid cursor", ex);
         }
@@ -85,11 +88,15 @@ public final class AdminCursorPage {
         if (timestamp == null) {
             throw new IllegalArgumentException("cursor timestamp is required");
         }
-        String raw = timestamp.toEpochMilli() + ":" + id;
+        String raw = timestamp + "|" + id;
         return Base64.getUrlEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
     }
 
     public record SortSpec(String field, String column, String idColumn, boolean descending) {
+        public SortSpec(String field, boolean descending) {
+            this(field, field, "id", descending);
+        }
+
         public String token() {
             return field + "." + (descending ? "desc" : "asc");
         }
@@ -100,8 +107,16 @@ public final class AdminCursorPage {
     }
 
     public record Cursor(Instant timestamp, long id) {
+        public Cursor {
+            if (timestamp == null) {
+                throw new IllegalArgumentException("cursor timestamp is required");
+            }
+        }
     }
 
     public record CursorPage<T>(List<T> items, String nextCursor, boolean hasMore, String sort, int limit) {
+        public CursorPage {
+            items = items == null ? List.of() : List.copyOf(items);
+        }
     }
 }

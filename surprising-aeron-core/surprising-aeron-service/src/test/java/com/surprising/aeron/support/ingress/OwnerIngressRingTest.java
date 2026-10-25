@@ -129,7 +129,7 @@ class OwnerIngressRingTest {
             assertThat(result.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             responses.add(header.commandId());
         });
-        owner.start(new OwnerLogContext(Cluster.Role.LEADER, 0, 0, NoOpIdleStrategy.INSTANCE));
+        owner.start(new OwnerLogContext(Cluster.Role.LEADER, 0, 0));
         try {
             var ring = owner.ingress();
             var first = probe(1);

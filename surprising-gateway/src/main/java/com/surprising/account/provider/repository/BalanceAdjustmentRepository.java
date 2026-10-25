@@ -2,7 +2,7 @@ package com.surprising.account.provider.repository;
 
 import com.surprising.account.api.model.AccountType;
 import com.surprising.account.api.model.AdminBalanceAdjustmentRecord;
-import com.surprising.account.api.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.account.provider.model.AccountHistoryPageQuery;
 import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.aeron.protocol.CoreResultCode;

@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.auth.repository;
 
 import com.surprising.gateway.provider.auth.model.AdminOperationRecord;
 
-import com.surprising.gateway.provider.auth.utils.AdminCursorPage;
+import com.surprising.trading.api.utils.AdminCursorPage;
 import com.surprising.gateway.provider.auth.model.CreatedAtPageQuery;
 
 import lombok.extern.slf4j.Slf4j;
