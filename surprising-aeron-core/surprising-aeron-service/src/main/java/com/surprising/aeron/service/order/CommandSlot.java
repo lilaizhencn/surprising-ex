@@ -89,14 +89,19 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     @Accessors(fluent = true, chain = false)
     @Getter
     final PlaceSlotContext place = new PlaceSlotContext();
-    /** 触发子单冻结订单与源收据。 */
-    final TriggerSlotContext trigger = new TriggerSlotContext();
-    /** 保留可复用强平校验和执行工作对象的专有上下文。 */
-    final LiquidationSlotContext liquidation = new LiquidationSlotContext();
-    /** 延后撮合时保留的原日志时间、位置与来源键。 */
-    final DeferredSlotContext deferred = new DeferredSlotContext();
-    /** 替换/改单的专有 Lane 准入事件。 */
-    final ReplaceSlotContext replace = new ReplaceSlotContext();
+    /** 触发子单已经完成冻结准入的订单引用。 */
+    private OrderRuntime triggerAdmissionOrder;
+    /** 触发续步已绑定的唯一源触发单收据。 */
+    private com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger;
+    /** 保留可复用强平执行工作，回收时只清工作内部引用。 */
+    private com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableLiquidationWork;
+    /** 首次使用时创建、随后复用的强平校验工作。 */
+    private com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck;
+    /** 延后撮合前固定的原 Cluster 时间、日志位置与来源键。 */
+    private long deferredClusterTimestamp, deferredClusterPosition;
+    private TradingCoreRuntime.SourceKey deferredSourceKey;
+    /** 替换/改单绑定的所属 Lane 准入事件。 */
+    private com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent replacementAdmission;
 
     /** Owner 观察的紧凑阶段标签，不代替结果与 Lane 完成掩码判断。 */
     private byte matchingLifecycle;
@@ -479,22 +484,24 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      * 懒创建并返回本槽可复用的强平校验工作。
      */
     public com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck liquidationCheck() {
-        return liquidation.check();
+        if (liquidationCheck == null)
+            liquidationCheck = new com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck();
+        return liquidationCheck;
     }
 
     /**
      * 返回已保留的强平执行工作，未设置时为空。
      */
     public com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork liquidationWork() {
-        return liquidation.reusableWork();
+        return reusableLiquidationWork;
     }
 
     /**
-     * 保存非空强平执行工作，具体检查交给强平上下文。
+     * 保存非空强平执行工作，后续命令复用同一工作对象。
      * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
      */
     public void liquidationWork(com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
-        liquidation.reusableWork(work);
+        reusableLiquidationWork = Objects.requireNonNull(work);
     }
 
     /**
@@ -673,12 +680,13 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         commitFenceEstablished = false;
         settlementContinuation = null;
         place.clear();
-        replace.clear();
+        replacementAdmission = null;
         settlementPlan = null;
         admittedMatchingOrder = null;
-        trigger.clear();
+        triggerAdmissionOrder = null;
+        sourceTrigger = null;
         matchingLifecycle = MATCHING_ADMITTED;
-        deferred.clear();
+        clearDeferredMatching();
         crossShardCancellationStarted = false;
         clusterIndependent = false;
         ledgerDispatchClosed = false;
@@ -765,22 +773,22 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     /**
      * 返回替换操作绑定的 Lane 准入事件。
      */
-    com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent replacementAdmission() { return replace.admission(); }
+    com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent replacementAdmission() { return replacementAdmission; }
     /**
      * 只允许 AMEND/REPLACE 首次绑定非空替换准入事件，重复或操作不符拒绝。
      * @param event 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
      */
     void replacementAdmission(com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent event) {
-        if (event == null || replace.admission != null || operation != Operation.AMEND && operation != Operation.REPLACE)
+        if (event == null || replacementAdmission != null || operation != Operation.AMEND && operation != Operation.REPLACE)
             throw new IllegalStateException("invalid replacement admission slot");
-        replace.admission(event);
+        replacementAdmission = event;
     }
     /**
      * 取走替换准入事件并清该引用，把后续使用责任交给调用方。
      */
     com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent takeReplacementAdmission() {
         // 当前方法准备取走并清引用的原值。
-        var value = replace.admission; replace.admission = null; return value;
+        var value = replacementAdmission; replacementAdmission = null; return value;
     }
     /**
      * 返回此命令保留的可空结算事件。
@@ -874,18 +882,19 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     /**
      * 返回触发续步已经冻结的源触发单收据，避免再回读 Lane 客户端索引。
      */
-    public com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger() { return trigger.sourceTrigger(); }
+    public com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger() { return sourceTrigger; }
     /**
-     * 将非空源触发单首次绑定到专有上下文，重复绑定由上下文拒绝。
+     * 首次绑定非空源触发单收据，重复绑定立即拒绝。
      * @param value 要保存或返回的当前字段值，方法本身不复制引用
      */
     public void sourceTrigger(com.surprising.aeron.model.CoreTriggerOrderState value) {
-        trigger.sourceTrigger(value);
+        if (value == null || sourceTrigger != null) throw new IllegalStateException("trigger receipt already bound");
+        sourceTrigger = value;
     }
     /**
      * 返回触发子单已经完成准入的订单引用。
      */
-    public OrderRuntime triggerAdmissionOrder() { return trigger.admissionOrder(); }
+    public OrderRuntime triggerAdmissionOrder() { return triggerAdmissionOrder; }
     /**
      * 只允许 TRIGGER 且尚无独立撮合输入时，保存非空冻结订单并用其剩余数量、撮合价和产品滑点生成 CoreMatchingOrder。
      * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
@@ -893,7 +902,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     void triggerAdmission(OrderRuntime order) {
         if (operation != Operation.TRIGGER || order == null || admittedMatchingOrder != null)
             throw new IllegalStateException("invalid trigger admission");
-        trigger.admissionOrder(order);
+        triggerAdmissionOrder = order;
         admittedMatchingOrder = new CoreMatchingOrder(order.orderId(), order.instrument().instrumentIdValue(),
                 order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
                 order.remainingQuantitySteps(), CoreMatchingOrder.slippagePpm(order.productLine()));
@@ -957,14 +966,15 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         admission = null;
         settlementContinuation = null;
         place.clear();
-        replace.clear();
+        replacementAdmission = null;
         settlementPlan = null;
         admittedMatchingOrder = null;
-        trigger.clear();
-        liquidation.clear();
+        triggerAdmissionOrder = null;
+        sourceTrigger = null;
+        clearLiquidationReferences();
         realtimeTakerOrder = null;
         matchingLifecycle = MATCHING_ADMITTED;
-        deferred.clear();
+        clearDeferredMatching();
         cachedMatcherShard = -1;
     }
 
@@ -978,7 +988,9 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         if (matchingLifecycle != MATCHING_ADMITTED || sourceKey == null) {
             throw new IllegalStateException("invalid deferred matching transition");
         }
-        deferred.set(clusterTimestamp, clusterPosition, sourceKey);
+        deferredClusterTimestamp = clusterTimestamp;
+        deferredClusterPosition = clusterPosition;
+        deferredSourceKey = sourceKey;
         matchingLifecycle = MATCHING_DEFERRED;
     }
     /**
@@ -989,7 +1001,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
             throw new IllegalStateException("matching command is not deferred");
         }
         matchingLifecycle = MATCHING_ADMITTED;
-        deferred.clear();
+        clearDeferredMatching();
     }
     /**
      * 返回当前阶段是否恰好为延后撮合。
@@ -1006,21 +1018,21 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     long deferredClusterTimestamp() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return deferred.clusterTimestamp;
+        return deferredClusterTimestamp;
     }
     /**
      * 要求仍处于延后阶段后返回原日志位置。
      */
     long deferredClusterPosition() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return deferred.clusterPosition;
+        return deferredClusterPosition;
     }
     /**
      * 要求延后阶段后返回原来源键。
      */
     TradingCoreRuntime.SourceKey deferredSourceKey() {
         if (!deferredMatching()) throw new IllegalStateException("matching command is not deferred");
-        return deferred.sourceKey;
+        return deferredSourceKey;
     }
 
     /**
@@ -1410,7 +1422,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     private void clearLifecycleState() {
         clearMatchingControlContinuations();
         if (reusableSettlementWork != null) reusableSettlementWork.clearReferences();
-        liquidation.clear();
+        clearLiquidationReferences();
         controlWork = null;
         controlPending = false;
         controlAccountsCommitted = false;
@@ -1430,9 +1442,9 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         commitContextActive = false;
         matchingRejection = null;
         place.clear();
-        replace.clear();
+        replacementAdmission = null;
         matchingLifecycle = MATCHING_ADMITTED;
-        deferred.clear();
+        clearDeferredMatching();
         cachedMatcherShard = -1;
         laneResultTarget.clear();
     }
@@ -2252,134 +2264,17 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
 
 }
 
-    /**
-     * 触发子单的冻结订单与唯一源触发收据，后续无需再回读客户端索引。
-     */
-    static final class TriggerSlotContext {
-        /**
-         *  触发子单已经完成冻结准入的订单引用。
-         * 返回冻结的触发子单准入订单。
-         * 直接保存触发子单订单引用，外层负责操作和非空检查。
-         * @param admissionOrder 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
-         */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        @Setter(value = AccessLevel.PACKAGE)
-        OrderRuntime admissionOrder;
-        /**  触发续步已绑定的源触发单收据。 返回源触发单收据。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        com.surprising.aeron.model.CoreTriggerOrderState sourceTrigger;
-
-        /**
-         * 要求非空且此前未绑定，保存同一源触发单引用。
-         * @param trigger 首次绑定的非空源触发单收据
-         */
-        void sourceTrigger(com.surprising.aeron.model.CoreTriggerOrderState trigger) {
-            if (trigger == null || this.sourceTrigger != null) throw new IllegalStateException("trigger receipt already bound");
-            this.sourceTrigger = trigger;
-        }
-
-        /**
-         * 清触发准入订单和源收据引用。
-         */
-        void clear() {
-            admissionOrder = null;
-            sourceTrigger = null;
-        }
+    /** 清强平工作内部引用，保留工作对象供下一次复用。 */
+    private void clearLiquidationReferences() {
+        if (reusableLiquidationWork != null) reusableLiquidationWork.clearReferences();
+        if (liquidationCheck != null) liquidationCheck.clearReferences();
     }
 
-    /**
-     * 强平校验与执行对象的可复用容器，清理只解除工作内部引用。
-     */
-    static final class LiquidationSlotContext {
-        /**  保留的强平执行工作对象，回收时只清内部引用。 返回已经保存的可空强平执行工作。 */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        private com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork reusableWork;
-        /** 懒创建并保留的强平执行校验对象。 */
-        private com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check;
-
-        /**
-         * 首次需要时创建强平校验对象，之后复用同一个对象。
-         */
-        com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck check() {
-            if (check == null)
-                check = new com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionCheck();
-            return check;
-        }
-
-        /**
-         * 保存非空强平执行工作。
-         * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
-         */
-        void reusableWork(com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work) {
-            this.reusableWork = Objects.requireNonNull(work);
-        }
-
-        /**
-         * 清已有强平工作和校验对象的内部引用，但保留二者对象便于复用。
-         */
-        void clear() {
-            if (reusableWork != null) reusableWork.clearReferences();
-            if (check != null) check.clearReferences();
-        }
-    }
-
-    /**
-     * 命令暂缓撮合时保留的原 Cluster 时间、日志位置和来源键。
-     */
-    static final class DeferredSlotContext {
-        /** 延后命令原有的 Cluster 业务时间。 */
-        long clusterTimestamp;
-        /** 延后命令原有的日志位置。 */
-        long clusterPosition;
-        /** 延后命令原有来源类型与来源实例键。 */
-        TradingCoreRuntime.SourceKey sourceKey;
-
-        /**
-         * 保存延后命令的日志时间、位置与来源键，不在此额外验证值。
-         * @param clusterTimestamp 要固定或暂存的 Cluster 业务时间
-         * @param clusterPosition 要固定或暂存的 Cluster 日志位置
-         * @param sourceKey 延后执行前保留的来源类型与实例键
-         */
-        void set(long clusterTimestamp, long clusterPosition, TradingCoreRuntime.SourceKey sourceKey) {
-            this.clusterTimestamp = clusterTimestamp;
-            this.clusterPosition = clusterPosition;
-            this.sourceKey = sourceKey;
-        }
-
-        /**
-         * 归零延后时间和位置并清来源键。
-         */
-        void clear() {
-            clusterTimestamp = 0;
-            clusterPosition = 0;
-            sourceKey = null;
-        }
-    }
-
-    /**
-     * 替换/改单专用 Lane 准入事件引用，重复及操作检查在外层执行。
-     */
-    static final class ReplaceSlotContext {
-        /**
-         *  替换/改单的 Lane 准入事件，外层负责绑定条件检查。
-         * 返回替换准入事件。
-         * 直接保存替换事件引用，绑定条件由外层入口检查。
-         * @param admission 要绑定或转交的准入、结算或提交事件，具体约束见当前入口
-         */
-        @Accessors(fluent = true, chain = false)
-        @Getter(value = AccessLevel.PACKAGE)
-        @Setter(value = AccessLevel.PACKAGE)
-        com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent admission;
-
-        /**
-         * 断开替换准入事件引用。
-         */
-        void clear() {
-            admission = null;
-        }
+    /** 清已结束的延后撮合元数据，阶段转换由调用方负责。 */
+    private void clearDeferredMatching() {
+        deferredClusterTimestamp = 0;
+        deferredClusterPosition = 0;
+        deferredSourceKey = null;
     }
 
 }

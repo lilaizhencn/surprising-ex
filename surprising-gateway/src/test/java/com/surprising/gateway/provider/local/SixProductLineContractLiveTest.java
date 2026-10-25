@@ -876,9 +876,38 @@ class SixProductLineContractLiveTest {
             long bid = book.path("bids").get(0).path("priceTicks").asLong();
             var resting = place(user, instrumentId, "BUY", "LIMIT", bid * 99 / 100, "GTC", false);
             assertThat(resting.path("status").asString()).isEqualTo("ACCEPTED");
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_AMEND"))) {
+                for (int revision = 0; revision < 2; revision++) {
+                    long originalId = resting.path("orderId").asLong();
+                    long nextPrice = bid * (98 - revision) / 100;
+                    long nextQuantity = revision == 0 ? 2 : 1;
+                    String clientId = "qa-amend-" + UUID.randomUUID();
+                    var receipt = request("POST", "/api/v1/gateway/trading/amend",
+                            json.writeValueAsString(Map.of("userId", user.id, "orderId", originalId,
+                                    "newClientOrderId", clientId, "clientRequestId", clientId,
+                                    "priceTicks", nextPrice, "quantitySteps", nextQuantity)), user.token, null, 200);
+                    assertThat(receipt.path("outcome").asString()).isEqualTo("TERMINAL");
+                    var amended = receipt.path("result");
+                    assertThat(amended.path("originalOrder").path("orderId").asLong()).isEqualTo(originalId);
+                    assertThat(amended.path("originalOrder").path("status").asString()).isEqualTo("CANCELED");
+                    resting = amended.path("replacementOrder");
+                    assertThat(resting.path("orderId").asLong()).isPositive().isNotEqualTo(originalId);
+                    assertThat(resting.path("status").asString()).isEqualTo("ACCEPTED");
+                    assertThat(resting.path("clientOrderId").asString()).isEqualTo(clientId);
+                    assertThat(resting.path("priceTicks").asLong()).isEqualTo(nextPrice);
+                    assertThat(resting.path("quantitySteps").asLong()).isEqualTo(nextQuantity);
+                }
+            }
             var canceled = orderResult(request("POST", "/api/v1/gateway/trading/cancel",
                     json.writeValueAsString(Map.of("userId", user.id, "orderId", resting.path("orderId").asLong())), user.token, null, 200));
             assertThat(canceled.path("status").asString()).isEqualTo("CANCELED");
+            if ("true".equals(System.getenv("SIX_LINE_LIVE_AMEND"))) {
+                var cleared = userState(core, user.id);
+                assertThat(cleared.reservations()).isEmpty();
+                assertThat(cleared.balances()).allMatch(balance -> balance.lockedUnits() == 0);
+                assertThat(combinedFunds(core, user.id, maker.id)).containsExactlyEntriesOf(before);
+                System.out.printf("SIX_LINE_AMEND_PASS productLine=%s amendments=2 oldOrdersCanceled=true quantityIncreaseAndDecrease=true finalReservations=0 locked=0 fundsDifference=0%n", line);
+            }
             var bought = place(user, instrumentId, "BUY", "MARKET", 0, "IOC", false);
             assertThat(bought.path("status").asString()).isEqualTo("FILLED");
             if (line != ProductLine.SPOT) verifyCurrentRisk(core, user, instrumentId, settlement, instrument);

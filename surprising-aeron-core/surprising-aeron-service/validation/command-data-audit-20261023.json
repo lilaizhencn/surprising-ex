@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第七十三轮A231-A233：触发续步21→18、父状态33→31、查询视图34→32；去未消费费率整链副本及转发，生产净减89行。18模块构建、全量1986(1Linux跳过)、PIPELINED164、跨模块102、六线实测/12恢复及浏览器/Client网络验证。228解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第七十四轮A234-A237：合并CommandSlot的4个仅字段包装类，整体实例字段63→59、生产净减105行；外层55→59是8项真实字段移入，未伪称删除业务数据。18模块、1986(1Linux跳过)、PIPELINED353、六线及12恢复通过。232解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -11409,6 +11409,58 @@
       ],
       "evidence": "从创建零值、父状态、复制、校验、查询和快照整链删除；子单仍在实际准入按当前配置/策略冻结真实费率。",
       "verification": "删除前六产品费率更新/恢复/解冻场景；18模块干净构建，核心全量1986(1Linux跳过)、PIPELINED164、跨模块102、六线HTTP/WS和12次Cluster冷恢复，以及真实浏览器/Client网络验证。见round73-runtime-20261025.json。"
+    },
+    {
+      "id": "A234",
+      "status": "resolved",
+      "source_basis_commit": "8da276d83b3ef07e135d4a1624bb7a393da9267d",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_fourth_cleanup_round",
+      "topic": "改单事件重复字段容器",
+      "fields_or_methods": [
+        "ReplaceSlotContext"
+      ],
+      "evidence": "1项实际事件引用直接归入CommandSlot；操作、非空及重复绑定检查原样保留。",
+      "verification": "18模块干净构建；全量1986(1Linux跳过)，附加PIPELINED353例；六线顺序HTTP/WS及12次真实Cluster冷恢复。完整owner/name/descriptor及源码展开对照。见round74-runtime-20261025.json。"
+    },
+    {
+      "id": "A235",
+      "status": "resolved",
+      "source_basis_commit": "8da276d83b3ef07e135d4a1624bb7a393da9267d",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_fourth_cleanup_round",
+      "topic": "触发收据重复字段容器",
+      "fields_or_methods": [
+        "TriggerSlotContext"
+      ],
+      "evidence": "2项实际冻结订单/源收据直接归入CommandSlot，首次绑定保护及原清理时点保留。",
+      "verification": "18模块干净构建；全量1986(1Linux跳过)，附加PIPELINED353例；六线顺序HTTP/WS及12次真实Cluster冷恢复。完整owner/name/descriptor及源码展开对照。见round74-runtime-20261025.json。"
+    },
+    {
+      "id": "A236",
+      "status": "resolved",
+      "source_basis_commit": "8da276d83b3ef07e135d4a1624bb7a393da9267d",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_fourth_cleanup_round",
+      "topic": "强平工作重复字段容器",
+      "fields_or_methods": [
+        "LiquidationSlotContext"
+      ],
+      "evidence": "2项原工作引用直接归入CommandSlot；懒创建、非空与复用仍按原顺序执行，清理不销毁工作对象。",
+      "verification": "18模块干净构建；全量1986(1Linux跳过)，附加PIPELINED353例；六线顺序HTTP/WS及12次真实Cluster冷恢复。完整owner/name/descriptor及源码展开对照。见round74-runtime-20261025.json。"
+    },
+    {
+      "id": "A237",
+      "status": "resolved",
+      "source_basis_commit": "8da276d83b3ef07e135d4a1624bb7a393da9267d",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_fourth_cleanup_round",
+      "topic": "延后执行元数据重复字段容器",
+      "fields_or_methods": [
+        "DeferredSlotContext"
+      ],
+      "evidence": "3项实际日志时间/位置/来源直接归入CommandSlot；DEFERRED读写守卫与不同生命周期清理继续保留。",
+      "verification": "18模块干净构建；全量1986(1Linux跳过)，附加PIPELINED353例；六线顺序HTTP/WS及12次真实Cluster冷恢复。完整owner/name/descriptor及源码展开对照。见round74-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11504,7 +11556,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A231_to_A233_trigger_callback_fields_forwarders_and_unused_persisted_fee_copies_removed_and_verified; overall_audit_in_progress",
+  "analysis_round_status": "A234_to_A237_CommandSlot_internal_field_wrappers_removed_and_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11726,12 +11778,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "bfd7b01854d9a09249fc54f09cdfb3d798f3ff9b",
-    "status": "trigger_end_to_end_unused_fee_data_and_callback_cleanup_verified",
+    "source_basis_commit": "8da276d83b3ef07e135d4a1624bb7a393da9267d",
+    "status": "four_Owner_only_field_containers_removed_and_verified",
     "resolved_ids": [
-      "A231",
-      "A232",
-      "A233"
+      "A234",
+      "A235",
+      "A236",
+      "A237"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11744,11 +11797,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 228,
+      "resolved": 232,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "seventy_third_cleanup_round",
+    "evidence": "seventy_fourth_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44960,6 +45013,39 @@
     "evidence": "round73-runtime-20261025.json",
     "counts": {
       "resolved": 228,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "seventy_fourth_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "8da276d83b3ef07e135d4a1624bb7a393da9267d",
+    "resolved_ids": [
+      "A234",
+      "A235",
+      "A236",
+      "A237"
+    ],
+    "removed_wrapper_classes": 4,
+    "net_instance_fields_removed": 4,
+    "production_net_lines_removed": 105,
+    "remaining_CommandSlot_fields_reviewed": 59,
+    "business_fields_moved_not_deleted": 8,
+    "core_full_test_counts": {
+      "tests": 1986,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "additional_pipelined_executions": 353,
+    "runtime_products": 6,
+    "cold_recoveries": 12,
+    "protocol_and_persisted_business_state_unchanged": true,
+    "report": "deep-code-cleanup-20261025-round74.md",
+    "evidence": "round74-runtime-20261025.json",
+    "counts": {
+      "resolved": 232,
       "candidate": 1,
       "retained": 4
     },
