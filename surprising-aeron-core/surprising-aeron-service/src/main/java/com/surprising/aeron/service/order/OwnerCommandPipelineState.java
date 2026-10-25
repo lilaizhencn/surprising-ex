@@ -79,14 +79,6 @@ public final class OwnerCommandPipelineState {
     @Accessors(fluent = true, chain = false)
     @Getter
     private int commandWindowHighWaterMark;
-    /** 已建立队首提交边界的次数，在 beginHeadCommit 增加。 */
-    private long drainedCommands;
-    /** 因已有依赖等待的累计次数。 */
-    private long dependencyFences;
-    /** 因控制边界等待的累计次数。 */
-    private long controlFences;
-    /** 依赖等待中被标记为重试的累计次数。 */
-    private long retryFences;
 
     /**
      * 清当前窗口及全部控制、依赖和观测字段，供启动或测试复用；不会重置交易运行时的业务状态。
@@ -103,10 +95,6 @@ public final class OwnerCommandPipelineState {
         blockedThrough = null;
         commandProgress = 0;
         commandWindowHighWaterMark = 0;
-        drainedCommands = 0;
-        dependencyFences = 0;
-        controlFences = 0;
-        retryFences = 0;
     }
 
     /**
@@ -213,7 +201,6 @@ public final class OwnerCommandPipelineState {
             throw new IllegalStateException("invalid command drain boundary");
         }
         committingHead = commandWindow.get(0);
-        drainedCommands++;
     }
 
     /**
@@ -270,30 +257,10 @@ public final class OwnerCommandPipelineState {
     }
 
     /**
-     * 增加控制边界等待次数，不自行阻塞线程。
-     */
-    public void recordControlFence() {
-        controlFences++;
-    }
-
-    /**
-     * 增加依赖等待次数，标为重试时再增加重试边界计数。
-     * @param retry 本次依赖等待是否由同命令重试引起
-     */
-    public void recordDependencyFence(boolean retry) {
-        dependencyFences++;
-        if (retry) retryFences++;
-    }
-
-    /**
-     * 组装终止日志摘要：窗口峰值、剩余项、建立提交边界次数及各类等待计数；commands 不是成功完成命令数。
+     * 组装终止日志摘要：窗口峰值与剩余未完成项。
      */
     public String terminationSummary() {
         return "highWaterMark=" + commandWindowHighWaterMark
-                + " pending=" + commandWindow.size()
-                + " commands=" + drainedCommands
-                + " dependencyFences=" + dependencyFences
-                + " controlFences=" + controlFences
-                + " retryFences=" + retryFences;
+                + " pending=" + commandWindow.size();
     }
 }

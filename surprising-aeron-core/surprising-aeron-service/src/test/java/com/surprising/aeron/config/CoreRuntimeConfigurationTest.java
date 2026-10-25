@@ -31,7 +31,7 @@ class CoreRuntimeConfigurationTest {
         for (var invalid : Map.of(
                 "max-pending-matching", "0",
                 "lane-completion-spins", "-1",
-                "snapshot-timeout-seconds", "0", "standalone-snapshot-timeout-seconds", "-1",
+                "snapshot-timeout-seconds", "0",
                 "owner-command-window", "65", "owner-input-batch-size", "257").entrySet()) {
             assertThatThrownBy(() -> bind(Map.of("surprising.aeron." + invalid.getKey(), invalid.getValue())))
                     .isInstanceOf(RuntimeException.class);

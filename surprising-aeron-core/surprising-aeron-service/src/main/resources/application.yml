@@ -10,7 +10,6 @@ surprising:
     # 节点执行参数由 CoreRuntimeConfiguration 一次绑定、校验后注入；JVM/环境变量仍按 Spring 优先级覆盖。
     lane-completion-spins: 1024
     max-pending-matching: 4096
-    standalone-snapshot-timeout-seconds: 300
     snapshot-timeout-seconds: 300
     owner-input-batch-size: 64
     owner-command-window: 256

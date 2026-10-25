@@ -107,7 +107,7 @@ YAML、标准环境变量、JVM `-D` 和 Spring 命令行服从 Spring 优先级
 | `surprising.aeron.max-pending-matching` / `lane-completion-spins` / `settlement-spin-limit` | 同上 | `4096` / `1024` / `0`，构造后固定 |
 | `surprising.aeron.matcher-group-size` / `matcher-group-nanos` / `lane-initial-entities` | 同上 | `256` / `10000 ns` / `1024`，必须为有效正值，实体容量至少 16 |
 | `surprising.aeron.funds-index-directory` | 同上 | 默认平台临时目录；资金索引首次 I/O 前已固定根目录，恢复使用同一配置 |
-| `surprising.aeron.snapshot.max-bytes` / `snapshot-timeout-seconds` / `standalone-snapshot-timeout-seconds` | 同上 | `1 GiB` / `300s` / `300s`，部署上限与协议硬上限分开 |
+| `surprising.aeron.snapshot.max-bytes` / `snapshot-timeout-seconds` | 同上 | `1 GiB` / `300s`，部署上限与协议硬上限分开 |
 | `surprising.aeron.decoder-cache-slots` | 同上 | `4096`，启动前校验 |
 | `surprising.realtime.channel` / `control-channel` | `RealtimeConfiguration`，Spring 统一绑定 | 默认空；先配置输出通道，控制通道才会启用 |
 | `surprising.realtime.directory` / `stream` / `control-stream` | 同上 | directory 默认 `CommonContext` 目录，部署时需与目标 Driver 一致；stream 默认 `2101` / `2102` |

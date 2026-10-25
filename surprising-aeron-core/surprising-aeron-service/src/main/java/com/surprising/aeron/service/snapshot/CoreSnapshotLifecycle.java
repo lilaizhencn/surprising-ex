@@ -112,7 +112,7 @@ public final class CoreSnapshotLifecycle {
         owner.assertHealthy();
         // 本次独立快照按固定超时计算的单调时钟截止点。
         long deadlineNanos = Math.addExact(System.nanoTime(), java.util.concurrent.TimeUnit.SECONDS.toNanos(
-                owner.configuration().standaloneSnapshotTimeoutSeconds()));
+                owner.configuration().snapshotTimeoutSeconds()));
         beginSnapshot(snapshotId, deadlineNanos);
         while (true) {
             // 本次轮询已完成的可空分段结果。

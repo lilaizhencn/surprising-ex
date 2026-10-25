@@ -1702,12 +1702,10 @@ class TradingCoreOwnerTest {
      */
     @Test
     void rejectsSnapshotFragmentsBeyondBoundedRecoveryBuffer() {
-        TradingOwnerTestSupport.ensureSnapshotCapacity(SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES - 1, 1);
-
-        assertThatThrownBy(() -> TradingOwnerTestSupport.ensureSnapshotCapacity(
-                SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES - 1, 2))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Aeron core snapshot exceeds maximum size");
+        var buffer = new SectionedCoreSnapshotCodec.RecoveryBuffer(1024);
+        var bytes = new byte[1025];
+        assertThatThrownBy(() -> buffer.accept(new UnsafeBuffer(bytes), 0, bytes.length))
+                .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class);
     }
 
     /**

@@ -3140,15 +3140,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 判断当前线程是否为 Owner，或运行时是否尚未绑定；只返回判断结果，不执行绑定。
-     */
-    public boolean inOwnerThread() {
-        // 当前调用线程，用于核对严格 Owner 或有效账户执行范围
-        Thread current = Thread.currentThread();
-        return owner == current || owner == null;
-    }
-
-    /**
      * 要求账户与账本资源均已关闭，逐个释放 Lane 和财库的所有者，再清运行时 Owner 引用，供被动状态交给另一线程。
      */
     public void releaseOwnerForHandoff() {
@@ -7311,17 +7302,6 @@ appendBalanceFundsDelta(patches, target);
     /** 缺少持仓索引时复用的共享空原始列表，调用方只能在有效范围读取，不能修改。 */
     private static final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList EMPTY_POSITION_KEYS =
             new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(0);
-
-    /**
-     * 把原始长整数列表复制为有序去重集合，供明确的导出读取使用。
-     * @param values 要清理的原始变化集合或要排序复制的长整数列表
-     */
-    static TreeSet<Long> toSortedSet(org.eclipse.collections.impl.list.mutable.primitive.LongArrayList values) {
-        // 从原始长整数列表复制出的有序去重集合
-        TreeSet<Long> sorted = new TreeSet<>();
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < values.size(); index++) sorted.add(values.get(index));
-        return sorted;
-    }
 
     /**
      * 更新客户号到订单及订单到客户号双向索引；客户号改指另一订单时先移除旧反向关系。调用方保证订单号为正，零保留为原始映射缺失值。

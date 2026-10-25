@@ -20,8 +20,6 @@ import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.support.ingress.OwnerIngressRing;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;
-import io.aeron.logbuffer.FragmentHandler;
-import java.util.function.BooleanSupplier;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
@@ -74,8 +72,6 @@ public final class TradingCoreOwner {
     private TradingCoreRuntime state;
     /** 外层交接的角色、复制时间及日志位置，不含网络发送能力。 */
     private OwnerLogContext logContext;
-    /** 保护推进期间的背景工作重入，结束推进后复位。 */
-    private boolean processingLogCallback;
 
     /** 把撮合终态交回当前控制命令的固定回调。 */
     private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler;
@@ -132,7 +128,6 @@ public final class TradingCoreOwner {
     public void start(OwnerLogContext logContext) {
         this.logContext = logContext;
         if (state == null) state = new TradingCoreRuntime(productLine, startupTopology, configuration);
-        processingLogCallback = false;
         commandPipeline.reset();
         log.info("Aeron core role productLine={} role={}", productLine, logContext.role());
         realtimeBoundary.start(logContext.role(), logContext.position(), state);
@@ -211,8 +206,6 @@ public final class TradingCoreOwner {
             }
             if (prefix != 0) {
                 commandPipeline.rememberBlockedIngress(next.command(), prefix);
-                if (!eligible) commandPipeline.recordControlFence();
-                else commandPipeline.recordDependencyFence(retry);
                 if (!commandPipeline.hasCommittingHead() && window.size() != 0) {
                     beginCommandCommit();
                 }
@@ -434,7 +427,7 @@ public final class TradingCoreOwner {
         while (hasCommandIngress() || commandPipeline.hasActiveControl()
                 || commandPipeline.commandWindow().size() != 0) {
             progressCommands();
-            idleCommand(0, deadline);
+            idleCommand(deadline);
         }
     }
 
@@ -477,11 +470,10 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 等待推进时先检查中断和显式截止时间，再调用当前等待策略；失败附带诊断，不把技术超时伪装成业务拒绝。
-     * @param work 上一轮实际工作量，供等待策略决定是否退避
+     * 等待推进时先检查中断和显式截止时间，再调用忙等自旋；失败附带诊断，不把技术超时伪装成业务拒绝。
      * @param deadline 单调纳秒时钟上的等待截止时间
      */
-    private void idleCommand(int work, long deadline) {
+    private void idleCommand(long deadline) {
         if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline) {
             // 这是运行时故障，不是复制的业务拒绝，也不能转换成延迟完成。
             throw new IllegalStateException("cluster log callback completion interrupted or timed out: "
@@ -530,22 +522,17 @@ public final class TradingCoreOwner {
      */
     private SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(
             long snapshotId, long deadlineNanos) {
-        try {
-            processingLogCallback = true;
-            finishSnapshotPrefix(deadlineNanos);
-            state.assertClusterCallbackComplete();
-            state.snapshots.beginSnapshot(snapshotId, deadlineNanos);
-            while (true) {
-                // 已准备好的分块快照，空表示需要继续收集
-                SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = state.snapshots.pollSnapshotSections(
-                        logContext == null ? 0 : logContext.timestamp(),
-                        logContext == null ? 0 : logContext.position(),
-                        System.nanoTime());
-                if (snapshot != null) return snapshot;
-                Thread.onSpinWait();
-            }
-        } finally {
-            processingLogCallback = false;
+        finishSnapshotPrefix(deadlineNanos);
+        state.assertClusterCallbackComplete();
+        state.snapshots.beginSnapshot(snapshotId, deadlineNanos);
+        while (true) {
+            // 已准备好的分块快照，空表示需要继续收集
+            SectionedCoreSnapshotCodec.SectionedSnapshot snapshot = state.snapshots.pollSnapshotSections(
+                    logContext == null ? 0 : logContext.timestamp(),
+                    logContext == null ? 0 : logContext.position(),
+                    System.nanoTime());
+            if (snapshot != null) return snapshot;
+            Thread.onSpinWait();
         }
     }
 
@@ -556,17 +543,6 @@ public final class TradingCoreOwner {
     public void roleChange(Cluster.Role newRole) {
         realtimeBoundary.roleChange(newRole);
         log.info("Aeron core role-change productLine={} role={}", productLine, newRole);
-    }
-
-    /**
-     * 只有当前不在日志推进中、没有待处理条目且实时功能启用时，才处理后台实时读取。
-     * @param nowNs 用于超时和调度观测的当前单调纳秒时间
-     */
-    public int pollBackgroundWork(long nowNs) {
-        if (processingLogCallback || pendingCommandCount() != 0 || !realtimeBoundary.enabled()) {
-            return 0;
-        }
-        return progressRealtimeReads(nowNs);
     }
 
     /**
@@ -596,31 +572,6 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 会话打开时推进已有命令；运行时异常包装为 Agent 终止异常，最终解除日志推进标记。
-     */
-    public void sessionOpened() {
-        processingLogCallback = true;
-        try {
-            progressCommands();
-        } catch (/* 当前读取或推进失败的异常，附带上下文后继续抛出 */ RuntimeException failure) {
-            throw new org.agrona.concurrent.AgentTerminationException(failure);
-        } finally { processingLogCallback = false; }
-    }
-
-    /**
-     * 会话关闭时推进已有日志工作；本方法不使用传入 ID 清理网络会话，网络出口由外层处理。
-     * @param sessionId 响应目标会话 ID；无会话命令使用 NO_SESSION_ID
-     */
-    void sessionClosed(long sessionId) {
-        drainFromLogEvent();
-    }
-
-    /**
-     * 把会话等日志事件统一交给命令推进入口，不维护第二条业务执行路径。
-     */
-    private void drainFromLogEvent() { pollCommands(); }
-
-    /**
      * 只探测现有 Matcher 通知、撮合完成和 Lane 回执；运行时尚未建立时返回假，不在门禁里强制检查尚未激活的资源。
      */
     boolean ownerCompletionAvailable() {
@@ -637,7 +588,6 @@ public final class TradingCoreOwner {
         long before = commandPipeline.commandProgress();
         // 本轮推进前的撮合派发修订号
         long matchingBefore = state.pendingMatching().dispatchRevision();
-        processingLogCallback = true;
         try {
             progressCommands();
             // 本轮空闲阶段处理的实时读取数量
@@ -652,7 +602,6 @@ public final class TradingCoreOwner {
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally {
             retainPendingPreparation();
-            processingLogCallback = false;
         }
     }
 
@@ -666,13 +615,6 @@ public final class TradingCoreOwner {
      */
     public TradingCoreRuntime state() {
         if (state == null) throw new IllegalStateException("clustered service is not started");
-        return state;
-    }
-
-    /**
-     * 返回当前可空运行时，供生命周期和测试区分尚未启动或已释放的状态。
-     */
-    TradingCoreRuntime currentStateOrNull() {
         return state;
     }
 
@@ -692,35 +634,6 @@ public final class TradingCoreOwner {
      */
     public void releaseResponse(CoreResponse response) {
         if (state != null) state.releaseResponse(response);
-    }
-
-    /**
-     * 从分片来源读取到流结束，将字节交给恢复缓冲，完整解码后替换当前运行时；空轮询调用等待策略，本循环没有另设读取超时。
-     * @param snapshotSource 能够轮询快照片段的输入来源
-     * @param endOfStream 判定快照输入已经结束的函数
-     */
-    void loadSnapshot(SnapshotFragmentSource snapshotSource, BooleanSupplier endOfStream) {
-        // 逐片收集并最终解码快照的恢复缓冲
-        SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
-        while (!endOfStream.getAsBoolean()) {
-            // 本轮实际读取的快照片段数
-            int fragments = snapshotSource.poll(
-                    (/* 当前快照片段所在的原输入缓冲 */ buffer, /* 片段在输入缓冲中的起始字节偏移 */ offset, /* 当前片段的有效字节数 */ length, /* 快照片段附带的 Aeron 头，恢复字节收集不读取该值 */ header) -> recovery.accept(buffer, offset, length), 10);
-            if (fragments == 0) Thread.onSpinWait();
-        }
-        replaceState(recovery.decodePassive(productLine, configuration, startupTopology));
-    }
-
-    /**
-     * 检查已有长度和新增片段均非负，且相加不超过 Java 数组上限；用减法检查避免整数相加先溢出。
-     * @param currentLength 缓冲中已有的快照字节数
-     * @param fragmentLength 将要追加的片段字节数
-     */
-    public static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
-        if (currentLength < 0 || fragmentLength < 0
-                || currentLength > SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES - fragmentLength) {
-            throw new IllegalStateException("Aeron core snapshot exceeds maximum size");
-        }
     }
 
     /**
@@ -748,19 +661,6 @@ public final class TradingCoreOwner {
         state.close();
         state = restored;
         realtimeBoundary.rebindState(state);
-    }
-
-    /**
-     * 快照分片读取契约，让恢复入口复用实际分片来源，无须持有 Cluster 或会话。
-     */
-    @FunctionalInterface
-    interface SnapshotFragmentSource {
-        /**
-         * 按片段预算轮询快照来源并调用接收器，返回本轮实际交出的片段数。
-         * @param fragmentHandler 接收每个快照片段的回调
-         * @param fragmentLimit 本轮最多处理的片段数
-         */
-        int poll(FragmentHandler fragmentHandler, int fragmentLimit);
     }
 
     /**

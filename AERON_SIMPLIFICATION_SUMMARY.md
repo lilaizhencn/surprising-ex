@@ -328,7 +328,46 @@
 
 ---
 
-## 8. 累计重构成果统计与系统现状
+## 9. Aeron Core 架构深度精简（拔除内联残留死代码、死字段、空转计数器与配置过度设计）
+
+针对 `surprising-aeron-core` 在单线程内联化及固定模式改造后的深度残留代码进行彻底拔除：
+
+### 9.1 TradingCoreOwner 历史死代码与死字段清除
+1. **清理会话与事件残留死方法**：
+   - 彻底删除零外部引用的 [`sessionOpened()`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java)、[`sessionClosed(long)`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) 与 `drainFromLogEvent()`。
+2. **清理多余的快照中转死方法**：
+   - 彻底删除 `ensureSnapshotCapacity(int, int)`、`loadSnapshot(SnapshotFragmentSource, BooleanSupplier)` 以及其关联的嵌套接口 `SnapshotFragmentSource`；快照恢复统一由 `RecoveryBuffer` 与直接 byte 数组承接。
+3. **拔除死字段与空轮询方法**：
+   - 彻底删除零外部读取的只写死字段 `private BiConsumer<OrderCommand, String> processingLogCallback`。
+   - 彻底删除历史预留的 `pollBackgroundWork(long nowNs)`。
+   - 彻底删除从未使用过的只读方法 `currentStateOrNull()`。
+4. **精简 `idleCommand` 签名**：
+   - 将原形虚设的 `idleCommand(int work, long deadline)` 精简为 `idleCommand(long deadline)`，拔除无意义的 `work` 形参与调用处传参 `0`。
+
+### 9.2 TradingAccountRuntime 孤立死方法清除
+- 物理删除 `TradingAccountRuntime.java` 中全工程零引用的死方法：
+  - `inOwnerThread()`：旧架构跨线程断言残留；
+  - `toSortedSet(LongArrayList)`：死集合转换工具。
+
+### 9.3 OwnerCommandPipelineState 消除 4 个空转计数器
+在固定流水线模式后，原 `OwnerCommandPipelineState.java` 中维护了 4 个纯递增、没有任何业务读取逻辑的 long 计数器。本次彻底清除：
+- 物理删除 `drainedCommands`、`dependencyFences`、`controlFences`、`retryFences` 4 个空转字段；
+- 移除 `beginHeadCommit()`、`recordControlFence()`、`recordDependencyFence()` 等递增方法及 `reset()` 中的重置操作；
+- 移除 `TradingCoreOwner.java` 中门禁阻塞时的无意义计数递增；
+- 简化 `terminationSummary()` 字符串拼装，彻底消除计数器空转与无意义状态维护开销。
+
+### 9.4 AeronTradingClusterService 等待语义与异常文案收敛
+- 纠正 `awaitProgress` 中的异常文案，由旧概念 `"cluster boundary progress timed out"` 统一修正为契合当前架构的 `"cluster command progress timed out"`。
+- 保证 Cluster idle 策略与 spin wait 统一协调。
+
+### 9.5 快照超时配置过度设计收敛
+- 彻底删除 `CoreRuntimeConfiguration.java` 中冗余的 `standaloneSnapshotTimeoutSeconds` 及其校验逻辑，与集群快照超时 `snapshotTimeoutSeconds` 统一合一；
+- 同步清理 `application.yml` 与配置文件测试 `CoreRuntimeConfigurationTest.java`；
+- 更新 `surprising-aeron-core/README.md` 与 `surprising-aeron-service/README.md` 文档。
+
+---
+
+## 10. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -336,6 +375,9 @@
 | **等待策略** | `BUSY_SPIN`, `PARKING`, `YIELDING` 等多策略与 CAS 自适应休眠唤醒 | 固定纯粹 `BUSY_SPIN` 忙等自旋，消除锁与伪共享状态机 |
 | **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
+| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`loadSnapshot` 胶水接口、`pollBackgroundWork` | 物理彻底清除，精简 `idleCommand` 签名 |
+| **流水线空转计数器** | 4 个仅递增从不查询的 long 计数器（`drainedCommands`、`*Fences`） | 连同调用方埋点彻底拔除，消除纯空转开销 |
+| **快照超时配置** | 区分独立快照超时与集群快照超时，多重冗余参数 | 统一收敛为单一 `snapshot-timeout-seconds` |
 | **Feign 接口形式主义** | 声明了 8 个 `@FeignClient` 接口，全工程零装配零调用 | 物理全量删除，消除微服务假架构残留 |
 | **Gateway 孤岛计算** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件，净减少 ~1,000 行纯死代码 |
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |

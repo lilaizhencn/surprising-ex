@@ -89,7 +89,13 @@ public final class TradingOwnerTestSupport implements ClusteredService {
         logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition());
         owner.start(logContext);
         if (snapshotImage != null) {
-            owner.loadSnapshot(snapshotImage::poll, snapshotImage::isEndOfStream);
+            var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.RecoveryBuffer();
+            while (!snapshotImage.isEndOfStream()) {
+                int fragments = snapshotImage.poll(
+                        (buffer, offset, length, header) -> recovery.accept(buffer, offset, length), 10);
+                if (fragments == 0) Thread.onSpinWait();
+            }
+            owner.restoreSnapshot(recovery);
         }
     }
 
@@ -230,7 +236,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      */
     @Override
     public int doBackgroundWork(long nowNs) {
-        return owner.pollBackgroundWork(nowNs);
+        return owner.pollCommands();
     }
 
     /**
@@ -239,8 +245,8 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      */
     @Override
     public void onTerminate(Cluster ignored) {
-        // 终止前保存的原运行时，用来检查是否早已记录致命故障
-        TradingCoreRuntime runtime = owner.currentStateOrNull();
+        TradingCoreRuntime runtime = null;
+        try { runtime = owner.state(); } catch (RuntimeException ignoredFailure) {}
         try { owner.terminate(); }
         catch (/* 关闭真实 Owner 时产生的运行时异常，只有原故障已记录时才抑制 */ RuntimeException failure) {
             if (runtime == null || runtime.fatalFailure == null) throw failure;
@@ -257,7 +263,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      */
     @Override
     public void onSessionOpen(ClientSession session, long timestamp) {
-        owner.sessionOpened();
+        owner.pollCommands();
         egress.drainResponses(owner);
     }
 
@@ -269,7 +275,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      */
     @Override
     public void onSessionClose(ClientSession session, long timestamp, CloseReason reason) {
-        if (session != null) { egress.closeSession(session); owner.sessionClosed(session.id()); }
+        if (session != null) { egress.closeSession(session); owner.pollCommands(); }
     }
 
     /**
@@ -356,16 +362,12 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      * @param endOfStream 判断输入已经结束的函数
      */
     public void loadSnapshot(SnapshotFragmentSource source, BooleanSupplier endOfStream) {
-        owner.loadSnapshot(source::poll, endOfStream);
-    }
-
-    /**
-     * 复用生产快照长度检查，覆盖负长度和整型溢出边界。
-     * @param currentLength 当前快照缓冲字节数
-     * @param fragmentLength 将要追加的快照片段字节数
-     */
-    public static void ensureSnapshotCapacity(int currentLength, int fragmentLength) {
-        TradingCoreOwner.ensureSnapshotCapacity(currentLength, fragmentLength);
+        var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.RecoveryBuffer();
+        while (!endOfStream.getAsBoolean()) {
+            int fragments = source.poll((buffer, offset, length, header) -> recovery.accept(buffer, offset, length), 10);
+            if (fragments == 0) Thread.onSpinWait();
+        }
+        owner.restoreSnapshot(recovery);
     }
 
     /**

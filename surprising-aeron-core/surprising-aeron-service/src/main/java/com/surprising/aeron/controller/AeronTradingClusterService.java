@@ -520,12 +520,12 @@ public final class AeronTradingClusterService implements ClusteredService {
     }
 
     /**
-     * 等待时检查故障、中断和截止时间，推进命令并持续排出响应，使用 Cluster 等待策略退避。
+     * 等待时检查故障、中断和截止时间，推进命令并持续排出响应，使用自旋等待。
      */
     private void awaitProgress(long deadline) {
         checkFailure();
         if (Thread.currentThread().isInterrupted() || System.nanoTime() > deadline) {
-            throw new AgentTerminationException("trading owner boundary or deadline");
+            throw new AgentTerminationException("cluster command progress timed out");
         }
         if (started) {
             pollCommands();
@@ -533,9 +533,9 @@ public final class AeronTradingClusterService implements ClusteredService {
         egress.drainResponses(coreOwner);
         if (cluster != null && cluster.idleStrategy() != null) {
             cluster.idleStrategy().idle();
-        } else {
-            Thread.onSpinWait();
+            return;
         }
+        Thread.onSpinWait();
     }
 
     /**

@@ -464,18 +464,10 @@ public class ClusteredBatchTradingBenchmark {
             makerBaseBalance = 1L + 256L * batchSize;
             service = new TradingCoreOwner(productLine, this::publishResponse);
             snapshotRequests = service.snapshotRequests();
-            // Aeron invokes background callbacks while its service idle strategy is running.
-            // Define that path here too; performance execution remains on the real cluster.
-            var serviceIdle = new org.agrona.concurrent.IdleStrategy() {
-                public void idle(int work) { if (realtime) service.pollBackgroundWork(System.nanoTime()); }
-                public void idle() { idle(0); }
-                public void reset() { }
-                public String alias() { return "realtime-reentrant"; }
-            };
             Cluster cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(),
                     new Class<?>[]{Cluster.class}, (proxy, method, args) -> switch (method.getName()) {
                         case "role" -> Cluster.Role.LEADER;
-                        case "idleStrategy" -> realtime ? serviceIdle : NoOpIdleStrategy.INSTANCE;
+                        case "idleStrategy" -> NoOpIdleStrategy.INSTANCE;
                         case "timeUnit" -> TimeUnit.MILLISECONDS;
                         case "scheduleTimer" -> true;
                         case "time", "logPosition" -> 1_700_000_000_000L;
@@ -533,7 +525,7 @@ public class ClusteredBatchTradingBenchmark {
                         }
                         default -> defaultValue(method.getReturnType());
                     });
-            service.sessionOpened();
+            service.pollCommands();
             ContractType type=ContractType.valueOf(productLine.contractTypeCode());
             settleAsset=type.isInverse()?"BTC":"USDT";
             pipelineSymbolB = "12";
@@ -918,7 +910,7 @@ public class ClusteredBatchTradingBenchmark {
                 if (fullWindowBoundary) {
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                     while (service.pendingCommandCount() != 0) {
-                        service.sessionOpened();
+                        service.pollCommands();
                         if (System.nanoTime() > deadline)
                             throw new IllegalStateException("full window waited for another timer");
                         Thread.onSpinWait();

@@ -372,7 +372,6 @@ flowchart TD
 | `surprising.aeron.snapshot-timeout-seconds` | 快照及内部完成前缀的预算默认 300 秒，必须为正 |
 | `surprising.aeron.max-pending-matching` | 在途撮合上限默认 4096，与 Matcher 窗口取较小值 |
 | `surprising.aeron.lane-completion-spins` | 同步 Lane 完成等待的自旋预算默认 1024，不允许负值 |
-| `surprising.aeron.standalone-snapshot-timeout-seconds` | 独立快照等待预算默认 300 秒，必须为正 |
 | `surprising.aeron.owner-command-window / decoder-cache-slots` | 固定响应窗口与复用解码容量，启动前校验，不在类初始化时固定 |
 | `surprising.aeron.matcher-group-size / matcher-group-nanos` | 原生同步 Matcher batching，默认 256 / 10000 ns |
 | `surprising.aeron.lane-initial-entities / funds-index-directory` | 每 Lane 实体表初始容量与资金索引根目录，在分配/开库前固定 |

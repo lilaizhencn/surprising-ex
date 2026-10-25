@@ -11,7 +11,6 @@ import org.springframework.core.env.StandardEnvironment;
 public record CoreRuntimeConfiguration(
         @DefaultValue("1024") int laneCompletionSpins,
         @DefaultValue("4096") int maxPendingMatching,
-        @DefaultValue("300") int standaloneSnapshotTimeoutSeconds,
         @DefaultValue("300") int snapshotTimeoutSeconds,
         @DefaultValue("64") int ownerInputBatchSize,
         @DefaultValue("256") int ownerCommandWindow,
@@ -25,7 +24,6 @@ public record CoreRuntimeConfiguration(
     public CoreRuntimeConfiguration {
         requireRange("lane-completion-spins", laneCompletionSpins, 0, Integer.MAX_VALUE);
         requireRange("max-pending-matching", maxPendingMatching, 1, 1 << 20);
-        requireRange("standalone-snapshot-timeout-seconds", standaloneSnapshotTimeoutSeconds, 1, 1800);
         requireRange("snapshot-timeout-seconds", snapshotTimeoutSeconds, 1, 1800);
         requireRange("owner-input-batch-size", ownerInputBatchSize, 1, 256);
         requireRange("owner-command-window", ownerCommandWindow, 64, 4096);
