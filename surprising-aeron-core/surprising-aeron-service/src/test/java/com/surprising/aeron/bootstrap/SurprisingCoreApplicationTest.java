@@ -29,7 +29,6 @@ class SurprisingCoreApplicationTest {
             assertThat(context.getBeansOfType(CoreConfiguration.class)).hasSize(1);
             assertThat(context.getBeansOfType(AeronTradingClusterService.class)).hasSize(1);
             assertThat(context.getBeansOfType(AeronCoreLifecycle.class)).hasSize(1);
-            assertThat(context.getBeansOfType(TradingOwnerLoop.class)).hasSize(1);
             assertThat(context.getBeansOfType(ClusterServiceEgress.class)).hasSize(1);
             assertThat(context.getBean(ClusterTopology.class).productLine()).isEqualTo(product);
             assertThat(context.getBean(LaneTopology.class).accountLaneCount()).isEqualTo(4);

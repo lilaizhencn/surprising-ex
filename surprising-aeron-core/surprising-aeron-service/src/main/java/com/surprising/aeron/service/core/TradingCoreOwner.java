@@ -32,7 +32,7 @@ import static com.surprising.aeron.support.egress.ClusterServiceEgress.NO_SESSIO
 /**
  * 启动步骤 8、交易步骤 1 和 5：在 Owner 线程推进复制命令，并把完成结果交给响应出口。
  * 持有当前产品线运行时和命令生命周期，使用有界命令窗口流水推进。
- * Cluster 会话和网络发送由 controller 承担，线程启动由 bootstrap.TradingOwnerLoop 承担。
+ * Cluster 会话和网络发送由 controller 承担，生命周期由 controller.AeronTradingClusterService 内联驱动。
  * 公开的恢复、快照、角色切换和完成通知装配方法供启动层在 Owner 线程调用，不能据此跨线程访问状态。
  */
 @Slf4j

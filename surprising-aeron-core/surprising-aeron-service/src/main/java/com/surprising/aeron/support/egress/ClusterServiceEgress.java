@@ -26,67 +26,34 @@ public final class ClusterServiceEgress {
     public static final long NO_SESSION_ID = -1L;
     /** 清空临时包装器或尚未分配发送缓冲时共用的空字节数组。 */
     private static final byte[] EMPTY = new byte[0];
-    /** Owner 到回调线程最多保留十六 MiB 编码长度预算。 */
-    private static final long OUTPUT_BYTES = 16L * 1024 * 1024;
-    /** 输出环固定八千一百九十二个槽。 */
-    private static final int OUTPUT_SLOTS = 8192;
+    /** 单条响应允许编码的最大载荷（十六 MiB 预算）。 */
+    private static final int MAX_RESPONSE_PAYLOAD = 16 * 1024 * 1024;
+    /** 输出环固定两千零四十八个槽。 */
+    private static final int OUTPUT_SLOTS = 2048;
     /** 输出环二次幂下标掩码。 */
     private static final int OUTPUT_MASK = OUTPUT_SLOTS - 1;
-    /** 累计清完六十四 KiB 编码内容时公布消费进度。 */
-    private static final long BATCH_OUTPUT_CONSUMED_BYTES_THRESHOLD = 64 * 1024;
-    /** 累计清完六十四个输出槽时公布消费进度。 */
-    private static final int BATCH_OUTPUT_CONSUMED_SLOTS_THRESHOLD = 64;
 
-    /** 预分配的 Owner 到回调侧响应交接槽。 */
+    /** 预分配的响应交接槽。 */
     private final Output[] outputs = new Output[OUTPUT_SLOTS];
-    /** 编码后遇背压的会话 FIFO，只由回调线程访问。 */
+    /** 编码后遇背压的会话 FIFO。 */
     private final DeferredSessionResponses deferred = new DeferredSessionResponses();
-    /** 回调线程编码和首次发送时复用的发送缓冲视图。 */
+    /** 编码和首次发送时复用的发送缓冲视图。 */
     private final UnsafeBuffer sendBuffer = new UnsafeBuffer(new byte[0]);
-    /** 回调侧复用编码数组，容量不足才扩容。 */
+    /** 复用编码数组，容量不足才扩容。 */
     private byte[] sendScratch = EMPTY;
-    /** 回调线程按纯会话 ID 管理的传输句柄表。 */
+    /** 按纯会话 ID 管理的传输句柄表。 */
     private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<TransportSession>
             sessions = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     /** 实际或测试会话发送器的创建边界。 */
     private final EgressFactory egressFactory;
-    /** 回调侧持有的 Cluster 句柄，Owner 不直接调用。 */
+    /** 当前持有的 Cluster 句柄。 */
     private Cluster cluster;
-    /** 回调侧存在实际会话关闭请求的遍历提示。 */
+    /** 存在实际会话关闭请求的遍历提示。 */
     private boolean closeRequests;
 
-    /**
-     * 生产进度前的显式填充基类，不存放业务状态。
-     */
-    /**
-     * 合并输出环生产、消费进度的实际存储对象。
-     */
-    private static final class PaddedEgressOffsets {
-        /** Owner 填完槽后发布的累计条数。 */
-        protected volatile long outputProducedCount;
-        /** 仅 Owner 修改的累计输出编码字节。 */
-        protected long outputProducedBytes;
-        /** Owner 缓存的已公布消费条数，容量不足时刷新。 */
-        protected long cachedOutputConsumedCount;
-        /** Owner 缓存的已公布消费字节，容量不足时刷新。 */
-        protected long cachedOutputConsumedBytes;
-
-        /** 回调线程批量公布的累计消费条数。 */
-        protected volatile long outputConsumedCount;
-        /** 回调线程批量公布的累计消费编码字节。 */
-        protected volatile long outputConsumedBytes;
-        /** 回调线程缓存的生产前缀，消费完再刷新。 */
-        protected long cachedOutputProducedCount;
-        /** 回调线程本地已取走的累计条数。 */
-        protected long localConsumedCount;
-        /** 已清槽但尚未公布给 Owner 的编码字节增量。 */
-        protected long uncommittedConsumedBytes;
-        /** 已清槽但尚未公布给 Owner 的条数增量。 */
-        protected int uncommittedConsumedSlots;
-    }
-
-    /** 输出生产与消费两侧的进度存储，按各自线程修改。 */
-    private final PaddedEgressOffsets egressOffsets = new PaddedEgressOffsets();
+    /** 单线程生产与消费游标。 */
+    private long producedCount;
+    private long consumedCount;
     /** 出口当前角色代次，旧代响应在排出时丢弃。 */
     private long epoch;
     /** 实际 Aeron 会话头使用的领导任期 ID。 */
@@ -211,23 +178,8 @@ public final class ClusterServiceEgress {
         leadershipTermId = termId;
     }
 
-    /** Owner 异常路径发布、回调侧消费的去重会话关闭请求集合。 */
-    private final java.util.Set<Long> overflowSessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
-    /** 跨线程可见的溢出关闭请求提示，集合内容仍是待处理来源。 */
-    private volatile boolean hasOverflowSessions;
-
     /**
-     * 在异常出口路径登记去重的会话关闭请求，并发布可见提示；无会话响应不登记，实际会话关闭仍由回调线程处理。
-     * @param sessionId 目标会话 ID，无会话为 NO_SESSION_ID
-     */
-    private void handleSessionOverflow(long sessionId) {
-        if (sessionId != NO_SESSION_ID && overflowSessions.add(sessionId)) {
-            hasOverflowSessions = true;
-        }
-    }
-
-    /**
-     * Owner 先核算编码长度及输出容量，必要时刷新消费进度；仍无空间就请求关闭目标会话并归还响应。可入队时先保留 Header 租约、填槽，再发布生产游标，不在 Owner 发送网络。
+     * 单线程内核直发模式：检查角色与容量后填入输出槽，若输出槽满先就地排空一轮再填入，无需多线程屏障。
      * @param processor 对应 Core Owner，排出或丢弃时通过它归还响应
      * @param sessionId 目标会话 ID，无会话为 NO_SESSION_ID
      * @param header 需要保持 egress 租约到编码结束的响应头
@@ -237,79 +189,50 @@ public final class ClusterServiceEgress {
      */
     public void publishResponse(TradingCoreOwner processor, long sessionId, CoreMessageHeader header, CoreResponse response,
                          long committedSequence, long ownerEpoch) {
-        // 当前响应预计完整编码字节数
+        if (cluster == null || cluster.role() != Cluster.Role.LEADER) {
+            if (processor != null) processor.releaseResponse(response);
+            return;
+        }
         int length = CoreMessageCodec.encodedResponseLength(header, response);
-        // Owner 入队前累计发布条数
-        long currentCount = egressOffsets.outputProducedCount;
-        // 本条入队成功后要发布的累计条数
-        long nextCount = currentCount + 1L;
-        // 本条入队成功后的累计编码字节数
-        long nextBytes = egressOffsets.outputProducedBytes + length;
-        if (nextCount - egressOffsets.cachedOutputConsumedCount > OUTPUT_SLOTS
-                || nextBytes - egressOffsets.cachedOutputConsumedBytes > OUTPUT_BYTES) {
-            egressOffsets.cachedOutputConsumedCount = egressOffsets.outputConsumedCount;
-            egressOffsets.cachedOutputConsumedBytes = egressOffsets.outputConsumedBytes;
-            if (nextCount - egressOffsets.cachedOutputConsumedCount > OUTPUT_SLOTS
-                    || nextBytes - egressOffsets.cachedOutputConsumedBytes > OUTPUT_BYTES) {
-                handleSessionOverflow(sessionId);
-                processor.releaseResponse(response);
+        if (length > MAX_RESPONSE_PAYLOAD) {
+            TransportSession session = sessions.get(sessionId);
+            if (session != null) session.close();
+            if (processor != null) processor.releaseResponse(response);
+            return;
+        }
+        long currentCount = producedCount;
+        if (currentCount - consumedCount >= OUTPUT_SLOTS) {
+            drainOutputs(processor, 256);
+            if (currentCount - consumedCount >= OUTPUT_SLOTS) {
+                if (processor != null) processor.releaseResponse(response);
                 return;
             }
         }
-        // Owner 当前可写的输出环槽
         Output slot = outputs[(int) currentCount & OUTPUT_MASK];
         header.retainForEgress();
         slot.prepare(processor, sessionId, header, response, committedSequence, length, ownerEpoch);
-        egressOffsets.outputProducedBytes = nextBytes;
-        egressOffsets.outputProducedCount = nextCount;
+        producedCount = currentCount + 1L;
     }
 
     /**
-     * 回调线程先处理溢出关闭请求，再最多取当前可见前缀中的 256 条输出；只编码当前代次的 Leader 有效会话响应。发送或丢弃都归还响应及 Header，批量公布容量后再公平重试慢会话。
+     * 单线程直发与慢会话轮询：顺序编码并发送就绪响应，再轮询 deferred 队列推进慢会话。
      * @param processor 对应 Core Owner，排出或丢弃时通过它归还响应
      */
     public int drainResponses(TradingCoreOwner processor) {
-        // 回调线程本轮消费游标
-        long consumed = egressOffsets.localConsumedCount;
-        // 本轮观察到的已发布响应前缀
-        long produced = egressOffsets.cachedOutputProducedCount;
-        if (consumed == produced) {
-            produced = egressOffsets.outputProducedCount;
-            egressOffsets.cachedOutputProducedCount = produced;
-            if (consumed == produced && deferred.size() == 0 && !hasOverflowSessions) {
-                return 0;
-            }
-        }
-        // 本轮取走的输出条数，丢弃也计入工作量
+        int work = drainOutputs(processor, 256);
+        return work + (deferred.size() == 0 ? 0 : deferred.poll(System.nanoTime(), 256));
+    }
+
+    private int drainOutputs(TradingCoreOwner processor, int limit) {
+        long consumed = consumedCount;
+        long produced = producedCount;
         int work = 0;
-        if (hasOverflowSessions) {
-            hasOverflowSessions = false;
-            // 并发关闭请求集合的弱一致迭代器，只移除已处理 ID
-            var iterator = overflowSessions.iterator();
-            while (iterator.hasNext()) {
-                // 本轮取出的一个溢出会话 ID
-                long sid = iterator.next();
-                // 回调线程正在处理的具体传输会话
-                TransportSession session = sessions.get(sid);
-                if (session != null) {
-                    session.close();
-                }
-                deferred.remove(sid);
-                // 只移除已经处理的会话 ID，保留 Owner 并发加入的其他关闭请求。
-                // 同一 ID 的重复请求无需再做一次处理，对应会话已经被标记关闭。
-                iterator.remove();
-            }
-        }
-        for (; work < 256 && consumed != produced; work++) {
-            // 当前借出的输出槽，清空并公布消费进度后可被 Owner 复用
+        for (; work < limit && consumed != produced; work++) {
             Output next = outputs[(int) consumed & OUTPUT_MASK];
             consumed++;
-            egressOffsets.localConsumedCount = consumed;
-            egressOffsets.uncommittedConsumedBytes += next.length;
-            egressOffsets.uncommittedConsumedSlots++;
+            consumedCount = consumed;
             try {
-                if (next.epoch != epoch || cluster.role() != Cluster.Role.LEADER) continue;
-                // 回调线程正在处理的具体传输会话
+                if (next.epoch != epoch || cluster == null || cluster.role() != Cluster.Role.LEADER) continue;
                 TransportSession session = sessions.get(next.sessionId);
                 if (session == null || session.isClosing()) continue;
                 if (sendScratch.length < next.length) {
@@ -319,59 +242,35 @@ public final class ClusterServiceEgress {
                 CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
                 deferred.offer(session, sendBuffer, next.length);
             } finally {
-                try { processor.releaseResponse(next.response); }
-                finally {
-                    next.header.releaseFromEgress();
+                try {
+                    if (next.processor != null) next.processor.releaseResponse(next.response);
+                } finally {
+                    if (next.header != null) next.header.releaseFromEgress();
                     next.clear();
                 }
             }
         }
-        if (egressOffsets.uncommittedConsumedBytes >= BATCH_OUTPUT_CONSUMED_BYTES_THRESHOLD
-                || egressOffsets.uncommittedConsumedSlots >= BATCH_OUTPUT_CONSUMED_SLOTS_THRESHOLD
-                || consumed == produced) {
-            commitConsumedBytes();
-        }
-        return work + (deferred.size() == 0 ? 0 : deferred.poll(System.nanoTime(), 256));
+        return work;
     }
 
     /**
-     * 一次公布本地已清槽的条数和编码字节数，再清累计增量，让 Owner 可以安全复用容量。
-     */
-    private void commitConsumedBytes() {
-        if (egressOffsets.uncommittedConsumedSlots > 0 || egressOffsets.uncommittedConsumedBytes > 0) {
-            egressOffsets.outputConsumedBytes += egressOffsets.uncommittedConsumedBytes;
-            egressOffsets.outputConsumedCount = egressOffsets.localConsumedCount;
-            egressOffsets.uncommittedConsumedBytes = 0;
-            egressOffsets.uncommittedConsumedSlots = 0;
-        }
-    }
-
-    /**
-     * 在生命周期清理边界逐槽归还响应与 Header，公布消费进度，清掉背压及溢出记录，断开全部会话通道；不重置所有累计游标或 Cluster 引用。
+     * 在生命周期清理边界逐槽归还响应与 Header，清掉背压记录，断开全部会话通道。
      */
     public void clear() {
-        // 回调线程本轮消费游标
-        long consumed = egressOffsets.localConsumedCount;
-        // 本轮观察到的已发布响应前缀
-        long produced = egressOffsets.outputProducedCount;
-        egressOffsets.cachedOutputProducedCount = produced;
+        long consumed = consumedCount;
+        long produced = producedCount;
         while (consumed != produced) {
-            // 当前借出的输出槽，清空并公布消费进度后可被 Owner 复用
             Output next = outputs[(int) consumed & OUTPUT_MASK];
             consumed++;
-            egressOffsets.localConsumedCount = consumed;
-            egressOffsets.uncommittedConsumedBytes += next.length;
-            egressOffsets.uncommittedConsumedSlots++;
-            try { next.processor.releaseResponse(next.response); }
-            finally {
-                next.header.releaseFromEgress();
+            consumedCount = consumed;
+            try {
+                if (next.processor != null) next.processor.releaseResponse(next.response);
+            } finally {
+                if (next.header != null) next.header.releaseFromEgress();
                 next.clear();
             }
         }
-        commitConsumedBytes();
         deferred.clear();
-        hasOverflowSessions = false;
-        overflowSessions.clear();
         sessions.forEachValue(TransportSession::disconnect);
         sessions.clear();
     }

@@ -135,14 +135,14 @@ class TradingCpuAffinityTest {
                 });
         // 使用真实响应出口，与 Owner 共用同一组会话与角色状态。
         var egress = new com.surprising.aeron.support.egress.ClusterServiceEgress();
-        // 启动真实 Owner 循环，检查 CPU 配置进入工作线程启动边界后仍然正确。
-        var loop = new com.surprising.aeron.bootstrap.TradingOwnerLoop(
+        // 启动真实服务，检查 CPU 配置进入工作线程启动边界后仍然正确。
+        var service = new com.surprising.aeron.controller.AeronTradingClusterService(
                 com.surprising.product.api.ProductLine.SPOT, egress, configuration);
         egress.start(cluster);
         try {
-            loop.start(cluster, null);
-            loop.checkFailure();
-        } finally { loop.terminate(); egress.clear(); }
+            service.onStart(cluster, null);
+            service.checkFailure();
+        } finally { service.onTerminate(cluster); egress.clear(); }
     }
 
     /** Linux 上逐个绑定四种角色，并检查关闭凭据后是否准确恢复原先允许的 CPU 集合。 */

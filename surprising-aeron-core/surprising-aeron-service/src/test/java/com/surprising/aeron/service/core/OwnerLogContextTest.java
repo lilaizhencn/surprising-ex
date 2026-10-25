@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.bootstrap.TradingOwnerLoop;
+import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
@@ -13,11 +13,11 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 覆盖六产品线的真实 OwnerLoop：Owner 只能使用复制进来的日志元数据，不能从业务线程调用 Cluster；动作边界后按输入顺序观察最新值。
+ * 覆盖六产品线的真实 AeronTradingClusterService：Owner 只能使用复制进来的日志元数据，不能从业务线程调用 Cluster；动作边界后按输入顺序观察最新值。
  */
 class OwnerLogContextTest {
     /**
-     * 把 Cluster 代理限制为仅回调线程可用；启动真实 Owner，依序交入两条命令，再通过角色切换边界等待，断言 Owner 保存最后的业务时间、位置和新角色。
+     * 把 Cluster 代理限制为仅回调线程可用；启动真实服务，依序交入两条命令，再通过角色切换边界等待，断言保存最后的业务时间、位置和新角色。
      * @param product 当前参数化产品线
      */
     @ParameterizedTest @EnumSource(ProductLine.class)
@@ -38,28 +38,25 @@ class OwnerLogContextTest {
                         default -> throw new AssertionError("unexpected Cluster API " + method.getName());
                     };
                 });
-        // 与真实 OwnerLoop 配套的响应出口，最终清理
+        // 与真实服务配套的响应出口，最终清理
         var egress = new ClusterServiceEgress();
         egress.start(cluster);
-        // 创建实际 Owner 线程的生产循环对象
-        var loop = new TradingOwnerLoop(product, egress);
+        // 创建实际服务的生产对象
+        var service = new AeronTradingClusterService(product, egress);
         try {
-            loop.start(cluster, null);
-            loop.enqueue(probe(product, 1), ClusterServiceEgress.NO_SESSION_ID, 70, 700, null);
-            loop.enqueue(probe(product, 2), ClusterServiceEgress.NO_SESSION_ID, 80, 800, null);
-            // 使用既有控制动作边界等待前面输入完成，再读取 Owner 已交出的上下文。
-            loop.onRoleChange(Cluster.Role.FOLLOWER, 1);
-            // 反射读取 Owner 日志上下文的私有字段
-            var field = TradingOwnerLoop.class.getDeclaredField("logContext");
-            field.setAccessible(true);
-            // 动作边界完成后读到的纯日志元数据对象
-            var context = (OwnerLogContext) field.get(loop);
+            service.onStart(cluster, null);
+            service.enqueue(probe(product, 1), ClusterServiceEgress.NO_SESSION_ID, 70, 700, null);
+            service.enqueue(probe(product, 2), ClusterServiceEgress.NO_SESSION_ID, 80, 800, null);
+            // 使用既有控制动作边界等待前面输入完成，再读取已交出的上下文。
+            service.onRoleChange(Cluster.Role.FOLLOWER);
+            // 读取日志上下文
+            var context = service.logContext();
             assertThat(Cluster.class.isAssignableFrom(context.getClass())).isFalse();
             assertThat(context.role()).isEqualTo(Cluster.Role.FOLLOWER);
             assertThat(context.timestamp()).isEqualTo(80);
             assertThat(context.position()).isEqualTo(800);
-            loop.checkFailure();
-        } finally { loop.terminate(); egress.clear(); }
+            service.checkFailure();
+        } finally { service.onTerminate(cluster); egress.clear(); }
     }
 
     /**

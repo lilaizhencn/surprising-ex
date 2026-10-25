@@ -24,7 +24,7 @@ flowchart LR
     C --> AC[Aeron Cluster: 复制并排序]
     AC --> S[AeronTradingClusterService]
     S --> I[OwnerIngressRing]
-    I --> O[TradingOwnerLoop / TradingCoreOwner]
+    I --> O[TradingCoreOwner]
     O --> R[TradingCoreRuntime: 校验与业务路由]
     R --> T[service.order: 准入与撮合编排]
     T --> M[matcher / matching: 订单簿与证据]
@@ -52,7 +52,7 @@ sequenceDiagram
     participant Life as bootstrap.AeronCoreLifecycle
     participant Aeron as Driver / Archive / Consensus
     participant Service as AeronTradingClusterService
-    participant Owner as TradingOwnerLoop
+    participant Owner as TradingCoreOwner
     participant Runtime as TradingCoreRuntime
     Main->>Spring: 1. 非 Web 启动，加载配置并扫描组件
     Spring->>Spring: 2. 绑定 surprising.aeron，创建 ClusterTopology / LaneTopology / CPU 配置
@@ -74,7 +74,7 @@ sequenceDiagram
 | 2 | [`CoreConfiguration`](surprising-aeron-service/src/main/java/com/surprising/aeron/config/CoreConfiguration.java)：绑定配置、校验必填产品线，创建 `ClusterTopology`、`LaneTopology` 和 `TradingCpuAffinity` |
 | 3–5 | [`AeronCoreLifecycle.startAndAwaitShutdown`](surprising-aeron-service/src/main/java/com/surprising/aeron/bootstrap/AeronCoreLifecycle.java)：配置并启动 Driver/Archive/Consensus，再启动 Service Container；资源由 try-with-resources 逆序关闭 |
 | 6 | [`AeronTradingClusterService.onStart`](surprising-aeron-service/src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java)：重置解码槽、启动响应出口、读取快照后启动 Owner |
-| 7–8 | [`TradingOwnerLoop.start`](surprising-aeron-service/src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java)：在 Owner 线程执行 `TradingCoreOwner.start`、恢复和激活；回调线程不直接修改账户 |
+| 7–8 | [`AeronTradingClusterService.onStart`](surprising-aeron-service/src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java)：在服务线程内联执行 `TradingCoreOwner.start`、恢复和激活；回调线程不直接修改账户 |
 | 8–9 | [`TradingCoreRuntime`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java)：恢复状态、幂等结果、来源序号、索引和路由，随后 `activate`；Matcher/Account Lane 激活后启动 System Ledger |
 
 首次启动不会从业务数据库自动加载币对、余额和标记价。这些业务事实经 `REGISTER_INSTRUMENT`、余额/划转、`APPLY_MARK_PRICE` 等命令进入复制日志；重启从快照和日志恢复。
@@ -141,7 +141,7 @@ java --enable-native-access=ALL-UNNAMED \
 | --- | --- | --- |
 | 主线程 | `SurprisingCoreApplication` → `AeronCoreLifecycle` | 装配资源并等待关闭，不执行交易 |
 | Driver / Archive / Consensus agents | `ClusteredMediaDriver.launch` | 网络、录制、复制、选主；Archive 使用 `SHARED` 模式，与 Driver 配置分开 |
-| Cluster Service agent | `ClusteredServiceContainer.launch` → `AeronTradingClusterService` | 内联推进 `TradingOwnerLoop` 与 `TradingCoreOwner`；Session、解码槽、命令生命周期、回包与快照；不再启动独立 Owner 线程 |
+| Cluster Service agent | `ClusteredServiceContainer.launch` → `AeronTradingClusterService` | 内联推进 `TradingCoreOwner`；Session、解码槽、命令生命周期、回包与快照；彻底消除独立 Owner 线程与中间转发层 |
 | `core-matcher-<id>`，仅 PIPELINED | `MatcherPipelineGroup.start` → `MatcherCommandPipeline.start` | 分片订单簿与 Matcher 序号；接收确定性输入，发布撮合证据/结算事件 |
 | `core-account-lane-<id>`，仅 PIPELINED | `TradingAccountRuntime` → `AccountLaneLifecycle.start` → `SettlementLaneWorker` | 按 userId 路由的余额、冻结、持仓、订单和风险；同用户跨币对全仓状态在同一 Lane |
 | `core-system-ledger-lane`，两种模式均有 | `TradingAccountRuntime` → `AccountLaneLifecycle.startLedger` → `SystemLedgerLane` | 系统资金、Treasury 与持久化资金索引；完成回执参与业务完成条件 |
@@ -192,7 +192,7 @@ sequenceDiagram
 
 | 步骤 | 关键类 / 方法 | 阅读重点 |
 | --- | --- | --- |
-| 1 | `AeronTradingClusterService.onSessionMessage` → `CoreMessageFlyweightDecoder` → `TradingOwnerLoop.enqueue` → `TradingCoreOwner` → `TradingCoreRuntime.apply` | 帧租约、sessionId、指纹、来源序号、重复命令；非法帧进入 Owner 前丢弃 |
+| 1 | `AeronTradingClusterService.onSessionMessage` → `CoreMessageFlyweightDecoder` → `TradingCoreOwner` → `TradingCoreRuntime.apply` | 帧租约、sessionId、指纹、来源序号、重复命令；非法帧进入 Owner 前丢弃 |
 | 2 | [`MatchingCommandAdmission.beginMatching / prepareMatching`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java) | 命令身份、生命周期冲突、在途槽位与拒绝结果 |
 | 2 | [`CoreOrderDecisionResolver`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java)、[`RuntimeOrderAdmission`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java)、`PlaceAdmissionEvent` | 币对/订单规则、价格保护、费率、余额、杠杆/保证金、平仓容量、客户端订单号与预留；`RuntimeOrderStateTransitions` 创建订单/冻结 |
 | 3 | [`CoreMatchingFlow.submitMatching`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java)、`CommandSlot`、`PendingMatchingRing` | 固定路由、准入门闩、池化对象生命周期；`MatchingPipelineProgress` 推进可继续命令 |
@@ -363,7 +363,7 @@ sequenceDiagram
     A->>O: 9. 回放快照后日志，接续在线流量
 ```
 
-入口：`AeronTradingClusterService.onTakeSnapshot / readSnapshot` → `TradingOwnerLoop.captureSnapshotSections / start` → [`CoreSnapshotLifecycle`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/CoreSnapshotLifecycle.java)、`SectionedCoreSnapshotWriter`、`SectionedCoreSnapshotRecovery`、`SectionedCoreSnapshotValidation`；业务编码在 `service.snapshot.state`，Matcher 编码在 `service.matcher.MatcherSnapshotCodec`。
+入口：`AeronTradingClusterService.onTakeSnapshot / readSnapshot` → `TradingCoreOwner.captureSnapshotSections / start` → [`CoreSnapshotLifecycle`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/CoreSnapshotLifecycle.java)、`SectionedCoreSnapshotWriter`、`SectionedCoreSnapshotRecovery`、`SectionedCoreSnapshotValidation`；业务编码在 `service.snapshot.state`，Matcher 编码在 `service.matcher.MatcherSnapshotCodec`。
 
 一起恢复业务状态、账户 Lane、订单簿/Matcher 序号、资金/Treasury、命令指纹/终态、来源序号、路由拓扑、风险/触发/资金费/生命周期游标及终态保留信息，不能只恢复订单簿或余额。
 
@@ -378,7 +378,7 @@ sequenceDiagram
 | --- | --- | --- |
 | 启动 1：配置 | `config` | `CoreConfiguration`、`ClusterTopology`、`LaneTopology`、`TradingCpuAffinity` |
 | 启动 2：资源生命周期 | `bootstrap`、`bootstrap.account`、`bootstrap.matcher` | `SurprisingCoreApplication`、`AeronCoreLifecycle`、Owner / Lane / Matcher 线程 |
-| 交易 1：输入与 Owner | `controller`、`support.ingress`、`bootstrap`、`service.core` | `AeronTradingClusterService`、`OwnerIngressRing`、`TradingOwnerLoop`、`TradingCoreOwner`、`TradingCoreRuntime` |
+| 交易 1：输入与 Owner | `controller`、`support.ingress`、`service.core` | `AeronTradingClusterService`、`OwnerIngressRing`、`TradingCoreOwner`、`TradingCoreRuntime` |
 | 交易 2：业务准入 | `service.order`、`service.order.admission` | `MatchingCommandAdmission`、`CoreOrderDecisionResolver`、`RuntimeOrderAdmission` |
 | 交易 3：撮合交接 | `service.order`、`service.matcher.pipeline`、`service.matcher` | `CoreMatchingFlow`、`MatchingPipelineProgress`、`MatcherCommandPipeline`、`DeterministicExchangeCoreAdapter` |
 | 交易 4：账户与账本结算 | `service.settlement`、`service.account`、`service.treasury`、`bootstrap.account` | `MatcherSettlementEvent`、产品结算处理器、`AccountLaneState`、`SystemLedgerLane` |

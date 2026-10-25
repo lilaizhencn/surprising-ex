@@ -280,7 +280,7 @@ flowchart TD
     B --> C[3–5. AeronCoreLifecycle.startAndAwaitShutdown]
     C --> D[Driver / Archive / Consensus]
     D --> E[ClusteredServiceContainer / AeronTradingClusterService.onStart]
-    E --> F[6–8. 读取快照分块 / TradingOwnerLoop.start]
+    E --> F[6–8. 读取快照分块并恢复]
     F --> G[服务线程: TradingCoreOwner.start / restoreSnapshot]
     G --> H[9. TradingCoreRuntime.activate]
     H --> I[按执行模式启动 Matcher / Account Lane，启动 System Ledger]
@@ -292,15 +292,15 @@ flowchart TD
 | --- | --- | --- |
 | 1–2 配置 | [`SurprisingCoreApplication`](src/main/java/com/surprising/aeron/bootstrap/SurprisingCoreApplication.java)、[`CoreConfiguration`](src/main/java/com/surprising/aeron/config/CoreConfiguration.java) | 加载 Spring 配置，绑定 `surprising.aeron`，创建集群拓扑、交易拓扑和 CPU 配置；不创建初始业务余额 |
 | 3–5 Aeron 资源 | [`AeronCoreLifecycle`](src/main/java/com/surprising/aeron/bootstrap/AeronCoreLifecycle.java) | 启动 Driver、Archive、Consensus 和 Service Container，等待关闭并逆序释放资源 |
-| 6–8 恢复与 Owner | [`AeronTradingClusterService`](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java)、[`TradingOwnerLoop`](src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java)、[`TradingCoreOwner`](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | 回调线程读取快照分块；直接在当前服务线程创建或恢复交易运行时 |
+| 6–8 恢复与 Owner | [`AeronTradingClusterService`](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java)、[`TradingCoreOwner`](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | 回调线程读取快照分块；直接在当前服务线程创建或恢复交易运行时 |
 | 9 工作资源 | [`TradingCoreRuntime`](src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java)、[`TradingAccountRuntime`](src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) | 激活恢复后的拓扑与状态；启动工作资源后才收窄服务线程的 CPU mask |
-| 10 回放 | `AeronTradingClusterService.onSessionMessage` → `TradingOwnerLoop.enqueue` | 把已复制日志及其时间、位置交给 Owner；回放与在线命令沿用同一交易规则 |
+| 10 回放 | `AeronTradingClusterService.onSessionMessage` → `TradingCoreOwner.ingress().offer` | 把已复制日志及其时间、位置交给 Owner；回放与在线命令沿用同一交易规则 |
 
 `CoreConfiguration` 统一装配拓扑、CPU、执行、网络和实时配置 Bean。
 Matcher 数量、账户 Lane 数量、路由种子与队列容量的默认值见 [application.yml](src/main/resources/application.yml)，
 可通过外部 YAML、环境变量、JVM `-D` 或 Spring 命令行参数覆盖；节点启动还必须指定产品线。
 例如账户 Lane 数可通过 `SURPRISING_AERON_ACCOUNTLANES=4` 或 `--surprising.aeron.account-lanes=4` 覆盖。
-`laneTopology` Bean → `TradingOwnerLoop` → `TradingCoreOwner` → `TradingCoreRuntime` → Matcher 与账户状态，
+`laneTopology` Bean → `AeronTradingClusterService` → `TradingCoreOwner` → `TradingCoreRuntime` → Matcher 与账户状态，
 整条启动路径共用同一份拓扑，`LaneTopology` 本身不读取外部配置。
 非 Spring 的工具和基准通过 `CoreConfiguration.standaloneLaneTopology()` 使用同一套绑定字段，
 读取系统属性与环境变量，不隐式加载节点 YAML。执行模式、等待方式、在途容量和快照预算统一由
@@ -309,7 +309,7 @@ Matcher 数量、账户 Lane 数量、路由种子与队列容量的默认值见
 `CoreTransportConfiguration` 绑定 Driver/Service、会话与通道；`RealtimeConfiguration` 绑定 `surprising.realtime`。
 原 `AERON_*` 环境名只由 `application.yml` 显式映射，正常配置优先级不改变。
 Matcher/Ledger 等待、原生 batching、Lane 初始容量、资金索引目录和快照部署上限也沿同一构造/恢复配置传递。
-节点恢复只解码被动状态，`TradingOwnerLoop` 在交接 Owner 后首次携带 affinity 激活；工具的 `decode` 保留即用激活职责。
+节点恢复只解码被动状态，`AeronTradingClusterService` 在交接 Owner 后首次携带 affinity 激活；工具的 `decode` 保留即用激活职责。
 币对、余额和标记价通过业务命令进入日志，重启从快照与日志恢复，不从数据库自动补载。
 
 | 线程 / 模式 | 负责的状态或工作 |
@@ -321,8 +321,7 @@ Matcher/Ledger 等待、原生 batching、Lane 初始容量、资金索引目录
 
 ### Owner：输入、推进与退出怎样衔接
 
-由 Cluster 服务线程直接驱动 `TradingOwnerLoop` 与
-`TradingCoreOwner.pollCommands` 推进业务，消除跨线程交接与上下文切换。
+由 Cluster 服务线程直接驱动 `TradingCoreOwner.pollCommands` 推进业务，消除跨线程交接与上下文切换。
 账户状态仍归所属 Lane；不要把它们看成两份交易状态。
 `TradingCoreOwner.pollCommands` 看业务推进。两者分别管理线程和命令生命周期，
 账户状态仍归所属 Lane；不要把它们看成两份交易状态。
@@ -336,9 +335,8 @@ Matcher/Ledger 等待、原生 batching、Lane 初始容量、资金索引目录
 
 ```mermaid
 flowchart TD
-    C[Cluster 回调: enqueue] --> I[OwnerIngressRing: 命令或框架动作]
-    I --> R[TradingOwnerLoop.run: 读取队首]
-    P[TradingCoreOwner.pollCommands]
+    C[Cluster 回调: onSessionMessage] --> I[OwnerIngressRing: 命令或框架动作]
+    I --> P[TradingCoreOwner.pollCommands: 读取队首推进]
     P --> W[接纳无冲突输入，按窗口队首提交]
     W --> E[满足撮合、账户与账本条件，交出终态]
     E --> D[ClusterService: 推进命令与响应排空]
@@ -347,12 +345,12 @@ flowchart TD
 
 | 阅读顺序 | 类与方法 | 数据、完成条件和异常 |
 | --- | --- | --- |
-| 1 交入命令 | [`TradingOwnerLoop.enqueue`](src/main/java/com/surprising/aeron/bootstrap/TradingOwnerLoop.java) → `OwnerIngressRing` | 交接请求租约、会话 ID、原业务时间、日志位置和指纹；入队成功后直接内联推进流水线 |
-| 2 选择工作 | `TradingOwnerLoop.pollCommands` | 内联于 Cluster 服务线程推进，消除跨核交接与缓存颠簸 |
+| 1 交入命令 | [`AeronTradingClusterService.enqueue`](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java) → `OwnerIngressRing` | 交接请求租约、会话 ID、原业务时间、日志位置和指纹；入队成功后直接内联推进流水线 |
+| 2 选择工作 | `AeronTradingClusterService.pollCommands` | 内联于 Cluster 服务线程推进，消除跨核交接与缓存颠簸 |
 | 3 推进与提交 | [`TradingCoreOwner.progressCommands / pollControl / pollCommandCommitBatch`](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | 将独立输入租约交给窗口；终态必须等待实际业务完成条件，再交实时边界和 egress |
 | 4 等待策略 | 固定忙等自旋（BusySpin） | 消除线程休眠/唤醒延迟与竞态开销 |
-| 5 快照与角色边界 | `TradingOwnerLoop.captureSnapshot / onRoleChange` | 先由 `TradingCoreOwner` 同步完成前缀命令，再固定快照或更新角色代次 |
-| 6 停止与释放 | `TradingOwnerLoop.terminate` → `TradingCoreOwner.terminate` | 同步关闭运行时、工作资源，释放借用输入并恢复 CPU 绑定 |
+| 5 快照与角色边界 | `AeronTradingClusterService.onTakeSnapshot / onRoleChange` | 先由 `TradingCoreOwner` 同步完成前缀命令，再固定快照或更新角色代次 |
+| 6 停止与释放 | `AeronTradingClusterService.onTerminate` → `TradingCoreOwner.terminate` | 同步关闭运行时、工作资源，释放借用输入并恢复 CPU 绑定 |
 
 以下执行参数在启动时统一绑定；默认值见 `application.yml`，可由外部 YAML、环境变量、JVM 属性或命令行覆盖：
 
@@ -393,7 +391,7 @@ flowchart LR
 
 | 步骤 | 关键类，按阅读顺序排列 | 交接与完成条件 |
 | --- | --- | --- |
-| 1 输入 | `AeronTradingClusterService` → `TradingOwnerLoop` → `TradingCoreOwner` → `TradingCoreRuntime.apply` | 交接命令、指纹、会话和日志元数据；检查协议、产品线和幂等 |
+| 1 输入 | `AeronTradingClusterService` → `TradingCoreOwner` → `TradingCoreRuntime.apply` | 交接命令、指纹、会话和日志元数据；检查协议、产品线和幂等 |
 | 2 准入 | [`MatchingCommandAdmission`](src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java) → [`CoreOrderDecisionResolver`](src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java) → `PlaceAdmissionEvent` / [`RuntimeOrderAdmission`](src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java) | 检查订单规则、资金、保证金、平仓容量及生命周期冲突；所属账户完成订单和预留变更 |
 | 3 撮合 | [`CoreMatchingFlow`](src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java) → `MatcherCommandPipeline` → `DeterministicExchangeCoreAdapter` | 固定分片并交接命令；PIPELINED 可提前提交带门闩的输入，账户准入成功后才能撮合 |
 | 4 结算 | [`MatcherSettlementDispatcher`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.java) / `MatcherSettlementEvent` → `RuntimeSpotMatchProcessor` / `RuntimeDerivativeMatchProcessor` | Matcher 事实直接交给所属账户，按产品计算余额、冻结、费用与持仓变化；财务事实交给 Ledger |
@@ -521,7 +519,7 @@ flowchart TD
 | 资金费 / 交割 / 行权 | `PerpetualFundingCommands` / `RuntimePerpetualFundingProcessor`；`InstrumentSettlementCommands` / `RuntimeLifecycleSettlementContinuation` | 分页资金费与到期结算各保留游标；到期结算先完成撤单，再推进持仓和账本 |
 | 余额 / 划转 | `DirectCommandDispatcher` → `BalanceTransferCommands` → `AccountControlTask` → `RuntimeAccountStateTransitions` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
 
-快照入口为 `AeronTradingClusterService.onTakeSnapshot` → `TradingOwnerLoop.captureSnapshotSections`
+快照入口为 `AeronTradingClusterService.onTakeSnapshot` → `TradingCoreOwner.captureSnapshotSections`
 → `CoreSnapshotLifecycle`。先排空快照边界前的命令，再捕获同一 fence 的账户、Matcher、账本、
 幂等和业务游标；恢复时一起还原，不能只加载订单簿或余额。完整时序见 [快照与恢复](../README.md#快照与恢复)。
 
@@ -571,8 +569,7 @@ com.surprising.aeron
 flowchart LR
     CFG[config: YAML / topology] --> BOOT[bootstrap: main / Aeron / threads]
     BOOT --> CTRL[controller: AeronTradingClusterService]
-    CTRL --> LOOP[bootstrap: TradingOwnerLoop]
-    LOOP --> CORE[service.core: TradingCoreOwner / TradingCoreRuntime]
+    CTRL --> CORE[service.core: TradingCoreOwner / TradingCoreRuntime]
     CORE --> ORDER[service.order: 准入 / 撮合编排 / 提交]
     ORDER --> MATCHER[service.matcher: 订单簿与撮合]
     MATCHER --> SETTLE[service.settlement: 账户与账本回执]
@@ -583,9 +580,9 @@ flowchart LR
 
 | 找代码时的起点 | 类与职责 |
 | --- | --- |
-| [controller](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java) | `AeronTradingClusterService` 负责协议回调；借用输入交给 Owner，真正的网络响应仍在 Cluster 线程发送 |
+| [controller](src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java) | `AeronTradingClusterService` 负责协议回调；内联推进 CoreOwner，单线程原位发送网络响应 |
 | [config](src/main/java/com/surprising/aeron/config/CoreConfiguration.java) | `CoreConfiguration` 绑定配置；`ClusterTopology`、`LaneTopology` 描述启动参数 |
-| [bootstrap](src/main/java/com/surprising/aeron/bootstrap/SurprisingCoreApplication.java) | `SurprisingCoreApplication` → `AeronCoreLifecycle`；`TradingOwnerLoop` 管理 Owner 线程、动作边界和退出；`AccountLaneLifecycle` 拥有账户工作资源与所有权交接 |
+| [bootstrap](src/main/java/com/surprising/aeron/bootstrap/SurprisingCoreApplication.java) | `SurprisingCoreApplication` → `AeronCoreLifecycle`；`AccountLaneLifecycle` 拥有账户工作资源与所有权交接 |
 | [service.core](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | `TradingCoreOwner` 编排复制命令；`TradingCoreRuntime` 连接各业务；`TradingAccountRuntime` 保存并处理唯一账户业务状态 |
 | [service.order](src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java) | `MatchingCommandAdmission` → `CoreMatchingFlow` → `OrderedCommitCoordinator`，依次完成准入、撮合交接及终态提交 |
 | [service.matcher](src/main/java/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.java) | `DeterministicExchangeCoreAdapter` 操作订单簿；`pipeline` 保留分片串行执行、完成回执与关闭协议 |
@@ -598,7 +595,7 @@ flowchart LR
 持久化使用现有 Aeron 日志、快照和 Ledger 索引，包整理沿用原有存储边界。
 线程消费循环与其邮箱、所有权交接协议放在一起，避免只把 `Thread.start()` 拆成透传类。
 
-顺着下单阅读：`controller` → `bootstrap.TradingOwnerLoop` → `service.core` →
+顺着下单阅读：`controller` → `service.core` →
 `service.order.admission` → `service.matcher` → `service.settlement` →
 `service.account` / `service.treasury` → `service.order.commit` → `service.result` / `support.egress`。
 失败继续由原有业务回滚、异常响应或致命故障恢复边界处理。
@@ -1020,7 +1017,7 @@ visitor 仅在同步遍历期间借用身份注册表、用户、映射和订单
 
 ### Owner 日志元数据边界与测试适配（2026-10-15）
 
-`OwnerLogContext` 不再实现 Aeron `Cluster`。`TradingOwnerLoop` 在服务线程复制初始角色、日志时间和位置，Owner 按既有输入 FIFO 更新这些值；`TradingCoreOwner` 和实时边界只接收所需元数据，Owner 的等待策略仍由自己持有。真实会话、发布器及定时器 API 留在 Cluster 服务边界。
+`OwnerLogContext` 不再实现 Aeron `Cluster`。`AeronTradingClusterService` 在服务线程复制初始角色、日志时间和位置，Owner 按既有输入 FIFO 更新这些值；`TradingCoreOwner` 和实时边界只接收所需元数据，等待策略仍由自己持有。真实会话、发布器及定时器 API 留在 Cluster 服务边界。
 
 受影响测试改为等待实际异步初始化，待撮合场景只完成准入，账户及身份断言经真实 Lane 查询；测试回调适配器同步更新元数据。没有放宽业务或线程归属校验。67 个必要用例通过，包含六产品线真实 Owner 的 Cluster API 访问隔离；基准模块及直接依赖编译通过。按要求未执行快照、恢复或压测，也不据此宣称全量测试或整体 Owner 迁移完成。见 [D1 功能验证](../../docs/validation/owner-log-metadata-tests-20261015.json)。
 
@@ -1062,7 +1059,7 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 
 ### D4 唯一输入环与 Owner 原位消费（2026-10-15）
 
-`TradingOwnerLoop` 的生产者和 `TradingCoreOwner` 的消费者共用同一个 `OwnerIngressRing`。该类仅持有原 Agrona SPSC 交接、8192 个常驻输入槽和 64 MiB 字节预算；`PendingClusterIngress`、输入回收队列及 Owner 中继方法已经删除。前一条消息尚未离开队首时，生产者不能复用其记录；清空字段先于 SPSC 消费进度发布。
+`AeronTradingClusterService` 与 `TradingCoreOwner` 共用同一个 `OwnerIngressRing`。该类仅持有原 Agrona SPSC 交接、8192 个常驻输入槽和 64 MiB 字节预算；`PendingClusterIngress`、输入回收队列及 Owner 中继方法已经删除。前一条消息尚未离开队首时，生产者不能复用其记录；清空字段先于 SPSC 消费进度发布。
 
 交易准入时原 `ClusterCommandWindow` 接管消息租约，然后释放输入槽。控制命令直接保留原环头，异步完成及响应交接后才前进。退出时先停止交易 workers 并清理已准入窗口，再归还环内未准入消息；服务输入发布失败也归还其 decoder 租约。角色和终止边界保留顺序，只等待动作前面的命令，不把自身或后续输入纳入等待条件。
 
@@ -1112,7 +1109,7 @@ FUSED比例OI准入通过既有事件等待Ledger发布输入，再在Owner执�
 
 ### 交易线程固定 CPU（2026-10-18）
 
-`TradingOwnerLoop.start` 先完成恢复并启动原有交易 worker，再绑定 Owner，避免 Linux 的线程亲和性继承把 Ledger 限制到 Owner 的单个 CPU。`TradingCpuAffinity` 使用 Java-Thread-Affinity 的原生 mask API，只有 Owner、Matcher 0、Account Lane 0/1 参与绑定，线程退出恢复原 mask。Driver、Archive、Ledger 等线程没有新增绑核设置。
+`AeronTradingClusterService.onStart` 先完成恢复并启动原有交易 worker，再绑定服务线程，避免 Linux 的线程亲和性继承把 Ledger 限制到单个 CPU。`TradingCpuAffinity` 使用 Java-Thread-Affinity 的原生 mask API，只有服务线程、Matcher 0、Account Lane 0/1 参与绑定，线程退出恢复原 mask。Driver、Archive、Ledger 等线程没有新增绑核设置。
 
 配置文件 [application.yml](src/main/resources/application.yml) 的 `surprising.aeron.cpu-affinity.enabled` 默认 `false`，关闭时不校验 CPU 编号、不调用原生绑核 API。开启时在同一文件为四个角色配置 OS CPU 编号，例如：
 

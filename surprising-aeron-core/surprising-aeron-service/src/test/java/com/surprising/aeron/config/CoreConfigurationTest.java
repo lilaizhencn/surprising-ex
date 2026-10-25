@@ -1,6 +1,6 @@
 package com.surprising.aeron.config;
 
-import com.surprising.aeron.bootstrap.TradingOwnerLoop;
+import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.product.api.ProductLine;
@@ -69,16 +69,16 @@ class CoreConfigurationTest {
             // 用最小 Cluster 元数据启动真实 Owner 线程，并捕获它实际使用的拓扑。
             var cluster = cluster();
             var egress = context.getBean(ClusterServiceEgress.class);
-            var owner = context.getBean(TradingOwnerLoop.class);
+            var service = context.getBean(AeronTradingClusterService.class);
             egress.start(cluster);
             try {
-                owner.start(cluster, null);
+                service.onStart(cluster, null);
                 try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decodePassive(
-                        owner.captureSnapshot(1, 0), ProductLine.SPOT, runtimeConfiguration, topology)) {
+                        service.captureSnapshot(1, 0), ProductLine.SPOT, runtimeConfiguration, topology)) {
                     assertThat(restored.runtimeState().topology()).isEqualTo(topology);
                 }
             } finally {
-                owner.terminate();
+                service.onTerminate(cluster);
                 egress.clear();
             }
         } finally {
@@ -182,7 +182,7 @@ class CoreConfigurationTest {
     /** 创建实际配置和 Owner 的 Spring 装配入口，不包含 Aeron 网络生命周期组件。 */
     private static SpringApplication application() {
         // 测试保留真实配置加载和依赖注入，避免测试替身掩盖传参遗漏。
-        var application = new SpringApplication(CoreConfiguration.class, TradingOwnerLoop.class, ClusterServiceEgress.class);
+        var application = new SpringApplication(CoreConfiguration.class, AeronTradingClusterService.class, ClusterServiceEgress.class);
         application.setWebApplicationType(WebApplicationType.NONE);
         application.setLogStartupInfo(false);
         return application;

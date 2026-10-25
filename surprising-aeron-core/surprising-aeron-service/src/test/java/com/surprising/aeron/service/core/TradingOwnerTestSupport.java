@@ -23,7 +23,7 @@ import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import org.agrona.concurrent.UnsafeBuffer;
 
 /**
- * 让测试直接调用真实 TradingCoreOwner 的 ClusteredService 适配器。Owner 逻辑在测试调用线程推进，没有生产 TradingOwnerLoop 的独立 Owner 线程；Matcher、账户和账本资源仍按实际执行模式工作。
+ * 让测试直接调用真实 TradingCoreOwner 的 ClusteredService 适配器。Owner 逻辑在测试调用线程推进；Matcher、账户和账本资源仍按实际执行模式工作。
  */
 public final class TradingOwnerTestSupport implements ClusteredService {
     /** 本夹具使用的真实交易 Owner，由测试调用线程推进。 */

@@ -192,3 +192,38 @@
 - **提交与推送**：
   - 内联提交 `1ec0201c3`、基准测试工具与总结更新。
 
+---
+
+## 5. 消除过度设计：彻底拔除中间人 `TradingOwnerLoop` 与重构 `ClusterServiceEgress`
+
+### 5.1 背景与设计异味根除
+内联重构后，系统已消除了独立的 `trading-owner` 平台线程，但在代码结构上仍遗留了多线程时代的“防御性过度设计”与“中间人壳类”：
+1. **中间人包装异味（Middle Man Smell）**：
+   - `TradingOwnerLoop` 本是独立线程循环的载体。内联后无独立线程无循环，所有公共方法（`enqueue`、`drainResponses`、`onRoleChange`、`captureSnapshotSections`、`terminate`）纯粹是将调用转发给 `TradingCoreOwner` 或 `ClusterServiceEgress`，多了一层无谓调用栈与 311 行纯胶水代码。
+2. **多线程并发屏障与冗余字段**：
+   - `ClusterServiceEgress` 内部依然保留了多线程时代用于跨核通信的 `PaddedEgressOffsets`（10 个 volatile 计数器与缓存行伪共享 padding）、8192 槽的大容量输出环以及并发去重集合。在单线程内联模式下，这些 volatile 与屏障纯属浪费。
+
+### 5.2 重构措施
+1. **精简 `ClusterServiceEgress` 为单线程原位直发内核**：
+   - 彻底删除 `PaddedEgressOffsets` 内部类及其全部 10 个 volatile 字段与 padding；
+   - 输出环改用原位普通游标 `long producedCount, consumedCount`，槽位精简为 2048；
+   - 移除无用的并发会话去重集合与分频消费字节核算，改用单线程直接原地推进与慢会话轮询。
+2. **彻底拔除 `TradingOwnerLoop` 类**：
+   - 物理删除 `TradingOwnerLoop.java`（净减少 311 行冗余代码）；
+   - 由 Aeron 集群服务主适配器 `AeronTradingClusterService` 直接持有 `TradingCoreOwner` 与 `ClusterServiceEgress`；
+   - `AeronTradingClusterService` 统一管理生命周期、CPU 亲和性绑定、角色切换、直接入队与快照发布。
+3. **全面适配测试与基准**：
+   - 适配 `CoreConfigurationTest`、`OwnerSessionBoundaryTest`、`OwnerLogContextTest`、`ProductionSourceBoundaryTest`、`TradingOwnerInputReuseTest`、`SurprisingCoreApplicationTest`、`TradingCpuAffinityTest`；
+   - 适配基准测试 `InProcessTradingAllocationBenchmark`；
+   - 修复全部测试并全量绿色通过。
+
+### 5.3 全量验证结果
+- **全模块集成测试**：
+  - 执行命令：`mvn test -pl surprising-aeron-core/surprising-aeron-service`
+  - 测试规模：**1601 个测试全部运行，0 失败，0 错误，1 个合法跳过（1601 run, 0 failures, 0 errors, 1 skipped）**，构建耗时 11 分 45 秒，结果为 `BUILD SUCCESS`。
+  - 核心套件：`TradingCoreOwnerTest`（45 项全绿）、`ClusterCommandPipelineTest`（326 项全绿）、`CorePerpetualFinancialMatrixTest`、`RuntimeCommitRecoveryTest`（18 项全绿）、`ProductionSourceBoundaryTest`（8 项全绿）、`CoreFundsLedgerIndexTest`（10 项全绿）等全部 100% 通过。
+- **资金正确性与恢复语义**：
+  - 完整保持了单线程内联模式下的借槽归还租赁契约、集群状态机快照与增量回放、无缝零丢包的资金一致性。
+
+
+

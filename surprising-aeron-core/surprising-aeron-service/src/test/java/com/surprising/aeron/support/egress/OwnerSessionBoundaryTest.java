@@ -1,6 +1,6 @@
 package com.surprising.aeron.support.egress;
 
-import com.surprising.aeron.bootstrap.TradingOwnerLoop;
+import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import io.aeron.Publication;
@@ -99,10 +99,10 @@ class OwnerSessionBoundaryTest {
             };
         });
         egress.start(cluster);
-        // 启动真实 Owner 线程的生产循环对象
-        var loop = new TradingOwnerLoop(product, egress);
+        // 启动真实服务对象
+        var loop = new AeronTradingClusterService(product, egress);
         try {
-            loop.start(cluster, null);
+            loop.onStart(cluster, null);
             // 已注册到实际出口的传输句柄
             var transport = egress.transportSession(session);
             loop.enqueue(probe(product, 1), transport.id(), 70, 700, null);
@@ -139,7 +139,7 @@ class OwnerSessionBoundaryTest {
             egress.closeSession(session);
             assertThat(closed).hasValue(2);
             loop.checkFailure();
-        } finally { loop.terminate(); egress.clear(); }
+        } finally { loop.onTerminate(cluster); egress.clear(); }
     }
 
     /**

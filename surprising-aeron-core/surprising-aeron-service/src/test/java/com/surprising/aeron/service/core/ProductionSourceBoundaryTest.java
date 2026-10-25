@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.bootstrap.TradingOwnerLoop;
+import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.service.order.ClusterCommandWindow;
 import com.surprising.aeron.service.order.CommandSlot;
@@ -69,14 +69,14 @@ class ProductionSourceBoundaryTest {
      */
     @Test
     void d4UsesOneInputRingWithoutAnOwnerRelayOrReturnQueue() throws Exception {
-        assertThat(java.util.Arrays.stream(TradingOwnerLoop.class.getDeclaredFields())
+        assertThat(java.util.Arrays.stream(AeronTradingClusterService.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getName)).doesNotContain("availableInput", "unpublishedInput");
         assertThat(java.util.Arrays.stream(OwnerCommandPipelineState.class.getDeclaredFields())
                 .map(java.lang.reflect.Field::getName)).doesNotContain("pendingIngress");
         assertThat(java.util.Arrays.stream(TradingCoreOwner.class.getDeclaredMethods())
                 .map(java.lang.reflect.Method::getName)).doesNotContain("enqueueCommittedCommand", "awaitIngressCapacity");
         assertThat(TradingCoreOwner.class.getDeclaredField("ingress").getType()).isEqualTo(OwnerIngressRing.class);
-        assertThat(TradingOwnerLoop.class.getDeclaredField("input").getType()).isEqualTo(OwnerIngressRing.class);
+        assertThat(AeronTradingClusterService.class.getDeclaredField("input").getType()).isEqualTo(OwnerIngressRing.class);
         assertThat(OwnerCommandPipelineState.class.getDeclaredField("activeControl").getType())
                 .isEqualTo(OwnerIngressRing.Entry.class);
     }
@@ -156,7 +156,7 @@ class ProductionSourceBoundaryTest {
         }
         // Aeron 服务生产 Java 源码根目录
         Path sources = root.resolve("surprising-aeron-core/surprising-aeron-service/src/main/java");
-        for (Class<?> /* 当前待反射或读取源文件的类型；业务泛型检查中为待排除的正文类型名 */ type : java.util.List.of(TradingCoreOwner.class, TradingOwnerLoop.class,
+        for (Class<?> /* 当前待反射或读取源文件的类型；业务泛型检查中为待排除的正文类型名 */ type : java.util.List.of(TradingCoreOwner.class,
                 OwnerIngressRing.class, ClusterCommandWindow.class)) {
             // 当前指定或遍历中的生产 Java 文件全文，检查时也包含注释
             String source = Files.readString(sources.resolve(type.getName().replace('.', '/') + ".java"));

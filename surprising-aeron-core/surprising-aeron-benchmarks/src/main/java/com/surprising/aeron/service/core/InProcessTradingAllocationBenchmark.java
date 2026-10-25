@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.bootstrap.TradingOwnerLoop;
+import com.surprising.aeron.controller.AeronTradingClusterService;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.support.egress.ClusterServiceEgress;
 import com.surprising.aeron.support.ingress.CoreMessageFlyweightDecoder;
@@ -54,7 +54,7 @@ public class InProcessTradingAllocationBenchmark {
     private final Sink session = new Sink();
     private final ClusterServiceEgress egress = new ClusterServiceEgress((cluster, target) -> session);
     private long sessionId;
-    private TradingOwnerLoop owner;
+    private AeronTradingClusterService owner;
     private long sequence, orderId = 1_000_000, submitted;
     private Interval interval;
 
@@ -92,8 +92,8 @@ public class InProcessTradingAllocationBenchmark {
                     default -> throw new AssertionError(method.getName());
                 });
         sessionId = egress.transportSession(actual).id();
-        owner = new TradingOwnerLoop(ProductLine.LINEAR_PERPETUAL, egress);
-        owner.start(cluster, null);
+        owner = new AeronTradingClusterService(ProductLine.LINEAR_PERPETUAL, egress);
+        owner.onStart(cluster, null);
         if (!oiLimitMode.equals("FIXED") && !oiLimitMode.equals("PROPORTIONAL"))
             throw new IllegalArgumentException("invalid OI input mode");
         for (int symbol = 0; symbol < symbols; symbol++) {
@@ -248,7 +248,7 @@ public class InProcessTradingAllocationBenchmark {
             System.out.println("pipelineValidation=PASS messages=" + submitted + " businessOperations=" + submitted * batchSize
                     + " unfinished=0 fundsDiff=0 batchSize=" + batchSize);
         } finally {
-            try { if (owner != null) owner.terminate(); egress.clear(); }
+            try { if (owner != null) owner.onTerminate(null); egress.clear(); }
             finally {
                 if (previousAccountLanes == null) System.clearProperty("surprising.aeron.account-lanes");
                 else System.setProperty("surprising.aeron.account-lanes", previousAccountLanes);

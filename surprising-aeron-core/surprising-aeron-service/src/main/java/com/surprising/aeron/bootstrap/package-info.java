@@ -3,7 +3,7 @@
  *
  * <p>从 {@link com.surprising.aeron.bootstrap.SurprisingCoreApplication} 进入；配置绑定留在
  * {@link com.surprising.aeron.config.CoreConfiguration}。交易线程的恢复与激活由
- * {@link com.surprising.aeron.bootstrap.TradingOwnerLoop} 承担。
+ * {@link com.surprising.aeron.controller.AeronTradingClusterService} 承担。
  * 完整启动时序和配置来源见 surprising-aeron-core/README.md。</p>
  */
 package com.surprising.aeron.bootstrap;
