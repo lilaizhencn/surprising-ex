@@ -183,10 +183,6 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     }
 
     /**
-     * 返回是否由本事件自行推进账户 Lane 的应用和提交水位。
-     */
-    public boolean commitsLane() { return commitLane; }
-    /**
      * 返回当前编号数组的第一笔订单，调用方先确保事件已准备且有效项数非零。
      */
     public long orderId() { return orderIds[0]; }

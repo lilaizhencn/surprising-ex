@@ -250,11 +250,6 @@ public final class CoreInstrument {
         this.configuration = updated.configuration;
     }
     /**
-     * 接回非空配置引用，供恢复或回滚使用，不在这里重新验证所有配置字段。
-     * @param configuration 需要接入的非空配置版本；此接入方法不重新执行完整业务校验
-     */
-    public void restoreConfiguration(Configuration configuration) { this.configuration = Objects.requireNonNull(configuration); }
-    /**
      * 返回当前配置的合约类型，决定产品线和金额公式。
      */
     public ContractType contractType() { return configuration.contractType(); }

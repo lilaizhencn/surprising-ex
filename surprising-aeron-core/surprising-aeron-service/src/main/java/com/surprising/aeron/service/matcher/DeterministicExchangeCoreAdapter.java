@@ -1745,17 +1745,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 要求品种非空，只读取 instrumentId 交给同步注册包装；其他合约或费率参数不直接配置原生订单簿。空参数直接抛异常，其余注册异常由下层包装为失败 Future。
-     * @param instrument 含永久品种编号的业务品种对象
-     */
-    public CompletableFuture<Integer> ensureInstrumentAsync(CoreInstrument instrument) {
-        if (instrument == null) {
-            throw new IllegalArgumentException("instrument is required");
-        }
-        return ensureSymbolAsync(instrument.instrumentId());
-    }
-
-    /**
      * 以空白初始状态同步创建全部引擎，不启动独立工作线程。
      */
     private void start() {

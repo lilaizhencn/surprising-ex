@@ -812,13 +812,6 @@ public final class TreasuryRuntime {
     }
 
     /**
-     * 返回当前待完成划转路由条目数，不等同资金金额。
-     */
-    public int pendingTransferCount() {
-        return pendingTransferUsers.size();
-    }
-
-    /**
      * 按划转编号读取已登记用户，缺失返回零，当前方法不另做所有者线程检查。
      * @param transferId 需要查询归属的划转编号
      */

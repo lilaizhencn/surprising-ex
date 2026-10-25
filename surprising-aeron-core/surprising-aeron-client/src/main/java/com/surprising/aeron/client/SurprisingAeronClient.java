@@ -219,10 +219,6 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         throw resultUnknown(message, "timed out waiting for committed command result");
     }
 
-    public long trySubmit(CoreMessage message) {
-        return offer(message);
-    }
-
     @Override
     public long offer(CoreMessage message) {
         if (ioOwner != null) { requireIoOwner(); return offerToCluster(message); }

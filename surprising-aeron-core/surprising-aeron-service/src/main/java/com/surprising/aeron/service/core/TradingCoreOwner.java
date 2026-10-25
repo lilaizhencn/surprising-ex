@@ -87,24 +87,8 @@ public final class TradingCoreOwner {
      * @param responseSink 必须存在的已提交响应出口
      */
     public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink) {
-        this(productLine, responseSink,
-                CoreConfiguration.standaloneLaneTopology());
-    }
-
-    /**
-     * 用启动边界已经绑定的拓扑创建 Owner，不在交易状态内重新读取配置。
-     * @param productLine 本 Owner 唯一处理的产品线
-     * @param responseSink 已提交响应的出口
-     * @param startupTopology 首次启动时账户和 Matcher 共用的不可变拓扑
-     */
-    public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink,
-            LaneTopology startupTopology) {
-        this(productLine, responseSink, startupTopology, CoreRuntimeConfiguration.standalone());
-    }
-
-    public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink,
-            LaneTopology startupTopology, CoreRuntimeConfiguration configuration) {
-        this(productLine, responseSink, startupTopology, configuration, RealtimeConfiguration.standalone());
+        this(productLine, responseSink, CoreConfiguration.standaloneLaneTopology(),
+                CoreRuntimeConfiguration.standalone(), RealtimeConfiguration.standalone());
     }
 
     public TradingCoreOwner(ProductLine productLine, ResponseSink responseSink, LaneTopology startupTopology,

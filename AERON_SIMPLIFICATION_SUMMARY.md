@@ -395,7 +395,53 @@
 
 ---
 
-## 11. 累计重构成果统计与系统现状
+## 12. 深入排查与第十一轮深度代码清理（Round 2 Deep Simplification）
+
+在完成首轮核心收敛后，进一步使用全工程调用拓扑扫描工具与符号跨模块引用分析，连根拔除了 11 处架构演进后残留的孤立死方法、多余别名封装与过度重载层级：
+
+### 12.1 `TradingCoreOwner` 构造重载链条彻底收敛
+- **问题根因**：`TradingCoreOwner` 原先定义了 4 个构造函数（2 参数、3 参数、4 参数、5 参数），其中 3 参数与 4 参数仅作为级联默认值的中间胶水层，在生产及全工程测试中均无任何调用者。
+- **重构落地**：
+  1. 彻底删除 3 参数与 4 参数两个多余的构造重载；
+  2. 2 参数便利构造函数直接委托给 5 参数完整主构造函数，消除中间层级联。
+
+### 12.2 `DeterministicExchangeCoreAdapter` 孤立死方法 `ensureInstrumentAsync` 物理删除
+- **重构落地**：物理删除 `public CompletableFuture<Integer> ensureInstrumentAsync(CoreInstrument instrument)`。系统生产与测试统一使用 `ensureSymbolAsync(String symbol)`，彻底消除冗余方法。
+
+### 12.3 `CommitPublication` 孤立死方法 `deferProvisionalProjection` 物理删除
+- **重构落地**：物理删除全工程 0 引用的 `public void deferProvisionalProjection()`，保持提交发布器纯净单一。
+
+### 12.4 `LaneCancelEvent` 孤立死方法 `commitsLane` 物理删除
+- **重构落地**：物理删除全工程 0 引用的 `public boolean commitsLane() { return commitLane; }`。
+
+### 12.5 `LiquidationIndex` 孤立死方法 `activeId` 物理删除
+- **重构落地**：物理删除全工程 0 引用的 `public long activeId(long userId, String instrumentId, CorePositionSide positionSide)`。
+
+### 12.6 `CoreInstrument` 孤立死方法 `restoreConfiguration` 物理删除
+- **重构落地**：物理删除全工程 0 引用的 `public void restoreConfiguration(Configuration configuration)`。
+
+### 12.7 `TreasuryRuntime` 孤立死方法 `pendingTransferCount` 物理删除
+- **重构落地**：物理删除全工程 0 引用的 `public int pendingTransferCount()`。
+
+### 12.8 `SurprisingAeronClient` 机械转发方法 `trySubmit` 物理删除
+- **重构落地**：物理删除仅单纯单行转发给 `offer(message)` 的 `public long trySubmit(CoreMessage message)`。
+
+### 12.9 `CoreTriggerOrderCodec` 孤立单例编码方法 `encodeSingle` 物理删除
+- **重构落地**：物理删除全工程 0 引用的 `public static byte[] encodeSingle(CoreTriggerOrderStateView state)`。
+
+### 12.10 `TradingOrderBatchCodec` 别名包装方法彻底删除
+- **重构落地**：
+  1. 物理删除直接转发给 `encodeResult` 的 `encodeBatchResult(CoreOrderBatchResult result)`；
+  2. 物理删除直接转发给 `decodeResult` 的 `decodeBatchResult(byte[] encoded)`。
+
+### 12.11 `CoreOrderBatchResult` 冗余伪别名方法清理
+- **重构落地**：
+  1. 物理删除 record `CoreOrderBatchResult` 中无外部引用的 `outcomes()`；
+  2. 物理删除 record `Item` 中无外部引用的 `itemIndex()` 和 `itemId()`，统一使用 record 原生标准组件访问器 `index()` 和 `orderId()`。
+
+---
+
+## 13. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -404,15 +450,17 @@
 | **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
 | **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
-| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute` 等 | 物理彻底清除所有孤立死方法，精简方法签名 |
+| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`ensureInstrumentAsync` 等 | 物理彻底清除所有孤立死方法，精简方法签名 |
 | **流水线空转计数器** | 4 个仅递增从不查询的 long 计数器（`drainedCommands`、`*Fences`） | 连同调用方埋点彻底拔除，消除纯空转开销 |
 | **准入伪参数** | 透传 `matcherWaitRequired`，内部多处防御分支 | 固定为异步流水线语义，彻底消除多余参数与防御分支 |
 | **快照超时配置** | 区分独立快照超时与集群快照超时，多重冗余参数 | 统一收敛为单一 `snapshot-timeout-seconds` |
+| **跨模块协议冗余别名** | Codec 中重复定义 `encodeBatchResult`、`trySubmit` 等假抽象别名 | 彻底清理冗余别名包装，直调权威方法 |
 | **Feign 接口形式主义** | 声明了 8 个 `@FeignClient` 接口，全工程零装配零调用 | 物理全量删除，消除微服务假架构残留 |
 | **Gateway 孤岛计算** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件，净减少 ~1,000 行纯死代码 |
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
 | **死命令与死 Record** | `AccountUserCommand`, `ExpiringPositionSettlementAccountCommand` 等遗留 | 物理彻底清除所有死命令与死 Record |
 | **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，相关核心测试全绿** |
+
 
 ---
 

@@ -298,10 +298,6 @@ public final class TradingOrderBatchCodec {
         return length;
     }
 
-    public static byte[] encodeBatchResult(CoreOrderBatchResult result) {
-        return encodeResult(result);
-    }
-
     public static CoreOrderBatchResult decodeResult(byte[] encoded) {
         return decodeResult(encoded, encoded == null ? 0 : encoded.length);
     }
@@ -333,10 +329,6 @@ public final class TradingOrderBatchCodec {
         } catch (IllegalArgumentException exception) {
             throw new ProtocolException(exception.getMessage());
         }
-    }
-
-    public static CoreOrderBatchResult decodeBatchResult(byte[] encoded) {
-        return decodeResult(encoded);
     }
 
     /** Checks every item status and frame boundary without materializing order/fill views.

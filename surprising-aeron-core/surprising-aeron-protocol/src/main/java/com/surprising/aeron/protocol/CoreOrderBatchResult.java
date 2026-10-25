@@ -23,10 +23,6 @@ public record CoreOrderBatchResult(List<CoreOrderBatchResult.Item> items) {
         return items;
     }
 
-    public List<Item> outcomes() {
-        return items;
-    }
-
     public record Item(
             int index,
             long orderId,
@@ -43,14 +39,6 @@ public record CoreOrderBatchResult(List<CoreOrderBatchResult.Item> items) {
                 throw new IllegalArgumentException("invalid order batch result item");
             }
             executions = executions == null ? List.of() : List.copyOf(executions);
-        }
-
-        public int itemIndex() {
-            return index;
-        }
-
-        public long itemId() {
-            return orderId;
         }
     }
 }

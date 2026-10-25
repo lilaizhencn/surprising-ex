@@ -122,15 +122,6 @@ public final class CommitPublication {
     public void abort() { clearBatchState(); }
 
     /**
-     * 要求已开启积累，把当前变化标为临时；若此前已有正式变化，不把它降级为临时。
-     */
-    public void deferProvisionalProjection() {
-        if (!deferred) throw new IllegalStateException("provisional projection requires a command batch");
-        if (!dirty) provisionalOnly = true;
-        dirty = true;
-    }
-
-    /**
      * 只清理当前发布积累标记；命令槽需先保存恢复所需标记，本方法不回滚业务。
      */
     public void suspend() { clearBatchState(); }

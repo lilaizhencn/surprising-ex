@@ -90,15 +90,6 @@ public final class CoreTriggerOrderCodec {
         return buffer.array();
     }
 
-    /** Encode a one-element response without allocating the temporary singleton List. */
-    public static byte[] encodeSingle(CoreTriggerOrderStateView state) {
-        int stateLength = encodedStateLength(state);
-        ByteBuffer buffer = ByteBuffer.allocate(Integer.BYTES * 3 + stateLength).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(VERSION).putInt(1).putInt(stateLength);
-        writeState(buffer, state);
-        return buffer.array();
-    }
-
     private static void writeState(ByteBuffer buffer, CoreTriggerOrderStateView state) {
         buffer.putInt(STATE_VERSION)
                 .putLong(state.triggerOrderId())

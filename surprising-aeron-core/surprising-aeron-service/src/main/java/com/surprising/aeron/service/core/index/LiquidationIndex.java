@@ -33,18 +33,6 @@ public final class LiquidationIndex {
     }
 
     /**
-     * 按用户、标的及持仓方向取未结束 ID 的最小值，分组不包含保证金模式；没有返回零，不保证同组只有一个任务。
-     * @param userId 该强平任务所属用户
-     * @param instrumentId 规范数字标的文本，分组比较仍采用文本字典序；hasUnresolved 可空表示全部
-     * @param positionSide 该任务对应净仓、多头或空头持仓腿
-     */
-    public long activeId(long userId, String instrumentId, CorePositionSide positionSide) {
-        // 当前查询或移除的分组 ID 升序桶
-        NavigableSet<Long> ids = activeIds.get(new LiquidationKey(userId, instrumentId, positionSide));
-        return ids == null || ids.isEmpty() ? 0 : ids.first();
-    }
-
-    /**
      * 借出原可变的全局未结束 ID 升序集合；调用方沿用 Owner 访问边界，直接改集合会使分组索引不一致。
      */
     public NavigableSet<Long> activeIds() {
