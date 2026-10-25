@@ -53,7 +53,9 @@
 ---
 
 ### 2.3 拍平多层伪共享继承 Padding 抽象类
-针对全工程模仿 Disruptor 风格堆叠的大量冗余 Padding 继承类进行全面拍平，消除了过度工程化产生的噪音，代码净减少 400 余行：
+针对全工程模仿 Disruptor 风格堆叠的大量冗余 Padding 继承类进行全面拍平，消除了过度工程化产生的噪音：
+- [`OwnerIngressRing.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/ingress/OwnerIngressRing.java)：
+  - 彻底清除环结构中遗留的 30 个显式缓存行填充变量（`p01..p0f`、`p11..p1f`）及 38 行多余 Javadoc，恢复纯粹简洁的字段布局。
 - [`SettlementLaneWorker.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/bootstrap/account/SettlementLaneWorker.java)：
   - 拍平外层类的 8 个多层继承抽象类（`SettlementLaneWorkerLhsPadding`、`HandoffRequested`、`MidPadding1`、`HandoffCompleted`、`MidPadding2`、`HandoffResumed`、`MidPadding3`、`Parked`、`RhsPadding`）及残留的 `isParked()` 死方法。
   - 拍平内部邮箱游标类：删除 `PaddedSequenceLhsPadding`、`PaddedSequenceValue`，合并为单一 `PaddedSequence`。
@@ -72,7 +74,7 @@
 ---
 
 ### 2.4 清理同步死分支与长调用链死代码
-由于流水线模式下 `asynchronousCommands()` 恒为 true，同步调用分支纯属冗余死代码。本次全面拔除了以下同步死分支与死方法（代码净减少 423 行）：
+由于流水线模式下 `asynchronousCommands()` 恒为 true，同步调用分支纯属冗余死代码。本次全面拔除了以下同步死分支与死方法：
 - [`TriggerOrderCommands.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java)：
   - 拍平 `advanceCandidate` 与 `submitMutation` 为直接异步派发。
   - 拍平 `executeUpsertAlgoOrder`、`executePlaceTriggerOcoPair`、`executePlaceTriggerOrder`、`executeCancelTriggerOrder`、`executeClaimTriggerOrder`、`executeCompleteTriggerOrder`、`executeUpdateTriggerTrailing`、`executeExpireTriggerOrder`、`executeRetryTriggerOrder`、`executeTriggerOrder(CoreMessage)` 为直接异步调用。
@@ -85,23 +87,28 @@
   - 拍平划转查询中的同步分支，直接返回异步续步 `beginPendingTransferQuery`。
   - 拍平 `applyClusterCommand` 中的异步作用域判断。
   - 拍平 `deferFinalizationRejection` 中的非异步判断。
+  - 私有化静态工具方法：将静态文本哈希工具 `mixText` 从 `public` 收敛为 `private`。
 - [`RuntimeDerivativeLiquidationProcessor.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java)：
   - 删除 `prepareAction` 中 `!runtime.asynchronousCommands()` 的同步读取强平死分支。
 - [`CoreMatchingFlow.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java)：
   - 拍平 `submitMatching`，去掉多余的作用域退出控制。
   - 删除 `submitMatchingInCommandScope` 中 `!owner.runtimeState().asynchronousCommands()` 的死分支。
+- 基准脚本收敛：
+  - 收敛 [`qualify-aeron-async-stages.sh`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh)，固定为单一 `PIPELINED` 执行模式。
 
 ---
 
 ## 3. 验证结果
 
 - **独立 Worktree 隔离验证**：
-  - 在独立目录与分支 `simplify/aeron-cleanup` 中分批完成重构，每批次均通过编译。
+  - 在独立目录与分支 `simplify/aeron-cleanup` 及 `simplify/aeron-cleanup-phase4` 中分批完成重构，每批次均通过编译。
 - **主工作区干净合入**：
-  - 通过补丁机制安全合入主分支工作区，**完全保留主工作区未提交的原有业务修改**。
+  - 通过补丁与 Fast-Forward 机制安全合入主分支工作区，**完全保留主工作区未提交的原有业务修改**。
 - **编译检查**：
   - `mvn -q -o test-compile -DskipTests` 全工程一次性编译成功，退出码为 0。
 - **运行规范**：
   - 严格遵循指令：**改完之后不运行测试，编译没问题即可**。
 - **代码收敛统计**：
-  - 累计净删除 **900 余行**冗余代码，消灭 20 余个多层继承类和数百个伪共享垃圾变量。
+  - 累计精简/删除 73 个文件，代码净减少 **2858 行**（456 insertions(+), 3314 deletions(-)），消灭 20 余个多层继承类和近 300 个伪共享无用填充变量。
+- **推送记录**：
+  - 已完成提交并推送至 `origin/master`（Commit `f2e68059e`、`f08ee3ecc`）。
