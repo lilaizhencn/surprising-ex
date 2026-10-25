@@ -14,10 +14,7 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
-import exchange.core2.core.common.OrderAction;
-import exchange.core2.core.common.OrderType;
 import exchange.core2.core.common.cmd.CommandResultCode;
-import exchange.core2.core.common.cmd.OrderCommandType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -283,7 +280,10 @@ class DeterministicExchangeCoreAdapterTest {
                     List.of(new DeterministicExchangeCoreAdapter.CancellationOrder(17, 8, second)), List.of(secondNative));
             assertThat(a.accepted()).isTrue();
             assertThat(b.accepted()).isTrue();
-            assertThat(secondNative.nativeSequence()).isLessThan(firstNative.nativeSequence());
+            // 从实际 Matcher 输出比较两个订单簿的原生进度，不要求控制回执保存原生对象。
+            var firstProbe = placeDirect(adapter, 7, bid(20, first, 90));
+            var secondProbe = placeDirect(adapter, 8, bid(21, second, 90));
+            assertThat(secondProbe.nativeMatcherResult().sequence()).isLessThan(firstProbe.nativeMatcherResult().sequence());
             assertThat(b.nativeMatcherSequence()).isGreaterThan(a.nativeMatcherSequence());
         } finally {
             if (previous == null) System.clearProperty("surprising.aeron.matching-engines");
@@ -377,35 +377,34 @@ class DeterministicExchangeCoreAdapterTest {
         }
     }
 
-    /**
-     * 用模拟原生成功回执绑定两次证据，要求同一分片业务序号从一到二；没有运行原生撮合。
-     */
+    /** 控制业务证据递增并保留原 Core 序号、UUID 和固定控制分片。 */
     @Test
     void matcherEvidenceAdvancesSequences() {
-        // 仅用于分片序号验证的新证据账本。
         var ledger = new MatcherEvidenceLedger(com.surprising.aeron.config.LaneTopology.productionDefault());
-        // 首个直接命令回执，或当前时间复用测试的第一条回执。
-        var first = ledger.bind(1, new java.util.UUID(0, 1),
-                ledger.nextSequence(0), 0, 0, nativeResult(2, 1));
-        // 时间复用场景的第二条直接命令回执。
-        var second = ledger.bind(2, new java.util.UUID(0, 2),
-                ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
+        var first = ledger.bindControl(1, new java.util.UUID(0, 1),
+                ledger.nextSequence(-1), new CoreMatchingResult(true, "SUCCESS"));
+        var second = ledger.bindControl(2, new java.util.UUID(0, 2),
+                ledger.nextSequence(-1), new CoreMatchingResult(true, "SUCCESS"));
         assertThat(first.nativeMatcherSequence()).isEqualTo(1);
         assertThat(second.nativeMatcherSequence()).isEqualTo(2);
+        assertThat(first.nativeCoreSequence()).isEqualTo(1);
+        assertThat(second.nativeCoreSequence()).isEqualTo(2);
+        assertThat(first.nativeMatches(0, 1)).isTrue();
+        assertThat(second.nativeMatches(0, 2)).isTrue();
+        assertThat(first.nativeMatcherShardId()).isEqualTo(-1);
+        assertThat(second.nativeMatcherShardId()).isEqualTo(-1);
     }
 
-    /**
-     * 先绑定原生序号二，再尝试同分片序号一，要求按原生序号非严格递增拒绝。
-     */
+    /** 实际原生登记入口拒绝同一分片的倒退及重复，拒绝后仍能继续推进。 */
     @Test
     void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
-        // 仅用于分片序号验证的新证据账本。
         var ledger = new MatcherEvidenceLedger(com.surprising.aeron.config.LaneTopology.productionDefault());
-        ledger.bind(2, new java.util.UUID(0, 2),
-                ledger.nextSequence(0), 0, 0, nativeResult(2, 2));
-        assertThatThrownBy(() -> ledger.bind(1, new java.util.UUID(0, 1),
-                ledger.nextSequence(0), 0, 0, nativeResult(2, 1)))
+        ledger.recordControlNative(0, 2);
+        assertThatThrownBy(() -> ledger.recordControlNative(0, 1))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("native sequence is not strictly increasing");
+        assertThatThrownBy(() -> ledger.recordControlNative(0, 2))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("native sequence is not strictly increasing");
+        ledger.recordControlNative(0, 3);
     }
 
     /**
@@ -721,19 +720,6 @@ class DeterministicExchangeCoreAdapterTest {
      */
     private static CoreMatchingResult result(boolean accepted, String resultCode) {
         return new CoreMatchingResult(accepted, resultCode);
-    }
-
-    /**
-     * 构造指定序号和符号编号的模拟原生成功下单回执，事件及行情为空，再包装成未绑定普通结果；不调用引擎撮合。
-     * @param symbolId 模拟原生回执的符号编号
-     * @param sequence 模拟原生回执的原生序号，同时用作该样本订单编号
-     */
-    private static CoreMatchingResult nativeResult(int symbolId, long sequence) {
-        // 当前直接命令取得的撮合回执。
-        MatcherResult result = new MatcherResult(sequence, OrderCommandType.PLACE_ORDER, sequence, symbolId,
-                100, 1, 100, OrderAction.BID, OrderType.GTC, 7, 1_000, 0,
-                CommandResultCode.SUCCESS, List.of(), new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
-        return CoreMatchingResult.fromNative(result);
     }
 
     /**

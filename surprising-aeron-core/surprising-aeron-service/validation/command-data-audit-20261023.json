@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第七十七轮A246-A248：控制回执只保留5项真实构造输入，删除原生序号副本、仅测试财库缓存和无人消费的读取契约/重复入口。净减2实例字段/130生产行；18模块、1986(1Linux跳过)、PIPELINED418、六线12改单/12恢复通过。243解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第七十八轮A249-A250：控制证据绑定去通用原生分支与分片搬运，普通控制回执去完整原生引用和固定-1字段。净减2实例字段/83生产行；18模块、1986(1Linux跳过)、PIPELINED418、六线12改单/12恢复通过。245解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -11622,6 +11622,37 @@
       ],
       "evidence": "删除接口中无人使用的UUID对象比较和原生对象读取成员；保留真实生产读取的UUID双long比较及事件列表。移除无调用的重复入口，序号别名读端改用同字段coreSequence；3处既有非空UUID断言直接比较原高低位，所有用例保留。",
       "verification": "18模块干净构建；核心全量1986例(1Linux跳过)，显式PIPELINED34类418例；六线顺序HTTP/WS、12次改单、12次真实Cluster冷恢复通过。见round77-runtime-20261025.json。"
+    },
+    {
+      "id": "A249",
+      "status": "resolved",
+      "source_basis_commit": "59c8ef0ee4a888c398dcddc7326034405faeee80",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_eighth_cleanup_round",
+      "topic": "只接收控制聚合结果的通用证据绑定与不可达原生分支",
+      "fields_or_methods": [
+        "MatcherEvidenceLedger.bind两个通用重载",
+        "Adapter.bindMatcherEvidence通用分片参数/分支",
+        "Adapter.matcherShardId(CoreMatchingResult)"
+      ],
+      "evidence": "同步和跨分片两条生产入口都固定传控制分片-1，聚合结果或合成结果的原生引用均为null。收窄为bindControl，只严格推进控制业务序号并保留原UUID/Core绑定及故障处理。真实原生登记recordControlNative、原生事件发布和恢复均保留。",
+      "verification": "18模块干净构建；核心全量1986例(1Linux跳过)、显式PIPELINED34类418例；六线顺序HTTP/WS、12次改单、12次真实Cluster冷恢复通过。首次测试编译错误及复验见round78-runtime-20261025.json。"
+    },
+    {
+      "id": "A250",
+      "status": "resolved",
+      "source_basis_commit": "59c8ef0ee4a888c398dcddc7326034405faeee80",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_eighth_cleanup_round",
+      "topic": "控制回执无人消费的完整原生结果引用和固定分片字段",
+      "fields_or_methods": [
+        "CoreMatchingResult.nativeMatcherResult字段/getter",
+        "CoreMatchingResult.nativeMatcherShardId字段",
+        "CoreMatchingResult.nativeSequence及原生私有构造器",
+        "bindEvidenceInPlace固定分片参数"
+      ],
+      "evidence": "控制回执只保存接受状态、结果码、撤单前缀、事件和真实命令证据；提取原生事实后不再保留完整对象。实际分片固定-1，改同契约常量读取；控制绑定不再搬运该常量。测试从实际Matcher输出核对原生进度，不保留仅测试使用的结果引用。",
+      "verification": "18模块干净构建；核心全量1986例(1Linux跳过)、显式PIPELINED34类418例；六线顺序HTTP/WS、12次改单、12次真实Cluster冷恢复通过。首次测试编译错误及复验见round78-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11717,7 +11748,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A246_to_A248_control_receipt_unused_proof_copy_test_cache_and_readers_removed_and_verified; overall_audit_in_progress",
+  "analysis_round_status": "A249_to_A250_control_evidence_unused_native_branch_and_copies_removed_and_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11939,12 +11970,11 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "fbc29606ea5f2074fa41f28e498b8a2184bc8371",
-    "status": "control_receipt_unused_proof_inputs_and_test_cache_removed",
+    "source_basis_commit": "59c8ef0ee4a888c398dcddc7326034405faeee80",
+    "status": "control_evidence_binding_and_control_result_storage_simplified",
     "resolved_ids": [
-      "A246",
-      "A247",
-      "A248"
+      "A249",
+      "A250"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11957,11 +11987,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 243,
+      "resolved": 245,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "seventy_seventh_cleanup_round",
+    "evidence": "seventy_eighth_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -14233,6 +14263,13 @@
         }
       ],
       "evidence": "round77-runtime-20261025.json"
+    },
+    {
+      "round": 78,
+      "source_basis_commit": "59c8ef0ee4a888c398dcddc7326034405faeee80",
+      "topic": "同步控制撤单不是测试专用入口",
+      "evidence": "CodeGraph CLI漏掉CommandSlot.ControlMatchingContinuation.get中的调用；完整classfile补足该生产调用。保留cancelControlOrders、cancelRoutedBatch、1024上限、首拒停止、NOT_SUBMITTED、故障登记及作用域finally。",
+      "report": "deep-code-cleanup-20261025-round78.md"
     }
   ],
   "third_cleanup_round": {
@@ -45358,6 +45395,43 @@
     "evidence": "round77-runtime-20261025.json",
     "counts": {
       "resolved": 243,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "seventy_eighth_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "59c8ef0ee4a888c398dcddc7326034405faeee80",
+    "resolved_ids": [
+      "A249",
+      "A250"
+    ],
+    "production_net_lines_removed": 83,
+    "net_instance_fields_removed": 2,
+    "retired_classes": 0,
+    "old_signatures_removed": 8,
+    "narrowed_signatures": 3,
+    "CoreMatchingResult_fields": [
+      11,
+      9
+    ],
+    "core_full_test_counts": {
+      "tests": 1986,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "additional_pipelined_executions": 418,
+    "pipelined_classes": 34,
+    "runtime_products": 6,
+    "native_amendments": 12,
+    "cold_recoveries": 12,
+    "protocol_and_persisted_business_state_unchanged": true,
+    "report": "deep-code-cleanup-20261025-round78.md",
+    "evidence": "round78-runtime-20261025.json",
+    "counts": {
+      "resolved": 245,
       "candidate": 1,
       "retained": 4
     },

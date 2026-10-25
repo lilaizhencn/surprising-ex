@@ -11,7 +11,7 @@ import lombok.Getter;
 import lombok.experimental.Accessors;
 
 /**
- * 一条普通撮合回执，保留接受状态、撤单前缀、原生事件和命令证据。Matcher 在发布前可原位补齐身份，避免仅为绑定再分配结果；发布后按只读契约消费，事件引用不深拷贝。它不负责修改余额、持仓或推进 Core 提交。
+ * 一条控制撤单或合成回执，保留接受状态、撤单前缀、事件和命令证据。Matcher 在发布前可原位补齐身份，避免仅为绑定再分配结果；发布后按只读契约消费，事件引用不深拷贝。它不负责修改余额、持仓或推进 Core 提交。
  */
 public final class CoreMatchingResult implements MatchingResult {
 
@@ -47,14 +47,6 @@ public final class CoreMatchingResult implements MatchingResult {
     @Accessors(fluent = true, chain = false)
     @Getter
     private long nativeMatcherSequence;
-    /**  本回执所属业务证据分片，控制分片为负一。 返回证据所属 Matcher 分片，控制分片使用负一。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private int nativeMatcherShardId;
-    /**  原生结果引用，没有原生回执的人工结果可为空。 返回底层 exchange-core 原生结果引用，没有原生结果时可为空。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private final MatcherResult nativeMatcherResult;
     /**  原生事件列表引用或组合片段视图，构造时不统一复制。 返回当前结果关联的原生成交、撤量或拒单事件序列；它是账户结算事实输入，不能据此再次撮合。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -83,50 +75,38 @@ public final class CoreMatchingResult implements MatchingResult {
         this.resultCode = resultCode;
         this.cancellations = immutable(cancellations);
         this.outcome = classify(accepted, resultCode, matcherStateChanged);
-        this.nativeMatcherShardId = -1;
-        this.nativeMatcherResult = null;
         this.matcherEvents = matcherEvents;
     }
 
     /**
-     * 把原生结果包装为尚未绑定命令身份的回执，原生序号读取时仍可从原结果取得。
-     * @param result 非空 exchange-core 原生结果
+     * 只提取控制撤单实际消费的接受状态、结果码和事件，不保留完整原生结果。
+     * @param result 非空的本次原生撤单结果
      */
     static CoreMatchingResult fromNative(MatcherResult result) {
-        return new CoreMatchingResult(result);
-    }
-
-    /**
-     * 从非空原生结果创建尚未绑定身份的回执，只有 SUCCESS 或 ACCEPTED 算接受；直接保留原生事件，按没有显式状态变化分类。
-     * @param result 非空 exchange-core 原生结果
-     */
-    private CoreMatchingResult(MatcherResult result) {
-        nativeMatcherResult = Objects.requireNonNull(result, "matcher result");
-        accepted = result.resultCode() == CommandResultCode.SUCCESS
+        Objects.requireNonNull(result, "matcher result");
+        boolean accepted = result.resultCode() == CommandResultCode.SUCCESS
                 || result.resultCode() == CommandResultCode.ACCEPTED;
-        resultCode = result.resultCode().name();
-        cancellations = List.of();
-        outcome = classify(accepted, resultCode, false);
-        nativeMatcherShardId = -1;
-        matcherEvents = Objects.requireNonNull(result.events(), "matcher events");
+        return new CoreMatchingResult(accepted, result.resultCode().name(), List.of(), false,
+                Objects.requireNonNull(result.events(), "matcher events"));
     }
 
+    /** 控制及合成回执固定使用控制证据分片，不保存重复的逐结果字段。 */
+    @Override public int nativeMatcherShardId() { return -1; }
+
     /**
-     * 仅供 Matcher 在完成环发布之前写入 Core 序号、UUID 和分片证据，并返回同一对象；方法自身不另检查线程、已发布状态或标量合法性，调用方负责该构造窗口。
+     * 仅供 Matcher 在完成环发布之前写入 Core 序号、UUID 和控制业务序号，并返回同一对象；方法自身不另检查线程、已发布状态或标量合法性，调用方负责该构造窗口。
      * @param coreSequence 要保存或补齐的 Core 命令序号
      * @param commandIdMostSignificantBits 待绑定命令 UUID 高六十四位
      * @param commandIdLeastSignificantBits 待绑定命令 UUID 低六十四位
      * @param matcherSequence 要绑定的业务分片证据序号
-     * @param matcherShardId 要绑定的业务证据分片编号
      */
     CoreMatchingResult bindEvidenceInPlace(
             long coreSequence, long commandIdMostSignificantBits, long commandIdLeastSignificantBits,
-            long matcherSequence, int matcherShardId) {
+            long matcherSequence) {
         nativeCoreSequence = coreSequence;
         nativeCommandIdMostSignificantBits = commandIdMostSignificantBits;
         nativeCommandIdLeastSignificantBits = commandIdLeastSignificantBits;
         nativeMatcherSequence = matcherSequence;
-        nativeMatcherShardId = matcherShardId;
         return this;
     }
 
@@ -181,12 +161,6 @@ public final class CoreMatchingResult implements MatchingResult {
         }
     }
 
-    /**
-     * 直接读取原生回执的序号；聚合或合成结果没有原生回执时返回零。
-     */
-    long nativeSequence() {
-        return nativeMatcherResult == null ? 0 : nativeMatcherResult.sequence();
-    }
     /**
      * 逐半部比较原命令 UUID，不额外检查 Core 序号、订单编号或事件内容。
      * @param most 待比较 UUID 高六十四位

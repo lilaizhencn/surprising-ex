@@ -94,54 +94,19 @@ final class MatcherEvidenceLedger {
     }
 
     /**
-     * 要求命令 UUID 非空，拆成原语高低位后交给同一证据绑定步骤。
-     * @param coreSequence 该结果对应的 Core 命令序号
+     * 聚合控制撤单已经逐项登记过原生序号；这里只推进控制分片的业务证据，再绑定原命令身份。
+     * @param coreSequence 控制命令的 Core 序号
      * @param commandId 原命令非空 UUID
-     * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
-     * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
-     * @param result 要绑定或发布的非空原生结果/普通结果对象
+     * @param sequence 要发布的控制业务序号，必须严格大于原已发布值
+     * @param result 已聚合的控制结果或合成结果
      */
-    CoreMatchingResult bind(
-            long coreSequence,
-            java.util.UUID commandId,
-            long sequence,
-            int matcherShardId, int nativeMatcherShardId,
-            CoreMatchingResult result) {
-        if (commandId == null) throw new IllegalArgumentException("matcher evidence is required");
-        return bind(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                sequence, matcherShardId, nativeMatcherShardId, result);
-    }
-
-    /**
-     * 读取结果原生序号，正数时先推进其实际原生分片，再推进业务证据分片，最后原位绑定命令身份。两次序号写入不是事务，后一步失败时这里不回退此前已写进度。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandIdMsb 原命令 UUID 高六十四位
-     * @param commandIdLsb 原命令 UUID 低六十四位
-     * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
-     * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
-     * @param result 要绑定或发布的非空原生结果/普通结果对象
-     */
-    CoreMatchingResult bind(
-            long coreSequence,
-            long commandIdMsb, long commandIdLsb,
-            long sequence,
-            int matcherShardId, int nativeMatcherShardId,
-            CoreMatchingResult result) {
-        if (result == null) throw new IllegalArgumentException("matcher evidence is required");
-        // 当前结果携带的原生序号，仅正数进入严格原生进度检查。
-        long nativeSequence = result.nativeSequence();
-        // 本次业务证据分片的数组逻辑下标。
-        int matcherIndex = index(matcherShardId);
-        if (nativeSequence > 0) {
-            advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
-                    "matcher shard native sequence is not strictly increasing");
-        }
-        advanceStrictly(shardSequences, matcherIndex, sequence,
+    CoreMatchingResult bindControl(long coreSequence, java.util.UUID commandId,
+                                   long sequence, CoreMatchingResult result) {
+        if (commandId == null || result == null) throw new IllegalArgumentException("matcher evidence is required");
+        advanceStrictly(shardSequences, index(-1), sequence,
                 "matcher shard sequence is not strictly increasing");
-        return result.bindEvidenceInPlace(coreSequence, commandIdMsb, commandIdLsb,
-                sequence, matcherShardId);
+        return result.bindEvidenceInPlace(coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), sequence);
     }
 
     /**

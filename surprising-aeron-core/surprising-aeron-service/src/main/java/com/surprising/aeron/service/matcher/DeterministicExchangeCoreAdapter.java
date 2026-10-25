@@ -1060,32 +1060,20 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 拒绝空结果及故障后的回执，核对非控制业务分片，再绑定 Core 身份及原生/业务序号；绑定后遇到致命结果分类登记故障，仍返回已绑定事实。
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param sequence 预先分配的证据分片业务序号
-     * @param matcherShardId 业务证据分片号，负一表示控制分片
-     * @param result 当前原生或普通撮合结果，方法签名决定具体类型
+     * 拒绝空结果及故障后的回执，绑定已聚合控制命令的业务证据；致命结果仍登记故障后返回原事实。
+     * @param coreSequence 当前控制命令的 Core 序号
+     * @param commandId 原命令 UUID
+     * @param sequence 控制分片已经分配的业务证据序号
+     * @param result 已聚合的控制撤单结果
      */
-    private CoreMatchingResult bindMatcherEvidence(
-            long coreSequence,
-            java.util.UUID commandId,
-            long sequence,
-            int matcherShardId,
-            CoreMatchingResult result) {
+    private CoreMatchingResult bindControlEvidence(long coreSequence, java.util.UUID commandId,
+                                                   long sequence, CoreMatchingResult result) {
         if (result == null) throw new IllegalStateException("matcher command returned no result");
-        // 绑定前观察到的首个故障，阻止继续发布证据。
         Throwable matcherPoison = matcherFailure.get();
         if (matcherPoison != null) {
             throw new IllegalStateException("matcher completion discarded after fatal divergence", matcherPoison);
         }
-        // 根据原生结果品种计算的真实引擎分片，负一表示没有有效品种。
-        int nativeShard = matcherShardId(result);
-        if (matcherShardId >= 0 && nativeShard >= 0 && nativeShard != matcherShardId)
-            throw new IllegalStateException("native matcher result crossed its evidence partition");
-        // 控制证据可串联不同订单簿，native sequence 仍必须在原生引擎自己的序列内严格递增。
-        CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId,
-                sequence, matcherShardId, nativeShard, result);
+        CoreMatchingResult bound = matcherEvidence.bindControl(coreSequence, commandId, sequence, result);
         poisonIfFatal(bound);
         return bound;
     }
@@ -1370,8 +1358,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 当前线程可使用的独占命令上下文。
         MatcherCommandScope scope = beginSynchronousCommand(timestamp);
         try {
-            return bindMatcherEvidence(coreSequence, commandId,
-                    matcherEvidence.nextSequence(-1), -1, cancelRoutedBatch(orders));
+            return bindControlEvidence(coreSequence, commandId,
+                    matcherEvidence.nextSequence(-1), cancelRoutedBatch(orders));
         } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
             matcherFailure.compareAndSet(null, failure);
             throw failure;
@@ -1409,8 +1397,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public CoreMatchingResult completeControlCancellations(long coreSequence, java.util.UUID commandId,
             long timestamp, List<CancellationOrder> orders, List<CoreMatchingResult> results) {
         validateCommandEvidence(coreSequence, commandId, 0, timestamp);
-        return bindMatcherEvidence(coreSequence, commandId,
-                matcherEvidence.nextSequence(-1), -1, aggregateRoutedCancellationResults(orders, results));
+        return bindControlEvidence(coreSequence, commandId,
+                matcherEvidence.nextSequence(-1), aggregateRoutedCancellationResults(orders, results));
     }
 
     /**
@@ -1926,16 +1914,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (instrumentId == null || instrumentId.isBlank()) throw new IllegalArgumentException("matcher instrumentId is required");
         return topology.matcherShardId(reserveSymbolId(instrumentId));
     }
-    /**
-     * 从普通回执的原生结果取得品种并计算实际分片，没有原生品种时返回负一。
-     * @param result 当前原生或普通撮合结果，方法签名决定具体类型
-     */
-    private int matcherShardId(CoreMatchingResult result) {
-        // 当前品种的永久原生编号。
-        int symbolId = result.nativeMatcherResult() == null ? 0 : result.nativeMatcherResult().symbol();
-        return symbolId <= 0 ? -1 : topology.matcherShardId(symbolId);
-    }
-
     /**
      * 在当前线程同步确保原生品种已注册，用完成或失败 Future 包装，不另外调度。
      * @param instrumentId 外部永久数字品种字符串
