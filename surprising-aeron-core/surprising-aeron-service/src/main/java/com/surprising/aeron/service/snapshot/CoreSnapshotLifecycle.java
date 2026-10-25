@@ -7,6 +7,7 @@ import com.surprising.aeron.service.matcher.MatcherSnapshot;
 import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.CommandSlot;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicReference;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -47,10 +48,10 @@ public final class CoreSnapshotLifecycle {
     @Getter
     final AtomicReference<RuntimeException> snapshotAuditFailure = new AtomicReference<>();
 
-    /**  当前仍在执行的 Matcher 捕获 Future，屏障释放不直接取消它。 返回正在捕获 Matcher 快照的原子引用，捕获完成后按同一 Future 身份比较清除。 */
+    /** 正在执行的 Matcher 捕获完成信号；外部取消等待视图不结束捕获，完成回调按身份清除。 */
     @Accessors(fluent = true, chain = false)
     @Getter
-    final AtomicReference<CompletableFuture<MatcherSnapshot>> inFlightMatcherSnapshot =
+    final AtomicReference<CompletionStage<MatcherSnapshot>> inFlightMatcherSnapshot =
             new AtomicReference<>();
 
     /**  当前 Owner 正在推进的快照屏障，返回结果或释放后清空。 返回当前屏障引用，未开始或已释放时为空，供 Owner 内部协作。 */
@@ -68,7 +69,7 @@ public final class CoreSnapshotLifecycle {
     long lastSnapshotId;
 
     /** 在各 Matcher 提交栅栏捕获原生模块，全部完成后汇总；屏障释放不取消捕获。 */
-    public CompletableFuture<MatcherSnapshot> captureMatcherSnapshot(
+    public CompletionStage<MatcherSnapshot> captureMatcherSnapshot(
             long snapshotId, long coreSequence, long businessStateHash,
             TradingCoreState state, Iterable<CoreOrderState> activeOrders) {
         return owner.matcherPipeline().readEachAsync(shardId ->
@@ -77,7 +78,7 @@ public final class CoreSnapshotLifecycle {
                         snapshotId, coreSequence, businessStateHash, state, shards))
                 .whenComplete((snapshot, failure) -> {
                     if (failure != null) owner.matchingAdapter().discardSnapshot(snapshotId);
-                });
+                }).minimalCompletionStage();
     }
 
     /**
@@ -207,15 +208,17 @@ public final class CoreSnapshotLifecycle {
                 }
                 if (fence.matcherSnapshot == null) {
                     fence.coreSequence = owner.appliedCommandCount();
-                    // 本次新提交的原生捕获 Future，先登记到在途引用，再由完成回调按身份清除。
-                    CompletableFuture<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
+                    // 只登记生产者的完成信号，防止等待方取消自己的视图时提前放行交易。
+                    CompletionStage<MatcherSnapshot> matcherSnapshot = matcherSnapshotCapture.capture(
                             fence.snapshotId, fence.coreSequence, fence.businessStateHash,
-                            fence.snapshotState, fence.snapshotState.orders().values().stream().filter(/* 从首次物化订单表筛选出的候选订单，只保留 OPEN 状态交给原生对账。 */ order -> order.status() == com.surprising.aeron.model.CoreOrderStatus.OPEN).toList());
+                            fence.snapshotState, fence.snapshotState.orders().values().stream().filter(/* 从首次物化订单表筛选出的候选订单，只保留 OPEN 状态交给原生对账。 */ order -> order.status() == com.surprising.aeron.model.CoreOrderStatus.OPEN).toList())
+                            .toCompletableFuture().minimalCompletionStage();
                     if (!inFlightMatcherSnapshot.compareAndSet(null, matcherSnapshot)) {
                         throw new TradingCoreRuntime.SnapshotNotReadyException();
                     }
-                    fence.matcherSnapshot = matcherSnapshot;
-                    matcherSnapshot.whenComplete((/* 本回调不读取成功值，只按原 Future 身份清除在途引用。 */ ignored, /* 本回调也不读取失败原因，成功或失败均结束该在途登记。 */ failure) ->
+                    // 轮询视图可以独立结束，实际捕获完成前仍保留只读在途信号。
+                    fence.matcherSnapshot = matcherSnapshot.toCompletableFuture();
+                    matcherSnapshot.whenComplete((ignored, failure) ->
                             inFlightMatcherSnapshot.compareAndSet(matcherSnapshot, null));
                 }
                 if (!fence.matcherSnapshot.isDone()) return null;

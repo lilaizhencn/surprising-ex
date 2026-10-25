@@ -1,5 +1,12 @@
 # Aeron 本机压测诊断
 
+## 七项运行路径简化后的夹具约束（2026-10-26）
+
+`ReplySlotAllocationBenchmark` 按出口实际发送次数检查完成性，响应在回调内编码，背压才排队保存字节。
+`InProcessTradingAllocationBenchmark` 按当前协议头长度和字段偏移读写借用帧；边界测试覆盖单笔/批量、建仓/反向平仓和终态资金。
+`ClusteredBatchTradingBenchmark` 只在 Owner 排空后取得账户访问权限，并进入原有 `onLane` 作用域读取余额、算法单和触发单。
+这些夹具通过 JUnit 做有限功能验证；本轮没有执行 JMH、JFR 或性能对比。
+
 `AccountQueryProjectionBenchmark` 单独测量显式 Lane 上的用户、订单和 clientOrderId 投影、哈希与编码。
 它使用由 JMH 线程持有的冷 Lane 和真实权威表，排除邮箱、并行 worker、网络与交易负载；
 不能用其分数推导实际 Lane 线程反查的收益、Core 交易吞吐或百字节目标。

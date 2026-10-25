@@ -182,9 +182,9 @@ public class InProcessTradingAllocationBenchmark {
                 UnsafeBuffer frame = frames[direction][index];
                 long id = ++sequence;
                 // Fixed protocol header fields; payload layout offsets are derived from the real encoder.
-                frame.putLong(24, id, ByteOrder.LITTLE_ENDIAN);
-                frame.putLong(40, id, ByteOrder.LITTLE_ENDIAN);
-                frame.putLong(64, id, ByteOrder.LITTLE_ENDIAN);
+                frame.putLong(20, id, ByteOrder.LITTLE_ENDIAN);
+                frame.putLong(36, id, ByteOrder.LITTLE_ENDIAN);
+                frame.putLong(60, id, ByteOrder.LITTLE_ENDIAN);
                 for (int item = 0; item < batchSize; item++) {
                     long nextOrder = ++orderId;
                     frame.putLong(orderOffsets[direction][index][item], nextOrder, ByteOrder.LITTLE_ENDIAN);
@@ -325,9 +325,9 @@ public class InProcessTradingAllocationBenchmark {
             if (status != (readUser ? ResponseStatus.OK : ResponseStatus.APPLIED).wireCode())
                 throw new IllegalStateException("non-applied terminal response status=" + status
                         + " code=" + CoreResultCode.fromWireCode(buffer.getInt(body + 8, ByteOrder.LITTLE_ENDIAN))
-                        + " command=" + buffer.getLong(offset + 24, ByteOrder.LITTLE_ENDIAN));
+                        + " command=" + buffer.getLong(offset + 20, ByteOrder.LITTLE_ENDIAN));
             int data = body + CoreProtocol.RESPONSE_FIXED_PAYLOAD_LENGTH;
-            int dataLength = buffer.getInt(body + 32, ByteOrder.LITTLE_ENDIAN);
+            int dataLength = buffer.getInt(body + 28, ByteOrder.LITTLE_ENDIAN);
             if (trading) {
                 if (batchSize > 1) {
                     if (buffer.getInt(data + 4, ByteOrder.LITTLE_ENDIAN) != batchSize)
@@ -342,7 +342,7 @@ public class InProcessTradingAllocationBenchmark {
                                     + " status=" + buffer.getInt(start + 28, ByteOrder.LITTLE_ENDIAN)
                                     + " code=" + CoreResultCode.fromWireCode(buffer.getInt(start + 32, ByteOrder.LITTLE_ENDIAN))
                                     + " orderId=" + buffer.getLong(start + 4, ByteOrder.LITTLE_ENDIAN)
-                                    + " command=" + buffer.getLong(offset + 24, ByteOrder.LITTLE_ENDIAN));
+                                    + " command=" + buffer.getLong(offset + 20, ByteOrder.LITTLE_ENDIAN));
                         cursor = start + size;
                     }
                     if (cursor != data + dataLength) throw new IllegalStateException("trailing batch result bytes");

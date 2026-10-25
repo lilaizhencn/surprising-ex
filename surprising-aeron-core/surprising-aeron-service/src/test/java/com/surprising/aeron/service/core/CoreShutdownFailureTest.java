@@ -26,9 +26,13 @@ class CoreShutdownFailureTest {
             core.snapshots.beginSnapshot(101, deadline);
             assertThat(core.snapshots.pollSnapshotSections(0, 0, System.nanoTime())).isNull();
             var capture = core.snapshots.inFlightMatcherSnapshot().get();
-            assertThat(capture).isNotNull().isNotDone();
+            assertThat(capture).isNotNull();
+            var cancelledView = capture.toCompletableFuture();
+            assertThat(cancelledView).isNotDone();
+            assertThat(cancelledView.cancel(false)).isTrue();
+            assertThat(core.snapshots.inFlightMatcherSnapshot().get() == capture).isTrue();
             core.snapshots.releaseSnapshotFence();
-            assertThat(capture.isCancelled()).isFalse();
+            assertThat(capture.toCompletableFuture()).isNotDone();
             assertThatThrownBy(() -> core.snapshots.beginSnapshot(102, deadline))
                     .isInstanceOf(TradingCoreRuntime.SnapshotNotReadyException.class);
             var command = new com.surprising.aeron.protocol.CoreMessage(
@@ -41,7 +45,7 @@ class CoreShutdownFailureTest {
             assertThatThrownBy(() -> core.apply(command)).isInstanceOf(IllegalStateException.class)
                     .hasMessage("snapshot fence is active");
             release.complete(null);
-            assertThat(capture.get(5, TimeUnit.SECONDS).modules()).isNotEmpty();
+            assertThat(capture.toCompletableFuture().get(5, TimeUnit.SECONDS).modules()).isNotEmpty();
             long completionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (core.snapshots.inFlightMatcherSnapshot().get() != null) {
                 if (System.nanoTime() >= completionDeadline) throw new AssertionError("capture was not released");

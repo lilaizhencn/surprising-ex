@@ -16,11 +16,12 @@ class D1BenchmarkBoundaryTest {
         } finally { workload.close(); }
     }
 
-    @Test
-    void inProcessTradingFixtureCompletesAndChecksTerminalFunds() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"1,OPEN_ONLY", "4,OPEN_ONLY", "1,REVERSE", "4,REVERSE"})
+    void inProcessTradingFixtureCompletesAndChecksTerminalFunds(int batchSize, String streamMode) {
         var workload = new InProcessTradingAllocationBenchmark();
-        workload.batchSize = 1;
-        workload.streamMode = "OPEN_ONLY";
+        workload.batchSize = batchSize;
+        workload.streamMode = streamMode;
         workload.clientIdMode = "ASCII";
         workload.oiLimitMode = "FIXED";
         workload.symbols = 1;
@@ -28,7 +29,11 @@ class D1BenchmarkBoundaryTest {
         try {
             workload.setup();
             assertThat(workload.continuousMatchStream()).isEqualTo(4096);
+        } catch (RuntimeException | Error failure) {
+            try { workload.close(); }
+            catch (RuntimeException | Error cleanup) { failure.addSuppressed(cleanup); }
+            throw failure;
         }
-        finally { workload.close(); }
+        workload.close();
     }
 }

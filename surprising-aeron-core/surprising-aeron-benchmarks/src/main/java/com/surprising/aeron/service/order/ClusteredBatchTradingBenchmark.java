@@ -1076,7 +1076,7 @@ public class ClusteredBatchTradingBenchmark {
             boolean acquired = !runtime.ownerLaneAccess();
             if (acquired) runtime.acquireOwnerLaneAccess();
             try {
-                return runtime.readAccountLane(runtime.accountLaneForUserReadOnly(userId), ignored -> read.get());
+                return runtime.onLane(userId, ignored -> read.get());
             } finally {
                 if (acquired) runtime.releaseOwnerLaneAccess();
             }

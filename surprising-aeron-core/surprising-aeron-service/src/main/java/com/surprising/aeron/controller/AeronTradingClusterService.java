@@ -179,7 +179,6 @@ public final class AeronTradingClusterService implements ClusteredService {
             throw fail;
         }
 
-        // 批量阈值触发响应排水，避免每条命令被打断；剩余响应由 doBackgroundWork 兜底发送
     }
 
     /**

@@ -394,7 +394,7 @@ public final class CoreQueryService {
     }
 
     /**
-     * 登记外部命令 UUID 到内部查询编号并投递目标 Lane；邮箱拒收或投递异常先清除关联，成功只返回待完成状态。
+     * 按请求 UUID 登记查询并投递目标 Lane；邮箱拒收或投递异常先清除关联，成功只返回待完成状态。
      * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      * @param laneMask 本次查询需要访问的账户 Lane 位集合，全部完成后才归并
      * @param query 已经固定身份、结果槽和目标 Lane 的账户查询任务

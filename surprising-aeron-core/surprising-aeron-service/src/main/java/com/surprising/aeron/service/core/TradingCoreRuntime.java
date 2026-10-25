@@ -1886,7 +1886,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
          * @param state 本次快照固定的全局业务镜像
          * @param activeOrders 与快照边界对应的活动订单内容
          */
-        CompletableFuture<MatcherSnapshot> capture(
+        java.util.concurrent.CompletionStage<MatcherSnapshot> capture(
                 long snapshotId,
                 long coreSequence,
                 long businessStateHash,
