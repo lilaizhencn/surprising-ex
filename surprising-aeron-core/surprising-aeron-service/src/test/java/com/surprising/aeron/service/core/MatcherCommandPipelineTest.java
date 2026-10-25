@@ -9,65 +9,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 验证单分片 Matcher 流水线的同步拥有线程、队列顺序、查询栅栏、容量与异常转交。命令主要返回人工 CoreMatchingResult，不启动真实订单簿；并发用门闩制造明确顺序，等待大多限制五秒。
+ * 验证单分片 Matcher 流水线的队列顺序、查询栅栏、容量与异常转交。命令主要返回人工 CoreMatchingResult，不启动真实订单簿；并发用门闩制造明确顺序，等待大多限制五秒。
  */
 class MatcherCommandPipelineTest {
-
-    /**
-     * 验证融合激活、命令和关闭动作都在当前线程执行，查询看到前一命令值，普通完成槽未收集前拒绝下一提交，错误序号探查不会取走结果。
-     */
-    @Test
-    void fusedExecutionOwnsActivationCommandsReadsAndShutdownOnOneThread() throws Exception {
-        // 启动融合流水线的当前线程，用于验证线程身份。
-        var owner = Thread.currentThread();
-        // 模拟被命令写入、由查询读取的共享整数。
-        var value = new java.util.concurrent.atomic.AtomicInteger();
-        try (/* 测试创建的单分片流水线，资源退出时关闭 worker 或融合状态。 */ var pipeline = new MatcherCommandPipeline(2, false)) {
-            pipeline.startInline(() -> assertThat(Thread.currentThread()).isSameAs(owner));
-            pipeline.submit(1, () -> {
-                assertThat(Thread.currentThread()).isSameAs(owner);
-                value.set(1);
-                return new CoreMatchingResult(true, "ONE");
-            });
-            // 融合模式立即执行的查询 Future。
-            var read = pipeline.readAtSubmissionFence(value::get);
-            assertThat(read.get()).isEqualTo(1);
-            assertThat(pipeline.submissionDepth()).isZero();
-            assertThat(pipeline.completionDepth()).isOne();
-            assertThat(pipeline.poll(2)).isNull();
-            assertThatThrownBy(() -> pipeline.submit(2, () -> new CoreMatchingResult(true, "TWO")))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("not collected");
-            assertThat(pipeline.poll(1).resultCode()).isEqualTo("ONE");
-            pipeline.submit(2, () -> { value.set(2); return new CoreMatchingResult(true, "TWO"); });
-            assertThat(pipeline.poll(2).resultCode()).isEqualTo("TWO");
-            pipeline.close(() -> assertThat(Thread.currentThread()).isSameAs(owner));
-        }
-    }
-
-    /**
-     * 用另一个平台线程提交要求被拒，随后验证同步命令异常立即传播，并能继续执行另一条成功命令；这里没有真实适配器的全局故障标记。
-     */
-    @Test
-    void fusedMatcherRejectsForeignWritersAndPropagatesSynchronousFailures() throws Exception {
-        try (/* 测试创建的单分片流水线，资源退出时关闭 worker 或融合状态。 */ var pipeline = new MatcherCommandPipeline(2, false)) {
-            pipeline.startInline(null);
-            // 另一个线程提交时捕获的异常引用。
-            var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-            // 用于尝试非法跨线程写入融合流水线的平台线程。
-            Thread thread = Thread.ofPlatform().start(() -> {
-                try { pipeline.submit(1, () -> new CoreMatchingResult(true, "BAD")); }
-                catch (/* 非法提交在该线程抛出的异常，保存给测试断言。 */ Throwable caught) { failure.set(caught); }
-            });
-            thread.join(5_000);
-            assertThat(thread.isAlive()).isFalse();
-            assertThat(failure.get()).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> pipeline.submit(1, () -> { throw new IllegalArgumentException("invalid order"); }))
-                    .isInstanceOf(IllegalArgumentException.class).hasMessage("invalid order");
-            pipeline.submit(2, () -> new CoreMatchingResult(true, "TWO"));
-            assertThat(pipeline.poll(2).resultCode()).isEqualTo("TWO");
-            assertThat(pipeline.inFlight()).isZero();
-        }
-    }
 
     /**
      * 阻塞第一条命令，由同一 Owner 依次投递同栅栏与后栅栏读请求，验证各自看到一或二且第五次读取因信箱满失败；名称中的并发指 worker 与请求交错，不是多个生产者并发提交。
@@ -206,7 +150,7 @@ class MatcherCommandPipelineTest {
     }
 
     /**
-     * 重复一百轮双命令与短暂空闲，逐轮收齐两个结果并检查无在途槽；没有在本测试强制设置 ADAPTIVE，实际等待策略仍取系统配置或默认。
+     * 重复一百轮双命令与短暂空闲，逐轮收齐两个结果并检查无在途槽；没有在本测试强制设置 PARKING，实际等待策略仍取系统配置或默认。
      */
     @Test
     void wakesAfterRepeatedIdleAndBurstCyclesWithoutLosingACompletion() {

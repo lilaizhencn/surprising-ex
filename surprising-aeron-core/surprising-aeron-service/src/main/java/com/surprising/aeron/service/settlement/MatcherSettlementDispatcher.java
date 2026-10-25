@@ -250,7 +250,7 @@ public final class MatcherSettlementDispatcher {
     }
 
     /**
-     * 下单步骤 4.3：单 Matcher 发布方校验事件与实际路由，向每个 Lane 的分片 SPSC 队列投递一次；FUSED 在当前线程内联执行。已投递不代表账户或财务结算完成。
+     * 下单步骤 4.3：单 Matcher 发布方校验事件与实际路由，向每个 Lane 的分片 SPSC 队列投递一次。已投递不代表账户或财务结算完成。
      * @param event 仍由当前命令租约持有的结算事件，空值按具体入口约定处理
      */
     void publishMatcherOwned(MatcherSettlementEvent event) {
@@ -262,18 +262,7 @@ public final class MatcherSettlementDispatcher {
         // 本次仍需投递或合并余额边界的账户 Lane 位图。
         long lanes = event.routedLaneMask();
         if (lanes == 0) throw new IllegalStateException("Matcher settlement has no routed Lane");
-        if (!owner.accountLanesStarted()) {
-            if (owner.isFusedExecution()) {
-                while (lanes != 0) {
-                    // 当前位图最低有效位对应的账户 Lane 编号。
-                    int laneId = Long.numberOfTrailingZeros(lanes);
-                    lanes &= lanes - 1;
-                    event.markLaneQueued(laneId);
-                    event.execute(owner.accountLane(laneId));
-                }
-            }
-            return;
-        }
+        if (!owner.accountLanesStarted()) return;
         // 事件固定的 Matcher 分片，用于选择每 Lane 的分片 SPSC 队列。
         int shard = event.directShard();
         while (lanes != 0) {

@@ -167,16 +167,6 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
     }
 
     /**
-     * FUSED 下仅在 Owner 且 OI 输入已就绪时内联执行原准入事件，没有就绪就等待后续推进。
-     */
-    public void executeInlineIfReady() {
-        if (runtime == null || !runtime.isFusedExecution())
-            throw new IllegalStateException("inline admission requires the fused trading Owner");
-        runtime.assertOwner();
-        if (!completed && inputReady) execute(runtime.accountLane(runtime.topology().accountLaneId(userId)));
-    }
-
-    /**
      * 返回 Lane 是否已经发布检查完成，业务拒绝也会完成事件。
      */
     public boolean complete() { return completed; }

@@ -15,23 +15,15 @@ class CoreRuntimeConfigurationTest {
 
     @Test void defaultsAreBoundWithoutAContainer() {
         var configuration = bind(Map.of());
-        assertThat(configuration.executionMode()).isEqualTo(TradingExecutionMode.FUSED);
         assertThat(configuration.ownerRoleChangeTimeoutSeconds()).isEqualTo(600);
         assertThat(configuration.maxPendingMatching()).isEqualTo(4096);
         assertThat(configuration.laneCompletionSpins()).isEqualTo(1024);
     }
 
-    @Test void bindsExecutionWaitingAndCapacityTogether() {
+    @Test void bindsCapacityTogether() {
         var configuration = bind(Map.of(
-                "surprising.aeron.execution-mode", "PIPELINED",
-                "surprising.aeron.owner-wait-strategy", "ADAPTIVE",
-                "surprising.aeron.settlement-wait-strategy", "BLOCKING",
-                "surprising.aeron.settlement-spin-limit", "24",
                 "surprising.aeron.max-pending-matching", "64",
                 "surprising.aeron.owner-role-change-timeout-seconds", "900"));
-        assertThat(configuration.executionMode()).isEqualTo(TradingExecutionMode.PIPELINED);
-        assertThat(configuration.ownerWaitStrategy()).isEqualTo(CoreRuntimeConfiguration.OwnerWaitStrategy.ADAPTIVE);
-        assertThat(configuration.settlementSpinLimit()).isEqualTo(24);
         assertThat(configuration.maxPendingMatching()).isEqualTo(64);
         assertThat(configuration.ownerRoleChangeTimeoutSeconds()).isEqualTo(900);
     }
@@ -39,37 +31,34 @@ class CoreRuntimeConfigurationTest {
     @Test void rejectsInvalidValuesBeforeAnyThreadStarts() {
         for (var invalid : Map.of(
                 "owner-role-change-timeout-seconds", "29", "max-pending-matching", "0",
-                "settlement-spin-limit", "4097", "lane-completion-spins", "-1",
+                "lane-completion-spins", "-1",
                 "snapshot-timeout-seconds", "0", "standalone-snapshot-timeout-seconds", "-1",
-                "owner-command-window", "65", "owner-input-batch-size", "257",
-                "execution-mode", "UNKNOWN").entrySet()) {
+                "owner-command-window", "65", "owner-input-batch-size", "257").entrySet()) {
             assertThatThrownBy(() -> bind(Map.of("surprising.aeron." + invalid.getKey(), invalid.getValue())))
                     .isInstanceOf(RuntimeException.class);
         }
     }
     @Test void explicitConfigurationSurvivesActivationAndSnapshotRecovery() {
-        var configuration = bind(Map.of("surprising.aeron.execution-mode", "FUSED",
-                "surprising.aeron.max-pending-matching", "64"));
-        String previous = System.setProperty("surprising.aeron.execution-mode", "INVALID_LOW_PRIORITY_VALUE");
+        var configuration = bind(Map.of("surprising.aeron.max-pending-matching", "64"));
+        String previous = System.setProperty("surprising.aeron.max-pending-matching", "INVALID_LOW_PRIORITY_VALUE");
         try (var runtime = new com.surprising.aeron.service.core.TradingCoreRuntime(
                 com.surprising.product.api.ProductLine.SPOT, LaneTopology.productionDefault(), configuration)) {
             runtime.activate();
-            assertThat(runtime.runtimeState().isFusedExecution()).isTrue();
+            assertThat(runtime.runtimeState().accountLanesStarted()).isTrue();
             byte[] snapshot = runtime.snapshot(1);
             try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decode(snapshot,
                     com.surprising.product.api.ProductLine.SPOT, configuration)) {
                 assertThat(restored.configuration()).isSameAs(configuration);
-                assertThat(restored.runtimeState().isFusedExecution()).isTrue();
                 assertThat(restored.runtimeState().topology()).isEqualTo(runtime.runtimeState().topology());
             }
         } finally {
-            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
-            else System.setProperty("surprising.aeron.execution-mode", previous);
+            if (previous == null) System.clearProperty("surprising.aeron.max-pending-matching");
+            else System.setProperty("surprising.aeron.max-pending-matching", previous);
         }
     }
 
     @Test void nodeRecoveryStaysPassiveUntilExplicitActivation() {
-        var configuration = bind(Map.of("surprising.aeron.execution-mode", "PIPELINED"));
+        var configuration = bind(Map.of());
         try (var original = new com.surprising.aeron.service.core.TradingCoreRuntime(
                 com.surprising.product.api.ProductLine.SPOT, LaneTopology.productionDefault(), configuration)) {
             byte[] snapshot = original.snapshot(7);

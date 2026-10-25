@@ -28,10 +28,6 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
     /** 独立账户覆盖连续退休，相邻同账户覆盖依赖阻塞与解锁。 */
     @Param({"DISTINCT", "PAIRED"})
     public String accountPattern = "DISTINCT";
-    /** 分别覆盖阻塞唤醒合并及忙轮询所有权交接；每个fork固定一种策略。 */
-    @Param({"BLOCKING", "BUSY_SPIN"})
-    public String laneWaitStrategy = "BLOCKING";
-    private String previousLaneWaitStrategy;
     private static final long TIME = 1_700_000_000_000L;
     /** 单一负载线程持有发送计数和响应计数；实际Owner运行于生产服务创建的线程。 */
     private AeronTradingClusterService service;
@@ -49,8 +45,6 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
 
     @Setup(Level.Trial)
     public void setup() {
-        previousLaneWaitStrategy = System.getProperty("surprising.aeron.settlement-wait-strategy");
-        System.setProperty("surprising.aeron.settlement-wait-strategy", laneWaitStrategy);
         transportThread = Thread.currentThread();
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         asset = type.isInverse() ? "BTC" : "USDT";
@@ -255,11 +249,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
             if (timerCalls != 0 || apiCalls == 0 || terminal != sequence)
                 throw new IllegalStateException("invalid transport/timer/terminal counters");
         } finally {
-            try { service.onTerminate(null); }
-            finally {
-                if (previousLaneWaitStrategy == null) System.clearProperty("surprising.aeron.settlement-wait-strategy");
-                else System.setProperty("surprising.aeron.settlement-wait-strategy", previousLaneWaitStrategy);
-            }
+            service.onTerminate(null);
         }
     }
 

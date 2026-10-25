@@ -46,7 +46,7 @@ class SystemLedgerControlTest {
             // Owner 当前尝试追加的资金流水，账本独占资金事实不会重复搬给它。
             var funds = new RuntimeFundsAccumulator();
             runtime.appendFundsDelta(funds);
-            assertThat(funds.toDelta().postings()).as("Owner consumes completion without money receipts").isEmpty();
+            assertThat(funds.isEmpty()).as("Owner consumes completion without money receipts").isTrue();
             LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 75L);
             assertThat(work.reusable()).isTrue();

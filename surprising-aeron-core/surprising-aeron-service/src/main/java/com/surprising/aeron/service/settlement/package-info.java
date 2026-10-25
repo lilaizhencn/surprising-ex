@@ -10,7 +10,7 @@
  *       和 {@link com.surprising.aeron.service.settlement.MatcherSettlementPlan}
  *       整理成交、已接受的撤单和实际参与账户。</li>
  *   <li>4.3：Event.notifyDirectPublication 经 Dispatcher.publishMatcherOwned
- *       直接投递各 Lane 的分片 SPSC 队列；FUSED 内联执行。</li>
+ *       直接投递各 Lane 的分片 SPSC 队列。</li>
  *   <li>4.4：Event.execute 选择 RuntimeSpotMatchProcessor 或
  *       RuntimeDerivativeMatchProcessor，衍生品金额由 RuntimeDerivativeFillCalculator
  *       按产品计算；MatcherSettlementChanges 整理终态、修订及资金增量，Lane 交回完成位。</li>

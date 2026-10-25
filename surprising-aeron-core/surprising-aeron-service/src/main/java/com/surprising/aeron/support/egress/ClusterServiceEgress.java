@@ -58,32 +58,10 @@ public final class ClusterServiceEgress {
     /**
      * 生产进度前的显式填充基类，不存放业务状态。
      */
-    private static class PaddedOutputProducedPadding {
-        /**
-         * p00：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p01：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p02：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p03：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p04：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p05：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p06：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p07：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p08：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p09：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p0a：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p0b：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p0c：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p0d：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         * p0e：生产进度之前的一项显式填充字段，不存业务数据，代码不读写它。
-         */
-        @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
-    }
-
     /**
-     * Owner 单写的输出生产游标和消费进度缓存；发布条数让回调侧看见已填槽。
+     * 合并输出环生产、消费进度的实际存储对象。
      */
-    private static class PaddedOutputProducedValue extends PaddedOutputProducedPadding {
+    private static final class PaddedEgressOffsets {
         /** Owner 填完槽后发布的累计条数。 */
         protected volatile long outputProducedCount;
         /** 仅 Owner 修改的累计输出编码字节。 */
@@ -92,37 +70,7 @@ public final class ClusterServiceEgress {
         protected long cachedOutputConsumedCount;
         /** Owner 缓存的已公布消费字节，容量不足时刷新。 */
         protected long cachedOutputConsumedBytes;
-    }
 
-    /**
-     * 生产与消费进度之间的显式填充基类，不保证 JVM 必定按某个缓存行布局。
-     */
-    private static class PaddedOutputConsumedPadding extends PaddedOutputProducedValue {
-        /**
-         * p10：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p11：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p12：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p13：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p14：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p15：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p16：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p17：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p18：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p19：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p1a：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p1b：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p1c：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p1d：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         * p1e：生产与消费进度之间的一项显式填充字段，不存业务数据，代码不读写它。
-         */
-        @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
-    }
-
-    /**
-     * 回调线程单写的输出消费进度及本地累计值，批量向 Owner 公布可复用容量。
-     */
-    private static class PaddedOutputConsumedValue extends PaddedOutputConsumedPadding {
         /** 回调线程批量公布的累计消费条数。 */
         protected volatile long outputConsumedCount;
         /** 回调线程批量公布的累计消费编码字节。 */
@@ -135,31 +83,6 @@ public final class ClusterServiceEgress {
         protected long uncommittedConsumedBytes;
         /** 已清槽但尚未公布给 Owner 的条数增量。 */
         protected int uncommittedConsumedSlots;
-    }
-
-    /**
-     * 合并输出环生产、消费进度的实际存储对象，末尾保留显式填充。
-     */
-    private static final class PaddedEgressOffsets extends PaddedOutputConsumedValue {
-        /**
-         * p20：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p21：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p22：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p23：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p24：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p25：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p26：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p27：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p28：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p29：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p2a：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p2b：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p2c：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p2d：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         * p2e：消费进度之后的一项显式填充字段，不存业务数据，代码不读写它。
-         */
-        @SuppressWarnings("unused")
-        private long p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p2a, p2b, p2c, p2d, p2e;
     }
 
     /** 输出生产与消费两侧的进度存储，按各自线程修改。 */

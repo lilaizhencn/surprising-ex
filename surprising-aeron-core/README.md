@@ -94,7 +94,6 @@ YAML、标准环境变量、JVM `-D` 和 Spring 命令行服从 Spring 优先级
 | `surprising.aeron.hostnames` | 同上 | `localhost,localhost,localhost`；本地单成员显式传 `localhost` |
 | `surprising.aeron.data-dir` | 同上 | `data/aeron`；节点目录为 `<data-dir>/<product>/node<N>` |
 | `surprising.aeron.cpu-affinity.*` | `CoreConfiguration`，见 [`application.yml`](surprising-aeron-service/src/main/resources/application.yml) | 默认关闭；开启需配置四个不同 CPU；macOS 跳过绑定 |
-| `surprising.aeron.execution-mode` | `CoreRuntimeConfiguration`，Spring 统一绑定 | `FUSED`；另可选 `PIPELINED`，由 Binder 转换枚举 |
 | `surprising.aeron.matching-engines` / `account-lanes` | `CoreConfiguration.laneTopology()`，Spring YAML、环境变量、JVM 属性或命令行 | `1` / `2`，须为允许范围内的 2 次幂；恢复使用快照拓扑 |
 | `surprising.aeron.account-lane-seed` | 同上 | `7640891576956012809`；随快照保存，不按新配置重新路由已有账户 |
 | `surprising.aeron.matcher-window-size` / `matching-completion-capacity` / `account-lane-queue-capacity` | 同上 | 均为 `4096`，须为允许范围内的 2 次幂 |
@@ -104,7 +103,7 @@ YAML、标准环境变量、JVM `-D` 和 Spring 命令行服从 Spring 优先级
 | `surprising.aeron.cluster-ingress-channel` | 同上 | `aeron:udp?term-length=16m` |
 | `surprising.aeron.archive-local-control-channel` | 同上 | `aeron:ipc?term-length=1m` |
 | `surprising.aeron.owner-input-batch-size` / `owner-command-window` | `CoreRuntimeConfiguration` | `64` / `256`，启动前检查范围及窗口二次幂 |
-| `surprising.aeron.owner-wait-strategy` / `matcher-pipeline-wait-strategy` / `settlement-wait-strategy` / `system-ledger-wait-strategy` | 同上 | 均默认 `BUSY_SPIN`，各线程按自己的枚举选择；不存在 `matcher-wait-strategy` 配置 |
+| `surprising.aeron.wait-strategy` | 同上 | 默认 `BUSY_SPIN`，可选 `PARKING`，所有工作线程统一使用 |
 | `surprising.aeron.max-pending-matching` / `lane-completion-spins` / `settlement-spin-limit` | 同上 | `4096` / `1024` / `0`，构造后固定 |
 | `surprising.aeron.matcher-group-size` / `matcher-group-nanos` / `lane-initial-entities` | 同上 | `256` / `10000 ns` / `1024`，必须为有效正值，实体容量至少 16 |
 | `surprising.aeron.funds-index-directory` | 同上 | 默认平台临时目录；资金索引首次 I/O 前已固定根目录，恢复使用同一配置 |
@@ -127,7 +126,6 @@ java --enable-native-access=ALL-UNNAMED \
   --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
   --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \
   --add-opens=java.base/java.util.zip=ALL-UNNAMED \
-  -Dsurprising.aeron.execution-mode=FUSED \
   -jar surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar \
   --surprising.aeron.product-line=SPOT \
   --surprising.aeron.node-id=0 \
@@ -154,9 +152,7 @@ java --enable-native-access=ALL-UNNAMED \
 ```mermaid
 flowchart TB
     S[Cluster 回调线程] -->|复制命令与日志元数据| O[OwnerIngressRing → Owner]
-    O --> Mode{execution-mode}
-    Mode -->|FUSED 默认| F[Owner 内联准入 → 撮合 → 账户变更]
-    Mode -->|PIPELINED| P[账户 Lane 准入 / Matcher 执行 / Lane 结算]
+    O --> P[账户 Lane 准入 / Matcher 执行 / Lane 结算]
     F --> L[独立 System Ledger]
     P --> L
     F --> C[Owner 收集完成结果并有序提交]
@@ -165,7 +161,7 @@ flowchart TB
     C -->|已提交终态| E[egress 队列 → Cluster 回调线程发送]
 ```
 
-FUSED 使用相同业务边界，在 Owner 内联执行 Matcher 和账户工作，不创建独立 Matcher/Account Lane 线程。PIPELINED 普通下单可提前把带准入门闩的输入交给 Matcher，但账户准入成功后才能撮合。队列提交成功或内部 `MATCHING_PENDING` 都不是客户端交易终态。
+系统采用流水线执行架构。普通下单可提前把带准入门闩的输入交给 Matcher，但账户准入成功后才能撮合。队列提交成功或内部 `MATCHING_PENDING` 都不是客户端交易终态。
 
 `LaneTopology.accountLaneId(userId)` 决定账户归属，`matcherShardId(symbolId)` 决定订单簿归属；两者不混用。快照只保存固定分片数、账户 Lane 数和路由种子，恢复不能按新配置重新分配账户；三项窗口/队列容量只由当前部署决定。
 
@@ -177,7 +173,7 @@ FUSED 使用相同业务边界，在 Owner 内联执行 Matcher 和账户工作�
 sequenceDiagram
     participant In as Cluster Service / Owner
     participant Admission as MatchingCommandAdmission
-    participant Account as Account Lane（FUSED 内联）
+    participant Account as Account Lane
     participant Matcher as CoreMatchingFlow / Matcher
     participant Commit as OrderedCommitCoordinator
     participant Out as 实时边界 / egress
@@ -381,7 +377,7 @@ sequenceDiagram
 
 | 阅读顺序 | 包 | 关键类 |
 | --- | --- | --- |
-| 启动 1：配置 | `config` | `CoreConfiguration`、`ClusterTopology`、`LaneTopology`、`TradingExecutionMode`、`TradingCpuAffinity` |
+| 启动 1：配置 | `config` | `CoreConfiguration`、`ClusterTopology`、`LaneTopology`、`TradingCpuAffinity` |
 | 启动 2：资源生命周期 | `bootstrap`、`bootstrap.account`、`bootstrap.matcher` | `SurprisingCoreApplication`、`AeronCoreLifecycle`、Owner / Lane / Matcher 线程 |
 | 交易 1：输入与 Owner | `controller`、`support.ingress`、`bootstrap`、`service.core` | `AeronTradingClusterService`、`OwnerIngressRing`、`TradingOwnerLoop`、`TradingCoreOwner`、`TradingCoreRuntime` |
 | 交易 2：业务准入 | `service.order`、`service.order.admission` | `MatchingCommandAdmission`、`CoreOrderDecisionResolver`、`RuntimeOrderAdmission` |

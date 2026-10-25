@@ -2,6 +2,7 @@ package com.surprising.aeron.service.treasury;
 
 import com.surprising.aeron.service.settlement.FundsPosting;
 import org.junit.jupiter.api.Test;
+import static com.surprising.aeron.service.treasury.RuntimeFundsTestSupport.postings;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -25,7 +26,7 @@ class RuntimeFundsAccumulatorTest {
             source.add(user % 3, FundsPosting.OwnerKind.USER, user, FundsPosting.Subledger.LOCKED, user);
         }
         // 转移前或合并后物化保存的分录列表，用于核对后续写入隔离。
-        var expected = source.toDelta().postings();
+        var expected = postings(source);
         // 反射取得的原语金额数组字段。
         var storage = RuntimeFundsAccumulator.class.getDeclaredField("units");
         storage.setAccessible(true);
@@ -33,16 +34,16 @@ class RuntimeFundsAccumulatorTest {
         Object originalStorage = storage.get(source);
         source.transferTo(target);
         assertThat(storage.get(target)).isSameAs(originalStorage);
-        assertThat(source.toDelta()).isSameAs(RuntimeFundsDelta.empty());
+        assertThat(source.isEmpty()).isTrue();
         source.add(9, FundsPosting.OwnerKind.USER, 900, FundsPosting.Subledger.AVAILABLE, 17);
-        assertThat(target.toDelta().postings()).containsExactlyElementsOf(expected);
+        assertThat(postings(target)).containsExactlyElementsOf(expected);
         assertThatCode(() -> target.requireConserved(false)).doesNotThrowAnyException();
         assertThatThrownBy(() -> target.transferToEmpty(source)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> target.transferToEmpty(target)).isInstanceOf(IllegalArgumentException.class);
         source.clear();
         target.transferToEmpty(source);
         target.clear();
-        assertThat(source.toDelta().postings()).containsExactlyElementsOf(expected);
+        assertThat(postings(source)).containsExactlyElementsOf(expected);
         assertThat(storage.get(source)).isSameAs(originalStorage);
     }
 
@@ -62,8 +63,8 @@ class RuntimeFundsAccumulatorTest {
         source.add(9, FundsPosting.OwnerKind.USER, 12, FundsPosting.Subledger.AVAILABLE, -3);
         source.add(9, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 3);
         source.transferTo(target);
-        assertThat(source.toDelta()).isSameAs(RuntimeFundsDelta.empty());
-        assertThat(target.toDelta().postings()).hasSize(2).allSatisfy(/* 从目标物化结果逐项读取的资金分录，用于核对资产或金额。 */ posting ->
+        assertThat(source.isEmpty()).isTrue();
+        assertThat(postings(target)).hasSize(2).allSatisfy(/* 从目标物化结果逐项读取的资金分录，用于核对资产或金额。 */ posting ->
                 assertThat(posting.assetId()).isEqualTo(9));
         target.requireConserved(false);
 
@@ -71,14 +72,14 @@ class RuntimeFundsAccumulatorTest {
         source.add(9, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 2);
         source.transferTo(target);
         // 转移前或合并后物化保存的分录列表，用于核对后续写入隔离。
-        var expected = target.toDelta().postings();
+        var expected = postings(target);
         assertThat(expected).anySatisfy(/* 从目标物化结果逐项读取的资金分录，用于核对资产或金额。 */ posting -> assertThat(posting.units()).isEqualTo(5));
         target.requireConserved(false);
         source.add(7, FundsPosting.OwnerKind.USER, 11, FundsPosting.Subledger.AVAILABLE, 1);
-        assertThat(target.toDelta().postings()).containsExactlyElementsOf(expected);
+        assertThat(postings(target)).containsExactlyElementsOf(expected);
         assertThatThrownBy(() -> source.transferTo(source)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> source.transferTo(null)).isInstanceOf(IllegalArgumentException.class);
-        assertThat(source.toDelta().postings()).hasSize(1);
+        assertThat(postings(source)).hasSize(1);
     }
 
     /**

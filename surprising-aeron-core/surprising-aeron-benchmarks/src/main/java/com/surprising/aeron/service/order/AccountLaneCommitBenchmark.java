@@ -67,10 +67,6 @@ public class AccountLaneCommitBenchmark {
         @Param("256")
         public int maxInFlight;
 
-        /** Compare the busy publication path and the consumer's parking handshake. */
-        @Param({"BUSY_SPIN", "BLOCKING"})
-        public String waitStrategy = "BUSY_SPIN";
-
         private TradingAccountRuntime runtime;
         private long[] users;
         private java.util.List<Long> metadataUsers;
@@ -80,13 +76,10 @@ public class AccountLaneCommitBenchmark {
         private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
         private long sequence;
         private String previousAccountLanes;
-        private String previousWaitStrategy;
 
         @Setup(Level.Trial)
         public void setUp() {
             if (maxInFlight != 256) throw new IllegalArgumentException("maxInFlight must be 256");
-            previousWaitStrategy = System.getProperty("surprising.aeron.settlement-wait-strategy");
-            System.setProperty("surprising.aeron.settlement-wait-strategy", waitStrategy);
             previousAccountLanes = System.getProperty("surprising.aeron.account-lanes");
             System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
             LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
@@ -196,8 +189,6 @@ public class AccountLaneCommitBenchmark {
             } finally {
                 try { runtime.close(); }
                 finally {
-                    if (previousWaitStrategy == null) System.clearProperty("surprising.aeron.settlement-wait-strategy");
-                    else System.setProperty("surprising.aeron.settlement-wait-strategy", previousWaitStrategy);
                     if (previousAccountLanes == null) System.clearProperty("surprising.aeron.account-lanes");
                     else System.setProperty("surprising.aeron.account-lanes", previousAccountLanes);
                 }

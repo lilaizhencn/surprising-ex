@@ -185,7 +185,7 @@ public final class MatchingCommandAdmission {
     }
 
     /**
-     * 使用已有指纹并解码输入，按空前置撤单、空资金增量和空准入借槽。
+     * 使用已有指纹并解码输入，按空前置撤单、无来源资金和空准入借槽。
      * @param sequence 当前原命令或新借槽的完整 Core 序号
      * @param operation 当前撮合操作类别
      * @param command 当前原始 Core 命令
@@ -194,7 +194,7 @@ public final class MatchingCommandAdmission {
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint) {
         return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
-                com.surprising.aeron.service.treasury.RuntimeFundsDelta.empty(),
+                null,
                 owner.decodeMatchingCommand(command), null);
     }
 
@@ -210,7 +210,7 @@ public final class MatchingCommandAdmission {
                                    CoreMessage command, CommandFingerprint fingerprint,
                                    DecodedMatchingCommand decodedCommand) {
         return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
-                com.surprising.aeron.service.treasury.RuntimeFundsDelta.empty(), decodedCommand, null);
+                null, decodedCommand, null);
     }
 
     /**

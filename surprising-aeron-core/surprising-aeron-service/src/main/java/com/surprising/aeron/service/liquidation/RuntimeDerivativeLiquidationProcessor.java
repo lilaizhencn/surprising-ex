@@ -153,11 +153,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
             var route = runtime.liquidationRoute(liquidationId);
             // 从强平路由或同步强平记录得到的源用户编号，没有记录时为 0。
             long userId = route == null ? 0 : route.userId();
-            if (route == null && !runtime.asynchronousCommands()) {
-                // 同步环境未找到路由时直接读取的强平正文，仅用于确定源用户。
-                var value = runtime.liquidation(liquidationId);
-                if (value != null) userId = value.userId();
-            }
             if (userId == 0) return;
             laneIds[index] = runtime.topology().accountLaneId(userId);
             results[index] = CHECK_LANE; laneMask |= 1L << laneIds[index];

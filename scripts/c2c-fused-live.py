@@ -1,4 +1,4 @@
-"""隔离 SPOT FUSED 实链路验收；仅用 SQL 准备测试身份、角色及显式合成 KYC。
+"""隔离 SPOT Core 实链路验收；仅用 SQL 准备测试身份、角色及显式合成 KYC。
 
 必须提供 C2C_LIVE_QA_ROOT 与 C2C_LIVE_DB_USER，并已准备本轮私有 runtime.py。
 金额、成交和划转均经真实 API/Core；不接触已部署服务器或手机账号。
@@ -465,7 +465,7 @@ def resume_crash():
 if __name__ == '__main__':
     action = sys.argv[1]
     if action == 'check':
-        print('Owned SPOT FUSED QA runtime verified; no financial command sent')
+        print('Owned SPOT Core QA runtime verified; no financial command sent')
     elif action == 'users':
         bootstrap_users()
     elif action == 'market':

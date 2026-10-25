@@ -269,7 +269,6 @@ class ClusteredBatchTradingBenchmarkTest {
         workload.productLine = productLine;
         workload.batchSize = 2;
         workload.maxInFlight = 256;
-        workload.settlementSpinLimit = 256;
         workload.interleavedMetrics = false;
         try (workload) {
             workload.setup();

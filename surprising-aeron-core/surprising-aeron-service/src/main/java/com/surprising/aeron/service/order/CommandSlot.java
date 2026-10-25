@@ -20,7 +20,6 @@ import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
 import com.surprising.aeron.service.settlement.MatcherSettlementPlan;
 import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation;
 import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
-import com.surprising.aeron.service.treasury.RuntimeFundsDelta;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import java.util.List;
@@ -521,146 +520,22 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     }
 
     /**
-     * 自动计算命令指纹，使用空前置撤单列表并解码后初始化。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param fundsDelta 初始资金事实增量值
-     */
-    CommandSlot(long sequence, Operation operation, CoreMessage command,
-                    RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, CommandFingerprint.of(command), List.of(), fundsDelta);
-    }
-
-    /**
-     * 保留传入指纹，使用空前置撤单列表并解码后初始化。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param fingerprint 本次原命令指纹
-     * @param fundsDelta 初始资金事实增量值
-     */
-    CommandSlot(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                    RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, fingerprint, List.of(), fundsDelta);
-    }
-
-    /**
-     * 自动计算指纹和解码值，保留指定先撤订单后初始化。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param fundsDelta 初始资金事实增量值
-     */
-    CommandSlot(long sequence, Operation operation, CoreMessage command,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                fundsDelta,
-                DecodedMatchingCommand.decode(command));
-    }
-
-    /**
-     * 使用传入指纹与先撤列表，自动解码命令后初始化。
+     * 要求正序号、命令类消息和必需输入非空，清旧生命周期后绑定命令、指纹、解码、先撤列表及来源资金交接，重置本次提交边界和业务阶段。保留槽内可复用任务对象，不是复制一份账户状态。
      * @param sequence 本次完整的正 Core 命令序号
      * @param operation 本槽承载的业务操作类别
      * @param command 本次完整 Core 命令消息
      * @param fingerprint 本次原命令指纹
      * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param fundsDelta 初始资金事实增量值
-     */
-    CommandSlot(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
-                fundsDelta,
-                DecodedMatchingCommand.decode(command));
-    }
-
-    /**
-     * 使用已解码命令并计算指纹，准入结果留空后初始化。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param fundsDelta 初始资金事实增量值
-     * @param decodedCommand 当前命令已经解码的输入
-     */
-    CommandSlot(long sequence, Operation operation, CoreMessage command,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeFundsDelta fundsDelta,
-                    DecodedMatchingCommand decodedCommand) {
-        this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                fundsDelta, decodedCommand, null);
-    }
-
-    /**
-     * 使用已传入的指纹、解码值及先撤列表，准入结果留空。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param fingerprint 本次原命令指纹
-     * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param fundsDelta 初始资金事实增量值
-     * @param decodedCommand 当前命令已经解码的输入
-     */
-    CommandSlot(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeFundsDelta fundsDelta,
-                    DecodedMatchingCommand decodedCommand) {
-        this(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
-                fundsDelta, decodedCommand, null);
-    }
-
-    /**
-     * 自动计算指纹，保留已解码值与可空准入结果后初始化。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param fundsDelta 初始资金事实增量值
-     * @param decodedCommand 当前命令已经解码的输入
-     * @param admission 对应方法签名的准入事件或已解析准入值，使用期间按租约只读
-     */
-    CommandSlot(long sequence, Operation operation, CoreMessage command,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeFundsDelta fundsDelta,
-                    DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
-        this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                fundsDelta, decodedCommand, admission);
-    }
-
-    /**
-     * 把完整输入交给 initialize 校验并建立此次槽生命周期。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param fingerprint 本次原命令指纹
-     * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param fundsDelta 初始资金事实增量值
-     * @param decodedCommand 当前命令已经解码的输入
-     * @param admission 对应方法签名的准入事件或已解析准入值，使用期间按租约只读
-     */
-    CommandSlot(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
-                    List<Long> preMatchingCancellationOrderIds, RuntimeFundsDelta fundsDelta,
-                    DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
-        initialize(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
-                fundsDelta, decodedCommand, admission);
-    }
-
-    /**
-     * 要求正序号、命令类消息和必需输入非空，清旧生命周期后绑定命令、指纹、解码、先撤列表及资金增量，重置本次提交边界和业务阶段。保留槽内可复用任务对象，不是复制一份账户状态。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param fingerprint 本次原命令指纹
-     * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param fundsDelta 初始资金事实增量值
+     * @param sourceFunds 可空来源资金累加器，初始化完成后移交到本槽空缓冲
      * @param decodedCommand 当前命令已经解码的输入
      * @param admission 对应方法签名的准入事件或已解析准入值，使用期间按租约只读
      */
     CommandSlot initialize(long sequence, Operation operation, CoreMessage command,
                                CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
-                               RuntimeFundsDelta fundsDelta,
+                               RuntimeFundsAccumulator sourceFunds,
                                DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
         if (sequence <= 0 || operation == null || command == null || preMatchingCancellationOrderIds == null
-                || fingerprint == null || fundsDelta == null || decodedCommand == null
+                || fingerprint == null || decodedCommand == null
                 || command.header().kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
             throw new IllegalArgumentException("invalid pending matching request");
         }
@@ -674,7 +549,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         this.fingerprint = fingerprint;
         this.preMatchingCancellationOrderIds = retainCancellationIds(preMatchingCancellationOrderIds);
         fundsAccumulator.clear();
-        fundsAccumulator.add(fundsDelta);
         this.decodedCommand = decodedCommand;
         this.admission = admission;
         commitFenceTimestamp = 0;
@@ -695,6 +569,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         realtimeTakerOrder = null;
         pipelinedSettlementCounted = false;
         cachedMatcherShard = -1;
+        if (sourceFunds != null) sourceFunds.transferToEmpty(fundsAccumulator);
         return this;
     }
 
@@ -704,27 +579,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     CommandSlot withPreMatchingCancellations(List<Long> orderIds) {
         preMatchingCancellationOrderIds = retainCancellationIds(orderIds);
-        return this;
-    }
-
-    /**
-     * 先以空资金增量初始化，再将非空来源累加器的内容移入槽内空缓冲；来源为空也允许，不再重复合并逐账户 posting。
-     * @param sequence 本次完整的正 Core 命令序号
-     * @param operation 本槽承载的业务操作类别
-     * @param command 本次完整 Core 命令消息
-     * @param fingerprint 本次原命令指纹
-     * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param sourceFunds 可空的来源累加器，非空时转交到槽内空缓冲
-     * @param decodedCommand 当前命令已经解码的输入
-     * @param admission 对应方法签名的准入事件或已解析准入值，使用期间按租约只读
-     */
-    CommandSlot initialize(long sequence, Operation operation, CoreMessage command,
-                           CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
-                           RuntimeFundsAccumulator sourceFunds,
-                           DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
-        initialize(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
-                RuntimeFundsDelta.empty(), decodedCommand, admission);
-        if (sourceFunds != null) sourceFunds.transferToEmpty(fundsAccumulator);
         return this;
     }
 

@@ -8,10 +8,6 @@ surprising:
     matching-completion-capacity: 4096
     account-lane-queue-capacity: 4096
     # 节点执行参数由 CoreRuntimeConfiguration 一次绑定、校验后注入；JVM/环境变量仍按 Spring 优先级覆盖。
-    execution-mode: FUSED
-    owner-wait-strategy: BUSY_SPIN
-    settlement-wait-strategy: BUSY_SPIN
-    settlement-spin-limit: 0
     lane-completion-spins: 1024
     max-pending-matching: 4096
     standalone-snapshot-timeout-seconds: 300
@@ -20,11 +16,8 @@ surprising:
     owner-input-batch-size: 64
     owner-command-window: 256
     decoder-cache-slots: 4096
-    # Matcher 与 Ledger 使用自己的真实等待入口；原 matcher-wait-strategy 无读取者，不再保留。
-    matcher-pipeline-wait-strategy: BUSY_SPIN
     matcher-group-size: 256
     matcher-group-nanos: 10000
-    system-ledger-wait-strategy: BUSY_SPIN
     lane-initial-entities: 1024
     funds-index-directory: ${java.io.tmpdir}
     snapshot:

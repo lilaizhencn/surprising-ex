@@ -16,7 +16,6 @@ import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.result.CommandResultBuilder;
 import com.surprising.aeron.service.result.ResponseArena;
-import com.surprising.aeron.service.treasury.RuntimeFundsDelta;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
@@ -34,8 +33,9 @@ class CommandSlotTest {
     @Test
     void laneEmptyResultIsFinalAndNeverQueriesOwnerState() {
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
-        var pending = new CommandSlot(1000, CommandSlot.Operation.PLACE, command(1000),
-                RuntimeFundsDelta.empty());
+        CoreMessage command = command(1000);
+        var pending = new CommandSlot().initialize(1000, CommandSlot.Operation.PLACE, command,
+                CommandFingerprint.of(command), List.of(), null, DecodedMatchingCommand.decode(command), null);
         pending.prepareLaneResultTarget(new ResponseArena(1, 16));
         // 普通命令槽提供的 Lane 结果写入接口。
         var target = pending.laneResultTarget();
@@ -66,7 +66,9 @@ class CommandSlotTest {
             var userView = builder.commandChangedUserIds;
             assertThat(userView).isInstanceOf(com.surprising.aeron.support.collection.PrimitiveLongView.class);
             // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
-            var pending = new CommandSlot(1, CommandSlot.Operation.PLACE, command(1), RuntimeFundsDelta.empty());
+            CoreMessage command = command(1);
+            var pending = new CommandSlot().initialize(1, CommandSlot.Operation.PLACE, command,
+                    CommandFingerprint.of(command), List.of(), null, DecodedMatchingCommand.decode(command), null);
             pending.suspendCommitContext(builder, null, false, false);
             builder.commandChangedUserIds = List.of();
             builder.commandChangedOrderIds = List.of();
@@ -126,14 +128,14 @@ class CommandSlotTest {
         // 当前下单输入消息。
         CoreMessage command = command(1000);
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
-        var pending = new CommandSlot(1000, CommandSlot.Operation.PLACE, command,
-                RuntimeFundsDelta.empty());
+        var pending = new CommandSlot().initialize(1000, CommandSlot.Operation.PLACE, command,
+                CommandFingerprint.of(command), List.of(), null, DecodedMatchingCommand.decode(command), null);
         // 人工绑定到槽上的批次上下文。
         var batch = new OrderBatchPending(1, new ResponseArena(1, 4096));
         pending.orderBatch = batch;
         pending.initialize(2000, CommandSlot.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(),
-                RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
+                null, DecodedMatchingCommand.decode(command), null);
         assertThat(pending.orderBatch).isNull();
     }
 
@@ -191,18 +193,16 @@ class CommandSlotTest {
         CoreMessage command = command(11);
         // 原命令已计算的指纹，更新列表后要求保持同一引用。
         CommandFingerprint fingerprint = CommandFingerprint.of(command);
-        // 原先共享的空资金增量常量。
-        RuntimeFundsDelta fundsDelta = RuntimeFundsDelta.empty();
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
-        CommandSlot pending = new CommandSlot(7, CommandSlot.Operation.PLACE, command, fingerprint,
-                List.of(17L), fundsDelta);
+        CommandSlot pending = new CommandSlot().initialize(7, CommandSlot.Operation.PLACE, command, fingerprint,
+                List.of(17L), null, DecodedMatchingCommand.decode(command), null);
 
         // 更新前保留的解码引用。
         var decoded = pending.decodedCommand();
         // 更新先撤列表后返回的原命令槽引用。
         CommandSlot updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
 
-        assertThat(updatedCancellations.fundsAccumulator().toDelta()).isSameAs(fundsDelta);
+        assertThat(updatedCancellations.fundsAccumulator().isEmpty()).isTrue();
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
         assertThat(updatedCancellations.command()).isSameAs(command);
         assertThat(updatedCancellations.decodedCommand()).isSameAs(decoded);

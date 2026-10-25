@@ -21,6 +21,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import static com.surprising.aeron.service.treasury.RuntimeFundsTestSupport.postings;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -56,14 +57,14 @@ class RuntimeTreasuryDeltaTest {
         RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
         treasury.appendFundsDelta(funds);
         funds.requireConserved(false);
-        assertThat(funds.toDelta().postings()).containsExactly(
-                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 10),
-                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE, -50),
-                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.DEFICIT, -5),
-                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.LIQUIDATION_FEE, 2),
-                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FUNDING_RESIDUAL, -4),
-                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.ROUNDING_RESIDUAL, 1),
-                new RuntimeFundsDelta.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.CLEARING_PNL, 46));
+        assertThat(postings(funds)).containsExactly(
+                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 10),
+                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE, -50),
+                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.DEFICIT, -5),
+                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.LIQUIDATION_FEE, 2),
+                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FUNDING_RESIDUAL, -4),
+                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.ROUNDING_RESIDUAL, 1),
+                new RuntimeFundsTestSupport.Posting(7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.CLEARING_PNL, 46));
 
         treasury.rollbackChangedValues();
 
@@ -96,11 +97,11 @@ class RuntimeTreasuryDeltaTest {
             RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator(75);
             treasury.appendFundsDelta(funds);
             // 当前原语流水物化的分录列表，供逐资产核对。
-            var postings = funds.toDelta().postings();
+            var postings = postings(funds);
             for (/* 当前设置或核对前值的资产编号。 */ int asset = 0; asset < 25; asset++) {
-                assertThat(postings).contains(new RuntimeFundsDelta.Posting(asset,
+                assertThat(postings).contains(new RuntimeFundsTestSupport.Posting(asset,
                         FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 200));
-                assertThat(postings).contains(new RuntimeFundsDelta.Posting(asset,
+                assertThat(postings).contains(new RuntimeFundsTestSupport.Posting(asset,
                         FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.INSURANCE, 300 + asset));
             }
             treasury.rollbackChangedValues();
@@ -178,7 +179,7 @@ class RuntimeTreasuryDeltaTest {
         assertThat(treasury.changedAssets().contains(7)).isTrue();
         var funds = new RuntimeFundsAccumulator();
         treasury.appendFundsDelta(funds);
-        assertThat(funds.toDelta().postings()).containsExactly(new RuntimeFundsDelta.Posting(
+        assertThat(postings(funds)).containsExactly(new RuntimeFundsTestSupport.Posting(
                 7, FundsPosting.OwnerKind.TREASURY, 0, FundsPosting.Subledger.FEE, 100));
         treasury.rollbackChangedValues();
         assertThat(treasury.fee(7)).isEqualTo(100);
@@ -305,52 +306,6 @@ class RuntimeTreasuryDeltaTest {
         assertThat(first.assetId(1)).isEqualTo(2);
         assertThat(first.feeUnits(1)).isEqualTo(13);
         assertThat(first.clearingUnits(1)).isEqualTo(-11);
-    }
-
-    /**
-     * 从包含系统和用户分录的资金值提取 Treasury 差额，核对强平费归保险、亏空反号及普通用户分录被忽略。
-     */
-    @Test
-    void derivesLaneTreasuryAcknowledgementFromPrimitiveFundsPostings() {
-        // 含 Treasury 及普通用户分录的资金值，尚未提取系统差额。
-        RuntimeFundsDelta funds = new RuntimeFundsDelta(List.of(
-                new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
-                        FundsPosting.Subledger.FEE, 7),
-                new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
-                        FundsPosting.Subledger.LIQUIDATION_FEE, 11),
-                new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
-                        FundsPosting.Subledger.DEFICIT, -13),
-                new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0,
-                        FundsPosting.Subledger.FUNDING_RESIDUAL, -17),
-                new RuntimeFundsDelta.Posting(2, FundsPosting.OwnerKind.USER, 9,
-                        FundsPosting.Subledger.AVAILABLE, -19)));
-
-        // 从原语资金分录提取的系统差额，用于核对子账映射。
-        RuntimeTreasuryDelta treasury = funds.treasuryDelta();
-
-        assertThat(treasury.size()).isOne();
-        assertThat(treasury.assetId(0)).isEqualTo(1);
-        assertThat(treasury.feeUnits(0)).isEqualTo(7);
-        assertThat(treasury.insuranceUnits(0)).isEqualTo(11);
-        assertThat(treasury.deficitUnits(0)).isEqualTo(13);
-        assertThat(treasury.fundingResidualUnits(0)).isEqualTo(-17);
-    }
-
-    /**
-     * 将预留及持仓保证金子账配给 Treasury，检查差额提取明确拒绝；这里只枚举这两个非法子账。
-     */
-    @Test
-    void rejectsUserOnlySubledgersForTreasuryOwner() {
-        for (FundsPosting.Subledger /* 当前故意给 Treasury 配入的用户专用子账类别。 */ subledger : List.of(
-                FundsPosting.Subledger.RESERVATION, FundsPosting.Subledger.POSITION_MARGIN)) {
-            // 故意把用户专用子账配给 Treasury 的非法提取输入。
-            RuntimeFundsDelta funds = new RuntimeFundsDelta(List.of(
-                    new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0, subledger, 1)));
-
-            assertThatThrownBy(funds::treasuryDelta)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("invalid Treasury funds subledger: " + subledger);
-        }
     }
 
     /**

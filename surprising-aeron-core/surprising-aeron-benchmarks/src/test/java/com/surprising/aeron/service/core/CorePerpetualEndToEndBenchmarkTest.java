@@ -1,16 +1,13 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.config.TradingExecutionMode;
 import java.util.List;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CorePerpetualEndToEndBenchmarkTest {
 
-    @ParameterizedTest @EnumSource(TradingExecutionMode.class)
-    void coreReservationCoversFragmentedTakerFeesAcrossMakerDepths(TradingExecutionMode mode) {
-        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
+    @Test
+    void coreReservationCoversFragmentedTakerFeesAcrossMakerDepths() {
         try {
             for (int makerDepth : List.of(1, 10, 100)) {
                 CorePerpetualEndToEndBenchmark.BaselineResult result =
@@ -24,8 +21,6 @@ class CorePerpetualEndToEndBenchmarkTest {
                 assertThat(result.terminalTombstones()).isGreaterThanOrEqualTo(makerDepth + 1);
             }
         } finally {
-            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
-            else System.setProperty("surprising.aeron.execution-mode", previous);
         }
     }
 }

@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.config.TradingExecutionMode;
 import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
@@ -152,10 +151,8 @@ class LinearPerpetualBenchmarkSupportTest {
         }
     }
 
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.EnumSource(TradingExecutionMode.class)
-    void liquidationBenchmarksExerciseTheFullTwoHundredFiftySixItemPaths(TradingExecutionMode mode) {
-        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
+    @org.junit.jupiter.api.Test
+    void liquidationBenchmarksExerciseTheFullTwoHundredFiftySixItemPaths() {
         try {
             int lanes = 4;
             List<NamedScenario> scenarios = List.of(
@@ -180,8 +177,6 @@ class LinearPerpetualBenchmarkSupportTest {
                 }).as(named.name()).doesNotThrowAnyException();
             }
         } finally {
-            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
-            else System.setProperty("surprising.aeron.execution-mode", previous);
         }
     }
 

@@ -56,15 +56,13 @@ class CoreConfigurationTest {
         // 故意提供非法低优先级属性，检查运行时内部不会绕过 Spring 再读一遍。
         String previous = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "3");
-        String previousMode = System.setProperty("surprising.aeron.execution-mode", "INVALID_LOW_PRIORITY");
         try (/* 只装配配置、出口与真实 Owner，不启动网络驱动。 */ var context = application().run(
                 "--spring.config.location=" + yaml.toUri(),
                 "--surprising.aeron.product-line=SPOT", "--surprising.aeron.hostnames=localhost",
-                "--surprising.aeron.account-lanes=8", "--surprising.aeron.execution-mode=FUSED")) {
+                "--surprising.aeron.account-lanes=8")) {
             // Spring 绑定后唯一的启动拓扑。
             var topology = context.getBean(LaneTopology.class);
             var runtimeConfiguration = context.getBean(CoreRuntimeConfiguration.class);
-            assertThat(runtimeConfiguration.executionMode()).isEqualTo(TradingExecutionMode.FUSED);
             assertThat(runtimeConfiguration.matcherGroupSize()).isEqualTo(17);
             assertThat(runtimeConfiguration.laneInitialEntities()).isEqualTo(32);
             assertThat(topology).isEqualTo(new LaneTopology(2, 8, 42, 32, 64, 128));
@@ -85,7 +83,6 @@ class CoreConfigurationTest {
             }
         } finally {
             restoreProperty("surprising.aeron.account-lanes", previous);
-            restoreProperty("surprising.aeron.execution-mode", previousMode);
         }
     }
 

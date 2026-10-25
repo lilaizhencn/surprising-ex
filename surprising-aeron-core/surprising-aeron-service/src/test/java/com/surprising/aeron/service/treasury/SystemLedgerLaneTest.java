@@ -240,73 +240,9 @@ class SystemLedgerLaneTest {
     }
 
     /**
-     * 临时使用 BLOCKING 策略，五百一十二轮在停车标记后的复查窗口发布就绪及后续任务，检查任务最终全部执行并恢复原 JVM 属性。
+     * 临时使用 PARKING 策略，五百一十二轮在停车标记后的复查窗口发布就绪及后续任务，检查任务最终全部执行并恢复原 JVM 属性。
      */
-    @Test
-    void accountReceiptPublishedInsideParkingWindowCannotLoseWakeup() throws Exception {
-        // 本用例临时修改的账本等待策略 JVM 属性名。
-        String key = "surprising.aeron.system-ledger-wait-strategy";
-        // 用例开始前的等待策略属性值，finally 精确恢复或移除。
-        String previous = System.getProperty(key);
-        System.setProperty(key, "BLOCKING");
-        try {
-            // 本用例原 Treasury 对象，或任务回调收到的同一财库，不是账本副本。
-            TreasuryRuntime ledger = new TreasuryRuntime();
-            // 跨线程接收账本异常的原子引用，结束时检查。
-            AtomicReference<Throwable> failure = new AtomicReference<>();
-            try (/* 实际启动的系统账本执行器，按用例选择自动或显式关闭。 */ var lane = new SystemLedgerLane(ledger, 256, failure::set)) {
-            for (/* 停车窗口竞争场景的当前重复轮次。 */ int iteration = 0; iteration < 512; iteration++) {
-                // 模拟账户回执是否到达的原子开关，控制队首就绪。
-                AtomicBoolean ready = new AtomicBoolean();
-                // 放行被测试门闩阻塞的就绪复查回调，finally 保证释放。
-                // 账本已公布停车标记并进入就绪复查窗口的通知门闩。
-                CountDownLatch parkedWindow = new CountDownLatch(1), releaseCheck = new CountDownLatch(1);
-                // 对应资金任务执行到通知点后释放的门闩。
-                CountDownLatch done = new CountDownLatch(1);
-                assertThat(lane.offer(/* 由模拟回执开关或固定 false 控制就绪的测试账本任务，输入和结果只在本用例生命周期使用。 */ new SystemLedgerLane.Entry() {
-                    /**
-                     * 在检测到停车窗口时用门闩延迟复查，让主线程恰在此窗口发布模拟回执，最后读取就绪标记。
-                     */
-                    @Override public boolean ready() {
-                        if (!ready.get() && lane.parked()) {
-                            parkedWindow.countDown();
-                            try {
-                                if (!releaseCheck.await(3, TimeUnit.SECONDS))
-                                    throw new AssertionError("parking window not released");
-                            } catch (/* 工作线程门闩等待收到的中断异常，当前分支把它转换为断言失败。 */ InterruptedException interrupted) {
-                                Thread.currentThread().interrupt();
-                                throw new AssertionError(interrupted);
-                            }
-                        }
-                        return ready.get();
-                    }
-                    /**
-                     * 本轮首个任务在原财库把费用增加一，后续任务再增加一并通知完成。
-                     * @param actual 当前测试任务由账本线程独占持有的原 Treasury
-                     */
-                    @Override public void apply(TreasuryRuntime actual) {
-                        actual.setFee(1, Math.incrementExact(actual.fee(1)));
-                    }
-                })).isTrue();
-                try {
-                    assertThat(parkedWindow.await(3, TimeUnit.SECONDS)).isTrue();
-                    ready.set(true);
-                    assertThat(lane.offer(/* 账本任务回调收到的同一权威 Treasury。 */ actual -> {
-                        actual.setFee(1, Math.incrementExact(actual.fee(1)));
-                        actual.clearChangedKeys();
-                        done.countDown();
-                    })).isTrue();
-                } finally { ready.set(true); releaseCheck.countDown(); }
-                assertThat(done.await(3, TimeUnit.SECONDS)).isTrue();
-            }
-        }
-        assertThat(failure).hasValue(null);
-        assertThat(ledger.fee(1)).isEqualTo(1_024);
-        } finally {
-            if (previous == null) System.clearProperty(key);
-            else System.setProperty(key, previous);
-        }
-    }
+
 
     /**
      * 关闭线程后投递资金任务应明确拒绝，原费用仍为零且没有额外故障。

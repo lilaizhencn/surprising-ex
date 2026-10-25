@@ -1397,7 +1397,7 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * 下单步骤 4.5：保留一个财务槽并尝试登记，无成交可在账户完成后本地核对，FUSED 可在账本允许时内联应用，否则投递账本邮箱。满队列返回 false 保留同槽供重试，已成功登记不允许重复投递。
+     * 下单步骤 4.5：保留一个财务槽并尝试登记，无成交可在账户完成后本地核对，否则投递账本邮箱。满队列返回 false 保留同槽供重试，已成功登记不允许重复投递。
      * @param ledger 当前运行时使用的系统账本执行边界
      */
     public boolean submitTreasurySettlement(SystemLedgerLane ledger) {
@@ -1418,17 +1418,13 @@ public final class MatcherSettlementEvent implements
             return true;
         }
         treasurySettlement.ledger = ledger;
-        if (runtime.isFusedExecution() && ledger.tryApplyInline(treasurySettlement)) {
-            treasurySettlement.queued = true;
-            return true;
-        }
         if (!ledger.offer(treasurySettlement)) return false;
         treasurySettlement.queued = true;
         return true;
     }
 
     /**
-     * 返回财务工作是否已登记成功，包括邮箱、本地无成交及 FUSED 内联路径，不只表示物理队列中存在任务。
+     * 返回财务工作是否已登记成功，包括邮箱和本地无成交路径，不只表示物理队列中存在任务。
      */
     public boolean hasLedgerSettlement() { return treasurySettlement != null && treasurySettlement.queued; }
 

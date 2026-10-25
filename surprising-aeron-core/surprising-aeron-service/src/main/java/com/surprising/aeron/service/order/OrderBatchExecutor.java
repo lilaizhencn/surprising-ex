@@ -637,14 +637,13 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 融合模式可内联推进，事件未完成检查 Lane 健康后返回假；完成则抛出已有拒绝，再用 Owner 路由索引核对全局订单号和客户身份，保存替换准入及先撤列表。
+     * 事件未完成检查 Lane 健康后返回假；完成则抛出已有拒绝，再用 Owner 路由索引核对全局订单号和客户身份，保存替换准入及先撤列表。
      * @param batch 本条批量命令的复用上下文
      * @param userId 本批请求用户，账户按该用户路由
      */
     private boolean collectBatchAmendAdmission(OrderBatchPending batch, long userId) {
         // 当前改单准入或撤单直达事件，类型见声明
         var event = batch.replacementAdmissionEvent;
-        if (owner.runtimeState().isFusedExecution()) event.executeInlineIfReady();
         if (!event.complete()) { owner.runtimeState().assertAccountLanesHealthy(); return false; }
         if (event.rejection() != null) throw event.rejection();
         // 事件已经解析的改单准入，后续仍需 Owner 核对全局订单身份

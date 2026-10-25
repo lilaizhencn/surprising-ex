@@ -43,12 +43,6 @@ public final class MatcherPipelineGroup implements AutoCloseable {
      * @param contexts 用于匹配 Core 序号与完成结果的现有命令槽环
      */
     public MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately, CommandSlotRing contexts) {
-        this(shardCount, capacityPerShard, startImmediately, contexts,
-                com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().matcherPipelineWaitStrategy());
-    }
-
-    public MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately,
-            CommandSlotRing contexts, com.surprising.aeron.config.CoreRuntimeConfiguration.MatcherWaitStrategy waitStrategy) {
         if (shardCount <= 0 || (shardCount & (shardCount - 1)) != 0) {
             throw new IllegalArgumentException("matcher shard count must be a power of two");
         }
@@ -56,22 +50,9 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         completedShardMask = new com.surprising.aeron.service.core.TradingAccountRuntime.PaddedReadyMask(shardCount);
         shards = new MatcherCommandPipeline[shardCount];
         for (/* 当前操作的分片流水线，构造循环中则是分片下标。 */ int shard = 0; shard < shardCount; shard++) {
-            shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false, waitStrategy);
+            shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false);
         }
         if (startImmediately) start((IntConsumer) null);
-    }
-
-    /**
-     * 把全部 Matcher 分片绑定到当前交易线程，各分片在其同步启动动作中激活订单簿，不创建独立 Matcher 线程。
-     * @param shardActivation 在分片拥有线程执行的可空订单簿激活动作
-     */
-    public void startInline(IntConsumer shardActivation) {
-        for (/* 当前遍历的全局 Matcher 分片号。 */ int shardId = 0; shardId < shards.length; shardId++) {
-            // 当前回调固定捕获的分片号，避免依赖下一轮循环。
-            int currentShardId = shardId;
-            shards[shardId].startInline(shardActivation == null ? null
-                    : () -> shardActivation.accept(currentShardId));
-        }
     }
 
     /**
@@ -282,7 +263,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     }
 
     /**
-     * 以精确乘法计算分片数乘首分片容量，融合模式每分片容量为一。
+     * 以精确乘法计算分片数乘首分片容量。
      */
     public int capacity() { return Math.multiplyExact(shards.length, shards[0].capacity()); }
 

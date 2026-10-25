@@ -123,7 +123,7 @@ public final class TradingOwnerLoop implements Runnable {
     public TradingOwnerLoop(ProductLine productLine, ClusterServiceEgress egress, TradingCpuAffinity affinity,
             LaneTopology laneTopology, CoreRuntimeConfiguration configuration, RealtimeConfiguration realtimeConfiguration) {
         roleChangeDeadlineNanos = java.util.concurrent.TimeUnit.SECONDS.toNanos(configuration.ownerRoleChangeTimeoutSeconds());
-        ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable, configuration.ownerWaitStrategy());
+        ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable);
         this.affinityConfiguration = java.util.Objects.requireNonNull(affinity);
         this.egress = egress;
         coreOwner = new TradingCoreOwner(productLine, this::publishResponse, laneTopology, configuration, realtimeConfiguration);

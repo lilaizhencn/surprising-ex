@@ -54,7 +54,7 @@ assert totals == fixture['initialTotals']
 reconciliation = wait(lambda: req('GET', '/api/v1/admin/c2c/reconciliation', 'admin'),
                       lambda row: row['status'] == 'MATCHED', 'Final escrow and fees reconciliation')
 evidence = {
-    'passed': True, 'scope': 'Local SPOT FUSED Core, real JWT, PostgreSQL, realtime and maker; synthetic KYC, OTP and off-platform fiat',
+    'passed': True, 'scope': 'Local SPOT Core, real JWT, PostgreSQL, realtime and maker; synthetic KYC, OTP and off-platform fiat',
     'suspensionBlocksNewOrdersAndWithdrawal': True, 'existingPaidOrderCompleted': identity,
     'merchantBondOriginalOwnerAndAmountReturned': True, 'allC2cObjectsTerminal': True,
     'merchantEscrowSummaryAfterRefund': '0', 'allLockedUnits': '0',

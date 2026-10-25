@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.order;
 
-import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport;
@@ -398,8 +397,6 @@ public class ClusteredBatchTradingBenchmark {
         @Param("false") public boolean realtime;
         /** Explicitly separate trading capacity from the historical per-command audit query load. */
         @Param("true") public boolean interleavedMetrics = true;
-        @Param({"0", "256"}) public int settlementSpinLimit;
-        private String previousSpinLimit;
         private com.surprising.aeron.client.RealtimeOutbox realtimeOutbox;
         private Thread realtimeConsumer;
         private volatile boolean consuming;
@@ -455,8 +452,6 @@ public class ClusteredBatchTradingBenchmark {
             if (maxInFlight != 256 || batchSize <= 0) throw new IllegalArgumentException("requires 256 in-flight");
             previousMatchingEngines = System.getProperty("surprising.aeron.matching-engines");
             System.setProperty("surprising.aeron.matching-engines", Integer.toString(matchingEngines));
-            previousSpinLimit = System.getProperty("surprising.aeron.settlement-spin-limit");
-            System.setProperty("surprising.aeron.settlement-spin-limit", Integer.toString(settlementSpinLimit));
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             sequence = terminal = queryResults = maxBacklog = 0;
             singleRequestIds.clear();
@@ -933,8 +928,7 @@ public class ClusteredBatchTradingBenchmark {
                 for (int user = 0; user < 256; user++) send(command(CoreMessageType.CANCEL_ORDER, 1_000 + user,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(firstOrders[user]))));
                 drain();
-                boolean pipelined = com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().executionMode() == TradingExecutionMode.PIPELINED;
-                if (terminal - before != 512 || (pipelined && service.commandWindowHighWaterMark() < 2))
+                if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
                     throw new IllegalStateException("independent commands did not pipeline and complete");
             } finally { singleResponses = false; }
         }
@@ -987,8 +981,7 @@ public class ClusteredBatchTradingBenchmark {
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
             }
             drain();
-            boolean pipelined = com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().executionMode() == TradingExecutionMode.PIPELINED;
-            if (terminal - before != 512 || (pipelined && service.commandWindowHighWaterMark() < 2))
+            if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
                 throw new IllegalStateException("independent batches did not pipeline and complete");
         }
 
@@ -1190,8 +1183,6 @@ public class ClusteredBatchTradingBenchmark {
                 service = null;
                 if (previousMatchingEngines == null) System.clearProperty("surprising.aeron.matching-engines");
                 else System.setProperty("surprising.aeron.matching-engines", previousMatchingEngines);
-                if (previousSpinLimit == null) System.clearProperty("surprising.aeron.settlement-spin-limit");
-                else System.setProperty("surprising.aeron.settlement-spin-limit", previousSpinLimit);
             }
         }
 

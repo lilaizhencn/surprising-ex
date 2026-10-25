@@ -5,7 +5,6 @@ import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.RealtimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
-import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.model.OwnerLogContext;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -32,7 +31,7 @@ import static com.surprising.aeron.support.egress.ClusterServiceEgress.NO_SESSIO
 
 /**
  * 启动步骤 8、交易步骤 1 和 5：在 Owner 线程推进复制命令，并把完成结果交给响应出口。
- * 持有当前产品线运行时和命令生命周期；FUSED 沿输入环队首执行，PIPELINED 使用有界命令窗口。
+ * 持有当前产品线运行时和命令生命周期，使用有界命令窗口流水推进。
  * Cluster 会话和网络发送由 controller 承担，线程启动由 bootstrap.TradingOwnerLoop 承担。
  * 公开的恢复、快照、角色切换和完成通知装配方法供启动层在 Owner 线程调用，不能据此跨线程访问状态。
  */
@@ -41,8 +40,6 @@ public final class TradingCoreOwner {
 
     /** Owner 独占的命令阶段、依赖等待、控制槽和有序提交状态。 */
     private final OwnerCommandPipelineState commandPipeline;
-    /** 仅 FUSED 使用的复用解码槽，终态交接前保留；PIPELINED 为 null。 */
-    private final com.surprising.aeron.service.order.command.DecodedMatchingCommand fusedDecoder;
     /**  Cluster 到 Owner 的唯一单生产者、单消费者输入环。 返回 Cluster 与 Owner 共用的原输入环；调用方遵守单生产者、单消费者约定。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -83,9 +80,6 @@ public final class TradingCoreOwner {
     /** 保护推进期间的背景工作重入，结束推进后复位。 */
     private boolean processingLogCallback;
 
-    /** 构造时固定的执行模式；FUSED 内联 Matcher 和账户工作，账本仍有独立所有权。 */
-    private final TradingExecutionMode executionMode;
-
     /** 把撮合终态交回当前控制命令的固定回调。 */
     private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler;
 
@@ -95,7 +89,7 @@ public final class TradingCoreOwner {
     private int deadlineCheckCounter;
 
     /**
-     * 校验产品线和响应出口，固定本实例的执行模式，并准备该模式需要的流水线和复用解码槽；此时不启动交易工作线程。
+     * 校验产品线和响应出口，并准备命令流水线；此时不启动交易工作线程。
      * @param productLine 必须明确指定的所属产品线
      * @param responseSink 必须存在的已提交响应出口
      */
@@ -130,17 +124,12 @@ public final class TradingCoreOwner {
         this.startupTopology = java.util.Objects.requireNonNull(startupTopology, "startupTopology");
         this.responseSink = java.util.Objects.requireNonNull(responseSink, "response sink");
         this.realtimeBoundary = new TradingRealtimeBoundary(productLine, realtimeConfiguration);
-        this.executionMode = configuration.executionMode();
-        // 当前执行模式是否需要独立命令窗口
-        boolean pipelined = executionMode == TradingExecutionMode.PIPELINED;
-        commandPipeline = new OwnerCommandPipelineState(pipelined, configuration.ownerCommandWindow());
+        commandPipeline = new OwnerCommandPipelineState(configuration.ownerCommandWindow());
         matchingCommitHandler = commandPipeline::completeControlMatching;
-        fusedDecoder = pipelined ? null
-                : com.surprising.aeron.service.order.command.DecodedMatchingCommand.commandSlot();
     }
 
     /**
-     * 启动步骤 8：接入复制日志上下文；没有运行时则新建，清空命令阶段与解码槽，接入等待策略并启动可选实时边界。工作资源由外层随后激活。
+     * 启动步骤 8：接入复制日志上下文；没有运行时则新建，清空命令阶段，接入等待策略并启动可选实时边界。工作资源由外层随后激活。
      * @param logContext Owner 可用的复制日志元数据及等待策略
      */
     public void start(OwnerLogContext logContext) {
@@ -148,9 +137,8 @@ public final class TradingCoreOwner {
         if (state == null) state = new TradingCoreRuntime(productLine, startupTopology, configuration);
         processingLogCallback = false;
         commandPipeline.reset();
-        if (fusedDecoder != null) fusedDecoder.clearCommandSlot();
         idleStrategy = logContext.idle();
-        log.info("Aeron core role productLine={} role={} mode={}", productLine, logContext.role(), executionMode);
+        log.info("Aeron core role productLine={} role={}", productLine, logContext.role());
         realtimeBoundary.start(logContext.role(), logContext.position(), state);
     }
 
@@ -164,17 +152,13 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 绑定当前 Owner，进入异步命令作用域后按执行模式推进；退出作用域后提交输入环已消费字节，不把未完成命令的租约提前释放。
+     * 绑定当前 Owner，进入异步命令作用域后推进；退出作用域后提交输入环已消费字节，不把未完成命令的租约提前释放。
      */
     private void progressCommands() {
         state.bindOwner();
         state.runtimeState.enterAsynchronousCommandScope();
         try {
-            if (executionMode == TradingExecutionMode.FUSED) {
-                progressFusedCommands();
-            } else {
-                progressCommandsInScope();
-            }
+            progressCommandsInScope();
         } finally {
             state.runtimeState.exitAsynchronousCommandScope();
             ingress.commitConsumedBytes();
@@ -182,38 +166,7 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * FUSED 主流程：每轮按预算推进队首。先接续控制工作，再取得必要账户访问权、记录原日志元数据并执行；终态未交接前保留原输入，不建立流水命令窗口。
-     */
-    private void progressFusedCommands() {
-        for (/* 本轮 FUSED 已尝试推进的循环计数，受输入预算限制 */ int completed = 0; completed < configuration.ownerInputBatchSize(); completed++) {
-            if (commandPipeline.hasActiveControl()) {
-                if (!pollControl()) return;
-                continue;
-            }
-            // 当前输入环借出的队首条目，取走或释放后不能继续访问
-            var next = ingress.first();
-            if (next == null || next.action() != null) return;
-            logContext.timestamp(next.timestamp());
-            logContext.position(next.position());
-            if (state.requiresOwnerLaneAccessForPreparation(next.command())
-                    && !state.runtimeState.tryAcquireOwnerLaneAccess()) return;
-            state.assertClusterCallbackComplete();
-            commandPipeline.beginControl(next);
-            beginCapture(next.position(), next.timestamp());
-            commandPipeline.startProgressDeadline();
-            // 当前队首是否属于撮合命令，用来登记需要等待的撮合序号
-            boolean matching = TradingCoreRuntime.isMatchingCommand(next.command().header().messageType());
-            commandPipeline.controlResponse(state.applyDecodedCommand(next.command(), next.timestamp(),
-                    next.position(), matching ? fusedDecoder : null, false, next.fingerprint()));
-            commandPipeline.rememberMatchingResponseSequence(matching ? state.matchingSequence(
-                    next.command().header().commandIdMsb(), next.command().header().commandIdLsb()) : 0L);
-            commandPipeline.recordAdmission();
-            if (!pollControl()) return;
-        }
-    }
-
-    /**
-     * PIPELINED 主流程：先收集队首完成，再按容量、冲突前缀及重试栅栏接纳输入。控制命令保留队首；独立撮合命令把输入租约交给窗口，按原日志顺序提交。
+     * 主流程：先收集队首完成，再按容量、冲突前缀及重试栅栏接纳输入。控制命令保留队首；独立撮合命令把输入租约交给窗口，按原日志顺序提交。
      */
     private void progressCommandsInScope() {
         // 当前 Owner 持有的流水命令窗口
@@ -422,8 +375,7 @@ public final class TradingCoreOwner {
         state.runtimeState.releaseOwnerLaneAccess();
         commandPipeline.finishControl();
         ingress.remove();
-        if (fusedDecoder != null) fusedDecoder.clearCommandSlot();
-        else if (commandPipeline.commandWindow().decodedIfPresent(request) != null)
+        if (commandPipeline.commandWindow().decodedIfPresent(request) != null)
             commandPipeline.commandWindow().releaseDecoded();
         request.releaseDecoderSlot();
         commandPipeline.recordControlProgress();
@@ -484,30 +436,23 @@ public final class TradingCoreOwner {
      */
     private void finishSnapshotPrefix(long deadline) {
         while (hasCommandIngress() || commandPipeline.hasActiveControl()
-                || (executionMode != TradingExecutionMode.FUSED && commandPipeline.commandWindow().size() != 0)) {
+                || commandPipeline.commandWindow().size() != 0) {
             progressCommands();
             idleCommand(0, deadline);
         }
     }
 
     /**
-     * 返回输入环和流水窗口中的待处理条目数；FUSED 只计输入环。动作边界也在输入环内，因此它是积压指标，不是精确的未回包业务数。
+     * 返回输入环和流水窗口中的待处理条目数。动作边界也在输入环内，因此它是积压指标，不是精确的未回包业务数。
      */
     public int pendingCommandCount() {
-        return executionMode == TradingExecutionMode.FUSED
-                ? ingress.size()
-                : ingress.size() + commandPipeline.commandWindow().size();
+        return ingress.size() + commandPipeline.commandWindow().size();
     }
 
     /**
-     * Owner 推进门禁：FUSED 看业务队首；PIPELINED 看可接纳输入、完成通知或本地可推进工作。窗口非空本身不代表再次调用就能产生进展。
+     * Owner 推进门禁：看可接纳输入、完成通知或本地可推进工作。窗口非空本身不代表再次调用就能产生进展。
      */
     public boolean ownerWorkAvailable() {
-        if (executionMode == TradingExecutionMode.FUSED) {
-            // 当前输入环借出的队首条目，取走或释放后不能继续访问
-            var next = ingress.first();
-            return next != null && next.action() == null;
-        }
         if (pendingIngressReady()) return true;
         return state != null && state.matchingProgress.hasDrainWork();
     }
@@ -535,10 +480,10 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 返回流水窗口当前条数；FUSED 没有这个窗口，直接返回零。
+     * 返回流水窗口当前条数。
      */
     int commandWindowSize() {
-        return executionMode == TradingExecutionMode.FUSED ? 0 : commandPipeline.commandWindow().size();
+        return commandPipeline.commandWindow().size();
     }
 
     /**
@@ -673,7 +618,6 @@ public final class TradingCoreOwner {
         } finally {
             // 关闭时先结束 Matcher 和账户工作线程，再释放它们仍可能借用的解码输入。
             commandPipeline.clearCommandContainers();
-            if (fusedDecoder != null) fusedDecoder.clearCommandSlot();
             ingress.discard();
             state = null;
         }
@@ -744,9 +688,7 @@ public final class TradingCoreOwner {
         } catch (/* 当前读取或推进失败的异常，附带上下文后继续抛出 */ RuntimeException failure) {
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally {
-            if (executionMode != TradingExecutionMode.FUSED) {
-                retainPendingPreparation();
-            }
+            retainPendingPreparation();
             processingLogCallback = false;
         }
     }

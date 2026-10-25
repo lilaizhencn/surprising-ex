@@ -223,21 +223,11 @@ public final class CoreMatchingFlow {
     }
 
     /**
-     * 按命令准入时保存的独立模式临时进入异步作用域，防止延后恢复时丢失直达结算路径；提交后只退出本次自行进入的作用域。
+     * 提交命令槽到撮合流程。
      * @param pending 本池仍在生命周期内的命令槽
      */
     void submitMatching(CommandSlot pending) {
-        // 命令可能在入口作用域退出后才获得分片提交头。
-        // 使用槽中固定的独立准入模式，恢复异步作用域后继续走池化直达结算。
-        // 本次是否为恢复独立准入模式而自行进入异步作用域，finally 只退出这一层。
-        boolean enteredAsynchronousScope = pending.clusterIndependent
-                && !owner.runtimeState().asynchronousCommands();
-        if (enteredAsynchronousScope) owner.runtimeState().enterAsynchronousCommandScope();
-        try {
-            submitMatchingInCommandScope(pending);
-        } finally {
-            if (enteredAsynchronousScope) owner.runtimeState().exitAsynchronousCommandScope();
-        }
+        submitMatchingInCommandScope(pending);
     }
 
     /**
@@ -254,11 +244,6 @@ public final class CoreMatchingFlow {
         if (!collectReplacementAdmissionIfReady(pending) || hasPendingMatchingRejection(pending.sequence())) return;
         if (!collectLiquidationChecksIfReady(pending) || pending.hasMatchingRejection()) return;
         pending.prepareLaneResultTarget(owner.responseArena());
-        if (pending.placeAdmission() != null
-                && (owner.runtimeState().isFusedExecution() || !owner.runtimeState().asynchronousCommands())) {
-            if (!collectPlaceAdmissionIfReady(pending)
-                    || hasPendingMatchingRejection(pending.sequence())) return;
-        }
         if (pending.orderBatch != null) {
             owner.batches().submitOrderBatchMatching(pending);
             // 批次仍可能派发后续 Matcher 片段时，保留当前分片提交边界。
@@ -369,14 +354,13 @@ public final class CoreMatchingFlow {
     }
 
     /**
-     * 融合模式先尝试内联准入，未完成检查 Lane 健康后返回假；完成后检查新身份，保存准入及先撤列表。已知业务/算术/参数错误转为槽内拒绝并释放提交头，其他运行异常继续传播。
+     * 准入未完成检查 Lane 健康后返回假；完成后检查新身份，保存准入及先撤列表。已知业务/算术/参数错误转为槽内拒绝并释放提交头，其他运行异常继续传播。
      * @param pending 本池仍在生命周期内的命令槽
      */
     boolean collectReplacementAdmissionIfReady(CommandSlot pending) {
         // 当前替换 Lane 准入收据。
         var event = pending.replacementAdmission();
         if (event == null || pending.matchingAdmission() != null || pending.hasMatchingRejection()) return true;
-        if (owner.runtimeState().isFusedExecution()) event.executeInlineIfReady();
         if (!event.complete()) { owner.runtimeState().assertAccountLanesHealthy(); return false; }
         // Lane 已报告的可空准入业务异常。
         RuntimeException rejection = event.rejection();
@@ -428,14 +412,13 @@ public final class CoreMatchingFlow {
     }
 
     /**
-     * 融合模式可先内联执行；只在第一次 Owner 收据收集时保存准入或拒绝，随后推进分片提交顺序。已拒绝且未提交的等待者可取消；收据实际释放还需 Matcher 已消费。
+     * 只在第一次 Owner 收据收集时保存准入或拒绝，随后推进分片提交顺序。已拒绝且未提交的等待者可取消；收据实际释放还需 Matcher 已消费。
      * @param pending 本池仍在生命周期内的命令槽
      */
     public boolean collectPlaceAdmissionIfReady(CommandSlot pending) {
         if (pending == null || pending.placeAdmission() == null) return true;
         // 已收齐的准入事件或其解析结果，具体阶段见声明。
         var admission = pending.placeAdmission();
-        if (owner.runtimeState().isFusedExecution()) admission.executeInlineIfReady();
         if (!admission.complete()) return false;
         // Lane 已报告的可空准入业务异常。
         RuntimeException rejection = admission.rejection();

@@ -7,7 +7,7 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 /**
  * 测试用的账户访问哨兵：临时替换账户表，在独立 Lane 模式下拦住 Owner 对表的 get 调用，并拦住其他线程向 Owner 变更集合写入。
- * FUSED 模式由 Owner 自己持有所有 Lane，因此允许它读取账户表；关闭哨兵时恢复原容器并保留期间产生的数据变化。
+ * 关闭哨兵时恢复原容器并保留期间产生的数据变化。
  */
 public final class OwnerAccountReadGuard implements AutoCloseable {
     /** 通过反射取得的账户 Lane 数组，后续按 Lane 替换及恢复表。 */
@@ -18,7 +18,7 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
     private final Object[][] originals;
     /** 创建哨兵的测试线程，代表当前 Owner；以线程对象身份判断访问方。 */
     private final Thread owner = Thread.currentThread();
-    /** 当前受检查的运行时，用于访问账户 Lane 和判断是否为 FUSED 模式。 */
+    /** 当前受检查的运行时，用于访问账户 Lane。 */
     private final TradingAccountRuntime runtime;
     /** 只能由 Owner 写入的用户和冻结委托变更集合字段名。 */
     private final String[] changeNames = {"changedUsers", "changedReservations"};
@@ -91,10 +91,9 @@ public final class OwnerAccountReadGuard implements AutoCloseable {
         return table;
     }
 
-    /** 判断当前是否为独立 Lane 模式下的 Owner 线程读表；FUSED 模式允许 Owner 读自己的账户状态。 */
+    /** 判断当前是否为 Owner 线程读表，Owner 不允许直接读取账户 Lane 状态。 */
     private boolean forbiddenOwnerRead() {
-        return Thread.currentThread() == owner
-                && !runtime.isFusedExecution();
+        return Thread.currentThread() == owner;
     }
 
     /**

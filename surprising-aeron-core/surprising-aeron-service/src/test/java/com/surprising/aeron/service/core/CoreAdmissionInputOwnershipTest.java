@@ -112,68 +112,6 @@ class CoreAdmissionInputOwnershipTest {
     }
 
     /**
-     * 临时固定 FUSED 并阻塞实际账本读取，普通下单须返回 MATCHING_PENDING 且尚未提交 Matcher；放行后完成准入和撮合，核对订单、资金及快照恢复哈希，最后还原配置。
-     */
-    @org.junit.jupiter.api.Test
-    void fusedAdmissionYieldsUntilLedgerPublishesProportionalOi() throws Exception {
-        // 强制 FUSED 前的原执行模式属性，结束后还原
-        String previous = System.setProperty("surprising.aeron.execution-mode", "FUSED");
-        // 实际账本查询任务已经进入阻塞点的门闩
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        // 账本查询放行门闩，finally 保证释放
-        var release = new java.util.concurrent.CountDownLatch(1);
-        try (/* 本场景自动关闭的真实交易 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
-            applied(core, CoreMessageType.REGISTER_INSTRUMENT, 0,
-                    TradingCommandCodec.encodeRegisterInstrument(instrument(core.productLine, "PROPORTIONAL"), ProductLine.LINEAR_PERPETUAL));
-            applied(core, CoreMessageType.APPLY_MARK_PRICE, 0,
-                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
-            applied(core, CoreMessageType.ADJUST_BALANCE, 7,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
-            try {
-                assertThat(core.runtimeState.dispatchLedgerQuery(/* 账本查询任务参数，当前闭包不读取 */ ignored -> {
-                    entered.countDown();
-                    try {
-                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Ledger gate timed out");
-                    } catch (/* 账本任务等待被中断，转换成测试断言失败 */ InterruptedException interrupted) { throw new AssertionError(interrupted); }
-                })).isTrue();
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                // 账本阻塞时从普通入口发出的限价买单
-                var command = message(core, CoreMessageType.PLACE_ORDER, 7, TradingCommandCodec.encodePlaceOrder(place(401, 1)));
-                assertThat(core.apply(command).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-                // 该命令登记的真实撮合槽，检查尚未提交及准入未完成
-                var pending = core.pendingMatching().required(core.matchingSequence(command.header().commandId()));
-                assertThat(pending.isMatchingSubmitted()).isFalse();
-                assertThat(pending.placeAdmission().accountReady()).isFalse();
-                assertThat(pending.placeAdmission().complete()).isFalse();
-                release.countDown();
-                // 完成回调保存本次订单终态的固定单槽
-                var terminal = new CoreResponse[1];
-                // 本次等待查询或异步终态的五秒单调截止时间
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (core.pendingMatching().firstSequence() != 0) {
-                    core.commits.commitReadyMatching(64, TIME, command.header().sourceSequence(), false,
-                            (/* 撮合完成回调附带的 Core 序号，本场景只有当前待项，不单独读取 */ sequence, /* 初始请求或完成回调交出的业务响应 */ response) -> terminal[0] = response);
-                    if (System.nanoTime() >= deadline) throw new AssertionError("FUSED admission did not resume");
-                }
-                assertThat(terminal[0].commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                assertThat(CoreTestCompletion.orderState(core, 7, 401).status()).isEqualTo("OPEN");
-                // 订单完成后导出的结算资产余额，用可用与冻结总和核对资金
-                var balance = CoreTestCompletion.userState(core, 7).balances().getFirst();
-                assertThat(balance.availableUnits() + balance.lockedUnits()).isEqualTo(10_000);
-                // 快照前的业务状态哈希，恢复后必须相同
-                long hash = core.stateHash();
-                try (/* 由真实快照恢复出的自动关闭候选 Core */ var restored = TradingCoreRuntime.fromSnapshot(core.productLine, core.snapshot())) {
-                    assertThat(restored.stateHash()).isEqualTo(hash);
-                    assertThat(CoreTestCompletion.orderState(restored, 7, 401).status()).isEqualTo("OPEN");
-                }
-            } finally { release.countDown(); }
-        } finally {
-            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
-            else System.setProperty("surprising.aeron.execution-mode", previous);
-        }
-    }
-
-    /**
      * 按指定产品和四种限制场景组装合约，保持固定总上限，改变比例系数和下限以覆盖是否需要 OI。
      * @param line 需要组装合约的产品线
      * @param mode 比例系数和下限组合的测试模式

@@ -5,7 +5,6 @@ import com.surprising.account.api.model.*;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.account.provider.exception.AccountCommandRejectedException;
 import com.surprising.account.provider.service.*;
-import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.gateway.provider.client.SpotAccountClient;
@@ -15,16 +14,14 @@ import com.surprising.gateway.provider.service.*;
 import com.surprising.product.api.ProductLine;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /** 六个真实 Core 状态机、真实账户方法和划转编排；仅把 Aeron 网络边界替换为同步协议调用。 */
 class MultiProductMoneyIntegrationTest {
-    @ParameterizedTest @EnumSource(TradingExecutionMode.class)
-    void oneGatewayKeepsSixBalancesIsolatedAndCrossProductRetriesConserveFunds(TradingExecutionMode mode) {
-        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
+    @Test
+    void oneGatewayKeepsSixBalancesIsolatedAndCrossProductRetriesConserveFunds() {
         var products = mock(GatewayProductServices.class);
         when(products.enabled()).thenReturn(List.of(ProductLine.values()));
         var cores = new EnumMap<ProductLine, Core>(ProductLine.class);
@@ -80,8 +77,6 @@ class MultiProductMoneyIntegrationTest {
             assertThat(total(cores)).isEqualTo(initial);
         } finally {
             cores.values().forEach(Core::close);
-            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
-            else System.setProperty("surprising.aeron.execution-mode", previous);
         }
     }
     private ProductTransferCommand transfer(ProductLine source, ProductLine target, String key) {

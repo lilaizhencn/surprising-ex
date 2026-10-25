@@ -39,9 +39,7 @@ import org.openjdk.jmh.infra.IterationParams;
 @Fork(value = 1, jvmArgsAppend = {"--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
         "--enable-native-access=ALL-UNNAMED", "-Xms1g", "-Xmx1g", "-XX:+UseG1GC",
         "-Dsurprising.aeron.matching-engines=1", "-Dsurprising.aeron.account-lanes=2",
-        "-Dsurprising.aeron.owner-command-window=256", "-Dsurprising.aeron.matcher-window-size=256",
-        "-Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN",
-        "-Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN", "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN"})
+        "-Dsurprising.aeron.owner-command-window=256", "-Dsurprising.aeron.matcher-window-size=256"})
 public class InProcessTradingAllocationBenchmark {
     private static final int WINDOW = 256, OPERATIONS = 4096;
     private static final long TIME = 1_700_000_000_000L, INITIAL_BALANCE = 1_000_000_000_000L;

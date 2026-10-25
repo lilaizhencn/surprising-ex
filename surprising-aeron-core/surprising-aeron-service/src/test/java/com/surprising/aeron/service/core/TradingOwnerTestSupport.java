@@ -317,7 +317,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      */
     public void finishCommands() { owner.finishCommands(); egress.drainResponses(owner); }
     /**
-     * 读取真实流水窗口当前占用，FUSED 为零。
+     * 读取真实流水窗口当前占用。
      */
     public int commandWindowSize() { return owner.commandWindowSize(); }
     /**

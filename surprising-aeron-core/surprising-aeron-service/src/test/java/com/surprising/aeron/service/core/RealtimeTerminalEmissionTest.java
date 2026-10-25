@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.client.RealtimeOutbox;
-import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.realtime.state.RealtimeStateCapture;
@@ -18,16 +17,12 @@ class RealtimeTerminalEmissionTest {
     /** 本功能轨迹原业务时间基点。 */
     private static final long TIME=1_700_000_000_000L;
     /**
-     * 暂设执行模式后，依次检查开仓、平仓、撤单及两用户各二十条批次的实时帧；首次挂单元数据和预留各一帧，最后要求无 outbox 丢批，finally 恢复原系统属性。
+     * 依次检查开仓、平仓、撤单及两用户各二十条批次的实时帧；首次挂单元数据和预留各一帧，最后要求无 outbox 丢批。
      * @param line 本轮独立运行时所属产品线
-     * @param mode 本轮临时设置的 FUSED 或 PIPELINED 执行模式
      */
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.MethodSource("productsAndModes")
-    @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
-    void committedOrdersEmitOncePerEntity(ProductLine line, TradingExecutionMode mode) {
-        // 原执行模式系统属性，finally 原样恢复或清除
-        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void committedOrdersEmitOncePerEntity(ProductLine line) {
         try (/* 当前产品线和模式的原交易运行时，退出自动关闭 */ var state = new TradingCoreRuntime(line)) {
                 // 当前产品线对应合约类型
                 var type=ContractType.valueOf(line.contractTypeCode());
@@ -70,18 +65,7 @@ class RealtimeTerminalEmissionTest {
                             capture,outbox,user==7?"batch-resting":"batch-fill");
                 }
                 if(outbox.droppedBatches()!=0)throw new IllegalStateException("dropped audit frames");
-        } finally {
-            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
-            else System.setProperty("surprising.aeron.execution-mode", previous);
         }
-    }
-
-    /**
-     * 组合全部产品线和全部执行模式作为参数，不把不同产品线状态合在同一运行时。
-     */
-    private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> productsAndModes() {
-        return Arrays.stream(ProductLine.values()).flatMap(/* 参数组合回调当前产品线 */ line -> Arrays.stream(TradingExecutionMode.values())
-                .map(/* 参数组合回调当前执行模式 */ mode -> org.junit.jupiter.params.provider.Arguments.of(line, mode)));
     }
 
     /**

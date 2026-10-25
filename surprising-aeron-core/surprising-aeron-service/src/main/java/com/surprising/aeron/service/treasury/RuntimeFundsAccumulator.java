@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.treasury;
 
 import com.surprising.aeron.service.settlement.FundsPosting;
-import java.util.ArrayList;
 import java.util.Arrays;
 
 /**
@@ -83,21 +82,6 @@ public final class RuntimeFundsAccumulator {
     }
 
     /**
-     * 将分录值中的各项逐条加入当前缓冲，空输入或空分录不处理；逐项合并并不提供整批异常回滚。
-     * @param delta 需要逐项加入的分录值，可为空
-     */
-    public void add(RuntimeFundsDelta delta) {
-        if (delta == null || delta.postingCount() == 0) return;
-        // 待读取或物化的分录列表，转出时由新建列表独立持有。
-        var postings = delta.postings();
-        for (/* 当前查找、读取或物化的有效资金项下标。 */ int index = 0; index < postings.size(); index++) {
-            // 当前分录对象，或守恒汇总循环中的有效项下标。
-            RuntimeFundsDelta.Posting posting = postings.get(index);
-            add(posting.assetId(), posting.ownerKind(), posting.ownerId(), posting.subledger(), posting.units());
-        }
-    }
-
-    /**
      * 借用给定缓冲的有效原语前缀逐条合并，不清空源；本方法不检查自合并，途中异常不提供整批回滚。
      * @param other 需要遍历加入的原语资金缓冲，可为空
      */
@@ -107,20 +91,6 @@ public final class RuntimeFundsAccumulator {
             add(other.assetIds[index], OWNER_KINDS[other.ownerKinds[index]], other.ownerIds[index],
                     SUBLEDGERS[other.subledgers[index]], other.units[index]);
         }
-    }
-
-    /**
-     * 把有效原语前缀物化为独立分录对象列表，交给已去重入口包装；当前为空时返回共用空值，不在这里检查资金守恒。
-     */
-    public RuntimeFundsDelta toDelta() {
-        if (size == 0) return RuntimeFundsDelta.empty();
-        // 待读取或物化的分录列表，转出时由新建列表独立持有。
-        ArrayList<RuntimeFundsDelta.Posting> postings = new ArrayList<>(size);
-        for (/* 当前查找、读取或物化的有效资金项下标。 */ int index = 0; index < size; index++) {
-            postings.add(new RuntimeFundsDelta.Posting(assetIds[index], OWNER_KINDS[ownerKinds[index]],
-                    ownerIds[index], SUBLEDGERS[subledgers[index]], units[index]));
-        }
-        return RuntimeFundsDelta.fromDistinct(postings);
     }
 
     /**

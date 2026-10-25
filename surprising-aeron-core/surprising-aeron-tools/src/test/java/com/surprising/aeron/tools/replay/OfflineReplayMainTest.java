@@ -1,6 +1,5 @@
 package com.surprising.aeron.tools.replay;
 
-import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
@@ -9,15 +8,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OfflineReplayMainTest {
 
-    @ParameterizedTest @EnumSource(TradingExecutionMode.class)
-    void replaysLengthPrefixedProtocolMessages(TradingExecutionMode mode) throws Exception {
+    @Test
+    void replaysLengthPrefixedProtocolMessages() throws Exception {
         byte[] encoded = CoreMessageCodec.encode(command());
         Path log = Files.createTempFile("aeron-replay-", ".bin");
         Files.write(log, ByteBuffer.allocate(Integer.BYTES + encoded.length)
@@ -29,14 +26,11 @@ class OfflineReplayMainTest {
         var output = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
         output.start();
         logger.addAppender(output);
-        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
         try {
             OfflineReplayMain.main(new String[]{"SPOT", log.toString()});
             assertThat(output.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
                     .anySatisfy(message -> assertThat(message).contains("messages=1", "appliedCommandCount=1"));
         } finally {
-            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
-            else System.setProperty("surprising.aeron.execution-mode", previous);
             logger.detachAppender(output);
             output.stop();
             Files.deleteIfExists(log);
@@ -56,8 +50,8 @@ class OfflineReplayMainTest {
         } finally { Files.deleteIfExists(log); }
     }
 
-    @ParameterizedTest @EnumSource(TradingExecutionMode.class)
-    void replaysOrdersRejectionAndRetryBeforeFollowingQuery(TradingExecutionMode mode) throws Exception {
+    @Test
+    void replaysOrdersRejectionAndRetryBeforeFollowingQuery() throws Exception {
         var commands = new java.util.ArrayList<CoreMessage>();
         commands.add(message(CoreMessageType.REGISTER_INSTRUMENT, 1,
                 TradingCommandCodec.encodeRegisterInstrument(
@@ -88,7 +82,6 @@ class OfflineReplayMainTest {
             bytes.write(encoded);
         }
         Files.write(log, bytes.toByteArray());
-        String previous = System.setProperty("surprising.aeron.execution-mode", mode.name());
         var logger = (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(OfflineReplayMain.class);
         var output = new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
         output.start(); logger.addAppender(output);
@@ -97,8 +90,6 @@ class OfflineReplayMainTest {
             assertThat(output.list).extracting(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage)
                     .anySatisfy(message -> assertThat(message).contains("messages=9", "appliedCommandCount=7"));
         } finally {
-            if (previous == null) System.clearProperty("surprising.aeron.execution-mode");
-            else System.setProperty("surprising.aeron.execution-mode", previous);
             logger.detachAppender(output); output.stop(); Files.deleteIfExists(log);
         }
     }

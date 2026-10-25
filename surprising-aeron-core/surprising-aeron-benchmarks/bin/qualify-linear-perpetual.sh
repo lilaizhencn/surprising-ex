@@ -71,7 +71,7 @@ MAIN_JVM_ARGS=(
   "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED"
   "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
   "-Dsurprising.aeron.matching-engines=${MATCHING_ENGINES}"
-  "-Dsurprising.aeron.settlement-wait-strategy=${SETTLEMENT_WAIT_STRATEGY}"
+  "-Dsurprising.aeron.wait-strategy=${WAIT_STRATEGY:-BUSY_SPIN}"
   "-Dsurprising.aeron.matching-completion-spins=${MATCHING_COMPLETION_SPINS}"
   "-Dsurprising.aeron.projection-busy-spin=${PROJECTION_BUSY_SPIN}"
   "-Dsurprising.aeron.projection-batch-size=64"

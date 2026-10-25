@@ -255,16 +255,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     /**
-     * FUSED 模式在 Owner 等账本 OI 就绪后内联执行这份原准入事件，不在同线程里阻塞等待尚未执行的账户任务。
-     */
-    public void executeInlineIfReady() {
-        if (runtime == null || !runtime.isFusedExecution())
-            throw new IllegalStateException("inline admission requires the fused trading Owner");
-        runtime.assertOwner();
-        if (!completed && inputReady) execute(runtime.accountLane(runtime.topology().accountLaneId(userId)));
-    }
-
-    /**
      * 返回 Lane 是否已经发布准入完成，成功或业务拒绝都属于已完成。
      */
     public boolean complete() {

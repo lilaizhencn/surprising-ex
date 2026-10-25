@@ -68,8 +68,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
         if (treasury.hasChangedValues())
             throw new IllegalStateException("Ledger activation requires committed Treasury");
         ledgerOwner = bindBusinessOwner;
-        ledger = new SystemLedgerLane(treasury, capacity, this::recordFailure, bindBusinessOwner,
-                configuration.systemLedgerWaitStrategy());
+        ledger = new SystemLedgerLane(treasury, capacity, this::recordFailure);
         bindBusinessOwner.accept(ledger.thread());
     }
 

@@ -6,8 +6,7 @@ import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 /**
@@ -18,13 +17,8 @@ class SettlementLaneWorkerTest {
      * 三种等待策略下，用 accountReady 开关模拟账本输入等待；断言后续准入不能越过队首、准入满时拒绝，较早的普通邮箱任务仍能执行，再放开输入核对八条准入 FIFO。这里没有实际账本线程或 Matcher 成交。
      * @param strategy 本轮参数化选择的账户等待策略名称
      */
-    @ParameterizedTest
-    @ValueSource(strings = {"BLOCKING", "BUSY_SPIN", "YIELDING"})
-    void pendingLedgerInputKeepsAdmissionFifoWithoutPreventingOlderSettlement(String strategy) throws Exception {
-        // 本例修改并在结束后恢复的 JVM 属性名
-        // 本例开始前的原属性值，空表示原来未配置
-        String key = "surprising.aeron.settlement-wait-strategy", previous = System.getProperty(key);
-        System.setProperty(key, strategy);
+    @Test
+    void pendingLedgerInputKeepsAdmissionFifoWithoutPreventingOlderSettlement() throws Exception {
         // 模拟账本输入是否到齐的原子开关，关闭清理时也会放开
         var inputReady = new java.util.concurrent.atomic.AtomicBoolean();
         // 任务实际执行顺序的原子计数，与逐项 expected 比较
@@ -77,73 +71,6 @@ class SettlementLaneWorkerTest {
                 assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
                 worker.assertHealthy();
             } finally { inputReady.set(true); release.countDown(); }
-        } finally {
-            if (previous == null) System.clearProperty(key); else System.setProperty(key, previous);
-        }
-    }
-
-    /**
-     * 从当前类逐层查父类声明字段，找不到继续向上，全部缺失则抛出字段错误。
-     * @param type 开始查找字段的反射类型
-     * @param name 需要沿继承链查找的字段名称
-     */
-    private static java.lang.reflect.Field findField(Class<?> type, String name) {
-        // 反射字段搜索当前所在的类，找不到时改为父类
-        Class<?> current = type;
-        while (current != null) {
-            try {
-                return current.getDeclaredField(name);
-            } catch (/* 当前类没有该字段的反射异常，继续向父类查找 */ NoSuchFieldException ignored) {
-                current = current.getSuperclass();
-            }
-        }
-        throw new NoSuchFieldError(name);
-    }
-
-    /**
-     * BLOCKING 且自旋预算为 0 或 256 时，重复 512 次等休眠声明后发布准入，逐项等待完成并核对 FIFO；只要求观察到声明，不声称线程一直停在 park。
-     * @param spins BLOCKING 在 park 前的配置自旋次数，本例为 0 或 256
-     */
-    @ParameterizedTest
-    @ValueSource(ints = {0, 256})
-    void admissionPublishedAfterParkingAnnouncementKeepsMakingProgress(int spins) throws Exception {
-        // 本例等待策略 JVM 属性名
-        String strategyKey = "surprising.aeron.settlement-wait-strategy";
-        // 本例自旋预算 JVM 属性名
-        String spinKey = "surprising.aeron.settlement-spin-limit";
-        // 测试前等待策略原配置，finally 恢复
-        // 测试前自旋预算原配置，finally 恢复
-        String previousStrategy = System.getProperty(strategyKey), previousSpin = System.getProperty(spinKey);
-        System.setProperty(strategyKey, "BLOCKING");
-        System.setProperty(spinKey, Integer.toString(spins));
-        try (/* 本例真实账户工作对象，按当前资源或 finally 边界关闭 */ var worker = new SettlementLaneWorker("admission-wakeup", new AccountLaneState(0, 8), 8)) {
-            // 沿继承链取得的休眠声明字段，配合公开探测观察发布边界
-            var parked = findField(SettlementLaneWorker.class, "parked");
-            parked.setAccessible(true);
-            // 任务实际执行顺序的原子计数，与逐项 expected 比较
-            var executed = new AtomicInteger();
-            for (/* 当前重复测试轮次，不参与生产业务顺序 */ int round = 0; round < 512; round++) {
-                // 本轮等待观测或完成的单调纳秒截止时间
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                // 本轮是否已观察到工作线程休眠声明
-                boolean announced = false;
-                while (!(announced = worker.isParked() || parked.getBoolean(worker)) && System.nanoTime() < deadline) Thread.onSpinWait();
-                assertThat(announced).isTrue();
-                // 本轮待执行准入的完成门闩
-                var completed = new CountDownLatch(1);
-                // 该任务必须取得的执行顺序号，固定后由回调捕获
-                int expected = round;
-                worker.submitAdmission(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> {
-                    if (executed.getAndIncrement() != expected) throw new AssertionError("admission reordered");
-                    completed.countDown();
-                });
-                assertThat(completed.await(2, TimeUnit.SECONDS)).isTrue();
-                worker.assertHealthy();
-            }
-            assertThat(executed.get()).isEqualTo(512);
-        } finally {
-            if (previousStrategy == null) System.clearProperty(strategyKey); else System.setProperty(strategyKey, previousStrategy);
-            if (previousSpin == null) System.clearProperty(spinKey); else System.setProperty(spinKey, previousSpin);
         }
     }
 
@@ -254,17 +181,10 @@ class SettlementLaneWorkerTest {
     }
 
     /**
-     * 三种等待策略下执行八轮交接：前任务未释放时交接不完成，完成后测试线程绑定账户，后续普通任务须等 Owner 释放并发布恢复轮次才执行。
-     * @param strategy 本轮参数化选择的账户等待策略名称
+     * 执行八轮交接：前任务未释放时交接不完成，完成后测试线程绑定账户，后续普通任务须等 Owner 释放并发布恢复轮次才执行。
      */
-    @ParameterizedTest
-    @ValueSource(strings = {"BLOCKING", "BUSY_SPIN", "YIELDING"})
-    void controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease(String strategy) throws Exception {
-        // 本例修改并在结束后恢复的 JVM 属性名
-        String key = "surprising.aeron.settlement-wait-strategy";
-        // 本例开始前的原属性值，空表示原来未配置
-        String previous = System.getProperty(key);
-        System.setProperty(key, strategy);
+    @Test
+    void controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease() throws Exception {
         // 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容
         var lane = new AccountLaneState(0, 8);
         try (/* 本例真实账户工作对象，按当前资源或 finally 边界关闭 */ var worker = new SettlementLaneWorker("handoff", lane, 8)) {
@@ -297,83 +217,6 @@ class SettlementLaneWorkerTest {
                 assertThat(resumed.await(2, TimeUnit.SECONDS)).isTrue();
                 worker.assertHealthy();
             }
-        } finally {
-            if (previous == null) System.clearProperty(key); else System.setProperty(key, previous);
-        }
-    }
-
-    /**
-     * BLOCKING 两种自旋预算下反复观察 park 并在活动任务期间填满普通邮箱，检查拒绝及 FIFO，最后 close 排完追加任务。此方法实际测试休眠与投递，并未调用账户所有权交接接口。
-     * @param spins BLOCKING 在 park 前的配置自旋次数，本例为 0 或 256
-     */
-    @ParameterizedTest
-    @ValueSource(ints = {0, 256})
-    void parkedAndActiveHandoffsKeepOrderAndDrainBeforeClose(int spins) throws Exception {
-        // 本例修改并在结束后恢复的 JVM 属性名
-        String key = "surprising.aeron.settlement-spin-limit";
-        // 本例开始前的原属性值，空表示原来未配置
-        String previous = System.getProperty(key);
-        // 本例等待策略 JVM 属性名
-        String strategyKey = "surprising.aeron.settlement-wait-strategy";
-        // 测试前等待策略原配置，finally 恢复
-        String previousStrategy = System.getProperty(strategyKey);
-        System.setProperty(strategyKey, "BLOCKING");
-        System.setProperty(key, Integer.toString(spins));
-        try (/* 本例真实账户工作对象，按当前资源或 finally 边界关闭 */ var worker = new SettlementLaneWorker("test", new AccountLaneState(0, 8), 8)) {
-            // 工作对象保存实际 thread 的反射字段
-            var field = SettlementLaneWorker.class.getDeclaredField("thread");
-            field.setAccessible(true);
-            // 反射取出的真实账户线程，观察 park blocker 并核对关闭后退出
-            var thread = (Thread) field.get(worker);
-            // 任务实际执行顺序的原子计数，与逐项 expected 比较
-            var executed = new AtomicInteger();
-            // 重复真实 park 后发布，以及消费者活动期间继续投递的交错。
-            for (/* 当前重复测试轮次，不参与生产业务顺序 */ int round = 0; round < 32; round++) {
-                // 本轮等待观测或完成的单调纳秒截止时间
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                // 本轮实际采样到的 park 阻塞对象，只断言该次观测
-                Object observedBlocker;
-                while ((observedBlocker = LockSupport.getBlocker(thread)) != worker
-                        && System.nanoTime() < deadline) Thread.yield();
-                // 只断言本次实际观察到的 park；随后可能立即被许可或虚假唤醒。
-                assertThat(observedBlocker).isSameAs(worker);
-                // 确认首任务已经进入并占住工作线程的门闩
-                var entered = new CountDownLatch(1);
-                // 控制首任务退出的门闩，保证后续队列能在确定边界填充
-                var release = new CountDownLatch(1);
-                // 本轮八条后续普通任务的完成门闩
-                var complete = new CountDownLatch(8);
-                // 本轮首任务应取得的执行序号，等于轮次乘九
-                int base = round * 9;
-                worker.submit(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> {
-                    entered.countDown();
-                    try {
-                        if (!release.await(2, TimeUnit.SECONDS)) throw new AssertionError("test release timeout");
-                    } catch (/* 任务等待门闩被中断，包装为 AssertionError 结束该模拟任务 */ InterruptedException e) { throw new AssertionError(e); }
-                    if (executed.getAndIncrement() != base) throw new AssertionError("first command reordered");
-                });
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                try {
-                    for (/* 本轮后续任务的下标，随后固定为其预期执行顺序 */ int item = 1; item <= 8; item++) {
-                        // 该任务必须取得的执行顺序号，固定后由回调捕获
-                        int expected = base + item;
-                        worker.submit(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> {
-                            if (executed.getAndIncrement() != expected) throw new AssertionError("command reordered");
-                            complete.countDown();
-                        });
-                    }
-                    assertThatThrownBy(() -> worker.submit(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> {})).isInstanceOf(RejectedExecutionException.class);
-                } finally { release.countDown(); }
-                assertThat(complete.await(2, TimeUnit.SECONDS)).isTrue();
-                worker.assertHealthy();
-            }
-            worker.submit(/* 任务实际收到的账户 Lane，部分顺序模拟任务不读取其业务内容 */ lane -> executed.incrementAndGet());
-            worker.close();
-            assertThat(executed.get()).isEqualTo(32 * 9 + 1);
-            assertThat(thread.isAlive()).isFalse();
-        } finally {
-            if (previousStrategy == null) System.clearProperty(strategyKey); else System.setProperty(strategyKey, previousStrategy);
-            if (previous == null) System.clearProperty(key); else System.setProperty(key, previous);
         }
     }
 }

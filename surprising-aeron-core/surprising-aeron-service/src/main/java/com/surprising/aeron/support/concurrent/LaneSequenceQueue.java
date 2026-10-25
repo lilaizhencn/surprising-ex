@@ -86,60 +86,10 @@ public final class LaneSequenceQueue {
     int capacity() { return sequences.length; }
 
     /**
-     * 完成队列游标之前的填充，隔开生产者与消费者写入。
+     * 保存已发布或已消费位置的 volatile 游标槽。
      */
-    private static class PaddedSequenceLhsPadding {
-        /**
-         * p00：序号位置周围的填充字段，不保存业务值。
-         * p01：序号位置周围的填充字段，不保存业务值。
-         * p02：序号位置周围的填充字段，不保存业务值。
-         * p03：序号位置周围的填充字段，不保存业务值。
-         * p04：序号位置周围的填充字段，不保存业务值。
-         * p05：序号位置周围的填充字段，不保存业务值。
-         * p06：序号位置周围的填充字段，不保存业务值。
-         * p07：序号位置周围的填充字段，不保存业务值。
-         * p08：序号位置周围的填充字段，不保存业务值。
-         * p09：序号位置周围的填充字段，不保存业务值。
-         * p0a：序号位置周围的填充字段，不保存业务值。
-         * p0b：序号位置周围的填充字段，不保存业务值。
-         * p0c：序号位置周围的填充字段，不保存业务值。
-         * p0d：序号位置周围的填充字段，不保存业务值。
-         * p0e：序号位置周围的填充字段，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
-    }
-
-    /**
-     * 保存已发布或已消费位置的 volatile 槽。
-     */
-    private static class PaddedSequenceValue extends PaddedSequenceLhsPadding {
+    private static final class PaddedSequence {
         /** 该一方写入、另一方观察的发布或消费位置。 */
         protected volatile long value;
-    }
-
-    /**
-     * 游标之后继续填充的完整位置槽。
-     */
-    private static final class PaddedSequence extends PaddedSequenceValue {
-        /**
-         * p10：序号位置周围的填充字段，不保存业务值。
-         * p11：序号位置周围的填充字段，不保存业务值。
-         * p12：序号位置周围的填充字段，不保存业务值。
-         * p13：序号位置周围的填充字段，不保存业务值。
-         * p14：序号位置周围的填充字段，不保存业务值。
-         * p15：序号位置周围的填充字段，不保存业务值。
-         * p16：序号位置周围的填充字段，不保存业务值。
-         * p17：序号位置周围的填充字段，不保存业务值。
-         * p18：序号位置周围的填充字段，不保存业务值。
-         * p19：序号位置周围的填充字段，不保存业务值。
-         * p1a：序号位置周围的填充字段，不保存业务值。
-         * p1b：序号位置周围的填充字段，不保存业务值。
-         * p1c：序号位置周围的填充字段，不保存业务值。
-         * p1d：序号位置周围的填充字段，不保存业务值。
-         * p1e：序号位置周围的填充字段，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
     }
 }

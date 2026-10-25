@@ -96,10 +96,6 @@ start_node() {
     "-Dsurprising.aeron.account-lanes=${AERON_BASELINE_ACCOUNT_LANES}"
     "-Dsurprising.aeron.matching-engines=${AERON_BASELINE_MATCHING_ENGINES}"
     "-Dsurprising.aeron.owner-command-window=${AERON_BASELINE_WINDOW}"
-    -Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN
-    -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN
-    -Dsurprising.aeron.settlement-spin-limit=0
-    -Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN
     -Dsurprising.aeron.owner-input-batch-size=64
     -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK
     -Dsurprising.aeron.service.idle-strategy=YIELDING
@@ -215,9 +211,7 @@ run_local_jmh_case() {
 -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC \
 -Dsurprising.aeron.account-lanes=${AERON_BASELINE_ACCOUNT_LANES} \
 -Dsurprising.aeron.matching-engines=${AERON_BASELINE_MATCHING_ENGINES} \
--Dsurprising.aeron.matcher-pipeline-wait-strategy=BUSY_SPIN \
--Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN \
--Dsurprising.aeron.owner-wait-strategy=BUSY_SPIN"
+-Dsurprising.aeron.wait-strategy=BUSY_SPIN"
   local -a jmh_args=("^${benchmark}$" "$@"
     -wi "${POPULATION_WARMUP_ITERATIONS}" -w "${POPULATION_ITERATION_SECONDS}s"
     -i "${POPULATION_MEASUREMENT_ITERATIONS}" -r "${POPULATION_ITERATION_SECONDS}s"

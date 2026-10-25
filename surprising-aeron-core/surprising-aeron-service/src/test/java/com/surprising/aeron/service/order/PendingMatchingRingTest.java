@@ -5,7 +5,6 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
-import com.surprising.aeron.service.treasury.RuntimeFundsDelta;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -211,7 +210,7 @@ class PendingMatchingRingTest {
         CoreMessage command = command(commandId, userId);
         return ring.acquire(sequence, CommandSlot.Operation.PLACE, command,
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
-                RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
+                null, DecodedMatchingCommand.decode(command), null);
     }
 
     /**

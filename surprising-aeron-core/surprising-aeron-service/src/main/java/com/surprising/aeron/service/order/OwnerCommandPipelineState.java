@@ -8,7 +8,7 @@ import lombok.Setter;
 import lombok.experimental.Accessors;
 
 /**
- * Owner 独占的命令调度状态：保存响应窗口、控制命令、当前提交队首、依赖阻塞引用和观测计数。这里决定下一步能推进什么，不拥有订单簿、余额或持仓事实，也不创建计时器或工作线程；窗口模式方法只在启用流水执行时调用。
+ * Owner 独占的命令调度状态：保存响应窗口、控制命令、当前提交队首、依赖阻塞引用和观测计数。这里决定下一步能推进什么，不拥有订单簿、余额或持仓事实，也不创建计时器或工作线程。
  */
 public final class OwnerCommandPipelineState {
     /** Owner 每轮完成收集使用的批次上限六十四，实际循环由调用方控制。 */
@@ -16,26 +16,24 @@ public final class OwnerCommandPipelineState {
     /** 异步命令截止点使用的三十秒纳秒间隔，本类只保存截止点。 */
     static final long COMMAND_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
 
-    /**  当前 Owner 的响应 FIFO，非窗口模式为空。 返回当前响应 FIFO，未启用窗口模式时为空。 */
+    /**  当前 Owner 的响应 FIFO。 返回当前响应 FIFO。 */
     @Accessors(fluent = true, chain = false)
     @Getter
     private final ClusterCommandWindow commandWindow;
 
     /**
-     * 创建启用响应 FIFO 窗口的 Owner 调度状态。
+     * 创建使用默认窗口容量的 Owner 调度状态。
      */
-    public OwnerCommandPipelineState() { this(true); }
-
-    /**
-     * 按模式选择是否创建窗口，融合/非流水模式窗口为空，其他字段使用初始值。
-     * @param pipelined 是否创建普通命令响应窗口
-     */
-    public OwnerCommandPipelineState(boolean pipelined) {
-        this(pipelined, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().ownerCommandWindow());
+    public OwnerCommandPipelineState() {
+        this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().ownerCommandWindow());
     }
 
-    public OwnerCommandPipelineState(boolean pipelined, int commandWindowCapacity) {
-        commandWindow = pipelined ? new ClusterCommandWindow(commandWindowCapacity) : null;
+    /**
+     * 创建指定窗口容量的 Owner 调度状态，其他字段使用初始值。
+     * @param commandWindowCapacity 命令响应窗口容量
+     */
+    public OwnerCommandPipelineState(int commandWindowCapacity) {
+        commandWindow = new ClusterCommandWindow(commandWindowCapacity);
     }
     /**  正在等待直接业务或查询完成的入口条目。 返回当前控制命令的入口条目引用。 */
     @Accessors(fluent = true, chain = false)
@@ -94,7 +92,7 @@ public final class OwnerCommandPipelineState {
      * 清当前窗口及全部控制、依赖和观测字段，供启动或测试复用；不会重置交易运行时的业务状态。
      */
     public void reset() {
-        if (commandWindow != null) commandWindow.clear();
+        commandWindow.clear();
         activeControl = null;
         controlResponse = null;
         matchingResponseSequence = 0;
@@ -115,7 +113,7 @@ public final class OwnerCommandPipelineState {
      * 终止时清窗口和活动引用，保留进展/峰值/边界计数，便于随后输出摘要。
      */
     public void clearCommandContainers() {
-        if (commandWindow != null) commandWindow.clear();
+        commandWindow.clear();
         activeControl = null;
         controlResponse = null;
         matchingResponseSequence = 0;
@@ -199,7 +197,7 @@ public final class OwnerCommandPipelineState {
     }
 
     /**
-     * 只为仍在入口队首的同一请求保留解码，换请求或队首为空时也清旧阻塞引用；仅用于窗口模式。
+     * 只为仍在入口队首的同一请求保留解码，换请求或队首为空时也清旧阻塞引用。
      * @param pending 当前仍在入口队首的请求，空表示没有待准备请求
      */
     public void retainPendingPreparation(CoreMessage pending) {
@@ -249,7 +247,7 @@ public final class OwnerCommandPipelineState {
      * @param response 需要暂存或匹配保存的可空/非空响应，具体要求见方法
      */
     public void completeControlMatching(long sequence, CoreResponse response) {
-        if (commandWindow != null && commandWindow.size() != 0 || response == null)
+        if (commandWindow.size() != 0 || response == null)
             throw new IllegalStateException("control completion requires an empty trading window and a response");
         if (sequence != matchingResponseSequence) return;
         if (matchingResponse != null) throw new IllegalStateException("duplicate control matching completion");
@@ -261,8 +259,7 @@ public final class OwnerCommandPipelineState {
      */
     public void recordAdmission() {
         commandProgress++;
-        if (commandWindow != null)
-            commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
+        commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
     }
 
     /**
@@ -293,7 +290,7 @@ public final class OwnerCommandPipelineState {
      */
     public String terminationSummary() {
         return "highWaterMark=" + commandWindowHighWaterMark
-                + " pending=" + (commandWindow == null ? 0 : commandWindow.size())
+                + " pending=" + commandWindow.size()
                 + " commands=" + drainedCommands
                 + " dependencyFences=" + dependencyFences
                 + " controlFences=" + controlFences

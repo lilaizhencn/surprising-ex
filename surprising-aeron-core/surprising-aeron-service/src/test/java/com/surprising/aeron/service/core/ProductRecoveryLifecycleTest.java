@@ -1,17 +1,14 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -19,21 +16,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @ExtendWith(PipelinedExecutionExtension.class)
 class ProductRecoveryLifecycleTest {
-    static Stream<Arguments> productsAndModes() {
-        return Stream.of(ProductLine.values()).flatMap(product -> Stream.of(TradingExecutionMode.values())
-                .map(mode -> Arguments.of(product, mode)));
-    }
 
     /**
      * 为当前产品构造部分成交和待触发单，快照恢复后重发旧命令并依次执行批量下改单撤单、触发取消和继续成交；在多个边界再次快照，对照金额和哈希。随后验证非法 OCO 不落半对、合法 OCO 恢复后只触发一腿，最后成交清空活动订单与预留。
      * @param product 当前参数化测试的独立产品线
-     * @param mode 本轮恢复和继续交易使用的执行模式
      */
-    @ParameterizedTest(name = "{0} / {1}")
-    @MethodSource("productsAndModes")
-    void nonemptySnapshotAndLogRecoverOrdersBatchesTriggersAndContinueTrading(ProductLine product,
-                                                                             TradingExecutionMode mode) {
-        System.setProperty("surprising.aeron.execution-mode", mode.name());
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(ProductLine.class)
+    void nonemptySnapshotAndLogRecoverOrdersBatchesTriggersAndContinueTrading(ProductLine product) {
         // 当前产品对应的合约类型，用来选择资产、乘数及到期参数。
         ContractType type = ContractType.valueOf(product.contractTypeCode());
         // 币本位使用 BTC，其他本场景使用 USDT 的结算资产名称。

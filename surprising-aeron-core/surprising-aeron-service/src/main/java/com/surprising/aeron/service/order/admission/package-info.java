@@ -13,6 +13,6 @@
  *
  * <p>前后步骤在 orchestration.trade：MatchingCommandAdmission 组织准入，CoreMatchingFlow
  * 接入 Matcher。准入完成只允许进入撮合；资金结算、终态提交不在本包重复执行。
- * FUSED 内联执行，PIPELINED 使用原 Account Lane 交接，保持相同账户所有权。</p>
+ * 准入通过 Account Lane 交接，保持账户所有权。</p>
  */
 package com.surprising.aeron.service.order.admission;

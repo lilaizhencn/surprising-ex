@@ -3,7 +3,6 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.TradingCpuAffinity;
-import com.surprising.aeron.config.TradingExecutionMode;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
@@ -537,12 +536,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 // 待完成划转查询允许返回的最大条数
                 int limit = com.surprising.aeron.protocol.CorePendingTransferCodec.decodeQuery(
                         message.payloadUnsafe());
-                if (runtimeState.asynchronousCommands())
-                    return bookQueries.beginPendingTransferQuery(message, limit);
-                // 按限制读取的原待完成划转命令
-                var transfers = runtimeState.pendingTransfers(limit);
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
-                        com.surprising.aeron.protocol.CorePendingTransferCodec.encode(transfers));
+                return bookQueries.beginPendingTransferQuery(message, limit);
             } catch (/* 本分支明确捕获的业务或输入异常，按对应协议码处理 */ IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -898,8 +892,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.matcherPipeline = new MatcherPipelineGroup(
                 matchingAdapter.topology().matchingEngineCount(),
                 Math.min(matchingAdapter.topology().matcherWindowSize(),
-                        matchingAdapter.topology().matchingCompletionCapacity()), false, pendingMatching.contexts(),
-                configuration.matcherPipelineWaitStrategy());
+                        matchingAdapter.topology().matchingCompletionCapacity()), false, pendingMatching.contexts());
         snapshots.matcherSnapshotCapture(matcherSnapshotCapture == null
                 ? snapshots::captureMatcherSnapshot : matcherSnapshotCapture);
         if (snapshotEncoder == null) {
@@ -1061,14 +1054,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     public CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded) {
-        // 本方法是否新进入异步命令作用域，决定 finally 是否负责退出
-        boolean entered = !runtimeState.asynchronousCommands();
-        if (entered) runtimeState.enterAsynchronousCommandScope();
-        try {
-            return applyDecodedCommand(message, timestamp, position, decoded, true);
-        } finally {
-            if (entered) runtimeState.exitAsynchronousCommandScope();
-        }
+        return applyDecodedCommand(message, timestamp, position, decoded, true);
     }
 
     /**
@@ -1126,7 +1112,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (message != decodedIngressMessage || decodedIngressCommand == null)
             return DecodedMatchingCommand.decode(message);
         // 解码留在幂等和来源检查之后，并处于准入的业务拒绝处理范围内。
-        // FUSED 传入尚空的串行槽；PIPELINED 的窗口条目已经解码。
+        // 窗口条目通常已经解码；未解码时在此补解。
         if (!decodedIngressCommand.isDecoded()) decodedIngressCommand.decodeInto(message);
         return decodedIngressCommand;
     }
@@ -1431,17 +1417,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 return finishDirectCommandContext(rejected(CoreResultCode.INVALID_MESSAGE));
             }
             if (status == ResponseStatus.APPLIED) {
-                if (runtimeState.asynchronousCommands()) {
-                    try {
-                        if (!triggers.collectClosingTriggerIds().isEmpty()) {
-                            commits.publication.request();
-                        }
-                    } catch (/* 本分支捕获的失败，按当前边界记录、延后拒绝或继续传播 */ ArithmeticException failure) {
-                        if (deferFinalizationRejection(CoreResultCode.ARITHMETIC_OVERFLOW)) return null;
-                        throw failure;
+                try {
+                    if (!triggers.collectClosingTriggerIds().isEmpty()) {
+                        commits.publication.request();
                     }
-                } else {
-                    triggers.cancelTriggersForClosedPositions();
+                } catch (/* 本分支捕获的失败，按当前边界记录、延后拒绝或继续传播 */ ArithmeticException failure) {
+                    if (deferFinalizationRejection(CoreResultCode.ARITHMETIC_OVERFLOW)) return null;
+                    throw failure;
                 }
                 if (pendingMatching.size() + admissions.queuedMatchingCount()
                         > pendingMatching.capacity()) {
@@ -1457,12 +1439,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 java.util.List<Long> changedOrderIds = resultBuilder.commandChangedOrderIds == null
                         ? java.util.List.of() : resultBuilder.commandChangedOrderIds;
                 try {
-                    if (runtimeState.asynchronousCommands()) {
-                        com.surprising.aeron.service.order.state.RuntimeOrderCommitStateTransitions.validateStampInputs(
-                                clusterTimestamp, clusterPosition, changedOrderIds);
-                    } else {
-                        stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
-                    }
+                    com.surprising.aeron.service.order.state.RuntimeOrderCommitStateTransitions.validateStampInputs(
+                            clusterTimestamp, clusterPosition, changedOrderIds);
                 } catch (/* 订单变化盖章准备失败，按异步续步或同步回滚路径处理 */ IllegalStateException exception) {
                     if (deferFinalizationRejection(CoreResultCode.INVALID_COMMAND)) return null;
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
@@ -1472,16 +1450,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
             }
             resultBuilder.materializeDirectChangeAccumulators();
             if (status == ResponseStatus.APPLIED && !resultBuilder.commandChangedUserIds.isEmpty()) {
-                if (runtimeState.asynchronousCommands()) {
-                    runtimeState.releaseCompletedSequentialLaneStage();
-                    directCommand.commitEvent(runtimeState.dispatchLaneMutation(
-                            nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
-                            resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
-                            clusterTimestamp, clusterPosition));
-                } else {
-                    runtimeState.stageLaneMutation(nextAppliedCommandCount,
-                            resultBuilder.commandChangedUserIds);
-                }
+                runtimeState.releaseCompletedSequentialLaneStage();
+                directCommand.commitEvent(runtimeState.dispatchLaneMutation(
+                        nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
+                        resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
+                        clusterTimestamp, clusterPosition));
             }
             directCommand.markFinalizationPrepared();
         }
@@ -1562,7 +1535,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param code 异步完成阶段需要保存的业务拒绝码
      */
     private boolean deferFinalizationRejection(CoreResultCode code) {
-        if (!runtimeState.asynchronousCommands()) return false;
         if (!directCommand.active()) {
             throw new IllegalStateException("asynchronous finalization has no command context");
         }
@@ -1863,7 +1835,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 启动步骤：先校验亲和配置，再按 FUSED 或 PIPELINED 模式内联或启动 Matcher，绑定 Owner，按需启动账户 Lane，并在两种模式下启动账本 Lane，最后激活适配器和发布器。启动中的运行时异常会尝试关闭资源并保留关闭故障；已激活调用直接返回。
+     * 启动步骤：先校验亲和配置，再启动 Matcher，绑定 Owner，启动账户 Lane 和账本 Lane，最后激活适配器和发布器。启动中的运行时异常会尝试关闭资源并保留关闭故障；已激活调用直接返回。
      * @param affinity 本次激活采用的 CPU 亲和配置
      */
     public void activate(TradingCpuAffinity affinity) {
@@ -1871,18 +1843,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (closed) throw new IllegalStateException("cannot activate closed core state");
         affinity.validateConfiguration(laneTopology());
         try {
-            // 本次激活是否使用 FUSED 执行方式，决定 Matcher 和账户工作是否内联
-            boolean fused = configuration.executionMode() == TradingExecutionMode.FUSED;
-            if (fused) {
-                runtimeState.enableFusedExecution();
-                matcherPipeline.startInline(matchingAdapter::activateShard);
-            } else {
-                matcherPipeline.start(matchingAdapter::activateShard, affinity);
-            }
+            matcherPipeline.start(matchingAdapter::activateShard, affinity);
             bindOwner();
-            if (!fused) runtimeState.startAccountLanes(affinity);
-            // FUSED 只内联撮合与账户执行，资金身份持久化 I/O 仍归账本线程。
-            // 两种执行模式都保留同一账本所有权边界。
+            runtimeState.startAccountLanes(affinity);
             runtimeState.startSystemLedgerLane();
             matchingAdapter.activate();
             commits.publication.activate();
@@ -2250,22 +2213,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return Collections.unmodifiableMap(lastSourceSequences.snapshot());
     }
 
-    /**
-     * 按游标和默认预算逐页取消同一 OCO 组的兄弟触发单；尚未结束却没有进展时抛错，不自行设置额外总等待时限。
-     * @param trigger 本次业务关联的原触发单
-     */
-    public void cancelAllOcoSiblings(com.surprising.aeron.model.CoreTriggerOrderState trigger) {
-        // OCO 兄弟触发单分页游标，初始从第一页开始
-        long cursor = Long.MAX_VALUE;
-        while (true) {
-            // 本轮取消兄弟触发单后的分页结果，包含下一游标及工作量
-            TriggerOrderCommands.OcoCancellationPage page = triggers.cancelOcoSiblings(
-                    trigger, cursor, DEFAULT_TRIGGER_SCAN_BATCH_SIZE);
-            if (page.complete()) return;
-            if (page.workUnits() == 0) throw new IllegalStateException("OCO cancellation made no progress");
-            cursor = page.nextCursor();
-        }
-    }
+
 
     /**
      * 把当前线程绑定为 Owner；已有其他 Owner 时拒绝，再绑定账户运行时并检查身份表所有权。
@@ -2327,55 +2275,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 assetId, identities, timestamp, position);
     }
 
-    /**
-     * 同步路径在用户账户边界内准备客户号、计算冻结并登记待撮合预留；需要时读取全局持仓量。异步命令禁止走此入口，准备失败仅按现有代码回滚客户号。
-     * @param userId 本次业务所属用户身份
-     * @param command 本次业务使用的已解码命令或命令槽，沿用当前命令生命周期
-     * @param commandId 本次命令 UUID，只有标明可空的查询路径允许为空
-     * @param pendingCoreSequence 下单预留将关联的在途 Core 序号
-     */
-    public void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
-                                  long pendingCoreSequence) {
-        if (runtimeState.asynchronousCommands())
-            throw new IllegalStateException("active trigger admission requires its Account Lane continuation");
-        // 按标的规则解析完成的下单参数
-        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
-                identities, userId, command, currentClusterTimestamp);
-        // 本次下单准入保存的订单与客户身份信息
-        var admissionIdentity = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.admissionIdentity(
-                runtimeState, identities, userId, resolved);
-        // 仅必要时读取的当前持仓量，减仓单不增加该依赖
-        long openInterestSteps = resolved.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()
-                ? factIndexes.openInterest().openInterestSteps(command.instrumentId()) : 0;
-        // 已完成下单解析的标的内部身份，这里已经取得确定值
-        int symbolId = resolved.symbolId();
-        // 本次下单需要预留的结算资产身份
-        int assetId = identities.assetId(resolved.reservationAsset());
-        runtimeState.executeUserSettlement(userId, () -> {
-            // 准备好的客户订单号身份，准备失败时按此键撤销登记
-            var preparedClientKey = identities.prepareClientKeyInCurrentLane(
-                    userId, resolved.clientOrderId());
-            try {
-                // 按本用户余额、持仓和待处理订单计算的本次所需冻结量
-                long requiredReservation = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.requiredReservationPrepared(
-                        runtimeState, runtimeState.accountLaneForUser(userId), userId, resolved, openInterestSteps, runtimeState.admissionOrders(userId, resolved.symbolId()), admissionIdentity);
-                RuntimeOrderStateTransitions.placePrepared(runtimeState, userId, resolved,
-                        commandId, requiredReservation,
-                        com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.clientKeyValue(preparedClientKey),
-                        symbolId, assetId);
-                runtimeState.markPendingReservation(userId, resolved.orderId(), pendingCoreSequence);
-                return null;
-            } catch (/* 预留失败，撤销本次已准备的客户号后继续抛出；不承诺回滚全部账户状态 */ RuntimeException | Error failure) {
-                if (preparedClientKey != 0) {
-                    identities.rollbackClientKeyInCurrentLane(
-                            userId, resolved.clientOrderId(), preparedClientKey);
-                }
-                throw failure;
-            }
-        });
-        if (!batches.hasPendingBatches()) commits.publication.deferProvisionalProjection();
-        else commits.publication.request();
-    }
+
 
     /**
      * 取得在途命令必须具备的准入结果，缺失视为流程错误。

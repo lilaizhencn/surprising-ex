@@ -69,7 +69,7 @@ JVM_ARGS=(
   "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
   "-Dsurprising.aeron.account-lanes=2"
   "-Dsurprising.aeron.matching-engines=${MATCHING_ENGINES}"
-  "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN"
+  "-Dsurprising.aeron.wait-strategy=BUSY_SPIN"
   "-Dsurprising.aeron.commit-journal-capacity=65536"
   "-Dsurprising.aeron.commit-journal-capacity-bytes=1073741824"
   "-Dsurprising.aeron.export-pending-bytes=268435456"

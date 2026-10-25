@@ -1,7 +1,6 @@
 package com.surprising.aeron.bootstrap.account;
 
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
-import com.surprising.aeron.config.CoreRuntimeConfiguration.SettlementWaitStrategy;
 
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.account.AccountLaneState;
@@ -14,134 +13,19 @@ import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 交接请求字段之前的填充基类，隔开频繁跨线程写入的数据，不保存业务。
- */
-abstract class SettlementLaneWorkerLhsPadding {
-    /**
-     * p00：交接请求字段之前的填充，不保存业务值。
-     * p01：交接请求字段之前的填充，不保存业务值。
-     * p02：交接请求字段之前的填充，不保存业务值。
-     * p03：交接请求字段之前的填充，不保存业务值。
-     * p04：交接请求字段之前的填充，不保存业务值。
-     * p05：交接请求字段之前的填充，不保存业务值。
-     * p06：交接请求字段之前的填充，不保存业务值。
-     * p07：交接请求字段之前的填充，不保存业务值。
-     */
-    @SuppressWarnings("unused")
-    private long p00, p01, p02, p03, p04, p05, p06, p07;
-}
-
-/**
- * 保存 Owner 请求的账户所有权交接轮次。
- */
-abstract class SettlementLaneWorkerHandoffRequested extends SettlementLaneWorkerLhsPadding {
-    /** Owner 发布的请求轮次，是否重复请求由外层交接协议保证。 */
-    protected volatile long requestedHandoff;
-}
-
-/**
- * 请求轮次与完成轮次之间的填充，减少相邻写入争用。
- */
-abstract class SettlementLaneWorkerMidPadding1 extends SettlementLaneWorkerHandoffRequested {
-    /**
-     * p10：交接请求与完成字段之间的填充，不保存业务值。
-     * p11：交接请求与完成字段之间的填充，不保存业务值。
-     * p12：交接请求与完成字段之间的填充，不保存业务值。
-     * p13：交接请求与完成字段之间的填充，不保存业务值。
-     * p14：交接请求与完成字段之间的填充，不保存业务值。
-     * p15：交接请求与完成字段之间的填充，不保存业务值。
-     * p16：交接请求与完成字段之间的填充，不保存业务值。
-     * p17：交接请求与完成字段之间的填充，不保存业务值。
-     */
-    @SuppressWarnings("unused")
-    private long p10, p11, p12, p13, p14, p15, p16, p17;
-}
-
-/**
- * 保存账户线程已经执行交接并释放所有权的轮次。
- */
-abstract class SettlementLaneWorkerHandoffCompleted extends SettlementLaneWorkerMidPadding1 {
-    /** Lane 执行普通邮箱中的交接任务并释放所有权后发布的轮次；不表示其他邮箱都已排空。 */
-    protected volatile long completedHandoff;
-}
-
-/**
- * 交接完成与恢复轮次之间的填充，不参与资金或订单状态。
- */
-abstract class SettlementLaneWorkerMidPadding2 extends SettlementLaneWorkerHandoffCompleted {
-    /**
-     * p20：交接完成与恢复字段之间的填充，不保存业务值。
-     * p21：交接完成与恢复字段之间的填充，不保存业务值。
-     * p22：交接完成与恢复字段之间的填充，不保存业务值。
-     * p23：交接完成与恢复字段之间的填充，不保存业务值。
-     * p24：交接完成与恢复字段之间的填充，不保存业务值。
-     * p25：交接完成与恢复字段之间的填充，不保存业务值。
-     * p26：交接完成与恢复字段之间的填充，不保存业务值。
-     * p27：交接完成与恢复字段之间的填充，不保存业务值。
-     */
-    @SuppressWarnings("unused")
-    private long p20, p21, p22, p23, p24, p25, p26, p27;
-}
-
-/**
- * 保存 Owner 已归还账户后发布的恢复轮次。
- */
-abstract class SettlementLaneWorkerHandoffResumed extends SettlementLaneWorkerMidPadding2 {
-    /** Owner 归还临时账户所有权后发布的恢复轮次。 */
-    protected volatile long resumedHandoff;
-}
-
-/**
- * 恢复轮次与休眠标记之间的填充。
- */
-abstract class SettlementLaneWorkerMidPadding3 extends SettlementLaneWorkerHandoffResumed {
-    /**
-     * p30：恢复轮次与休眠字段之间的填充，不保存业务值。
-     * p31：恢复轮次与休眠字段之间的填充，不保存业务值。
-     * p32：恢复轮次与休眠字段之间的填充，不保存业务值。
-     * p33：恢复轮次与休眠字段之间的填充，不保存业务值。
-     * p34：恢复轮次与休眠字段之间的填充，不保存业务值。
-     * p35：恢复轮次与休眠字段之间的填充，不保存业务值。
-     * p36：恢复轮次与休眠字段之间的填充，不保存业务值。
-     * p37：恢复轮次与休眠字段之间的填充，不保存业务值。
-     */
-    @SuppressWarnings("unused")
-    private long p30, p31, p32, p33, p34, p35, p36, p37;
-}
-
-/**
- * 保存账户线程休眠声明，供各生产者决定是否发出唤醒。
- */
-abstract class SettlementLaneWorkerParked extends SettlementLaneWorkerMidPadding3 {
-    /** 工作线程在 park 前先发布的休眠声明，随后还会重新检查全部相关输入。 */
-    protected volatile boolean parked;
-}
-
-/**
- * 休眠标记之后的填充，减少与后续字段写入争用。
- */
-abstract class SettlementLaneWorkerRhsPadding extends SettlementLaneWorkerParked {
-    /**
-     * p40：休眠字段之后的填充，不保存业务值。
-     * p41：休眠字段之后的填充，不保存业务值。
-     * p42：休眠字段之后的填充，不保存业务值。
-     * p43：休眠字段之后的填充，不保存业务值。
-     * p44：休眠字段之后的填充，不保存业务值。
-     * p45：休眠字段之后的填充，不保存业务值。
-     * p46：休眠字段之后的填充，不保存业务值。
-     * p47：休眠字段之后的填充，不保存业务值。
-     */
-    @SuppressWarnings("unused")
-    private long p40, p41, p42, p43, p44, p45, p46, p47;
-}
-
-/**
  * 启动与账户执行步骤：为一个账户 Lane 建立实际工作线程，合并单 Owner 控制邮箱、独立准入邮箱及各 Matcher 分片独占生产的结算环。账户所有权交接时暂停业务消费；环槽复用与任务自身完成分别管理。
  */
 @Slf4j
-public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding implements AutoCloseable {
+public final class SettlementLaneWorker implements AutoCloseable {
     /** 普通队首等输入时由自旋切换到 yield 的次数阈值，固定为 1024。 */
     private static final int BUSY_SPIN_YIELD_THRESHOLD = 1024;
+
+    /** Owner 发布的请求轮次，是否重复请求由外层交接协议保证。 */
+    private volatile long requestedHandoff;
+    /** Lane 执行普通邮箱中的交接任务并释放所有权后发布的轮次；不表示其他邮箱都已排空。 */
+    private volatile long completedHandoff;
+    /** Owner 归还临时账户所有权后发布的恢复轮次。 */
+    private volatile long resumedHandoff;
 
     /**
      * 可投递到账户线程的任务契约；任务先声明输入就绪，再在账户实际拥有者线程执行。
@@ -170,10 +54,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
     private final int indexMask;
     /** 独立准入邮箱下标掩码。 */
     private final int admissionIndexMask;
-    /** 构造时从 JVM 属性固定的等待策略。 */
-    private final SettlementWaitStrategy waitStrategy;
-    /** BLOCKING 空闲阶段 park 前自旋预算，构造时限定为 0 至 4096。 */
-    private final int spinLimit;
     /** 本工作线程唯一拥有的账户 Lane。 */
     private final AccountLaneState lane;
     /**  构造时启动的实际 LaneThread，始终带有所属账户引用。 借出实际账户工作线程引用，供生命周期及诊断使用。 */
@@ -271,8 +151,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
             matcherSettlementRings[shard] = new MatcherSettlementRing(capacity);
         indexMask = capacity - 1;
         admissionIndexMask = capacity - 1;
-        waitStrategy = configuration.settlementWaitStrategy();
-        spinLimit = configuration.settlementSpinLimit();
         this.lane = lane;
         thread = new LaneThread("core-" + role + "-lane-" + lane.laneId(), () -> run(affinity), lane);
         lane.bindWorker(thread);
@@ -306,13 +184,7 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
      */
     public void resumeHandoff(long epoch) {
         resumedHandoff = epoch;
-        unparkIfParked();
     }
-
-    /**
-     * 读取工作线程是否已声明准备休眠；这个标记本身不证明线程此刻仍停在 park。
-     */
-    public boolean isParked() { return parked; }
 
     /**
      * 单 Owner 向普通邮箱发布任务，检查故障、关闭、物理容量及总采样深度；先放引用再发布游标并按需唤醒，返回一开始计数的入队序号，不表示任务完成。
@@ -335,7 +207,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         }
         commands[(int) next & indexMask] = command;
         producerSequence.value = next + 1;
-        unparkIfParked();
         return next + 1;
     }
 
@@ -357,7 +228,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         }
         admissionCommands[(int) next & admissionIndexMask] = command;
         admissionProducerSequence.value = next + 1;
-        unparkIfParked();
         return next + 1;
     }
 
@@ -381,17 +251,7 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         }
         // 分片环返回的零起始发布位置，外层返回值再加一
         long position = ring.publish(event);
-        unparkIfParked();
         return position + 1;
-    }
-
-    /**
-     * 只在工作线程已经声明休眠时发放唤醒许可，配合其休眠前再次检查输入。
-     */
-    private void unparkIfParked() {
-        if (parked) {
-            java.util.concurrent.locks.LockSupport.unpark(thread);
-        }
     }
 
     /**
@@ -460,8 +320,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
         long admissionNext = admissionConsumerSequence.value;
         // 账户已见准入发布上界，耗尽时刷新
         long cachedAdmissionProducerSeq = admissionProducerSequence.value;
-        // BLOCKING 无工作时已自旋次数，达到配置预算后再 park
-        int idleSpins = 0;
         try (/* 实际工作线程取得的 CPU 亲和租约，线程退出时关闭 */ var affinity = configuration.accountLane(lane.laneId())) {
             lane.bindOwner();
             started = true;
@@ -475,11 +333,7 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                 if (completedHandoff > reboundHandoff) {
                     if (resumedHandoff < completedHandoff) {
                         if (!running) break;
-                        switch (waitStrategy) {
-                            case BUSY_SPIN -> Thread.onSpinWait();
-                            case YIELDING -> Thread.yield();
-                            case BLOCKING -> parkUntilWork(true);
-                        }
+                        Thread.onSpinWait();
                         continue;
                     }
                     lane.bindOwner();
@@ -501,7 +355,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                         admissionNext++;
                         admissionConsumerSequence.value = admissionNext;
                         execute(admission);
-                        idleSpins = 0;
                         payloadWaitSpins = 0;
                         continue;
                     }
@@ -520,7 +373,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                     // 该邮箱不保存等待载荷的阶段，发布入口先核对一次约定。
                     pollMatcherSettlement(direct);
                     execute(direct);
-                    idleSpins = 0;
                     payloadWaitSpins = 0;
                     continue;
                 }
@@ -537,31 +389,15 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
                         next++;
                         consumerSequence.value = next;
                         execute(command);
-                        idleSpins = 0;
                         payloadWaitSpins = 0;
                         continue;
                     }
                     if (!running) throw new IllegalStateException("Lane stopped before its matcher payload arrived");
 
-                    // 普通队首合法但输入尚未就绪，需要让出 CPU 给能够补齐输入的线程。
-                    // BUSY_SPIN 先短暂自旋，达到阈值后调用 yield；本分支并不 park。
-                    if (waitStrategy == SettlementWaitStrategy.BUSY_SPIN) {
-                        backoffPayloadWait(payloadWaitSpins++);
-                        continue;
-                    }
+                    backoffPayloadWait(payloadWaitSpins++);
+                    continue;
                 }
-                switch (waitStrategy) {
-                    case BUSY_SPIN -> Thread.onSpinWait();
-                    case YIELDING -> Thread.yield();
-                    case BLOCKING -> {
-                        if (idleSpins < spinLimit) {
-                            idleSpins++;
-                            Thread.onSpinWait();
-                        } else {
-                            parkUntilWork(false);
-                        }
-                    }
-                }
+                Thread.onSpinWait();
             }
         } catch (/* 本账户线程实际保存或传播的原故障 */ Throwable laneFailure) {
             failure = laneFailure;
@@ -573,39 +409,6 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
             }
         } finally {
             lane.releaseOwnerForHandoff();
-        }
-    }
-
-    /**
-     * 先声明休眠，再检查关闭、准入、交接恢复或可执行主任务，仍无工作才最多 park 十万纳秒，finally 清声明；这里只探测，不在 Owner 持权期间执行账户任务。
-     * @param waitingForHandoff 当前是否正在等 Owner 归还账户所有权
-     */
-    private void parkUntilWork(boolean waitingForHandoff) {
-        parked = true;
-        try {
-            if (!running) return;
-            if (admissionConsumerSequence.value < admissionProducerSequence.value) {
-                // 准入队首引用，输入就绪后先取走再执行
-                Command admission = admissionCommands[(int) admissionConsumerSequence.value & admissionIndexMask];
-                if (admission != null && ready(admission)) return;
-            }
-            if (waitingForHandoff) {
-                if (resumedHandoff >= completedHandoff) return;
-            } else {
-                // 本轮可空普通队首，与直接结算比较优先级
-                Command main = consumerSequence.value < producerSequence.value
-                        ? commands[(int) consumerSequence.value & indexMask] : null;
-                // 本轮选择的可空直接结算事件
-                MatcherSettlementEvent direct = peekMatcherSettlement();
-                if (direct != null && shouldRunMatcherSettlement(direct, main)) {
-                    return;
-                } else if (main != null && ready(main)) {
-                    return;
-                }
-            }
-            LockSupport.parkNanos(this, 100_000L);
-        } finally {
-            parked = false;
         }
     }
 
@@ -758,169 +561,33 @@ public final class SettlementLaneWorker extends SettlementLaneWorkerRhsPadding i
     }
 
     /**
-     * 邮箱游标之前的填充，隔开生产者和消费者的频繁写入。
+     * 保存邮箱跨线程可见的单调位置值游标槽。
      */
-    private static class PaddedSequenceLhsPadding {
-        /**
-         * p00：邮箱位置之前的填充，不保存业务值。
-         * p01：邮箱位置之前的填充，不保存业务值。
-         * p02：邮箱位置之前的填充，不保存业务值。
-         * p03：邮箱位置之前的填充，不保存业务值。
-         * p04：邮箱位置之前的填充，不保存业务值。
-         * p05：邮箱位置之前的填充，不保存业务值。
-         * p06：邮箱位置之前的填充，不保存业务值。
-         * p07：邮箱位置之前的填充，不保存业务值。
-         * p08：邮箱位置之前的填充，不保存业务值。
-         * p09：邮箱位置之前的填充，不保存业务值。
-         * p0a：邮箱位置之前的填充，不保存业务值。
-         * p0b：邮箱位置之前的填充，不保存业务值。
-         * p0c：邮箱位置之前的填充，不保存业务值。
-         * p0d：邮箱位置之前的填充，不保存业务值。
-         * p0e：邮箱位置之前的填充，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
-    }
-
-    /**
-     * 保存邮箱跨线程可见的单调位置值。
-     */
-    private static class PaddedSequenceValue extends PaddedSequenceLhsPadding {
+    private static final class PaddedSequence {
         /** 该邮箱已发布或已消费的位置，volatile 写入向另一方交接可见性。 */
         protected volatile long value;
     }
 
     /**
-     * 邮箱位置之后继续填充的完整游标槽。
+     * 一个 Matcher 到一个账户 Lane 的固定引用环，双方各自推进游标；环槽释放与业务事件完成分别管理。
      */
-    private static final class PaddedSequence extends PaddedSequenceValue {
-        /**
-         * p10：邮箱位置之后的填充，不保存业务值。
-         * p11：邮箱位置之后的填充，不保存业务值。
-         * p12：邮箱位置之后的填充，不保存业务值。
-         * p13：邮箱位置之后的填充，不保存业务值。
-         * p14：邮箱位置之后的填充，不保存业务值。
-         * p15：邮箱位置之后的填充，不保存业务值。
-         * p16：邮箱位置之后的填充，不保存业务值。
-         * p17：邮箱位置之后的填充，不保存业务值。
-         * p18：邮箱位置之后的填充，不保存业务值。
-         * p19：邮箱位置之后的填充，不保存业务值。
-         * p1a：邮箱位置之后的填充，不保存业务值。
-         * p1b：邮箱位置之后的填充，不保存业务值。
-         * p1c：邮箱位置之后的填充，不保存业务值。
-         * p1d：邮箱位置之后的填充，不保存业务值。
-         * p1e：邮箱位置之后的填充，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
-    }
-
-    /**
-     * Matcher 环生产位置之前的填充。
-     */
-    private static class MatcherSettlementRingLhsPadding {
-        /**
-         * p00：Matcher 环生产位置之前的填充，不保存业务值。
-         * p01：Matcher 环生产位置之前的填充，不保存业务值。
-         * p02：Matcher 环生产位置之前的填充，不保存业务值。
-         * p03：Matcher 环生产位置之前的填充，不保存业务值。
-         * p04：Matcher 环生产位置之前的填充，不保存业务值。
-         * p05：Matcher 环生产位置之前的填充，不保存业务值。
-         * p06：Matcher 环生产位置之前的填充，不保存业务值。
-         * p07：Matcher 环生产位置之前的填充，不保存业务值。
-         * p08：Matcher 环生产位置之前的填充，不保存业务值。
-         * p09：Matcher 环生产位置之前的填充，不保存业务值。
-         * p0a：Matcher 环生产位置之前的填充，不保存业务值。
-         * p0b：Matcher 环生产位置之前的填充，不保存业务值。
-         * p0c：Matcher 环生产位置之前的填充，不保存业务值。
-         * p0d：Matcher 环生产位置之前的填充，不保存业务值。
-         * p0e：Matcher 环生产位置之前的填充，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p0a, p0b, p0c, p0d, p0e;
-    }
-
-    /**
-     * 单 Matcher 生产者的位置和它缓存的账户消费上界。
-     */
-    private static class MatcherSettlementRingProducerPosition extends MatcherSettlementRingLhsPadding {
+    private static final class MatcherSettlementRing {
         /** 本分片环已发布位置，单 Matcher 写入并向账户线程可见。 */
         protected volatile long producerPosition;
         /** Matcher 缓存的账户消费上界，判满时按需刷新。 */
         protected long cachedConsumerPosition;
-    }
-
-    /**
-     * Matcher 环生产位置与账户消费位置之间的填充。
-     */
-    private static class MatcherSettlementRingMidPadding extends MatcherSettlementRingProducerPosition {
-        /**
-         * p10：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p11：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p12：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p13：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p14：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p15：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p16：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p17：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p18：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p19：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p1a：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p1b：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p1c：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p1d：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         * p1e：Matcher 环生产与消费位置之间的填充，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p1a, p1b, p1c, p1d, p1e;
-    }
-
-    /**
-     * 账户消费者的位置和它缓存的 Matcher 发布上界。
-     */
-    private static class MatcherSettlementRingConsumerPosition extends MatcherSettlementRingMidPadding {
         /** 账户已取走的环位置，清引用后用 release 发布。 */
         protected volatile long consumerPosition;
         /** 账户缓存的 Matcher 发布上界，队首到达上界时刷新。 */
         protected long cachedProducerPosition;
-    }
 
-    /**
-     * Matcher 环消费位置之后的填充。
-     */
-    private static class MatcherSettlementRingRhsPadding extends MatcherSettlementRingConsumerPosition {
-        /**
-         * p20：Matcher 环消费位置之后的填充，不保存业务值。
-         * p21：Matcher 环消费位置之后的填充，不保存业务值。
-         * p22：Matcher 环消费位置之后的填充，不保存业务值。
-         * p23：Matcher 环消费位置之后的填充，不保存业务值。
-         * p24：Matcher 环消费位置之后的填充，不保存业务值。
-         * p25：Matcher 环消费位置之后的填充，不保存业务值。
-         * p26：Matcher 环消费位置之后的填充，不保存业务值。
-         * p27：Matcher 环消费位置之后的填充，不保存业务值。
-         * p28：Matcher 环消费位置之后的填充，不保存业务值。
-         * p29：Matcher 环消费位置之后的填充，不保存业务值。
-         * p2a：Matcher 环消费位置之后的填充，不保存业务值。
-         * p2b：Matcher 环消费位置之后的填充，不保存业务值。
-         * p2c：Matcher 环消费位置之后的填充，不保存业务值。
-         * p2d：Matcher 环消费位置之后的填充，不保存业务值。
-         * p2e：Matcher 环消费位置之后的填充，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p2a, p2b, p2c, p2d, p2e;
-    }
-
-    /**
-     * 一个 Matcher 到一个账户 Lane 的固定引用环，双方各自推进游标；环槽释放与业务事件完成分别管理。
-     */
-    private static final class MatcherSettlementRing extends MatcherSettlementRingRhsPadding {
         /** 消费位置字段访问器，归还环槽时执行 release 写入。 */
         private static final java.lang.invoke.VarHandle CONSUMER_POSITION_VH;
         /** 初始化消费位置访问器，失败时停止该环类型初始化。 */
         static {
             try {
                 CONSUMER_POSITION_VH = java.lang.invoke.MethodHandles.lookup()
-                        .findVarHandle(MatcherSettlementRingConsumerPosition.class, "consumerPosition", long.class);
+                        .findVarHandle(MatcherSettlementRing.class, "consumerPosition", long.class);
             } catch (/* 消费位置访问器初始化失败，阻止环类型继续初始化 */ ReflectiveOperationException e) {
                 throw new ExceptionInInitializerError(e);
             }

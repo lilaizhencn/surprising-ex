@@ -5,10 +5,10 @@ import com.surprising.aeron.service.matcher.CoreMatchingResult;
 import com.surprising.aeron.service.result.CommandResultBuilder;
 import com.surprising.aeron.service.settlement.FundsPosting;
 import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
-import com.surprising.aeron.service.treasury.RuntimeFundsDelta;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
+import static com.surprising.aeron.service.treasury.RuntimeFundsTestSupport.postings;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -52,7 +52,7 @@ class CommandSlotRingTest {
         active.add(7, FundsPosting.OwnerKind.USER, 11,
                 FundsPosting.Subledger.AVAILABLE, -100);
         // 第一次人工 posting 的不可变对照值。
-        var firstExpected = active.toDelta();
+        var firstExpected = postings(active);
         // 首个提交的用户变更缓冲。
         PrimitiveLongChangeSet firstUsers = new PrimitiveLongChangeSet();
         firstUsers.add(11L);
@@ -64,11 +64,11 @@ class CommandSlotRingTest {
         firstBuilder.changedUserIds(firstUsers);
         firstBuilder.changedOrderIds(firstOrders);
         first.suspendCommitContext(firstBuilder, active, true, false);
-        assertThat(active.toDelta()).isSameAs(RuntimeFundsDelta.empty());
+        assertThat(active.isEmpty()).isTrue();
         active.add(8, FundsPosting.OwnerKind.USER, 22,
                 FundsPosting.Subledger.LOCKED, 50);
         // 第二次人工 posting 的不可变对照值。
-        var secondExpected = active.toDelta();
+        var secondExpected = postings(active);
         // 第二个提交的用户变更缓冲。
         PrimitiveLongChangeSet secondUsers = new PrimitiveLongChangeSet();
         secondUsers.add(22L);
@@ -82,13 +82,13 @@ class CommandSlotRingTest {
         second.suspendCommitContext(secondBuilder, active, false, false);
         first.takeCommitFundsTo(active);
         first.clearCommitContext();
-        assertThat(active.toDelta()).usingRecursiveComparison().isEqualTo(firstExpected);
+        assertThat(postings(active)).usingRecursiveComparison().isEqualTo(firstExpected);
         second.takeCommitFundsTo(active);
         second.clearCommitContext();
-        assertThat(active.toDelta()).usingRecursiveComparison().isEqualTo(secondExpected);
+        assertThat(postings(active)).usingRecursiveComparison().isEqualTo(secondExpected);
         ring.discard(1);
         ring.discard(2);
-        assertThat(active.toDelta()).usingRecursiveComparison().isEqualTo(secondExpected);
+        assertThat(postings(active)).usingRecursiveComparison().isEqualTo(secondExpected);
     }
 
     /**
@@ -233,7 +233,7 @@ class CommandSlotRingTest {
         assertThat(context.commitChangedUserIds()).containsExactly(7L);
         assertThat(context.commitChangedOrderIds()).containsExactly(11L);
         context.takeCommitFundsTo(restoredFunds);
-        assertThat(restoredFunds.toDelta()).isSameAs(RuntimeFundsDelta.empty());
+        assertThat(restoredFunds.isEmpty()).isTrue();
         assertThat(context.commitSnapshotDirty()).isTrue();
         assertThat(context.commitSnapshotProvisionalOnly()).isFalse();
         context.clearCommitContext();

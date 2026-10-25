@@ -9,10 +9,6 @@ import org.springframework.core.env.StandardEnvironment;
 /** 节点启动时一次绑定的执行配置；恢复沿用本节点配置，账户路由仍由快照决定。 */
 @ConfigurationProperties(prefix = "surprising.aeron")
 public record CoreRuntimeConfiguration(
-        @DefaultValue("FUSED") TradingExecutionMode executionMode,
-        @DefaultValue("BUSY_SPIN") OwnerWaitStrategy ownerWaitStrategy,
-        @DefaultValue("BUSY_SPIN") SettlementWaitStrategy settlementWaitStrategy,
-        @DefaultValue("0") int settlementSpinLimit,
         @DefaultValue("1024") int laneCompletionSpins,
         @DefaultValue("4096") int maxPendingMatching,
         @DefaultValue("300") int standaloneSnapshotTimeoutSeconds,
@@ -21,18 +17,13 @@ public record CoreRuntimeConfiguration(
         @DefaultValue("64") int ownerInputBatchSize,
         @DefaultValue("256") int ownerCommandWindow,
         @DefaultValue("4096") int decoderCacheSlots,
-        @DefaultValue("BUSY_SPIN") MatcherWaitStrategy matcherPipelineWaitStrategy,
         @DefaultValue("256") int matcherGroupSize,
         @DefaultValue("10000") int matcherGroupNanos,
-        @DefaultValue("BUSY_SPIN") LedgerWaitStrategy systemLedgerWaitStrategy,
         @DefaultValue("1024") int laneInitialEntities,
         java.nio.file.Path fundsIndexDirectory,
         @DefaultValue SnapshotLimits snapshot) {
 
     public CoreRuntimeConfiguration {
-        if (executionMode == null || ownerWaitStrategy == null || settlementWaitStrategy == null)
-            throw new IllegalArgumentException("execution and waiting strategies are required");
-        requireRange("settlement-spin-limit", settlementSpinLimit, 0, 4096);
         requireRange("lane-completion-spins", laneCompletionSpins, 0, Integer.MAX_VALUE);
         requireRange("max-pending-matching", maxPendingMatching, 1, 1 << 20);
         requireRange("standalone-snapshot-timeout-seconds", standaloneSnapshotTimeoutSeconds, 1, 1800);
@@ -43,8 +34,6 @@ public record CoreRuntimeConfiguration(
         if (Integer.bitCount(ownerCommandWindow) != 1)
             throw new IllegalArgumentException("surprising.aeron.owner-command-window must be a power of two");
         requireRange("decoder-cache-slots", decoderCacheSlots, 1, 1 << 20);
-        if (matcherPipelineWaitStrategy == null || systemLedgerWaitStrategy == null)
-            throw new IllegalArgumentException("matcher and ledger waiting strategies are required");
         requireRange("matcher-group-size", matcherGroupSize, 1, Integer.MAX_VALUE);
         requireRange("matcher-group-nanos", matcherGroupNanos, 1, Integer.MAX_VALUE);
         requireRange("lane-initial-entities", laneInitialEntities, 16, 1 << 20);
@@ -73,8 +62,4 @@ public record CoreRuntimeConfiguration(
         }
     }
 
-    public enum MatcherWaitStrategy { BUSY_SPIN, ADAPTIVE }
-    public enum LedgerWaitStrategy { BUSY_SPIN, BLOCKING }
-    public enum OwnerWaitStrategy { BUSY_SPIN, ADAPTIVE }
-    public enum SettlementWaitStrategy { BUSY_SPIN, YIELDING, BLOCKING }
 }

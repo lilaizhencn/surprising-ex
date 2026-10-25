@@ -191,7 +191,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final AccountLaneState[] accountLanes;
     /** 按 Lane 复用的用户路由临时列表，每次派发前清空，不保存第二份用户业务状态。 */
     final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
-    /** PIPELINED 账户工作对象数组，未启动或 FUSED 路径可为空槽。 */
+    /** 账户 Lane 生命周期，未启动时没有工作线程。 */
     private final AccountLaneLifecycle laneLifecycle;
     private final CoreRuntimeConfiguration configuration;
     /** 账户准入完成后按 Matcher 分片设置的唤醒提示，业务结果仍在原事件。 */
@@ -326,61 +326,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 提交序号之前的填充基类，用额外字段把频繁写入的序号与相邻对象数据隔开；填充不保存业务。
+     * 所属 Lane 已提交到的 Core 序号槽位，以 volatile 发布给 Owner。
      */
-    private static class PaddedCommittedSequenceLhsPadding {
-        /**
-         * p00：提交序号之前的填充字段，不保存业务值。
-         * p01：提交序号之前的填充字段，不保存业务值。
-         * p02：提交序号之前的填充字段，不保存业务值。
-         * p03：提交序号之前的填充字段，不保存业务值。
-         * p04：提交序号之前的填充字段，不保存业务值。
-         * p05：提交序号之前的填充字段，不保存业务值。
-         * p06：提交序号之前的填充字段，不保存业务值。
-         * p07：提交序号之前的填充字段，不保存业务值。
-         * p08：提交序号之前的填充字段，不保存业务值。
-         * p09：提交序号之前的填充字段，不保存业务值。
-         * p10：提交序号之前的填充字段，不保存业务值。
-         * p11：提交序号之前的填充字段，不保存业务值。
-         * p12：提交序号之前的填充字段，不保存业务值。
-         * p13：提交序号之前的填充字段，不保存业务值。
-         * p14：提交序号之前的填充字段，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p00, p01, p02, p03, p04, p05, p06, p07, p08, p09, p10, p11, p12, p13, p14;
-    }
-
-    /**
-     * 在前置填充之后保存可见的已提交序号，由所属 Lane 发布、Owner 观察。
-     */
-    private static class PaddedCommittedSequenceValue extends PaddedCommittedSequenceLhsPadding {
+    private static final class PaddedCommittedSequenceSlot {
         /** 所属 Lane 已提交到的 Core 序号，以 volatile 发布给 Owner。 */
         protected volatile long sequence;
-    }
-
-    /**
-     * 在提交序号之后继续填充的完整槽位，减少不同 Lane 发布时的缓存行争用。
-     */
-    private static final class PaddedCommittedSequenceSlot extends PaddedCommittedSequenceValue {
-        /**
-         * p10：提交序号之后的填充字段，不保存业务值。
-         * p11：提交序号之后的填充字段，不保存业务值。
-         * p12：提交序号之后的填充字段，不保存业务值。
-         * p13：提交序号之后的填充字段，不保存业务值。
-         * p14：提交序号之后的填充字段，不保存业务值。
-         * p15：提交序号之后的填充字段，不保存业务值。
-         * p16：提交序号之后的填充字段，不保存业务值。
-         * p17：提交序号之后的填充字段，不保存业务值。
-         * p18：提交序号之后的填充字段，不保存业务值。
-         * p19：提交序号之后的填充字段，不保存业务值。
-         * p20：提交序号之后的填充字段，不保存业务值。
-         * p21：提交序号之后的填充字段，不保存业务值。
-         * p22：提交序号之后的填充字段，不保存业务值。
-         * p23：提交序号之后的填充字段，不保存业务值。
-         * p24：提交序号之后的填充字段，不保存业务值。
-         */
-        @SuppressWarnings("unused")
-        private long p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, p21, p22, p23, p24;
     }
 
     /** 单笔下单准入事件池，输入和消费者都结束使用后才能归还。 */
@@ -393,23 +343,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final java.util.ArrayDeque<PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
             new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
     public boolean accountLanesStarted() { return laneLifecycle.started(); }
-    /** 是否明确启用 FUSED 执行方式，不代表账本也在 Owner 内联执行。 */
-    private boolean fusedExecutionActive;
-
-    /**
-     * 在 Owner 上标记采用 FUSED 执行方式，不在此创建或启动工作线程。
-     */
-    public void enableFusedExecution() {
-        assertOwner();
-        this.fusedExecutionActive = true;
-    }
-
-    /**
-     * 返回此前是否已标记 FUSED 执行方式。
-     */
-    public boolean isFusedExecution() {
-        return fusedExecutionActive;
-    }
 
     /** 本产品线按标的内部身份维护的标记价格。 */
     final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
@@ -885,7 +818,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 在 Owner 上判断账户已启动、账本已存在或显式异步范围是否任一成立；FUSED 也可能因独立账本而走异步续步。
+     * 在 Owner 上判断账户已启动、账本已存在或显式异步范围是否任一成立。
      */
     public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted() || laneLifecycle.ledger() != null || asynchronousCommandScope; }
 
@@ -6323,7 +6256,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 启用私有捕获时导出本命令风险、订单和持仓变化；仅纯冷执行另导出用户与预留，活动或 FUSED 已由 Lane 交接负责。捕获异常只记失败。
+     * 启用私有捕获时导出本命令风险、订单和持仓变化；仅纯冷执行另导出用户与预留，活动执行已由 Lane 交接负责。捕获异常只记失败。
      * @param capture 接入或使用的可空实时变化捕获器
      */
     public void captureRealtimeChanges(RealtimeStateCapture capture) {
@@ -6331,9 +6264,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (capture == null || !capture.privateStateEnabled()) return;
         try {
             changedRiskSnapshots.forEach((/* 本轮正在恢复、读取或捕获的业务实体身份 */ id,/* 本次风险、订单或持仓变化后值，空持仓按补丁前值捕获删除 */ value) -> capture.risk(value));
-            // 活动执行通过已提交 Lane 变化交接用户和预留，Owner 内联执行也沿用该路径。
+            // 活动执行通过已提交 Lane 变化交接用户和预留。
             // 纯冷执行没有这个交接边界，才在这里另导出用户与预留变化集合。
-            if (!accountLanesStarted() && !fusedExecutionActive) {
+            if (!accountLanesStarted()) {
                 changedUsers.forEach(/* 本轮正在恢复、读取或捕获的业务实体身份 */ id -> capture.metadata(user(id)));
                 changedReservations.forEach(/* 本轮正在恢复、读取或捕获的业务实体身份 */ id -> capture.reservation(reservation(id)));
             }
@@ -7183,14 +7116,14 @@ appendBalanceFundsDelta(patches, target);
     }
 
     /**
-     * 纯冷阶段构造独立订单，活动或 FUSED 要求当前所属 Lane 并使用共享退休栅栏的订单池。
+     * 纯冷阶段构造独立订单，活动执行要求当前所属 Lane 并使用共享退休栅栏的订单池。
      * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param command 本次已经解码的费用政策或下单参数
      * @param commandId 原业务命令 UUID
      * @param symbolId 本产品线标的内部身份
      */
     public OrderRuntime prepareControlOrder(long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId) {
-        if (!accountLanesStarted() && !fusedExecutionActive)
+        if (!accountLanesStarted())
             return preparedOrder(productLine, userId, command, commandId, symbolId, 0, 0);
         // 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用
         AccountLaneState lane = currentLaneCommandScope();
@@ -7244,7 +7177,7 @@ appendBalanceFundsDelta(patches, target);
         }
         // 当前处理的原订单或更新后订单，使用范围由本分支的账户所有权限定
         OrderRuntime order = prepared != null && !prepared.commandSlotValue() ? prepared
-                : accountLanesStarted() || fusedExecutionActive
+                : accountLanesStarted()
                 ? lane.preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position, retiredOwnerSequence)
                 : preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position);
         // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
