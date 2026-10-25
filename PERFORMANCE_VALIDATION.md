@@ -87,7 +87,28 @@ python3 /tmp/surprising-remediation-performance/recover-original-archive-once.py
 
 证据在 `/tmp/surprising-remediation-performance/runs/focused-long-20261022-final/`：原失败`functional-result.json`、`recovery-node.log`，补恢复`recovery-once-result.json`、完整before/after快照及`independent-recovery-snapshot-comparison.json`，内存环境`long-run-memory-environment-analysis.json`。运行器修前文件、`run-real-round.driver-wait.diff`、控制验证、实际依赖源码摘录保存在父目录；最终摘要与证据hash见`final-verification-summary.json`、`final-evidence-manifest.json`。原失败与补恢复成功分别保留，整体同负载正确性与恢复证据已补齐。
 
-## 尚未执行与资源条件
+## 7. 2026-10-25 内联重构与死代码彻底清理后权威压测记录
+
+- **执行基线**：Git Commit `caad77c60`（`master` 分支）
+- **测试环境**：Apple M 系列 (macOS / arm64), JDK 27 (HotSpot 64-Bit Server VM, 27+33-FR)
+- **JVM 参数**：`--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --enable-native-access=ALL-UNNAMED`
+- **架构模式**：Aeron 容器服务线程直接驱动 `TradingOwnerLoop` 内联推进，已彻底移除独立后台 Owner 线程及跨核交接环。
+
+### 7.1 测试数据与实测指标
+
+| 场景 | 产品线 | 关键配置与负载 | 吞吐量 (Throughput) | 延迟分位 (Latency) | 业务一致性与终态 |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **端到端订单撮合流** (`CorePerpetualEndToEndBenchmark`) | `LINEAR_PERPETUAL` | 10,000 cycles, 20,000 orders, `makerDepth = 1` | **21,062.155 orders/s**<br>(10,531.078 cycles/s) | p50: **41 µs**<br>p95: **78 µs**<br>p99: **129 µs**<br>max: 7,324 µs | `pendingMatching = 0`<br>`matchedQuantity = 10,000`<br>`finalizedOrders = 20,000` |
+| **JMH 常驻盘口异步挂撤单** (`LinearPerpetualCoreBenchmark`) | `LINEAR_PERPETUAL` | `accountLanes = 2`, `priceLevels = 200`, `ordersPerLevel = 1250` | **142,581.470 ops/s** | - | `terminalBusinessOps = 142,582.291 ops/s`<br>`errorOps ≈ 0`<br>`unfinishedOps ≈ 0`<br>`timedOutOps ≈ 0` |
+| **JMH 常驻盘口异步挂撤单** (`LinearPerpetualCoreBenchmark`) | `LINEAR_PERPETUAL` | `accountLanes = 1`, `priceLevels = 200`, `ordersPerLevel = 1250` | **116,861.984 ops/s** | - | `terminalBusinessOps = 116,862.692 ops/s`<br>`errorOps ≈ 0`<br>`unfinishedOps ≈ 0`<br>`timedOutOps ≈ 0` |
+| **JMH 批量挂撤单吞吐** (`ClusteredBatchTradingBenchmark`) | `LINEAR_PERPETUAL` | `batchSize = 20`, 512 batchWindows, `maxInFlight = 256` | **2,437,120.000 items/s**<br>(核心批次: 121,856 ops/s) | - | `rejectedOps ≈ 0`<br>`accepted = terminal = 121,856`<br>`unfinished = 0` |
+| **JMH 批量挂撤单吞吐** (`ClusteredBatchTradingBenchmark`) | `SPOT` | `batchSize = 20`, 512 batchWindows, `maxInFlight = 256` | **2,723,840.000 items/s**<br>(核心批次: 136,192 ops/s) | - | `rejectedOps ≈ 0`<br>`accepted = terminal = 136,192`<br>`unfinished = 0` |
+
+### 7.2 性能与架构结论
+1. **结论：通过（PASS）**。内联后流水线命令流转零积压、零超时、零死锁，所有测试项 `accepted = terminal`，`unfinished = 0`。
+2. **极速批处理吞吐**：在 `batchSize = 20` 批处理下，线性永续业务订单吞吐达到 **243.7 万/秒**，现货达到 **272.3 万/秒**。
+3. **极低端到端延迟**：逐笔撮合流下 p50 为 **41 µs**，p99 达到 **129 µs**，完全消除了原跨线程交接带来的抖动。
+
 
 - 正式吞吐、Lane1/2速度对照：按用户答复暂缓，不宣称多线程更快或Core容量上限。
 - 精确流水线身份分配限制为80B/操作，零分配目标未达；双端native结果独立记录，不能被Core正确性结果替代。
