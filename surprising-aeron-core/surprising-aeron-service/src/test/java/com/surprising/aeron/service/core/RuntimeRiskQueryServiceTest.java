@@ -3,6 +3,10 @@ package com.surprising.aeron.service.core;
 import com.surprising.aeron.model.CoreRiskStatus;
 import com.surprising.aeron.model.CoreRiskSnapshot;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
+import com.surprising.aeron.protocol.CoreRiskSnapshotView;
+import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
+import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
+import java.util.List;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
@@ -75,7 +79,7 @@ class RuntimeRiskQueryServiceTest {
         long revision = runtime.revision();
 
         // 当前行情下即时重算的单条风险查询结果，与后台扫描缓存分开检查。
-        var risk = RuntimeRiskQueryService.snapshots(runtime, ids, 7).getFirst();
+        var risk = userRisk().getFirst();
 
         // 本轮是否为反向合约，期望名义金额和盈亏需要采用对应公式。
         boolean inverse = product == ProductLine.INVERSE_PERPETUAL || product == ProductLine.INVERSE_DELIVERY;
@@ -103,9 +107,9 @@ class RuntimeRiskQueryServiceTest {
         position(product, "2", -5, CoreMarginMode.CROSS, 100, 80);
         position(product, "3", 10, CoreMarginMode.ISOLATED, 500, 80);
         // 两个全仓加一个逐仓持仓的即时查询列表，后台缓存此时仍为空。
-        var rows = RuntimeRiskQueryService.snapshots(runtime, ids, 7);
+        var rows = userRisk();
         assertThat(rows).hasSize(3);
-        assertThat(RuntimeRiskQueryService.snapshots(runtime, ids, 0)).isEqualTo(rows);
+        assertThat(globalRisk()).isEqualTo(rows);
         assertThat(runtime.riskSnapshotsForSnapshot()).isEmpty();
         // 总钱包一万扣除逐仓保证金五百；两份全仓的浮盈亏合计为负二百加一百。
         for (var /* 当前检查的一条全仓风险行，两份全仓持仓必须共享相同钱包和组合权益。 */ row : rows.subList(0, 2)) {
@@ -128,7 +132,7 @@ class RuntimeRiskQueryServiceTest {
         setup(ProductLine.OPTION);
         position(ProductLine.OPTION, "1", 10, CoreMarginMode.CROSS, 0, 80);
         // 当前行情下即时重算的单条风险查询结果，与后台扫描缓存分开检查。
-        var risk = RuntimeRiskQueryService.snapshots(runtime, ids, 7).getFirst();
+        var risk = userRisk().getFirst();
         assertThat(risk.unrealizedPnlUnits()).isEqualTo(-200);
         assertThat(risk.equityUnits()).isEqualTo(10800);
         assertThat(risk.maintenanceMarginUnits()).isZero();
@@ -143,7 +147,7 @@ class RuntimeRiskQueryServiceTest {
         setup(ProductLine.LINEAR_PERPETUAL);
         position(ProductLine.LINEAR_PERPETUAL, "1", 10, CoreMarginMode.ISOLATED, 200, 80);
         // 当前行情下即时重算的单条风险查询结果，与后台扫描缓存分开检查。
-        var risk = RuntimeRiskQueryService.snapshots(runtime, ids, 7).getFirst();
+        var risk = userRisk().getFirst();
         assertThat(risk.equityUnits()).isZero();
         assertThat(risk.marginRatioPpm()).isEqualTo(Long.MAX_VALUE);
         assertThat(risk.status()).isEqualTo("LIQUIDATION");
@@ -179,14 +183,14 @@ class RuntimeRiskQueryServiceTest {
         runtime.putRiskSnapshot(key, new RiskSnapshotRuntime(7, symbol, CorePositionSide.NET, 437798,
                 10_475_817_151_583L, 479_915_800_000L, 78_463_385_000L, 7489));
         // 当前行情下即时重算的单条风险查询结果，与后台扫描缓存分开检查。
-        var risk = RuntimeRiskQueryService.snapshots(runtime, ids, 7).getFirst();
+        var risk = userRisk().getFirst();
         assertThat(risk.unrealizedPnlUnits()).isEqualTo(456_183_000_000L);
         assertThat(risk.equityUnits()).isEqualTo(10_452_084_351_583L);
         assertThat(risk.notionalUnits()).isEqualTo(15_668_944_200_000L);
         assertThat(risk.maintenanceMarginUnits()).isEqualTo(78_344_721_000L);
         assertThat(risk.marginRatioPpm()).isEqualTo(7495);
         assertThat(risk.priceSequence()).isEqualTo(437900);
-        assertThat(RuntimeRiskQueryService.snapshots(runtime, ids, 0)).containsExactly(risk);
+        assertThat(globalRisk()).containsExactly(risk);
     }
 
     /**
@@ -199,6 +203,18 @@ class RuntimeRiskQueryServiceTest {
     @org.junit.jupiter.params.provider.CsvSource({"64,0,64", "64,3,64", "64,430,3440", "64,1000,4096", "512,3,512"})
     void scanBudgetGrowsAndShrinksWithPendingInstruments(int minimum, int pending, int expected) {
         assertThat(RiskScanCoordinator.adaptiveBudget(minimum, pending)).isEqualTo(expected);
+    }
+
+    /** 单用户金额断言直接使用现有账户计算入口，并先固定本次市场输入。 */
+    private List<CoreRiskSnapshotView> userRisk() {
+        return RuntimeRiskQueryService.userSnapshots(runtime, ids, 7,
+                RuntimeRiskQueryService.MarketInputs.capture(runtime, ids, runtime.instrumentIdsForQuery()));
+    }
+
+    /** 汇总断言走真实查询协议，不能为冷测试保留另一份全 Lane 扫描。 */
+    private List<CoreRiskSnapshotView> globalRisk() {
+        var state = RuntimeStateMaterializer.materialize(runtime, ids);
+        return new RuntimeTestStateTransitions().riskSnapshots(state, 0);
     }
 
     /**

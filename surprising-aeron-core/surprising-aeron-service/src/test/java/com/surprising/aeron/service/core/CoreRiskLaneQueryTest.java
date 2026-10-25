@@ -8,15 +8,12 @@ import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.account.CoreUserState;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.order.CoreTestCompletion;
+import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.query.state.RuntimeOperationalQueryService;
-import com.surprising.aeron.service.query.state.RuntimeRiskQueryService;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -29,7 +26,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 风险查询的线程边界与结果一致性测试：用独立参照计算核对各账户 Lane 的返回值，再验证查询固定的市场事实、分页和响应数量限制。
+ * 风险查询的线程边界与结果一致性测试：用独立检查点查询核对各账户 Lane 的返回值，再验证查询固定的市场事实、分页和响应数量限制。
  */
 class CoreRiskLaneQueryTest {
     /** 所有测试消息共用的固定 Unix 毫秒时间戳，避免本机时间变化影响结果。 */
@@ -68,7 +65,7 @@ class CoreRiskLaneQueryTest {
     }
 
     /**
-     * 把运行中的全局风险、单用户风险和 ADL 候选编码与独立参照计算比对，检查空结果、候选上限，以及查询不会转移 Lane 所有权或修改业务状态。
+     * 把运行中的全局风险、单用户风险和 ADL 候选编码与独立检查点查询比对，检查空结果、候选上限，以及查询不会转移 Lane 所有权或修改业务状态。
      * @param line 本轮使用的产品线，所有合约、状态和查询必须处于同一条产品线
      */
     @ParameterizedTest
@@ -76,17 +73,13 @@ class CoreRiskLaneQueryTest {
     void currentRiskAndAdlReadActualLanesAndMatchColdCalculation(ProductLine line) throws Exception {
         // 包含多币对、多空及全仓逐仓持仓的业务参照状态。
         var state = positionedState(line);
-        // 参照计算使用的业务编号映射，与投影出来的运行时配套使用。
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 用于直接调用风险计算的独立参照运行时，测试结束自动关闭。 */ var expected = RuntimeStateProjector.project(state, identities); /* 从本用例状态初始化的交易运行时，测试结束时自动关闭账户 Lane 等资源。 */ var core = initial(state)) {
+        try (var core = initial(state)) {
             // 不限定用户的参照风险行列表，用来核对全局查询编码。
-            var globalRisk = RuntimeRiskQueryService.snapshots(expected, identities, 0);
+            var globalRisk = new RuntimeTestStateTransitions().riskSnapshots(state, 0);
             // 只包含用户 1 的参照风险行列表。
-            var userRisk = RuntimeRiskQueryService.snapshots(expected, identities, 1);
-            // 按资产建立的 ADL 持仓索引，供参照计算定位候选仓位。
-            var adlIndex = new AdlPositionIndex(state, identities);
+            var userRisk = new RuntimeTestStateTransitions().riskSnapshots(state, 1);
             // 按本轮结算资产算出的完整 ADL 候选参照列表，再分别核对全量与限一条查询。
-            var adl = RuntimeRiskQueryService.adlCandidates(expected, identities, asset(line), adlIndex.positions(asset(line), Integer.MAX_VALUE), 10);
+            var adl = new RuntimeTestStateTransitions().adlCandidates(state, asset(line), 10);
             var beforeQueries = core.tradingState();
             core.activate();
             // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
@@ -130,23 +123,19 @@ class CoreRiskLaneQueryTest {
             var before = core.tradingState();
             // 该逐仓委托尚未释放的冻结金额，需要从全仓钱包余额中扣除。
             long reserved = before.users().get(1L).reservations().get(400L).remainingUnits();
-            // 参照计算使用的业务编号映射，与投影出来的运行时配套使用。
-            var identities = new RuntimeIdentityRegistry();
-            try (/* 独立投影的参照运行时，用于计算期望结果，离开作用域后自动关闭。 */ var cold = RuntimeStateProjector.project(before, identities)) {
-                // 包含逐仓委托冻结扣减后的用户风险参照结果。
-                var expected = RuntimeRiskQueryService.snapshots(cold, identities, 1);
-                // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
-                long handoff = core.runtimeState.laneHandoffEpoch();
-                try (/* 临时禁止 Owner 越界读取账户表的哨兵，离开作用域时恢复原表。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
-                    // 实际账户 Lane 返回的风险查询响应，用来核对编码及钱包余额。
-                    var response = query(core, CoreMessageType.RISK_STATE_QUERY, 1, new byte[0]);
-                    assertThat(response.data()).isEqualTo(CoreRiskQueryCodec.encode(expected));
-                    assertThat(CoreRiskQueryCodec.decode(response.data())).allSatisfy(/* 逐条检查的钱包风险记录，钱包余额必须扣除逐仓订单预占金额。 */ row ->
-                            assertThat(row.walletBalanceUnits()).isEqualTo(9500 - reserved));
-                }
-                assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
-                assertThat(core.tradingState()).isEqualTo(before);
+            // 包含逐仓委托冻结扣减后的用户风险参照结果。
+            var expected = new RuntimeTestStateTransitions().riskSnapshots(before, 1);
+            // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
+            long handoff = core.runtimeState.laneHandoffEpoch();
+            try (/* 临时禁止 Owner 越界读取账户表的哨兵，离开作用域时恢复原表。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
+                // 实际账户 Lane 返回的风险查询响应，用来核对编码及钱包余额。
+                var response = query(core, CoreMessageType.RISK_STATE_QUERY, 1, new byte[0]);
+                assertThat(response.data()).isEqualTo(CoreRiskQueryCodec.encode(expected));
+                assertThat(CoreRiskQueryCodec.decode(response.data())).allSatisfy(/* 逐条检查的钱包风险记录，钱包余额必须扣除逐仓订单预占金额。 */ row ->
+                        assertThat(row.walletBalanceUnits()).isEqualTo(9500 - reserved));
             }
+            assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(core.tradingState()).isEqualTo(before);
             core.assertClusterCallbackComplete();
         }
     }
@@ -159,16 +148,13 @@ class CoreRiskLaneQueryTest {
     void queryFixesPriceAndConfigurationBeforeOwnerUpdatesThemAndDoesNotWaitForLane() throws Exception {
         // 包含多币对、多空及全仓逐仓持仓的业务参照状态。
         var state = positionedState(ProductLine.LINEAR_PERPETUAL);
-        // 参照计算使用的业务编号映射，与投影出来的运行时配套使用。
-        var identities = new RuntimeIdentityRegistry();
         // 控制被阻塞 Lane 何时继续的闩锁，finally 中也释放以避免测试遗留阻塞线程。
         var release = new CountDownLatch(1);
-        try (/* 独立投影的参照运行时，用于计算期望结果，离开作用域后自动关闭。 */ var cold = RuntimeStateProjector.project(state, identities); /* 从本用例状态初始化的交易运行时，测试结束时自动关闭账户 Lane 等资源。 */ var core = initial(state)) {
-            // Owner 更新市场事实前独立算出的旧风险结果，已提交查询必须返回这一版。
-            var expectedRisk = RuntimeRiskQueryService.snapshots(cold, identities, 0);
+        try (var core = initial(state)) {
+            // Owner 更新市场事实前从检查点查询的旧风险结果，已提交查询必须返回这一版。
+            var expectedRisk = new RuntimeTestStateTransitions().riskSnapshots(state, 0);
             // Owner 更新市场事实前的 ADL 候选参照，不能受到随后配置原位更新的影响。
-            var expectedAdl = RuntimeRiskQueryService.adlCandidates(cold, identities, "USDT",
-                    new AdlPositionIndex(state, identities).positions("USDT", Integer.MAX_VALUE), 10);
+            var expectedAdl = new RuntimeTestStateTransitions().adlCandidates(state, "USDT", 10);
             core.activate();
             // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
             long handoff = core.runtimeState.laneHandoffEpoch();

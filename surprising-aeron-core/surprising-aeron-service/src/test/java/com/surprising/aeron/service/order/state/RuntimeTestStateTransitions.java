@@ -34,14 +34,15 @@ import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.TradingCoreRuntime;
+import com.surprising.aeron.service.order.CoreTestCompletion;
+import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
-import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
-import com.surprising.aeron.service.query.state.RuntimeRiskQueryService;
 import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
 import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchFixture;
@@ -58,10 +59,12 @@ import java.util.Comparator;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
 import java.util.Collection;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
- * 测试用状态推进器，把给定业务前值投影成冷可变运行时，调用已有生产规则，再在断言边界物化后状态。它不是在线命令执行器，不经过真实 Cluster、Matcher 队列和异步提交链路。
+ * 测试用状态推进器，把给定业务前值投影成冷可变运行时，调用已有生产规则，再在断言边界物化后状态。状态变更不经过真实 Cluster；风险和 ADL 查询通过现有协议及账本、账户续步执行。
  */
 public final class RuntimeTestStateTransitions {
 
@@ -462,30 +465,36 @@ public final class RuntimeTestStateTransitions {
     }
 
     /**
-     * 在冷运行时按资产建立本次持仓候选索引，再用生产估值及排名规则取得有界 ADL 候选。
+     * 从检查点走现有 ADL 查询协议，账本选路后由账户 Lane 估值并返回有界候选。
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param asset ADL 候选查询的结算资产代码
      * @param limit ADL 最多返回的候选条数
      */
     public List<CoreAdlCandidateView> adlCandidates(TradingCoreState before, String asset, int limit) {
-        // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
-            return RuntimeRiskQueryService.adlCandidates(runtime, identities, asset,
-                    new AdlPositionIndex(before, identities).positions(asset, Integer.MAX_VALUE), limit);
-        }
+        return CoreAdlQueryCodec.decodeCandidates(queryState(before, CoreMessageType.ADL_CANDIDATE_QUERY,
+                0, CoreAdlQueryCodec.encodeQuery(asset, limit)));
     }
 
     /**
-     * 在冷运行时调用生产风险查询规则，按传入用户条件重新计算风险视图。
+     * 从检查点走现有风险查询协议，按用户条件由账本和账户 Lane 重新计算风险视图。
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param userId 当前测试命令或风险查询使用的用户编号
      */
     public List<CoreRiskSnapshotView> riskSnapshots(TradingCoreState before, long userId) {
-        // 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
-            return RuntimeRiskQueryService.snapshots(runtime, identities, userId);
+        return CoreRiskQueryCodec.decode(queryState(before, CoreMessageType.RISK_STATE_QUERY, userId, new byte[0]));
+    }
+
+    /** 从给定检查点启动隔离 Core，用原账本选路及账户查询续步取得独立响应字节，再关闭线程。 */
+    private static byte[] queryState(TradingCoreState before, CoreMessageType type, long userId, byte[] payload) {
+        try (var core = new TradingCoreRuntime(before.productLine(),
+                0, new LinkedHashMap<>(), new LinkedHashMap<>(), before,
+                new TerminalStateRetention(), null, 0,
+                Map.of(), Map.of(), null, null)) {
+            var request = new CoreMessage(CoreMessageHeader.query(type, UUID.randomUUID(), before.productLine(),
+                    CommandSource.OPERATIONS, 0, 0, userId, 0, 0), payload);
+            var response = CoreTestCompletion.querySynchronously(core, request);
+            if (response.status() != ResponseStatus.OK) throw new AssertionError("risk query failed: " + response.resultCode());
+            return response.data();
         }
     }
 

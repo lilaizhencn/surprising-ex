@@ -606,22 +606,9 @@ class CoreDeliveryOptionFinancialMatrixTest {
             // 业务中间状态或候选查询状态快照往返后的冷状态
             TradingCoreState restored = TradingStateSnapshotCodec.decode(
                     TradingStateSnapshotCodec.encode(state), variant.productLine());
-            // 本次投影、业务辅助和物化共用的独立整数身份表
-            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-            // 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭
-            TradingAccountRuntime runtime = RuntimeStateProjector.project(restored, identities);
-            try {
-                // 从恢复状态建立的 ADL 持仓索引，供运行时查询候选
-                var index = new AdlPositionIndex(restored, identities);
-                assertThat(RuntimeRiskQueryService.adlCandidates(runtime, identities,
-                        variant.settleAsset(), index.positions(variant.settleAsset(), Integer.MAX_VALUE), 10))
-                        .containsExactlyElementsOf(candidates);
-                assertThat(reducer.adlCandidates(restored, variant.settleAsset(), 10))
-                        .containsExactlyElementsOf(candidates);
-                assertThat(total(restored, variant.settleAsset())).isEqualTo(2 * WALLET);
-            } finally {
-                runtime.close();
-            }
+            assertThat(reducer.adlCandidates(restored, variant.settleAsset(), 10))
+                    .containsExactlyElementsOf(candidates);
+            assertThat(total(restored, variant.settleAsset())).isEqualTo(2 * WALLET);
         }
     }
 

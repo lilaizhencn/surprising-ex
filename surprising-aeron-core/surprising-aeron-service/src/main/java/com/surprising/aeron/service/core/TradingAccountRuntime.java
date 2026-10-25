@@ -4208,31 +4208,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 扫描当前可访问 Lane，统计其全部持仓记录并收集非零持仓用户，扫描后才检查数量上限；超限抛出查询过大异常，不能把该参数理解为提前停止遍历的预算。
-     * @param maximumPositions 扫描完成后校验的持仓记录数量上限，超出则拒绝该查询
-     */
-    public LongHashSet usersWithPublishedPositions(int maximumPositions) {
-        assertOwner();
-        requireAccountReadOwnership();
-        // 本次扫描收集到的非零持仓用户集合，按用户身份去重
-        LongHashSet users = new LongHashSet();
-        // 本次已经扫描的持仓记录总数，全部扫描后才与上限比较
-        int totalPositions = 0;
-        // 当前线程已经进入的可空账户 Lane 范围，不允许借此读取其他 Lane
-        AccountLaneState scoped = currentLaneCommandScope();
-        for (AccountLaneState /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane : accountLanes) {
-            if (scoped != null && lane != scoped) continue;
-            lane.assertOwner();
-            totalPositions = Math.addExact(totalPositions, lane.positionCount());
-            for (PositionRuntime /* 当前读取的可空持仓，风险暴露检查只计非零数量 */ position : lane.positionValuesForRead())
-                if (position.signedQuantitySteps() != 0) users.add(position.userId());
-        }
-        if (totalPositions > maximumPositions)
-            throw new com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException();
-        return users;
-    }
-
-    /**
      * 严格绑定或核对 Owner 后，读取从 Lane 回执汇总的持仓数量。
      */
     public int publishedPositionCount() {

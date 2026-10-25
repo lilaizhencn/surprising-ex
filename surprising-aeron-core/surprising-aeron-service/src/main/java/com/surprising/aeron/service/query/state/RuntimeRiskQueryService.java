@@ -1,22 +1,17 @@
 package com.surprising.aeron.service.query.state;
 
-import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.protocol.CoreAdlCandidateView;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreRiskSnapshotView;
 import com.surprising.aeron.service.account.BalanceRuntime;
-import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.risk.*;
 import com.surprising.aeron.service.risk.CoreRiskPolicy;
-import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.aeron.support.math.OptionContractMath;
 import java.util.ArrayList;
@@ -41,125 +36,85 @@ public final class RuntimeRiskQueryService {
     private static final long PPM = 1_000_000L;
 
     /**
-     * 不带预捕获市场输入的查询入口，用户 0 表示汇总有持仓用户，否则只查该用户；调用方负责在允许读取这些账户的执行范围内使用。
-     * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
-     */
-    public static List<CoreRiskSnapshotView> snapshots(
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId) {
-        return snapshots(runtime, identities, userId, null);
-    }
-
-    /**
      * 生产账户 Lane 的单用户入口，要求正用户编号和 Owner 已固定的市场输入，再按当前持仓计算风险结果。
      * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
      * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
-     * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
+     * @param userId 所属账户 Lane 本次计算的正用户编号
+     * @param markets Owner 在派发前捕获的非空市场输入
      */
     public static List<CoreRiskSnapshotView> userSnapshots(TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities, long userId, MarketInputs markets) {
         if (userId <= 0 || markets == null) throw new IllegalArgumentException("risk query Lane inputs are required");
-        return snapshots(runtime, identities, userId, markets);
-    }
-
-    /**
-     * 先检查扫描及响应数量上限，逐仓计算即时估值，再按同资产合并全仓权益与维持保证金；逐仓独立估值，最后按用户、币对及持仓腿排序返回不可修改列表，不回写风险缓存。
-     * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
-     * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
-     */
-    private static List<CoreRiskSnapshotView> snapshots(TradingAccountRuntime runtime,
-            RuntimeIdentityRegistry identities, long userId, MarketInputs markets) {
-        // 即时查询把当前持仓与当前查询行情一起估值。后台风险缓存属于分批强平扫描，
-        // 可能仍对应旧价格，因此不能直接作为本次查询结果。
-        // 本次需要估值的有序用户编号，汇总时来自已发布持仓用户索引，单用户时只有一个编号。
-        var users = new java.util.TreeSet<Long>();
-        if (userId == 0) {
-            runtime.usersWithPublishedPositions(RuntimeOperationalQueryService.MAX_INDEX_SCAN).forEach(users::add);
-        } else {
-            users.add(userId);
-        }
-        // 本次即时风险查询结果列表，全部计算完后排序并复制成只读列表。
         ArrayList<CoreRiskSnapshotView> result = new ArrayList<>();
-        // 本次已经访问的用户持仓索引规模，达到统一扫描上限前就拒绝超限请求。
-        int scanned = 0;
-        for (long /* 当前正在合并同资产持仓权益的用户编号。 */ user : users) {
-            scanned = Math.addExact(scanned, runtime.positionCountForUser(user));
-            if (scanned > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
+        if (runtime.positionCountForUser(userId) > RuntimeOperationalQueryService.MAX_INDEX_SCAN)
+            throw new RuntimeOperationalQueryService.QueryTooLargeException();
+        // 当前用户各非空持仓的临时估值列表，先收集再生成组合口径的风险行。
+        var values = new ArrayList<PositionValuation>();
+        // 按结算资产归组的本次查询临时累计值，不回写 Core 账户或扫描状态。
+        // 仅在本次用户查询中使用的全仓资产汇总，下标 0 为权益变化、1 为维持保证金。
+        var cross = new java.util.HashMap<String, long[]>();
+        // 当前用户各结算资产的全仓共享钱包缓存，每种资产只计算一次逐仓扣减。
+        var wallets = new java.util.HashMap<String, Long>();
+        for (long /* 当前用户需要读取的一个持仓整数键。 */ key : runtime.positionKeysForUser(userId).toArray()) {
+            // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
+            PositionRuntime position = runtime.position(key);
+            if (position == null || position.signedQuantitySteps() == 0) continue;
+            if (values.size() >= RuntimeOperationalQueryService.MAX_QUERY_ENTITIES)
                 throw new RuntimeOperationalQueryService.QueryTooLargeException();
-            // 当前用户各非空持仓的临时估值列表，先收集再生成组合口径的风险行。
-            var values = new ArrayList<PositionValuation>();
-            // 按结算资产归组的本次查询临时累计值，不回写 Core 账户或扫描状态。
-            // 仅在本次用户查询中使用的全仓资产汇总，下标 0 为权益变化、1 为维持保证金。
-            var cross = new java.util.HashMap<String, long[]>();
-            // 当前用户各结算资产的全仓共享钱包缓存，每种资产只计算一次逐仓扣减。
-            var wallets = new java.util.HashMap<String, Long>();
-            for (long /* 当前用户需要读取的一个持仓整数键。 */ key : runtime.positionKeysForUser(user).toArray()) {
-                // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
-                PositionRuntime position = runtime.position(key);
-                if (position == null || position.signedQuantitySteps() == 0) continue;
-                if (result.size() + values.size() >= RuntimeOperationalQueryService.MAX_QUERY_ENTITIES)
-                    throw new RuntimeOperationalQueryService.QueryTooLargeException();
-                // 当前币对的外部编号，用来查配置或捕获市场输入。
-                String instrumentId = identities.instrumentId(position.symbolId());
-                // 本仓的配置，生产查询从固定市场输入取得，通用计算路径可直接读当前配置。
-                CoreInstrument instrument = markets == null ? runtime.instrument(instrumentId) : markets.instrument(position.symbolId());
-                // 本仓的行情，生产查询用固定引用，通用路径直接读运行时当前行情。
-                MarkPriceRuntime mark = markets == null ? runtime.markPrice(position.symbolId()) : markets.mark(position.symbolId());
-                if (instrument == null || mark == null)
-                    throw new IllegalStateException("risk query source is missing");
-                // 本仓带方向的数量步数，分别用于盈亏、维持保证金及市值计算。
-                long quantity = position.signedQuantitySteps();
-                // 当前持仓的未实现盈亏，查询行独立展示它，不能与期权权益市值混为一项。
-                long pnl = CoreContractMath.pnlUnits(instrument, quantity, position.entryPriceTicks(), mark.markPriceTicks());
-                // 当前单个持仓的维持保证金要求，先保存到临时估值，再按资产合并全仓金额。
-                long maintenance = CoreContractMath.maintenanceMarginUnits(instrument, quantity,
-                        mark.markPriceTicks(), mark.indexPriceTicks(), mark.forwardPriceTicks());
-                // 本仓实际计入权益的估值变化，期货为浮盈亏，期权为带方向市值。
-                long equityDelta = instrument.contractType().isOption()
-                        ? OptionContractMath.optionMarketValueUnits(instrument, quantity, mark.markPriceTicks()) : pnl;
-                // 本仓按标记价和合约精度算出的名义金额，供风险输出或 ADL 评分使用。
-                long notional = CoreContractMath.notionalUnits(instrument, Math.absExact(quantity), mark.markPriceTicks());
-                values.add(new PositionValuation(position, instrument, mark, pnl, maintenance, equityDelta, notional));
-                wallets.computeIfAbsent(instrument.settleAsset(), /* 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。 */ asset -> crossWalletBalance(runtime, identities, user, asset, markets));
-                if (position.marginMode() == CoreMarginMode.CROSS) {
-                    // 同一结算资产的全仓累计值，下标 0 是权益变化合计，下标 1 是维持保证金合计。
-                    long[] totals = cross.computeIfAbsent(instrument.settleAsset(), /* 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。 */ asset -> new long[2]);
-                    totals[0] = Math.addExact(totals[0], equityDelta);
-                    totals[1] = Math.addExact(totals[1], maintenance);
-                }
+            // 本仓在查询准备时捕获的配置。
+            CoreInstrument instrument = markets.instrument(position.symbolId());
+            // 本仓在查询准备时捕获的行情引用。
+            MarkPriceRuntime mark = markets.mark(position.symbolId());
+            if (instrument == null || mark == null)
+                throw new IllegalStateException("risk query source is missing");
+            // 本仓带方向的数量步数，分别用于盈亏、维持保证金及市值计算。
+            long quantity = position.signedQuantitySteps();
+            // 当前持仓的未实现盈亏，查询行独立展示它，不能与期权权益市值混为一项。
+            long pnl = CoreContractMath.pnlUnits(instrument, quantity, position.entryPriceTicks(), mark.markPriceTicks());
+            // 当前单个持仓的维持保证金要求，先保存到临时估值，再按资产合并全仓金额。
+            long maintenance = CoreContractMath.maintenanceMarginUnits(instrument, quantity,
+                    mark.markPriceTicks(), mark.indexPriceTicks(), mark.forwardPriceTicks());
+            // 本仓实际计入权益的估值变化，期货为浮盈亏，期权为带方向市值。
+            long equityDelta = instrument.contractType().isOption()
+                    ? OptionContractMath.optionMarketValueUnits(instrument, quantity, mark.markPriceTicks()) : pnl;
+            // 本仓按标记价和合约精度算出的名义金额，供风险输出或 ADL 评分使用。
+            long notional = CoreContractMath.notionalUnits(instrument, Math.absExact(quantity), mark.markPriceTicks());
+            values.add(new PositionValuation(position, instrument, mark, pnl, maintenance, equityDelta, notional));
+            wallets.computeIfAbsent(instrument.settleAsset(), /* 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。 */ asset -> crossWalletBalance(runtime, identities, userId, asset, markets));
+            if (position.marginMode() == CoreMarginMode.CROSS) {
+                // 同一结算资产的全仓累计值，下标 0 是权益变化合计，下标 1 是维持保证金合计。
+                long[] totals = cross.computeIfAbsent(instrument.settleAsset(), /* 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。 */ asset -> new long[2]);
+                totals[0] = Math.addExact(totals[0], equityDelta);
+                totals[1] = Math.addExact(totals[1], maintenance);
             }
-            for (PositionValuation /* 当前用户已经算好的单持仓估值，结合共享钱包生成最终风险行。 */ value : values) {
-                // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
-                PositionRuntime position = value.position();
-                // 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。
-                String asset = value.instrument().settleAsset();
-                // 当前结算资产扣掉逐仓持仓与委托占用后的全仓共享钱包。
-                long wallet = wallets.get(asset);
-                // 本行风险占比使用的维持保证金，全仓取该资产全仓合计，逐仓取单仓要求；输出行仍单独展示本仓维持保证金。
-                // 本行风险占比采用的权益，全仓为共享钱包加组合估值变化，逐仓只看本仓保证金和市值变化。
-                long equity, maintenance;
-                if (position.marginMode() == CoreMarginMode.CROSS) {
-                    // 同一结算资产的全仓累计值，下标 0 是权益变化合计，下标 1 是维持保证金合计。
-                    long[] totals = cross.get(asset);
-                    equity = Math.addExact(wallet, totals[0]);
-                    maintenance = totals[1];
-                } else {
-                    equity = Math.addExact(position.positionMarginUnits(), value.equityDelta());
-                    maintenance = value.maintenance();
-                }
-                // 维持保证金相对权益的 ppm 风险占比，不需维持时为 0，权益不正时用最大 long。
-                long ratio = maintenance == 0 ? 0 : equity <= 0 ? Long.MAX_VALUE
-                        : multiplyDivideCapped(maintenance, PPM, equity);
-                result.add(new CoreRiskSnapshotView(user, value.instrument().instrumentId(), position.marginMode(),
-                        position.positionSide(), asset, position.signedQuantitySteps(), position.entryPriceTicks(),
-                        value.mark().markPriceTicks(), value.notional(), position.positionMarginUnits(),
-                        value.mark().priceSequence(), wallet, equity, value.pnl(), value.maintenance(), ratio,
-                        CoreRiskPolicy.status(ratio).name()));
+        }
+        for (PositionValuation /* 当前用户已经算好的单持仓估值，结合共享钱包生成最终风险行。 */ value : values) {
+            // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
+            PositionRuntime position = value.position();
+            // 当前资产汇总的结算资产代码，或按该代码建立钱包与组合累计值的映射键。
+            String asset = value.instrument().settleAsset();
+            // 当前结算资产扣掉逐仓持仓与委托占用后的全仓共享钱包。
+            long wallet = wallets.get(asset);
+            // 本行风险占比使用的维持保证金，全仓取该资产全仓合计，逐仓取单仓要求；输出行仍单独展示本仓维持保证金。
+            // 本行风险占比采用的权益，全仓为共享钱包加组合估值变化，逐仓只看本仓保证金和市值变化。
+            long equity, maintenance;
+            if (position.marginMode() == CoreMarginMode.CROSS) {
+                // 同一结算资产的全仓累计值，下标 0 是权益变化合计，下标 1 是维持保证金合计。
+                long[] totals = cross.get(asset);
+                equity = Math.addExact(wallet, totals[0]);
+                maintenance = totals[1];
+            } else {
+                equity = Math.addExact(position.positionMarginUnits(), value.equityDelta());
+                maintenance = value.maintenance();
             }
+            // 维持保证金相对权益的 ppm 风险占比，不需维持时为 0，权益不正时用最大 long。
+            long ratio = maintenance == 0 ? 0 : equity <= 0 ? Long.MAX_VALUE
+                    : multiplyDivideCapped(maintenance, PPM, equity);
+            result.add(new CoreRiskSnapshotView(userId, value.instrument().instrumentId(), position.marginMode(),
+                    position.positionSide(), asset, position.signedQuantitySteps(), position.entryPriceTicks(),
+                    value.mark().markPriceTicks(), value.notional(), position.positionMarginUnits(),
+                    value.mark().priceSequence(), wallet, equity, value.pnl(), value.maintenance(), ratio,
+                    CoreRiskPolicy.status(ratio).name()));
         }
         result.sort(Comparator.comparingLong(CoreRiskSnapshotView::userId)
                 .thenComparing(CoreRiskSnapshotView::instrumentId)
@@ -168,54 +123,13 @@ public final class RuntimeRiskQueryService {
     }
 
     /**
-     * 遍历指定资产的有界持仓路由，只为仍有盈利的有效仓位计算 ADL 分数；各 Lane 先保留有限条最优候选，再多路合并成最终列表。
-     * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
-     * @param keys 账本业务索引提供的 ADL 持仓路由集合，逐项读取实际仓位后才能决定是否为候选
-     * @param limit 最多返回或保留的候选条数，调用方应提供非负上限
-     */
-    public static List<CoreAdlCandidateView> adlCandidates(
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String asset,
-            Iterable<AdlPositionIndex.PositionKey> keys, int limit) {
-        // 规范化后的目标结算资产代码，所有候选都必须与它匹配。
-        String normalizedAsset = AssetBalance.normalizeAsset(asset);
-        // 按 Lane 分组的有限候选列表，每组单独保持优先顺序，最后再归并。
-        ArrayList<ArrayList<CoreAdlCandidateView>> laneCandidates =
-                new ArrayList<>(runtime.topology().accountLaneCount());
-        for (/* 本轮初始化或归并候选列表的账户 Lane 下标。 */ int laneId = 0; laneId < runtime.topology().accountLaneCount(); laneId++) {
-            laneCandidates.add(new ArrayList<>(Math.min(limit, 64)));
-        }
-        // 已检查的候选持仓路由数量，每条都计入扫描预算，即使随后发现实际持仓无效。
-        int scanned = 0;
-        for (AdlPositionIndex.PositionKey /* 账本索引给出的候选持仓身份路由，仍要核对实际持仓是否存在和盈利。 */ key : keys) {
-            if (++scanned > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
-                throw new RuntimeOperationalQueryService.QueryTooLargeException();
-            }
-            // 按净持仓或双向持仓腿生成的业务键，用来在身份表定位整数键。
-            String positionName = key.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                    ? key.instrumentId() : key.instrumentId() + ':' + key.positionSide().name();
-            // 候选路由对应的整数持仓键，未注册时为空，或在钱包扣减时表示当前持仓键。
-            Long positionKey = identities.findPositionKey(key.userId(), positionName);
-            // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
-            PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
-            // 当前可用的 ADL 候选，缺失、空仓、资产不符或不盈利时为空。
-            CoreAdlCandidateView candidate = position == null ? null
-                    : adlCandidate(runtime, identities, key.userId(), position, normalizedAsset, null);
-            if (candidate != null) addAdlCandidate(laneCandidates.get(
-                    runtime.topology().accountLaneId(key.userId())), candidate, limit);
-        }
-        return mergeAdlCandidates(laneCandidates, limit);
-    }
-
-    /**
      * 生产 Lane 按 Owner 准备的整数持仓键读取目标用户仓位，核对路由用户一致，再用固定市场输入计算候选；缺失持仓返回 null。
      * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
      * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
+     * @param userId 所属账户 Lane 本次计算的正用户编号
      * @param positionKey Owner 为该用户准备的持仓整数键，0 表示没有定位到持仓
      * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
-     * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
+     * @param markets Owner 在派发前捕获的非空市场输入
      */
     public static CoreAdlCandidateView adlCandidate(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             long userId, long positionKey, String asset, MarketInputs markets) {
@@ -224,25 +138,10 @@ public final class RuntimeRiskQueryService {
         PositionRuntime position = positionKey == 0 ? null : runtime.position(positionKey);
         if (position == null) return null;
         if (position.userId() != userId) throw new IllegalStateException("ADL query position route differs");
-        return adlCandidate(runtime, identities, userId, position, asset, markets);
-    }
-
-    /**
-     * 筛掉空仓、资产不符、行情缺失、非衍生品及不盈利持仓，再按盈利率乘杠杆率计算 ADL 优先分数；逐仓用本仓保证金，全仓用该资产账户总余额作为此评分的保证金基数。
-     * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
-     * @param position 当前账户 Lane 的目标持仓，按它的数量、模式与入场信息估值
-     * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
-     * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
-     */
-    private static CoreAdlCandidateView adlCandidate(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-            long userId, PositionRuntime position, String asset, MarketInputs markets) {
-        // 本仓的行情，生产查询用固定引用，通用路径直接读运行时当前行情。
-        MarkPriceRuntime mark = markets == null ? runtime.markPrice(position.symbolId()) : markets.mark(position.symbolId());
-        // 本仓的配置，生产查询从固定市场输入取得，通用计算路径可直接读当前配置。
-        CoreInstrument instrument = markets == null ? runtime.instrument(identities.instrumentId(position.symbolId()))
-                : markets.instrument(position.symbolId());
+        // 本仓在查询准备时捕获的行情引用。
+        MarkPriceRuntime mark = markets.mark(position.symbolId());
+        // 本仓在查询准备时捕获的配置。
+        CoreInstrument instrument = markets.instrument(position.symbolId());
         if (position.signedQuantitySteps() == 0 || !identities.asset(position.assetId()).equals(asset)
                 || mark == null || instrument == null
                 || !(instrument.contractType().isPerpetual() || instrument.contractType().isDelivery()
@@ -257,7 +156,7 @@ public final class RuntimeRiskQueryService {
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
         // ADL 杠杆评分使用的保证金基数，逐仓取本仓保证金，全仓取账户该资产总余额。
         long margin = position.marginMode() == CoreMarginMode.ISOLATED
-                ? position.positionMarginUnits() : totalBalance(runtime, identities, userId, asset, markets);
+                ? position.positionMarginUnits() : totalBalance(runtime, userId, asset, markets);
         // 盈利相对名义金额的 ppm 比率，参与 ADL 优先分数。
         long profitRate = ratio(profit, notional);
         // 名义金额相对保证金基数的 ppm 杠杆率，基数不正时用最大 long。
@@ -386,16 +285,15 @@ public final class RuntimeRiskQueryService {
      * 从用户该资产可用加冻结总余额中，扣掉逐仓持仓保证金和逐仓委托预占，得到全仓可共享的钱包；索引超限或逐仓占用超过总余额时直接报错。
      * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
      * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
+     * @param userId 所属账户 Lane 本次计算的正用户编号
      * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
-     * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
+     * @param markets Owner 在派发前捕获的非空市场输入
      */
     private static long crossWalletBalance(
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId, String asset, MarketInputs markets) {
         // 当前结算资产扣掉逐仓持仓与委托占用后的全仓共享钱包。
-        long wallet = totalBalance(runtime, identities, userId, asset, markets);
-        if (runtime.positionCountForUser(userId) > RuntimeOperationalQueryService.MAX_INDEX_SCAN
-                || runtime.reservationCountForUser(userId) > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
+        long wallet = totalBalance(runtime, userId, asset, markets);
+        if (runtime.reservationCountForUser(userId) > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
             throw new RuntimeOperationalQueryService.QueryTooLargeException();
         }
         for (long /* 候选路由对应的整数持仓键，未注册时为空，或在钱包扣减时表示当前持仓键。 */ positionKey : runtime.positionKeysForUser(userId).toArray()) {
@@ -423,15 +321,14 @@ public final class RuntimeRiskQueryService {
     /**
      * 按结算资产定位用户余额，缺少资产编号或余额记录时按 0，存在时返回可用与冻结金额之和并检查整数溢出。
      * @param runtime 当前查询读取的运行时，调用方必须持有对应账户数据的读取权限
-     * @param identities 币对、资产和持仓业务编号与整数键的映射
-     * @param userId 要计算的用户编号，只有通用汇总入口允许用 0 表示全部有持仓用户
+     * @param userId 所属账户 Lane 本次计算的正用户编号
      * @param asset 本次候选或钱包计算限定的结算资产代码，集合查询入口会规范化该代码
-     * @param markets Owner 在派发前捕获的市场输入；内部通用入口允许为空以读取运行时当前市场
+     * @param markets Owner 在派发前捕获的非空市场输入
      */
     private static long totalBalance(
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, long userId, String asset, MarketInputs markets) {
-        // 固定查询使用捕获的资产编号，否则查当前身份表；缺少编号就不读取余额。
-        Integer assetId = markets == null ? identities.findAssetId(asset) : markets.assetIds.get(asset);
+            TradingAccountRuntime runtime, long userId, String asset, MarketInputs markets) {
+        // 使用本次查询捕获的资产编号；缺少编号就不读取余额。
+        Integer assetId = markets.assetIds.get(asset);
         // 用户在目标结算资产的余额，缺失时查询按零余额处理。
         BalanceRuntime balance = assetId == null ? null : runtime.balance(userId, assetId);
         return balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
