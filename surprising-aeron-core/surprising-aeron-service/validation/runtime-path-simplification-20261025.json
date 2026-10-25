@@ -1,0 +1,3226 @@
+{
+  "date": "2026-10-25",
+  "scope": "用户授权的四项：冷查询、冷资金保存链、Owner外部唤醒、客户身份一次绑定",
+  "baseline_commit": "2dda1e344",
+  "implementation_commit": "66fa45b38",
+  "shared_branch_note": "实施期间另一个任务提交了共享master，包含本轮源码；保留该历史，本报告只统计并验证列出的Aeron源码及文档。",
+  "status": "核心验证通过；附加基准夹具存在已逐项复现的基线失败",
+  "environment": {
+    "jdk": "HotSpot Corretto 27.0.0.33.1",
+    "maven": "3.9.16",
+    "os": "macOS x86_64",
+    "free_disk_at_start": "193 GiB"
+  },
+  "production_java": {
+    "files": 30,
+    "added": 89,
+    "deleted": 609,
+    "net_removed": 520,
+    "details": [
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/bootstrap/account/AccountLaneLifecycle.java",
+        "added": 1,
+        "deleted": 4
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/ControlLaneDispatcher.java",
+        "added": 0,
+        "deleted": 1
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/LaneClientIdentities.java",
+        "added": 5,
+        "deleted": 20
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+        "added": 5,
+        "deleted": 30
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java",
+        "added": 0,
+        "deleted": 30
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+        "added": 3,
+        "deleted": 46
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/change/LaneCommitEvent.java",
+        "added": 2,
+        "deleted": 5
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java",
+        "added": 22,
+        "deleted": 73
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java",
+        "added": 2,
+        "deleted": 4
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.java",
+        "added": 16,
+        "deleted": 17
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/pipeline/MatcherPipelineGroup.java",
+        "added": 7,
+        "deleted": 33
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlot.java",
+        "added": 1,
+        "deleted": 28
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java",
+        "added": 3,
+        "deleted": 5
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderBatchExecutor.java",
+        "added": 5,
+        "deleted": 9
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java",
+        "added": 2,
+        "deleted": 4
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/BatchPlaceReservation.java",
+        "added": 2,
+        "deleted": 4
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/PlaceAdmissionEvent.java",
+        "added": 1,
+        "deleted": 3
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/CommitPublication.java",
+        "added": 1,
+        "deleted": 2
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java",
+        "added": 1,
+        "deleted": 4
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/CoreQueryService.java",
+        "added": 0,
+        "deleted": 6
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/RiskAccountQuery.java",
+        "added": 0,
+        "deleted": 4
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.java",
+        "added": 1,
+        "deleted": 197
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultBuilder.java",
+        "added": 0,
+        "deleted": 1
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/retention/TerminalStateRetention.java",
+        "added": 2,
+        "deleted": 8
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java",
+        "added": 1,
+        "deleted": 2
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementEvent.java",
+        "added": 2,
+        "deleted": 8
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java",
+        "added": 2,
+        "deleted": 4
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.java",
+        "added": 0,
+        "deleted": 49
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/SystemLedgerCommand.java",
+        "added": 2,
+        "deleted": 7
+      },
+      {
+        "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java",
+        "added": 0,
+        "deleted": 1
+      }
+    ]
+  },
+  "full_tests": {
+    "surprising-instrument-api": [
+      {
+        "name": "com.surprising.instrument.api.InstrumentEventKeysTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.091"
+      },
+      {
+        "name": "com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.369"
+      },
+      {
+        "name": "com.surprising.instrument.api.math.PerpetualContractMathTest",
+        "tests": "7",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.085"
+      },
+      {
+        "name": "com.surprising.instrument.api.model.ContractTypeProductLineTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.009"
+      },
+      {
+        "name": "com.surprising.product.api.InstrumentIdsTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.011"
+      },
+      {
+        "name": "com.surprising.product.api.ProductLineTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.023"
+      },
+      {
+        "name": "com.surprising.product.api.ProductTopicNamesTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.013"
+      }
+    ],
+    "surprising-aeron-core/surprising-aeron-protocol": [
+      {
+        "name": "com.surprising.aeron.protocol.BorrowedResponseSlotTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.009"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CommandFingerprintLeaseTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.099"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreAlgoOrderCodecTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.009"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.01"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreCommandResultCodecTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.006"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreLaneMetricsCodecTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.019"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.032"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.01"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreMaintenanceCodecTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.013"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreMessageCodecTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.05"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreOpenInterestCodecTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.014"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreOrderPreflightCodecTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CorePendingTransferCodecTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.007"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreResponseTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.008"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreResultCodeTest",
+        "tests": "114",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.224"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreRiskQueryCodecTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.008"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreRiskScanControlCodecTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.013"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreSettlementProgressCodecTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+        "tests": "14",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.095"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.CoreTriggerOrderCodecTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.011"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.OrderDecoderSlotTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.079"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.OrderExecutionValueTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.005"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.ProductLineClusterLayoutTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.RealtimeFrameCodecTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.245"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.RealtimeWireCompatibilityTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.048"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.TradingCommandCodecTest",
+        "tests": "29",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.127"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+        "tests": "12",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.07"
+      },
+      {
+        "name": "com.surprising.aeron.protocol.WireCodeLookupTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.096"
+      }
+    ],
+    "surprising-aeron-core/surprising-aeron-client": [
+      {
+        "name": "com.surprising.aeron.client.AeronClientAgentTest",
+        "tests": "23",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.555"
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronClientCapacityTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.015"
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronClientPoolTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.564"
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronRealtimeReceiverTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.497"
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronRealtimeTransportTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "5.565"
+      },
+      {
+        "name": "com.surprising.aeron.client.AeronRequestLeaseTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.055"
+      },
+      {
+        "name": "com.surprising.aeron.client.BorrowedMediaDriverTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.536"
+      },
+      {
+        "name": "com.surprising.aeron.client.CoreCommandOutcomeTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.client.CoreQueryClassTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.005"
+      },
+      {
+        "name": "com.surprising.aeron.client.RealtimeOutboxTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.024"
+      },
+      {
+        "name": "com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.229"
+      },
+      {
+        "name": "com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.994"
+      },
+      {
+        "name": "com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.011"
+      }
+    ],
+    "surprising-aeron-core/surprising-aeron-service": [
+      {
+        "name": "com.surprising.aeron.bootstrap.ClusterFatalErrorTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.173"
+      },
+      {
+        "name": "com.surprising.aeron.bootstrap.CoreBusinessRejectionCodeTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.06"
+      },
+      {
+        "name": "com.surprising.aeron.bootstrap.SurprisingCoreApplicationIdleStrategyTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.009"
+      },
+      {
+        "name": "com.surprising.aeron.bootstrap.SurprisingCoreApplicationNetworkingTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.034"
+      },
+      {
+        "name": "com.surprising.aeron.bootstrap.SurprisingCoreApplicationTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.093"
+      },
+      {
+        "name": "com.surprising.aeron.bootstrap.SurprisingCoreApplicationThreadingModeTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.039"
+      },
+      {
+        "name": "com.surprising.aeron.bootstrap.account.AccountLaneLifecycleTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.073"
+      },
+      {
+        "name": "com.surprising.aeron.config.CoreConfigurationTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "5.681"
+      },
+      {
+        "name": "com.surprising.aeron.config.CoreRuntimeConfigurationTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.063"
+      },
+      {
+        "name": "com.surprising.aeron.config.LaneTopologyTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.007"
+      },
+      {
+        "name": "com.surprising.aeron.config.RealtimeConfigurationTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.006"
+      },
+      {
+        "name": "com.surprising.aeron.config.TradingCpuAffinityTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "1",
+        "time": "0.774",
+        "skips": [
+          {
+            "case": "linuxBindsEachRoleToTheRequestedCpuAndRestoresItsOriginalMask",
+            "reason": "Disabled on operating system: Mac OS X"
+          }
+        ]
+      },
+      {
+        "name": "com.surprising.aeron.model.CoreOrderStateTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.model.CoreTriggerOrderStateTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.008"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.AccountLanePendingReservationTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.016"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.CaptureBufferReuseTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.001"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.ControlLaneDispatcherTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.015"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.ControlOrderMetadataLeaseTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.008"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.CoreUserStateTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.LaneAdmissionAggregateTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.088"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.LaneAdmissionReuseTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.026"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.LaneClientIdentitiesTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.088"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.LaneCloseCapacityTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.LaneEntityMembershipTest",
+        "tests": "7",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.172"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.OrderClientKeyIndexTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.003"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.PublishedPositionCountTest",
+        "tests": "12",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.05"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.RuntimeLeverageLookupTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.051"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.TerminalClientReleaseTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.087"
+      },
+      {
+        "name": "com.surprising.aeron.service.account.UserIndexPageTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.001"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.AccountControlTaskResultTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.01"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.AccountLaneOwnershipTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.07"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.AdmissionSettlementFactTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.019"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.AsyncAccountBalanceCommandTest",
+        "tests": "24",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "27.682"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.AsyncFundingCommandTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "3.357"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CommittedDeliveryReplayTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "6.253"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CommittedFundingReplayTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.228"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CommittedLiquidationReplayTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.049"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CommittedOptionExerciseReplayTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "6.618"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CommittedPortfolioFlowTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.342"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ConditionalOrderSchedulingIndexTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreActiveLaneIngressTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.964"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreAdmissionInputOwnershipTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.828"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreAlgoLaneQueryTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.115"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreAuditHashQueryTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.689"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreBusinessStateHashTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "3.153"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreCommandFingerprintTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "4.055"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreContractMathTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.003"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreDeliveryOptionFinancialMatrixTest",
+        "tests": "29",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.123"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreFeePolicySnapshotCodecTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.003"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreFinancialLedgerProductionTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.989"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreLaneMetricsBoundaryTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.014"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreLifecycleStateTest",
+        "tests": "20",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.464"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreLifecycleWorkTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.042"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreLiquidationLaneCheckTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.993"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreMaintenanceTest",
+        "tests": "17",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "11.415"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreMatcherLedgerTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.866"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreMatchingStateTest",
+        "tests": "51",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "21.627"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreMessageFlyweightDecoderTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.101"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreNativeSnapshotProductLineTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.179"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreOptionPremiumFeeFundingTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.947"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreOrderDecisionResolverTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.058"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CorePerpetualFinancialMatrixTest",
+        "tests": "42",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "12.115"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CorePreflightLaneQueryTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "3.172"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreProductLineArchitectureContractTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.005"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreRiskLaneQueryTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.516"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreRiskStateTest",
+        "tests": "18",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "39.1"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreRuntimeBalanceSurfaceTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "3.813"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreSelfTradePrefixTest",
+        "tests": "42",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "14.31"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreShutdownFailureTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.013"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreSpotAssetUnitsTest",
+        "tests": "18",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "8.398"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreTransferLaneLifecycleTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "5.515"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreUserRevisionTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.641"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreValueValidationTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.005"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CrossShardCancellationTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.596"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ExplicitLaneAccessTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.051"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.FrozenMatcherInputTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.LaneSequenceQueueTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.001"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.LaneTerminalSummaryTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.011"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.MatcherCommandPipelineTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.054"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.MatchingNotificationProbeTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.018"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.OwnerIndexChurnTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.007"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.OwnerLogContextTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.666"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.OwnerPositionRetirementTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.013"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ParallelRiskScanTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.431"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.PlaceLaneDecisionTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.013"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.PrimitiveLongChangeSetTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.017"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ProductRecoveryLifecycleTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "19.879"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ProductionSourceBoundaryTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.122"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.PublishedSnapshotRecoveryTest",
+        "tests": "13",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.036"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ReadyLaneNotificationTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.05"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RealtimeTerminalEmissionTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "3.241"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RiskBatchBudgetTest",
+        "tests": "15",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "14.521"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RuntimeChangedIndexCommitTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.025"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RuntimeCommitRecoveryTest",
+        "tests": "18",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "58.662"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RuntimeExecutionScopeTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.008"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RuntimeRiskQueryServiceTest",
+        "tests": "14",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.095"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RuntimeStateBusinessRulesTest",
+        "tests": "37",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.694"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RuntimeStateQueryServiceTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.016"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RuntimeStateTransitionsTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.355"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.SectionedCoreSnapshotCodecTest",
+        "tests": "16",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.781"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.SettlementLaneWorkerTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.249"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.SharedProductLineSnapshotContractTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "4.866"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.SystemLedgerFundsValidationTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.TradingAccountRuntimeTest",
+        "tests": "58",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.341"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.TradingCoreOwnerTest",
+        "tests": "45",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "26.47"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.TradingRuntimeOwnershipTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.056"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.TradingStateSnapshotCodecTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.015"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.TransferLaneCapacityTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.083"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.TreasuryProgressOwnershipTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.006"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.TriggerOrderIndexTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.13"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.change.CommittedIndexVisitTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.change.OrderSlotReuseTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.005"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.change.OwnerIndexedChangesTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.change.PositionPublicationReuseTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.change.RuntimeChangeBufferTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.02"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.change.RuntimeIndexedChangeBufferTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.identity.RuntimeIdentityRegistryTest",
+        "tests": "12",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.123"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.index.ActiveOrderIndexTest",
+        "tests": "11",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.075"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.index.AdlPositionIndexTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.index.LedgerPositionPublicationTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.02"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.index.PositionUserIndexTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.003"
+      },
+      {
+        "name": "com.surprising.aeron.service.fee.FeePolicyBookTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.001"
+      },
+      {
+        "name": "com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapterTest",
+        "tests": "28",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.404"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.BatchDecisionCaptureTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.027"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.ClusterCommandPipelineTest",
+        "tests": "326",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "309.77"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.ClusterCommandWindowRoutingTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.001"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.CommandSlotRingTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.009"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.CommandSlotTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.029"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.CoreOrderedOrderBatchTest",
+        "tests": "42",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "15.551"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.LaneReplacementResponseTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.02"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.MatcherPipelineGroupTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.046"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.OrderBatchSlotReuseTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.OrdinaryLifecycleOverlapTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.049"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.OwnerCommandPipelineStateTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.011"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.PendingMatchingRingTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.008"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.admission.PendingReservationSequenceIndexTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.019"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.admission.ReplacementAdmissionEventTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.02"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.state.OrderRuntimeTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.state.ReservationPublicationLeaseTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.state.ReservationRuntimeTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.service.query.CoreAccountLaneQueryTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.14"
+      },
+      {
+        "name": "com.surprising.aeron.service.query.CoreLedgerQueryTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.342"
+      },
+      {
+        "name": "com.surprising.aeron.service.replay.CommittedPortfolioSnapshotTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.37"
+      },
+      {
+        "name": "com.surprising.aeron.service.replay.CommittedTradeReplayTest",
+        "tests": "17",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "8.358"
+      },
+      {
+        "name": "com.surprising.aeron.service.result.CoreResultLedgerTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.611"
+      },
+      {
+        "name": "com.surprising.aeron.service.result.FundsCommandIndexTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.264"
+      },
+      {
+        "name": "com.surprising.aeron.service.result.ResponseArenaTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.service.retention.CoreFundsIdempotencyTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "15.474"
+      },
+      {
+        "name": "com.surprising.aeron.service.retention.CoreFundsLedgerIndexTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "19.517"
+      },
+      {
+        "name": "com.surprising.aeron.service.retention.TerminalStateRetentionTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "7.874"
+      },
+      {
+        "name": "com.surprising.aeron.service.retention.TerminalTombstoneStoreTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.256"
+      },
+      {
+        "name": "com.surprising.aeron.service.settlement.MatcherSettlementPlanTest",
+        "tests": "16",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.143"
+      },
+      {
+        "name": "com.surprising.aeron.service.settlement.MatcherTreasurySettlementTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.01"
+      },
+      {
+        "name": "com.surprising.aeron.service.settlement.OrderBatchSettlementWaitTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.018"
+      },
+      {
+        "name": "com.surprising.aeron.service.settlement.RuntimeDerivativeFillCalculatorTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.068"
+      },
+      {
+        "name": "com.surprising.aeron.service.settlement.RuntimeDerivativeMatchProcessorTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.101"
+      },
+      {
+        "name": "com.surprising.aeron.service.settlement.SettlementChangesReuseTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.012"
+      },
+      {
+        "name": "com.surprising.aeron.service.settlement.UserRevisionReuseTest",
+        "tests": "18",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.08"
+      },
+      {
+        "name": "com.surprising.aeron.service.snapshot.state.CoreTransferSnapshotCodecTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.005"
+      },
+      {
+        "name": "com.surprising.aeron.service.snapshot.state.SnapshotFieldEvolutionTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.056"
+      },
+      {
+        "name": "com.surprising.aeron.service.snapshot.state.StateMapSupportTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.006"
+      },
+      {
+        "name": "com.surprising.aeron.service.treasury.CoreTreasuryStateTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.001"
+      },
+      {
+        "name": "com.surprising.aeron.service.treasury.RuntimeFundsAccumulatorTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.006"
+      },
+      {
+        "name": "com.surprising.aeron.service.treasury.RuntimeTreasuryDeltaTest",
+        "tests": "13",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.054"
+      },
+      {
+        "name": "com.surprising.aeron.service.treasury.SystemLedgerControlTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.031"
+      },
+      {
+        "name": "com.surprising.aeron.service.treasury.SystemLedgerLaneTest",
+        "tests": "8",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.078"
+      },
+      {
+        "name": "com.surprising.aeron.support.egress.BorrowedHeaderEgressTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.111"
+      },
+      {
+        "name": "com.surprising.aeron.support.egress.DeferredSessionResponsesTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.008"
+      },
+      {
+        "name": "com.surprising.aeron.support.egress.OwnerSessionBoundaryTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.649"
+      },
+      {
+        "name": "com.surprising.aeron.support.ingress.OwnerIngressRingTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.287"
+      },
+      {
+        "name": "com.surprising.aeron.support.ingress.TradingOwnerInputReuseTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "30.852"
+      }
+    ]
+  },
+  "final_incremental_and_fixtures": {
+    "surprising-aeron-core/surprising-aeron-service": [
+      {
+        "name": "com.surprising.aeron.service.core.CoreActiveLaneIngressTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.723"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreDeliveryOptionFinancialMatrixTest",
+        "tests": "29",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.891"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreLifecycleStateTest",
+        "tests": "20",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.852"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CorePerpetualFinancialMatrixTest",
+        "tests": "42",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "5.085"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CoreSpotAssetUnitsTest",
+        "tests": "18",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "8.353"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ProductRecoveryLifecycleTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "17.199"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RuntimeCommitRecoveryTest",
+        "tests": "18",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "22.008"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.CommandSlotRingTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.026"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.CommandSlotTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "1.68"
+      },
+      {
+        "name": "com.surprising.aeron.service.order.PendingMatchingRingTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.015"
+      }
+    ],
+    "surprising-aeron-core/surprising-aeron-tools": [
+      {
+        "name": "com.surprising.aeron.tools.diagnostics.CoreLaneMetricsPrometheusFormatterTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.008"
+      },
+      {
+        "name": "com.surprising.aeron.tools.reconciliation.ClusterFundsReconcileTest",
+        "tests": "16",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.419"
+      },
+      {
+        "name": "com.surprising.aeron.tools.replay.OfflineReplayMainTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.583"
+      }
+    ],
+    "surprising-aeron-core/surprising-aeron-benchmarks": [
+      {
+        "name": "com.surprising.aeron.benchmarks.transport.CommandReplicationTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.076"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.ClusterAsyncPairTest",
+        "tests": "5",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.01"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.ClusterCapacityMetricsTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.038"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.ClusterMarkPriceGateTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.009"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityTest",
+        "tests": "10",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.367"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.ClusterOfferRetryTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.011"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.ClusterStreamFillCountTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.019"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.GeneratedMarkPriceSourceTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.012"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.GeneratedPriceClockTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.004"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.HttpArtifactsLoadTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.458"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.HttpOpenLoopLoadTest",
+        "tests": "9",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "3.461"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest",
+        "tests": "8",
+        "failures": "1",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.092",
+        "failed_cases": [
+          {
+            "case": "directControlResponsesAreAuthoritativeTerminalResults",
+            "type": "java.lang.AssertionError",
+            "stack": [
+              "Expecting actual:",
+              "  \"{\"userId\":1002,\"clientAlgoOrderId\":\"batch_algo_control-7856d956-2858-3abd-a866-bf459c536bda\",\"instrumentId\":\"2\",\"algoType\":\"TWAP\",\"side\":\"BUY\",\"priceTicks\":700000,\"quantitySteps\":1,\"childQuantitySteps\":1,\"intervalSeconds\":1,\"durationSeconds\":1,\"marginMode\":\"CROSS\",\"positionSide\":\"NET\",\"reduceOnly\":false}\"",
+              "to contain:",
+              "  [\"\"postOnly\":false\", \"\"timeInForce\":\"IOC\"\"]",
+              "but could not find:",
+              "  [\"\"postOnly\":false\", \"\"timeInForce\":\"IOC\"\"]",
+              " ",
+              "\tat com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest.lambda$directControlResponsesAreAuthoritativeTerminalResults$3(HttpOperationPoolLoadTest.java:222)",
+              "\tat com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest.directControlResponsesAreAuthoritativeTerminalResults(HttpOperationPoolLoadTest.java:222)",
+              "\tat java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:104)",
+              "\t...(80 remaining lines not displayed - this can be changed with Assertions.setMaxStackTraceElementsDisplayed)",
+              "\tat com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest.directControlResponsesAreAuthoritativeTerminalResults(HttpOperationPoolLoadTest.java:222)"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.OperationalLifecycleAuditTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.002"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.OrderBookBootstrapLoaderTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.003"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.P10CapacityGateTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.016"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.StableIdentityLedgerTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.223"
+      },
+      {
+        "name": "com.surprising.aeron.benchmarks.workload.W4LifecycleQaMainTest",
+        "tests": "7",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.013"
+      },
+      {
+        "name": "com.surprising.aeron.client.ClientSourceOrderingBenchmarkTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.131"
+      },
+      {
+        "name": "com.surprising.aeron.controller.CommandReplicationLoggingTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.021"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.AccountLaneCommitBenchmarkTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.027"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.AccountQueryProjectionBenchmarkTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.012"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest",
+        "tests": "125",
+        "failures": "0",
+        "errors": "33",
+        "skipped": "0",
+        "time": "78.783",
+        "failed_cases": [
+          {
+            "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[1]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneRollbackAndTrading(ClusteredBatchTradingBenchmark.java:215)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:141)"
+            ]
+          },
+          {
+            "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[2]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneRollbackAndTrading(ClusteredBatchTradingBenchmark.java:215)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:141)"
+            ]
+          },
+          {
+            "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[3]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneRollbackAndTrading(ClusteredBatchTradingBenchmark.java:215)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:141)"
+            ]
+          },
+          {
+            "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[4]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneRollbackAndTrading(ClusteredBatchTradingBenchmark.java:215)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:141)"
+            ]
+          },
+          {
+            "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[5]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneRollbackAndTrading(ClusteredBatchTradingBenchmark.java:215)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:141)"
+            ]
+          },
+          {
+            "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[6]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneRollbackAndTrading(ClusteredBatchTradingBenchmark.java:215)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:141)"
+            ]
+          },
+          {
+            "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[1]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.batchCloseWithPendingTriggers(ClusteredBatchTradingBenchmark.java:266)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.batchMatchingCloseCancelsProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:66)"
+            ]
+          },
+          {
+            "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[2]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.batchCloseWithPendingTriggers(ClusteredBatchTradingBenchmark.java:266)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.batchMatchingCloseCancelsProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:66)"
+            ]
+          },
+          {
+            "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[3]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.batchCloseWithPendingTriggers(ClusteredBatchTradingBenchmark.java:266)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.batchMatchingCloseCancelsProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:66)"
+            ]
+          },
+          {
+            "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[4]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.batchCloseWithPendingTriggers(ClusteredBatchTradingBenchmark.java:266)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.batchMatchingCloseCancelsProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:66)"
+            ]
+          },
+          {
+            "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[5]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.batchCloseWithPendingTriggers(ClusteredBatchTradingBenchmark.java:266)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.batchMatchingCloseCancelsProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:66)"
+            ]
+          },
+          {
+            "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[1]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: active account access must run on its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.checkLaneAccess(TradingAccountRuntime.java:3469)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.balance(TradingAccountRuntime.java:3453)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runFinalizationFailure(ClusteredBatchTradingBenchmark.java:679)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.finalizationFailureAndTrading(ClusteredBatchTradingBenchmark.java:230)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.finalizationFailurePreservesFundsAndSubsequentTrading(ClusteredBatchTradingBenchmarkTest.java:120)"
+            ]
+          },
+          {
+            "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[2]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: active account access must run on its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.checkLaneAccess(TradingAccountRuntime.java:3469)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.balance(TradingAccountRuntime.java:3453)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runFinalizationFailure(ClusteredBatchTradingBenchmark.java:679)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.finalizationFailureAndTrading(ClusteredBatchTradingBenchmark.java:230)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.finalizationFailurePreservesFundsAndSubsequentTrading(ClusteredBatchTradingBenchmarkTest.java:120)"
+            ]
+          },
+          {
+            "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[3]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: active account access must run on its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.checkLaneAccess(TradingAccountRuntime.java:3469)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.balance(TradingAccountRuntime.java:3453)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runFinalizationFailure(ClusteredBatchTradingBenchmark.java:679)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.finalizationFailureAndTrading(ClusteredBatchTradingBenchmark.java:230)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.finalizationFailurePreservesFundsAndSubsequentTrading(ClusteredBatchTradingBenchmarkTest.java:120)"
+            ]
+          },
+          {
+            "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[4]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: active account access must run on its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.checkLaneAccess(TradingAccountRuntime.java:3469)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.balance(TradingAccountRuntime.java:3453)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runFinalizationFailure(ClusteredBatchTradingBenchmark.java:679)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.finalizationFailureAndTrading(ClusteredBatchTradingBenchmark.java:230)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.finalizationFailurePreservesFundsAndSubsequentTrading(ClusteredBatchTradingBenchmarkTest.java:120)"
+            ]
+          },
+          {
+            "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[5]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: active account access must run on its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.checkLaneAccess(TradingAccountRuntime.java:3469)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.balance(TradingAccountRuntime.java:3453)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runFinalizationFailure(ClusteredBatchTradingBenchmark.java:679)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.finalizationFailureAndTrading(ClusteredBatchTradingBenchmark.java:230)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.finalizationFailurePreservesFundsAndSubsequentTrading(ClusteredBatchTradingBenchmarkTest.java:120)"
+            ]
+          },
+          {
+            "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[6]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: active account access must run on its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.checkLaneAccess(TradingAccountRuntime.java:3469)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.balance(TradingAccountRuntime.java:3453)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runFinalizationFailure(ClusteredBatchTradingBenchmark.java:679)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.finalizationFailureAndTrading(ClusteredBatchTradingBenchmark.java:230)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.finalizationFailurePreservesFundsAndSubsequentTrading(ClusteredBatchTradingBenchmarkTest.java:120)"
+            ]
+          },
+          {
+            "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[1]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneAndTrading(ClusteredBatchTradingBenchmark.java:202)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoLaneControlsPreserveTradingAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:162)"
+            ]
+          },
+          {
+            "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[2]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneAndTrading(ClusteredBatchTradingBenchmark.java:202)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoLaneControlsPreserveTradingAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:162)"
+            ]
+          },
+          {
+            "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[3]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneAndTrading(ClusteredBatchTradingBenchmark.java:202)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoLaneControlsPreserveTradingAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:162)"
+            ]
+          },
+          {
+            "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[4]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneAndTrading(ClusteredBatchTradingBenchmark.java:202)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoLaneControlsPreserveTradingAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:162)"
+            ]
+          },
+          {
+            "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[5]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneAndTrading(ClusteredBatchTradingBenchmark.java:202)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoLaneControlsPreserveTradingAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:162)"
+            ]
+          },
+          {
+            "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[6]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.algoOrder(TradingAccountRuntime.java:4491)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runAlgoLaneUpdates(ClusteredBatchTradingBenchmark.java:750)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.algoLaneAndTrading(ClusteredBatchTradingBenchmark.java:202)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.algoLaneControlsPreserveTradingAndSnapshot(ClusteredBatchTradingBenchmarkTest.java:162)"
+            ]
+          },
+          {
+            "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[1]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:836)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.partialThenFullCloseWithTriggers(ClusteredBatchTradingBenchmark.java:255)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:85)",
+              "\tSuppressed: java.lang.IllegalStateException: cancel did not restore user funds",
+              "\t\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.close(ClusteredBatchTradingBenchmark.java:1130)",
+              "\t\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:82)"
+            ]
+          },
+          {
+            "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[2]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:836)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.partialThenFullCloseWithTriggers(ClusteredBatchTradingBenchmark.java:255)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:85)",
+              "\tSuppressed: java.lang.IllegalStateException: cancel did not restore user funds",
+              "\t\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.close(ClusteredBatchTradingBenchmark.java:1130)",
+              "\t\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:82)"
+            ]
+          },
+          {
+            "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[3]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:836)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.partialThenFullCloseWithTriggers(ClusteredBatchTradingBenchmark.java:255)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:85)",
+              "\tSuppressed: java.lang.IllegalStateException: cancel did not restore user funds",
+              "\t\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.close(ClusteredBatchTradingBenchmark.java:1130)",
+              "\t\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:82)"
+            ]
+          },
+          {
+            "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[4]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:836)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.partialThenFullCloseWithTriggers(ClusteredBatchTradingBenchmark.java:255)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:85)",
+              "\tSuppressed: java.lang.IllegalStateException: cancel did not restore user funds",
+              "\t\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.close(ClusteredBatchTradingBenchmark.java:1130)",
+              "\t\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:82)"
+            ]
+          },
+          {
+            "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[5]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:836)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.partialThenFullCloseWithTriggers(ClusteredBatchTradingBenchmark.java:255)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:85)",
+              "\tSuppressed: java.lang.IllegalStateException: cancel did not restore user funds",
+              "\t\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.close(ClusteredBatchTradingBenchmark.java:1130)",
+              "\t\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.partialCloseRetainsTriggerUntilPositionIsFullyClosed(ClusteredBatchTradingBenchmarkTest.java:82)"
+            ]
+          },
+          {
+            "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[1]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:785)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.closePositionWithPendingTriggers(ClusteredBatchTradingBenchmark.java:244)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.matchingCloseCancelsPendingProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:102)"
+            ]
+          },
+          {
+            "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[2]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:785)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.closePositionWithPendingTriggers(ClusteredBatchTradingBenchmark.java:244)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.matchingCloseCancelsPendingProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:102)"
+            ]
+          },
+          {
+            "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[3]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:785)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.closePositionWithPendingTriggers(ClusteredBatchTradingBenchmark.java:244)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.matchingCloseCancelsPendingProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:102)"
+            ]
+          },
+          {
+            "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[4]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:785)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.closePositionWithPendingTriggers(ClusteredBatchTradingBenchmark.java:244)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.matchingCloseCancelsPendingProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:102)"
+            ]
+          },
+          {
+            "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[5]",
+            "type": "java.lang.IllegalStateException",
+            "stack": [
+              "java.lang.IllegalStateException: account read requires its owning Lane thread",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.requireAccountReadOwnership(TradingAccountRuntime.java:3384)",
+              "\tat com.surprising.aeron.service.core.TradingAccountRuntime.triggerOrder(TradingAccountRuntime.java:4576)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:845)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:788)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark$Workload.runTriggerRoundTrip(ClusteredBatchTradingBenchmark.java:785)",
+              "\tat com.surprising.aeron.service.order.ClusteredBatchTradingBenchmark.closePositionWithPendingTriggers(ClusteredBatchTradingBenchmark.java:244)",
+              "\tat com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest.matchingCloseCancelsPendingProtectiveTriggers(ClusteredBatchTradingBenchmarkTest.java:102)"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CommittedReplayAllocationBenchmarkTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.577"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.ContinuousOwnerBenchmarkTest",
+        "tests": "30",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "27.106"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.CorePerpetualEndToEndBenchmarkTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.825"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.D1BenchmarkBoundaryTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "1",
+        "skipped": "0",
+        "time": "0.046",
+        "failed_cases": [
+          {
+            "case": "inProcessTradingFixtureCompletesAndChecksTerminalFunds",
+            "type": "java.lang.IndexOutOfBoundsException",
+            "stack": [
+              "\tat org.agrona.AbstractMutableDirectBuffer.boundsCheck0(AbstractMutableDirectBuffer.java:1809)",
+              "\tat org.agrona.AbstractMutableDirectBuffer.getInt(AbstractMutableDirectBuffer.java:204)",
+              "\tat com.surprising.aeron.service.core.InProcessTradingAllocationBenchmark$Sink.offer(InProcessTradingAllocationBenchmark.java:318)",
+              "\tat com.surprising.aeron.support.egress.ClusterServiceEgress$TransportSession.offer(ClusterServiceEgress.java:340)",
+              "\tat com.surprising.aeron.support.egress.DeferredSessionResponses.offer(DeferredSessionResponses.java:49)",
+              "\tat com.surprising.aeron.support.egress.ClusterServiceEgress.drainOutputs(ClusterServiceEgress.java:243)",
+              "\tat com.surprising.aeron.support.egress.ClusterServiceEgress.drainResponses(ClusterServiceEgress.java:222)",
+              "\tat com.surprising.aeron.controller.AeronTradingClusterService.drainResponses(AeronTradingClusterService.java:327)",
+              "\tat com.surprising.aeron.service.core.InProcessTradingAllocationBenchmark.await(InProcessTradingAllocationBenchmark.java:293)",
+              "\tat com.surprising.aeron.service.core.InProcessTradingAllocationBenchmark.userState(InProcessTradingAllocationBenchmark.java:265)",
+              "\tat com.surprising.aeron.service.core.InProcessTradingAllocationBenchmark.close(InProcessTradingAllocationBenchmark.java:221)",
+              "\tat com.surprising.aeron.service.core.D1BenchmarkBoundaryTest.inProcessTradingFixtureCompletesAndChecksTerminalFunds(D1BenchmarkBoundaryTest.java:32)"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "com.surprising.aeron.service.core.DerivativeMixedWorkloadTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "10.958"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.DerivativeRiskBoundaryBenchmarkTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.053"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.FundingCutBenchmarkTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "11.402"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.InstrumentPauseAdmissionBenchmarkTest",
+        "tests": "6",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "3.255"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.LifecycleGuardTest",
+        "tests": "4",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.064"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.LifecyclePaginationBenchmarkTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "29.764"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupportTest",
+        "tests": "24",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "99.291"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.MatcherTreasuryReceiptBenchmarkTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.011"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.OwnerPublicationBenchmarkTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.006"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.RealtimeWorkloadTest",
+        "tests": "12",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "6.957"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.SettlementSolvencyBenchmarkTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "7.519"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.SpotMixedWorkloadTest",
+        "tests": "2",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "2.144"
+      },
+      {
+        "name": "com.surprising.aeron.service.core.TriggerCommitBenchmarkTest",
+        "tests": "3",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.016"
+      },
+      {
+        "name": "com.surprising.marketmaker.provider.service.MakerReconciliationAllocationBenchmarkTest",
+        "tests": "1",
+        "failures": "0",
+        "errors": "0",
+        "skipped": "0",
+        "time": "0.583"
+      }
+    ]
+  },
+  "baseline_failed_fixture_reproduction": [
+    {
+      "name": "com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest",
+      "tests": "1",
+      "failures": "1",
+      "errors": "0",
+      "skipped": "0",
+      "time": "0.688",
+      "failed_cases": [
+        {
+          "case": "directControlResponsesAreAuthoritativeTerminalResults",
+          "type": "java.lang.AssertionError"
+        }
+      ]
+    },
+    {
+      "name": "com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest",
+      "tests": "33",
+      "failures": "0",
+      "errors": "33",
+      "skipped": "0",
+      "time": "21.889",
+      "failed_cases": [
+        {
+          "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[1]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[2]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[3]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[4]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[5]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot(ProductLine)[6]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[1]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[2]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[3]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[4]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "batchMatchingCloseCancelsProtectiveTriggers(ProductLine)[5]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[1]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[2]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[3]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[4]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[5]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "finalizationFailurePreservesFundsAndSubsequentTrading(ProductLine)[6]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[1]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[2]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[3]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[4]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[5]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "algoLaneControlsPreserveTradingAndSnapshot(ProductLine)[6]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[1]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[2]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[3]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[4]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "partialCloseRetainsTriggerUntilPositionIsFullyClosed(ProductLine)[5]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[1]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[2]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[3]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[4]",
+          "type": "java.lang.IllegalStateException"
+        },
+        {
+          "case": "matchingCloseCancelsPendingProtectiveTriggers(ProductLine)[5]",
+          "type": "java.lang.IllegalStateException"
+        }
+      ]
+    },
+    {
+      "name": "com.surprising.aeron.service.core.D1BenchmarkBoundaryTest",
+      "tests": "1",
+      "failures": "0",
+      "errors": "1",
+      "skipped": "0",
+      "time": "0.047",
+      "failed_cases": [
+        {
+          "case": "inProcessTradingFixtureCompletesAndChecksTerminalFunds",
+          "type": "java.lang.IndexOutOfBoundsException"
+        }
+      ]
+    }
+  ],
+  "baseline_comparison": {
+    "same_case_and_exception_type": true,
+    "cases": 35,
+    "new_failed_cases": 0,
+    "note": "比较已执行夹具的用例名与异常类型；不把失败用例视为通过，也不据此证明未执行路径。"
+  },
+  "commands": {
+    "clean_compile": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests clean test-compile",
+    "full_tests": "mvn -pl surprising-aeron-core/surprising-aeron-service -am test",
+    "final_tests": [
+      "mvn",
+      "-pl",
+      "surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks",
+      "-am",
+      "-Dtest=AccountLaneCommitBenchmarkTest,AccountQueryProjectionBenchmarkTest,ClientSourceOrderingBenchmarkTest,ClusterAsyncPairTest,ClusterCapacityMetricsTest,ClusterFundsReconcileTest,ClusterMarkPriceGateTest,ClusterMixedCapacityTest,ClusterOfferRetryTest,ClusterStreamFillCountTest,ClusteredBatchTradingBenchmarkTest,CommandReplicationLoggingTest,CommandReplicationTest,CommandSlotRingTest,CommandSlotTest,CommittedReplayAllocationBenchmarkTest,ContinuousOwnerBenchmarkTest,CoreActiveLaneIngressTest,CoreDeliveryOptionFinancialMatrixTest,CoreLaneMetricsPrometheusFormatterTest,CoreLifecycleStateTest,CorePerpetualEndToEndBenchmarkTest,CorePerpetualFinancialMatrixTest,CoreSpotAssetUnitsTest,D1BenchmarkBoundaryTest,DerivativeMixedWorkloadTest,DerivativeRiskBoundaryBenchmarkTest,FundingCutBenchmarkTest,GeneratedMarkPriceSourceTest,GeneratedPriceClockTest,HttpArtifactsLoadTest,HttpOpenLoopLoadTest,HttpOperationPoolLoadTest,InstrumentPauseAdmissionBenchmarkTest,LifecycleGuardTest,LifecyclePaginationBenchmarkTest,LinearPerpetualBenchmarkSupportTest,MakerReconciliationAllocationBenchmarkTest,MatcherTreasuryReceiptBenchmarkTest,OfflineReplayMainTest,OperationalLifecycleAuditTest,OrderBookBootstrapLoaderTest,OwnerPublicationBenchmarkTest,P10CapacityGateTest,PendingMatchingRingTest,ProductRecoveryLifecycleTest,RealtimeWorkloadTest,RuntimeCommitRecoveryTest,SettlementSolvencyBenchmarkTest,SpotMixedWorkloadTest,StableIdentityLedgerTest,TriggerCommitBenchmarkTest,W4LifecycleQaMainTest",
+      "-Dsurefire.failIfNoSpecifiedTests=false",
+      "test"
+    ],
+    "baseline_reproduction": [
+      "mvn",
+      "-pl",
+      "surprising-aeron-core/surprising-aeron-benchmarks",
+      "-am",
+      "-Dtest=ClusteredBatchTradingBenchmarkTest#algoLaneControlsPreserveTradingAndSnapshot+algoRollbackRestoresLaneBeforeNextUpdateAndSnapshot+batchMatchingCloseCancelsProtectiveTriggers+finalizationFailurePreservesFundsAndSubsequentTrading+matchingCloseCancelsPendingProtectiveTriggers+partialCloseRetainsTriggerUntilPositionIsFullyClosed,D1BenchmarkBoundaryTest#inProcessTradingFixtureCompletesAndChecksTerminalFunds,HttpOperationPoolLoadTest#directControlResponsesAreAuthoritativeTerminalResults",
+      "-Dsurefire.failIfNoSpecifiedTests=false",
+      "test"
+    ],
+    "final_clean_package": "mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests clean package"
+  },
+  "sequence_note": "全量核心测试完成后，进一步删除仅测试读取的CommandSlot资金缓冲及初始化参数；最终以161项核心回归、20项工具测试、基准夹具和最新提交上的14模块干净打包覆盖收尾。最终源文件与干净构建副本逐字节一致。",
+  "initial_failures": [
+    "首次测试迁移脚本误改了测试类结构；从本轮基线恢复原用例并修正脚本，未减少测试用例数。",
+    "共享目录重试出现已编译class缺失，未采用该次结果；后续在独立master验证副本中构建。",
+    "定向回归151项中1失败/1错误：固定分页夹具应保留风险游标999，一个身份测试须先绑定运行时。修正后20项复验通过，随后核心完整测试通过。"
+  ],
+  "static_checks": {
+    "git_diff_check_exit": 0,
+    "removed_members_absent_from_fresh_classes": true,
+    "classes": [
+      "TradingCoreRuntime",
+      "TradingAccountRuntime",
+      "CommandSlot",
+      "RuntimeIdentityRegistry",
+      "MatcherPipelineGroup",
+      "LaneClientIdentities"
+    ],
+    "snapshot_and_wire_formats_changed": false
+  },
+  "source_sha256": {
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/bootstrap/account/AccountLaneLifecycle.java": "7f9317bf2a4ca348c06aaf3df7a4d629f3cb7be2f19e6670679c5c7c3e37f4c8",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/ControlLaneDispatcher.java": "e8b9fda41bf0df4543b691c073013055f9ff6105676c48f8b36cc293b876a085",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/LaneClientIdentities.java": "2dd870dc45f6464ce6f768109623aa7fa4d8d90f90437dd06c10144de2bc66de",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java": "8ba7791a897811ea18dc03f7eca8a8c1d43e9614242c922f5c39ff8e574dfb65",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java": "477d2c4eaf0c08ac0c3758231dd53fa9225ab015e9789f6c0a0f06256874518a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java": "d6ba7abe32044d31f48d29ac45b496ef022484b4550ba747296f2b459783a2b7",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/change/LaneCommitEvent.java": "c431ea02cf2b7194bc9e1319d960aee314d8d8e5745b23472dc2a8b9e42fbb2d",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java": "d8aafc00e10655f69d815dcb5c0aa96c9c920c98997b7bdaaf4d2d86e79125a0",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java": "48c9b5c5e1842228440da6ccf92f4dc19e83b0ac4ffad68d0c36387ddb44babb",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.java": "41a5a4f29d7acca03d5afb809bc32d82945e21e09b728a9152de919abc82d9c3",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/pipeline/MatcherPipelineGroup.java": "7da2206c94ef389bef91d1b90252c4cd5b32b6c8c1fde8a86b92cae554d917d6",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlot.java": "7766bf1dbb83ba595ec4ae75ce0ad89d8a29a31d3b53eee270fd70082f177b21",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java": "027dbfea43a1a81eb7f4b9b4ef0b0d120d63f4b4d3db0c86f48549f2750a9c35",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderBatchExecutor.java": "99b16da311b8f49ca139e31ec76c525b66ccf8bbb6f3e7dbd94eb546869dffe9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/PendingMatchingRing.java": "a4059abbe3d30aa1ecb521d642f6a503fd1772159d8c682ed7b0cf6a9c73bbe7",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/BatchPlaceReservation.java": "c826075222997282fcf5d53ea050827132df87d4879dabe6f6038a59639c2abd",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/PlaceAdmissionEvent.java": "12d24128f43081ad7a6420086bffcab899a33d95834773141472010149f794e9",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/CommitPublication.java": "e77a56c849cc36be0916a716f81826b03258f09c68c7dd2ea8f1d2a83d10b555",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java": "678b1e977d0a1b73cafd5503ba257aedbb8e6ddb83892662b64906702e040000",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/CoreQueryService.java": "25ba0000e1ec10672760451b220de196399855091ae6e22f882f1f6c5fb71296",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/RiskAccountQuery.java": "18436cdc21f7f3bef2c294c2978e3ccffab21df3fd28822af59e5a29dae095ed",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.java": "c7c935ac0dda5408d102b64f1d52afdbb680a428c8d7f01c3b4e00b4b30cceb0",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultBuilder.java": "e0339def16d341b805a8f76b58651915a29d56e1dffdff72a63b6ab1694984b8",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/retention/TerminalStateRetention.java": "73a231569a8195a49806bc05305a8c40f0f483dacf5408fdf5953a3e7d597550",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java": "fb97d1b24ca7be4bebe8fbfae4a1a2d4791c9ea310e2152426847e7b0217ace8",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementEvent.java": "b04a4836c44972355e27e0989c3a591d7efbabde062c959a9c10b092c8a6338a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java": "138e6c4fc384972f3a12baf6649eece5d1f70b73cd3600c2a1110ace2edd522a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.java": "31654b5afc507ff0850f1bd14eb77e4e3b3fc451a212cb76134337d8bd0db26a",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/SystemLedgerCommand.java": "cc1b2f6d975926bcae57445c8db89db85ec364ef417f1610d6c1d510abf46cd2",
+    "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java": "c61a8df6eb5d3a7d1d15ab9d6a427192f17853e0ae30c6b356004ff28c484e26",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/bootstrap/account/AccountLaneLifecycleTest.java": "98c225cdb34d1c8bdaab01f40f424a5fef51a9abcc6846d460527a837a621361",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/account/LaneClientIdentitiesTest.java": "7819a29d50d69d83789efe3b8c3c16a221d8493ed076f3e187a770b65684eb70",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreDeliveryOptionFinancialMatrixTest.java": "c94c8b99167c6ca7e7bfe9e067883eefc8aad5d2a9d3d8cdb23046765c345f89",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLifecycleStateTest.java": "fda3af8bef48191675c1539f6c37707f296e9f74f85d03a7604e2bfe8b40c67d",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingAccountRuntimeTest.java": "1ef072cdba084558d3066461c0f99a393b5c59eb2748c2975b778d8f4779fe9a",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java": "b88852b9519fd77d08b0519a598db74b819fafb66240ff68b2c5add21aa90b7f",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingOwnerTestSupport.java": "43b18df70478f922a9353260de59606cc657f401cfab663daee4a607039fe467",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistryTest.java": "6ba13abbe6503dce7ed6f67d13a6c108a78808dd16aee07ee1118e4910c08c7a",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/ClusterCommandPipelineTest.java": "9134eeaa1135e00d60563044925814f7d0ede6045fbd5a46d17fe552b1933b20",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/CommandSlotRingTest.java": "ae4d295c06f329690783f2ca4efdac58732bfa00d8e26564d0e415e9e13ee8bf",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/CommandSlotTest.java": "c1aaea4768e2e4de2dd8da11f94e11d096deefc54f91b61a1da8372030187a9e",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/PendingMatchingRingTest.java": "bec731b3234b7fe8cdbfb8404fc297bcf994d17f0e7284c2974e13e3cb7f1345",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreLedgerQueryTest.java": "22ae186ab3ef2bba6d3f20b7c7d7c2623b13e989b4b30cb81da0e41cbbce7a0f",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/retention/CoreFundsLedgerIndexTest.java": "09d0152ce0c7352a7c519de23640b6d2eda3e374b35bfe40b06513baf1c2eb96",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/settlement/MatcherSettlementPlanTest.java": "b98246ebf9017bda592bbe71f010ea163474a4216ec7e22349b33a84d70677ae",
+    "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/settlement/MatcherTreasurySettlementTest.java": "06a2095711883ab461a041e4c5dd7bb6f7347fd4962110b739d406af4c92363c"
+  },
+  "logs": [
+    {
+      "name": "compile.log",
+      "exit_code": 1,
+      "bytes": 15982,
+      "sha256": "9cea9daf6fd0d30119dc2e95482b558abfc8d537c9af918cf14096386cc11d5d",
+      "summaries": [
+        "[INFO] BUILD FAILURE",
+        "[INFO] Total time:  15.452 s"
+      ]
+    },
+    {
+      "name": "compile-retry.log",
+      "exit_code": 1,
+      "bytes": 72054,
+      "sha256": "0f8bc2878c51dc31d176f1ec7db4a867f02fe3a27052512e5d3c36882856d43a",
+      "summaries": [
+        "[INFO] BUILD FAILURE",
+        "[INFO] Total time:  15.562 s"
+      ]
+    },
+    {
+      "name": "isolated-compile.log",
+      "exit_code": 0,
+      "bytes": 27795,
+      "sha256": "34ed7ce1daa418cdcf248e8037b7ce3ea9d8a74304300e628553b5d9c2e642e5",
+      "summaries": [
+        "[INFO] BUILD SUCCESS",
+        "[INFO] Total time:  51.006 s"
+      ]
+    },
+    {
+      "name": "focused-tests.log",
+      "exit_code": 1,
+      "bytes": 16674,
+      "sha256": "a54126861ff1f3ec723dcb660f0b73f1e658d53a5420445f0e215f698c0ec106",
+      "summaries": [
+        "[ERROR] Tests run: 151, Failures: 1, Errors: 1, Skipped: 0",
+        "[INFO] BUILD FAILURE",
+        "[INFO] Total time:  25.122 s"
+      ]
+    },
+    {
+      "name": "focused-retry.log",
+      "exit_code": 0,
+      "bytes": 11358,
+      "sha256": "e89d39bf5e5f1f6108b4cf7681c680af4ffc5b113a793329e05537479b167031",
+      "summaries": [
+        "[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] BUILD SUCCESS",
+        "[INFO] Total time:  23.492 s"
+      ]
+    },
+    {
+      "name": "full-tests.log",
+      "exit_code": 0,
+      "bytes": 469222,
+      "sha256": "f7923bc4fb79f21bafbba2565e72791ea6846e00ce9e7f78d8b9e3137100c1f2",
+      "summaries": [
+        "[INFO] Tests run: 29, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 257, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 69, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 1601, Failures: 0, Errors: 0, Skipped: 1",
+        "[INFO] BUILD SUCCESS",
+        "[INFO] Total time:  13:07 min"
+      ]
+    },
+    {
+      "name": "final-tests.log",
+      "exit_code": 1,
+      "bytes": 193930,
+      "sha256": "f9d954919ef3b0673f0cfdc9b49117a8e56e7912a6101cfdd5a146149e303bf4",
+      "summaries": [
+        "[INFO] Tests run: 161, Failures: 0, Errors: 0, Skipped: 0",
+        "[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0",
+        "[ERROR] Tests run: 310, Failures: 1, Errors: 34, Skipped: 0",
+        "[INFO] BUILD FAILURE",
+        "[INFO] Total time:  06:21 min"
+      ]
+    },
+    {
+      "name": "baseline-tests.log",
+      "exit_code": 1,
+      "bytes": 91767,
+      "sha256": "a4eb4f6d2a2f9613fdd1b8467712fdca923df7b9f2016a03c204a6d7b1f0fbc9",
+      "summaries": [
+        "[ERROR] Tests run: 35, Failures: 1, Errors: 34, Skipped: 0",
+        "[INFO] BUILD FAILURE",
+        "[INFO] Total time:  01:05 min"
+      ]
+    },
+    {
+      "name": "package.log",
+      "exit_code": 0,
+      "bytes": 69109,
+      "sha256": "758fb2c04d4f674193549356f8a6ff978c58bf9ecda05aa6038d276723f67093",
+      "summaries": [
+        "[INFO] BUILD SUCCESS",
+        "[INFO] Total time:  01:27 min"
+      ]
+    }
+  ],
+  "not_run": [
+    "独立HTTP/WebSocket及浏览器/手机交互",
+    "多节点切主",
+    "强杀及在途崩溃",
+    "长期稳定性",
+    "JMH/JFR及性能对比",
+    "wallet"
+  ],
+  "cleanup": {
+    "status": "complete",
+    "temporary_root": "/tmp/aeron-cleanup-1234.X9yL11",
+    "directory_exists": false,
+    "remaining_test_jvms": [],
+    "completed_at_utc": "2026-10-25T14:38:02.493096+00:00",
+    "note": "已删除本轮两份隔离验证副本、临时脚本和原始日志；摘要、逐类结果及SHA已归档，未清理其他任务资源。"
+  }
+}

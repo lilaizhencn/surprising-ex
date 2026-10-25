@@ -628,7 +628,7 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * 按用户和实际客户端键反查原单号；零键返回空文本，没有该用户身份表则返回空值。
+     * 在所属 Lane 按用户和实际客户端键反查原单号；零键返回空文本，未知身份明确拒绝。
      * @param userId 该身份所属用户
      * @param clientKey 用户范围的实际客户端身份键，零表示未提供客户端单号
      */
