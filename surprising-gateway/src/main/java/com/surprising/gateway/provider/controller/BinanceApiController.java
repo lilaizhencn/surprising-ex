@@ -87,10 +87,10 @@ public class BinanceApiController {
                 return json(HttpStatus.OK, Map.of("serverTime", System.currentTimeMillis()));
             }
             if (path.endsWith("/exchangeInfo")) {
-                return proxy("instrument", "", request, body, null, null, false);
+                return proxy("instrument", "", request, body, null, null);
             }
             if (path.endsWith("/depth")) {
-                return depth(request, body);
+                return depth(request);
             }
             if (path.endsWith("/asset/transfer")) {
                 return transfer(request, body);
@@ -112,7 +112,7 @@ public class BinanceApiController {
             }
             if (path.endsWith("/account")) {
                 long userId = authenticate(request, "READ", body);
-                return account(request, body, userId);
+                return account(request, userId);
             }
             if (path.endsWith("/account/status")) {
                 authenticate(request, "READ");
@@ -120,7 +120,7 @@ public class BinanceApiController {
             }
             if (path.endsWith("/openOrders")) {
                 long userId = authenticate(request, "READ");
-                return orders(request, userId, true);
+                return orders(request, userId);
             }
             if (path.endsWith("/allOrders")) {
                 long userId = authenticate(request, "READ");
@@ -170,7 +170,7 @@ public class BinanceApiController {
         }
         payload.put("referenceId", idempotencyKey.trim());
         payload.put("reason", "binance asset transfer");
-        ResponseEntity<byte[]> response = proxy("account", "/transfers", request, jsonBytes(payload), userId, null, true);
+        ResponseEntity<byte[]> response = proxy("account", "/transfers", request, jsonBytes(payload), userId, null);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> result = readMap(response.getBody());
         return json(HttpStatus.OK, Map.of("tranId", number(result.get("transferId"))));
@@ -332,34 +332,34 @@ public class BinanceApiController {
             payload.put("positionSide", "NET");
             payload.put("reduceOnly", booleanValue(params.get("reduceOnly")));
             payload.put("postOnly", "GTX".equals(payload.get("timeInForce")));
-            return transformOrder(proxy("trading", "", request, jsonBytes(payload), userId, null, true), symbol, scale);
+            return transformOrder(proxy("trading", "", request, jsonBytes(payload), userId, null), symbol, scale);
         }
         if ("DELETE".equals(method)) {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("userId", userId);
             payload.put("orderId", longParameter(params, "orderId"));
-            return transformOrder(proxy("trading", "/cancel", request, jsonBytes(payload), userId, null, true), symbol,
+            return transformOrder(proxy("trading", "/cancel", request, jsonBytes(payload), userId, null), symbol,
                     properties.getBinanceApi().scale(symbol));
         }
         String orderId = first(params, "orderId");
         String clientOrderId = first(params, "origClientOrderId", "clientOrderId");
         if (orderId != null) {
-            return transformOrder(proxy("trading", "/" + orderId, request, null, userId, null, true), symbol,
+            return transformOrder(proxy("trading", "/" + orderId, request, null, userId, null), symbol,
                     properties.getBinanceApi().scale(symbol));
         }
         if (clientOrderId != null) {
             String query = "userId=" + userId + "&clientOrderId=" + encode(clientOrderId);
-            return transformOrder(proxy("trading", "/by-client-order-id", request, null, userId, query, true), symbol,
+            return transformOrder(proxy("trading", "/by-client-order-id", request, null, userId, query), symbol,
                     properties.getBinanceApi().scale(symbol));
         }
         throw new IllegalArgumentException("orderId or origClientOrderId is required");
     }
 
-    private ResponseEntity<byte[]> orders(HttpServletRequest request, long userId, boolean openOnly) {
+    private ResponseEntity<byte[]> orders(HttpServletRequest request, long userId) {
         String symbol = request.getParameter("symbol");
         String query = "userId=" + userId + "&limit=" + capped(request.getParameter("limit"));
         if (symbol != null && !symbol.isBlank()) query += "&instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)));
-        ResponseEntity<byte[]> response = proxy("trading", "/open", request, null, userId, query, true);
+        ResponseEntity<byte[]> response = proxy("trading", "/open", request, null, userId, query);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> payload = readMap(response.getBody());
         List<Map<String, Object>> result = new ArrayList<>();
@@ -383,7 +383,7 @@ public class BinanceApiController {
             String value = request.getParameter(parameter);
             if (value != null && !value.isBlank()) query += "&" + parameter + "=" + encode(value);
         }
-        ResponseEntity<byte[]> response = proxy("trading", "/history", request, null, userId, query, true);
+        ResponseEntity<byte[]> response = proxy("trading", "/history", request, null, userId, query);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> payload = readMap(response.getBody());
         List<Map<String, Object>> result = new ArrayList<>();
@@ -401,9 +401,9 @@ public class BinanceApiController {
         return json(HttpStatus.OK, result);
     }
 
-    private ResponseEntity<byte[]> account(HttpServletRequest request, byte[] body, long userId) {
+    private ResponseEntity<byte[]> account(HttpServletRequest request, long userId) {
         ResponseEntity<byte[]> response = proxy("account", "/balances", request, null, userId,
-                "userId=" + userId, true);
+                "userId=" + userId);
         if (response.getStatusCode().isError()) return response;
         boolean canWithdraw = properties.getCustodyWallet().isEnabled()
                 && isKycVerified(complianceService.kyc(userId));
@@ -427,11 +427,11 @@ public class BinanceApiController {
                 "accountType", "SPOT", "balances", balances));
     }
 
-    private ResponseEntity<byte[]> depth(HttpServletRequest request, byte[] body) {
+    private ResponseEntity<byte[]> depth(HttpServletRequest request) {
         String symbol = requiredParameter(request, "symbol");
         int limit = capped(request.getParameter("limit"));
         String query = "instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request))) + "&depth=" + limit;
-        ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query, false);
+        ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> payload = readMap(response.getBody());
         GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
@@ -445,7 +445,7 @@ public class BinanceApiController {
         String symbol = requiredParameter(request, "symbol");
         String query = "instrumentId=" + encode(properties.getBinanceApi().backendInstrumentId(symbol, productLine(request)))
                 + "&depth=5";
-        ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query, false);
+        ResponseEntity<byte[]> response = proxy("trading-market", "/orderbook", request, null, null, query);
         if (response.getStatusCode().isError()) return response;
         Map<String, Object> payload = readMap(response.getBody());
         GatewayProperties.SymbolScale scale = properties.getBinanceApi().scale(symbol);
@@ -471,7 +471,7 @@ public class BinanceApiController {
     }
 
     private ResponseEntity<byte[]> proxy(String service, String suffix, HttpServletRequest request,
-                                         byte[] body, Long userId, String query, boolean privateRoute) {
+                                         byte[] body, Long userId, String query) {
         return gatewayProxyService.proxyCompat(service, suffix, query, HttpMethod.valueOf(request.getMethod()),
                 request, body, userId);
     }

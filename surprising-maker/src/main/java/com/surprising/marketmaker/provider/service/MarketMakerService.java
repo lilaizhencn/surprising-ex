@@ -164,7 +164,7 @@ public class MarketMakerService {
         try {
             InstrumentResponse instrument = currentInstrument(strategy.getProductLine(), instrumentId);
             requireTradable(instrument, strategy.getProductLine());
-            MarkPriceResponse mark = currentMarkPrice(strategy.getProductLine(), instrumentId, instrument.changeId());
+            MarkPriceResponse mark = latestMarkPrice(instrumentId, instrument.changeId());
             StrategyRuntimeState state = state(strategy);
             return maybeTrade(strategy, state, state.cycleSequence(), instrumentId, instrument, mark, Instant.now());
         } catch (RuntimeException ex) {
@@ -369,7 +369,7 @@ public class MarketMakerService {
             PositionResponse position = currentPosition(strategy, accountId, instrumentId, instrument);
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
                     properties.getQuoting().getOrderBookDepth());
-            MarkPriceResponse markPrice = currentMarkPrice(productLine, instrumentId, instrument.changeId());
+            MarkPriceResponse markPrice = latestMarkPrice(instrumentId, instrument.changeId());
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId, productLine, instrument);
             QuotePlan plan = !isTradableForProduct(instrument, productLine)
                     || properties.getReferenceMarket().isEnabled() && referenceOrderBook == null
@@ -663,7 +663,7 @@ public class MarketMakerService {
                 requireTradable(instrument, strategy.getProductLine());
                 OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(instrumentId,
                         properties.getQuoting().getOrderBookDepth());
-                MarkPriceResponse markPrice = currentMarkPrice(strategy.getProductLine(), instrumentId, instrument.changeId());
+                MarkPriceResponse markPrice = latestMarkPrice(instrumentId, instrument.changeId());
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(instrumentId,
                         strategy.getProductLine(), instrument);
                 long volatilityTicks = observeVolatility(strategy, instrumentId, instrument, orderBook, markPrice);
@@ -796,7 +796,7 @@ public class MarketMakerService {
         long previousAsk = owned.stream().filter(order -> order.side() == OrderSide.SELL)
                 .mapToLong(OrderResponse::priceTicks).min().orElse(Long.MAX_VALUE);
         List<CancelOrderRequest> cancelRequests = owned.stream()
-                .filter(order -> !shouldKeep(order, plan.quotes(), accountPrefix, now, quoting))
+                .filter(order -> !shouldKeep(order, plan.quotes(), accountPrefix, quoting))
                 // Move quotes that would cross the new opposite side first, preserving post-only semantics.
                 .sorted(Comparator.<OrderResponse>comparingInt(order ->
                         order.side() == OrderSide.SELL && order.priceTicks() <= highestBid
@@ -1031,14 +1031,14 @@ public class MarketMakerService {
     private boolean shouldKeep(OrderResponse order,
                                List<DesiredQuote> desiredQuotes,
                                String accountPrefix,
-                               Instant now, MarketMakerProperties.Quoting quoting) {
-        return desiredQuotes.stream().anyMatch(quote -> isFreshQuote(order, quote, accountPrefix, now, quoting));
+                               MarketMakerProperties.Quoting quoting) {
+        return desiredQuotes.stream().anyMatch(quote -> isFreshQuote(order, quote, accountPrefix, quoting));
     }
 
     private boolean isFreshQuote(OrderResponse order,
                                  DesiredQuote quote,
                                  String accountPrefix,
-                                 Instant now, MarketMakerProperties.Quoting quoting) {
+                                 MarketMakerProperties.Quoting quoting) {
         return isLive(order) && matchesQuote(order, quote, accountPrefix, quoting);
     }
 
@@ -1491,10 +1491,6 @@ public class MarketMakerService {
                     strategy.getMarginMode(), PositionSide.NET, inventory, 0L, 0L, Instant.now());
         }
         return accountRpcApi.position(accountId, instrumentId, strategy.getMarginMode().name(), PositionSide.NET.name());
-    }
-
-    private MarkPriceResponse currentMarkPrice(ProductLine productLine, String instrumentId, long instrumentChangeId) {
-        return latestMarkPrice(instrumentId, instrumentChangeId);
     }
 
     private void requireTradable(InstrumentResponse instrument, ProductLine productLine) {

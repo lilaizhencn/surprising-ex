@@ -437,7 +437,7 @@ public final class OrderBatchExecutor {
                         owner.suspendMatchingCommitContext(pending);
                         return null;
                     }
-                    collectBatchPlaceReservation(batch, pending.command().header().userId());
+                    collectBatchPlaceReservation(batch);
                     batch.itemAdmission = null;
                 }
                 pending = pending.withPreMatchingCancellations(batch.currentPreMatchingCancellationOrderIds);
@@ -539,9 +539,8 @@ public final class OrderBatchExecutor {
     /**
      * 收集已经完成的账户预留，绑定本项账户冻结副本；保存先撤列表，再请求发布。
      * @param batch 本条批量命令的复用上下文
-     * @param userId 本批请求用户，账户按该用户路由
      */
-    private void collectBatchPlaceReservation(OrderBatchPending batch, long userId) {
+    private void collectBatchPlaceReservation(OrderBatchPending batch) {
         // 本批复用的顺序下单账户预留工作
         var work = batch.placeReservation;
         // 账户已经冻结并交给本项的订单副本

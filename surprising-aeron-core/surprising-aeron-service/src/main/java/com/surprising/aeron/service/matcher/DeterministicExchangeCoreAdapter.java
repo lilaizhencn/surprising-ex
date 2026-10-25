@@ -334,7 +334,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             restoredActiveOrders = List.copyOf(restoredOrders);
             restoredCoreSequence = coreSequence;
             deferredActivation = () -> activateRestoredMatcher(
-                    state, restoredOrders, coreSequence, snapshot);
+                    restoredOrders, coreSequence, snapshot);
             if (startImmediately) activate();
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             stop();
@@ -423,13 +423,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 同步加载全部原生快照，逐单对账并比对汇总引擎哈希；state 参数在此方法体内不再读取，Core 元数据已在构造阶段检查。
-     * @param state 对应恢复或快照点的 Core 状态，具体读取边界见方法说明
+     * 同步加载全部原生快照，逐单对账并比对汇总引擎哈希；Core 元数据已在构造阶段检查。
      * @param activeOrders 同一冻结点的 Core 活动订单序列
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param snapshot 已有 Matcher 快照；启动路径为空时表示空白引擎
      */
-    private void activateRestoredMatcher(TradingCoreState state, Iterable<CoreOrderState> activeOrders,
+    private void activateRestoredMatcher(Iterable<CoreOrderState> activeOrders,
                                          long coreSequence, MatcherSnapshot snapshot) {
         start(snapshot);
         reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();

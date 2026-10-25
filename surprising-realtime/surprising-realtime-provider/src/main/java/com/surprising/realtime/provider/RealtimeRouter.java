@@ -135,7 +135,7 @@ public final class RealtimeRouter implements AutoCloseable {
                     if (receiver.recoveryRequired()) recoverReceiver();
                     long now = System.currentTimeMillis();
                     if (now >= nextRefresh) {
-                        refresh(aeron, now);
+                        refresh(now);
                         nextRefresh = now + 100;
                     }
                     retryPending();
@@ -408,7 +408,7 @@ public final class RealtimeRouter implements AutoCloseable {
         prefixes.remove(product);
     }
 
-    private void refresh(Aeron aeron, long now) {
+    private void refresh(long now) {
         nodes.values()
                 .removeIf(
                         n -> {

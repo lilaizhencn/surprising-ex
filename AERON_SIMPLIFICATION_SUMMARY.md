@@ -475,7 +475,32 @@
 
 ---
 
-## 14. 累计重构成果统计与系统现状
+## 14. Round 4: 消除过度拆类、拔除跨模块死参数与层层转发
+
+### 14.1 消除过度拆类：现货规则直接内联与物理删除 `SpotOrderAdmission`
+- **问题现象**：现货规则计算仅有 3 行代码（卖单冻结基础资产，买单冻结报价资产及逐步成交手续费），却额外定义了 `SpotOrderAdmission.java` 静态工具类，`SpotTradingRules` 仅做单行转调，属于机械拆类。
+- **重构落地**：将现货预留计算公式直接内联至 `SpotTradingRules.java`，物理删除 `SpotOrderAdmission.java` 文件，逻辑一目了然。
+
+### 14.2 核心服务与撮合层死参数拔除
+- **`OrderBatchExecutor`**：方法 `collectBatchPlaceReservation(OrderBatchPending batch, long userId)` 拔除未使用的 `userId` 参数，调用方不再无谓解析 `userId`。
+- **`LaneCommitDelta`**：方法 `drainTo` 拔除未使用的 `int laneId` 参数，精简调用契约。
+- **`DeterministicExchangeCoreAdapter`**：方法 `activateRestoredMatcher` 拔除未使用的 `TradingCoreState state` 参数，消除延迟激活 Lambda 闭包对整个 Core 状态的长期持有。
+
+### 14.3 做市服务与网关层死参数与无用转发清理
+- **`MarketMakerService`**：
+  - 拔除 `shouldKeep` 与 `isFreshQuote` 中未使用的 `Instant now` 参数；
+  - 物理删除单纯转调的 `currentMarkPrice` 私有方法，调用处直接收敛为 `latestMarkPrice`。
+- **`ExpiringContractSettlementFanoutService`**：拔除 `submit` 中未使用的 `long version` 参数。
+- **`GatewayApiKeyService`**：拔除 `requireSecurity` 中未使用的 `String requestIp` 参数。
+- **`BinanceApiController`**：
+  - 拔除 `orders` 中未使用的 `boolean openOnly` 参数；
+  - 拔除 `depth` 与 `account` 中未使用的 `byte[] body` 参数；
+  - 拔除 `proxy` 中未使用的 `boolean privateRoute` 参数，同步收敛全部 10 处调用。
+- **`RealtimeRouter`**：拔除 `refresh(Aeron aeron, long now)` 中未使用的 `Aeron aeron` 参数。
+
+---
+
+## 15. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |

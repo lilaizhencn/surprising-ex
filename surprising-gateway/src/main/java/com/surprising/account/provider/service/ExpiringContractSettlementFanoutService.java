@@ -27,7 +27,7 @@ public class ExpiringContractSettlementFanoutService {
     }
 
     public int fanout(DeliverySettlementEvent event) {
-        submit(event.instrumentId(), event.changeId(), event.settlementPriceTicks(),
+        submit(event.instrumentId(), event.settlementPriceTicks(),
                 settlementTime(event.deliveryTime(), event.eventTime()));
         return 1;
     }
@@ -43,12 +43,12 @@ public class ExpiringContractSettlementFanoutService {
         }
         // Core 的 strike 与价格均使用期权档位，事件的标的价格则是报价资产整数单位。
         // 只在接入边界换算；收益仍由 Core 独立计算，不能用事件现金字段覆盖交易状态。
-        submit(event.instrumentId(), event.changeId(), units / instrument.priceTickUnits(),
+        submit(event.instrumentId(), units / instrument.priceTickUnits(),
                 settlementTime(event.deliveryTime(), event.eventTime()));
         return 1;
     }
 
-    private void submit(String instrumentId, long version, long settlementPriceTicks,
+    private void submit(String instrumentId, long settlementPriceTicks,
                         Instant settlementTime) {
         long settlementId = settlementTime.toEpochMilli();
         String identity = properties.getKafka().getProductLine() + ":lifecycle:" + instrumentId.toUpperCase()

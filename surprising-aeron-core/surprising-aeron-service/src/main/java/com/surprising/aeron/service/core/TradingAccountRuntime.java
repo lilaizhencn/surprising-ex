@@ -1525,7 +1525,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         changes.recordControlChanges(this, laneId);
         if (accountRollback.balancePatch(laneId).size() != 0) markBalancesChanged();
         changes.publishTriggersToOwner(this);
-        changes.drainTo(laneId, this, changedUsers, changedOrders);
+        changes.drainTo(this, changedUsers, changedOrders);
     }
 
     /**

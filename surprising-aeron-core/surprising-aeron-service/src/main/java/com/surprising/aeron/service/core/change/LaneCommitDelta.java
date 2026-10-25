@@ -278,10 +278,9 @@ public final class LaneCommitDelta {
      * @param changedUsers 可选的本命令变化用户键集合，不需要时为 null
      * @param changedOrders 可选的本命令变化订单键集合，不需要时为 null
      */
-    public void drainTo(int laneId,
-                 TradingAccountRuntime state,
-                 com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
-                 com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
+    public void drainTo(TradingAccountRuntime state,
+                        com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
+                        com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         if (changedUsers != null || changedOrders != null) {
             users.forEach((/* 本收据用户变化对应的用户编号。 */ userId, /* 本次遍历只收集业务键，不读取回调传入的值。 */ ignored) -> {
                 if (changedUsers != null) changedUsers.add(userId);

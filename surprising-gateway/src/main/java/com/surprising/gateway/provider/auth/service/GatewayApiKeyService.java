@@ -57,7 +57,7 @@ public class GatewayApiKeyService {
                                 String ipAllowlist,
                                 String emailCode, String totpCode, String requestIp) {
         JwtPrincipal principal = authService.authenticateBearer(authorization);
-        requireSecurity(principal.userId(), emailCode, totpCode, requestIp);
+        requireSecurity(principal.userId(), emailCode, totpCode);
         String apiKey = "sx_" + randomToken(24);
         String secret = randomToken(32);
         GatewayApiKeyRepository.ApiKeyRecord record = repository.create(
@@ -74,7 +74,7 @@ public class GatewayApiKeyService {
     public void revoke(String authorization, String apiKey, String emailCode, String totpCode,
                        String requestIp) {
         JwtPrincipal principal = authService.authenticateBearer(authorization);
-        requireSecurity(principal.userId(), emailCode, totpCode, requestIp);
+        requireSecurity(principal.userId(), emailCode, totpCode);
         if (!repository.revoke(principal.userId(), apiKey, Instant.now())) {
             throw new IllegalArgumentException("active api key not found");
         }
@@ -83,7 +83,7 @@ public class GatewayApiKeyService {
     public void updateIpAllowlist(String authorization, String apiKey, String ipAllowlist,
                                   String emailCode, String totpCode, String requestIp) {
         JwtPrincipal principal = authService.authenticateBearer(authorization);
-        requireSecurity(principal.userId(), emailCode, totpCode, requestIp);
+        requireSecurity(principal.userId(), emailCode, totpCode);
         if (!repository.updateIpAllowlist(principal.userId(), apiKey,
                 ipAllowlist)) {
             throw new IllegalArgumentException("active api key not found");
@@ -122,7 +122,7 @@ public class GatewayApiKeyService {
         }
     }
 
-    private void requireSecurity(long userId, String emailCode, String totpCode, String requestIp) {
+    private void requireSecurity(long userId, String emailCode, String totpCode) {
         if (!verificationService.verify(userId, "SECURITY_SETTINGS", emailCode, totpCode, Instant.now())) {
             throw new IllegalArgumentException("security verification is required or invalid");
         }
