@@ -238,8 +238,9 @@ class ParallelRiskScanTest {
             var changed = RuntimeStateMaterializer.materialize(runtime, ids);
             // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
             var index = new PositionUserIndex(changed, TOPOLOGY);
-            RuntimeDerivativeRiskProcessor.applyContinuationRuntime(2 * TOPOLOGY.accountLaneCount(),
-                    ids.symbolId(SYMBOL), index, runtime, ids);
+            for (int page = 0; page < 8 && runtime.firstRiskIncompleteScan() != null; page++)
+                run(runtime, ids, index, 2 * TOPOLOGY.accountLaneCount());
+            assertThat(runtime.firstRiskIncompleteScan()).isNull();
             // 继续估值后的结果，ETH 风险权益应等于已含平仓利润的钱包三百单位。
             var state = RuntimeStateMaterializer.materialize(runtime, ids);
             assertThat(state.riskState().snapshots().get(userId + ":2").equityUnits()).isEqualTo(300);
@@ -278,12 +279,15 @@ class ParallelRiskScanTest {
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 100), runtime, ids);
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 100, 1, 1_700_000_000_001L), runtime, ids);
-            // 从本用例持仓构造的用户索引，供账本准备各 Lane 的有界用户页。
+            // 共享调度先给 BTC、再给 ETH 两个单位，保留两币对的未完成组合累计。
             var index = new PositionUserIndex(source, TOPOLOGY);
-            RuntimeDerivativeRiskProcessor.applyContinuationRuntime(2 * TOPOLOGY.accountLaneCount(),
-                    ids.symbolId("2"), index, runtime, ids);
+            run(runtime, ids, index, 2 * TOPOLOGY.accountLaneCount());
+            run(runtime, ids, index, 2 * TOPOLOGY.accountLaneCount());
             assertThat(runtime.riskScan(ids.symbolId("2")).laneProgress())
                     .allMatch(/* 逐条检查的 Lane 进度，应保留未完成用户及对应的组合累计金额。 */ cursor -> cursor.userId() > 0 && cursor.unrealizedPnlUnits() == 0);
+            assertThat(runtime.riskScan(ids.symbolId(SYMBOL)).laneProgress())
+                    .allMatch(cursor -> cursor.userId() > 0 && !cursor.complete());
+            assertThat(RuntimeStateMaterializer.materialize(runtime, ids).riskState().liquidations()).isEmpty();
             // ETH 扫描已经累计完两个持仓，此时 BTC 新价格只更新 BTC 扫描入口。
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(2, 120), runtime, ids);
             // ETH 尚在分批估值、BTC 已刷新价格时保存的业务状态检查点。
@@ -296,16 +300,18 @@ class ParallelRiskScanTest {
             try (/* 从快照恢复状态投影的第二个运行时，与原运行时应用同样的行情和预算。 */ var restored = RuntimeStateProjector.project(restoredState, restoredIds, TOPOLOGY)) {
                 // 恢复状态上的持仓用户索引，使用恢复后的身份映射。
                 var restoredIndex = new PositionUserIndex(restoredState, TOPOLOGY);
-                for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; page < 8 && !runtime.riskScan(ids.symbolId("2")).riskComplete(); page++) {
-                    RuntimeDerivativeRiskProcessor.applyContinuationRuntime(TOPOLOGY.accountLaneCount(),
-                            ids.symbolId("2"), index, runtime, ids);
-                    RuntimeDerivativeRiskProcessor.applyContinuationRuntime(TOPOLOGY.accountLaneCount(),
-                            restoredIds.symbolId("2"), restoredIndex, restored, restoredIds);
+                // 两币对共用真实调度预算，每页只允许每 Lane 一个单位，原状态与恢复状态消耗相同。
+                for (int page = 0; page < 32 && runtime.firstRiskIncompleteScan() != null; page++) {
+                    int work = run(runtime, ids, index, TOPOLOGY.accountLaneCount());
+                    assertThat(work).isBetween(1, TOPOLOGY.accountLaneCount());
+                    assertThat(run(restored, restoredIds, restoredIndex, TOPOLOGY.accountLaneCount())).isEqualTo(work);
                     assertThat(RuntimeStateMaterializer.materialize(restored, restoredIds))
                             .isEqualTo(RuntimeStateMaterializer.materialize(runtime, ids));
                 }
                 // 扫描结束后的业务物化结果，用来核对风险条数、编号和账户资金事实。
                 var complete = RuntimeStateMaterializer.materialize(runtime, ids);
+                assertThat(runtime.firstRiskIncompleteScan()).isNull();
+                assertThat(restored.firstRiskIncompleteScan()).isNull();
                 assertThat(runtime.riskScan(ids.symbolId("2")).riskComplete()).isTrue();
                 assertThat(complete.riskState().snapshots().values()).hasSize(2 * TOPOLOGY.accountLaneCount())
                         .allMatch(/* 最终逐条检查的风险快照，组合权益都应使用更新后的三百单位。 */ snapshot -> snapshot.equityUnits() == 300);

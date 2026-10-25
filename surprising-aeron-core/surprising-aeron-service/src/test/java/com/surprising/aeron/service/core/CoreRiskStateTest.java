@@ -119,7 +119,7 @@ class CoreRiskStateTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         RuntimeStateParityChecker.assertMatches(marked, identities,
                 RuntimeDerivativeRiskFixture.simulateMarkPrice(
-                        state, markCommand, state.users().keySet(), identities));
+                        state, markCommand, identities));
 
         // 用户 7 在合约 1 的风险记录，应被评为需要强平。
         CoreRiskSnapshot risk = marked.riskState().snapshots().get("7:1");
@@ -243,7 +243,8 @@ class CoreRiskStateTest {
         long positionKey = identities.preparedPositionKey(7, "1");
         assertThat(runtime.riskSnapshot(positionKey)).isNull();
 
-        RuntimeDerivativeRiskProcessor.applyContinuationRuntime(64, state.users().keySet(), runtime, identities);
+        RuntimeDerivativeRiskFixture.continueRiskBudget(64,
+                new PositionUserIndex(state, runtime.topology()), runtime, identities);
 
         assertThat(runtime.riskSnapshot(positionKey)).isNotNull();
     }
@@ -266,7 +267,8 @@ class CoreRiskStateTest {
         int first = runtime.firstRiskIncompleteScan().symbolId();
         // 另一份尚未访问的币对编号，应该优先于刚刷新的已完成币对。
         int other = first == identities.symbolId("1") ? identities.symbolId("2") : identities.symbolId("1");
-        RuntimeDerivativeRiskProcessor.applyContinuationRuntime(64, new java.util.TreeSet<Long>(), runtime, identities);
+        RuntimeDerivativeRiskFixture.continueRiskBudget(1,
+                new PositionUserIndex(state, runtime.topology()), runtime, identities);
         assertThat(runtime.riskScan(first).riskComplete()).isTrue();
         RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(identities.instrumentId(first), 100, 2, 1001), runtime, identities);
         assertThat(runtime.firstRiskIncompleteScan().symbolId()).as("a refreshed completed instrumentId must go behind unvisited work").isEqualTo(other);
@@ -298,11 +300,11 @@ class CoreRiskStateTest {
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
         var runtime = RuntimeStateProjector.project(state, ids);
         RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("2", 1, 1, 1000), runtime, ids);
-        // 需要参与风险遍历的用户编号有序集合。
-        var users = new java.util.TreeSet<>(state.users().keySet());
+        // 与运行时拓扑一致的持仓用户索引，续扫不枚举无持仓账户。
+        var positions = new PositionUserIndex(state, runtime.topology());
         for (/* 模拟币对 1 连续行情刷新的次数，同时作为递增价格序号。 */ int i = 1; i <= 4; i++) {
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("1", 100, i, 1000+i), runtime, ids);
-            RuntimeDerivativeRiskProcessor.applyContinuationRuntime(64, users, runtime, ids);
+            RuntimeDerivativeRiskFixture.continueRiskBudget(64, positions, runtime, ids);
         }
         // 风险处理后的运行时物化结果，便于按业务编号核对强平与资金事实。
         var result = RuntimeStateMaterializer.materialize(runtime, ids);
@@ -553,7 +555,7 @@ class CoreRiskStateTest {
         TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
         runtime.startAccountLanes();
         try {
-            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, state.users().keySet(), runtime, identities);
+            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, runtime, identities);
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .isEqualTo(first);
             RuntimeStateParityChecker.assertMatches(first, identities, runtime);
@@ -562,7 +564,7 @@ class CoreRiskStateTest {
                 // 本批继续扫描开始前的参照状态，状态转换和运行时都从同一业务进度推进。
                 TradingCoreState before = first;
                 first = reducer.continueRiskScan(before, 64);
-                RuntimeTestStateTransitions.applyRiskContinuation(before, 64, before.users().keySet(), runtime, identities);
+                RuntimeTestStateTransitions.applyRiskContinuation(before, 64, runtime, identities);
                 RuntimeStateParityChecker.assertMatches(first, identities, runtime);
             }
         } finally {
@@ -595,13 +597,13 @@ class CoreRiskStateTest {
         TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities);
         runtime.startAccountLanes();
         try {
-            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, state.users().keySet(), runtime, identities);
+            RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, runtime, identities);
             RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
             while (!authoritative.riskState().scan().riskComplete()) {
                 // 本批继续扫描开始前的参照状态，状态转换和运行时都从同一业务进度推进。
                 TradingCoreState before = authoritative;
                 authoritative = reducer.continueRiskScan(before, 7);
-                RuntimeTestStateTransitions.applyRiskContinuation(before, 7, before.users().keySet(), runtime, identities);
+                RuntimeTestStateTransitions.applyRiskContinuation(before, 7, runtime, identities);
                 RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
             }
         } finally {
@@ -634,7 +636,7 @@ class CoreRiskStateTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
         TradingAccountRuntime runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
-                state, latest, state.users().keySet(), identities);
+                state, latest, identities);
         RuntimeStateParityChecker.assertMatches(after, identities, runtime);
         assertThat(after.riskState().scan().scanStartPriceSequence()).isEqualTo(1);
         assertThat(after.riskState().scan().priceSequence()).isEqualTo(2);

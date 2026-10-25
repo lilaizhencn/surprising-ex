@@ -573,7 +573,7 @@ class CoreLifecycleStateTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         RuntimeStateParityChecker.assertMatches(recovered, identities,
                 RuntimeDerivativeRiskFixture.simulateMarkPrice(
-                        state, command, state.users().keySet(), identities));
+                        state, command, identities));
 
         assertThat(recovered.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.CANCELED);

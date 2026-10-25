@@ -652,7 +652,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭
         TradingAccountRuntime runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
-                opening, mark, opening.users().keySet(), identities);
+                opening, mark, identities);
         try {
             RuntimeStateParityChecker.assertMatches(marked, identities, runtime);
             assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(marked),
@@ -704,7 +704,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState beforeMark = opening;
         assertRuntimeParity(beforeMark, marked,
                 /* 本次投影、业务辅助和物化共用的独立整数身份表 */ identities -> RuntimeDerivativeRiskFixture.simulateMarkPrice(
-                        beforeMark, mark, beforeMark.users().keySet(), identities));
+                        beforeMark, mark, identities));
     }
 
     /**

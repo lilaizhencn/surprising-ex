@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第六十九轮A222-A224：ADL六标记与资金费三标记分别收敛成单phase，到期账户派发复用当前等待phase，净减8字段、16行；18模块干净构建、154不同回归与PIPELINED154次、六线实测及12次恢复通过。219解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第七十轮A225-A226：删除风险同步续扫副本、全用户备用来源及重复风险执行入口；净减1字段、209生产行。18模块干净构建、完整1981例（跳过1）、PIPELINED229例、六线实测及12次恢复通过。221解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -11273,6 +11273,36 @@
       ],
       "evidence": "删除dispatchedPhase，现有phase在派发前切到CANCEL_WAIT/PREPARE_WAIT/APPLY_WAIT，Lane读取同一等待阶段；内联和工作线程均使用同一顺序，净减1字段。",
       "verification": "18模块干净构建；默认与PIPELINED各154例；实际满邮箱、同／跨Lane和资金费复用；六产品线顺序HTTP/WS、资金费/强平/保险/ADL、到期与12次Cluster冷恢复。见round69-runtime-20261025.json。"
+    },
+    {
+      "id": "A225",
+      "status": "resolved",
+      "source_basis_commit": "09132769a71196496860c05a8e80f1ba1446244e",
+      "business_code_changed": true,
+      "resolved_in_round": "seventieth_cleanup_round",
+      "topic": "仅测试使用的同步风险续扫和全用户备用来源",
+      "fields_or_methods": [
+        "RuntimeDerivativeRiskProcessor.applyContinuationRuntime的3个重载",
+        "RiskScanCoordinator.runSlice",
+        "RiskScanCoordinator.indexedUserIds",
+        "RiskScanCoordinator.higherIndexedUser及私有备用构造重载"
+      ],
+      "evidence": "删除3个同步续扫入口、整份runSlice与五秒Owner借权等待、备用用户集合字段和NavigableSet分支；账本路径直接使用原持仓用户索引。测试改走现有RiskScanCoordinator.poll，不增加生产接口或兼容路径。",
+      "verification": "CodeGraph及完整owner/name/descriptor调用证据；18模块干净构建、完整模块测试、PIPELINED229例、六线HTTP/WS及12次Cluster冷恢复；初始夹具失败和复验见round70-runtime-20261025.json。"
+    },
+    {
+      "id": "A226",
+      "status": "resolved",
+      "source_basis_commit": "09132769a71196496860c05a8e80f1ba1446244e",
+      "business_code_changed": true,
+      "resolved_in_round": "seventieth_cleanup_round",
+      "topic": "风险同步执行重复入口",
+      "fields_or_methods": [
+        "TradingAccountRuntime.executeUserRisk",
+        "TradingAccountRuntime.executeRiskLane"
+      ],
+      "evidence": "executeUserRisk只有测试调用，executeRiskLane只有被删runSlice和测试调用，均删除。实际账户修改权限检查、dispatchRiskLanes线程交接及原异常传播保留，未放宽跨线程访问。",
+      "verification": "CodeGraph及完整owner/name/descriptor调用证据；18模块干净构建、完整模块测试、PIPELINED229例、六线HTTP/WS及12次Cluster冷恢复；初始夹具失败和复验见round70-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11368,7 +11398,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A222_to_A224_cleaned_154_distinct_cases_154_pipelined_six_live_products_twelve_cold_recoveries_verified; overall_audit_in_progress",
+  "analysis_round_status": "A225_to_A226_risk_sync_fallback_removed_full_modules_pipelined229_six_live_products_twelve_cold_recoveries_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11590,12 +11620,11 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "759f90965cd2fbfe02de8e7aebef98baa78d45e7",
-    "status": "financial_continuation_phase_copies_cleaned_and_verified",
+    "source_basis_commit": "09132769a71196496860c05a8e80f1ba1446244e",
+    "status": "risk_sync_fallback_and_duplicate_execution_ports_removed_and_verified",
     "resolved_ids": [
-      "A222",
-      "A223",
-      "A224"
+      "A225",
+      "A226"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11608,11 +11637,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 219,
+      "resolved": 221,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "sixty_ninth_cleanup_round",
+    "evidence": "seventieth_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44695,6 +44724,38 @@
     "command_snapshot_http_ws_contracts_changed": false,
     "counts": {
       "resolved": 219,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "seventieth_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "09132769a71196496860c05a8e80f1ba1446244e",
+    "resolved_ids": [
+      "A225",
+      "A226"
+    ],
+    "removed_instance_fields_net": 1,
+    "production_net_lines_removed": 209,
+    "removed_synchronous_methods": 6,
+    "removed_forwarding_lookup_methods": 1,
+    "removed_private_constructor_overloads": 1,
+    "new_classes_interfaces_or_business_stages": 0,
+    "report": "deep-code-cleanup-20261025-round70.md",
+    "evidence": "round70-runtime-20261025.json",
+    "full_module_test_counts": {
+      "tests": 1981,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "additional_pipelined_executions": 229,
+    "runtime_products": 6,
+    "cold_recoveries": 12,
+    "command_snapshot_http_ws_contracts_changed": false,
+    "counts": {
+      "resolved": 221,
       "candidate": 1,
       "retained": 4
     },

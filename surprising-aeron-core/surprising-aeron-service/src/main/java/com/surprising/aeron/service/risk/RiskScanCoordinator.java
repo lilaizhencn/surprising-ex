@@ -20,10 +20,8 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
     private final TradingAccountRuntime runtime;
     /** 本命令共用的业务编号映射，Owner 准备路由和 Lane 估值时使用。 */
     private final RuntimeIdentityRegistry identities;
-    /** 按币对及 Lane 查询候选持仓用户的索引，可为空以使用另一有序用户来源。 */
+    /** 按币对及 Lane 查询候选持仓用户的账本索引。 */
     private final PositionUserIndex positionUsers;
-    /** 没有持仓用户索引时使用的有序用户集合，由账本按 Lane 筛选。 */
-    private final Iterable<Long> indexedUserIds;
     /** 本命令按配置和待扫币对数计算的总工作预算。 */
     private int budget;
     /** 本命令尚未消耗的工作预算，Owner 每片完成后扣减。 */
@@ -68,26 +66,12 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
      */
     public RiskScanCoordinator(int maxWork, PositionUserIndex positionUsers, TradingAccountRuntime runtime,
             RuntimeIdentityRegistry identities) {
-        this(maxWork, positionUsers, null, runtime, identities);
-    }
-
-    /**
-     * 校验 Owner、预算及用户来源，创建按账户 Lane 编号索引的任务和用户页缓冲区；后续命令可以复用这些数组。
-     * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
-     * @param positionUsers 按币对和 Lane 定位有持仓用户的索引，避免为每轮风险扫描遍历全体账户
-     * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    private RiskScanCoordinator(int maxWork, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (maxWork <= 0 || maxWork > 4096 || (positionUsers == null && indexedUserIds == null)
+        if (maxWork <= 0 || maxWork > 4096 || positionUsers == null
                 || runtime == null || identities == null) throw new IllegalArgumentException("invalid risk scan budget");
         runtime.assertOwner();
         this.runtime = runtime;
         this.identities = identities;
         this.positionUsers = positionUsers;
-        this.indexedUserIds = indexedUserIds;
         // 运行时配置的账户 Lane 数量，用来一次性创建对应长度的复用数组。
         int lanes = runtime.topology().accountLaneCount();
         inputs = new RiskLaneProgress[lanes];
@@ -181,54 +165,6 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
     public int completedWork() { return budget - remaining; }
 
     /**
-     * 同步入口复用相同的路由、估值、编号和游标规则；必要时在五秒内取得 Owner 账户访问权，按 Lane 执行后在 finally 释放，再提交本片进度。
-     * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
-     * @param symbolId 要继续扫描的币对整数编号
-     * @param positionUsers 按币对和 Lane 定位有持仓用户的索引，避免为每轮风险扫描遍历全体账户
-     * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    static int runSlice(int maxWork, int symbolId, PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        // 同步路径本次使用的续扫对象，内部仍按相同 Lane 规则完成一片。
-        RiskScanCoordinator c = new RiskScanCoordinator(maxWork, positionUsers, indexedUserIds, runtime, identities);
-        c.prepare(runtime.riskScan(symbolId), c.budget);
-        c.apply(null);
-        // 本同步入口是否需要临时取得账户 Lane 访问权，取得后必须在 finally 释放。
-        boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();
-        try {
-            if (acquired) {
-                // 等待 Owner 账户访问权的单调时钟截止值，最多等待五秒。
-                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                while (!runtime.tryAcquireOwnerLaneAccess()) {
-                    if (System.nanoTime() - deadline >= 0) {
-                        throw new IllegalStateException("timed out waiting for owner lane access in risk runSlice");
-                    }
-                    Thread.onSpinWait();
-                }
-            }
-            for (/* 本轮正在初始化、收集、执行或合并的账户 Lane 下标。 */ int lane = 0; lane < c.inputs.length; lane++) {
-                if ((c.laneMask & (1L << lane)) == 0) continue;
-                // 为当前执行回调固定的 Lane 下标，避免循环变量变化影响回调目标。
-                final int id = lane;
-                c.results[lane] = runtime.executeRiskLane(lane, () -> c.scanLane(id));
-            }
-            c.assignLiquidationIds();
-            for (/* 本轮正在初始化、收集、执行或合并的账户 Lane 下标。 */ int lane = 0; lane < c.inputs.length; lane++) {
-                if ((c.creationMask & (1L << lane)) == 0) continue;
-                // 为当前执行回调固定的 Lane 下标，避免循环变量变化影响回调目标。
-                final int id = lane;
-                runtime.executeRiskLane(lane, () -> c.applyLiquidations(id));
-            }
-        } finally {
-            if (acquired) runtime.releaseOwnerLaneAccess();
-        }
-        c.finish();
-        return c.work;
-    }
-
-    /**
      * Owner 捕获所选币对当前扫描、配置、匹配序号的行情和结算资产，记录本片预算并重置路由发布标记；没有有效待扫输入时直接报错。
      * @param selected Owner 选中的尚未完成账户风险扫描
      * @param sliceBudget 当前币对片段允许消耗的预算，必须为正
@@ -247,7 +183,7 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
     }
 
     /**
-     * 先发布持仓用户索引输入，再为每个 Lane 准备有界用户页与恢复游标，从上次轮转点给未完成 Lane 分配预算，最后发布路由就绪。异步路径由账本执行，同步 runSlice 在调用线程直接执行。
+     * 先发布持仓用户索引输入，再为每个 Lane 准备有界用户页与恢复游标，从上次轮转点给未完成 Lane 分配预算，最后发布路由就绪。由账本执行并发布路由。
      * @param ignored 账本回调统一签名中的资金状态参数；准备用户路由不使用它
      */
     @Override public void apply(TreasuryRuntime ignored) {
@@ -269,9 +205,9 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
             var page = userPages[lane];
             page.clear();
             // 索引中游标之后的下一用户编号，0 表示没有后续用户。
-            long next = higherIndexedUser(lane, cursor.lastUserId());
+            long next = positionUsers.higherUserId(instrument.instrumentId(), lane, cursor.lastUserId());
             for (/* 用户页已经加入的编号数量，限制前瞻页最多到片段预算加一项。 */ int count = 0; next != 0 && count <= sliceBudget; count++) {
-                page.add(next); next = higherIndexedUser(lane, next);
+                page.add(next); next = positionUsers.higherUserId(instrument.instrumentId(), lane, next);
             }
             if (!cursor.complete() && cursor.userId() == 0 && page.isEmpty())
                 cursor = new RiskLaneProgress(cursor.lastUserId(), true, 0, 0, "-", 0, 0, 0, 0, 0);
@@ -314,23 +250,6 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
      * @param scope 当前账本路由命令的作用域引用
      */
     public void bindLedgerScope(SystemLedgerCommand scope) { ledgerScope = scope; }
-
-    /**
-     * 优先从币对持仓用户索引取当前 Lane 游标后的用户；没有该索引时要求输入为有序集合，再跳过不属于当前 Lane 的用户，末尾返回 0。
-     * @param lane 本次准备、估值或提交的账户 Lane 编号
-     * @param cursor 当前 Lane 最后处理完的用户编号，后续从它之后寻找
-     */
-    private long higherIndexedUser(int lane, long cursor) {
-        if (positionUsers != null) return positionUsers.higherUserId(instrument.instrumentId(), lane, cursor);
-        if (!(indexedUserIds instanceof java.util.NavigableSet<?>))
-            throw new IllegalStateException("risk user index must be ordered for online scanning");
-        // 已经确认是可导航有序集合的用户索引，用 higher 取得严格大于游标的用户。
-        @SuppressWarnings("unchecked")
-        var users = (java.util.NavigableSet<Long>) indexedUserIds;
-        for (/* 有序集合中待检查的下一用户，只接受分配到当前 Lane 的编号。 */ Long next = users.higher(cursor); next != null; next = users.higher(next))
-            if (runtime.topology().accountLaneId(next) == lane) return next;
-        return 0;
-    }
 
     /**
      * 在所属账户 Lane 内读取自己的有界用户页、分配预算和上次修订号，执行估值并返回本 Lane 回执。

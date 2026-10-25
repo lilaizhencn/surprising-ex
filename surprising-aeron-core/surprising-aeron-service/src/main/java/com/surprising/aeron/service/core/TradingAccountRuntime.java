@@ -1297,42 +1297,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 同步执行指定用户所属 Lane 的风险操作并返回结果，沿用同步 Lane 修改的访问检查。
-     * @param <T> 该账户操作返回值的类型
-     * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public <T> T executeUserRisk(long userId, java.util.function.Supplier<T> operation) {
-        assertOwner();
-        if (userId <= 0 || operation == null) {
-            throw new IllegalArgumentException("invalid user risk command");
-        }
-        // 当前按拓扑选中或从掩码取出的账户 Lane 编号
-        int laneId = topology.accountLaneId(userId);
-        executeLaneMutations(1L << laneId, 1, /* 回调传入但本操作不需要的 Lane 参数，实际使用已捕获的业务操作 */ ignored -> operation.get());
-        // 从本 Lane 复用结果数组取出的本次业务返回值
-        @SuppressWarnings("unchecked") T result = (T) laneMutationResultsScratch[laneId];
-        return result;
-    }
-
-    /**
-     * 同步执行指定 Lane 的风险操作；活动 Owner 未取得账户访问权时拒绝，调用方应走工作线程派发。
-     * @param <T> 该账户操作返回值的类型
-     * @param laneId 账户 Lane 的零起始编号
-     * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作
-     */
-    public <T> T executeRiskLane(int laneId, java.util.function.Supplier<T> operation) {
-        assertOwner();
-        if (laneId < 0 || laneId >= accountLanes.length || operation == null) {
-            throw new IllegalArgumentException("invalid risk lane command");
-        }
-        if (accountLanesStarted() && !ownerLaneAccess()) {
-            throw new IllegalStateException("active Account Lane risk must be dispatched to its worker");
-        }
-        return onLane(laneId, /* 回调传入但本操作不需要的 Lane 参数，实际使用已捕获的业务操作 */ ignored -> operation.get());
-    }
-
-    /**
      * 把用户列表按用户身份映射到目标 Lane，再走同步结算执行。
      * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
      * @param operation 在选中账户 Lane 的有效执行范围内调用的业务操作

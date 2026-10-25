@@ -5,7 +5,6 @@ import com.surprising.aeron.model.RiskLaneProgress;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.product.option.OptionRiskRules;
@@ -67,97 +66,6 @@ public final class RuntimeDerivativeRiskProcessor {
         runtime.setMarketRevision(Math.incrementExact(runtime.revision()));
         runtime.putRiskScan(nextScan);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-    }
-
-    /**
-     * 校验预算和用户来源，扫描停用或没有未完成币对时直接返回，否则选一份扫描交给指定币对入口。
-     * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
-     * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    public static void applyContinuationRuntime(int maxWork, Iterable<Long> indexedUserIds,
-                                                TradingAccountRuntime runtime,
-                                                RuntimeIdentityRegistry identities) {
-        if (runtime == null || identities == null || indexedUserIds == null) {
-            throw new IllegalArgumentException("invalid perpetual risk continuation apply");
-        }
-        if (maxWork <= 0 || maxWork > 4096) throw new IllegalArgumentException("invalid risk scan batch size");
-        if (!runtime.riskScanControl().enabled()) return;
-        // 选中或指定币对当前未完成的扫描，没有待处理风险时直接结束本入口。
-        RiskScanRuntime sourceScan = runtime.firstRiskIncompleteScan();
-        if (sourceScan == null) return;
-        applyContinuationRuntime(maxWork, sourceScan.symbolId(), indexedUserIds, runtime, identities);
-    }
-
-    /**
-     * 对指定币对核对当前行情与扫描序号，按调用上限和自适应预算中较小值继续一片，使用调用方有序用户集合，最后增加全局修订号并返回工作量。
-     * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
-     * @param symbolId 要继续扫描的币对整数编号
-     * @param indexedUserIds 调用方提供的有序用户编号集合；没有持仓用户索引时据此筛选各 Lane 的候选用户
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    public static int applyContinuationRuntime(int maxWork, int symbolId, Iterable<Long> indexedUserIds,
-                                               TradingAccountRuntime runtime,
-                                               RuntimeIdentityRegistry identities) {
-        if (runtime == null || identities == null || indexedUserIds == null) {
-            throw new IllegalArgumentException("invalid perpetual risk continuation apply");
-        }
-        if (maxWork <= 0 || maxWork > 4096) throw new IllegalArgumentException("invalid risk scan batch size");
-        if (!runtime.riskScanControl().enabled()) return 0;
-        // 选中或指定币对当前未完成的扫描，没有待处理风险时直接结束本入口。
-        RiskScanRuntime sourceScan = runtime.riskScan(symbolId);
-        if (sourceScan == null || sourceScan.riskComplete()) return 0;
-        // 从整数币对编号还原的外部编号，或同步扫描映射中的币对键。
-        String instrumentId = identities.instrumentId(sourceScan.symbolId());
-        // 运行时已经注册的币对配置，提供结算资产和期权价格校验条件。
-        CoreInstrument instrument = runtime.instrument(instrumentId);
-        // 本币对当前行情，价格序号必须与选中扫描一致。
-        MarkPriceRuntime mark = runtime.markPrice(sourceScan.symbolId());
-        if (instrument == null || mark == null || mark.priceSequence() != sourceScan.priceSequence()) {
-            throw new IllegalStateException("risk scan input is missing");
-        }
-        // 统一续扫流程本片实际消耗的工作量，回给共享预算调用方。
-        int completedWork = RiskScanCoordinator.runSlice(Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
-                        runtime.incompleteRiskScanCount())), sourceScan.symbolId(), null, indexedUserIds, runtime, identities);
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-        return completedWork;
-    }
-
-    /**
-     * 对指定币对继续一片，使用持仓用户索引按 Lane 定位候选账户；输入、预算和行情序号通过校验后执行，再增加修订号并返回工作量。
-     * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
-     * @param symbolId 要继续扫描的币对整数编号
-     * @param positionUsers 按币对和 Lane 定位有持仓用户的索引，避免为每轮风险扫描遍历全体账户
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和持仓
-     */
-    public static int applyContinuationRuntime(int maxWork, int symbolId, PositionUserIndex positionUsers,
-                                               TradingAccountRuntime runtime,
-                                               RuntimeIdentityRegistry identities) {
-        if (runtime == null || identities == null || positionUsers == null) {
-            throw new IllegalArgumentException("invalid perpetual risk continuation apply");
-        }
-        if (maxWork <= 0 || maxWork > 4096) throw new IllegalArgumentException("invalid risk scan batch size");
-        if (!runtime.riskScanControl().enabled()) return 0;
-        // 选中或指定币对当前未完成的扫描，没有待处理风险时直接结束本入口。
-        RiskScanRuntime sourceScan = runtime.riskScan(symbolId);
-        if (sourceScan == null || sourceScan.riskComplete()) return 0;
-        // 从整数币对编号还原的外部编号，或同步扫描映射中的币对键。
-        String instrumentId = identities.instrumentId(sourceScan.symbolId());
-        // 运行时已经注册的币对配置，提供结算资产和期权价格校验条件。
-        CoreInstrument instrument = runtime.instrument(instrumentId);
-        // 本币对当前行情，价格序号必须与选中扫描一致。
-        MarkPriceRuntime mark = runtime.markPrice(sourceScan.symbolId());
-        if (instrument == null || mark == null || mark.priceSequence() != sourceScan.priceSequence()) {
-            throw new IllegalStateException("risk scan input is missing");
-        }
-        // 统一续扫流程本片实际消耗的工作量，回给共享预算调用方。
-        int completedWork = RiskScanCoordinator.runSlice(Math.min(maxWork, RiskScanCoordinator.adaptiveBudget(runtime.riskScanControl().scanBatchSize(),
-                        runtime.incompleteRiskScanCount())), symbolId, positionUsers, null, runtime, identities);
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-        return completedWork;
     }
 
     /**

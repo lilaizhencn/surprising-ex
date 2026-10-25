@@ -1584,10 +1584,6 @@ class TradingAccountRuntimeTest {
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
             assertThatThrownBy(() -> state.executeUserSettlement(8, executed::incrementAndGet))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
-            assertThatThrownBy(() -> state.executeUserRisk(8, executed::incrementAndGet))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
-            assertThatThrownBy(() -> state.executeRiskLane(0, executed::incrementAndGet))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("must be dispatched");
             assertThat(executed.get()).isZero();
             assertThat(owner.getName()).isEqualTo(originalName);
             state.dispatchControlLanes(state.topology().accountLaneMask(8), /* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ id -> Thread.currentThread());

@@ -151,27 +151,25 @@ public final class RuntimeTestStateTransitions {
     }
 
     /**
-     * 以前状态全部用户为候选，在冷运行时调用生产标记价及风险处理入口，再物化风险后状态。
+     * 从前状态重建持仓用户索引，在冷运行时调用生产标记价及风险续步，再物化风险后状态。
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param command 对应业务动作的已构造协议命令或已解析订单输入，交给同名生产规则处理
      */
     public TradingCoreState applyMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> RuntimeTestStateTransitions.applyRiskMarkPrice(before,
                 command,
-                before.users().keySet(),
                 runtime,
                 identities));
     }
 
     /**
-     * 按给定用户预算和前状态用户候选调用生产续扫规则，返回其物化进度和状态。
+     * 按给定工作预算和持仓用户索引调用生产续扫规则，返回其物化进度和状态。
      * @param before 本次业务操作前的完整冷状态快照，不在它上面直接改账户实体
      * @param maxUsers 本次风控续扫的用户工作预算
      */
     public TradingCoreState continueRiskScan(TradingCoreState before, int maxUsers) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> RuntimeTestStateTransitions.applyRiskContinuation(before,
                 maxUsers,
-                before.users().keySet(),
                 runtime,
                 identities));
     }
@@ -632,7 +630,7 @@ public final class RuntimeTestStateTransitions {
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
     public static void applyRiskMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
-                                      Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
+                                      TradingAccountRuntime runtime,
                                       RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
@@ -640,19 +638,22 @@ public final class RuntimeTestStateTransitions {
         }
         RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(command, runtime, identities);
         if (runtime.riskScanControl().enabled()) {
-            RuntimeDerivativeRiskProcessor.applyContinuationRuntime(runtime.riskScanControl().scanBatchSize(), indexedUserIds, runtime, identities);
+            com.surprising.aeron.service.core.RuntimeDerivativeRiskFixture.continueRiskBudget(
+                    runtime.riskScanControl().scanBatchSize(),
+                    new com.surprising.aeron.service.core.index.PositionUserIndex(before, runtime.topology()), runtime, identities);
         }
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
     public static void applyRiskContinuation(TradingCoreState before, int maxWork,
-                                         Iterable<Long> indexedUserIds, TradingAccountRuntime runtime,
+                                         TradingAccountRuntime runtime,
                                          RuntimeIdentityRegistry identities) {
         if (before == null || runtime == null || before.productLine() != runtime.productLine()
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid perpetual risk continuation apply");
         }
-        RuntimeDerivativeRiskProcessor.applyContinuationRuntime(maxWork, indexedUserIds, runtime, identities);
+        com.surprising.aeron.service.core.RuntimeDerivativeRiskFixture.continueRiskBudget(maxWork,
+                new com.surprising.aeron.service.core.index.PositionUserIndex(before, runtime.topology()), runtime, identities);
     }
 
     /** 冷状态测试入口：投影边界检查后调用现用运行时规则。 */
