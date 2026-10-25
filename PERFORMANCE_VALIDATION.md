@@ -120,3 +120,52 @@ python3 /tmp/surprising-remediation-performance/recover-original-archive-once.py
 ## 清理状态
 
 本性能子任务全部节点、driver、发压和采样进程均已退出，无强杀或残留。600秒原节点1075、客户端1193、iostat1192、首次恢复16747及补恢复23826均已独立kill0/ps确认不存在；最终证据为 `/tmp/surprising-remediation-performance/resource-release-final-long-recovery.json`，`allOwnedReleased=true`。早期专属xctrace及其DTServiceHub也已核实并结束。临时源码、录制、trace、原Archive及成功/失败输出保留供复核，没有删除失败记录或终止其他用户任务。
+
+---
+
+# Aeron 完全饱和状态极限写入速度实测报告 (2026-10-25)
+
+## 1. 压测目标与范围
+
+针对用户提出的核心问题：**“在完全饱和状态下，Aeron 实际写入速度”**，本次实测隔离干扰，在 HotSpot JDK 27 环境下针对以下两个层级进行饱和打满测试：
+1. **纯 Aeron Cluster 基础设施层（无业务执行成本）**：
+   - 使用 `CommandReplicationNode`（单节点 Dedicated 模式真实 Aeron Cluster + Archive + Raft 共识日志）与 `CommandReplicationLoad`（独占持续发压、最大在途窗口 `maxInFlight = 256` 循环 `cluster.offer` 打满）。
+   - 验证链路：`cluster.offer` → Ingress UDP/IPC → ConsensusModule 共识排序 → Archive 磁盘 WAL 顺序归档持久化 → ClusteredService 提交确认 → Egress UDP 回传 ACK。
+2. **业务端到端饱和层（包含撮合、风控与持仓记账）**：
+   - 使用 `LinearPerpetualCoreBenchmark.saturatedMatchingWorkload`（单笔逐笔流饱和在途 256 发压）与 `ClusteredBatchTradingBenchmark`（批处理 batch=20 饱和发压）。
+
+---
+
+## 2. 纯 Aeron 基础设施极限写入速度实测数据
+
+| 测试场景 | 消息单包大小 | 业务项/包 | 15s 写入总提交数 | 消息写入速度 (`messagesPerSec`) | 有效载荷带宽 (`payloadMiBPerSec`) | 代表业务项吞吐 (`itemsPerSec`) | 背压重试数 (`retries`) | 确认延迟 p50 | 确认延迟 p99 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **单笔订单极限饱和** (`batch = 1`) | 140 Bytes | 1 笔 | **6,562,177 笔** | **437,471.455 ops/s**<br>(**43.75 万条/秒**) | **58.409 MiB/s**<br>(~61.25 MB/s) | **437,471 items/s** | 88 次 | **404.7 µs** | **4.62 ms** |
+| **批量订单极限饱和** (`batch = 20`) | 1,610 Bytes | 20 笔 | **948,624 批**<br>(18,972,480 笔) | **63,225.248 ops/s**<br>(**6.32 万批/秒**) | **97.077 MiB/s**<br>(~101.8 MB/s) | **1,264,505 items/s**<br>(**126.45 万笔/秒**) | 98 次 | **3.96 ms** | **5.18 ms** |
+
+> **关键数据指标**：
+> - 状态校验：两组测试最终 `unfinished = 0`，全部发送请求均被完整持久化入盘且收到客户端 ACK。
+> - 在途窗口：`peak = 256` 始终处于满打满状态，Aeron 写入通道在极低重试率（<100次）下维持极佳的饱和流水线吞吐。
+
+---
+
+## 3. 业务端到端完全饱和状态写入与撮合处理速度
+
+| 场景 | 负载与发压方式 | 实际写入与处理速度 | 终态与积压 | 对应带宽/吞吐分析 |
+| :--- | :--- | :--- | :--- | :--- |
+| **单笔逐笔端到端饱和** (`saturatedMatchingWorkload`) | `maxInFlight = 256`, 持续异步发压，包含撮合+风控+持仓记账 | **125,236.106 ops/s**<br>(撮合成交: 62,618 trades/s) | `unfinished = 0`<br>`rejected = 0` | 瓶颈受限于单线程状态机业务撮合与逐笔风控校验计算。 |
+| **常驻盘口异步挂撤单** (`residentBookMatchingThroughput`) | `lane = 2`, `maxInFlight = 256` | **142,581 ops/s** | `unfinished = 0` | 盘口常驻撮合流下的写入与处理速率。 |
+| **批处理端到端饱和** (`ClusteredBatchTradingBenchmark`) | `batchSize = 20`, `maxInFlight = 256`, `LINEAR_PERPETUAL` | **2,437,120.000 items/s**<br>(底座 Aeron 批次: 121,856 ops/s) | `unfinished = 0`<br>`rejected ≈ 0` | 批处理将业务解耦，Aeron 底座每秒吞吐 **12.18 万个 1.6KB 批次包**，折合有效吞吐 **~195 MB/s**。 |
+| **批处理端到端饱和** (`ClusteredBatchTradingBenchmark`) | `batchSize = 20`, `maxInFlight = 256`, `SPOT` | **2,723,840.000 items/s**<br>(底座 Aeron 批次: 136,192 ops/s) | `unfinished = 0`<br>`rejected ≈ 0` | 现货现货撮合流下的业务吞吐，折合有效吞吐 **~218 MB/s**。 |
+
+---
+
+## 4. 结论与性能边界
+
+1. **Aeron 底座纯复制与持久化上限**：
+   - 在单笔订单小包模式（140B）下，Aeron 纯协议栈在本地单节点饱和写入能力为 **43.7 万条/秒（437K ops/s）**，带宽 **58.4 MiB/s**。
+   - 在批量大包模式（1.6KB）下，Aeron 纯协议栈持续写入带宽达到 **97.1 MiB/s（~102 MB/s）**，代表业务项达到 **126.5 万笔/秒**。
+2. **与业务端到端对比**：
+   - 单笔交易端到端饱和吞吐受限于撮合引擎每秒状态机计算（~12.5万 - 14.3万 ops/s），此时 Aeron 底座利用率约为 30%，Aeron 绝非瓶颈。
+   - 当引入批量写入（batchSize=20）时，Aeron 底座的高带宽优势完全释放，端到端业务订单吞吐跃升至 **243.7 万 - 272.3 万笔/秒**。
+

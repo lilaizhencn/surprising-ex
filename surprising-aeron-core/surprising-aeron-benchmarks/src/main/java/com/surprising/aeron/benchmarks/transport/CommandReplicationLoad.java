@@ -50,9 +50,9 @@ public final class CommandReplicationLoad {
             long now = System.nanoTime();
             if (now < end && sent - acknowledged < started.length) {
                 long next = sent + 1;
-                message.putLong(24, next, ByteOrder.LITTLE_ENDIAN);
-                message.putLong(40, next, ByteOrder.LITTLE_ENDIAN);
-                message.putLong(64, next, ByteOrder.LITTLE_ENDIAN);
+                message.putLong(20, next, ByteOrder.LITTLE_ENDIAN);
+                message.putLong(36, next, ByteOrder.LITTLE_ENDIAN);
+                message.putLong(60, next, ByteOrder.LITTLE_ENDIAN);
                 started[(int) next & 255] = now;
                 long result = cluster.offer(message, 0, message.capacity());
                 if (result > 0) sent = next;
@@ -81,6 +81,14 @@ public final class CommandReplicationLoad {
     public static void main(String[] args) {
         int batch = Integer.getInteger("replication.batch", 1);
         if (batch != 1 && batch != 20) throw new IllegalArgumentException("batch must be 1 or 20");
+        int warmup = Integer.getInteger("replication.warmup", 10);
+        int duration = Integer.getInteger("replication.duration", 30);
+        ProductLine productLine = ProductLine.requireExternalCode(
+                System.getProperty("surprising.aeron.product-line", "LINEAR_PERPETUAL"));
+        List<String> hostnames = java.util.Arrays.stream(System.getProperty(
+                "surprising.aeron.hostnames", "127.0.0.1,127.0.0.1,127.0.0.1").split(","))
+                .map(String::trim)
+                .toList();
         var load = new CommandReplicationLoad();
         var buffer = new UnsafeBuffer(command(batch));
         try (var driver = MediaDriver.launch(new MediaDriver.Context().threadingMode(ThreadingMode.SHARED)
@@ -89,8 +97,7 @@ public final class CommandReplicationLoad {
                     .aeronDirectoryName(driver.aeronDirectoryName())
                     .messageTimeoutNs(30_000_000_000L)
                     .ingressChannel("aeron:udp")
-                    .ingressEndpoints(ProductLineClusterLayout.ingressEndpoints(ProductLine.LINEAR_PERPETUAL,
-                            List.of("127.0.0.1", "127.0.0.1", "127.0.0.1")))
+                    .ingressEndpoints(ProductLineClusterLayout.ingressEndpoints(productLine, hostnames))
                     .egressChannel("aeron:udp?endpoint=127.0.0.1:0")
                     .egressListener((session, timestamp, data, offset, length, header) -> {
                         long sequence = data.getLong(offset, ByteOrder.LITTLE_ENDIAN);
@@ -99,8 +106,8 @@ public final class CommandReplicationLoad {
                         load.acknowledged = sequence;
                         load.latency.recordValue(System.nanoTime() - load.started[(int) sequence & 255]);
                     }))) {
-            load.phase(cluster, buffer, 10, batch, "warmup");
-            load.phase(cluster, buffer, 30, batch, "measurement");
+            load.phase(cluster, buffer, warmup, batch, "warmup");
+            load.phase(cluster, buffer, duration, batch, "measurement");
             log.info("replicationTotal sequence={}", load.acknowledged);
         }
     }
