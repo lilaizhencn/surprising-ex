@@ -37,13 +37,19 @@ public final class AdminCursorPage {
         }
         try {
             String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            int split = decoded.lastIndexOf('|');
-            if (split <= 0 || split == decoded.length() - 1) {
-                throw new IllegalArgumentException("invalid cursor");
+            int splitPipe = decoded.lastIndexOf('|');
+            if (splitPipe > 0 && splitPipe < decoded.length() - 1) {
+                Instant timestamp = Instant.parse(decoded.substring(0, splitPipe));
+                long id = Long.parseLong(decoded.substring(splitPipe + 1));
+                return new Cursor(timestamp, id);
             }
-            Instant timestamp = Instant.parse(decoded.substring(0, split));
-            long id = Long.parseLong(decoded.substring(split + 1));
-            return new Cursor(timestamp, id);
+            int splitColon = decoded.indexOf(':');
+            if (splitColon > 0 && splitColon < decoded.length() - 1) {
+                long epochMillis = Long.parseLong(decoded.substring(0, splitColon));
+                long id = Long.parseLong(decoded.substring(splitColon + 1));
+                return new Cursor(Instant.ofEpochMilli(epochMillis), id);
+            }
+            throw new IllegalArgumentException("invalid cursor");
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid cursor", ex);
         }

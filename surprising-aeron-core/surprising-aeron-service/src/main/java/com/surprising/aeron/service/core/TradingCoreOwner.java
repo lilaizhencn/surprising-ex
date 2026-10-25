@@ -446,27 +446,6 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * Owner 推进门禁：看可接纳输入、完成通知或本地可推进工作。窗口非空本身不代表再次调用就能产生进展。
-     */
-    public boolean ownerWorkAvailable() {
-        if (pendingIngressReady()) return true;
-        return state != null && state.matchingProgress.hasDrainWork();
-    }
-
-    /**
-     * 判断业务队首是否有窗口容量，且未被已记住的冲突前缀挡住。
-     */
-    private boolean pendingIngressReady() {
-        // 当前输入环借出的队首条目，取走或释放后不能继续访问
-        var next = ingress.first();
-        if (next == null) return false;
-        // 当前 Owner 持有的流水命令窗口
-        ClusterCommandWindow window = commandPipeline.commandWindow();
-        if (window.size() == window.capacity()) return false;
-        return !commandPipeline.isIngressBlocked(next.command());
-    }
-
-    /**
      * 判断输入环是否有未处理的业务命令。
      */
     private boolean hasCommandIngress() {
@@ -640,15 +619,6 @@ public final class TradingCoreOwner {
      * 把会话等日志事件统一交给命令推进入口，不维护第二条业务执行路径。
      */
     private void drainFromLogEvent() { pollCommands(); }
-
-    /**
-     * 把同一个轻量完成通知接入运行时与 Matcher，工作线程发布完成后可唤醒 Owner。
-     * @param signal 工作线程发布完成后调用的轻量通知
-     */
-    public void ownerCompletionSignal(Runnable signal) {
-        state.runtimeState.ownerCompletionSignal(signal);
-        state.matcherPipeline().completionSignal(signal);
-    }
 
     /**
      * 只探测现有 Matcher 通知、撮合完成和 Lane 回执；运行时尚未建立时返回假，不在门禁里强制检查尚未激活的资源。

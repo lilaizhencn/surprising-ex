@@ -233,7 +233,6 @@ public final class ControlLaneDispatcher {
             }
             // release 发布后不再读取可变任务字段，Owner 此后可以立即复用槽位。
             LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 1L);
-            owner.signalOwnerCompletion();
         }
     }
 }

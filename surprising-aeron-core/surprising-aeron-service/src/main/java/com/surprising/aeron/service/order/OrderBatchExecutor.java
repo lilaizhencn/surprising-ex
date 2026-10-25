@@ -807,7 +807,7 @@ public final class OrderBatchExecutor {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
                 batch.observedSettlementLaneMask |= event.requiredLaneMask();
                 batch.mergeTreasuryDelta(owner.runtimeState().collectOrderBatchMatcherSettlement(
-                        event, owner.runtimeState().coldCommandFunds(), owner.terminalRetention()));
+                        event, null, owner.terminalRetention()));
                 owner.commits.publication.request();
                 if (event.commitSequence() != 0) batch.laneCommitCompleted(true);
                 owner.runtimeState().releaseMatcherSettlement(event);
@@ -861,7 +861,7 @@ public final class OrderBatchExecutor {
             // 当前已就绪并待收集的单项结算事件
             var settledEvent = batch.itemSettlementEvent;
             batch.mergeTreasuryDelta(owner.runtimeState().collectOrderBatchMatcherSettlement(
-                    settledEvent, owner.runtimeState().coldCommandFunds(), owner.terminalRetention()));
+                    settledEvent, null, owner.terminalRetention()));
             if (batch.kind == OrderBatchKind.AMEND && batch.lastMatchingResult.accepted()) {
                 // 保留原有预留修订计数；现货同时计算原单撤销，所以增加两次，其他产品增加一次。
                 owner.runtimeState().setMetadata(owner.productLine(), Math.addExact(owner.runtimeState().revision(),
@@ -1021,7 +1021,7 @@ public final class OrderBatchExecutor {
             boolean finalLaneCommit = batch.settlementEvent.commitSequence() != 0;
             // 整批事件已经收集的可空财库差额，未就绪时为空
             RuntimeTreasuryDelta delta = owner.runtimeState().collectMatcherSettlement(
-                    batch.settlementEvent, owner.runtimeState().coldCommandFunds(), owner.terminalRetention());
+                    batch.settlementEvent, null, owner.terminalRetention());
             if (delta == null) {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
@@ -1083,7 +1083,6 @@ public final class OrderBatchExecutor {
         // 整批响应缓冲中的有效字节数
         int responseLength = batch.preparedResponseLength;
         owner.terminalTradeCount(Math.addExact(owner.terminalTradeCount(), batch.tradeCount));
-        owner.validateFundsConservation(pending.command());
         owner.matchingFlow.commitMatchingSequence(batch.sequence);
         owner.resultLedger().storeOwnedResult(pending.command().header().commandId(),
                 pending.fingerprint(), ResponseStatus.APPLIED, CoreResultCode.NONE,
@@ -1201,16 +1200,13 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 开启原命令事实及批次变更作用域，一次绑定本命令资金累加器，再取得整批提交权并开始发布积累。
+     * 开启原命令事实及批次变更作用域，取得整批提交权并开始发布积累。
      * @param batch 本条批量命令的复用上下文
      * @param pending 本批仍占用的命令槽
      */
     void beginOrderBatchCommitContext(OrderBatchPending batch, CommandSlot pending) {
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.resultBuilder.beginCommand();
-        // 收取第一项回执前只绑定一次资金累加器。
-        // 顺序子项和多轮 Owner 挂起期间累积的账本回执必须一直保留到最终收尾。
-        owner.setCommandFunds(pending.fundsAccumulator());
         owner.runtimeState().beginOrderBatchMutationScope();
         batch.beginCommit();
         owner.commits.publication.begin();
@@ -1232,7 +1228,7 @@ public final class OrderBatchExecutor {
         }
         beginOrderBatchCommitContext(batch, pending);
         if (!preparedCancel) {
-            owner.runtimeState().collectPlaceBatchAdmission(admission, owner.runtimeState().coldCommandFunds());
+            owner.runtimeState().collectPlaceBatchAdmission(admission, null);
             owner.runtimeState().releasePlaceBatchAdmission(admission);
             batch.placeBatchAdmissionEvent = null;
             owner.commits.publication.request();

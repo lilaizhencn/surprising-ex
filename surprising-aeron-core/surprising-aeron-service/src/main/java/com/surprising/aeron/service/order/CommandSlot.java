@@ -19,7 +19,6 @@ import com.surprising.aeron.service.result.ResponseArena;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
 import com.surprising.aeron.service.settlement.MatcherSettlementPlan;
 import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation;
-import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import java.util.List;
@@ -57,10 +56,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     @Accessors(fluent = true, chain = false)
     @Getter
     private List<Long> preMatchingCancellationOrderIds;
-    /**  本命令当前阶段的资金事实累加器，不是可写账户余额。 返回当前命令拥有的资金累加器，跨阶段交接由调用方控制。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private final RuntimeFundsAccumulator fundsAccumulator = new RuntimeFundsAccumulator();
     /**  本命令已经解码的输入引用。 返回命令的解码槽引用，不能在发布后任意改写。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -520,19 +515,17 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     }
 
     /**
-     * 要求正序号、命令类消息和必需输入非空，清旧生命周期后绑定命令、指纹、解码、先撤列表及来源资金交接，重置本次提交边界和业务阶段。保留槽内可复用任务对象，不是复制一份账户状态。
+     * 要求正序号、命令类消息和必需输入非空，清旧生命周期后绑定命令、指纹、解码及先撤列表，重置本次提交边界和业务阶段。保留槽内可复用任务对象，不是复制一份账户状态。
      * @param sequence 本次完整的正 Core 命令序号
      * @param operation 本槽承载的业务操作类别
      * @param command 本次完整 Core 命令消息
      * @param fingerprint 本次原命令指纹
      * @param preMatchingCancellationOrderIds 准入确定的需要先撤的订单号列表
-     * @param sourceFunds 可空来源资金累加器，初始化完成后移交到本槽空缓冲
      * @param decodedCommand 当前命令已经解码的输入
      * @param admission 对应方法签名的准入事件或已解析准入值，使用期间按租约只读
      */
     CommandSlot initialize(long sequence, Operation operation, CoreMessage command,
                                CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
-                               RuntimeFundsAccumulator sourceFunds,
                                DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
         if (sequence <= 0 || operation == null || command == null || preMatchingCancellationOrderIds == null
                 || fingerprint == null || decodedCommand == null
@@ -548,7 +541,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         this.command = command;
         this.fingerprint = fingerprint;
         this.preMatchingCancellationOrderIds = retainCancellationIds(preMatchingCancellationOrderIds);
-        fundsAccumulator.clear();
         this.decodedCommand = decodedCommand;
         this.admission = admission;
         commitFenceTimestamp = 0;
@@ -569,7 +561,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         realtimeTakerOrder = null;
         pipelinedSettlementCounted = false;
         cachedMatcherShard = -1;
-        if (sourceFunds != null) sourceFunds.transferToEmpty(fundsAccumulator);
         return this;
     }
 
@@ -802,7 +793,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         command = null;
         fingerprint = null;
         preMatchingCancellationOrderIds = List.of();
-        fundsAccumulator.clear();
         decodedCommand = null;
         admission = null;
         settlementContinuation = null;
@@ -1002,9 +992,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     private PrimitiveLongChangeSet commitChangedOrderIds = new PrimitiveLongChangeSet();
     /** 是否保存了待恢复的提交输入。 */
     private boolean commitContextActive;
-    /** 挂起提交期间移交到本槽的资金事实缓冲，不重复累加同一 posting。 */
-    private final com.surprising.aeron.service.treasury.RuntimeFundsAccumulator commitFundsAccumulator =
-            new com.surprising.aeron.service.treasury.RuntimeFundsAccumulator(32);
     /** 挂起上下文中是否需要发布快照变化。 */
     private boolean commitSnapshotDirty;
     /** 挂起变化是否只有临时快照内容。 */
@@ -1063,12 +1050,10 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     /**
      * 当前没有挂起上下文时，把 Owner 结果构建器的 primitive 用户/订单变更缓冲与本槽空缓冲交换，并转交资金累加器及快照标记，供续步让出执行后恢复；不物化 boxed 列表。
      * @param resultBuilder Owner 当前使用的结果与变更集合构建器
-     * @param fundsAccumulator 可空的 Owner 提交资金缓冲，挂起时转交到槽内
      * @param snapshotDirty 挂起时保存的快照是否有待发布变化
      * @param snapshotProvisionalOnly 挂起时变化是否仅含临时快照
      */
     public void suspendCommitContext(CommandResultBuilder resultBuilder,
-                              com.surprising.aeron.service.treasury.RuntimeFundsAccumulator fundsAccumulator,
                               boolean snapshotDirty, boolean snapshotProvisionalOnly) {
         if (resultBuilder == null || commitContextActive) {
             throw new IllegalStateException("invalid suspended sequence commit context");
@@ -1081,8 +1066,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         commitChangedOrderIds = resultBuilder.changedOrderIds();
         resultBuilder.changedUserIds(reusableUserIds);
         resultBuilder.changedOrderIds(reusableOrderIds);
-        commitFundsAccumulator.clear();
-        if (fundsAccumulator != null) fundsAccumulator.transferToEmpty(commitFundsAccumulator);
         commitSnapshotDirty = snapshotDirty;
         commitSnapshotProvisionalOnly = snapshotProvisionalOnly;
         commitContextActive = true;
@@ -1114,14 +1097,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     PrimitiveLongChangeSet commitChangedOrderIds() { return requiredCommit(commitChangedOrderIds); }
     /**
-     * 要求提交上下文活跃，目标非空时先清目标再转交本槽资金缓冲；目标为空不做转交，不重复合并逐账户 posting。
-     * @param target 接收原生事实的结算目标或接收提交资金缓冲的目标，具体类型见签名
-     */
-    public void takeCommitFundsTo(com.surprising.aeron.service.treasury.RuntimeFundsAccumulator target) {
-        requireCommit();
-        if (target != null) { target.clear(); commitFundsAccumulator.transferToEmpty(target); }
-    }
-    /**
      * 要求上下文活跃后返回是否需要发布快照变化。
      */
     public boolean commitSnapshotDirty() { requireCommit(); return commitSnapshotDirty; }
@@ -1137,7 +1112,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         requireCommit();
         commitChangedUserIds.clear();
         commitChangedOrderIds.clear();
-        commitFundsAccumulator.clear();
         commitSnapshotDirty = false;
         commitSnapshotProvisionalOnly = false;
         commitContextActive = false;
@@ -1277,7 +1251,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         submittedMatcherShard = -1;
         commitChangedUserIds.clear();
         commitChangedOrderIds.clear();
-        commitFundsAccumulator.clear();
         commitSnapshotDirty = false;
         commitSnapshotProvisionalOnly = false;
         commitContextActive = false;

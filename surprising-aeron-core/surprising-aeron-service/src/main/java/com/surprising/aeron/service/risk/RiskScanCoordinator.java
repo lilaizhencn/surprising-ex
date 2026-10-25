@@ -240,9 +240,8 @@ public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
     private void publishRoutes() {
         ledgerScope = null;
         // 发布就绪前暂存的运行时引用，完成信号通过它通知 Owner。
-        TradingAccountRuntime completion = runtime;
+
         routesReady = true;
-        completion.signalOwnerCompletion();
     }
 
     /**

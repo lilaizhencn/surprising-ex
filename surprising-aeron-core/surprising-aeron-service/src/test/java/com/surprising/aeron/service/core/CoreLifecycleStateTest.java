@@ -690,7 +690,25 @@ class CoreLifecycleStateTest {
             java.util.function.LongFunction<InsuranceAllocationPolicy.Resolution> resolution = id ->
                     runtime.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.resolve(receipts, count, id, assetId, ledger));
             // 对反向候选列表一次性求出的全部保险分配结果。
-            var allAllocations = InsuranceAllocationPolicy.allocations(runtime, identities, reverseIds);
+            long[] ids = reverseIds.stream().mapToLong(Long::longValue).toArray();
+            var claims = new InsuranceAllocationPolicy.AllocationInputs[runtime.laneCount()];
+            for (int laneId = 0; laneId < claims.length; laneId++) {
+                final int current = laneId;
+                long[] laneIds = java.util.Arrays.stream(ids)
+                        .filter(id -> runtime.accountLaneId(runtime.liquidation(id).userId()) == current).toArray();
+                if (laneIds.length == 0) continue;
+                int[] assets = new int[laneIds.length];
+                java.util.Arrays.fill(assets, assetId);
+                var instruments = new CoreInstrument[laneIds.length];
+                for (int index = 0; index < laneIds.length; index++)
+                    instruments[index] = runtime.liquidation(laneIds[index]).instrument();
+                runtime.inLaneCommandScope(runtime.accountLane(laneId), lane -> {
+                    claims[current] = InsuranceAllocationPolicy.prepareLaneAllocations(runtime, laneIds, assets, instruments);
+                    return null;
+                });
+            }
+            var allAllocations = runtime.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.allocations(
+                    ledger, InsuranceAllocationPolicy.mergeLaneClaims(claims)));
             for (long /* 当前要比较逐项保险覆盖结果的强平编号。 */ id : reverseIds) {
                 assertThat(resolution.apply(id).expectedCoverage())
                         .isEqualTo(allAllocations.get(id))

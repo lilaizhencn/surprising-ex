@@ -89,66 +89,64 @@ class RuntimeIdentityRegistryTest {
         }
     }
 
-    /**
-     * 冷表两次准备同一客户端单号，逐次 Lane 释放只在最后删除；相同身份在独立表中可释放而不影响原表，错误 Lane 拒绝。
-     */
+    /** 各运行时的 Lane 独立保留引用，确定性键相同也不会跨运行时释放。 */
     @Test
     void laneReleaseCompletesWithoutAnOwnerHandoffAndPreservesOtherTables() {
-        // 本用例当前验证的独立身份表，或原表与恢复表遍历中的当前实例
         var registry = new RuntimeIdentityRegistry();
-        // 本用例身份所属用户十七
-        long user = 17;
-        // 按测试用户路由构造或从冷运行时取得的所属账户 Lane
-        var lane = new AccountLaneState(CoreConfiguration.standaloneLaneTopology().accountLaneId(user), 16);
-        // 首次客户端准备结果，或第一个用户/名称的实际持仓键
-        var first = registry.prepareClientKeyInLane(lane, user, "客户-retired");
-        registry.prepareClientKeyInLane(lane, user, "客户-retired");
-        // 去掉首次客户端准备结果符号后的实际正键
-        long firstKey = RuntimeIdentityRegistry.clientKeyValue(first);
-        registry.releaseClientKeyInLane(lane, user, firstKey);
-        assertThat(registry.findClientKey(user, "客户-retired")).isEqualTo(firstKey);
-        registry.releaseClientKeyInLane(lane, user, firstKey);
-        assertThat(registry.clientIdentityCount()).isZero();
-        // 最后删除后重新准备同名身份所得结果；客户端结果保留新分配符号
-        var recreated = registry.prepareClientKeyInLane(lane, user, "客户-retired");
-        // 独立表为相同用户和原名生成同一确定性身份，释放不影响原表
         var independent = new RuntimeIdentityRegistry();
-        assertThat(independent.clientKey(user, "客户-retired")).isEqualTo(RuntimeIdentityRegistry.clientKeyValue(recreated));
-        // 去掉重新准备客户端结果符号后的实际正键
-        long recreatedKey = RuntimeIdentityRegistry.clientKeyValue(recreated);
-        independent.releaseClientKeyInLane(lane, user, recreatedKey);
-        assertThat(independent.clientIdentityCount()).isZero();
-        assertThat(registry.clientIdentityCount()).isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.releaseClientKeyInLane(
-                new AccountLaneState(lane.laneId() + 1, 16), user, recreatedKey))
-                .isInstanceOf(IllegalStateException.class);
+        long user = 17;
+        try (var runtime = new TradingAccountRuntime(); var other = new TradingAccountRuntime()) {
+            registry.bindClientLanes(runtime);
+            independent.bindClientLanes(other);
+            var lane = runtime.accountLane(runtime.accountLaneId(user));
+            var otherLane = other.accountLane(other.accountLaneId(user));
+            long first = registry.prepareClientKeyInLane(lane, user, "客户-retired");
+            registry.prepareClientKeyInLane(lane, user, "客户-retired");
+            long firstKey = RuntimeIdentityRegistry.clientKeyValue(first);
+            registry.releaseClientKeyInLane(lane, user, firstKey);
+            assertThat(registry.findClientKey(user, "客户-retired")).isEqualTo(firstKey);
+            registry.releaseClientKeyInLane(lane, user, firstKey);
+            assertThat(registry.clientIdentityCount()).isZero();
+            long recreated = registry.prepareClientKeyInLane(lane, user, "客户-retired");
+            long key = RuntimeIdentityRegistry.clientKeyValue(recreated);
+            assertThat(independent.clientKey(user, "客户-retired")).isEqualTo(key);
+            independent.releaseClientKeyInLane(otherLane, user, key);
+            assertThat(independent.clientIdentityCount()).isZero();
+            assertThat(registry.clientIdentityCount()).isOne();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.releaseClientKeyInLane(
+                    otherLane, user, key)).isInstanceOf(IllegalStateException.class);
+        }
     }
 
-    /**
-     * 在冷表中检查异线程只读反查、跨用户误释放和逐用户删除互不干扰；未启动真实账户工作线程。
-     */
+    /** 冷装载与活动查询都读取同一 Lane 身份表，错用户释放不影响其他身份。 */
     @Test
     void clientReadOnlyLookupAndLaneReleasePreserveOtherKeys() throws Exception {
-        // 供异线程读取和释放验证的冷客户端身份表
         var registry = new RuntimeIdentityRegistry();
-        // 首次客户端准备结果，或第一个用户/名称的实际持仓键
-        long first = registry.clientKey(7, "客户-A");
-        // 另一用户或另一名称的身份键，用于检查释放隔离
-        long second = registry.clientKey(8, "客户-B");
-        assertThat(registry.clientOrderId(7, first)).isEqualTo("客户-A");
-        assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
-        // 模拟独立 Lane 操作或普通冷读的单线程执行器，用例结束关闭
-        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
-        try {
-            assertThat(executor.submit(() -> registry.clientOrderId(7, first)).get()).isEqualTo("客户-A");
-        } finally { executor.shutdownNow(); }
-        registry.releaseClientKey(8, first);
-        assertThat(registry.findClientKey(7, "客户-A")).isEqualTo(first);
-        registry.releaseClientKey(7, first);
-        assertThat(registry.findClientKey(7, "客户-A")).isNull();
-        assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
-        registry.releaseClientKey(8, second);
-        assertThat(registry.clientIdentityCount()).isZero();
+        try (var runtime = new TradingAccountRuntime()) {
+            registry.bindClientLanes(runtime);
+            long first = registry.clientKey(7, "客户-A");
+            long second = registry.clientKey(8, "客户-B");
+            registry.releaseClientKey(8, first);
+            assertThat(registry.findClientKey(7, "客户-A")).isEqualTo(first);
+            registry.releaseClientKey(7, first);
+            assertThat(registry.findClientKey(7, "客户-A")).isNull();
+            assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
+            runtime.startAccountLanes();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.clientOrderId(8, second))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThat(com.surprising.aeron.service.core.AccountLaneQueryTestSupport.read(
+                    runtime, 8, () -> registry.clientOrderId(8, second))).isEqualTo("客户-B");
+            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(8), laneId -> {
+                registry.releaseClientKeyInLane(runtime.accountLane(laneId), 8, second);
+                return null;
+            });
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+            while (!runtime.pollControlLanes()) {
+                if (System.nanoTime() >= deadline) throw new AssertionError("identity release timed out");
+                Thread.onSpinWait();
+            }
+            assertThat(registry.clientIdentityCount()).isZero();
+        }
     }
 
     /**
@@ -353,17 +351,15 @@ class RuntimeIdentityRegistryTest {
     void clientIdentityReferenceProtectsAReusedKeyFromAnOlderTerminalRelease() {
         // 本用例 Owner 准备和查询的身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        // 首次客户端准备结果，或第一个用户/名称的实际持仓键
-        var first = identities.prepareClientKey(1001, "client-1");
-        // 同客户端单号再次准入保留的实际正键
-        var reused = identities.prepareClientKey(1001, "client-1");
-
-        identities.releaseClientKey(1001, first);
-
-        assertThat(identities.clientIdentityCount()).isOne();
-        assertThat(identities.clientOrderId(1001, reused)).isEqualTo("client-1");
-
-        identities.rollbackPreparedClientKey(1001, "client-1", reused);
-        assertThat(identities.clientIdentityCount()).isZero();
+        try (var runtime = new TradingAccountRuntime()) {
+            identities.bindClientLanes(runtime);
+            var first = identities.prepareClientKey(1001, "client-1");
+            var reused = identities.prepareClientKey(1001, "client-1");
+            identities.releaseClientKey(1001, first);
+            assertThat(identities.clientIdentityCount()).isOne();
+            assertThat(identities.clientOrderId(1001, reused)).isEqualTo("client-1");
+            identities.rollbackPreparedClientKey(1001, "client-1", reused);
+            assertThat(identities.clientIdentityCount()).isZero();
+        }
     }
 }

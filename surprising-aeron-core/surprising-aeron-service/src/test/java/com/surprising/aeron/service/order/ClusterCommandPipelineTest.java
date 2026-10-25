@@ -547,7 +547,6 @@ class ClusterCommandPipelineTest {
     @EnumSource(ProductLine.class)
     void idleProbeBeforeTheFirstLogDoesNotRequireAnActivatedCommitJournal(ProductLine product) {
         try (/* 接收交错或并发在途输入的测试 Fixture，退出资源作用域时关闭 */ Fixture live = new Fixture(product)) {
-            live.service.ownerCompletionSignal(() -> {});
             assertThat(live.service.ownerCompletionAvailable()).isFalse();
             assertThat(live.service.pollCommands()).isZero();
             assertThat(live.service.ownerCompletionAvailable()).isFalse();

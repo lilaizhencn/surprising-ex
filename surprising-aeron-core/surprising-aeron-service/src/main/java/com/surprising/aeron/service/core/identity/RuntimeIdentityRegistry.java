@@ -112,35 +112,12 @@ public final class RuntimeIdentityRegistry {
     /** 客户端身份权威表所在运行时，尚未绑定时为空。 */
     private TradingAccountRuntime clientRuntime;
 
-    /** 仅独立冷构建按用户保存的身份表，成功迁入运行时后清空并释放。 */
-    private org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<LaneClientIdentities> unboundClients;
-
-    /**
-     * 仅在新旧账户工作线程均未启动时迁移客户端身份：先导入新运行时，成功后清旧表并切换权威引用。导入失败保留旧来源，不发布不完整的新运行时。
-     * @param runtime 要接入客户端身份的冷运行时，账户线程尚未启动
-     */
+    /** 首次装载前绑定唯一账户运行时；客户身份直接归所属 Lane，不支持迁移或重绑定。 */
     public void bindClientLanes(TradingAccountRuntime runtime) {
         assertOwner();
-        if (clientRuntime == runtime) return;
-        if (runtime.accountLanesStarted() || clientRuntime != null && clientRuntime.accountLanesStarted())
-            throw new IllegalStateException("client identities already belong to a runtime");
-        // 先把身份导入新的冷运行时，成功后才释放旧来源；导入失败保留原权威表，
-        // 不把未完整导入的新运行时设为当前运行时。
-        if (clientRuntime != null) {
-            for (/* 新旧冷运行时账户 Lane 的遍历下标 */ int laneIndex = 0; laneIndex < clientRuntime.accountLaneCount(); laneIndex++) {
-                // 当前正导入新冷运行时的旧账户 Lane
-                AccountLaneState lane = clientRuntime.accountLane(laneIndex);
-                lane.clientIdentities().copyTo(runtime);
-            }
-        } else if (unboundClients != null) unboundClients.forEachValue(/* 当前用户或迁移中的客户端身份表 */ table -> table.copyTo(runtime));
-        if (clientRuntime != null) {
-            for (/* 新旧冷运行时账户 Lane 的遍历下标 */ int laneIndex = 0; laneIndex < clientRuntime.accountLaneCount(); laneIndex++) {
-                // 新运行时已导入完成，当前可清空的旧账户 Lane
-                AccountLaneState lane = clientRuntime.accountLane(laneIndex);
-                lane.clientIdentities().clear();
-            }
-        }
-        if (unboundClients != null) { unboundClients.clear(); unboundClients = null; }
+        java.util.Objects.requireNonNull(runtime, "runtime");
+        if (clientRuntime != null || runtime.accountLanesStarted())
+            throw new IllegalStateException("client identities require one passive runtime binding");
         clientTopology = runtime.topology();
         clientRuntime = runtime;
     }
@@ -154,44 +131,22 @@ public final class RuntimeIdentityRegistry {
         return clientRuntime.accountLaneForUserReadOnly(userId);
     }
 
-    /**
-     * 取用户的客户端身份表；绑定后使用账户 Lane 的表，独立冷构建时由 Owner 按用户延迟建表。
-     * @param userId 该身份所属用户
-     */
+    /** 按唯一运行时的固定路由借用客户身份表，读取和写入均遵守 Lane 所有权。 */
     private LaneClientIdentities clientTable(long userId) {
-        if (clientRuntime != null) return clientLane(userId).clientIdentities();
-        assertOwner();
-        if (unboundClients == null)
-            unboundClients = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
-        // 当前用户或迁移中的客户端身份表
-        LaneClientIdentities table = unboundClients.get(userId);
-        if (table == null) { table = new LaneClientIdentities(null); unboundClients.put(userId, table); }
-        return table;
+        return clientLane(userId).clientIdentities();
     }
 
     /**
-     * 读取现有用户身份表，不创建冷表；绑定后仍须由调用方遵守账户访问边界。
-     * @param userId 该身份所属用户
-     */
-    private LaneClientIdentities clientTableReadOnly(long userId) {
-        if (clientRuntime != null) return clientLane(userId).clientIdentities();
-        // 独立冷构建的客户端表引用，不存在则查询未命中
-        var clients = unboundClients;
-        return clients == null ? null : clients.get(userId);
-    }
-
-    /**
-     * 先核对 Lane 所有权、用户路由及运行时实例，再返回其身份表；冷构建仍走按用户保存的临时表。
+     * 先核对 Lane 所有权、用户路由及唯一运行时实例，再返回其身份表。
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
      * @param userId 该身份所属用户
      */
     private LaneClientIdentities clientTable(AccountLaneState lane, long userId) {
         lane.assertOwner();
         if (lane.laneId() != clientTopology.accountLaneId(userId)
-                || (clientRuntime != null && clientRuntime.accountLane(lane.laneId()) != lane))
+                || clientRuntime == null || clientRuntime.accountLane(lane.laneId()) != lane)
             throw new IllegalStateException("client identity crossed account Lane");
-        if (clientRuntime != null) return lane.clientIdentities();
-        return clientTable(userId);
+        return lane.clientIdentities();
     }
 
     /**
@@ -532,7 +487,7 @@ public final class RuntimeIdentityRegistry {
      * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
      */
     public long prepareClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId) {
-        // 当前用户或迁移中的客户端身份表
+        // 当前用户所属 Lane 的客户端身份表
         LaneClientIdentities table = clientTable(lane, userId);
         // 当前用户身份的确定性长整数键
         long key = clientKeyOrZero(userId, clientOrderId);
@@ -574,7 +529,7 @@ public final class RuntimeIdentityRegistry {
      * @param preparedKey 本次客户端身份准备结果，负号表示新建，绝对值为实际键
      */
     public void rollbackClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId, long preparedKey) {
-        // 当前用户或迁移中的客户端身份表
+        // 当前用户所属 Lane 的客户端身份表
         LaneClientIdentities table = clientTable(lane, userId);
         if (preparedKey != 0) table.rollback(clientKeyValue(preparedKey), userId, clientOrderId);
     }
@@ -653,9 +608,9 @@ public final class RuntimeIdentityRegistry {
         // 当前用户身份的确定性长整数键
         long key = clientKeyOrZero(userId, clientOrderId);
         if (key == 0) return 0;
-        // 当前用户或迁移中的客户端身份表
-        LaneClientIdentities table = clientTableReadOnly(userId);
-        return table == null ? 0 : table.find(key, userId, clientOrderId);
+        // 当前用户所属 Lane 的客户端身份表
+        LaneClientIdentities table = clientTable(userId);
+        return table.find(key, userId, clientOrderId);
     }
 
     /**
@@ -665,7 +620,7 @@ public final class RuntimeIdentityRegistry {
      * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
      */
     public long findClientKeyValueInLane(AccountLaneState lane, long userId, String clientOrderId) {
-        // 当前用户或迁移中的客户端身份表
+        // 当前用户所属 Lane 的客户端身份表
         LaneClientIdentities table = clientTable(lane, userId);
         // 当前用户身份的确定性长整数键
         long key = clientKeyOrZero(userId, clientOrderId);
@@ -679,9 +634,9 @@ public final class RuntimeIdentityRegistry {
      */
     public String clientOrderId(long userId, long clientKey) {
         if (clientKey == 0) return "";
-        // 当前用户或迁移中的客户端身份表
-        LaneClientIdentities table = clientTableReadOnly(userId);
-        return table == null ? null : table.name(clientKey, userId);
+        // 当前用户所属 Lane 的客户端身份表
+        LaneClientIdentities table = clientTable(userId);
+        return table.name(clientKey, userId);
     }
 
     /**
@@ -1123,16 +1078,10 @@ public final class RuntimeIdentityRegistry {
         assertOwner();
         // 汇总的存活客户端身份条目数，不是引用总数
         int count = 0;
-        if (clientRuntime != null) {
-            for (/* 新旧冷运行时账户 Lane 的遍历下标 */ int laneIndex = 0; laneIndex < clientRuntime.accountLaneCount(); laneIndex++) {
-            // 用户所属账户 Lane 或当前循环正迁移的 Lane
+        if (clientRuntime == null) return 0;
+        for (int laneIndex = 0; laneIndex < clientRuntime.accountLaneCount(); laneIndex++) {
             AccountLaneState lane = clientRuntime.accountLane(laneIndex);
-count = Math.addExact(count, lane.clientIdentities().publishedCount());
-        }
-        } else if (unboundClients != null) {
-            // 遍历分配或客户端身份表的原始游标
-            var iterator = unboundClients.values().iterator();
-            while (iterator.hasNext()) count = Math.addExact(count, iterator.next().publishedCount());
+            count = Math.addExact(count, lane.clientIdentities().publishedCount());
         }
         return count;
     }

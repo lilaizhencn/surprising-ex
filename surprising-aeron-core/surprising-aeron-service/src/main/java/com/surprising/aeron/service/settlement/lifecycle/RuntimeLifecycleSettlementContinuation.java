@@ -279,7 +279,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         }
 
         /**
-         * 由账本线程读取用户索引并按账户 Lane 分组；账本未激活时由初始化路径内联调用。订单仍有下一页时不选择持仓用户，最后发布 usersReady 并唤醒 Owner。
+         * 由账本线程读取用户索引并按账户 Lane 分组；账本未激活时由初始化路径内联调用。订单仍有下一页时不选择持仓用户，最后发布 usersReady。
          */
         private void selectAccountUsers() {
             userPage = moreOrders ? null
@@ -288,10 +288,8 @@ public final class RuntimeLifecycleSettlementContinuation {
             for (long /* 本次账本选页得到的用户编号。 */ user : selectedUserIds) usersByLane[runtime.topology().accountLaneId(user)].add(user);
             userLaneMask = RuntimeLifecycleSettlement.laneMask(usersByLane);
             indexedUserIds = null;
-            // 发布完成标记前保存的运行时引用，用于随后唤醒 Owner。
-            TradingAccountRuntime completion = runtime;
+
             usersReady = true;
-            completion.signalOwnerCompletion();
         }
 
         /**

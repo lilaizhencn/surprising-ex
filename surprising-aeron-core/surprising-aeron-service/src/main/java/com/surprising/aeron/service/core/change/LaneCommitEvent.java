@@ -287,12 +287,9 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("Account Lane committed the same sequence twice");
         }
-        // 先保存通知目标再发布完成位，Owner 可能立即收齐并重置事件，使 runtime 字段先于本 Lane 唤醒动作被清空。
-        // 发布完成位之前保存的运行时通知目标，避免 Owner 立即回收事件后读到空 runtime。
-        TradingAccountRuntime completionRuntime = runtime;
+
         LONGS.setRelease(completedLanes, completionOffset, 1L);
-        // 完成位才是交接依据，先发布可见完成位再唤醒 Owner；Owner 重新核对所有参与位后才继续。
-        completionRuntime.signalOwnerCompletion();
+
     }
 
     /**

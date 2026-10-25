@@ -291,18 +291,9 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      */
     public String stalledCommandDiagnostics() { return owner.stalledCommandDiagnostics(); }
     /**
-     * 读取真实 Owner 的可推进工作门禁，不把在途数量当作进展。
-     */
-    public boolean ownerWorkAvailable() { return owner.ownerWorkAvailable(); }
-    /**
      * 读取真实 Owner 的 Matcher 或 Lane 完成提示。
      */
     public boolean ownerCompletionAvailable() { return owner.ownerCompletionAvailable(); }
-    /**
-     * 把测试提供的完成通知接入实际 Owner 和 Matcher。
-     * @param signal 实际完成发布后调用的测试通知
-     */
-    public void ownerCompletionSignal(Runnable signal) { owner.ownerCompletionSignal(signal); }
     /**
      * 推进一次 Owner，再排出测试响应；返回二者工作量之和，不是本轮终态条数。
      */

@@ -3,12 +3,9 @@ package com.surprising.aeron.service.order;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
 import com.surprising.aeron.service.result.CommandResultBuilder;
-import com.surprising.aeron.service.settlement.FundsPosting;
-import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
-import static com.surprising.aeron.service.treasury.RuntimeFundsTestSupport.postings;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -36,59 +33,35 @@ class CommandSlotRingTest {
         assertThat(ring.claim(3).submittedMatcherShard()).isEqualTo(-1);
     }
 
-    /**
-     * 先后把两条不同资金事实挂到两个槽，要求来源缓冲转空，分别取回正确旧值；丢弃槽后已取回的活动缓冲不被清掉。
-     */
+    /** 不同序号分别保存变化和发布标记，恢复一个槽不修改另一个槽。 */
     @Test
-    void suspendedSequencesTransferFundsWithoutSharingTheActiveBuffer() {
-        // 当前固定容量命令槽池。
+    void suspendedSequencesKeepTheirOwnChangesAndPublicationFlags() {
         var ring = new CommandSlotRing(4);
-        // 首个槽或首个同步完成结果，具体见当前声明。
         var first = ring.claim(1);
-        // 第二个已占用槽。
         var second = ring.claim(2);
-        // 正在由 Owner 使用的资金缓冲，挂起时被移交并清空。
-        var active = new RuntimeFundsAccumulator();
-        active.add(7, FundsPosting.OwnerKind.USER, 11,
-                FundsPosting.Subledger.AVAILABLE, -100);
-        // 第一次人工 posting 的不可变对照值。
-        var firstExpected = postings(active);
-        // 首个提交的用户变更缓冲。
-        PrimitiveLongChangeSet firstUsers = new PrimitiveLongChangeSet();
-        firstUsers.add(11L);
-        // 首个提交的订单变更缓冲。
-        PrimitiveLongChangeSet firstOrders = new PrimitiveLongChangeSet();
-        firstOrders.add(1L);
-        // 首个提交使用的结果构建器。
-        CommandResultBuilder firstBuilder = new CommandResultBuilder(null);
-        firstBuilder.changedUserIds(firstUsers);
-        firstBuilder.changedOrderIds(firstOrders);
-        first.suspendCommitContext(firstBuilder, active, true, false);
-        assertThat(active.isEmpty()).isTrue();
-        active.add(8, FundsPosting.OwnerKind.USER, 22,
-                FundsPosting.Subledger.LOCKED, 50);
-        // 第二次人工 posting 的不可变对照值。
-        var secondExpected = postings(active);
-        // 第二个提交的用户变更缓冲。
-        PrimitiveLongChangeSet secondUsers = new PrimitiveLongChangeSet();
-        secondUsers.add(22L);
-        // 第二个提交的订单变更缓冲。
-        PrimitiveLongChangeSet secondOrders = new PrimitiveLongChangeSet();
-        secondOrders.add(2L);
-        // 第二个提交使用的结果构建器。
-        CommandResultBuilder secondBuilder = new CommandResultBuilder(null);
-        secondBuilder.changedUserIds(secondUsers);
-        secondBuilder.changedOrderIds(secondOrders);
-        second.suspendCommitContext(secondBuilder, active, false, false);
-        first.takeCommitFundsTo(active);
+        var builder = new CommandResultBuilder(null);
+        builder.changedUserIds().add(11L);
+        builder.changedOrderIds().add(101L);
+        first.suspendCommitContext(builder, true, false);
+        builder.changedUserIds().add(22L);
+        builder.changedOrderIds().add(202L);
+        second.suspendCommitContext(builder, false, true);
+        first.restoreCommitContext(builder);
+        assertThat(builder.changedUserIds()).containsExactly(11L);
+        assertThat(builder.changedOrderIds()).containsExactly(101L);
+        assertThat(first.commitSnapshotDirty()).isTrue();
+        assertThat(first.commitSnapshotProvisionalOnly()).isFalse();
         first.clearCommitContext();
-        assertThat(postings(active)).usingRecursiveComparison().isEqualTo(firstExpected);
-        second.takeCommitFundsTo(active);
-        second.clearCommitContext();
-        assertThat(postings(active)).usingRecursiveComparison().isEqualTo(secondExpected);
         ring.discard(1);
+        second.restoreCommitContext(builder);
+        assertThat(builder.changedUserIds()).containsExactly(22L);
+        assertThat(builder.changedOrderIds()).containsExactly(202L);
+        assertThat(second.commitSnapshotDirty()).isFalse();
+        assertThat(second.commitSnapshotProvisionalOnly()).isTrue();
+        second.clearCommitContext();
         ring.discard(2);
-        assertThat(postings(active)).usingRecursiveComparison().isEqualTo(secondExpected);
+        assertThat(builder.changedUserIds()).containsExactly(22L);
+        assertThat(builder.changedOrderIds()).containsExactly(202L);
     }
 
     /**
@@ -211,7 +184,7 @@ class CommandSlotRingTest {
     }
 
     /**
-     * 挂起用户、订单变更和空资金缓冲，检查快照标记及数据，取回后清上下文并丢弃槽。
+     * 挂起用户、订单变更，检查发布标记及数据，清上下文后丢弃槽。
      */
     @Test
     void ownsSuspendedCommitStateBySequence() {
@@ -219,21 +192,15 @@ class CommandSlotRingTest {
         CommandSlotRing ring = new CommandSlotRing(4);
         // 当前已占用的命令槽。
         CommandSlot context = ring.claim(2);
-        // 本次挂起的空资金累加器。
-        RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
-        // 准备接收原挂起资金的另一个缓冲。
-        RuntimeFundsAccumulator restoredFunds = new RuntimeFundsAccumulator();
         // 当前结果构建器。
         CommandResultBuilder builder = new CommandResultBuilder(null);
         builder.changedUserIds().add(7L);
         builder.changedOrderIds().add(11L);
-        context.suspendCommitContext(builder, funds, true, false);
+        context.suspendCommitContext(builder, true, false);
 
         assertThat(context.hasCommitContext()).isTrue();
         assertThat(context.commitChangedUserIds()).containsExactly(7L);
         assertThat(context.commitChangedOrderIds()).containsExactly(11L);
-        context.takeCommitFundsTo(restoredFunds);
-        assertThat(restoredFunds.isEmpty()).isTrue();
         assertThat(context.commitSnapshotDirty()).isTrue();
         assertThat(context.commitSnapshotProvisionalOnly()).isFalse();
         context.clearCommitContext();
@@ -259,7 +226,7 @@ class CommandSlotRingTest {
         PrimitiveLongChangeSet userBuffer = suspended.changedUserIds();
         // 原订单变更缓冲的对象引用。
         PrimitiveLongChangeSet orderBuffer = suspended.changedOrderIds();
-        context.suspendCommitContext(suspended, new RuntimeFundsAccumulator(), false, false);
+        context.suspendCommitContext(suspended, false, false);
         // 挂起后交给原构建器的备用用户缓冲。
         PrimitiveLongChangeSet suspendedReusableUserIds = suspended.changedUserIds();
         // 挂起后交给原构建器的备用订单缓冲。

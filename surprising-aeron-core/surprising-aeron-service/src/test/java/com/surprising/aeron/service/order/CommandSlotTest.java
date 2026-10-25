@@ -35,7 +35,7 @@ class CommandSlotTest {
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
         CoreMessage command = command(1000);
         var pending = new CommandSlot().initialize(1000, CommandSlot.Operation.PLACE, command,
-                CommandFingerprint.of(command), List.of(), null, DecodedMatchingCommand.decode(command), null);
+                CommandFingerprint.of(command), List.of(), DecodedMatchingCommand.decode(command), null);
         pending.prepareLaneResultTarget(new ResponseArena(1, 16));
         // 普通命令槽提供的 Lane 结果写入接口。
         var target = pending.laneResultTarget();
@@ -68,8 +68,8 @@ class CommandSlotTest {
             // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
             CoreMessage command = command(1);
             var pending = new CommandSlot().initialize(1, CommandSlot.Operation.PLACE, command,
-                    CommandFingerprint.of(command), List.of(), null, DecodedMatchingCommand.decode(command), null);
-            pending.suspendCommitContext(builder, null, false, false);
+                    CommandFingerprint.of(command), List.of(), DecodedMatchingCommand.decode(command), null);
+            pending.suspendCommitContext(builder, false, false);
             builder.commandChangedUserIds = List.of();
             builder.commandChangedOrderIds = List.of();
             builder.resetChangeAccumulators();
@@ -129,13 +129,13 @@ class CommandSlotTest {
         CoreMessage command = command(1000);
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
         var pending = new CommandSlot().initialize(1000, CommandSlot.Operation.PLACE, command,
-                CommandFingerprint.of(command), List.of(), null, DecodedMatchingCommand.decode(command), null);
+                CommandFingerprint.of(command), List.of(), DecodedMatchingCommand.decode(command), null);
         // 人工绑定到槽上的批次上下文。
         var batch = new OrderBatchPending(1, new ResponseArena(1, 4096));
         pending.orderBatch = batch;
         pending.initialize(2000, CommandSlot.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(),
-                null, DecodedMatchingCommand.decode(command), null);
+                DecodedMatchingCommand.decode(command), null);
         assertThat(pending.orderBatch).isNull();
     }
 
@@ -195,14 +195,13 @@ class CommandSlotTest {
         CommandFingerprint fingerprint = CommandFingerprint.of(command);
         // 当前测试的可复用命令槽，批次测试中为三个槽的数组。
         CommandSlot pending = new CommandSlot().initialize(7, CommandSlot.Operation.PLACE, command, fingerprint,
-                List.of(17L), null, DecodedMatchingCommand.decode(command), null);
+                List.of(17L), DecodedMatchingCommand.decode(command), null);
 
         // 更新前保留的解码引用。
         var decoded = pending.decodedCommand();
         // 更新先撤列表后返回的原命令槽引用。
         CommandSlot updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
 
-        assertThat(updatedCancellations.fundsAccumulator().isEmpty()).isTrue();
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
         assertThat(updatedCancellations.command()).isSameAs(command);
         assertThat(updatedCancellations.decodedCommand()).isSameAs(decoded);

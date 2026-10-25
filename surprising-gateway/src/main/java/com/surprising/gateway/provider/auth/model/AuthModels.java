@@ -52,8 +52,6 @@ public final class AuthModels {
     public record PasswordResetResponse(boolean accepted) {
     }
 
-    public record CurrentPasswordRequest(@NotBlank @Size(max=128) String currentPassword) {}
-
     public record UserMfaVerificationRequest(
             @NotBlank @Size(max=128) String currentPassword,
             @NotBlank @Size(min = 6, max = 6) String totpCode) {
@@ -93,13 +91,6 @@ public final class AuthModels {
                                  List<String> roles, Instant createdAt) {
             this(userId, username, email, status, roles, createdAt, null);
         }
-    }
-
-    public record TokenPair(
-            String accessToken,
-            String refreshToken,
-            Instant accessTokenExpiresAt,
-            Instant refreshTokenExpiresAt) {
     }
 
     public sealed interface LoginResult permits AuthResponse, LoginVerificationModels.ChallengeResponse {}

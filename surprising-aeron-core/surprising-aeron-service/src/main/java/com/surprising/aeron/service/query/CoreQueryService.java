@@ -213,7 +213,6 @@ public final class CoreQueryService {
             } catch (/* 预检金额计算发生算术溢出，返回 ARITHMETIC_OVERFLOW。 */ ArithmeticException failure) { response = rejected(CoreResultCode.ARITHMETIC_OVERFLOW); }
             catch (/* 预检输入非法，返回 INVALID_COMMAND，不使查询一直等待。 */ IllegalArgumentException failure) { response = rejected(CoreResultCode.INVALID_COMMAND); }
             completedBookQueries.put(id, CompletedBookQuery.encoded(response));
-            owner.runtimeState().signalOwnerCompletion();
         }
 
         /**
@@ -571,7 +570,6 @@ public final class CoreQueryService {
                         CoreResultCode.INVALID_COMMAND, commandCount);
             }
             completedBookQueries.put(id, CompletedBookQuery.encoded(completed));
-            owner.runtimeState().signalOwnerCompletion();
         }
 
         /**
@@ -858,7 +856,6 @@ public final class CoreQueryService {
                 failures[lane.laneId()] = CoreResultCode.INVALID_COMMAND;
             }
             completed.getAndUpdate(/* 原子更新前已完成的 Lane 位集合，本次只合入当前 Lane 的位。 */ mask -> mask | (1L << lane.laneId()));
-            owner.runtimeState().signalOwnerCompletion();
         }
         /**
          * 只有所有目标 Lane 的完成位齐全，账本才可读取回执；空路由的零位集合直接就绪。
@@ -876,7 +873,6 @@ public final class CoreQueryService {
                     if (failure == null) continue;
                     completedBookQueries.put(id, CompletedBookQuery.encoded(new CoreResponse(
                             ResponseStatus.REJECTED, ResponseStatus.REJECTED, failure, commandCount)));
-                    owner.runtimeState().signalOwnerCompletion();
                     return;
                 }
                 // 按固定候选和双重预算组装的工作页，保险分支再补建议金额。
@@ -896,7 +892,6 @@ public final class CoreQueryService {
                         CoreResultCode.INVALID_COMMAND, commandCount);
             }
             completedBookQueries.put(id, CompletedBookQuery.encoded(response));
-            owner.runtimeState().signalOwnerCompletion();
         }
     }
 
@@ -1019,7 +1014,6 @@ public final class CoreQueryService {
                 response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.INVALID_COMMAND, commandCount);
             }
             completedBookQueries.put(id, CompletedBookQuery.encoded(response));
-            owner.runtimeState().signalOwnerCompletion();
         }
     }
 

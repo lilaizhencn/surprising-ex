@@ -2,7 +2,6 @@ package com.surprising.aeron.service.treasury;
 
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import java.math.BigInteger;
@@ -26,59 +25,11 @@ public final class InsuranceAllocationPolicy {
             .thenComparingInt(value -> value.positionSide().ordinal())
             .thenComparingLong(LiquidationRuntime::liquidationId);
 
-    /**
-     * 在原运行时可读边界准备候选索赔，再通过静默账本查询读取各资产保险预算并计算全部分配，不直接从 Owner 读取可变财库。
-     * @param runtime 提供当前可读取强平事实及账本查询边界的运行时
-     * @param identities 把运行时币对及结算资产转换为业务名称或稠密编号的字典
-     * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
-     */
-    public static Map<Long, Long> allocations(TradingAccountRuntime runtime,
-                                               RuntimeIdentityRegistry identities,
-                                               Iterable<Long> candidateIds) {
-        if (runtime == null || identities == null || candidateIds == null) {
-            throw new IllegalArgumentException("insurance allocation inputs are required");
-        }
-        // 本次准备或合并的索赔输入，包含当前调用持有的列表引用。
-        AllocationInputs inputs = prepareAllocations(runtime, identities, candidateIds);
-        return runtime.queryLedgerAtRest(/* 账本静默查询回调持有的原财库，预算由该执行边界读取。 */ ledger -> allocations(ledger, inputs));
-    }
-
     /** 当前命令或查询持有的按资产索赔引用分组，预算由账本读取；列表不是永久不可变副本，后续分配会原地排序，生命周期由调用方交接。 构造约定：接管当前命令或查询已准备的按资产索赔列表，不复制列表或权威账户状态。 参数 byAsset：当前调用独占的按资产索赔列表 Map，构造时接管引用 */
     @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
     public static final class AllocationInputs {
         /** 当前命令或查询按结算资产保存的索赔列表，后续分配会原地排序，消费期间独占。 */
         private final Map<Integer, ArrayList<LiquidationRuntime>> byAsset;
-    }
-
-    /**
-     * Owner 读取候选，只保留需要保险且规范币对仍匹配的强平记录，按结算资产分组；空编号或不适用记录跳过，不在此按编号去重。
-     * @param runtime 提供当前可读取强平事实及账本查询边界的运行时
-     * @param identities 把运行时币对及结算资产转换为业务名称或稠密编号的字典
-     * @param candidateIds 上游提供的候选强平编号，允许空项但本类不去重
-     */
-    public static AllocationInputs prepareAllocations(TradingAccountRuntime runtime,
-            RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
-        if (runtime == null || identities == null || candidateIds == null)
-            throw new IllegalArgumentException("insurance allocation inputs are required");
-        runtime.assertOwner();
-        // 本次新建的结算资产到索赔列表分组。
-        Map<Integer, ArrayList<LiquidationRuntime>> byAsset = new HashMap<>();
-        for (Long /* 当前读取的可空候选强平编号。 */ candidateId : candidateIds) {
-            if (candidateId == null) continue;
-            // 当前运行时或冷状态读取到的强平记录。
-            LiquidationRuntime liquidation = runtime.liquidation(candidateId);
-            if (liquidation == null || liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
-                continue;
-            }
-            // 当前候选对应的规范合约对象，需与强平输入中的对象匹配。
-            CoreInstrument instrument = runtime.instrument(identities.instrumentId(liquidation.symbolId()));
-            if (instrument == null || instrument != liquidation.instrument()) continue;
-            // 当前索赔所属结算资产编号。
-            int assetId = identities.assetId(instrument.settleAsset());
-            byAsset.computeIfAbsent(assetId, /* 创建该资产分组时回调收到的键，只需要新建列表，不再读取键。 */ ignored -> new ArrayList<>())
-                    .add(liquidation);
-        }
-        return new AllocationInputs(byAsset);
     }
 
     /**

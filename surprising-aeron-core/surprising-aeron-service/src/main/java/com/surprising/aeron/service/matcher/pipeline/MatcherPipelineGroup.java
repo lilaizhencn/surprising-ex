@@ -17,23 +17,6 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     private final CommandSlotRing contexts;
     /** Matcher 发布完成时置位、Owner 一次取清的就绪位图，用来筛选需要回收的分片。 */
     private final com.surprising.aeron.service.core.TradingAccountRuntime.PaddedReadyMask completedShardMask;
-    /** 是否已安装分片完成通知，置位后不再走未配置时的全分片探查路径。 */
-    private volatile boolean completionSignalConfigured;
-
-    /**
-     * 为各分片安装完成回调，发布时先设置对应就绪位，只有从未就绪变为就绪且外层回调非空才唤醒；配置后关闭无回调时的全分片探查分支。
-     * @param signal 有新分片就绪时执行的可空 Owner 唤醒动作
-     */
-    public void completionSignal(Runnable signal) {
-        completionSignalConfigured = true;
-        for (/* 当前遍历的全局 Matcher 分片号。 */ int shardId = 0; shardId < shards.length; shardId++) {
-            // 当前回调固定捕获的分片号，避免依赖下一轮循环。
-            final int currentShardId = shardId;
-            shards[shardId].completionSignal(() -> {
-                if (completedShardMask.setBit(currentShardId) && signal != null) signal.run();
-            });
-        }
-    }
 
     /**
      * 校验正的二次幂分片数和非空命令槽环，为每个分片创建延迟启动的流水线；需要立即启动时依次启动全部独立 worker。
@@ -50,7 +33,9 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         completedShardMask = new com.surprising.aeron.service.core.TradingAccountRuntime.PaddedReadyMask(shardCount);
         shards = new MatcherCommandPipeline[shardCount];
         for (/* 当前操作的分片流水线，构造循环中则是分片下标。 */ int shard = 0; shard < shardCount; shard++) {
-            shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false);
+            int shardId = shard;
+            shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false,
+                    () -> completedShardMask.setBit(shardId));
         }
         if (startImmediately) start((IntConsumer) null);
     }
@@ -126,29 +111,18 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     }
 
     /**
-     * 只探查是否有就绪分片位，未配置完成通知时再探查各分片正 token 队头；不收集控制调用的结果。
+     * 只探查固定通知发布的就绪分片位，不收集控制调用的结果。
      */
     public boolean hasMatchingCompletions() {
-        if (completedShardMask.get() != 0) return true;
-        if (!completionSignalConfigured) {
-            for (MatcherCommandPipeline /* 当前操作的分片流水线，构造循环中则是分片下标。 */ shard : shards) {
-                if (shard.completedMatchingSequence() != 0) return true;
-            }
-        }
-        return false;
+        return completedShardMask.get() != 0;
     }
 
     /**
-     * 取走就绪位图，仅在这些分片连续收集普通队头以回收传输槽并传播失败；Matcher 已把结果交给命令槽，此处不再访问可能已复用的 CommandSlot。未配置通知时主动探查分片。
+     * 取走固定通知发布的就绪位图，仅在这些分片连续收集普通队头以回收传输槽并传播失败；Matcher 已把结果交给命令槽，此处不再访问可能已复用的 CommandSlot。
      */
     public void drainMatchingCompletions() {
-        // 一次取清的就绪分片位图，必要时加入主动探查的普通完成分片。
+        // 一次取清的就绪分片位图。
         long readyMask = completedShardMask.getAndClear();
-        if (!completionSignalConfigured) {
-            for (/* 当前遍历的全局 Matcher 分片号。 */ int shardId = 0; shardId < shards.length; shardId++) {
-                if (shards[shardId].completedMatchingSequence() != 0) readyMask |= 1L << shardId;
-            }
-        }
         for (/* 当前遍历的全局 Matcher 分片号。 */ int shardId = 0; shardId < shards.length; shardId++) {
             if ((readyMask & (1L << shardId)) == 0) continue;
             // 当前操作的分片流水线，构造循环中则是分片下标。

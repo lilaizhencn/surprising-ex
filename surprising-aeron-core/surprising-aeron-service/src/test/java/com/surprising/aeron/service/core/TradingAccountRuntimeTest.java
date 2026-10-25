@@ -379,9 +379,6 @@ class TradingAccountRuntimeTest {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         var state = new TradingAccountRuntime(topology);
         state.setMetadata(com.surprising.product.api.ProductLine.SPOT, 10);
-        // 故障工作发布完成唤醒后通知测试线程的门闩
-        var announced = new java.util.concurrent.CountDownLatch(1);
-        state.ownerCompletionSignal(announced::countDown);
         state.startAccountLanes();
         state.startSystemLedgerLane();
         // 原运行时 SystemLedgerLane 的反射字段
@@ -391,7 +388,8 @@ class TradingAccountRuntimeTest {
         var failure = new NoSuchMethodError("synthetic settlement linkage failure");
         try {
             state.submitAccountCommand(0, /* 当前用户所属 Lane 下标或回调提供的实际账户 Lane */ lane -> { throw failure; });
-            assertThat(announced.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            state.accountWorkerThread(0).join(3_000);
+            assertThat(state.accountWorkerThread(0).isAlive()).isFalse();
             assertThatThrownBy(state::hasMatchingNotifications).isSameAs(failure);
         } finally {
             assertThatThrownBy(state::close).isSameAs(failure);

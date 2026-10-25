@@ -1,16 +1,16 @@
 package com.surprising.aeron.service.account;
 
-import com.surprising.aeron.service.core.TradingAccountRuntime;
 import java.util.Arrays;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.Accessors;
 import org.agrona.collections.Long2LongHashMap;
 
-/** 一个账户 Lane 的客户订单身份行表。正数身份键定位用户与客户号文本，引用计数为零时清除文本并复用空行；跨线程监控只读发布数量，不直接读取行表。 构造约定：绑定所属 Lane，构造时不申请线程所有权；Lane 为 null 的独立使用场景不执行所有者校验。 参数 lane：所属账户 Lane；null 表示不委托 Lane 做线程校验 */
+/** 一个账户 Lane 的客户订单身份行表。正数身份键定位用户与客户号文本，引用计数为零时清除文本并复用空行；跨线程监控只读发布数量，不直接读取行表。 构造约定：绑定所属 Lane，构造时不申请线程所有权。 参数 lane：唯一所属账户 Lane，不允许为空 */
 @RequiredArgsConstructor
 public final class LaneClientIdentities {
-    /** 拥有这些客户身份的账户 Lane，独立行表场景允许为 null。 */
+    /** 拥有这些客户身份的唯一账户 Lane。 */
+    @lombok.NonNull
     private final AccountLaneState lane;
     /** 正数客户身份键到数组行号加一的映射，零表示不存在。 */
     private final Long2LongHashMap rowsByKey = new Long2LongHashMap(16, 0.65f, 0);
@@ -34,9 +34,9 @@ public final class LaneClientIdentities {
     private volatile int publishedCount;
 
     /**
-     * 存在所属 Lane 时校验或认领当前线程；没有 Lane 的独立行表沿用调用方串行使用约定。
+     * 由所属 Lane 校验或认领当前线程。
      */
-    private void assertOwner() { if (lane != null) lane.assertOwner(); }
+    private void assertOwner() { lane.assertOwner(); }
 
     /**
      * 已有键先核对用户和文本，retain 为 true 才增加已有引用；新键总以一个引用插入。返回正键表示已存在，负键表示本次新建。
@@ -173,21 +173,6 @@ public final class LaneClientIdentities {
         names[row] = null;
         freeRows[freeCount++] = row;
         publishedCount--;
-    }
-
-    /**
-     * 把存活行连同引用次数按目标拓扑复制到未发布的目标 Lane，逐目标校验所有者；本方法不清源表，全部成功后的源清理由字典重绑定流程负责。
-     * @param target 尚未发布、已准备好 Lane 拓扑的目标运行时
-     */
-    public void copyTo(TradingAccountRuntime target) {
-        assertOwner();
-        for (/* 本次查找、导入或遍历使用的身份数组下标，只有引用非零的行才存活。 */ int row = 0; row < nextRow; row++) {
-            if (references[row] == 0) continue;
-            // 按目标拓扑选中的账户 Lane，复制前要求目标线程所有权有效。
-            AccountLaneState destination = target.accountLane(target.topology().accountLaneId(users[row]));
-            destination.assertOwner();
-            destination.clientIdentities.insert(keys[row], users[row], names[row], references[row]);
-        }
     }
 
     /**

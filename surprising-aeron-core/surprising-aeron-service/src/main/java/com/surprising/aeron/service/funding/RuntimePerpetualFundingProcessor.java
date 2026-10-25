@@ -185,7 +185,7 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         /**
-         * 在账本上按全局游标选用户，再按实际账户 Lane 分组；未激活账本时内联执行。完成后释放索引来源引用，发布 usersReady 并唤醒 Owner。
+         * 在账本上按全局游标选用户，再按实际账户 Lane 分组；未激活账本时内联执行。完成后释放索引来源引用，发布 usersReady。
          */
         private void selectAccountUsers() {
             userPage = UserIndexPage.select(indexedUserIds, command.cursorUserId(), command.maxUsers());
@@ -198,10 +198,8 @@ public final class RuntimePerpetualFundingProcessor {
                 usersByLane[lane].add(user); laneMask |= 1L << lane;
             }
             indexedUserIds = null;
-            // 发布用户页完成标记前保存的运行时引用，随后用于唤醒 Owner。
-            TradingAccountRuntime completion = runtime;
+
             usersReady = true;
-            completion.signalOwnerCompletion();
         }
 
         /**

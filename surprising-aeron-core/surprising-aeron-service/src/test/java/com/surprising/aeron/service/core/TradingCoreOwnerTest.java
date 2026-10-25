@@ -143,7 +143,7 @@ class TradingCoreOwnerTest {
                 var head = core.pendingMatching().head();
                 event = head == null ? null : head.settlementEvent();
                 if (event != null && event.completedLaneMask() == event.requiredLaneMask()
-                        && !core.matchingProgress.hasNotifications() && !service.ownerWorkAvailable()) break;
+                        && !core.matchingProgress.hasNotifications()) break;
                 if (System.nanoTime() > deadline) throw new AssertionError("Owner did not await Ledger completion");
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             } while (true);
@@ -155,10 +155,10 @@ class TradingCoreOwnerTest {
                 if (System.nanoTime() > deadline) throw new AssertionError("Ledger did not finish settlement");
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             }
-            // 此时只剩账本发布完成及唤醒提示，Matcher/账户通知已被收完。
+            // 此时账本已经发布完成事实，Matcher/账户通知已被收完。
             assertThat(core.matchingProgress.hasNotifications()).isFalse();
             assertThat(service.ownerCompletionAvailable()).isTrue();
-            assertThat(service.ownerWorkAvailable()).isTrue();
+            assertThat(event.complete()).isTrue();
             service.pollCommands();
             assertThat(responses.size()).isGreaterThan(before);
             finishCommands(service);
@@ -277,7 +277,7 @@ class TradingCoreOwnerTest {
                         accountsComplete &= event != null && event.ready() && event.completedLaneMask() != 0
                                 && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask();
                     }
-                    if (accountsComplete && !core.matchingProgress.hasNotifications() && !service.ownerWorkAvailable()) break;
+                    if (accountsComplete && !core.matchingProgress.hasNotifications()) break;
                     if (System.nanoTime() > deadline) throw new AssertionError("Independent Lane facts were not ready");
                     java.util.concurrent.locks.LockSupport.parkNanos(100_000);
                 } while (true);
@@ -703,8 +703,7 @@ class TradingCoreOwnerTest {
                         ? batch.itemSettlementEvent() : batch.settlementEvent();
                 if (event != null && event.requiredLaneMask() != 0
                         && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask()
-                        && !core.matchingProgress.hasNotifications()
-                        && (type != CoreMessageType.CANCEL_ORDER_BATCH || !service.ownerWorkAvailable())) break;
+                        && !core.matchingProgress.hasNotifications()) break;
                 if (System.nanoTime() > deadline) throw new AssertionError("Batch Owner did not await Ledger completion");
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             } while (true);
@@ -717,7 +716,7 @@ class TradingCoreOwnerTest {
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             }
             assertThat(service.ownerCompletionAvailable()).isTrue();
-            assertThat(service.ownerWorkAvailable()).isTrue();
+            assertThat(event.complete()).isTrue();
             finishCommands(service);
             assertThat(responses).hasSize(before + 2);
             // 本轮原批次完成后解码的响应

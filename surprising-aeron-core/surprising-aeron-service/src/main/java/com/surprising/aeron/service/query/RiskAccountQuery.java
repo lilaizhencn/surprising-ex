@@ -128,10 +128,7 @@ final class RiskAccountQuery implements SettlementLaneWorker.Command, Function<A
         } catch (/* 账本选择路由时发现扫描规模超限，转换为查询响应过大。 */ RuntimeOperationalQueryService.QueryTooLargeException failure) {
             failRoutes(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
         } catch (/* 账本选择路由时遇到的非法查询条件，转换为 INVALID_COMMAND。 */ IllegalArgumentException failure) { failRoutes(CoreResultCode.INVALID_COMMAND); }
-        // 准备发布完成通知的运行时，先取得引用再发布路由就绪位。
-        var runtime = owner.runtimeState();
         routesReady = true;
-        runtime.signalOwnerCompletion();
     }
 
     /**
@@ -180,7 +177,6 @@ final class RiskAccountQuery implements SettlementLaneWorker.Command, Function<A
             response = rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
         } catch (/* 最终编码或合并时遇到非法参数，返回 INVALID_COMMAND。 */ IllegalArgumentException failure) { response = rejected(CoreResultCode.INVALID_COMMAND); }
         owner.bookQueries.completedBookQueries.put(id, CoreQueryService.CompletedBookQuery.encoded(response));
-        owner.runtimeState().signalOwnerCompletion();
     }
 
     /**

@@ -948,7 +948,6 @@ public final class TriggerOrderCommands {
             // 账本查询完成后用于通知 Owner 的同一运行时引用
             var runtime = owner.runtimeState();
             inputReady = true;
-            runtime.signalOwnerCompletion();
         }
 
         /**

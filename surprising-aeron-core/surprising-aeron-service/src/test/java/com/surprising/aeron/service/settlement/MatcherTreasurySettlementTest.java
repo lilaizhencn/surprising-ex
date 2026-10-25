@@ -108,7 +108,7 @@ class MatcherTreasurySettlementTest {
     }
 
     /**
-     * 实际阻塞 maker 与账本队首，让 taker 独立完成；检查满队列保留、提前回收及重复收集拒绝、原财库手续费为二，以及旧账本唤醒回调未返回时财务槽也可安全复用。
+     * 实际阻塞 maker 与账本队首，让 taker 独立完成；检查满队列保留、提前回收及重复收集拒绝、原财库手续费为二，以及账本处理后续工作时原财务槽可安全复用。
      */
     @Test
     void independentAccountWritersThenOriginalLedgerSettleFeesBeforeOwnerCollects() throws Exception {
@@ -160,21 +160,10 @@ class MatcherTreasurySettlementTest {
             // 放行 maker Lane 继续账户结算的门闩。
             var releaseMaker = new CountDownLatch(1);
             // 由主动账户线程完成通知触发的门闩，用于证明 taker 不必等待 maker。
-            var takerFinished = new CountDownLatch(1);
             // 系统账本进入完成后的唤醒回调时通知主线程的门闩。
             var financialSignalling = new CountDownLatch(1);
             // 延迟旧代账本完成通知返回，供主线程先复用事件的门闩。
             var releaseFinancialSignal = new CountDownLatch(1);
-            // 只允许首个账本通知被阻塞的原子开关。
-            var holdFirstFinancialSignal = new java.util.concurrent.atomic.AtomicBoolean(true);
-            runtime.ownerCompletionSignal(() -> {
-                if (Thread.currentThread() == runtime.accountWorkerThread(takerLane)) takerFinished.countDown();
-                if (Thread.currentThread().getName().equals("core-system-ledger-lane")
-                        && holdFirstFinancialSignal.compareAndSet(true, false)) {
-                    financialSignalling.countDown();
-                    await(releaseFinancialSignal);
-                }
-            });
             runtime.submitAccountCommand(makerLane, /* 阻塞任务收到的 maker 账户 Lane，本任务只等门闩而不读账户。 */ lane -> {
                 makerParked.countDown();
                 await(releaseMaker);
@@ -207,7 +196,12 @@ class MatcherTreasurySettlementTest {
                 event.completeMatcherPublication();
                 try {
                     assertThat(event.submitTreasurySettlement(ledger)).isFalse();
-                    assertThat(takerFinished.await(3, TimeUnit.SECONDS)).isTrue();
+                    long takerDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+                    while ((event.completedLaneMask() & (1L << takerLane)) == 0) {
+                        runtime.assertAccountLanesHealthy();
+                        if (System.nanoTime() >= takerDeadline) throw new AssertionError("taker settlement timed out");
+                        Thread.onSpinWait();
+                    }
                     assertThat(event.complete()).isFalse();
                     assertThatThrownBy(() -> runtime.releaseMatcherSettlement(event))
                             .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
@@ -228,6 +222,16 @@ class MatcherTreasurySettlementTest {
                 long admissionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.submitTreasurySettlement(ledger)) {
                     if (System.nanoTime() >= admissionDeadline) throw new AssertionError("Ledger queue remained full");
+                    Thread.onSpinWait();
+                }
+                // 后续账本工作阻塞时，已完成的原事件仍可由 Owner 立即回收。
+                long tailDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+                while (!ledger.offer(treasury -> {
+                    financialSignalling.countDown();
+                    await(releaseFinancialSignal);
+                })) {
+                    ledger.assertHealthy();
+                    if (System.nanoTime() >= tailDeadline) throw new AssertionError("Ledger tail remained full");
                     Thread.onSpinWait();
                 }
                 assertThatThrownBy(() -> event.submitTreasurySettlement(ledger))
@@ -279,7 +283,6 @@ class MatcherTreasurySettlementTest {
                 releaseLedgerHead.set(true); releaseMaker.countDown(); releaseFinancialSignal.countDown();
             }
             assertThat(original.fee(identities.assetId("USDT"))).isEqualTo(2);
-            runtime.ownerCompletionSignal(null);
         }
     }
 

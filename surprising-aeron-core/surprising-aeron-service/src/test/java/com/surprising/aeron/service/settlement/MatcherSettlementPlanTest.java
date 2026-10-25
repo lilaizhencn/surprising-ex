@@ -146,14 +146,14 @@ class MatcherSettlementPlanTest {
     }
 
     /**
-     * 用真实 Matcher 测试线程卡住发布后的唤醒回调；Owner 可在就绪后收集并复用事件，旧回调继续返回不能污染新代字段。
+     * 真实 Matcher 测试线程发布后停留在测试门闩；Owner 收集并复用事件后，原线程退出不能污染新代。
      */
     @Test
     @org.junit.jupiter.api.Timeout(15)
-    void ownerMayRecycleAfterReadinessWhileMatcherIsStillSignalling() throws Exception {
-        // 工作线程进入发布后唤醒回调时通知主线程的门闩。
+    void ownerMayRecyclePublishedEventBeforeMatcherThreadExits() throws Exception {
+        // 工作线程完成发布后通知主线程的门闩。
         var signalling = new java.util.concurrent.CountDownLatch(1);
-        // 阻塞旧发布唤醒回调直到主线程完成事件复用的门闩。
+        // 保持原 Matcher 测试线程存活直到主线程完成事件复用的门闩。
         var finishSignal = new java.util.concurrent.CountDownLatch(1);
         // 跨线程记录意外异常的原子引用。
         var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
@@ -178,17 +178,14 @@ class MatcherSettlementPlanTest {
                 assertThat(event.dispatched()).isTrue();
                 assertThat(event.ready()).isFalse();
             }, 0);
-            runtime.ownerCompletionSignal(() -> {
-                if (runtime.inOwnerThread()) return;
-                signalling.countDown();
-                awaitPublicationLatch(finishSignal);
-            });
             matcher = Thread.ofPlatform().name("test-matcher-publication").start(() -> {
                 try {
                     event.beginMatcherPublication();
                     event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                             symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
                     event.completeMatcherPublication();
+                    signalling.countDown();
+                    awaitPublicationLatch(finishSignal);
                 } catch (/* Matcher 测试线程捕获并交给主线程检查的异常。 */ Throwable error) { failure.set(error); signalling.countDown(); }
             });
             assertThat(signalling.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
@@ -196,7 +193,7 @@ class MatcherSettlementPlanTest {
             assertThat(event.ready()).isTrue();
             assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
             runtime.releaseMatcherSettlement(event);
-            // 从事件池再次借到的同一对象，用于检查新代字段未被旧回调覆盖。
+            // 从事件池再次借到的同一对象，用于检查新代字段未被旧线程覆盖。
             var reused = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
                     0, identities, 30, 40);
             assertThat(reused).isSameAs(event);
@@ -207,7 +204,6 @@ class MatcherSettlementPlanTest {
             assertThat(reused.ready()).isFalse();
             assertThat(reused.dispatched()).isFalse();
             assertThat(reused.coreSequence()).isEqualTo(2);
-            runtime.ownerCompletionSignal(null);
             reused.reserveMatcherPublication();
             reused.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 2, List.of()), 2, 3, 4, 11, 2, 0);
@@ -367,7 +363,7 @@ class MatcherSettlementPlanTest {
             }
             assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
             runtime.releaseMatcherSettlement(event);
-            // 从事件池再次借到的同一对象，用于检查新代字段未被旧回调覆盖。
+            // 从事件池再次借到的同一对象，用于检查新代字段未被旧线程覆盖。
             var reused = runtime.prepareDirectMatcherSettlement(2, 15, taker, null, 1, id, 0,
                     identities, 2, 2, List.of(), null);
             assertThat(reused).isSameAs(event);

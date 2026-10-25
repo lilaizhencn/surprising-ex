@@ -29,7 +29,7 @@ class AdminCursorPageTest {
     }
 
     @Test
-    void cursorPreservesInstantPrecisionAndRejectsOldFormat() {
+    void cursorPreservesInstantPrecisionAndSupportsColonFormat() {
         Instant timestamp = Instant.parse("2026-07-03T12:30:45.123456789Z");
         AdminCursorPage.SortSpec sort = new AdminCursorPage.SortSpec(
                 "updatedAt", "updated_at", "id", true);
@@ -44,9 +44,15 @@ class AdminCursorPageTest {
         assertThat(decoded.timestamp()).isEqualTo(timestamp);
         assertThat(decoded.id()).isEqualTo(42L);
 
-        String oldFormat = Base64.getUrlEncoder().withoutPadding()
+        String colonFormat = Base64.getUrlEncoder().withoutPadding()
                 .encodeToString("1783081845123:99".getBytes(StandardCharsets.UTF_8));
-        assertThatThrownBy(() -> AdminCursorPage.decodeCursor(oldFormat))
+        AdminCursorPage.Cursor colonDecoded = AdminCursorPage.decodeCursor(colonFormat);
+        assertThat(colonDecoded.timestamp()).isEqualTo(Instant.ofEpochMilli(1783081845123L));
+        assertThat(colonDecoded.id()).isEqualTo(99L);
+
+        String invalidFormat = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("not-a-valid-cursor".getBytes(StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> AdminCursorPage.decodeCursor(invalidFormat))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("invalid cursor");
     }

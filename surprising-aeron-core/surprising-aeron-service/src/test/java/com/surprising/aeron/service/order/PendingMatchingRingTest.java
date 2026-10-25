@@ -199,7 +199,7 @@ class PendingMatchingRingTest {
     }
 
     /**
-     * 用本环 acquire 占槽并初始化人工身份、空资金与解码输入，调用方再决定 put 入队。
+     * 用本环 acquire 占槽并初始化人工身份与解码输入，调用方再决定 put 入队。
      * @param ring 当前测试待撮合环
      * @param sequence 本次预备的完整 Core 序号
      * @param commandId 本条人工载体命令 UUID
@@ -210,7 +210,7 @@ class PendingMatchingRingTest {
         CoreMessage command = command(commandId, userId);
         return ring.acquire(sequence, CommandSlot.Operation.PLACE, command,
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
-                null, DecodedMatchingCommand.decode(command), null);
+                DecodedMatchingCommand.decode(command), null);
     }
 
     /**

@@ -339,10 +339,8 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         target.admissionReceipt(orderId(), rejection == null, resultCode.wireCode());
         if (rejection == null) target.addAdmissionCancellations(closeCapacityCancellations);
         // 先取得通知目标，再发布消费位。Owner 可能立即清空池化事件；消费位可见后 Matcher 只使用已捕获引用，不再读取事件字段。
-        // 发布完成或消费位之前先取得的通知目标，避免对象回收清理 runtime 后再读取该字段。
-        TradingAccountRuntime completionRuntime = runtime;
+        // 消费位发布后，Owner 可以回收本事件，不再访问事件字段。
         matcherConsumed = true;
-        completionRuntime.signalOwnerCompletion();
     }
 
     /**

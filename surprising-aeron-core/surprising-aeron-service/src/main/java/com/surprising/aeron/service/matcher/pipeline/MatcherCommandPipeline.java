@@ -12,7 +12,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 import lombok.Getter;
-import lombok.Setter;
 import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 import org.agrona.concurrent.OneToOneConcurrentArrayQueue;
@@ -72,14 +71,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private final int workerId;
     /** Owner 单生产者、Matcher 单消费者的有界查询信箱，请求记录提交栅栏而不复制状态。 */
     private OneToOneConcurrentArrayQueue<BackgroundRead<?>> backgroundReads;
-    /**
-     *  Matcher 发布完成或可见故障后的可空唤醒回调。
-     * 安装可空的完成唤醒回调；Matcher 发布完成或发现发布故障时调用，回调不在此方法执行。
-     * @param completionSignal 完成或发布故障后执行的可空唤醒动作
-     */
-    @Accessors(fluent = true, chain = false)
-    @Setter
-    private volatile Runnable completionSignal;
+    /** 固定的分片完成通知；只标记原分片就绪位，独立流水线没有组接收者。 */
+    private final Runnable completionPublished;
     /**
      * 把查询和当前已提交位置放入有界单生产者读信箱，Matcher 执行到该位置后再读。关闭或信箱满返回失败 Future，运行异常转为失败结果，查询不会复制交易状态。
      * @param <T> 读取或控制调用返回值的类型
@@ -136,6 +129,12 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     public MatcherCommandPipeline(int workerId, int requestedCapacity, boolean startImmediately) {
+        this(workerId, requestedCapacity, startImmediately, null);
+    }
+
+    MatcherCommandPipeline(int workerId, int requestedCapacity, boolean startImmediately,
+            Runnable completionPublished) {
+        this.completionPublished = completionPublished;
         if (requestedCapacity <= 0 || (requestedCapacity & (requestedCapacity - 1)) != 0) {
             throw new IllegalArgumentException("matcher pipeline capacity must be a power of two");
         }
@@ -277,7 +276,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     /**
-     * 先拒绝无效输入、发布故障和关闭状态；由 Owner 回收就绪直达槽、检查窗口容量并填槽，最后用提交游标发布。队满立即拒绝，不覆盖未消费槽，必要时唤醒等待的 Matcher。
+     * 先拒绝无效输入、发布故障和关闭状态；由 Owner 回收就绪直达槽、检查窗口容量并填槽，最后用提交游标发布。队满立即拒绝，不覆盖未消费槽。
      * @param token 非零传输标识，正数为普通命令，负数为控制调用
      * @param command 需要在 Matcher 拥有线程执行的非空函数
      * @param settlement 可空的结算事件，直达模式由它保留原生成交事实
@@ -494,8 +493,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 started = true;
             } else {
                 publicationFailure = failure;
-                // 当前读取的可空完成唤醒回调。
-                Runnable signal = completionSignal;
+                // 当前读取的固定分片就绪通知。
+                Runnable signal = completionPublished;
                 if (signal != null) signal.run();
             }
             accepting = false;
@@ -503,7 +502,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     /**
-     * 先执行激活动作，再按提交顺序消费槽并在相应提交栅栏执行读请求；原生事实先发布到事件或 CommandSlot，随后发布传输完成游标并唤醒 Owner。命令异常留在槽中传播，发布异常终止工作；正常离开循环后拒绝剩余读请求并执行关闭动作。启动动作失败会提前返回。
+     * 先执行激活动作，再按提交顺序消费槽并在相应提交栅栏执行读请求；原生事实先发布到事件或 CommandSlot，随后发布传输完成游标并标记所属分片就绪。命令异常留在槽中传播，发布异常终止工作；正常离开循环后拒绝剩余读请求并执行关闭动作。启动动作失败会提前返回。
      */
     private void runMatching() {
         try {
@@ -585,8 +584,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 }
                 position++;
                 completedPosition.value = position;
-                // 当前读取的可空完成唤醒回调。
-                Runnable signal = completionSignal;
+                // 当前读取的固定分片就绪通知。
+                Runnable signal = completionPublished;
                 if (signal != null) signal.run();
                 if (position - cachedConsumed > completionHighWaterMark) {
                     cachedConsumed = consumedPosition.value;
@@ -603,8 +602,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             // 使已经退出的 worker 显示为故障，不能只表现为队列暂时空闲。
             publicationFailure = failure;
             accepting = false;
-            // 当前读取的可空完成唤醒回调。
-            Runnable signal = completionSignal;
+            // 当前读取的固定分片就绪通知。
+            Runnable signal = completionPublished;
             if (signal != null) signal.run();
         }
         // worker 退出时尚未执行的读请求，逐个完成为失败。

@@ -155,8 +155,6 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     public static final class FundsIndexWork implements com.surprising.aeron.service.treasury.SystemLedgerLane.Entry {
         /** 当前任务借用的终态保留器，Ledger 经它访问资金索引。 */
         private TerminalStateRetention retention;
-        /** 已排队任务要通知的运行时，完成发布前先捕获为局部引用。 */
-        private TradingAccountRuntime completionRuntime;
         /** 本次资金 UUID 高位。 */
         private long commandIdMsb;
         /** 本次资金 UUID 低位。 */
@@ -251,7 +249,6 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
                 return true;
             }
             if (!queued) {
-                completionRuntime = owner.runtimeState();
                 if (!owner.runtimeState().dispatchLedgerQuery(this)) return false;
                 queued = true;
             }
@@ -259,17 +256,14 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
         }
 
         /**
-         * 由实际执行线程绑定索引 I/O 并读或写；先捕获完成通知所需运行时，再公布完成位，最后只用局部引用通知 Owner，防止任务已被 clear 或复用后读错字段。
+         * 由实际执行线程绑定索引 I/O 并读或写，最后公布完成位；此后不再访问可被 clear 或复用的任务字段。
          * @param ignored 账本任务契约附带的 Treasury，本索引 I/O 不读取它
          */
         @Override public void apply(com.surprising.aeron.service.treasury.TreasuryRuntime ignored) {
             retention.fundsCommands.bindIoOwner();
             if (write) retention.fundsCommands.put(commandIdMsb, commandIdLsb, fingerprint);
             else retained = retention.fundsCommands.get(commandIdMsb, commandIdLsb);
-            // 发布完成位前捕获的通知运行时，任务复用后只访问这个局部引用
-            TradingAccountRuntime completion = completionRuntime;
             completed = true;
-            if (completion != null) completion.signalOwnerCompletion();
         }
 
         /**
@@ -284,7 +278,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
          * 正常完成后或 Ledger 已停止的关闭阶段清任务引用及标记，恢复空闲完成状态；不在执行线程仍可能访问时提前调用。
          */
         public void clear() {
-            retention = null; completionRuntime = null;
+            retention = null;
             commandIdMsb = commandIdLsb = 0;
             fingerprint = retained = null;
             write = prepared = queued = false;

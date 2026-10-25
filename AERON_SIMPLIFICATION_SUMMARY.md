@@ -270,6 +270,81 @@
   - `surprising-gateway`：`AdminCursorPageTest` 3 项测试全绿；
   - `surprising-aeron-service`：核心套件测试（`OwnerIngressRingTest` 4项、`TradingOwnerInputReuseTest` 5项、`OwnerLogContextTest` 6项、`CoreAdmissionInputOwnershipTest` 10项、`ProductionSourceBoundaryTest` 8项）**共 33 项全绿通过**。
 
+---
+
+## 7. 深入清理：全工程过度设计与历史死代码彻底拔除（第 3 阶段完成）
+
+### 7.1 物理删除 8 个未引用的 `@FeignClient` 假 RPC 客户端
+在系统演进过程中，曾声明了部分带有 `@FeignClient` 的接口，但系统实际架构完全由内部 Service、Gateway 路由或 Aeron 高性能消息流转驱动。这 8 个 Feign 接口在全工程中 **0 装配、0 注入、0 远程调用**，属于纯粹的形式主义架构遗留。
+本次对其进行连根拔起并清理空包：
+1. **`surprising-derivatives-lifecycle-api`**：
+   - 彻底删除 [`AdlRpcApi.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/adl/api/client/AdlRpcApi.java)
+   - 彻底删除 [`InsuranceRpcApi.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/insurance/api/client/InsuranceRpcApi.java)
+   - 彻底删除 [`LiquidationRpcApi.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/liquidation/api/client/LiquidationRpcApi.java)
+   - 彻底删除 [`RiskRpcApi.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-api/src/main/java/com/surprising/risk/api/client/RiskRpcApi.java)
+2. **`surprising-price-api`**：
+   - 彻底删除 [`ExchangeRateRpcApi.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-price/surprising-price-api/src/main/java/com/surprising/price/api/client/ExchangeRateRpcApi.java)
+   - 彻底删除 [`IndexPriceRpcApi.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-price/surprising-price-api/src/main/java/com/surprising/price/api/client/IndexPriceRpcApi.java)
+   - 彻底删除 [`MarkPriceRpcApi.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-price/surprising-price-api/src/main/java/com/surprising/price/api/client/MarkPriceRpcApi.java)
+3. **`surprising-maker-api`**：
+   - 彻底删除 [`MarketMakerRpcApi.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-maker/src/main/java/com/surprising/marketmaker/api/client/MarketMakerRpcApi.java)
+
+### 7.2 物理删除 Gateway 历史孤岛数学类与模型体系（12 个文件）
+- **背景与痛点**：
+  在早期架构演进中，网关内部实现了一套针对持仓盈亏、强平释放与资金费扣减的数学计算。随着结算清算能力权威收敛至 Aeron Core，这套类库彻底成为了外部零引用的“代码孤岛”（除其自身 4 个自测测试类互相调用外，任何 Controller 和 Service 均不访问）。
+- **清理明细（彻底物理删除 12 个文件，净减少 ~1,000 行纯死代码）**：
+  1. **生产核心数学工具（4 个）**：
+     - `AccountMarginReleaseMath.java`
+     - `MarginTransferMath.java`
+     - `PnlSettlementMath.java`
+     - `TradeFeeMath.java`
+  2. **孤立数据模型（4 个）**：
+     - `ContractSpec.java`
+     - `BalanceSettlementState.java`
+     - `PositionChange.java`
+     - `PositionState.java`
+  3. **孤立测试用例（4 个）**：
+     - `AccountMarginReleaseMathTest.java`
+     - `MarginTransferMathTest.java`
+     - `PnlSettlementMathTest.java`
+     - `TradeFeeMathTest.java`
+
+### 7.3 清除孤立死命令、残余日志工具与死 Record
+1. **死命令删除**：
+   - 物理删除 `surprising-account-api` 中的 [`AccountUserCommand.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-account-api/src/main/java/com/surprising/account/api/model/AccountUserCommand.java) 与 [`AccountUserCommandType.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-account-api/src/main/java/com/surprising/account/api/model/AccountUserCommandType.java)（旧指令协议，已被统一命令模型取代）；
+   - 物理删除 `surprising-gateway` 中的 `ExpiringPositionSettlementAccountCommand.java`（零引用到期交割合约指令模型）。
+2. **基准测试残余日志工具删除**：
+   - 物理删除 `surprising-aeron-benchmarks` 中过时的 [`StableLedgerJournal.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/StableLedgerJournal.java) 与 [`StableLedgerJson.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/StableLedgerJson.java)。
+3. **死 Record 清理**：
+   - 从 `surprising-gateway` 的 [`AuthModels.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/main/java/com/surprising/gateway/provider/auth/model/AuthModels.java) 中移除了未使用的 `CurrentPasswordRequest` 与 `TokenPair`。
+
+### 7.4 统一游标跨模块兼容与全量测试修复
+1. **跨模块游标编解码兼容**：
+   - 在统一的 [`AdminCursorPage.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-trading-api/src/main/java/com/surprising/trading/api/utils/AdminCursorPage.java) 中扩展 `decodeCursor`，无缝兼容 `Instant` 标准格式（`ISO_INSTANT|id`）与 Funding 历史系统的毫秒游标（`epochMillis:id`），同时保证强校验与防越界；并在 [`AdminCursorPageTest.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-trading-api/src/test/java/com/surprising/trading/api/utils/AdminCursorPageTest.java) 中覆盖了双向编解码与非法格式边界测试。
+2. **测试修复与对齐**：
+   - 修复 [`AccountLaneLifecycleTest.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/bootstrap/account/AccountLaneLifecycleTest.java)：适配精简后的构造函数入参；
+   - 修复 [`CoreLedgerQueryTest.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreLedgerQueryTest.java)：引入缺失的集合导入并对齐持续查询的游标测试预期；
+   - 验证 `FundingQueryBoundaryTest`：21 项资金费率历史分页边界测试 100% 通过。
+
+---
+
+## 8. 累计重构成果统计与系统现状
+
+| 优化维度 | 重构前状况 | 重构后收敛成果 |
+| :--- | :--- | :--- |
+| **执行模式** | `FUSED` 与 `PIPELINED` 双模式维护，数百行内联判断与死分支 | 固定纯粹 `PIPELINED` 单一流水线模式，删除全部模式枚举与配置 |
+| **等待策略** | `BUSY_SPIN`, `PARKING`, `YIELDING` 等多策略与 CAS 自适应休眠唤醒 | 固定纯粹 `BUSY_SPIN` 忙等自旋，消除锁与伪共享状态机 |
+| **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
+| **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
+| **Feign 接口形式主义** | 声明了 8 个 `@FeignClient` 接口，全工程零装配零调用 | 物理全量删除，消除微服务假架构残留 |
+| **Gateway 孤岛计算** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件，净减少 ~1,000 行纯死代码 |
+| **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
+| **死命令与死 Record** | `AccountUserCommand`, `ExpiringPositionSettlementAccountCommand` 等遗留 | 物理彻底清除所有死命令与死 Record |
+| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，相关核心测试全绿** |
+
+---
+
+
 
 
 

@@ -148,7 +148,7 @@ public final class CommitPublication {
     }
 
     /**
-     * 拒绝重入并检查生命周期，计算下一发布序号；在活动事实作用域内补齐冷路径资金、捕获可选实时变化、应用派生索引，再推进序号和修订并清已提交变化。内部运行异常记录恢复故障后继续抛出，不回滚已发生的部分变化。
+     * 拒绝重入并检查生命周期，计算下一发布序号；在活动事实作用域内捕获可选实时变化、应用派生索引，再推进序号和修订并清已提交变化。内部运行异常记录恢复故障后继续抛出，不回滚已发生的部分变化。
      */
     void publish() {
         if (active) throw new IllegalStateException("owner commit publisher is already active");
@@ -161,7 +161,6 @@ public final class CommitPublication {
                 if (!owner.factContextActive()) {
                     throw new IllegalStateException("runtime commit requires an active command scope");
                 }
-                owner.runtimeState().appendFundsDelta(owner.runtimeState().coldCommandFunds());
                 if (owner.realtimeCapture() != null) owner.runtimeState().captureRealtimeChanges(owner.realtimeCapture());
                 if (owner.runtimeState().committedRevision() < runtimePatchRevision)
                     throw new IllegalStateException("runtime changed-index commit is out of order");

@@ -113,15 +113,13 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     }
 
     /**
-     * 账本读取本项币对 OI，先捕获通知目标，再发布输入就绪并唤醒 Owner。
+     * 账本读取本项币对 OI，随后发布输入就绪。
      * @param ignored 账本任务接口传入的原财库，本项从运行时账本索引读取 OI
      */
     @Override public void apply(TreasuryRuntime ignored) {
         openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.context().instrument().instrumentId());
-        // 输入就绪发布前取得的完成通知目标，发布后只用此引用唤醒 Owner。
-        TradingAccountRuntime completion = runtime;
+
         inputReady = true;
-        completion.signalOwnerCompletion();
     }
 
     /**

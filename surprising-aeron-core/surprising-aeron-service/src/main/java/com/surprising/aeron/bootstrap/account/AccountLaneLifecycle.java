@@ -17,7 +17,6 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     private final LaneTopology topology;
     private final CoreRuntimeConfiguration configuration;
     private final Runnable assertOwner;
-    private final Runnable completionSignal;
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private boolean started;
     private boolean ownerHasAccess = true;
@@ -28,12 +27,11 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     private Consumer<Thread> ledgerOwner;
 
     public AccountLaneLifecycle(AccountLaneState[] lanes, LaneTopology topology,
-            CoreRuntimeConfiguration configuration, Runnable assertOwner, Runnable completionSignal) {
+            CoreRuntimeConfiguration configuration, Runnable assertOwner) {
         this.lanes = lanes;
         this.topology = topology;
         this.configuration = configuration;
         this.assertOwner = assertOwner;
-        this.completionSignal = completionSignal;
         workers = new SettlementLaneWorker[lanes.length];
     }
 
@@ -116,7 +114,6 @@ public final class AccountLaneLifecycle implements AutoCloseable {
 
     private void recordFailure(Throwable problem) {
         failure.compareAndSet(null, problem);
-        completionSignal.run();
     }
 
     private void closeAfterFailure(Throwable problem) {

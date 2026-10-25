@@ -92,10 +92,8 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
             rejection = failure;
             scopeCompleted = true;
         }
-        // 发布完成位前保存的运行时通知目标，发布后不再读可复用命令字段。
-        TradingAccountRuntime completion = runtime;
+
         completed = true;
-        completion.signalOwnerCompletion();
     }
 
     /**
@@ -204,7 +202,6 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
                 funds.clear();
                 runtime.applyLedgerControlPositions(positionUndo);
                 validated = true;
-                runtime.signalOwnerCompletion();
             }
             return requested;
         }
@@ -218,10 +215,8 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
                 runtime.rollbackLedgerPositions(positionUndo);
             } else positionUndo.clear();
             ledger.clearChangedKeys();
-            // 发布完成位前保存的运行时通知目标，发布后不再读可复用命令字段。
-            TradingAccountRuntime completion = runtime;
+
             completed = true;
-            completion.signalOwnerCompletion();
         }
     }
 }

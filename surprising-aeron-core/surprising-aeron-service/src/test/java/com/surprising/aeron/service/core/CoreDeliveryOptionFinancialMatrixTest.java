@@ -38,7 +38,6 @@ import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.query.state.*;
-import com.surprising.aeron.service.query.state.RuntimeLiquidationQueryService;
 import com.surprising.aeron.service.query.state.RuntimeRiskQueryService;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation;
@@ -652,7 +651,6 @@ class CoreDeliveryOptionFinancialMatrixTest {
             // 对手工排入的受保护期权多头计划发起的强平执行命令
             var execution = new com.surprising.aeron.protocol.ExecuteLiquidationCommand(
                     99, 1, PREMIUM_PRICE, 0);
-            assertThat(RuntimeLiquidationQueryService.isExecutable(runtime, identities, execution)).isFalse();
             RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(execution, List.of(), runtime, identities);
             assertThat(runtime.liquidation(99).status()).isEqualTo(CoreLiquidationState.Status.CANCELED);
             assertThat(runtime.position(identities.positionKey(USER_ID, option.instrumentId()))

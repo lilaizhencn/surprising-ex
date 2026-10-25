@@ -418,12 +418,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TREASURY_STATE_QUERY) {
             try {
-                if (runtimeState.systemLedgerStarted()) return bookQueries.beginTreasuryQuery(message);
-                // 冷阶段物化的财库资产查询结果
-                var views = com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.treasuryAssets(
-                        runtimeState, identities);
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreStateQueryCodec.encodeTreasuryState(views));
+                return bookQueries.beginTreasuryQuery(message);
             } catch (/* 本分支明确捕获的业务或输入异常，按对应协议码处理 */ com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             }
@@ -500,18 +495,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 if (query.productLine() != productLine) {
                     return rejected(CoreResultCode.PRODUCT_LINE_MISMATCH);
                 }
-                // 强平索引中严格位于请求游标之后的活动身份视图，冷查询继续按条件筛选
-                java.util.NavigableSet<Long> candidates = factIndexes.liquidations().activeIds()
-                        .tailSet(query.afterLiquidationId(), false);
-                if (runtimeState.systemLedgerStarted()) {
-                    return bookQueries.beginLiquidationWorkQuery(message, query);
-                }
-                // 冷阶段按查询条件组装的强平工作结果
-                var work = com.surprising.aeron.service.query.state.RuntimeLiquidationQueryService.work(
-                        runtimeState, identities, productLine, query, candidates,
-                        factIndexes.liquidations().activeIds());
-                return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
-                        com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
+                return bookQueries.beginLiquidationWorkQuery(message, query);
             } catch (/* 本分支明确捕获的业务或输入异常，按对应协议码处理 */ com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             } catch (/* 本分支明确捕获的业务或输入异常，按对应协议码处理 */ IllegalArgumentException exception) {
@@ -1476,7 +1460,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         directCommand.clearFinalizationPrepared();
         commits.publication.complete();
-        if (status == ResponseStatus.APPLIED) validateFundsConservation(message);
         directCommand.markPublicationComplete();
         return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
                 sourceKey, fingerprint, status, resultCode, nextAppliedCommandCount);
@@ -2358,7 +2341,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         // 保存在 Core 序号槽中的变化缓冲与提交发布续步上下文
         CommandSlot context = pending;
         context.suspendCommitContext(
-                resultBuilder, runtimeState.coldCommandFunds(),
+                resultBuilder,
                 commits.publication.dirty(), commits.publication.provisionalOnly());
         commits.publication.suspend();
         resultBuilder.commandChangedUserIds = List.of();
@@ -2382,7 +2365,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         context.restoreCommitContext(resultBuilder);
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
-        context.takeCommitFundsTo(runtimeState.coldCommandFunds());
         context.clearCommitContext();
         resultBuilder.commandTradeCount(0);
         resultBuilder.commandLiquidationProgress = null;
@@ -2455,31 +2437,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 new CoreMessage(header, com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeExecute(
                         trigger.triggerOrderId(), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis)),
                 childOrder, trigger);
-    }
-
-    /**
-     * 冷阶段复制给定资金累加内容；活动账本存在时不在 Owner 重复维护。
-     * @param fundsAccumulator 冷阶段要复制到本命令的资金累加内容
-     */
-    public void setCommandFunds(
-            com.surprising.aeron.service.treasury.RuntimeFundsAccumulator fundsAccumulator) {
-        if (runtimeState.systemLedgerStarted()) return;
-        runtimeState.coldCommandFunds().clear();
-        runtimeState.coldCommandFunds().add(fundsAccumulator);
-    }
-
-    /**
-     * 仅在冷阶段按命令是否允许外部增减判断资金守恒；活动阶段的资金裁决由账本承担。
-     * @param command 本次业务使用的已解码命令或命令槽，沿用当前命令生命周期
-     */
-    public void validateFundsConservation(CoreMessage command) {
-        if (runtimeState.systemLedgerStarted()) return;
-        // 该命令是否属于允许外部资金增减的列举类型
-        boolean externalAdjustment = command.header().messageType() == CoreMessageType.ADJUST_BALANCE
-                || command.header().messageType() == CoreMessageType.TRANSFER_OUT
-                || command.header().messageType() == CoreMessageType.TRANSFER_IN
-                || command.header().messageType() == CoreMessageType.ADJUST_INSURANCE_FUND;
-        runtimeState.coldCommandFunds().requireConserved(externalAdjustment);
     }
 
     /**

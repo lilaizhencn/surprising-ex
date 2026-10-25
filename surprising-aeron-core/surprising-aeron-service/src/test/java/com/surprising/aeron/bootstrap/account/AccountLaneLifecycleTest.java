@@ -14,7 +14,7 @@ class AccountLaneLifecycleTest {
         lanes[0] = new AccountLaneState(0, topology.accountLaneQueueCapacity());
         // 第二条 Lane 的非法输入模拟创建中途失败；第一条工作线程已经实际启动。
         var lifecycle = new AccountLaneLifecycle(lanes, topology, CoreRuntimeConfiguration.standalone(),
-                () -> { }, () -> { });
+                () -> { });
         assertThatThrownBy(() -> lifecycle.start(TradingCpuAffinity.disabled()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(lifecycle.started()).isFalse();
@@ -28,7 +28,7 @@ class AccountLaneLifecycleTest {
         for (int laneId = 0; laneId < lanes.length; laneId++)
             lanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
         try (var lifecycle = new AccountLaneLifecycle(lanes, topology, CoreRuntimeConfiguration.standalone(),
-                () -> { }, () -> { })) {
+                () -> { })) {
             lifecycle.start(TradingCpuAffinity.disabled());
             assertThat(lifecycle.ownerHasAccess()).isFalse();
             while (!lifecycle.tryAcquireOwnerAccess()) Thread.onSpinWait();
@@ -48,7 +48,7 @@ class AccountLaneLifecycleTest {
         var rejectOwner = new java.util.concurrent.atomic.AtomicBoolean();
         var first = new IllegalStateException("ownership release failed");
         var lifecycle = new AccountLaneLifecycle(lanes, topology, CoreRuntimeConfiguration.standalone(),
-                () -> { if (rejectOwner.get()) throw first; }, () -> { });
+                () -> { if (rejectOwner.get()) throw first; });
         lifecycle.start(TradingCpuAffinity.disabled());
         rejectOwner.set(true);
         assertThatThrownBy(lifecycle::close).hasCause(first);

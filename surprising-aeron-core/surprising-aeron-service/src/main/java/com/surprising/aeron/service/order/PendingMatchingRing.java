@@ -135,26 +135,24 @@ public final class PendingMatchingRing {
     }
 
     /**
-     * 先占槽再初始化，并把来源资金累加器转交给槽自身缓冲；尚未入队，失败也不自动撤销已经占用的池槽。
+     * 先占槽再初始化；尚未入队，失败也不自动撤销已经占用的池槽。
      * @param sequence 当前命令的完整 Core 序号
      * @param operation 该槽承载的业务操作类别
      * @param command 该槽对应的完整 Core 命令
      * @param fingerprint 原命令指纹
      * @param preMatchingCancellationOrderIds 已确定要先撤的订单号集合
-     * @param fundsAccumulator 初始化时要转交到槽自身缓冲的来源资金累加器
      * @param decodedCommand 当前命令已经解码的只读输入
      * @param admission 可空的已确定准入结果
      */
     CommandSlot acquire(long sequence, CommandSlot.Operation operation, CoreMessage command,
                         com.surprising.aeron.protocol.CommandFingerprint fingerprint,
                         java.util.List<Long> preMatchingCancellationOrderIds,
-                        com.surprising.aeron.service.treasury.RuntimeFundsAccumulator fundsAccumulator,
                         DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
         // 底层池中当前完整序号对应的占用槽。
         CommandSlot context = contexts.claim(sequence);
         // 正在初始化、查询、遍历或观察的原命令槽引用。
         CommandSlot pending = context.initialize(sequence, operation, command, fingerprint,
-                preMatchingCancellationOrderIds, fundsAccumulator, decodedCommand, admission);
+                preMatchingCancellationOrderIds, decodedCommand, admission);
         if (context != pending) throw new IllegalStateException("command must use its claimed slot");
         return pending;
     }

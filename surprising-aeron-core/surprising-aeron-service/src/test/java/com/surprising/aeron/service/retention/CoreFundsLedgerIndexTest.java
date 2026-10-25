@@ -225,39 +225,25 @@ class CoreFundsLedgerIndexTest {
         }
     }
 
-    /**
-     * 同一任务依次查询六十四个不存在身份，看到完成后立即 clear；整体十秒内仍必须收到六十四次通知且应用数为零，防止完成发布后任务复用清掉通知输入。
-     */
+    /** 完成后立即 clear 并复用资金索引请求，检查每次结果独立且不增加应用计数。 */
     @Test @Timeout(15)
-        void indexCompletionSignalsOwnerEvenWhenTheRequestIsImmediatelyReused() {
-        try (/* 本场景自动关闭或故障后显式关闭的真实 Core */ var core = new TradingCoreRuntime(ProductLine.SPOT)) {
+    void indexRequestsCanBeImmediatelyReusedAfterCompletion() {
+        try (var core = new TradingCoreRuntime(ProductLine.SPOT)) {
             core.activate();
-            // 真实 Ledger 完成后通知 Owner 的原子次数
-            var signals = new java.util.concurrent.atomic.AtomicInteger();
-            core.runtimeState().ownerCompletionSignal(signals::incrementAndGet);
-            // 立即 clear 并反复准备的实际资金索引任务
             var work = new TerminalStateRetention.FundsIndexWork();
-            // 当前整个通知场景或直接控制等待的纳秒截止时间
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            try {
-                for (/* 本轮不存在资金 UUID 的查找序号 */ int index = 0; index < 64; index++) {
-                    work.prepareLookup(core.terminalRetention(), new UUID(998, index));
-                    while (!work.poll(core)) {
-                        if (System.nanoTime() >= deadline) throw new AssertionError("funds lookup completion timed out");
-                        Thread.onSpinWait();
-                    }
-                    assertThat(work.retained()).isNull();
-                    // 完成位先于通知发布；任务立即复用也不能清掉工作线程已经捕获的通知运行时。
-                    work.clear();
-                }
-                while (signals.get() != 64) {
+            for (int index = 0; index < 64; index++) {
+                work.prepareLookup(core.terminalRetention(), new UUID(998, index));
+                while (!work.poll(core)) {
                     core.assertHealthy();
-                    if (System.nanoTime() >= deadline) throw new AssertionError("funds completion signal lost");
+                    if (System.nanoTime() >= deadline) throw new AssertionError("funds lookup completion timed out");
                     Thread.onSpinWait();
                 }
-                assertThat(core.appliedCommandCount()).isZero();
-                core.assertHealthy();
-            } finally { core.runtimeState().ownerCompletionSignal(null); }
+                assertThat(work.retained()).isNull();
+                work.clear();
+            }
+            assertThat(core.appliedCommandCount()).isZero();
+            core.assertHealthy();
         }
     }
 

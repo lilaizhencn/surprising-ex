@@ -340,7 +340,6 @@ public final class OrderedCommitCoordinator {
                 owner.resultBuilder.commandLiquidationBatchResult = null;
                 owner.resultBuilder.commandRiskScanControl = null;
                 owner.resultBuilder.resetChangeAccumulators();
-                owner.setCommandFunds(pending.fundsAccumulator());
                 owner.activateFactContext(pending.command(), pending.fingerprint());
                 publication.begin();
                 return completeDispatchedMatcherSettlement(pending, matchingResult);
@@ -378,7 +377,6 @@ public final class OrderedCommitCoordinator {
         owner.resultBuilder.commandLiquidationBatchResult = null;
         owner.resultBuilder.commandRiskScanControl = null;
         owner.resultBuilder.resetChangeAccumulators();
-        owner.setCommandFunds(pending.fundsAccumulator());
         owner.activateFactContext(pending.command(), pending.fingerprint());
         publication.begin();
         try {
@@ -494,7 +492,6 @@ public final class OrderedCommitCoordinator {
      */
     private CoreResponse finishTerminalMatching(CommandSlot pending, MatchingResult matchingResult) {
         publication.complete();
-        owner.validateFundsConservation(pending.command());
         // 按 Matcher 接受与否确定的终态状态
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         // 本轮终态需要保存的拒绝或匹配结果码
@@ -592,7 +589,7 @@ public final class OrderedCommitCoordinator {
         com.surprising.aeron.service.treasury.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
             settlementTreasuryDelta = owner.runtimeState().collectMatcherSettlement(
-                    event, owner.runtimeState().coldCommandFunds(), owner.terminalRetention(),
+                    event, null, owner.terminalRetention(),
                     owner.resultBuilder.changedUserIds(), owner.resultBuilder.changedOrderIds());
             owner.resultBuilder.markLaneCommitIdsSeeded();
             pending.completeLanes(event.requiredLaneMask());

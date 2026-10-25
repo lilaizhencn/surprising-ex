@@ -8,15 +8,15 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 验证 Lane 客户身份的引用计数、空行复用、冷绑定迁移和线程所有权；同数值键隔离通过直接导入模拟，不测量生产哈希碰撞概率。
+ * 验证 Lane 客户身份的引用计数、空行复用、一次绑定和线程所有权；同数值键隔离通过直接导入模拟，不测量生产哈希碰撞概率。
  */
 class LaneClientIdentitiesTest {
     /**
      * 同一身份持有两次后分别回滚及释放，检查错用户释放无效、文本清除，并让后续身份持续复用同一行及数组。
      */
     @Test void referencesProtectAnAliasUntilBothOrdersReleaseItAndRowsRecycle() throws Exception {
-        // 未绑定 Lane 的独立身份行表，当前测试线程串行访问。
-        var table = new LaneClientIdentities(null);
+        // 真实 Lane 的身份行表，当前测试线程串行访问。
+        var table = new AccountLaneState(0, 16).clientIdentities();
         assertThat(table.prepare(11, 7, "客户😀", true)).isEqualTo(-11);
         assertThat(table.prepare(11, 7, "客户😀", true)).isEqualTo(11);
         table.rollback(11, 7, "客户😀");
@@ -43,8 +43,8 @@ class LaneClientIdentitiesTest {
      * 尝试同键不同用户或文本、错误回滚以及引用数溢出，要求原身份、数量及文本保持不变。
      */
     @Test void collisionOverflowAndWrongRollbackDoNotChangeTheExistingIdentity() throws Exception {
-        // 未绑定 Lane 的独立身份行表，当前测试线程串行访问。
-        var table = new LaneClientIdentities(null);
+        // 真实 Lane 的身份行表，当前测试线程串行访问。
+        var table = new AccountLaneState(0, 16).clientIdentities();
         table.prepare(17, 7, "original", true);
         assertThatThrownBy(() -> table.prepare(17, 8, "original", true)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> table.prepare(17, 7, "different", true)).isInstanceOf(IllegalStateException.class);
@@ -61,8 +61,8 @@ class LaneClientIdentitiesTest {
      * 先容纳一千零二十四个身份，再滑动删除最旧并加入新键，要求全部存活文本正确且完成初始扩容后复用名字数组。
      */
     @Test void growthAndBackShiftDeletionKeepEveryLiveIdentityAcrossWraps() throws Exception {
-        // 未绑定 Lane 的独立身份行表，当前测试线程串行访问。
-        var table = new LaneClientIdentities(null);
+        // 真实 Lane 的身份行表，当前测试线程串行访问。
+        var table = new AccountLaneState(0, 16).clientIdentities();
         // 滑动窗口始终保持的存活身份数量，一千零二十四。
         int live = 1024;
         for (/* 本轮需要准备、读取或释放的客户身份整数键。 */ long key = 1; key <= live; key++) table.prepare(key, 7, "id-" + key, true);
@@ -81,24 +81,19 @@ class LaneClientIdentitiesTest {
             assertThat(table.name(key, 7)).isEqualTo("id-" + key);
     }
 
-    /**
-     * 把独立字典绑定旧运行时再冷迁移到新运行时，核对源清空、身份不漂移及双引用身份需要两次释放。
-     */
-    @Test void initialBindingAndColdRebindTransferAuthorityWithExactReferences() {
-        // 被验证冷绑定与 Lane 路由规则的运行时身份字典。
+    /** 首次装载前绑定一次；重复绑定被拒绝，原身份及引用次数保持。 */
+    @Test void oneBindingKeepsLaneAuthorityAndRejectsRebindingWithoutChangingReferences() {
         var identities = new RuntimeIdentityRegistry();
-        // 用户七持有两次的第一个确定性客户身份键。
-        long first = identities.prepareClientKey(7, "first");
-        identities.prepareClientKey(7, "first");
-        // 用户八持有一次的第二个确定性客户身份键。
-        long second = identities.clientKey(8, "second");
-        try (/* 首次接收身份权威表的旧运行时，作用域结束自动关闭。 */ var oldRuntime = new TradingAccountRuntime(); /* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingAccountRuntime()) {
-            identities.bindClientLanes(oldRuntime);
-            // 旧运行时中用户七的身份表，冷迁移成功后其存活数量应归零。
-            var oldTable = oldRuntime.accountLane(oldRuntime.topology().accountLaneId(7)).clientIdentities;
-            assertThat(identities.clientIdentityCount()).isEqualTo(2);
+        assertThatThrownBy(() -> identities.prepareClientKey(7, "unbound"))
+                .isInstanceOf(IllegalStateException.class);
+        try (var runtime = new TradingAccountRuntime(); var other = new TradingAccountRuntime()) {
             identities.bindClientLanes(runtime);
-            assertThat(oldTable.publishedCount()).isZero();
+            long first = identities.prepareClientKey(7, "first");
+            identities.prepareClientKey(7, "first");
+            long second = identities.clientKey(8, "second");
+            assertThatThrownBy(() -> identities.bindClientLanes(other)).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> identities.bindClientLanes(runtime)).isInstanceOf(IllegalStateException.class);
+            assertThat(identities.clientIdentityCount()).isEqualTo(2);
             assertThat(identities.findClientKeyValue(7, "first")).isEqualTo(first);
             assertThat(identities.findClientKeyValue(8, "second")).isEqualTo(second);
             identities.releaseClientKey(7, first);

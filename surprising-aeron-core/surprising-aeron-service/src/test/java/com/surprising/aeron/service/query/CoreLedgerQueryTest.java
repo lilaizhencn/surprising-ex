@@ -18,6 +18,7 @@ import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TreeSet;
@@ -102,9 +103,7 @@ class CoreLedgerQueryTest {
                 Map.of(), Map.of("1", instrument), new CoreRiskState(
                 Map.of("1", new CoreMarkPriceState("1", 100, 1, 1)), Map.of(), liquidations, Map.of("1", new CoreRiskState.RiskScan("1", 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors)), 6),
                 CoreTreasuryState.empty());
-        // 冷运行时使用的身份映射，构造同一业务状态的独立查询参照。
-        var identities = new RuntimeIdentityRegistry();
-        try (/* 从测试业务状态投影的冷运行时，用其工作页编码核对在线异步查询。 */ var cold = RuntimeStateProjector.project(state, identities); /* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {
+        try (var core = coreWithInitialState(state)) {
             core.activate();
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
             long handoff = core.runtimeState().laneHandoffEpoch();
@@ -113,10 +112,8 @@ class CoreLedgerQueryTest {
                     for (int /* 本轮允许的工作页编码字节预算，与单项条数限制一起生效。 */ maxBytes : new int[]{256, 1_024}) {
                         // 指定工作类型、游标、一项上限和字节预算的页查询条件。
                         var request = new CoreLiquidationWorkView.Query(LINE, purpose, cursor, 1, maxBytes);
-                        // 冷运行时依照同一计划集合得到的工作页，编码后应与在线响应一致。
-                        var expected = com.surprising.aeron.service.query.state.RuntimeLiquidationQueryService.work(
-                                cold, identities, LINE, request, new TreeSet<>(liquidations.keySet()), liquidations.keySet());
-                        // 本次查询消费到的最终响应，按场景核对成功、响应超限或页内容。
+                        // 固定夹具的预期内容与游标，独立于生产筛选及分页方法。
+                        var expected = expectedWorkPage(purpose, cursor, maxBytes);
                         var response = query(core, CoreMessageType.LIQUIDATION_WORK_QUERY, CoreLiquidationWorkCodec.encodeQuery(request));
                         assertThat(response.data()).isEqualTo(CoreLiquidationWorkCodec.encodeWork(expected));
                     }
@@ -125,6 +122,29 @@ class CoreLedgerQueryTest {
             assertThat(core.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
             core.assertClusterCallbackComplete();
         }
+    }
+
+    /** 固定夹具中 EXECUTION 仅 1/5 有效、ADL 仅 3/4 有效；显式列出分页游标。 */
+    private static CoreLiquidationWorkView expectedWorkPage(CoreLiquidationWorkView.Purpose purpose,
+            long cursor, int maxBytes) {
+        boolean execution = purpose == CoreLiquidationWorkView.Purpose.EXECUTION;
+        var continuation = execution ? new com.surprising.aeron.protocol.CoreRiskScanContinuation("1", 1, 999) : null;
+        long selected = execution ? cursor < 1 ? 1 : cursor < 5 ? 5 : 0
+                : cursor < 3 ? 3 : cursor < 4 ? 4 : 0;
+        long next = selected == 1 ? 4 : selected == 3 ? 3 : 5;
+        var actions = selected != 0 && execution
+                ? List.of(new com.surprising.aeron.protocol.CoreLiquidationActionView(selected, 1000 + selected,
+                        "1", CoreMarginMode.CROSS, CorePositionSide.NET, 1, 1, 1, 100))
+                : List.<com.surprising.aeron.protocol.CoreLiquidationActionView>of();
+        var resolutions = selected != 0 && !execution
+                ? List.of(new CoreLiquidationWorkView.Resolution(selected, 1000 + selected, "1", "USDT",
+                        CoreMarginMode.CROSS, CorePositionSide.NET, 1, 1, selected == 3 ? 70 : 30, 0, purpose))
+                : List.<CoreLiquidationWorkView.Resolution>of();
+        var expected = new CoreLiquidationWorkView(LINE, next, selected != 1 && selected != 3,
+                continuation, actions, resolutions);
+        if (CoreLiquidationWorkCodec.encodeWork(expected).length <= maxBytes) return expected;
+        long skipped = execution ? selected == 1 ? cursor : 4 : selected == 3 ? 2 : cursor;
+        return new CoreLiquidationWorkView(LINE, skipped, false, continuation, List.of(), List.of());
     }
 
     /**

@@ -812,7 +812,7 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * 下单步骤 4.3：持有发布租约时释放原 Matcher 提交占用，再发布结果并完成各 Lane 投递，最后解除租约。此后只用提前保存的运行时通知 Owner，不再读可被回收的事件字段。
+     * 下单步骤 4.3：持有发布租约时释放原 Matcher 提交占用，再发布结果并完成各 Lane 投递，最后解除租约。此后不再读可被回收的事件字段。
      */
     private void notifyDirectPublication() {
         // 发布完成前提前保存的运行时通知目标，完成位发布后只使用此局部引用。
@@ -824,8 +824,6 @@ public final class MatcherSettlementEvent implements
         directPublished = true;
         completionRuntime.settlements().publishMatcherOwned(this);
         matcherPublicationDeferred = false;
-        // 发布方已交出事件，只允许使用此前保存的运行时局部引用。
-        completionRuntime.signalOwnerCompletion();
     }
 
     /**
@@ -1473,12 +1471,8 @@ public final class MatcherSettlementEvent implements
             funds.clear();
             runtime.applyLedgerSettlementPositions(changes, requiredLaneMask, identities);
             treasury.clearChangedKeys();
-            // 发布完成前提前保存的运行时通知目标，完成位发布后只使用此局部引用。
-            TradingAccountRuntime completionRuntime = runtime;
-            // Owner 观察完成后可立即接管缓冲并复用财务槽，因此先保存通知目标；
-            // 发布完成位后不再读取本槽或事件的任何字段。
+            // Owner 观察完成后可以立即复用财务槽，发布后不再访问槽或事件字段。
             completed = true;
-            completionRuntime.signalOwnerCompletion();
         }
 
         /**

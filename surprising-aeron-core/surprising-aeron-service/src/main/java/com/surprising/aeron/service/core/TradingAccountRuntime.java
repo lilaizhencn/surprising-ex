@@ -515,7 +515,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
         this.laneLifecycle = new AccountLaneLifecycle(accountLanes, topology, configuration,
-                this::assertOwner, this::signalOwnerCompletion);
+                this::assertOwner);
         this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.matcherSettlementReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
@@ -2315,7 +2315,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
-        if (placeAdmissionReadyLanes.setBit(laneId)) signalOwnerCompletion();
+        placeAdmissionReadyLanes.setBit(laneId);
     }
 
     /**
@@ -2343,7 +2343,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (matcherShard < 0 || matcherShard >= topology.matchingEngineCount()) {
             throw new IllegalArgumentException("invalid matcher shard");
         }
-        if (accountAdmissionReadyShards.setBit(matcherShard)) signalOwnerCompletion();
+        accountAdmissionReadyShards.setBit(matcherShard);
     }
 
     /**
@@ -2362,22 +2362,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertAccountLanesHealthy();
         return placeAdmissionReadyLanes.get() != 0
                 || hasPlaceAdmissionNotifications() || hasSettlementNotifications();
-    }
-
-    /** 可空的轻量唤醒回调，发布队列或标记之后调用，不替代完成事实。 */
-    private volatile Runnable ownerCompletionSignal;
-    /**
-     * 在 Owner 上接入可空的轻量完成通知回调。
-     * @param signal 可空轻量通知，Owner 休眠协议决定实际唤醒行为
-     */
-    public void ownerCompletionSignal(Runnable signal) { assertOwner(); ownerCompletionSignal = signal; }
-    /**
-     * 读取一次当前通知回调并在非空时执行，由发布方在队列或完成标记发布后调用。
-     */
-    public void signalOwnerCompletion() {
-        // 本次读取到的可空通知回调，保存到局部后再调用
-        Runnable signal = ownerCompletionSignal;
-        if (signal != null) signal.run();
     }
 
     /**
@@ -2402,7 +2386,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public void publishMatcherSettlementReady(int laneId, long coreSequence) {
         matcherSettlementReadyQueues[laneId].publish(coreSequence);
-        if (settlementReadyLanes.setBit(laneId)) signalOwnerCompletion();
+        settlementReadyLanes.setBit(laneId);
     }
 
     /**
@@ -2410,7 +2394,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param laneId 账户 Lane 的零起始编号
      */
     public void publishDirectMatcherSettlementReady(int laneId) {
-        if (directSettlementReadyLanes.setBit(laneId)) signalOwnerCompletion();
+        directSettlementReadyLanes.setBit(laneId);
     }
 
     /**
@@ -6617,13 +6601,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         return Math.subtractExact(revision, pendingReservations.totalPendingReservations());
     }
 
-    /** 仅冷执行使用的本命令资金累加器，活动账本存在时不由 Owner 再维护同一资金账。 */
-    private final RuntimeFundsAccumulator coldFunds = new RuntimeFundsAccumulator();
-    /**
-     * 没有活动账本时借出冷阶段资金累加器，否则返回空。
-     */
-    public RuntimeFundsAccumulator coldCommandFunds() { return laneLifecycle.ledger() == null ? coldFunds : null; }
-
     /** 无专用财务控制槽时复用的账本资金及持仓索引校验条目。 */
     private final ControlFundsValidation controlFundsValidation = new ControlFundsValidation();
 
@@ -6708,7 +6685,6 @@ appendBalanceFundsDelta(patches, target);
                 funds.clear();
                 applyLedgerControlPositions(positionUndo);
                 validated = true;
-                signalOwnerCompletion();
             }
             return requested;
         }
@@ -6721,7 +6697,6 @@ appendBalanceFundsDelta(patches, target);
             if (rollback) rollbackLedgerPositions(positionUndo);
             else positionUndo.clear();
             completed = true;
-            signalOwnerCompletion();
         }
 
         /**

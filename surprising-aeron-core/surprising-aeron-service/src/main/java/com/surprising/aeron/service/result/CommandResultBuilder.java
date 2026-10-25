@@ -240,7 +240,6 @@ public final class CommandResultBuilder {
      * 账本尚未启动时清冷阶段资金工作区，再清当前用户和订单 ID 集合及 Lane 已供给标记；需要有效 Owner 和运行时。
      */
     public void resetChangeAccumulators() {
-        if (!owner.runtimeState().systemLedgerStarted()) owner.runtimeState().coldCommandFunds().clear();
         changedUserIds.clear();
         changedOrderIds.clear();
         laneCommitIdsSeeded = false;
