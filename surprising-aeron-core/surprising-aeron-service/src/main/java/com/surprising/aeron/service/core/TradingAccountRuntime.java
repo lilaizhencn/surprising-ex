@@ -428,10 +428,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 当前不可变费用政策版本，活动写入归 Lane 0，读者保留所见版本。 */
     private volatile FeePolicyBook feePolicies = FeePolicyBook.EMPTY;
 
-    /** 结算编排复用的剩余数量映射，不另建权威订单状态。 */
-    final LongLongHashMap matcherSettlementRemainingScratch = new LongLongHashMap();
-    /** 结算编排复用的订单身份集合，不保存第二份订单对象。 */
-    final LongHashSet matcherSettlementOrderScratch = new LongHashSet();
     /** 绑定的既有事实索引；活动账本拥有持仓等业务索引的修改权。 */
     private RuntimeFactIndexes factIndexes;
     /** 应用事实索引时配套使用的身份注册表。 */
@@ -2920,23 +2916,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
          */
         default void completeSequence() {
         }
-    }
-
-    /**
-     * 取得 Owner 复用的剩余数量映射；本入口不清空，调用方沿用既有准备和清理顺序。
-     */
-    public LongLongHashMap matcherSettlementRemainingScratch() {
-        assertOwner();
-        return matcherSettlementRemainingScratch;
-    }
-
-    /**
-     * 先清空再借出本轮复用的订单身份集合，下一次调用会覆盖此前内容。
-     */
-    public LongHashSet matcherSettlementOrderScratch() {
-        assertOwner();
-        matcherSettlementOrderScratch.clear();
-        return matcherSettlementOrderScratch;
     }
 
     /**

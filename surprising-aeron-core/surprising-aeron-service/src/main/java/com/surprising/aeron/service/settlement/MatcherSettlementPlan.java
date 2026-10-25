@@ -5,24 +5,18 @@ import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
-import com.surprising.aeron.service.matcher.CoreCancellationResult;
-import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
-import java.util.AbstractList;
 import java.util.List;
-import java.util.RandomAccess;
 import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import lombok.experimental.Accessors;
-import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 /**
- * 下单步骤 4.2：把一项撮合结果整理成成交事件、受影响订单和账户 Lane 路由。直达入口由 Matcher 根据输入事实构建，通用入口沿既有 Owner 读取边界校验账户；发布后由所属 Lane 消费。数组、只读视图和准入引用都受事件或在途槽租约约束，不能当成永久快照。
+ * 下单步骤 4.2：Matcher 根据原生成交事实构建受影响订单和账户 Lane 路由；发布后由所属 Lane 校验当前订单并应用。数组、事件和准入引用受在途槽租约约束，不能当成永久快照。
  */
 public final class MatcherSettlementPlan {
     /**  本代 taker 或撤单请求是否被拒绝，不能与已计入成交并存。 返回本计划是否要求按拒单或撤单拒绝处理 taker。 */
@@ -81,18 +75,12 @@ public final class MatcherSettlementPlan {
     private int takerLaneId = -1;
     /** 本代是否已构建 maker Lane 事件链，复用旧数组时以此开关判定有效性。 */
     private boolean laneEventsIndexed;
-    /** 构建入口复用的初始订单身份参数数组，不作为对外发布的事实视图。 */
-    private long[] initialOrderScratch;
     /** 没有前置撤单时共用的空原语数组。 */
     private static final long[] NO_ORDERS = new long[0];
     /**  构建时保留的准入订单值或命令槽引用，消费者遵守该代租约。 返回构建时保留的准入订单引用，借用期受计划租约限制，可能为空。 */
     @Accessors(fluent = true, chain = false)
     @Getter(value = AccessLevel.PACKAGE)
     private OrderRuntime admittedTaker;
-    /**  尚无 Owner 订单后值时使用的不可变已解析准入输入。 返回普通下单等入口保存的不可变准入输入，可能为空。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private ResolvedPlaceOrder resolvedTaker;
     /** 直达事实校验所需的主动订单方向，空表示不走直达订单校验。 */
     private com.surprising.aeron.protocol.CoreOrderSide directTakerSide;
     /** 直达事实校验所需的币对稠密编号。 */
@@ -101,8 +89,6 @@ public final class MatcherSettlementPlan {
     private CoreInstrument directTakerInstrument;
     /** 本计划构建阶段独占的原语订单去重集合；借用它的构建路径在 finally 清空，短事件路径不使用它。 */
     private final LongHashSet directOrderKeys = new LongHashSet();
-    /** 绑定本计划的只读订单编号视图，跟随当前代变化而非独立快照。 */
-    private final List<Long> orderIdView = new OrderIdView(this);
 
     /**
      * 创建可复用计划，先保留八个订单编号槽，事件和前置撤单使用空值。
@@ -116,7 +102,7 @@ public final class MatcherSettlementPlan {
         matcherEvents = List.of(); completedTrigger = null; preCancellationOrderIds = NO_ORDERS;
         preCancellationSize = 0;
         rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
-        admittedTaker = null; resolvedTaker = null; takerLaneId = -1;
+        admittedTaker = null; takerLaneId = -1;
         directTakerSide = null;
         directTakerSymbolId = 0;
         directTakerInstrument = null;
@@ -250,6 +236,19 @@ public final class MatcherSettlementPlan {
         for (/* 线性检查短订单前缀的当前下标。 */ int i = 0; i < size; i++) {
             if (values[i] == value) return size;
         }
+        values[size] = value;
+        return size + 1;
+    }
+
+    /**
+     * 借用给定集合检查编号是否首次出现，新编号追加到原语有效前缀，容量由构建方保证。
+     * @param unique 当前构建边界独占的原语订单去重集合
+     * @param values 预先保证容量的原语订单编号数组
+     * @param size 数组当前有效编号数量
+     * @param value 要附加的订单编号，或对应入口的触发单终态值
+     */
+    private static int addUnique(LongHashSet unique, long[] values, int size, long value) {
+        if (!unique.add(value)) return size;
         values[size] = value;
         return size + 1;
     }
@@ -392,457 +391,6 @@ public final class MatcherSettlementPlan {
     }
 
     /**
-     * 从已有原语事实列创建计划，默认没有前置撤单；内部入口接管传入数组与事件引用。
-     * @param coreSequence 当前事实对应的 Core 序号
-     * @param takerOrderId 主动订单或该计划的撤单目标编号
-     * @param activeUserId 发起本代命令的账户用户
-     * @param requiredLaneMask 当前计划涉及的账户 Lane 位图
-     * @param orderIds 受影响订单编号数组，复制或接管方式以具体入口为准
-     * @param orderCount 传入原语订单数组的有效前缀长度
-     * @param matcherEvents 传入的原始撮合事件列表引用
-     * @param tradeCount 已统计的成交事件数量
-     */
-    private MatcherSettlementPlan(long coreSequence, long takerOrderId, long activeUserId,
-                                  long requiredLaneMask, long[] orderIds, int orderCount,
-                                  List<MatcherEvent> matcherEvents, int tradeCount) {
-        this(coreSequence, takerOrderId, activeUserId, requiredLaneMask, orderIds, orderCount,
-                matcherEvents, tradeCount, NO_ORDERS);
-    }
-
-    /**
-     * 保存调用方已准备的事实列和有效数量，不在构造器中重新校验成交或复制输入数组。
-     * @param coreSequence 当前事实对应的 Core 序号
-     * @param takerOrderId 主动订单或该计划的撤单目标编号
-     * @param activeUserId 发起本代命令的账户用户
-     * @param requiredLaneMask 当前计划涉及的账户 Lane 位图
-     * @param orderIds 受影响订单编号数组，复制或接管方式以具体入口为准
-     * @param orderCount 传入原语订单数组的有效前缀长度
-     * @param matcherEvents 传入的原始撮合事件列表引用
-     * @param tradeCount 已统计的成交事件数量
-     * @param preCancellationOrderIds 内部构造接管的前置撤单编号数组
-     */
-    private MatcherSettlementPlan(long coreSequence, long takerOrderId, long activeUserId,
-                                  long requiredLaneMask, long[] orderIds, int orderCount,
-                                  List<MatcherEvent> matcherEvents, int tradeCount,
-                                  long[] preCancellationOrderIds) {
-        this.coreSequence = coreSequence;
-        this.takerOrderId = takerOrderId;
-        this.activeUserId = activeUserId;
-        this.requiredLaneMask = requiredLaneMask;
-        this.orderIds = orderIds;
-        this.orderCount = orderCount;
-        this.matcherEvents = matcherEvents;
-        this.tradeCount = tradeCount;
-        this.preCancellationOrderIds = preCancellationOrderIds;
-        this.preCancellationSize = preCancellationOrderIds.length;
-    }
-
-    /**
-     * Owner 构建当前批次时独占的校验暂存。累计跨项剩余量、终态身份和最近 maker 引用，批次结束清空，不发布成第二份订单状态。
-     */
-    static final class BatchValidationScratch {
-        /** 当前批次按订单累计扣减后的剩余量校验表，不是权威订单状态。 */
-        private final LongLongHashMap remainingByOrderId = new LongLongHashMap();
-        /** 本批已用尽、即时完成或不再允许后续成交的订单编号集合。 */
-        private final LongHashSet terminalOrderIds = new LongHashSet();
-        /** 本批最近一次读取的 maker 引用，仅复用相邻重复 maker，clear 解除引用。 */
-        private OrderRuntime lastMaker;
-
-        /**
-         * 复用最近一个 maker 的开放订单引用，相邻成交切换编号时才重新读取；只在当前批次构建调用边界内使用。
-         * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-         * @param id 当前要读取或复用最近引用的 maker 订单编号
-         */
-        OrderRuntime maker(TradingAccountRuntime runtime, long id) {
-            if (lastMaker == null || lastMaker.orderId() != id) lastMaker = requireOpen(runtime, id);
-            return lastMaker;
-        }
-
-        /**
-         * 清空累计剩余量、已终态订单集合和最近 maker 引用，开始新批次前调用。
-         */
-        void clear() {
-            remainingByOrderId.clear();
-            terminalOrderIds.clear();
-            lastMaker = null;
-        }
-    }
-
-    /**
-     * 复用目标计划的两个初始身份槽，按通用构建入口校验结果；目标的上一代必须已完成消费。
-     * @param target 可独占重建的计划槽，上一代消费者必须已经结束
-     * @param sequence 当前事实的 Core 序号
-     * @param takerOrderId 主动订单或该计划的撤单目标编号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param firstOrderId 首个已知关联订单编号
-     * @param secondOrderId 第二个已知关联订单编号
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     */
-    public static MatcherSettlementPlan buildInto(MatcherSettlementPlan target,
-            long sequence, long takerOrderId, long userId, long firstOrderId, long secondOrderId,
-            MatchingResult result, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (target == null) throw new IllegalArgumentException("settlement target is required");
-        if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
-        target.initialOrderScratch[0] = firstOrderId;
-        target.initialOrderScratch[1] = secondOrderId;
-        return build(sequence, takerOrderId, userId, target.initialOrderScratch, result, runtime, identities,
-                null, null, null, null, target);
-    }
-
-    /**
-     * 复用目标的一项初始身份缓冲构建批次单项；有效身份按通用入口处理，不为参数传递临时创建单元素数组。
-     * @param target 可独占重建的计划槽，上一代消费者必须已经结束
-     * @param sequence 当前事实的 Core 序号
-     * @param takerOrderId 主动订单或该计划的撤单目标编号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     */
-    public static MatcherSettlementPlan buildSingleInto(MatcherSettlementPlan target,
-            long sequence, long takerOrderId, long userId,
-            MatchingResult result, TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (target == null) throw new IllegalArgumentException("settlement target is required");
-        if (target.initialOrderScratch == null || target.initialOrderScratch.length < 1)
-            target.initialOrderScratch = new long[1];
-        target.initialOrderScratch[0] = takerOrderId;
-        return build(sequence, takerOrderId, userId, target.initialOrderScratch, result, runtime, identities,
-                null, null, null, null, target);
-    }
-
-    /**
-     * 复用目标创建没有成交的两订单计划，路由仅为当前用户，第二个编号作为 taker；清除上一代引用后保存两个有效身份。
-     * @param target 可独占重建的计划槽，上一代消费者必须已经结束
-     * @param sequence 当前事实的 Core 序号
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param firstOrderId 首个已知关联订单编号
-     * @param secondOrderId 第二个已知关联订单编号
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     */
-    public static MatcherSettlementPlan emptyInto(MatcherSettlementPlan target, long sequence,
-            long userId, long firstOrderId, long secondOrderId, TradingAccountRuntime runtime) {
-        if (target == null || sequence <= 0 || userId <= 0 || firstOrderId <= 0 || secondOrderId <= 0
-                || runtime == null) throw new IllegalArgumentException("invalid empty settlement target");
-        target.clearReferences();
-        target.coreSequence = sequence;
-        target.activeUserId = userId;
-        target.takerOrderId = secondOrderId;
-        target.requiredLaneMask = runtime.topology().accountLaneMask(userId);
-        target.orderIds[0] = firstOrderId;
-        target.orderIds[1] = secondOrderId;
-        target.orderCount = 2;
-        return target;
-    }
-
-    /**
-     * 在一遍成交遍历中构建当前批次项并校验跨项累计数量，共用本批剩余量和终态校验状态。
-     * @param sequence 当前事实的 Core 序号
-     * @param taker 已准入的运行时主动订单引用，或对应重载的不可变已解析准入值
-     * @param instrument 当前事实的规范币对对象，必须与订单输入一致
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     * @param scratch 仅在当前批次构建调用边界内使用的累计数量及终态校验暂存
-     * @param target 可独占重建的计划槽，上一代消费者必须已经结束
-     */
-    static MatcherSettlementPlan buildBatchItem(long sequence, OrderRuntime taker, CoreInstrument instrument,
-                                                MatchingResult result, TradingAccountRuntime runtime,
-                                                RuntimeIdentityRegistry identities, BatchValidationScratch scratch, MatcherSettlementPlan target) {
-        return build(sequence, taker.orderId(), taker.userId(), null, result, runtime, identities,
-                taker, null, instrument, scratch, target);
-    }
-
-    /**
-     * 通用构建入口：选择已准入或可读取的开放 taker，逐成交核对 maker、累计剩余量与持仓身份，归集变化订单和 Lane；批次保留跨项数量，单项临时数量表在 finally 清空，最后填充或创建计划并建立事件索引。
-     * @param coreSequence 当前事实对应的 Core 序号
-     * @param takerOrderId 主动订单或该计划的撤单目标编号
-     * @param activeUserId 发起本代命令的账户用户
-     * @param initialOrderIds 构建前已知的订单编号，非正数项在通用入口跳过
-     * @param result 当前构建入口已关联本代命令的撮合结果，原生重载由外层事件核验证据
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     * @param preparedTaker 调用方提供的已准入运行时订单引用，可为空
-     * @param resolvedTaker 调用方提供的不可变已解析准入值，可为空
-     * @param preparedInstrument 调用方已解析的规范币对，为空时由允许的运行时视图读取
-     * @param batch 当前批次共享的累计数量校验状态，普通单项为空
-     * @param target 可独占重建的计划槽，上一代消费者必须已经结束
-     */
-    private static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
-                                               long[] initialOrderIds, MatchingResult result,
-                                               TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                               OrderRuntime preparedTaker, ResolvedPlaceOrder resolvedTaker,
-                                               CoreInstrument preparedInstrument,
-                                               BatchValidationScratch batch, MatcherSettlementPlan target) {
-        if (coreSequence <= 0 || takerOrderId <= 0 || activeUserId <= 0 || (initialOrderIds == null && batch == null)
-                || result == null || runtime == null || identities == null
-                || result.nativeCoreSequence() != coreSequence) {
-            throw new IllegalArgumentException("invalid matcher settlement plan input");
-        }
-        // 当前构建或 Lane 校验使用的主动订单引用，已解析输入路径可以为空。
-        OrderRuntime taker = preparedTaker == null && resolvedTaker == null
-                ? requireOpen(runtime, takerOrderId) : preparedTaker;
-        if (taker != null && taker.status() != CoreOrderStatus.OPEN
-                || batch != null && batch.terminalOrderIds.contains(takerOrderId))
-            throw new IllegalStateException("runtime matched order is not open: " + takerOrderId);
-        // 本次构建使用的规范币对对象。
-        CoreInstrument instrument = preparedInstrument == null
-                ? runtime.instrument(identities.instrumentId(taker.symbolId())) : preparedInstrument;
-        // 主动订单的币对稠密编号，用于核对 maker。
-        int takerSymbolId = taker == null ? resolvedTaker.symbolId() : taker.symbolId();
-        // 主动订单在本次构建起点的剩余量或完整准入数量。
-        long takerRemainingQuantity = taker == null ? resolvedTaker.quantitySteps() : taker.remainingQuantitySteps();
-        // 主动订单的买卖方向。
-        var takerSide = taker == null ? resolvedTaker.side() : taker.side();
-        // 主动订单的持仓方向，供衍生品身份准备。
-        var takerPositionSide = taker == null ? resolvedTaker.positionSide() : taker.positionSide();
-        // 主动订单的有效期策略，用于判断批次内是否终态。
-        var takerTimeInForce = taker == null ? resolvedTaker.timeInForce() : taker.timeInForce();
-        // 主动订单的订单类型，市价单在本项后不再继续成交。
-        var takerOrderType = taker == null ? resolvedTaker.orderType() : taker.orderType();
-        if (instrument == null || instrument != (taker == null ? resolvedTaker.instrument() : taker.instrument())) {
-            throw new IllegalStateException("runtime match instrument is missing");
-        }
-        // 本次订单变化身份数组按已知事件和初始编号估算的容量。
-        int expectedChanges = Math.max(2, result.matcherEvents().size() + result.cancellations().size()
-                + (initialOrderIds == null ? 1 : initialOrderIds.length) + 1);
-        // 本次新建或目标计划保留的原语订单编号数组。
-        long[] orders;
-        if (target == null) orders = new long[expectedChanges];
-        else {
-            if (target.orderIds.length < expectedChanges)
-                target.orderIds = new long[Math.max(expectedChanges, target.orderIds.length * 2)];
-            orders = target.orderIds;
-        }
-        // 本次构建已写入的去重订单身份数。
-        int orderCount = 0;
-        // 通用构建入口借用的运行时原语订单去重暂存。
-        LongHashSet uniqueOrders = runtime.matcherSettlementOrderScratch();
-        if (initialOrderIds == null) orderCount = addUnique(uniqueOrders, orders, orderCount, takerOrderId);
-        else for (long /* 本次加入身份前缀或核对撤单授权的原语订单编号。 */ orderId : initialOrderIds) {
-            if (orderId > 0) orderCount = addUnique(uniqueOrders, orders, orderCount, orderId);
-        }
-        // 已经归集的实际参与账户 Lane 位图。
-        long laneMask = runtime.topology().accountLaneMask(activeUserId);
-        // 构建时确定的主动账户 Lane 编号。
-        int builtTakerLaneId = runtime.topology().accountLaneId(activeUserId);
-        // 单个事件不会重复访问 maker，无批次时无需累计剩余量表。
-        // 批次或多个事件是否需要累计剩余量校验表。
-        boolean cumulativeValidation = batch != null || result.matcherEvents().size() > 1;
-        // 逐订单累计剩余量暂存，单事件无批次时可以为空。
-        LongLongHashMap remainingByOrderId = !cumulativeValidation ? null : batch == null
-                ? runtime.matcherSettlementRemainingScratch() : batch.remainingByOrderId;
-        if (batch == null && remainingByOrderId != null) remainingByOrderId.clear();
-        if (remainingByOrderId == null || !remainingByOrderId.containsKey(takerOrderId)) {
-            if (remainingByOrderId != null) remainingByOrderId.put(takerOrderId, takerRemainingQuantity);
-        }
-        // 本轮已经校验的 TRADE 事件数。
-        int tradeCount = 0;
-        try {
-            // 当前构建或校验入口借用的原始撮合事件列表。
-            var matcherEvents = result.matcherEvents();
-            for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < matcherEvents.size(); index++) {
-                // 当前原始 Matcher 事件，TRADE 才参与成交数量与 maker 路由。
-                MatcherEvent event = matcherEvents.get(index);
-                if (event == null) throw new IllegalArgumentException("runtime match is required");
-                if (event.eventType() != MatcherEventType.TRADE) continue;
-                if (tradeCount == 0) preparePositionIdentity(runtime, identities, instrument,
-                        activeUserId, takerPositionSide);
-                if (event.price() <= 0 || event.size() <= 0) {
-                    throw new IllegalArgumentException("invalid runtime match price or quantity");
-                }
-                // 当前成交在允许读取边界内取得的对手订单引用。
-                OrderRuntime maker = batch == null ? requireOpen(runtime, event.matchedOrderId())
-                        : batch.maker(runtime, event.matchedOrderId());
-                if (batch != null && batch.terminalOrderIds.contains(maker.orderId())
-                        || maker.userId() != event.matchedOrderUid() || maker.symbolId() != takerSymbolId
-                        || maker.side() == takerSide || maker.userId() == activeUserId) {
-                    throw new IllegalStateException("runtime match does not match authoritative orders");
-                }
-                // 扣除当前成交后主动订单的累计剩余量。
-                long takerRemaining = Math.subtractExact(remainingByOrderId == null
-                        ? takerRemainingQuantity : remainingByOrderId.get(takerOrderId), event.size());
-                // 当前 maker 是否已经出现在累计剩余量表中。
-                boolean knownMaker = remainingByOrderId != null && remainingByOrderId.containsKey(maker.orderId());
-                // 当前成交前 maker 的累计剩余量，首次出现时取订单权威值。
-                long makerBefore = knownMaker ? remainingByOrderId.get(maker.orderId()) : maker.remainingQuantitySteps();
-                // 扣除当前成交后 maker 的累计剩余量。
-                long makerRemaining = Math.subtractExact(makerBefore, event.size());
-                if (takerRemaining < 0 || makerRemaining < 0) {
-                    throw new IllegalStateException("fill exceeds runtime order remaining quantity");
-                }
-                if (remainingByOrderId != null) {
-                    remainingByOrderId.put(takerOrderId, takerRemaining);
-                    remainingByOrderId.put(maker.orderId(), makerRemaining);
-                }
-                if (batch != null && makerRemaining == 0) batch.terminalOrderIds.add(maker.orderId());
-                if (!knownMaker)
-                    preparePositionIdentity(runtime, identities, instrument, maker);
-                orderCount = addUnique(uniqueOrders, orders, orderCount, maker.orderId());
-                // 当前 maker 用户所属的账户 Lane 编号。
-                int makerLane = runtime.topology().accountLaneId(maker.userId());
-                tradeCount++;
-                laneMask |= 1L << makerLane;
-            }
-            if (batch != null && (remainingByOrderId.get(takerOrderId) == 0 || takerTimeInForce.immediate()
-                    || takerOrderType == com.surprising.aeron.protocol.CoreOrderType.MARKET))
-                batch.terminalOrderIds.add(takerOrderId);
-        } finally {
-            if (batch == null && remainingByOrderId != null) remainingByOrderId.clear();
-        }
-        // 当前结果携带的撤单项列表。
-        var cancellations = result.cancellations();
-        for (/* 当前遍历的原始撮合事件、撤单结果或订单前缀下标。 */ int index = 0; index < cancellations.size(); index++) {
-            // 当前检查的单笔撤单结果。
-            var cancellation = cancellations.get(index);
-            // 当前撤单结果在运行时可读取的订单，或 requireOpen 取得的待校验值。
-            OrderRuntime order = runtime.order(cancellation.orderId());
-            if (order != null) {
-                orderCount = addUnique(uniqueOrders, orders, orderCount, order.orderId());
-                laneMask |= runtime.topology().accountLaneMask(order.userId());
-            }
-        }
-        // 本次新建或正在复用填充的结算计划。
-        MatcherSettlementPlan plan = target == null
-                ? new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId, laneMask, orders, orderCount, result.matcherEvents(), tradeCount)
-                : target;
-        plan.coreSequence = coreSequence; plan.takerOrderId = takerOrderId; plan.activeUserId = activeUserId;
-        plan.admittedTaker = taker;
-        plan.resolvedTaker = resolvedTaker;
-        plan.directTakerSide = null;
-        plan.directTakerSymbolId = 0;
-        plan.directTakerInstrument = null;
-        plan.takerLaneId = builtTakerLaneId;
-        plan.requiredLaneMask = laneMask; plan.orderIds = orders; plan.orderCount = orderCount;
-        plan.matcherEvents = result.matcherEvents(); plan.tradeCount = tradeCount;
-        plan.preCancellationOrderIds = NO_ORDERS; plan.preCancellationSize = 0;
-        plan.completedTrigger = null; plan.rejectedTaker = false;
-        plan.laneEventsIndexed = false;
-        return plan.indexLaneEvents(runtime);
-    }
-
-    /**
-     * 创建没有成交的计划，复制调用方订单编号数组，按当前用户确定路由；数组为空时 taker 编号为零。
-     * @param coreSequence 当前事实对应的 Core 序号
-     * @param activeUserId 发起本代命令的账户用户
-     * @param orderIds 受影响订单编号数组，复制或接管方式以具体入口为准
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     */
-    public static MatcherSettlementPlan empty(long coreSequence, long activeUserId, long[] orderIds,
-                                               TradingAccountRuntime runtime) {
-        if (coreSequence <= 0 || activeUserId <= 0 || orderIds == null || runtime == null) {
-            throw new IllegalArgumentException("invalid empty matcher settlement plan input");
-        }
-        return new MatcherSettlementPlan(coreSequence,
-                orderIds.length == 0 ? 0 : orderIds[orderIds.length - 1], activeUserId,
-                runtime.topology().accountLaneMask(activeUserId), orderIds.clone(), orderIds.length,
-                List.of(), 0);
-    }
-
-    /**
-     * 借用给定集合检查编号是否首次出现，新编号追加到原语有效前缀，容量由构建方保证。
-     * @param unique 当前构建边界独占的原语订单去重集合
-     * @param values 预先保证容量的原语订单编号数组
-     * @param size 数组当前有效编号数量
-     * @param value 要附加的订单编号，或对应入口的触发单终态值
-     */
-    private static int addUnique(LongHashSet unique, long[] values, int size, long value) {
-        if (!unique.add(value)) return size;
-        values[size] = value;
-        return size + 1;
-    }
-
-    /** 绑定所属计划的只读订单编号视图，同时提供原语读取接口；有效范围随当前计划代次变化，不持有独立快照。 构造约定：只保存所属计划引用，读取时跟随该计划当前代的有效编号前缀。 参数 plan：此只读视图借用的所属计划 */
-    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-    private static final class OrderIdView extends AbstractList<Long>
-            implements RandomAccess, com.surprising.aeron.support.collection.PrimitiveLongView {
-        /** 只读视图借用的所属计划，不复制其订单数组。 */
-        private final MatcherSettlementPlan plan;
-
-        /**
-         * 校验当前有效范围后返回装箱订单编号；本视图不复制编号，计划复用后旧代内容失效。
-         * @param index 当前代有效订单、事件或前置撤单下标
-         */
-        @Override
-        public Long get(int index) {
-            if (index < 0 || index >= plan.orderCount) throw new IndexOutOfBoundsException(index);
-            return plan.orderIds[index];
-        }
-
-        /**
-         * 返回所属计划当前代有效订单编号数。
-         */
-        @Override
-        public int size() { return plan.orderCount; }
-
-        /**
-         * 为原语视图接口返回当前代有效订单编号数。
-         */
-        @Override
-        public int primitiveSize() { return plan.orderCount; }
-
-        /**
-         * 校验有效下标后直接读取原语订单编号，避免装箱。
-         * @param index 当前代有效订单、事件或前置撤单下标
-         */
-        @Override
-        public long primitiveValueAt(int index) {
-            if (index < 0 || index >= plan.orderCount) throw new IndexOutOfBoundsException(index);
-            return plan.orderIds[index];
-        }
-    }
-
-    /**
-     * 根据已知订单的用户与持仓方向，委托产品感知入口准备持仓身份。
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     * @param instrument 当前事实的规范币对对象，必须与订单输入一致
-     * @param order 当前需校验或准备持仓身份的订单引用
-     */
-    private static void preparePositionIdentity(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                                CoreInstrument instrument, OrderRuntime order) {
-        preparePositionIdentity(runtime, identities, instrument, order.userId(), order.positionSide());
-    }
-
-    /**
-     * 只有衍生品才解析或建立用户、合约与持仓方向的运行时持仓键，现货直接返回。
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param identities 合约名称与运行时持仓身份字典
-     * @param instrument 当前事实的规范币对对象，必须与订单输入一致
-     * @param userId 当前主动、撤单或持仓身份所属用户
-     * @param positionSide 用户在该合约上的持仓方向
-     */
-    private static void preparePositionIdentity(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                                CoreInstrument instrument, long userId,
-                                                com.surprising.aeron.protocol.CorePositionSide positionSide) {
-        if (!runtime.productLine().isDerivative()) return;
-        identities.positionKey(userId, instrument, positionSide);
-    }
-
-    /**
-     * 从当前允许读取的运行时订单视图取得开放订单；缺失或已终态时报出订单和成交进度诊断。
-     * @param runtime 提供拓扑、允许读取的订单视图及构建暂存缓冲的交易运行时
-     * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
-     */
-    private static OrderRuntime requireOpen(TradingAccountRuntime runtime, long orderId) {
-        // 当前撤单结果在运行时可读取的订单，或 requireOpen 取得的待校验值。
-        OrderRuntime order = runtime.order(orderId);
-        if (order == null || order.status() != CoreOrderStatus.OPEN) {
-            throw new IllegalStateException("runtime matched order is not open: " + orderId
-                    + (order == null ? " missing" : " status=" + order.status()
-                    + " executed=" + order.executedQuantitySteps()
-                    + " remaining=" + order.remainingQuantitySteps()
-                    + " revision=" + order.revision()));
-        }
-        return order;
-    }
-
-    /**
-     * 借用计划自带的只读订单编号视图，不复制数组；视图随当前计划代次变化，不能跨租约保留。
-     */
-    public List<Long> orderIdList() { return orderIdView; }
-    /**
      * 直接读取原语订单编号；调用方保证下标在 orderCount 内，本方法不另检查业务有效前缀。
      * @param index 当前代有效订单、事件或前置撤单下标
      */
@@ -856,24 +404,6 @@ public final class MatcherSettlementPlan {
      * @param index 当前代有效订单、事件或前置撤单下标
      */
     public MatcherEvent matcherEvent(int index) { return matcherEvents.get(index); }
-    /**
-     * 把调用方整个原语撤单数组复制到计划自有缓冲，空数组清除本代撤单前缀；这里不重新验证撤单是否成功。
-     * @param orderIds 受影响订单编号数组，复制或接管方式以具体入口为准
-     */
-    public MatcherSettlementPlan preCancellations(long[] orderIds) {
-        if (orderIds == null) throw new IllegalArgumentException("pre-cancellation ids are required");
-        if (orderIds.length == 0) {
-            preCancellationOrderIds = NO_ORDERS;
-            preCancellationSize = 0;
-            return this;
-        }
-        ensurePreCancellationCapacity(orderIds.length);
-        System.arraycopy(orderIds, 0, preCancellationStorage, 0, orderIds.length);
-        preCancellationOrderIds = preCancellationStorage;
-        preCancellationSize = orderIds.length;
-        return this;
-    }
-
     /**
      * 将已经接受的替换原单撤单保存为唯一前置撤单项；之后可追加普通前置撤单。
      * @param orderId 当前主动订单、撤单目标或待检查订单的原语编号
@@ -899,59 +429,6 @@ public final class MatcherSettlementPlan {
         System.arraycopy(orderIds, 0, preCancellationStorage, preCancellationSize, count);
         preCancellationSize += count;
         preCancellationOrderIds = preCancellationStorage;
-    }
-
-    /**
-     * 按准入期望编号的顺序筛出实际接受的撤单，原语列表避免装箱，普通列表跳过空编号；每个期望项最多写入一次。
-     * @param expectedOrderIds 按准入顺序排列的预期前置撤单编号
-     * @param cancellations Matcher 返回的逐订单撤单结果列表
-     */
-    public void preCancellationsFromExpected(List<Long> expectedOrderIds,
-                                             List<CoreCancellationResult> cancellations) {
-        if (expectedOrderIds == null || cancellations == null) {
-            throw new IllegalArgumentException("cancellation inputs are required");
-        }
-        if (expectedOrderIds.isEmpty()) {
-            preCancellationOrderIds = NO_ORDERS;
-            preCancellationSize = 0;
-            return;
-        }
-        // 本轮筛选或线性去重后保留的有效项数。
-        int count = 0;
-        if (expectedOrderIds instanceof com.surprising.aeron.support.collection.ImmutableLongArrayList /* 已经识别为专用原语列表的期望撤单编号视图。 */ primitive) {
-            for (/* 当前按准入顺序遍历的期望撤单下标。 */ int expectedIndex = 0; expectedIndex < primitive.size(); expectedIndex++) {
-                // 本次加入身份前缀或核对撤单授权的原语订单编号。
-                long orderId = primitive.valueAt(expectedIndex);
-                for (/* 当前为期望编号查找的实际撤单结果下标。 */ int cancellationIndex = 0; cancellationIndex < cancellations.size(); cancellationIndex++) {
-                    // 当前检查的单笔撤单结果。
-                    CoreCancellationResult cancellation = cancellations.get(cancellationIndex);
-                    if (cancellation.accepted() && cancellation.orderId() == orderId) {
-                        ensurePreCancellationCapacity(count + 1);
-                        preCancellationStorage[count++] = orderId;
-                        break;
-                    }
-                }
-            }
-        } else {
-            for (/* 当前按准入顺序遍历的期望撤单下标。 */ int expectedIndex = 0; expectedIndex < expectedOrderIds.size(); expectedIndex++) {
-                // 普通列表中取出的可空期望编号，空项跳过。
-                Long expectedOrderId = expectedOrderIds.get(expectedIndex);
-                if (expectedOrderId == null) continue;
-                // 本次加入身份前缀或核对撤单授权的原语订单编号。
-                long orderId = expectedOrderId;
-                for (/* 当前为期望编号查找的实际撤单结果下标。 */ int cancellationIndex = 0; cancellationIndex < cancellations.size(); cancellationIndex++) {
-                    // 当前检查的单笔撤单结果。
-                    CoreCancellationResult cancellation = cancellations.get(cancellationIndex);
-                    if (cancellation.accepted() && cancellation.orderId() == orderId) {
-                        ensurePreCancellationCapacity(count + 1);
-                        preCancellationStorage[count++] = orderId;
-                        break;
-                    }
-                }
-            }
-        }
-        preCancellationOrderIds = count == 0 ? NO_ORDERS : preCancellationStorage;
-        preCancellationSize = count;
     }
 
     /**

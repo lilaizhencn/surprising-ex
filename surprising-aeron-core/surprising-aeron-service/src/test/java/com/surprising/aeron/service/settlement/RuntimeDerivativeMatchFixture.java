@@ -186,7 +186,7 @@ public final class RuntimeDerivativeMatchFixture {
         // 逐成交扣减后主动订单的累计剩余量，仅用于提前校验。
         long takerRemaining = taker.remainingQuantitySteps();
         // 本次验证按 maker 订单累计的剩余量原语暂存表。
-        LongLongHashMap makerRemaining = runtime.matcherSettlementRemainingScratch();
+        LongLongHashMap makerRemaining = new LongLongHashMap();
         makerRemaining.clear();
         try {
             for (/* 通用事件列表当前遍历下标。 */ int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {

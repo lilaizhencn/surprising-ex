@@ -123,7 +123,7 @@ public final class RuntimeSpotMatchFixture {
         // 验证过程中主动订单逐成交扣减后的累计剩余量。
         long takerRemaining = taker.remainingQuantitySteps();
         // 当前验证过程中各 maker 累计剩余数量的原语暂存表。
-        LongLongHashMap makerRemaining = runtime.matcherSettlementRemainingScratch();
+        LongLongHashMap makerRemaining = new LongLongHashMap();
         makerRemaining.clear();
         try {
             for (/* 通用原始撮合事件的当前下标。 */ int matchIndex = 0; matchIndex < matches.size(); matchIndex++) {

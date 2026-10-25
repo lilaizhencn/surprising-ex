@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第七十五轮A238-A241：普通准入无用版本/金额副本整链删除，客户键回调局部化，去仅测试准入副本和剩余Place包装；净减5字段/100生产行。18模块、1986(1Linux跳过)、PIPELINED354、六线12改单/12恢复通过。236解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第七十六轮A242-A245：删除无生产调用的通用结算构建器、跨项暂存、Owner缓存、空准入副本、装箱视图和重复撤单筛选。净减9实例字段/2内部类/544生产行。18模块、1986(1Linux跳过)、PIPELINED377、六线12改单/12恢复通过。240解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -11519,6 +11519,66 @@
       ],
       "evidence": "三个真实字段归入原CommandSlot，通过原实时访问器供Core使用；重复preparedOrder入口统一到相同校验的matchingOrder。原发布/回收时点保留，同时删除无用自旋局部量及已验证用户的无用Lane计算。",
       "verification": "18模块干净构建；核心全量1986(1Linux跳过)，附加PIPELINED28类354例；六线顺序HTTP/WS、12次改单与12次真实Cluster冷恢复。见round75-runtime-20261025.json。"
+    },
+    {
+      "id": "A242",
+      "status": "resolved",
+      "source_basis_commit": "99e505217ce60f6a426a8784ff3d9973d33a4b5c",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_sixth_cleanup_round",
+      "topic": "无生产调用的Owner通用结算构建路径及跨项暂存",
+      "fields_or_methods": [
+        "MatcherSettlementPlan.buildInto/buildSingleInto/buildBatchItem",
+        "MatcherSettlementPlan.empty/emptyInto",
+        "BatchValidationScratch",
+        "initialOrderScratch"
+      ],
+      "evidence": "完整classfile所属类/名称/描述符确认公开入口仅由旧测试调用。删除通用build、Owner订单/持仓准备、跨项剩余量和终态暂存。原生Matcher限制成交数量，真实Lane身份/当前数量校验及资金应用保留；测试迁移到真实入口，没有把通用构建器搬入测试。",
+      "verification": "18模块干净构建；核心全量1986(1Linux跳过)，附加PIPELINED31类377例；六线顺序HTTP/WS、12次改单和12次真实Cluster冷恢复。见round76-runtime-20261025.json。"
+    },
+    {
+      "id": "A243",
+      "status": "resolved",
+      "source_basis_commit": "99e505217ce60f6a426a8784ff3d9973d33a4b5c",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_sixth_cleanup_round",
+      "topic": "只为通用构建器和冷测试保留的Owner缓存",
+      "fields_or_methods": [
+        "TradingAccountRuntime.matcherSettlementRemainingScratch",
+        "TradingAccountRuntime.matcherSettlementOrderScratch",
+        "两个公开getter"
+      ],
+      "evidence": "删除两项运行时缓存和读取入口；两份现有冷金融测试夹具改为各自持有局部LongLongHashMap，生产路径不新增集合、扫描或状态副本。",
+      "verification": "18模块干净构建；核心全量1986(1Linux跳过)，附加PIPELINED31类377例；六线顺序HTTP/WS、12次改单和12次真实Cluster冷恢复。见round76-runtime-20261025.json。"
+    },
+    {
+      "id": "A244",
+      "status": "resolved",
+      "source_basis_commit": "99e505217ce60f6a426a8784ff3d9973d33a4b5c",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_sixth_cleanup_round",
+      "topic": "原生生产构建始终为空的已解析准入副本和读取条件",
+      "fields_or_methods": [
+        "MatcherSettlementPlan.resolvedTaker",
+        "MatcherSettlementEvent.publishAdmissionFinal条件"
+      ],
+      "evidence": "该字段只由退役的通用build写入；原生ResolvedPlaceOrder重载直接使用原输入，没有写入此字段。删除字段、清空和getter；最终发布只判断现有admittedTaker和eventAdmission，真实准入身份和租约继续保留。",
+      "verification": "18模块干净构建；核心全量1986(1Linux跳过)，附加PIPELINED31类377例；六线顺序HTTP/WS、12次改单和12次真实Cluster冷恢复。见round76-runtime-20261025.json。"
+    },
+    {
+      "id": "A245",
+      "status": "resolved",
+      "source_basis_commit": "99e505217ce60f6a426a8784ff3d9973d33a4b5c",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_sixth_cleanup_round",
+      "topic": "只供测试使用的装箱订单视图及撤单复制/筛选接口",
+      "fields_or_methods": [
+        "MatcherSettlementPlan.OrderIdView/orderIdView/orderIdList",
+        "MatcherSettlementPlan.preCancellations",
+        "MatcherSettlementPlan.preCancellationsFromExpected"
+      ],
+      "evidence": "生产按orderCount/orderId读取原语身份；前置撤单已经由Matcher按执行顺序确认成功并追加有效前缀。删除多余视图与重复筛选，保留原语读取、acceptedReplacementCancellation/acceptedPreCancellations、复制边界及容量复用。",
+      "verification": "18模块干净构建；核心全量1986(1Linux跳过)，附加PIPELINED31类377例；六线顺序HTTP/WS、12次改单和12次真实Cluster冷恢复。见round76-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11614,7 +11674,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A238_to_A241_unused_ordinary_admission_metadata_and_wrappers_removed_and_verified; overall_audit_in_progress",
+  "analysis_round_status": "A242_to_A245_dormant_generic_settlement_path_and_support_state_removed_and_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11836,13 +11896,13 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "a277ec6e4afdb2aed2e9e6167cc94efe471d9711",
-    "status": "ordinary_admission_unused_fields_and_checks_removed_end_to_end",
+    "source_basis_commit": "99e505217ce60f6a426a8784ff3d9973d33a4b5c",
+    "status": "unused_generic_settlement_builders_and_support_state_removed",
     "resolved_ids": [
-      "A238",
-      "A239",
-      "A240",
-      "A241"
+      "A242",
+      "A243",
+      "A244",
+      "A245"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11855,11 +11915,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 236,
+      "resolved": 240,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "seventy_fifth_cleanup_round",
+    "evidence": "seventy_sixth_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -45149,6 +45209,48 @@
     "evidence": "round75-runtime-20261025.json",
     "counts": {
       "resolved": 236,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "seventy_sixth_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "99e505217ce60f6a426a8784ff3d9973d33a4b5c",
+    "resolved_ids": [
+      "A242",
+      "A243",
+      "A244",
+      "A245"
+    ],
+    "production_net_lines_removed": 544,
+    "net_instance_fields_removed": 9,
+    "retired_classes": 2,
+    "MatcherSettlementPlan_instance_fields": [
+      25,
+      22
+    ],
+    "TradingAccountRuntime_instance_fields": [
+      77,
+      75
+    ],
+    "removed_nested_class_fields": 4,
+    "core_full_test_counts": {
+      "tests": 1986,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "additional_pipelined_executions": 377,
+    "pipelined_classes": 31,
+    "runtime_products": 6,
+    "native_amendments": 12,
+    "cold_recoveries": 12,
+    "protocol_and_persisted_business_state_unchanged": true,
+    "report": "deep-code-cleanup-20261025-round76.md",
+    "evidence": "round76-runtime-20261025.json",
+    "counts": {
+      "resolved": 240,
       "candidate": 1,
       "retained": 4
     },

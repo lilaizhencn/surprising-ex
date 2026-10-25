@@ -9,9 +9,12 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
+import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
+import com.surprising.aeron.service.matcher.CoreMatchingOrder;
+import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matcher.MatcherEventFixtures;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.instrument.api.model.ContractType;
@@ -26,7 +29,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 撮合结算计划和事件租约的回归用例。覆盖发布预约、就绪与回收、Lane 票据、跨项成交数量、计划数组及视图复用；有的用例使用实际线程，有的直接构造结果，不代表完整 Cluster 或性能采样。
+ * 撮合结算计划和事件租约的回归用例。覆盖发布预约、就绪与回收、Lane 票据、原生撮合数量、计划数组及有效前缀复用；有的用例使用实际线程，有的直接构造结果，不代表完整 Cluster 或性能采样。
  */
 class MatcherSettlementPlanTest {
     /**
@@ -373,133 +376,114 @@ class MatcherSettlementPlanTest {
         }
     }
 
-    /**
-     * 两项共享 maker 时用批次暂存累计剩余量，拒绝合计超量和终态后继续成交；构建失败不扣减权威 maker 数量。
-     */
+    /** 实际 Matcher 连续处理两笔买单，共享卖单只能成交五个单位；这里不执行账户结算。 */
     @Test
-    void sharedMakerQuantityIsValidatedAcrossItemsBeforeAnyLaneApplies() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
-            // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
-            // 当前用例固定测试币对的稠密编号。
-            int instrumentId = identities.symbolId("1");
-            // 用例共用的规范永续币对引用。
-            var instrument = instrument();
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument);
-            // 批次多次成交共用的卖方 maker，用于检查累计剩余量。
-            var maker = order(10, 20, instrumentId, CoreOrderSide.SELL, 5);
-            // 当前批次第一笔主动买单，计划消耗 maker 三个单位。
-            var first = order(11, 21, instrumentId, CoreOrderSide.BUY, 3);
-            // 当前批次第二笔主动买单，用于累计 maker 数量检查。
-            var second = order(12, 22, instrumentId, CoreOrderSide.BUY, 3);
-            runtime.putOrder(maker); runtime.putOrder(first); runtime.putOrder(second);
-            // 当前批次共享的剩余数量、终态及最近 maker 校验暂存。
-            var scratch = new MatcherSettlementPlan.BatchValidationScratch();
-            assertThat(MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan()).tradeCount()).isEqualTo(1);
-            assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1, second, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan()))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
-            assertThat(runtime.order(10).remainingQuantitySteps()).isEqualTo(5);
-            scratch.clear();
-            MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan());
-            assertThat(MatcherSettlementPlan.buildBatchItem(1, second, instrument, fill(2), runtime, identities, scratch, new MatcherSettlementPlan()).tradeCount()).isEqualTo(1);
-            assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(1), runtime, identities, scratch, new MatcherSettlementPlan()))
-                    .isInstanceOf(IllegalStateException.class);
+    void nativeMatcherLimitsSharedMakerAcrossConsecutiveItemsBeforeLaneApplication() {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            DirectMatcherTestInputs.placeDirect(adapter, 20,
+                    new CoreMatchingOrder(10, 1, CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 5, 0));
+            var first = DirectMatcherTestInputs.placeDirect(adapter, 21,
+                    new CoreMatchingOrder(11, 1, CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 3, 0));
+            var second = DirectMatcherTestInputs.placeDirect(adapter, 22,
+                    new CoreMatchingOrder(12, 1, CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 3, 0));
+            assertThat(first.plan(0).tradeCount()).isOne();
+            assertThat(second.plan(0).tradeCount()).isOne();
+            assertThat(first.plan(0).matcherEvent(0).size()).isEqualTo(3);
+            assertThat(second.plan(0).matcherEvent(0).size()).isEqualTo(2);
+            assertThat(first.plan(0).matcherEvent(0).size() + second.plan(0).matcherEvent(0).size()).isEqualTo(5);
         }
     }
-    /**
-     * 清理计划及批次暂存后替换 maker 为更小数量，检查重建会读新数量并拒绝超量；本用例没有附加触发终态，不据名称声称验证触发状态清理。
-     */
+
+    /** 复用计划后由实际 Lane 校验当前 maker，不能沿用前一代较大的剩余量。 */
     @Test
-    void reusedPlanAndScratchDoNotRetainPriorMakerOrTriggerState() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
-            // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry(); /* 当前用例固定测试币对的稠密编号。 */ int instrumentId = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0); runtime.registerInstrument(instrument());
-            runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,5));
-            // 当前构建或事件输入的主动买单。
-            var taker = order(11,21,instrumentId,CoreOrderSide.BUY,3); runtime.putOrder(taker);
-            // 当前批次共享的剩余数量、终态及最近 maker 校验暂存。
-            var scratch = new MatcherSettlementPlan.BatchValidationScratch(); /* 需要在各代间复用的结算计划对象。 */ var slot = new MatcherSettlementPlan();
-            assertThat(MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(3),runtime,identities,scratch,slot)).isSameAs(slot);
-            slot.clearReferences(); scratch.clear();
-            runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,1));
-            assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(3),runtime,identities,scratch,slot))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
-        }
-    }
-    /**
-     * 先为九次成交建立 maker Lane 链，再复用为一次成交，核对新代首项、结束下标及成交数不读取旧链尾。
-     */
-    @Test
-    void pooledPlanSwitchesFromDeepMakerLaneIndexBackToOneFillWithoutStaleLinks() {
-        // 用例显式使用的四账户 Lane 路由拓扑。
+    void reusedNativePlanValidatesCurrentLaneMakerState() {
         var topology = new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime(topology)) {
-            // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry(); /* 当前用例固定测试币对的稠密编号。 */ int instrumentId = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL,0); runtime.registerInstrument(instrument());
-            // 调整到与固定 maker 不同账户 Lane 的主动用户编号。
+        try (var runtime = new TradingAccountRuntime(topology)) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("1");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            runtime.registerInstrument(instrument());
+            runtime.putOrder(order(10, 20, symbol, CoreOrderSide.SELL, 5));
             long takerUser = 21;
             while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
-            runtime.putOrder(order(10,20,instrumentId,CoreOrderSide.SELL,20));
-            // 当前构建或事件输入的主动买单。
-            var taker = order(11,takerUser,instrumentId,CoreOrderSide.BUY,20); runtime.putOrder(taker);
-            // 构造深度成交所用的九项原始事件列表。
-            var events = new java.util.ArrayList<exchange.core2.core.common.MatcherResult.MatcherEvent>();
-            for (/* 添加重复 maker 成交事件的当前次数。 */ int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10,20,100,1,false,false));
-            // 包含九次小额成交的接受结果，用来触发多 Lane 深度事件链。
-            var deep = new CoreMatchingResult(true, "SUCCESS", List.of(),
-                    true, 0, 0, 0, 0, 0, -1,
-                    null, events).withCoreSequenceInPlace(1);
-            // 当前批次共享的剩余数量、终态及最近 maker 校验暂存。
-            var scratch = new MatcherSettlementPlan.BatchValidationScratch(); /* 需要在各代间复用的结算计划对象。 */ var slot = new MatcherSettlementPlan();
-            MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),deep,runtime,identities,scratch,slot);
-            // 固定 maker 所属账户 Lane，用于检查其事件链。
-            // 沿 maker Lane 链实际遍历到的事件数。
+            var taker = order(11, takerUser, symbol, CoreOrderSide.BUY, 3);
+            runtime.putOrder(taker);
+            var slot = new MatcherSettlementPlan();
+            var result = nativeResult(CommandResultCode.SUCCESS, symbol, 1,
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false)));
+            slot.buildDirectNative(1, taker, instrument(), result, runtime);
+            var lane = runtime.accountLaneForUser(20);
+            slot.clearReferences();
+            var currentMaker = order(10, 20, symbol, CoreOrderSide.SELL, 1);
+            runtime.putOrder(currentMaker);
+            slot.buildDirectNative(2, taker, instrument(), result, runtime);
+            var changes = runtime.acquireMatcherSettlementChanges(1L << lane.laneId());
+            changes.directPositionIdentities = true;
+            runtime.enterMatcherSettlementScope(lane, changes);
+            try {
+                assertThatThrownBy(() -> slot.validateDirectLane(lane, runtime, identities, instrument()))
+                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds Lane maker");
+            } finally {
+                runtime.exitMatcherSettlementScope(lane, changes);
+                runtime.releaseMatcherSettlementChanges(changes);
+            }
+            assertThat(runtime.order(10)).isSameAs(currentMaker);
+            assertThat(currentMaker.remainingQuantitySteps()).isOne();
+            assertThat(taker.remainingQuantitySteps()).isEqualTo(3);
+        }
+    }
+
+    /** 九笔成交启用 maker Lane 链后复用为一笔，新代不能读取旧链尾。 */
+    @Test
+    void pooledPlanSwitchesFromDeepMakerLaneIndexBackToOneFillWithoutStaleLinks() {
+        var topology = new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        try (var runtime = new TradingAccountRuntime(topology)) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("1");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            runtime.registerInstrument(instrument());
+            long takerUser = 21;
+            while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
+            var taker = order(11, takerUser, symbol, CoreOrderSide.BUY, 20);
+            var events = new java.util.ArrayList<MatcherResult.MatcherEvent>();
+            for (int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10, 20, 100, 1, false, false));
+            var slot = new MatcherSettlementPlan();
+            slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1, events), runtime);
             int makerLane = topology.accountLaneId(20), count = 0;
-            for (/* 沿 maker Lane 链当前访问的原始事件下标，负一表示遍历结束。 */ int event = slot.firstMatcherEvent(makerLane); event >= 0; event = slot.nextMatcherEvent(event,makerLane)) count++;
+            for (int event = slot.firstMatcherEvent(makerLane); event >= 0; event = slot.nextMatcherEvent(event, makerLane)) count++;
             assertThat(count).isEqualTo(9);
-            slot.clearReferences(); scratch.clear();
-            MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(1),runtime,identities,scratch,slot);
+            slot.clearReferences();
+            slot.buildDirectNative(2, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 2,
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 1, false, false))), runtime);
             assertThat(slot.firstMatcherEvent(makerLane)).isZero();
-            assertThat(slot.nextMatcherEvent(0,makerLane)).isEqualTo(-1);
+            assertThat(slot.nextMatcherEvent(0, makerLane)).isEqualTo(-1);
             assertThat(slot.tradeCount()).isOne();
         }
     }
-    /**
-     * 借用大批量存储后改为一项，在尾部留异代计划，检查当前有效项只有一项且不能通过 plan 读取尾部。
-     */
+
+    /** 缩小批次有效前缀后，尾部异代计划不能参与本代读取。 */
     @Test
     void smallerBatchReusesCapacityAndIgnoresStaleTailPlans() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
-            // 当前用例解析币对编号及持仓身份的运行时字典。
+        try (var runtime = new TradingAccountRuntime()) {
             var identities = new RuntimeIdentityRegistry();
-            // 当前用例固定测试币对的稠密编号。
-            int instrumentId = identities.symbolId("1");
-            // 用例共用的规范永续币对引用。
-            var instrument = instrument();
+            int symbol = identities.symbolId("1");
             runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument);
-            // 当前需要预约、发布、收集并回收的撮合结算事件。
+            runtime.registerInstrument(instrument());
             var event = new MatcherSettlementEvent();
-            // 大批次借出的事件存储，缩小有效项数后仍保留原容量。
             var storage = event.batchStorage(20);
-            // 小批次测试的主动用户编号。
             long userId = 21;
-            // 该主动用户所属账户 Lane 位图。
             long laneMask = runtime.topology().accountLaneMask(userId);
-            storage.plans[0] = MatcherSettlementPlan.empty(1, userId, new long[]{11}, runtime);
-            // 尾部属于上代且序号不同；不能参与本代校验、执行或收集。
-            storage.plans[1] = MatcherSettlementPlan.empty(99, userId, new long[]{12}, runtime);
-            storage.instruments[0] = instrument;
+            storage.plans[0].buildDirectNativeCancellation(1, userId, 11,
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 1, List.of()), runtime);
+            storage.plans[1].buildDirectNativeCancellation(99, userId, 12,
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 99, List.of()), runtime);
+            storage.instruments[0] = instrument();
             assertThat(event.batchStorage(1)).isSameAs(storage);
-            storage.admittedOrders[0] = order(11, userId, instrumentId, CoreOrderSide.BUY, 1);
-            // 当前构造事实使用的命令 UUID。
+            storage.admittedOrders[0] = order(11, userId, symbol, CoreOrderSide.BUY, 1);
             var commandId = new java.util.UUID(1, 2);
             event.prepareDirect(1, laneMask, 1, 1, commandId, 0, runtime, identities, 1, List.of(), null);
             event.reserveMatcherPublication();
-            event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, instrumentId, 1, List.of()),
+            event.publishDirectNativeResult(nativeResult(CommandResultCode.SUCCESS, symbol, 1, List.of()),
                     1, 1, 2, 11, 1, 0);
             assertThat(event.planCount()).isOne();
             assertThat(event.plan(0).coreSequence()).isEqualTo(1);
@@ -507,67 +491,50 @@ class MatcherSettlementPlanTest {
         }
     }
 
-    /**
-     * 交替构建成交和空计划，检查调用方撤单数组被复制、清空后旧事件与撤单不保留，新代编号及成交数正确。
-     */
+    /** 同一原生计划槽在成交、撤单、成交之间复用，不保留旧订单或撤单前缀。 */
     @Test
     void singleCommandSlotReusesPlanWithoutLeakingPriorOrdersOrCancellations() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
-            // 当前用例解析币对编号及持仓身份的运行时字典。
+        try (var runtime = new TradingAccountRuntime()) {
             var identities = new RuntimeIdentityRegistry();
-            // 当前用例固定测试币对的稠密编号。
-            int instrumentId = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
-            runtime.putOrder(order(10, 20, instrumentId, CoreOrderSide.SELL, 5));
-            runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
-            // 需要在各代间复用的结算计划对象。
+            int symbol = identities.symbolId("1");
+            var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
             var slot = new MatcherSettlementPlan();
-            assertThat(MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
-                    fill(3), runtime, identities)).isSameAs(slot);
-            // 调用方撤单数组或混合接受与拒绝的撤单结果列表，具体用例分别核对复制及顺序。
+            slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1,
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), runtime);
             long[] cancellations = {12};
-            assertThat(slot.preCancellations(cancellations)).isSameAs(slot);
+            slot.acceptedPreCancellations(cancellations, 1);
             cancellations[0] = 999;
             assertThat(slot.preCancellationOrderId(0)).isEqualTo(12);
             slot.clearReferences();
             assertThat(slot.matcherEventCount()).isZero();
             assertThat(slot.preCancellationCount()).isZero();
-            assertThat(MatcherSettlementPlan.emptyInto(slot, 2, 21, 20, 22, runtime)).isSameAs(slot);
-            assertThat(slot.orderCount()).isEqualTo(2);
-            assertThat(slot.orderId(0)).isEqualTo(20);
-            assertThat(slot.orderId(1)).isEqualTo(22);
+            slot.buildDirectNativeCancellation(2, 21, 22,
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 2, List.of()), runtime);
+            assertThat(slot.orderCount()).isOne();
+            assertThat(slot.orderId(0)).isEqualTo(22);
             assertThat(slot.tradeCount()).isZero();
             assertThat(slot.matcherEventCount()).isZero();
-            assertThat(MatcherSettlementPlan.buildInto(slot, 3, 11, 21, 11, 0,
-                    fill(1, 3), runtime, identities)).isSameAs(slot);
+            slot.buildDirectNative(3, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 3,
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 1, false, false))), runtime);
+            assertThat(slot.coreSequence()).isEqualTo(3);
             assertThat(slot.orderCount()).isEqualTo(2);
             assertThat(slot.orderId(0)).isEqualTo(11);
             assertThat(slot.orderId(1)).isEqualTo(10);
+            assertThat(slot.tradeCount()).isOne();
             assertThat(slot.preCancellationCount()).isZero();
         }
     }
 
-    /**
-     * 检查单项构建返回原计划槽，并保存预期 taker、maker 和成交数；仅验证槽复用，不代表分配采样。
-     */
+    /** 原生单项构建直接填充既有计划槽，保存 taker、maker 身份和成交数。 */
     @Test
-    void singleItemBatchBuilderUsesThePooledTargetForInitialIdentity() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
-            // 当前用例解析币对编号及持仓身份的运行时字典。
+    void nativeSingleItemUsesPooledPlanForTakerAndMaker() {
+        try (var runtime = new TradingAccountRuntime()) {
             var identities = new RuntimeIdentityRegistry();
-            // 当前用例固定测试币对的稠密编号。
-            int instrumentId = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
-            runtime.putOrder(order(10, 20, instrumentId, CoreOrderSide.SELL, 5));
-            runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
-            // 需要在各代间复用的结算计划对象。
+            int symbol = identities.symbolId("1");
             var slot = new MatcherSettlementPlan();
-            // 本次单项构建使用的接受成交结果。
-            var result = fill(3);
-            assertThat(MatcherSettlementPlan.buildSingleInto(slot, 1, 11, 21,
-                    result, runtime, identities)).isSameAs(slot);
+            slot.buildDirectNative(1, order(11, 21, symbol, CoreOrderSide.BUY, 3), instrument(),
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 1,
+                            List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), runtime);
             assertThat(slot.orderCount()).isEqualTo(2);
             assertThat(slot.orderId(0)).isEqualTo(11);
             assertThat(slot.orderId(1)).isEqualTo(10);
@@ -575,85 +542,73 @@ class MatcherSettlementPlanTest {
         }
     }
 
-    /**
-     * 检查重复读取返回同一编号视图，计划清空后旧视图也变空，明确它不是独立快照。
-     */
+    /** 原语订单前缀在计划清空后失效，复用时只暴露新一代有效数量。 */
     @Test
-    void orderIdViewFollowsPlanLifetimeWithoutCopyingStorage() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
-            // 需要在各代间复用的结算计划对象。
-            var slot = MatcherSettlementPlan.emptyInto(new MatcherSettlementPlan(), 1, 21, 11, 10, runtime);
-            // 绑定计划生命周期的只读订单编号视图。
-            var view = slot.orderIdList();
-
-            assertThat(view).containsExactly(11L, 10L);
-            assertThat(slot.orderIdList()).isSameAs(view);
-            slot.clearReferences();
-            assertThat(view).isEmpty();
-        }
-    }
-
-    /**
-     * 让实际结果顺序不同于准入顺序且包含拒绝项，检查只保存成功撤单并按准入期望顺序排列。
-     */
-    @Test
-    void expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
-            // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
-            // 当前用例固定测试币对的稠密编号。
-            int instrumentId = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
-            runtime.putOrder(order(11, 21, instrumentId, CoreOrderSide.BUY, 3));
-            // 需要在各代间复用的结算计划对象。
-            var slot = MatcherSettlementPlan.buildInto(new MatcherSettlementPlan(), 1, 11, 21, 11, 0,
-                    new CoreMatchingResult(true, "SUCCESS", List.of(),
-                            true, 1, 1, 2, 1, 1, 0,
-                            null, List.of()), runtime, identities);
-            // 调用方撤单数组或混合接受与拒绝的撤单结果列表，具体用例分别核对复制及顺序。
-            var cancellations = List.of(new com.surprising.aeron.service.matcher.CoreCancellationResult(13, true),
-                    new com.surprising.aeron.service.matcher.CoreCancellationResult(12, false),
-                    new com.surprising.aeron.service.matcher.CoreCancellationResult(11, true));
-            slot.preCancellationsFromExpected(List.of(12L, 11L, 13L), cancellations);
-            assertThat(slot.preCancellationCount()).isEqualTo(2);
-            assertThat(slot.preCancellationOrderId(0)).isEqualTo(11);
-            assertThat(slot.preCancellationOrderId(1)).isEqualTo(13);
-        }
-    }
-
-    /**
-     * 分别构造单次超量及重复 maker 累计超量，检查失败后合法数量仍可重建，原 taker 和 maker 引用保持不变。
-     */
-    @Test
-    void singleEventAndRepeatedMakerBothRejectExcessBeforeStateMutation() {
-        try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime()) {
-            // 当前用例解析币对编号及持仓身份的运行时字典。
-            var identities = new RuntimeIdentityRegistry();
-            // 当前用例固定测试币对的稠密编号。
-            int instrumentId = identities.symbolId("1");
-            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
-            runtime.registerInstrument(instrument());
-            // 批次多次成交共用的卖方 maker，用于检查累计剩余量。
-            var maker = order(10, 20, instrumentId, CoreOrderSide.SELL, 3);
-            // 当前构建或事件输入的主动买单。
-            var taker = order(11, 21, instrumentId, CoreOrderSide.BUY, 5);
-            runtime.putOrder(maker); runtime.putOrder(taker);
-            // 需要在各代间复用的结算计划对象。
+    void primitiveOrderPrefixTracksClearAndReuse() {
+        try (var runtime = new TradingAccountRuntime()) {
             var slot = new MatcherSettlementPlan();
-            assertThatThrownBy(() -> MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
-                    fill(4), runtime, identities)).isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
-            // 两次引用同一 maker 且累计超量的原始成交结果。
-            var repeated = new CoreMatchingResult(true, "SUCCESS", List.of(),
-                    true, 1, 0, 0, 0, 0, -1,
-                    null, List.of(MatcherEventFixtures.trade(10, 20, 100, 2, false, false),
-                            MatcherEventFixtures.trade(10, 20, 100, 2, false, false)));
-            assertThatThrownBy(() -> MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
-                    repeated, runtime, identities)).isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
-            assertThat(MatcherSettlementPlan.buildInto(slot, 1, 11, 21, 11, 0,
-                    fill(3), runtime, identities).tradeCount()).isEqualTo(1);
+            slot.buildDirectNativeCancellation(1, 21, 11,
+                    nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), runtime);
+            assertThat(slot.orderCount()).isOne();
+            assertThat(slot.orderId(0)).isEqualTo(11);
+            slot.clearReferences();
+            assertThat(slot.orderCount()).isZero();
+            slot.buildDirectNativeCancellation(2, 21, 22,
+                    nativeResult(CommandResultCode.SUCCESS, 1, 2, List.of()), runtime);
+            assertThat(slot.orderCount()).isOne();
+            assertThat(slot.orderId(0)).isEqualTo(22);
+        }
+    }
+
+    /** 保留替换撤单在前，只复制已接受的撤单前缀，忽略缓冲尾部。 */
+    @Test
+    void acceptedCancellationsAppendInExecutionOrderAndIgnoreUnusedTail() {
+        try (var runtime = new TradingAccountRuntime()) {
+            var slot = new MatcherSettlementPlan();
+            slot.buildDirectNativeCancellation(1, 21, 11,
+                    nativeResult(CommandResultCode.SUCCESS, 1, 1, List.of()), runtime);
+            slot.acceptedReplacementCancellation(10);
+            long[] cancellations = {11, 13, 999};
+            slot.acceptedPreCancellations(cancellations, 2);
+            cancellations[0] = 888;
+            assertThat(slot.preCancellationCount()).isEqualTo(3);
+            assertThat(slot.preCancellationOrderId(0)).isEqualTo(10);
+            assertThat(slot.preCancellationOrderId(1)).isEqualTo(11);
+            assertThat(slot.preCancellationOrderId(2)).isEqualTo(13);
+            slot.clearReferences();
+            assertThat(slot.preCancellationCount()).isZero();
+        }
+    }
+
+    /** 单笔或重复成交超过 taker 总剩余量都在构建时拒绝，不修改账户权威订单。 */
+    @Test
+    void nativeFactsRejectSingleAndRepeatedTakerOverfillBeforeLaneApplication() {
+        try (var runtime = new TradingAccountRuntime()) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("1");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            runtime.registerInstrument(instrument());
+            var maker = order(10, 20, symbol, CoreOrderSide.SELL, 5);
+            var taker = order(11, 21, symbol, CoreOrderSide.BUY, 3);
+            runtime.putOrder(maker);
+            runtime.putOrder(taker);
+            var slot = new MatcherSettlementPlan();
+            assertThatThrownBy(() -> slot.buildDirectNative(1, taker, instrument(),
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 1,
+                            List.of(MatcherEventFixtures.trade(10, 20, 100, 4, false, false))), runtime))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds admitted taker quantity");
+            assertThatThrownBy(() -> slot.buildDirectNative(1, taker, instrument(),
+                    nativeResult(CommandResultCode.SUCCESS, symbol, 1,
+                            List.of(MatcherEventFixtures.trade(10, 20, 100, 2, false, false),
+                                    MatcherEventFixtures.trade(10, 20, 100, 2, false, false))), runtime))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds admitted taker quantity");
+            slot.buildDirectNative(1, taker, instrument(), nativeResult(CommandResultCode.SUCCESS, symbol, 1,
+                    List.of(MatcherEventFixtures.trade(10, 20, 100, 3, false, false))), runtime);
+            assertThat(slot.tradeCount()).isOne();
             assertThat(runtime.order(10)).isSameAs(maker);
             assertThat(runtime.order(11)).isSameAs(taker);
+            assertThat(maker.remainingQuantitySteps()).isEqualTo(5);
+            assertThat(taker.remainingQuantitySteps()).isEqualTo(3);
         }
     }
 
@@ -668,21 +623,6 @@ class MatcherSettlementPlanTest {
     private static OrderRuntime order(long id,long user,int instrumentId,CoreOrderSide side,long qty) {
         return new OrderRuntime(id,user,instrumentId,instrument(),side,100,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                 CoreOrderType.LIMIT,CoreTimeInForce.GTC,0,0,qty,0,qty,false);
-    }
-    /**
-     * 以 Core 序号一构造固定 maker 的单笔接受成交。
-     * @param quantity 固定 maker 本次成交的数量
-     */
-    private static CoreMatchingResult fill(long quantity) { return fill(quantity, 1); }
-    /**
-     * 以指定 Core 序号构造固定 maker 的单笔接受成交，数量按参数设置。
-     * @param quantity 固定 maker 本次成交的数量
-     * @param sequence 关联结果的 Core 序号
-     */
-    private static CoreMatchingResult fill(long quantity, long sequence) {
-        return new CoreMatchingResult(true, "SUCCESS", List.of(),
-                true, 0, 0, 0, 0, 0, -1,
-                null, List.of(MatcherEventFixtures.trade(10,20,100,quantity,false,false))).withCoreSequenceInPlace(sequence);
     }
     /**
      * 构造测试用原生结果，命令类型固定为 PLACE_ORDER；结果码和事件由用例指定，不实际运行撮合。

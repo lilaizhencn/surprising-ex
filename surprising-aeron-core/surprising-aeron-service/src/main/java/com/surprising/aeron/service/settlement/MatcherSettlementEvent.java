@@ -1209,7 +1209,7 @@ public final class MatcherSettlementEvent implements
         // 当前授权、取消或发布最终值的原语订单编号。
         long orderId = admitted != null ? admitted.orderId()
                 : eventAdmission ? admissionOrderId : value.takerOrderId();
-        if ((admitted == null && value.resolvedTaker() == null && !eventAdmission)
+        if ((admitted == null && !eventAdmission)
                 || lane.laneId() != runtime.accountLaneId(userId)) return;
         runtime.publishUser(lane, userId, lane.user(userId));
         runtime.publishOrder(lane, orderId, lane.order(orderId));
