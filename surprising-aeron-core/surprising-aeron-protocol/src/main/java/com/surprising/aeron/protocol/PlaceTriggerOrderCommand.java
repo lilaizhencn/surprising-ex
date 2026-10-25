@@ -29,6 +29,6 @@ public record PlaceTriggerOrderCommand(
                 ocoGroupId, instrumentId, side, triggerType, triggerCondition, triggerPriceTicks,
                 activationPriceTicks, callbackRatePpm, 0, 0, 0, orderType, timeInForce, priceTicks,
                 quantitySteps, marginMode, positionSide, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "",
-                expiresAtEpochMillis, 0, clusterTimestamp, clusterTimestamp, 1, 0, 0, priceSource);
+                expiresAtEpochMillis, 0, clusterTimestamp, clusterTimestamp, 1, priceSource);
     }
 }

@@ -9,7 +9,7 @@ import java.util.List;
 public final class CoreTriggerOrderCodec {
     private static final int VERSION = 1;
     private static final int QUERY_VERSION = 3;
-    private static final int STATE_VERSION = 3;
+    private static final int STATE_VERSION = 4;
     private static final int PLACEMENT_VERSION = 5;
     private static final int MAX_TEXT_BYTES = 128;
     private static final CoreTriggerOrderType[] TYPES = CoreTriggerOrderType.values();
@@ -121,7 +121,6 @@ public final class CoreTriggerOrderCodec {
         buffer.putLong(state.expiresAtEpochMillis()).putLong(state.triggeredAtEpochMillis())
                 .putLong(state.createdAtEpochMillis()).putLong(state.updatedAtEpochMillis())
                 .putLong(state.revision());
-        buffer.putLong(state.makerFeeRatePpm()).putLong(state.takerFeeRatePpm());
         buffer.putInt(state.priceSource().ordinal());
     }
 
@@ -134,7 +133,7 @@ public final class CoreTriggerOrderCodec {
         length = Math.addExact(length, Integer.BYTES * 2L + Long.BYTES * 2L);
         length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 3L);
         length = Math.addExact(length, textLength(state.rejectReason()));
-        length = Math.addExact(length, Long.BYTES * 7L + Integer.BYTES);
+        length = Math.addExact(length, Long.BYTES * 5L + Integer.BYTES);
         return Math.toIntExact(length);
     }
 
@@ -164,7 +163,6 @@ public final class CoreTriggerOrderCodec {
                 STATUSES[reader.enumIndex(STATUSES.length)], reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.text(), reader.nonNegative(),
                 reader.nonNegative(), reader.nonNegative(), reader.nonNegative(), reader.nonNegative(),
-                reader.longValue(), reader.longValue(),
                 PRICE_SOURCES[reader.enumIndex(PRICE_SOURCES.length)]);
         reader.consumed(); return result;
     }

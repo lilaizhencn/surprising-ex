@@ -130,7 +130,7 @@ class ClusterCommandPipelineTest {
                     CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                     100, 0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 4,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                    0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                    0, 0, 0, "", 0, 0, 0, 0, 1);
             live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                     CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),
@@ -272,7 +272,7 @@ class ClusterCommandPipelineTest {
                 ? CoreTriggerCondition.GREATER_OR_EQUAL : CoreTriggerCondition.LESS_OR_EQUAL,
                 threshold, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, 1,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                0, 0, 0, "", 0, 0, 0, 0, 1);
     }
 
     /**
@@ -1232,6 +1232,44 @@ class ClusterCommandPipelineTest {
         verifyTriggerChild(product, false);
     }
 
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void triggerChildUsesFeePolicyAtAdmissionAndKeepsItAcrossRecovery(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            long maker = 11, user = disjointUser(maker);
+            if (product == ProductLine.SPOT) live.apply(live.message(CoreMessageType.ADJUST_BALANCE, maker,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 100))));
+            live.apply(live.place(maker, "1", 101, 100, 10, CoreOrderSide.SELL));
+            live.apply(live.place(user, "1", 102, 100, 10, CoreOrderSide.BUY));
+            live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
+                    CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
+                            9001, "fee-trigger", "", "1", CoreOrderSide.SELL,
+                            CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
+                            100, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 110, 1,
+                            CoreMarginMode.CROSS, CorePositionSide.NET, 0, CoreTriggerPriceSource.MARK))));
+            live.apply(live.message(CoreMessageType.UPSERT_FEE_POLICY, 0,
+                    TradingCommandCodec.encodeUpsertFeePolicy(new com.surprising.aeron.protocol.UpsertFeePolicyCommand(
+                            99001, 1, user, "1", -25, 75, 0, true, TIME, 0))));
+            var balancesBefore = live.service.state().tradingState().user(user).balances();
+            live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
+                    CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
+            var terminal = CoreTestCompletion.triggerState(live.service.state(), user, 9001);
+            assertThat(terminal.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            var child = CoreTestCompletion.orderState(live.service.state(), user, terminal.placedOrderId());
+            assertThat(child).isNotNull();
+            assertThat(child.makerFeeRatePpm()).isEqualTo(-25);
+            assertThat(child.takerFeeRatePpm()).isEqualTo(75);
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                assertThat(CoreTestCompletion.orderState(restored, user, child.orderId())).isEqualTo(child);
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+            live.apply(live.cancel(user, child.orderId()));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(live.service.state().tradingState().user(user).balances()).isEqualTo(balancesBefore);
+        }
+    }
+
     /**
      * 交叉检查显式触发、衍生品内部扫描及零、部分、全部成交；已有活动号和可选终态号都占子单空间。检查选定子单号、源触发终态、OCO 兄弟取消及不借走 Lane，恢复分支另作哈希比较。
      * @param product 当前场景独立产品线，实际范围由各测试枚举源限定
@@ -1267,7 +1305,7 @@ class ClusterCommandPipelineTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                         CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),
@@ -1281,7 +1319,7 @@ class ClusterCommandPipelineTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                         CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         sibling.triggerOrderId(), sibling.clientTriggerOrderId(), sibling.ocoGroupId(),
@@ -1368,7 +1406,7 @@ class ClusterCommandPipelineTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTX, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                         CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),
@@ -1382,7 +1420,7 @@ class ClusterCommandPipelineTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                         CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         sibling.triggerOrderId(), sibling.clientTriggerOrderId(), sibling.ocoGroupId(),
@@ -1460,7 +1498,7 @@ class ClusterCommandPipelineTest {
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100,
                         overflow && id == 9101 ? Long.MAX_VALUE : 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                         CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),
@@ -2905,7 +2943,7 @@ class ClusterCommandPipelineTest {
                         0, trailing ? 100_000 : 0, 0, 0, 0,
                         CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", expired ? TIME + 500 : 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", expired ? TIME + 500 : 0, 0, 0, 0, 1);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                         CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),
@@ -3048,7 +3086,7 @@ class ClusterCommandPipelineTest {
                         110, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
                         110, 1, CoreMarginMode.CROSS, CorePositionSide.NET,
                         CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 0, 0,
-                        1, 0, 0, sources[i]);
+                        1, sources[i]);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user,
                         CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),

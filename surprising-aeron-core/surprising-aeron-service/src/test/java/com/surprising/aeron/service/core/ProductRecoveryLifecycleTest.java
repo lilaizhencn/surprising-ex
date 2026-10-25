@@ -71,7 +71,7 @@ class ProductRecoveryLifecycleTest {
                     CoreTriggerOrderType.STOP_LOSS, CoreTriggerCondition.GREATER_OR_EQUAL,
                     200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                    0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                    0, 0, 0, "", 0, 0, 0, 0, 1);
             apply(live, command(product, 6, 22, CoreMessageType.PLACE_TRIGGER_ORDER,
                     CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),
@@ -133,7 +133,7 @@ class ProductRecoveryLifecycleTest {
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         120, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 120, 2,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                        0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                        0, 0, 0, "", 0, 0, 0, 0, 1);
                 // 与止盈腿同组的合法止损腿。
                 var stopLoss = ocoStopLoss(product, "recovery-stop-loss");
                 // 止损腿客户编号为空白的非法 OCO 配对请求。
@@ -215,7 +215,7 @@ class ProductRecoveryLifecycleTest {
                 CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS, CoreTriggerCondition.LESS_OR_EQUAL,
                 80, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 80, 2,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
-                0, 0, 0, "", 0, 0, 0, 0, 1, 0, 0);
+                0, 0, 0, "", 0, 0, 0, 0, 1);
     }
 
     /**

@@ -70,7 +70,7 @@ class TriggerOrderIdentityTest {
                 com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 120, 0, 0, 0, 0, 0,
                 com.surprising.aeron.protocol.CoreOrderType.MARKET, com.surprising.aeron.protocol.CoreTimeInForce.IOC,
                 0, 1, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET,
-                com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED, 77, 9, 121, "", 0, 1100, 1000, 1200, 3, 0, 0,
+                com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED, 77, 9, 121, "", 0, 1100, 1000, 1200, 3,
                 com.surprising.aeron.protocol.CoreTriggerPriceSource.LAST);
         when(projection.get(ProductLine.LINEAR_PERPETUAL, 1001L, Long.MAX_VALUE)).thenReturn(java.util.Optional.of(state));
         when(projection.get(ProductLine.LINEAR_PERPETUAL, null, Long.MAX_VALUE)).thenReturn(java.util.Optional.of(state));

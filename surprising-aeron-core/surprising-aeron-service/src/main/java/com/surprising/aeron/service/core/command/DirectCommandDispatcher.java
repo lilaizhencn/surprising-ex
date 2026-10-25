@@ -112,7 +112,7 @@ public final class DirectCommandDispatcher {
             case UPDATE_TRIGGER_TRAILING -> triggers.executeUpdateTriggerTrailing(message);
             case EXPIRE_TRIGGER_ORDER -> triggers.executeExpireTriggerOrder(message);
             case RETRY_TRIGGER_ORDER -> triggers.executeRetryTriggerOrder(message);
-            case EXECUTE_TRIGGER_ORDER -> triggers.executeExecuteTriggerOrder(message);
+            case EXECUTE_TRIGGER_ORDER -> triggers.executeTriggerOrder(message);
             default -> { return false; }
         }
         return true;

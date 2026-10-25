@@ -186,6 +186,8 @@ class SixProductLineContractLiveTest {
         assertThat(result.path("completed").asInt()).isEqualTo(2);
         var ids = new ArrayList<String>();
         for (var row : result.path("results")) {
+            assertThat(row.path("order").has("makerFeeRatePpm")).isFalse();
+            assertThat(row.path("order").has("takerFeeRatePpm")).isFalse();
             long id = row.path("order").path("triggerOrderId").asLong();
             ids.add(Long.toString(id));
             request("POST", "/api/v1/gateway/trading-trigger/cancel",
@@ -198,9 +200,13 @@ class SixProductLineContractLiveTest {
                 Thread.sleep(100);
             }
             assertThat(terminal.path("status").asString()).isEqualTo("CANCELED");
+            assertThat(terminal.has("makerFeeRatePpm")).isFalse();
+            assertThat(terminal.has("takerFeeRatePpm")).isFalse();
             var timeline = get("/api/v1/admin/gateway/trading-trigger/" + id + "/timeline?productLine=" + line, admin);
             assertThat(timeline.path("order").path("triggerOrderId").asLong()).isEqualTo(id);
             assertThat(timeline.path("order").path("priceSource").asString()).isEqualTo("LAST");
+            assertThat(timeline.path("order").has("makerFeeRatePpm")).isFalse();
+            assertThat(timeline.path("order").has("takerFeeRatePpm")).isFalse();
         }
         String receiptPath = "/api/v1/gateway/trading-trigger/oco-submission?userId=" + maker.id
                 + "&takeProfitClientId=query-" + run + "-tp&stopLossClientId=query-" + run + "-sl";
@@ -213,7 +219,7 @@ class SixProductLineContractLiveTest {
         assertThat(receipt.path("outcome").asString()).isEqualTo("TERMINAL");
         assertThat(receipt.path("code").asString()).isEqualTo("NONE");
         triggerQueryFixture = Map.of("userId", maker.id, "accessToken", maker.token, "triggerIds", ids, "receiptPath", receiptPath);
-        System.out.println("OPTION_TRIGGER_READ_PASS makerOcoReceipt=true terminalUserLookup=2 adminTimeline=2 source=LAST");
+        System.out.println("OPTION_TRIGGER_READ_PASS makerOcoReceipt=true terminalUserLookup=2 adminTimeline=2 source=LAST feesAbsent=true");
     }
 
     private void enableLocalProduct() throws Exception {
@@ -269,7 +275,7 @@ class SixProductLineContractLiveTest {
             var content = new LinkedHashMap<String, Object>(Map.of(
                     "userId", user.id, "accessToken", user.token, "instrumentId", String.valueOf(instrumentId),
                     "makerId", maker.id, "bidPriceTicks", bid, "runId", System.getenv("SIX_LINE_LIVE_RUN_ID"), "productLine", line.name(), "optionCompanionId", optionCompanion,
-                    "session", Map.of("accessToken", user.token, "user", Map.of("userId", user.id, "username", "live-" + line.name()))));
+                    "session", user.session));
             if (triggerQueryFixture != null) {
                 content.put("triggerQuery", triggerQueryFixture);
                 content.put("adminAccessToken", admin);
@@ -735,7 +741,7 @@ class SixProductLineContractLiveTest {
         String accessToken = auth.path("accessToken").asString();
         var claims = json.readTree(Base64.getUrlDecoder().decode(accessToken.split("\\.")[1]));
         assertThat(claims.path("exp").asLong() - claims.path("iat").asLong()).as("access JWT is valid for seven days").isEqualTo(604_800);
-        return new Participant(id, accessToken);
+        return new Participant(id, auth);
     }
 
     private void exerciseSpotAlgoReads(JdbcTemplate jdbc, SurprisingAeronClient core, Participant user,
@@ -895,6 +901,9 @@ class SixProductLineContractLiveTest {
             }
             if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_TRIGGER_READ_VIEW")))
                 verifyMakerTriggerHistory(maker, instrumentId);
+            boolean singleTriggerClients = line == ProductLine.OPTION
+                    && "true".equals(System.getenv("SIX_LINE_LIVE_OPTION_SINGLE_TRIGGER"));
+            if (singleTriggerClients) awaitClientVerification(user, maker, instrumentId, bid);
             var sold = place(user, instrumentId, "SELL", "MARKET", 0, "IOC", line != ProductLine.SPOT);
             assertThat(sold.path("status").asString()).isEqualTo("FILLED");
             if (line == ProductLine.SPOT) {
@@ -986,7 +995,8 @@ class SixProductLineContractLiveTest {
                     line, user.depth.size(), user.trades.size(), restTradeIds.size());
             if ("true".equals(System.getenv("SIX_LINE_LIVE_ALGO_READ_VIEW")))
                 exerciseSpotAlgoReads(jdbc, core, user, maker, instrumentId, bid);
-            if ((line == ProductLine.SPOT || line == ProductLine.OPTION)&&statisticsFixture==null) awaitClientVerification(user, maker, instrumentId, bid);
+            if ((line == ProductLine.SPOT || line == ProductLine.OPTION)&&statisticsFixture==null
+                    && !singleTriggerClients) awaitClientVerification(user, maker, instrumentId, bid);
             if (line == ProductLine.OPTION && "true".equals(System.getenv("SIX_LINE_LIVE_OPTION_PROTECTION"))) {
                 var directory = java.nio.file.Path.of(System.getenv("SIX_LINE_LIVE_UI_FIXTURE")).getParent();
                 for (String client : List.of("web", "client")) {
@@ -1252,6 +1262,7 @@ class SixProductLineContractLiveTest {
     private final class Participant implements WebSocket.Listener {
         final long id;
         final String token;
+        final JsonNode session;
         final CompletableFuture<Void> subscribed = new CompletableFuture<>();
         final Map<String, JsonNode> executions = new ConcurrentHashMap<>();
         final Map<String, JsonNode> trades = new ConcurrentHashMap<>();
@@ -1259,7 +1270,11 @@ class SixProductLineContractLiveTest {
         final List<String> errors = new CopyOnWriteArrayList<>();
         final StringBuilder fragments = new StringBuilder();
         WebSocket socket;
-        Participant(long id, String token) { this.id = id; this.token = token; }
+        Participant(long id, JsonNode session) {
+            this.id = id;
+            this.session = session;
+            this.token = session.path("accessToken").asString();
+        }
         void connect(int instrumentId) {
             socket = http.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10))
                     .buildAsync(URI.create("ws://127.0.0.1:9094/ws/v1"), this).join();

@@ -14,8 +14,7 @@ class CoreTriggerOrderCodecTest {
                 "tp-501", "oco-1", "1", CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT,
                 CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0, CoreOrderType.MARKET,
                 CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
-                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1_000, 1_000, 1,
-                -25, 40, CoreTriggerPriceSource.LAST);
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", 0, 0, 1_000, 1_000, 1, CoreTriggerPriceSource.LAST);
         assertThat(CoreTriggerOrderCodec.decodeState(CoreTriggerOrderCodec.encodeState(state))).isEqualTo(state);
         assertThat(CoreTriggerOrderCodec.encodedStateLength(state))
                 .isEqualTo(CoreTriggerOrderCodec.encodeState(state).length);

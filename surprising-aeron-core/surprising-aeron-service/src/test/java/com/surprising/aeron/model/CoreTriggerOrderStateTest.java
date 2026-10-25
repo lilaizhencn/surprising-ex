@@ -33,22 +33,6 @@ class CoreTriggerOrderStateTest {
     }
 
     @Test
-    void restoringKeepsCreationFeesInsteadOfCurrentInstrumentDefaults() {
-        for (ProductLine line : ProductLine.values()) {
-            var historical = pending(instrument(line, "1")).withExecutionSnapshot(-123, 456);
-            var currentInstrument = instrument(line, "1");
-            var restored = CoreTriggerOrderState.from(historical.view(), currentInstrument);
-
-            assertThat(currentInstrument.makerFeeRatePpm()).isZero();
-            assertThat(currentInstrument.takerFeeRatePpm()).isZero();
-            assertThat(restored.instrument()).isSameAs(currentInstrument);
-            assertThat(restored.makerFeeRatePpm()).isEqualTo(-123);
-            assertThat(restored.takerFeeRatePpm()).isEqualTo(456);
-            assertThat(restored.view()).isEqualTo(historical.view());
-        }
-    }
-
-    @Test
     void bindingRejectsAnotherInstrumentId() {
         for (ProductLine line : ProductLine.values()) {
             var view = pending(instrument(line, "1")).view();

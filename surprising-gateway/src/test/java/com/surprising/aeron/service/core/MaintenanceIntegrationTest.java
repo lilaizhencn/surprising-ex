@@ -42,7 +42,7 @@ class MaintenanceIntegrationTest {
             var trigger = new CoreTriggerOrderStateView(511,line,22,"maintenance-trigger","","1",line==ProductLine.SPOT?CoreOrderSide.BUY:CoreOrderSide.SELL,
                     CoreTriggerOrderType.STOP_LOSS,CoreTriggerCondition.GREATER_OR_EQUAL,200,0,0,0,0,0,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,90,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,
-                    0,0,0,"",0,0,0,0,1,0,0);
+                    0,0,0,"",0,0,0,0,1);
             submit(22,CoreMessageType.PLACE_TRIGGER_ORDER,
                     CoreTriggerOrderCodec.encodePlacement(new com.surprising.aeron.protocol.PlaceTriggerOrderCommand(
                         trigger.triggerOrderId(), trigger.clientTriggerOrderId(), trigger.ocoGroupId(),

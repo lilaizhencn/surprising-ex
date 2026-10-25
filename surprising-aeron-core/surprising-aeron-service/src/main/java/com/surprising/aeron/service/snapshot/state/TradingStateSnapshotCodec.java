@@ -34,13 +34,13 @@ import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
 /**
- * 交易状态的独立持久化格式。新快照外层版本五十五，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
- * 构造约定：工具类不创建实例；当前写版本五十五，历史布局不再接受。
+ * 交易状态的独立持久化格式。新快照外层版本五十六，内部各业务记录以固定字段编号和长度编码；字段编号只增不复用，Java 类名、声明顺序及接口 DTO 不决定磁盘布局。只读取当前版本，不兼容变化统一提升外层版本，未知合法字段按长度跳过而不参与当前恢复。
+ * 构造约定：工具类不创建实例；当前写版本五十六，历史布局不再接受。
  */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TradingStateSnapshotCodec {
     /** 本编码器新写入的外层快照布局版本。 */
-    private static final int VERSION = 55;
+    private static final int VERSION = 56;
 
     /**
      * 把交易状态各业务表和独立记录写成编号字段，外层加当前小端版本头，不兼容变化统一提升外层版本；不把 Java 类名或当前接口 DTO 当作磁盘结构。
@@ -680,7 +680,7 @@ public final class TradingStateSnapshotCodec {
     }
 
     /**
-     * 按固定字段编号写入触发单记录，保存触发条件、追踪止损状态、子单参数、OCO、费用、价格来源及终态时间；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
+     * 按固定字段编号写入触发单记录，保存触发条件、追踪止损状态、子单参数、OCO、价格来源及终态时间；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的触发单记录业务值
      */
     private static byte[] writeCoreTriggerOrderStateView(CoreTriggerOrderStateView value) {
@@ -715,13 +715,11 @@ public final class TradingStateSnapshotCodec {
                 .number(30, value.createdAtEpochMillis()) // 30：记录创建时刻，毫秒
                 .number(31, value.updatedAtEpochMillis()) // 31：记录最近更新时刻，毫秒
                 .number(32, value.revision()) // 32：当前业务记录修订号
-                .number(33, value.makerFeeRatePpm()) // 33：Maker 手续费率，百万分比
-                .number(34, value.takerFeeRatePpm()) // 34：Taker 手续费率，百万分比
                 .number(35, SnapshotEnumCodes.encode(value.priceSource())) // 35：触发单使用标记价、最近成交价或指数价的来源
                 .encode();
     }
     /**
-     * 按固定字段编号读取并构造触发单记录，恢复触发条件、追踪止损状态、子单参数、OCO、费用、价格来源及终态时间；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
+     * 按固定字段编号读取并构造触发单记录，恢复触发条件、追踪止损状态、子单参数、OCO、价格来源及终态时间；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前触发单记录的独立字段记录字节
      */
     private static CoreTriggerOrderStateView readCoreTriggerOrderStateView(byte[] encoded, ProductLine productLine) {
@@ -759,8 +757,6 @@ public final class TradingStateSnapshotCodec {
                 r.number(30), // 30：记录创建时刻，毫秒
                 r.number(31), // 31：记录最近更新时刻，毫秒
                 r.number(32), // 32：当前业务记录修订号
-                r.number(33), // 33：Maker 手续费率，百万分比
-                r.number(34), // 34：Taker 手续费率，百万分比
                 SnapshotEnumCodes.readCoreTriggerPriceSource(r.integer(35))); // 35：触发单使用标记价、最近成交价或指数价的来源
     }
 

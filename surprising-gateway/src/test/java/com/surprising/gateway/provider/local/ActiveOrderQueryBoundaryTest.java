@@ -53,7 +53,7 @@ class ActiveOrderQueryBoundaryTest {
         return new CoreOrderStateView(id,line,42,instrument,CoreOrderSide.BUY,100,1,0,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"client-"+id,new UUID(0,id),1,2,1000,1000,1,"OPEN",1);
     }
     CoreTriggerOrderStateView trigger(long id,String instrument) {
-        return new CoreTriggerOrderStateView(id,line,42,"client-"+id,"",instrument,CoreOrderSide.SELL,CoreTriggerOrderType.TAKE_PROFIT,CoreTriggerCondition.GREATER_OR_EQUAL,120,0,0,0,0,0,CoreOrderType.MARKET,CoreTimeInForce.IOC,0,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,0,0,0,"",0,0,1000,1000,2,0,0,CoreTriggerPriceSource.LAST);
+        return new CoreTriggerOrderStateView(id,line,42,"client-"+id,"",instrument,CoreOrderSide.SELL,CoreTriggerOrderType.TAKE_PROFIT,CoreTriggerCondition.GREATER_OR_EQUAL,120,0,0,0,0,0,CoreOrderType.MARKET,CoreTimeInForce.IOC,0,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,0,0,0,"",0,0,1000,1000,2,CoreTriggerPriceSource.LAST);
     }
     static Stream<Arguments> products() {return Arrays.stream(ProductLine.values()).flatMap(line->(line==ProductLine.SPOT?Stream.of("order"):Stream.of("order","trigger")).map(domain->Arguments.of(line,domain)));}
     @ParameterizedTest @MethodSource("products")

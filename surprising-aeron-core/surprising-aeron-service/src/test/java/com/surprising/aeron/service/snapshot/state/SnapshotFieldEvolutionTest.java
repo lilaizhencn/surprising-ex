@@ -82,7 +82,7 @@ class SnapshotFieldEvolutionTest {
         var state = new TradingCoreState(empty.productLine(), 0, empty.users(), empty.orders(),
                 empty.instruments(), empty.riskState(), treasury);
         byte[] encoded = TradingStateSnapshotCodec.encode(state);
-        assertThat(ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt()).isEqualTo(55);
+        assertThat(ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt()).isEqualTo(56);
         var root = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, Integer.BYTES, encoded.length));
         var savedTreasury = new SnapshotFields.Reader(root.bytes(7));
         var entries = new SnapshotFields.Reader(savedTreasury.bytes(10))

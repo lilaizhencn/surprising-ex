@@ -45,8 +45,6 @@ import com.surprising.product.api.ProductLine;
  * @param createdAtEpochMillis 这份业务记录的创建时间，使用 Unix 毫秒时间戳
  * @param updatedAtEpochMillis 最后一次更新这份记录的 Unix 毫秒时间戳
  * @param revision 这份状态的修订号，供结果发布和后续更新判断版本
- * @param makerFeeRatePpm 挂单成交时采用的费率，单位为百万分之一，负数表示返佣
- * @param takerFeeRatePpm 吃单成交时采用的费率，单位为百万分之一，负数表示返佣
  * @param priceSource 判断条件时使用标记价、最新成交价还是指数价
  */
 public record CoreTriggerOrderState(
@@ -59,10 +57,10 @@ public record CoreTriggerOrderState(
         CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence, long triggeredPriceTicks,
         String rejectReason, long expiresAtEpochMillis, long triggeredAtEpochMillis,
         long createdAtEpochMillis, long updatedAtEpochMillis, long revision,
-        long makerFeeRatePpm, long takerFeeRatePpm, CoreTriggerPriceSource priceSource) {
+        CoreTriggerPriceSource priceSource) {
 
     /**
-     * 创建尚未提供执行费率的条件单，挂单与吃单费率从 0 开始，触发价格来源使用标记价。
+     * 创建以标记价判断条件的触发单；子单费率由实际准入决策。
      * @param triggerOrderId 条件单的唯一编号，与触发后产生的普通订单编号分开保存
      * @param userId 这份状态所属的用户编号，必须为正数
      * @param clientTriggerOrderId 客户端提供的条件单标识，未提供时保存为空字符串
@@ -111,7 +109,7 @@ public record CoreTriggerOrderState(
                 lowestPriceTicks, activatedAtEpochMillis, orderType, timeInForce, priceTicks, quantitySteps,
                 marginMode, positionSide, status, placedOrderId, triggerSequence, triggeredPriceTicks,
                 rejectReason, expiresAtEpochMillis, triggeredAtEpochMillis, createdAtEpochMillis,
-                updatedAtEpochMillis, revision, 0, 0, CoreTriggerPriceSource.MARK);
+                updatedAtEpochMillis, revision, CoreTriggerPriceSource.MARK);
     }
 
     /**
@@ -124,8 +122,7 @@ public record CoreTriggerOrderState(
         if (triggerOrderId <= 0 || userId <= 0 || instrument == null
                 || side == null || triggerType == null || triggerCondition == null || triggerPriceTicks < 0
                 || callbackRatePpm < 0 || orderType == null || timeInForce == null || quantitySteps <= 0
-                || marginMode == null || positionSide == null || status == null || priceSource == null || revision < 0 || makerFeeRatePpm < -1_000_000L || makerFeeRatePpm > 1_000_000L
-                || takerFeeRatePpm < -1_000_000L || takerFeeRatePpm > 1_000_000L) {
+                || marginMode == null || positionSide == null || status == null || priceSource == null || revision < 0) {
             throw new IllegalArgumentException("invalid trigger order state");
         }
     }
@@ -149,7 +146,7 @@ public record CoreTriggerOrderState(
                 highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType, timeInForce, priceTicks,
                 quantitySteps, marginMode, positionSide, status, placedOrderId, triggerSequence, triggeredPriceTicks,
                 rejectReason, expiresAtEpochMillis, triggeredAtEpochMillis, createdAtEpochMillis,
-                updatedAtEpochMillis, revision, makerFeeRatePpm, takerFeeRatePpm, priceSource);
+                updatedAtEpochMillis, revision, priceSource);
     }
 
     /**
@@ -169,23 +166,7 @@ public record CoreTriggerOrderState(
                 view.timeInForce(), view.priceTicks(), view.quantitySteps(), view.marginMode(), view.positionSide(),
                 view.status(), view.placedOrderId(), view.triggerSequence(), view.triggeredPriceTicks(),
                 view.rejectReason(), view.expiresAtEpochMillis(), view.triggeredAtEpochMillis(),
-                view.createdAtEpochMillis(), view.updatedAtEpochMillis(), view.revision(),
-                view.makerFeeRatePpm(), view.takerFeeRatePpm(), view.priceSource());
+                view.createdAtEpochMillis(), view.updatedAtEpochMillis(), view.revision(), view.priceSource());
     }
 
-    /**
-     * 返回更新了挂单、吃单费率快照的条件单，保留原触发进度、时间和修订号。
-     * @param makerFeeRatePpm 挂单成交时采用的费率，单位为百万分之一，负数表示返佣
-     * @param takerFeeRatePpm 吃单成交时采用的费率，单位为百万分之一，负数表示返佣
-     */
-    public CoreTriggerOrderState withExecutionSnapshot(long makerFeeRatePpm,
-                                                       long takerFeeRatePpm) {
-        return new CoreTriggerOrderState(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId,
-                instrument, side, triggerType, triggerCondition, triggerPriceTicks, activationPriceTicks,
-                callbackRatePpm, highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType,
-                timeInForce, priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId,
-                triggerSequence, triggeredPriceTicks, rejectReason, expiresAtEpochMillis,
-                triggeredAtEpochMillis, createdAtEpochMillis, updatedAtEpochMillis, revision,
-                makerFeeRatePpm, takerFeeRatePpm, priceSource);
-    }
 }

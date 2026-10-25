@@ -108,7 +108,7 @@ public final class RuntimeTriggerOrderStateTransitions {
         if (view.clientTriggerOrderId().isBlank()) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "clientTriggerOrderId is required");
         }
-        // 当前运行时的规范币对，登记成功后绑定到条件单并固定其当时默认费率。
+        // 当前运行时的规范币对，登记成功后绑定到条件单。
         CoreInstrument instrument = runtime.instrument(view.instrumentId());
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "trigger order instrument does not exist");
@@ -124,8 +124,7 @@ public final class RuntimeTriggerOrderStateTransitions {
                     "clientTriggerOrderId already exists");
         }
         validatePlacement(runtime, userId, symbolId, positionKey, view);
-        return CoreTriggerOrderState.from(view, instrument)
-                .withExecutionSnapshot(instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm());
+        return CoreTriggerOrderState.from(view, instrument);
     }
 
     /**
@@ -233,8 +232,7 @@ public final class RuntimeTriggerOrderStateTransitions {
                 current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
                 current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
-                Math.incrementExact(current.revision()), current.makerFeeRatePpm(),
-                current.takerFeeRatePpm(), current.priceSource()));
+                Math.incrementExact(current.revision()), current.priceSource()));
         runtime.incrementCommandRevision();
         return true;
     }
@@ -406,8 +404,7 @@ public final class RuntimeTriggerOrderStateTransitions {
                 current.expiresAtEpochMillis(),
                 status == CoreTriggerOrderStatus.TRIGGERED || status == CoreTriggerOrderStatus.TRIGGER_FAILED
                         ? updatedAt : current.triggeredAtEpochMillis(),
-                current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
-                current.makerFeeRatePpm(), current.takerFeeRatePpm(), current.priceSource());
+                current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()), current.priceSource());
     }
 
     /**

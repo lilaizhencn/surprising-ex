@@ -32,7 +32,7 @@ class TriggerOrderProjectionPostgresTest {
         var v=new CoreTriggerOrderStateView(id,ProductLine.OPTION,user,"client-"+id,"oco","74",CoreOrderSide.SELL,
                 CoreTriggerOrderType.TAKE_PROFIT,CoreTriggerCondition.GREATER_OR_EQUAL,120,0,0,0,0,0,
                 CoreOrderType.MARKET,CoreTimeInForce.IOC,0,1,CoreMarginMode.CROSS,CorePositionSide.NET,status,
-                0,0,0,"",0,0,time,time+1,2,0,0,CoreTriggerPriceSource.LAST);
+                0,0,0,"",0,0,time,time+1,2,CoreTriggerPriceSource.LAST);
         jdbc.update("INSERT INTO core_trigger_order_projection VALUES (?,?,?,?,?,?,?,?,?,?,?)", "OPTION",id,user,v.clientTriggerOrderId(),"74",status.name(),time,time+1,2,20,CoreTriggerOrderCodec.encodeList(List.of(v)));
     }
     @Test void absentInitializationIs503RatherThanAnEmptyHistory() {

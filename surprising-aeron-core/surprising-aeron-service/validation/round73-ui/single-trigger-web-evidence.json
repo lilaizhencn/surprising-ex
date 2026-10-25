@@ -1,0 +1,24 @@
+{
+  "productLine": "OPTION",
+  "posts": [
+    {
+      "operation": "place",
+      "clientTriggerOrderId": "web-trigger-27e64e79-925e-41a4-abb6-eea4b4e0c183"
+    },
+    {
+      "operation": "cancel",
+      "triggerOrderId": "4483460410557657549"
+    }
+  ],
+  "pageErrors": [],
+  "widths": [
+    1440,
+    320
+  ],
+  "triggerId": "4483460410557657549",
+  "placePosts": 1,
+  "cancelPosts": 1,
+  "placeReloadRecovered": true,
+  "cancelReloadRecovered": true,
+  "noBodyOverflow": true
+}

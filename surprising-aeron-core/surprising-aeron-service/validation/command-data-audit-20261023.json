@@ -18,7 +18,7 @@
     "snapshot_record_write_read_pairs_compared": 24,
     "write_only_field_ids_found": [],
     "write_read_comparison_limit": "解码/哈希不等于业务消费；无用 Lane、UUID 和现金副本也会被解码及哈希。",
-    "checkpoint": "第七十二轮A229-A230：批次冻结直接调用原placePrepared，去无Lane备用分支/重复路由检查及测试专用place转发，资产编号改局部，任务自身字段16→15，生产净减64行。18模块干净构建、默认/PIPELINED各271例、六线实测及12次恢复通过。225解决、A11候选、4保留，全量审计继续。",
+    "checkpoint": "第七十三轮A231-A233：触发续步21→18、父状态33→31、查询视图34→32；去未消费费率整链副本及转发，生产净减89行。18模块构建、全量1986(1Linux跳过)、PIPELINED164、跨模块102、六线实测/12恢复及浏览器/Client网络验证。228解决、A11候选、4保留，全量审计继续。",
     "snapshot_pair_breakdown": {
       "typed_business_records": 22,
       "generic_containers": 2
@@ -1176,7 +1176,8 @@
         "state": "implemented_compile_verified",
         "change": "新增触发单创建及 OCO 创建编码，不接受 Maker/Taker 费率；状态查询和子单执行继续使用 Core 固定的实际费率。"
       },
-      "analysis_status": "confirmed"
+      "analysis_status": "confirmed",
+      "followup_correction_20261025": "A233纠正旧用途判断：父触发费率从未进入当前子单决策，真实子单按实际准入的配置/费率策略选择；父状态/查询/快照副本已删除。A02删除创建输入费率的结论仍有效。"
     },
     {
       "id": "A03",
@@ -11362,6 +11363,52 @@
       ],
       "evidence": "生产删除仅供测试调用的身份准备转发；测试按原顺序准备客户/币对/资产编号后调用原placePrepared，未复制冻结或业务校验。",
       "verification": "CodeGraph及完整classfile owner/name/descriptor；18模块干净构建，默认/PIPELINED各271例，六线顺序HTTP/WS与12次Cluster冷恢复，见round72-runtime-20261025.json。"
+    },
+    {
+      "id": "A231",
+      "status": "resolved",
+      "source_basis_commit": "bfd7b01854d9a09249fc54f09cdfb3d798f3ff9b",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_third_cleanup_round",
+      "topic": "触发子单续步保存仅单次账户回调使用的值",
+      "fields_or_methods": [
+        "TriggerExecutionContinuation.order",
+        "failureReason",
+        "assetId"
+      ],
+      "evidence": "三个值改局部，Owner从获准回执读订单号，字段21→18。",
+      "verification": "删除前六产品费率更新/恢复/解冻场景；18模块干净构建，核心全量1986(1Linux跳过)、PIPELINED164、跨模块102、六线HTTP/WS和12次Cluster冷恢复，以及真实浏览器/Client网络验证。见round73-runtime-20261025.json。"
+    },
+    {
+      "id": "A232",
+      "status": "resolved",
+      "source_basis_commit": "bfd7b01854d9a09249fc54f09cdfb3d798f3ff9b",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_third_cleanup_round",
+      "topic": "触发执行重复解码入口及单调用私有转发",
+      "fields_or_methods": [
+        "executeExecuteTriggerOrder",
+        "executableTrigger(long,long,long)",
+        "childOrder不带已选订单号重载"
+      ],
+      "evidence": "统一原消息执行入口，内联原状态读取和子单号准备；顺序与所有权边界保留。",
+      "verification": "删除前六产品费率更新/恢复/解冻场景；18模块干净构建，核心全量1986(1Linux跳过)、PIPELINED164、跨模块102、六线HTTP/WS和12次Cluster冷恢复，以及真实浏览器/Client网络验证。见round73-runtime-20261025.json。"
+    },
+    {
+      "id": "A233",
+      "status": "resolved",
+      "source_basis_commit": "bfd7b01854d9a09249fc54f09cdfb3d798f3ff9b",
+      "business_code_changed": true,
+      "resolved_in_round": "seventy_third_cleanup_round",
+      "topic": "未被触发子单执行消费的父单费率副本",
+      "fields_or_methods": [
+        "CoreTriggerOrderState.makerFeeRatePpm/takerFeeRatePpm",
+        "CoreTriggerOrderStateView.makerFeeRatePpm/takerFeeRatePpm",
+        "withExecutionSnapshot",
+        "触发状态编码及快照字段33/34"
+      ],
+      "evidence": "从创建零值、父状态、复制、校验、查询和快照整链删除；子单仍在实际准入按当前配置/策略冻结真实费率。",
+      "verification": "删除前六产品费率更新/恢复/解冻场景；18模块干净构建，核心全量1986(1Linux跳过)、PIPELINED164、跨模块102、六线HTTP/WS和12次Cluster冷恢复，以及真实浏览器/Client网络验证。见round73-runtime-20261025.json。"
     }
   ],
   "preserve_verified_purposes": [
@@ -11457,7 +11504,7 @@
       "scope": "探针清理同步夹具；其余候选先完成恢复或查询一致性核对。"
     }
   ],
-  "analysis_round_status": "A229_to_A230_batch_freeze_forwarding_and_test_only_place_removed_271_distinct_cases_271_pipelined_six_live_products_twelve_cold_recoveries_verified; overall_audit_in_progress",
+  "analysis_round_status": "A231_to_A233_trigger_callback_fields_forwarders_and_unused_persisted_fee_copies_removed_and_verified; overall_audit_in_progress",
   "temporary_resources": {
     "previous_build_log": "/tmp/aeron-field-cleanup-20261023-build.log",
     "status": "removed_after_results_archived",
@@ -11679,11 +11726,12 @@
   ],
   "latest_analysis_round": {
     "date": "2026-10-25",
-    "source_basis_commit": "784ad7ca9d2f79689345ebc1cd63f623a82909bd",
-    "status": "batch_freeze_forwarding_and_callback_local_field_cleanup_verified",
+    "source_basis_commit": "bfd7b01854d9a09249fc54f09cdfb3d798f3ff9b",
+    "status": "trigger_end_to_end_unused_fee_data_and_callback_cleanup_verified",
     "resolved_ids": [
-      "A229",
-      "A230"
+      "A231",
+      "A232",
+      "A233"
     ],
     "confirmed_ids": [],
     "candidate_ids": [
@@ -11696,11 +11744,11 @@
       "A129"
     ],
     "counts": {
-      "resolved": 225,
+      "resolved": 228,
       "candidate": 1,
       "retained": 4
     },
-    "evidence": "seventy_second_cleanup_round",
+    "evidence": "seventy_third_cleanup_round",
     "overall_audit_completed": false,
     "business_code_changed": true,
     "compilation_run": true,
@@ -44870,6 +44918,48 @@
     "command_snapshot_http_ws_contracts_changed": false,
     "counts": {
       "resolved": 225,
+      "candidate": 1,
+      "retained": 4
+    },
+    "overall_audit_completed": false
+  },
+  "seventy_third_cleanup_round": {
+    "date": "2026-10-25",
+    "source_basis_commit": "bfd7b01854d9a09249fc54f09cdfb3d798f3ff9b",
+    "resolved_ids": [
+      "A231",
+      "A232",
+      "A233"
+    ],
+    "removed_instance_fields_net": 7,
+    "production_net_lines_removed": 89,
+    "removed_forwarders": 3,
+    "core_full_test_counts": {
+      "tests": 1986,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1
+    },
+    "additional_pipelined_executions": 164,
+    "cross_module_executed_distinct_cases": 102,
+    "runtime_products": 6,
+    "cold_recoveries": 12,
+    "browser_real_clicks": true,
+    "client_real_network_widget": true,
+    "formats": {
+      "core_schema": 17,
+      "trigger_placement": 5,
+      "trigger_query": 3,
+      "trigger_state_before": 3,
+      "trigger_state_after": 4,
+      "trading_snapshot_before": 55,
+      "trading_snapshot_after": 56,
+      "sectioned_snapshot": 30
+    },
+    "report": "deep-code-cleanup-20261025-round73.md",
+    "evidence": "round73-runtime-20261025.json",
+    "counts": {
+      "resolved": 228,
       "candidate": 1,
       "retained": 4
     },

@@ -670,16 +670,6 @@ public final class TriggerOrderCommands {
     }
 
     /**
-     * 从请求解码触发 ID、价格序列、触发价和时间，携带原命令 UUID 进入默认需要 OCO 撤销的同步执行入口。
-     * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
-     */
-    public void executeTriggerOrder(CoreMessage message) {
-        // 协议解出的执行数组，依次为触发 ID、行情序列、价格和触发时间
-        long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payloadUnsafe());
-        executeTriggerOrder(execute[0], execute[1], execute[2], execute[3], message.header().commandId(), true);
-    }
-
-    /**
      * 同步执行先核对可执行条件、可选撤 OCO 并认领，再构造子单及核对身份，冻结准入成功后排入原撮合链。只有 reserve 调用中的业务拒绝在这里转成触发失败；前面的身份检查及技术异常继续交外层处理。排入撮合不代表子单已成交。
      * @param triggerOrderId 当前触发单业务 ID
      * @param triggerSequence 本次执行或认领要求匹配的行情价格序列
@@ -691,7 +681,9 @@ public final class TriggerOrderCommands {
     public void executeTriggerOrder(long triggerOrderId, long triggerSequence, long triggeredPriceTicks,
                                      long triggeredAtEpochMillis, UUID commandId, boolean cancelOco) {
         // 本次候选对应的触发状态或路由，先确认状态再处理
-        var trigger = executableTrigger(triggerOrderId, triggerSequence, triggeredPriceTicks);
+        var trigger = owner.runtimeState().triggerOrder(triggerOrderId);
+        trigger = executableTrigger(trigger, triggerSequence, triggeredPriceTicks,
+                trigger == null ? null : owner.identities().findSymbolId(trigger.instrumentId()));
         if (trigger == null) return;
         if (cancelOco) owner.cancelAllOcoSiblings(trigger);
         if (RuntimeTriggerOrderStateTransitions.claim(owner.runtimeState(), triggerOrderId, triggerSequence,
@@ -701,7 +693,8 @@ public final class TriggerOrderCommands {
         // 本触发单已有标的配置，供交易开关或子单产品规则检查
         var instrument = trigger.instrument();
         // 按触发规则构造的子订单意图，尚未完成资金冻结或撮合
-        var place = childOrder(trigger, triggeredPriceTicks, instrument);
+        var place = childOrder(trigger, triggeredPriceTicks, instrument,
+                triggerChildOrderId(trigger.triggerOrderId()));
         // 已经选定并用于本次子单的未占用正奇数订单 ID
         long childOrderId = place.orderId();
         owner.requireOrderIdentityAvailable(trigger.userId(), place);
@@ -717,18 +710,6 @@ public final class TriggerOrderCommands {
         owner.resultBuilder.markOrderChanged(childOrderId);
         owner.queueTriggerMatching(owner.runtimeState().triggerOrder(triggerOrderId), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId,
                 owner.runtimeState().changedOrderValue(childOrderId));
-    }
-
-    /**
-     * 从账户状态读完整触发单并找到其标的索引，交给统一可执行性校验。
-     * @param id 需要查询的触发单业务 ID
-     * @param sequence 可执行性校验必须匹配的行情价格序列
-     * @param price 选定来源价格或子单默认限价，单位为价格 tick
-     */
-    private com.surprising.aeron.model.CoreTriggerOrderState executableTrigger(long id, long sequence, long price) {
-        // 本次候选对应的触发状态或路由，先确认状态再处理
-        var trigger = owner.runtimeState().triggerOrder(id);
-        return executableTrigger(trigger, sequence, price, trigger == null ? null : owner.identities().findSymbolId(trigger.instrumentId()));
     }
 
     /**
@@ -754,17 +735,6 @@ public final class TriggerOrderCommands {
                 || selectedPrice != price || !isTriggerConditionSatisfied(trigger, price))
             throw new CoreStateRejectedException("TRIGGER_CONDITION_NOT_MET", "trigger price is not executable");
         return trigger;
-    }
-
-    /**
-     * 先分配未占用的正奇数子订单 ID，再按触发单参数构造下单意图。
-     * @param trigger 本次判断、构造子单或 OCO 撤销所用的触发状态、路由或视图
-     * @param price 选定来源价格或子单默认限价，单位为价格 tick
-     * @param instrument 触发单已有标的配置，用来判断现货还是衍生品
-     */
-    private PlaceOrderCommand childOrder(com.surprising.aeron.model.CoreTriggerOrderState trigger,
-            long price, com.surprising.aeron.service.instrument.CoreInstrument instrument) {
-        return childOrder(trigger, price, instrument, triggerChildOrderId(trigger.triggerOrderId()));
     }
 
     /**
@@ -1117,13 +1087,14 @@ public final class TriggerOrderCommands {
      * 显式执行请求的分流入口：冷路径进入同步执行，活动账户路径解码并把子单续步交直接控制槽等待。
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
      */
-    public void executeExecuteTriggerOrder(CoreMessage message) {
-        if (!owner.runtimeState().asynchronousCommands()) {
-            executeTriggerOrder(message);
+    public void executeTriggerOrder(CoreMessage message) {
+        boolean asynchronous = owner.runtimeState().asynchronousCommands();
+        // 协议解出的执行数组，依次为触发 ID、行情序列、价格和触发时间。
+        long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payloadUnsafe());
+        if (!asynchronous) {
+            executeTriggerOrder(execute[0], execute[1], execute[2], execute[3], message.header().commandId(), true);
             return;
         }
-        // 协议解出的执行数组，依次为触发 ID、行情序列、价格和触发时间
-        long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payloadUnsafe());
         // 当前候选实际采用的所选来源价格 tick
         // 本次显式执行协议中的触发 ID
         // 本次显式执行协议中的触发时间
@@ -1173,15 +1144,8 @@ public final class TriggerOrderCommands {
         private long triggerId, triggerSequence, price, triggeredAt, childSequence, childOrderId;
         /** 本扫描合成或原执行请求传入的命令 UUID，供子单身份和撮合上下文使用。 */
         private UUID commandId;
-        /** 账户解析后的子单准入输入，包含原交易规则确定的预留和费率。 */
-        private com.surprising.aeron.service.order.admission.ResolvedPlaceOrder order;
-        /** 解析子单遇到的业务拒绝代码，非空则认领后完成为失败。 */
-        private String failureReason;
-        /**
-         * assetId：子单实际预留资产的内部 ID，解析未成功时为零。
-         * laneId：触发单所属用户账户 Lane，由 Owner 预先定位。
-         */
-        private int assetId, laneId;
+        /** 触发单所属用户账户 Lane，由 Owner 预先定位。 */
+        private int laneId;
         /**
          * baseAssetId：标的基础资产的内部整数身份。
          * quoteAssetId：标的报价资产的内部整数身份。
@@ -1217,7 +1181,7 @@ public final class TriggerOrderCommands {
                 long triggerId, long triggerSequence, long price, long triggeredAt, UUID commandId,
                 boolean cancelOco, long childOrderId) {
             this.childOrderId = childOrderId;
-            trigger = null; order = null; failureReason = "";
+            trigger = null;
             this.triggerId = triggerId; this.triggerSequence = triggerSequence;
             this.price = price; this.triggeredAt = triggeredAt; this.commandId = commandId;
             decision = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.context(
@@ -1255,11 +1219,13 @@ public final class TriggerOrderCommands {
             if (!inputReady) throw new IllegalStateException("Ledger trigger admission input is incomplete");
             trigger = executableTrigger(owner.runtimeState().triggerOrder(triggerId), triggerSequence, price, decision.symbolId());
             if (trigger == null) return null;
+            com.surprising.aeron.service.order.admission.ResolvedPlaceOrder order = null;
+            String failureReason = "";
             try {
                 order = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.resolve(
                         decision, trigger.userId(), childOrder(trigger, price, trigger.instrument(), childOrderId));
             } catch (/* 子单决策或冻结中遇到的业务拒绝，记成触发失败而非技术故障 */ CoreStateRejectedException rejected) { failureReason = rejected.code(); }
-            assetId = order == null ? 0 : order.reservationAsset().equals(decision.instrument().baseAsset()) ? baseAssetId
+            int assetId = order == null ? 0 : order.reservationAsset().equals(decision.instrument().baseAsset()) ? baseAssetId
                     : order.reservationAsset().equals(decision.instrument().quoteAsset()) ? quoteAssetId : settleAssetId;
             for (/* 当前借入同组倒序集合的 primitive ID 迭代器 */ var siblingIds = siblings.iterator(); siblingIds.hasNext();) {
                 // 本页当前选择或处理的 OCO 兄弟触发 ID
@@ -1320,11 +1286,10 @@ public final class TriggerOrderCommands {
                 var receipt = (com.surprising.aeron.service.order.state.OrderRuntime) result;
                 owner.runtimeState().collectControlReservation(receipt, childSequence);
                 owner.resultBuilder.markUserChanged(trigger.userId());
-                owner.resultBuilder.markOrderChanged(order.orderId());
+                owner.resultBuilder.markOrderChanged(receipt.orderId());
                 owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, receipt);
             }
             trigger = null;
-            order = null;
             decision = null;
             commandId = null;
             siblings = null;
