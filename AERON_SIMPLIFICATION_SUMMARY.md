@@ -767,19 +767,41 @@
 | **Gateway 孤岛计算与死代码** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件及多个死方法/模型，净减少死代码 |
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
 | **死命令与死 Record** | `AccountUserCommand`, `UserMfaEnrollment` 等遗留 | 物理彻底清除所有死命令与死 Record |
-| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，全量单测与 155 项集群长稳压测（ClusteredBatchTrading & ContinuousOwner）全绿通过** |
-
-
-
-
-
-
-
-
+| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，全量单测与 158 项集群长稳压测（ClusteredBatchTrading & ContinuousOwner & SettlementSolvency）全绿通过** |
 
 ---
 
+## 30. Round 14: 彻底消除 SystemLedgerLane 独立线程并就地内联
 
+基于“KISS 原则”与“消除过度并发工程化”的核心要求，Round 14 对系统账本执行链路进行了根本性架构精简：
 
+### 30.1 物理删除独立账本线程 `SystemLedgerLane.java`
+- **问题根因**：
+  此前系统为处理财库更新、系统手续费/保险金划转、强平结算、持仓业务索引（`factIndexes`）维护及资金审计，专门启动了一个独立的平台线程 `SystemLedgerLane`，并通过 Disruptor/Queue 邮箱进行跨线程任务投递与状态同步。然而，系统财库与持仓业务索引实际上只由一个权威边界消费，拆分独立线程不仅引入了大量的跨线程屏障、等待唤醒（parking/unparking）开销，还催生了复杂的跨线程状态交接与队列阻塞等待逻辑。
+- **重构落地**：
+  1. 将原本在 `SystemLedgerLane` 消费循环中执行的财库变更（`TreasuryRuntime`）、资金守恒核对与持仓索引更新，彻底就地内联至 Owner 线程同步推进；
+  2. 物理删除 `SystemLedgerLane.java` 与其专用测试 `SystemLedgerLaneTest.java`；
+  3. `AccountLaneLifecycle` 中移除对独立账本线程的创建、启停、监控及退出屏障，仅保留业务所有者线程绑定；
+  4. 全量压测（`ClusteredBatchTradingBenchmarkTest`, `ContinuousOwnerBenchmarkTest`, `SettlementSolvencyBenchmarkTest`）158/158 100% PASS，资金 100% 绝对守恒。
 
+---
+
+## 31. Round 15: 全链路伪异步 Entry 状态机清理与彻底物理废除 `TreasuryRuntime.Entry`
+
+在消除 `SystemLedgerLane` 独立线程后，代码库中仍残留了大量历史跨线程任务伪装类（均实现 `TreasuryRuntime.Entry` 接口，并挂载 `ready()`、`queued`、`completed` 等虚假异步状态标志）。Round 15 针对该问题展开了全链路的伪异步状态机清理与过度包装清退：
+
+### 31.1 订单准入、批量、触发、预检与控制校验链路全面内联
+- **准入链路**：`BaseOrderAdmissionEvent`、`PlaceAdmissionEvent`、`ReplacementAdmissionEvent` 移除 `implements TreasuryRuntime.Entry`，就地读取持仓量 OI，消除 `inputReady`、`inputQueued` 与虚假提交逻辑；
+- **批量与触发链路**：`OrderBatchPending.BatchPlaceReservation` 与 `TriggerOrderCommands.TriggerExecutionContinuation` 移除 `Entry` 伪装，就地同步读取准入持仓；
+- **预检与控制校验**：`CoreQueryService.PreflightQuery` 与 `ControlFundsValidation` 移除 `Entry` 接口及排队状态机，就地核对资金守恒与记录持仓 undo；
+- **资金费与交割生命周期**：`RuntimePerpetualFundingProcessor.FundingWork` 与 `RuntimeLifecycleSettlementContinuation.SettlementWork` 消除 `userInput` 账本投递，就地选页；
+- **强平与风险扫描**：`LiquidationWorkQuery` 与 `RiskScanCoordinator` 移除 `Entry` 接口与等待 phase 4，就地归并并同步派发 Lane 估值。
+
+### 31.2 彻底物理删除 `TreasuryRuntime.Entry` 接口
+- **核心操作**：
+  1. `MatcherSettlementEvent.TreasurySettlement` 移除 `implements TreasuryRuntime.Entry`，移除方法上的 `@Override`；
+  2. `SystemLedgerCommand` 移除 `implements TreasuryRuntime.Entry`，内部类 `ScopeClose` 移除 `implements TreasuryRuntime.Entry` 并内联校验与关闭，彻底删除死代码 `notAdmitted()`、`previousScopeOpen`、`closeQueued` 及 `queueClose()`；
+  3. `TradingAccountRuntime` 彻底删除空方法 `enqueueLedgerScopeClose`，将 `dispatchLedgerQuery` 升级为标准的函数式接口 `java.util.function.Consumer<TreasuryRuntime>`；
+  4. 从 `TreasuryRuntime.java` 中彻底物理删除 `public interface Entry { ... }` 接口契约，全工程 `TreasuryRuntime.Entry` 引用彻底归零；
+  5. 更新持仓和资金索引异常文案，消除废弃 API 编译警告。
 
