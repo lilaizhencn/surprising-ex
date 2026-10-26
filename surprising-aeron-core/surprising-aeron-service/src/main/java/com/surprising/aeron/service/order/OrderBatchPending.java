@@ -19,6 +19,9 @@ import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.function.BooleanSupplier;
+import java.util.function.IntFunction;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
@@ -492,8 +495,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     final com.surprising.aeron.service.matcher.CoreMatchingResult noNativeCommandResult =
             new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "NO_NATIVE_COMMAND");
     /** 顺序下单共用的账户预留工作，上一项完成后才能准备下一项。 */
-    final com.surprising.aeron.service.order.admission.BatchPlaceReservation placeReservation =
-            new com.surprising.aeron.service.order.admission.BatchPlaceReservation();
+    final BatchPlaceReservation placeReservation = new BatchPlaceReservation();
     /** 本批流水下单在 Matcher 执行的固定任务。 */
     final OrderBatchExecutor.PipelinedPlaceBatchSubmission pipelinedPlaceBatchSubmission =
             new OrderBatchExecutor.PipelinedPlaceBatchSubmission();
@@ -820,4 +822,129 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
      * 返回实际批内项数，不是数组容量。
      */
     public int itemCount() { return items.size(); }
+
+    /**
+     * 顺序批量下单中一个当前项的准入和冻结任务。Owner 只推进原账本及控制邮箱，Lane 计算并冻结，订单租约保留在原批次槽；任务可复用，但必须等 Lane 释放并由控制调度器发布结果。
+     */
+    public static final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object>, com.surprising.aeron.service.treasury.SystemLedgerLane.Entry, BooleanSupplier {
+        private com.surprising.aeron.service.core.TradingAccountRuntime runtime;
+        private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
+        private PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision decision;
+        private long sequence, userId, openInterestSteps;
+        private UUID commandId;
+        private OrderRuntime admittedOrder;
+        private PlaceBatchAdmissionEvent.PlaceBatchIntentSource source;
+        private int sourceIndex;
+        @Accessors(fluent = true, chain = false)
+        @Getter
+        private List<Long> closeCapacityCancellations = List.of();
+        private volatile boolean completed = true;
+        private volatile boolean inputReady = true;
+        private boolean inputQueued, accountDispatched;
+
+        public void prepare(com.surprising.aeron.service.core.TradingAccountRuntime runtime,
+                com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities,
+                long sequence, long userId, UUID commandId, com.surprising.aeron.protocol.PlaceOrderCommand command,
+                PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision decision,
+                PlaceBatchAdmissionEvent.PlaceBatchIntentSource source, int sourceIndex) {
+            if (runtime == null || identities == null || sequence <= 0 || userId <= 0
+                    || commandId == null || command == null || decision == null || source == null || sourceIndex < 0)
+                throw new IllegalArgumentException("invalid batch place reservation");
+            runtime.assertOwner();
+            if (!completed) throw new IllegalStateException("Account Lane still owns this batch reservation");
+            clear();
+            this.decision = decision;
+            this.source = source;
+            this.sourceIndex = sourceIndex;
+            initializeOrderIntent(command, decision.context().instrument(), decision.context().symbolId());
+            this.runtime = runtime;
+            this.identities = identities;
+            this.sequence = sequence;
+            this.userId = userId;
+            this.commandId = commandId;
+            openInterestSteps = 0;
+            inputReady = !decision.context().instrument().usesOpenInterestForUserLimit() || command.reduceOnly();
+            inputQueued = accountDispatched = false;
+            completed = false;
+        }
+
+        @Override public boolean getAsBoolean() { return pollAdmission(); }
+
+        public boolean pollAdmission() {
+            runtime.assertOwner();
+            if (!inputReady) {
+                if (!inputQueued) inputQueued = runtime.dispatchLedgerQuery(this);
+                if (!inputReady) return false;
+            }
+            if (!accountDispatched) {
+                runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
+                accountDispatched = true;
+            }
+            return runtime.pollControlLanes();
+        }
+
+        @Override public void apply(com.surprising.aeron.service.treasury.TreasuryRuntime ignored) {
+            openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.context().instrument().instrumentId());
+            inputReady = true;
+        }
+
+        @Override public Object apply(int laneId) {
+            if (!inputReady) throw new IllegalStateException("Ledger batch admission input is incomplete");
+            com.surprising.aeron.service.account.AccountLaneState lane = runtime.currentLaneCommandScope();
+            if (lane == null || lane.laneId() != laneId || laneId != runtime.topology().accountLaneId(userId))
+                throw new IllegalStateException("batch place reservation requires its Account Lane");
+            long identity = 0;
+            try {
+                com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.resolveInto(this, decision.context(), userId, intent());
+                int assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
+                        : side() == com.surprising.aeron.protocol.CoreOrderSide.BUY ? decision.quoteAssetId() : decision.baseAssetId();
+                identity = identities.prepareClientKeyInLane(lane, userId, clientOrderId());
+                long clientKey = com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.clientKeyValue(identity);
+                long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
+                long required = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.requiredReservationPrepared(runtime, lane, userId, this,
+                        openInterestSteps, lane.admissionOrderIndex(symbolId()), clientKey, positionKey,
+                        decision.context().lifecycleSettled(), decision.context().fundingInProgress());
+                com.surprising.aeron.service.position.PositionRuntime position = positionKey == 0 ? null : lane.position(positionKey);
+                if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
+                        && position != null && position.signedQuantitySteps() != 0
+                        && (position.signedQuantitySteps() > 0) != (side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
+                    closeCapacityCancellations = com.surprising.aeron.service.position.PositionCloseCapacity.inspectLane(lane, userId, symbolId(),
+                            positionKey, positionSide(), side(), orderId()).conflictsFor(quantitySteps());
+                }
+                runtime.placePreparedOrder(userId, this, commandId,
+                        required, clientKey, symbolId(), assetId);
+                lane.markPendingReservation(orderId(), sequence);
+                OrderRuntime admitted = runtime.laneDelta(laneId).orders().get(orderId());
+                if (admitted == null) throw new IllegalStateException("batch admission order is missing");
+                admittedOrder = source.captureAdmittedOrder(sourceIndex, admitted);
+                return null;
+            } catch (RuntimeException | Error failure) {
+                if (identity != 0) identities.rollbackClientKeyInLane(lane, userId, clientOrderId(), identity);
+                throw failure;
+            } finally {
+                completed = true;
+            }
+        }
+
+        public OrderRuntime admittedOrder() {
+            if (admittedOrder == null) throw new IllegalStateException("batch reservation has not completed");
+            return admittedOrder;
+        }
+
+        public void clear() {
+            if (!completed) return;
+            clearResolvedOrder();
+            runtime = null;
+            identities = null;
+            decision = null;
+            commandId = null;
+            sequence = userId = openInterestSteps = 0;
+            admittedOrder = null;
+            source = null;
+            sourceIndex = 0;
+            closeCapacityCancellations = List.of();
+            inputReady = true;
+            inputQueued = accountDispatched = false;
+        }
+    }
 }

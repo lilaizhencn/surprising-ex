@@ -21,14 +21,13 @@ import java.util.List;
 /**
  * 改单或替换单的所属账户 Lane 准入事件。Owner 固定原单身份、决策输入和 Matcher 路由，账本按需提供 OI；Lane 校验原单并生成新订单准入结果，命令保留该决策输入直到终态，不在这里直接修改 Matcher 订单簿。
  */
-public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
+public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
     /**
      * sequence：本次改单的 Core 命令序号。
      * userId：原单和新单所属用户编号。
      * originalOrderId：需要保持版本检查的原普通订单编号。
-     * openInterestSteps：账本发布的本次准入 OI 数量步数。
      */
-    private long sequence, userId, originalOrderId, openInterestSteps;
+    private long sequence, userId, originalOrderId;
     /** Owner 固定的 Matcher 分片，完成通知按此唤醒原撮合续步。 */
     private int matcherShard;
     /** 选择性改单意图，与 replace 互斥。 */
@@ -43,16 +42,6 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
     private RuntimeIdentityRegistry identities;
     /** 成功后生成的新单准入结果，引用本事件的解析输入，命令须保留到终态。 */
     private ResolvedMatchingAdmission admission;
-    /** 本次新意图计算的平仓冲突及原前置撤单编号，调用方先确认准入成功。 */
-    private List<Long> closeCapacityCancellations = List.of();
-    /** 检查产生的业务拒绝、算术或参数异常，完成后由 Owner 消费。 */
-    private RuntimeException rejection;
-    /** Lane 发布所有结果后的可见性标记，通知参数必须提前捕获。 */
-    private volatile boolean completed;
-    /** 本次准入 OI 是否就绪，不需要 OI 的场景创建时即就绪。 */
-    private volatile boolean inputReady = true;
-    /** 账本输入任务已经成功投递，未就绪时不能复用事件。 */
-    private boolean inputQueued;
 
     /**
      * 要求改单和替换意图恰好提供一种，绑定原订单、用户、配置和 Matcher 分片，重置结果并按产品判断是否等待账本 OI。
@@ -167,23 +156,6 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
     }
 
     /**
-     * 返回 Lane 是否已经发布检查完成，业务拒绝也会完成事件。
-     */
-    public boolean complete() { return completed; }
-    /**
-     * 返回改单所需 OI 输入是否已就绪，账户消费者据此决定是否执行。
-     */
-    @Override public boolean accountReady() { return inputReady; }
-    /**
-     * 标记账本输入任务已成功投递，在输入就绪前禁止直接丢弃事件。
-     */
-    public void inputQueued() { inputQueued = true; }
-    /**
-     * 判断事件是否仍被已投递的账本输入任务借用。
-     */
-    public boolean inputPending() { return inputQueued && !inputReady; }
-
-    /**
      * 账本读取对应币对的准入 OI，写值后发布输入就绪，供账户继续检查。
      * @param ignored 账本接口传入的原财库，本方法仅从运行时的账本 OI 索引读取
      */
@@ -196,17 +168,9 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
      */
     public long coreSequence() { return sequence; }
     /**
-     * 完成后返回检查失败的原异常，成功时为 null。
-     */
-    public RuntimeException rejection() { requireComplete(); return rejection; }
-    /**
      * 完成后返回新单、原单版本和账户版本组成的准入结果；拒绝时可为 null，调用方先检查 rejection。
      */
     public ResolvedMatchingAdmission admission() { requireComplete(); return admission; }
-    /**
-     * 完成后返回当前前置撤单编号；调用方必须先处理拒绝结果，不能直接把失败准入留下的列表当成功动作。
-     */
-    public List<Long> closeCapacityCancellations() { requireComplete(); return closeCapacityCancellations; }
 
     /**
      * 要求 Lane 已完成后清理事件；关联命令仍需先结束对解析输入的使用，不能因看到完成位就提前复用。
@@ -221,10 +185,9 @@ public final class ReplacementAdmissionEvent extends ResolvedPlaceOrder implemen
      */
     public void discard() {
         if (inputPending()) throw new IllegalStateException("Ledger still owns replacement input");
-        clearResolvedOrder();
+        clearBaseAdmission();
         amend = null; replace = null; decision = null; runtime = null; identities = null;
-        admission = null; rejection = null; closeCapacityCancellations = List.of(); completed = false;
-        inputQueued = false; inputReady = true; openInterestSteps = 0;
+        admission = null;
     }
 
     /**

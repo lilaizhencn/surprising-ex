@@ -698,7 +698,37 @@
 
 ---
 
-## 26. 累计重构成果统计与系统现状
+## 27. Round 12: 订单准入模块（order/admission）过度抽象治理与类收敛
+
+基于“KISS 原则”与“主流程顺着读、消除过度拆类与形式主义抽象”的核心开发规范，Round 12 针对核心交易链路中的订单准入（`order/admission`）模块展开了专项架构简化与过度设计治理：
+
+### 27.1 物理删除孤立顶层类 `BatchPlaceReservation.java` 并内联归位
+- **问题根因**：
+  `BatchPlaceReservation.java`（203 行）原本作为一个独立的 `public` 顶层类存放在 `admission` 包下。但经过全工程依赖拓扑排查，该类实际上**仅由 `OrderBatchPending` 独占创建、持有与生命周期流转**，本质上是批量订单流水线处理中的私有内部状态容器，对外暴露为顶层类造成了严重的包级命名空间污染与“类爆炸”视觉杂音。
+- **重构落地**：
+  1. 将 `BatchPlaceReservation` 作为静态嵌套类内联至 `OrderBatchPending.java`（`OrderBatchPending.BatchPlaceReservation`）；
+  2. 保持其原有的池化复用语义与高频无 GC 分配特性；
+  3. 执行 `git rm` 彻底物理删除孤立源文件 `BatchPlaceReservation.java`，消除类膨胀。
+
+### 27.2 收敛割裂的决策与准入类：`CoreOrderDecisionResolver` 深度并入 `RuntimeOrderAdmission`
+- **问题根因**：
+  此前系统将订单准入人为切片为两套平行的概念：`CoreOrderDecisionResolver`（351 行）负责所谓“撮合前决策与价格保护准备”，而 `RuntimeOrderAdmission`（870+ 行）负责“账户冻结与准入校验”。这种切分导致一个订单在准入时，逻辑在两个大工具类之间反复跳转、跨层传参，增加了大量认知负荷与不必要的认知摩擦。
+- **重构落地**：
+  1. 将原本分散在 `CoreOrderDecisionResolver` 中的所有领域核心逻辑（包括买卖滑点上限控制、标记价新鲜度审计、动态手续费率决议、到期结算提前锁定、订单价格保护阈值以及预留价格计算）**全部深度合并收拢至 `RuntimeOrderAdmission.java`**；
+  2. 准入校验流程实现“从输入到决策再到账户准入”一线贯通，顺着业务流程平铺直读；
+  3. `CoreOrderDecisionResolver.java` 暴降至 65 行超轻量门面（所有方法单行直接委托至 `RuntimeOrderAdmission`），确保对外部调用点、历史单元测试与性能 Benchmark 契约的 100% 平滑兼容。
+
+### 27.3 抽取统一准入事件骨架基类 `BaseOrderAdmissionEvent`
+- **问题根因**：
+  单笔下单事件 `PlaceAdmissionEvent`（255 行）与订单改单事件 `ReplacementAdmissionEvent`（217 行）各自维护了大量完全相同的准入样板代码，包括账本 OI 异步输入状态（`openInterestSteps`、`inputReady`、`inputQueued`）、完成可见性（`completed`）、业务拒绝异常（`rejection`）、撮合前先撤订单列表（`closeCapacityCancellations`）及其生命周期检查方法。
+- **重构落地**：
+  1. 抽取通用的包私有基类 `BaseOrderAdmissionEvent.java`，统一管理准入事件的生命周期字段、OI 就绪判定与撮合前冲抵撤单集合；
+  2. `PlaceAdmissionEvent` 与 `ReplacementAdmissionEvent` 继承自 `BaseOrderAdmissionEvent`，各自净删除 67 行和 45 行重复样板字段与方法；
+  3. 彻底统一了准入事件在对象池重置（`clearBaseAdmission`）与就绪派发时的状态机一致性。
+
+---
+
+## 28. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -708,6 +738,7 @@
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
 | **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
 | **机械拆类过度设计** | 充斥 `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission`、`OrderAdmissionMath`、`FuturesFillCalculator`、`OptionRiskRules` 及 9 个 `*StateTransitions` 类等大量形式主义拆分 | **物理彻底删除全部 15 个机械拆类孤立文件（净减 ~1,500+ 行脚手架代码），全系统所有 `*StateTransitions` 类彻底全部清零**，逻辑自然归位至职责实体（`CoreContractMath`、`TradingAccountRuntime`、`AccountLaneState`、`CoreTriggerOrderState`、`AccountControlTask`、`InsuranceFundCommands`、`TriggerOrderCommands` 等） |
+| **订单准入过度抽象** | 准入类数量膨胀，存在孤立顶层类 `BatchPlaceReservation`；决策准备与账户准入在两个 350+ 行类间割裂中转；单笔下单与改单事件样板代码高度重复 | **物理删除 `BatchPlaceReservation.java` 内联收敛至所属模块；合并决策逻辑至 `RuntimeOrderAdmission`，门面缩减至 65 行；提取 `BaseOrderAdmissionEvent` 统一准入生命周期与 OI 就绪状态** |
 | **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`setValueAt`、`liquidationValuesForRead`、`positionValuesForRead`、`CLUSTER_MAX_MESSAGE_LENGTH`、`EMPTY_ORDER_IDS` 等 | 物理彻底清除所有孤立死方法、死常量与残留死 Import，精简类与方法签名 |
 | **实现细节过度暴露** | 13 个类内部逻辑使用的静态标记常量声明为 `public` | 彻底收敛为 `private`，强化对象边界与类型系统封装 |
 | **死参数与无用转发** | `tryMatchingCommit`、`completeMutation`、`isNonFencingQuery` 等多余包装 | 彻底拔除无用包装，直接在调用点权威处理 |
@@ -718,7 +749,8 @@
 | **Gateway 孤岛计算与死代码** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件及多个死方法/模型，净减少死代码 |
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
 | **死命令与死 Record** | `AccountUserCommand`, `UserMfaEnrollment` 等遗留 | 物理彻底清除所有死命令与死 Record |
-| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，全量单测与集成测试全绿通过** |
+| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，全量单测与 155 项集群长稳压测（ClusteredBatchTrading & ContinuousOwner）全绿通过** |
+
 
 
 

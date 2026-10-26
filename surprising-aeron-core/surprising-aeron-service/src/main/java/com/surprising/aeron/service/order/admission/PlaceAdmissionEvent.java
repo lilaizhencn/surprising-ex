@@ -21,7 +21,7 @@ import lombok.experimental.Accessors;
 
 /** 一笔普通下单的单向准入交接事件，同时复用 ResolvedPlaceOrder 存决策字段。Owner 先绑定路由，账本按需提供 OI，所属 Lane 决策、检查及冻结，Matcher 等回执后才能使用；对象池回收还要满足消费条件。 构造约定：创建可由对象池保存的空准入事件，后续先绑定决策输入，再准备命令归属。 */
 @NoArgsConstructor
-public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
+public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
     /** 本次下单的 Core 命令序号，准入回执和冻结状态都归属此序号。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -37,12 +37,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private long userId;
     /** 原命令 UUID，订单及预留写入沿用它标识业务操作。 */
     private UUID commandId;
-    /** 账本准备的币对 OI 数量，账户准入用它检查比例限额。 */
-    private long openInterestSteps;
-    /** OI 输入已经就绪的可见性标记，不需要 OI 或只减仓时可直接就绪。 */
-    private volatile boolean inputReady = true;
-    /** 需要的账本输入任务是否已经成功投递，仍未就绪时不能丢弃本对象。 */
-    private boolean inputQueued;
     /** Owner 固定并借用的不可变账本事实，供 Lane 检查资金费及到期结算冲突。 */
     private TreasuryRuntime.SettlementStatus settlementStatus;
     /** 本订单实际冻结资产的运行时编号。 */
@@ -63,12 +57,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     private FeePolicyBook decisionPolicies;
     /** Owner 固定的决策业务时间，价格鲜度、费率及到期检查使用此值。 */
     private long decisionTimestamp;
-    /** Lane 捕获的业务拒绝、算术或参数异常，完成后由 Owner 或 Matcher 读取。 */
-    private RuntimeException rejection;
-    /** 撮合前应执行的撤单编号，合并平仓容量冲突和原账户前置撤单规则，不交出可变订单实体。 */
-    private List<Long> closeCapacityCancellations = List.of();
-    /** Lane 写完准入数据后发布的完成位，读取回执前必须看到此位。 */
-    private volatile boolean completed;
     /** Matcher 已读取或明确取消等待的发布位，可见后 Matcher 不得继续访问事件字段。 */
     private volatile boolean matcherConsumed;
 
@@ -170,7 +158,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         if (!matcherConsumed) {
             throw new IllegalStateException("cannot recycle a place admission before matcher handoff");
         }
-        clearResolvedOrder();
+        clearBaseAdmission();
         commandId = null;
         settlementStatus = null;
         runtime = null;
@@ -178,14 +166,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         decisionMark = null;
         decisionPolicies = null;
         decisionTimestamp = 0;
-        rejection = null;
-        closeCapacityCancellations = List.of();
         matcherConsumed = false;
-        inputQueued = false;
-        inputReady = true;
-        openInterestSteps = 0;
-        // 下一次 Owner 决策可能在 prepare 之前就拒绝；池化对象清理后应允许该未投递输入直接 discard。
-        completed = false;
     }
 
     /**
@@ -250,26 +231,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     }
 
     /**
-     * 返回 Lane 是否已经发布准入完成，成功或业务拒绝都属于已完成。
-     */
-    public boolean complete() {
-        return completed;
-    }
-
-    /**
-     * 返回账户准入依赖的 OI 输入是否已就绪。
-     */
-    @Override public boolean accountReady() { return inputReady; }
-    /**
-     * 记录账本输入任务已经投递，后续未收到输入前不能丢弃事件。
-     */
-    public void inputQueued() { inputQueued = true; }
-    /**
-     * 判断账本任务已经投递但输入尚未就绪，供回收路径保护仍被账本借用的对象。
-     */
-    public boolean inputPending() { return inputQueued && !inputReady; }
-
-    /**
      * 在账本线程读取准入 OI，再发布输入就绪位，账户消费者随后才可执行。
      * @param ignored 账本接口传入的原财库，本方法从运行时账本 OI 索引取值，不直接使用该参数
      */
@@ -284,7 +245,7 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     public void discard() {
         if (inputPending()) throw new IllegalStateException("Ledger still owns place admission input");
         if (complete()) throw new IllegalStateException("completed place admission must be collected");
-        clearResolvedOrder();
+        clearBaseAdmission();
         commandId = null;
         settlementStatus = null;
         runtime = null;
@@ -292,16 +253,10 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
         decisionMark = null;
         decisionPolicies = null;
         decisionTimestamp = 0;
-        rejection = null;
-        closeCapacityCancellations = List.of();
         coreSequence = 0;
         userId = 0;
         laneId = 0;
-        inputQueued = false;
-        inputReady = true;
-        openInterestSteps = 0;
         matcherConsumed = false;
-        completed = false;
     }
 
     /**
@@ -343,14 +298,6 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     public boolean matcherConsumed() { return matcherConsumed; }
 
     /**
-     * 要求准入已完成；成功返回撮合前撤单编号，拒绝时返回空列表，不能执行失败准入的撤单建议。
-     */
-    public List<Long> closeCapacityCancellations() {
-        if (!complete()) throw new IllegalStateException("place admission is incomplete");
-        return rejection == null ? closeCapacityCancellations : List.of();
-    }
-
-    /**
      * 已完成的准入不再需要进入 Matcher 等待路径时，显式发布消费完成；重复取消或条件不符视为内部错误。
      */
     public void cancelMatcherWait() {
@@ -376,13 +323,5 @@ public final class PlaceAdmissionEvent extends ResolvedPlaceOrder implements Set
     public ResolvedPlaceOrder matchingOrder() {
         if (intent() == null) throw new IllegalStateException("place admission is not prepared");
         return this;
-    }
-
-    /**
-     * 要求 Lane 已完成后返回原拒绝异常，成功时为 null。
-     */
-    public RuntimeException rejection() {
-        if (!complete()) throw new IllegalStateException("place admission is incomplete");
-        return rejection;
     }
 }
