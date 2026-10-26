@@ -613,7 +613,31 @@
 
 ---
 
-## 21. 累计重构成果统计与系统现状
+## 22. Round 9: 拔除孤立死常量、收敛内部常量暴露与清理源码残留 Import
+
+基于全局词法扫描与符号全息分析，Round 9 针对核心协议与服务层进行了实现细节封装加固与无用元素拔除：
+
+### 22.1 物理删除孤立死常量
+- **`TradingCoreRuntime.EMPTY_ORDER_IDS` 物理删除**：
+  - 全工程（包括测试与该类自身）零引用的孤立长整型数组常量，彻底物理删除。
+
+### 22.2 收敛过度暴露的类内部实现常量
+消除违背面向对象封装原则的过度 public 暴露，将仅在定义类内部使用的 13 个静态常量收敛为 `private`：
+- `CoreMessageFlyweightDecoder`：`DEFAULT_CACHE_SLOTS` 收敛为 `private`；
+- `TradingCoreRuntime`：`DEFAULT_TRIGGER_SCAN_BATCH_SIZE`、`HASH_OFFSET_BASIS`、`HASH_PRIME` 收敛为 `private`；
+- `AccountControlTask`：`KIND_BALANCE`、`KIND_TRANSFER_OUT`、`KIND_TRANSFER_COMPLETE`、`KIND_LEVERAGE`、`KIND_POSITION_MODE`、`KIND_POSITION_MARGIN` 任务类型标记收敛为 `private`；
+- `ProductLineClusterLayout`：集群网络偏移常量 `MEMBER_FACING_OFFSET`、`LOG_OFFSET`、`TRANSFER_OFFSET` 收敛为 `private`；
+- `AmendOrderCommand`：未改动标记 `UNCHANGED_PRICE`、`UNCHANGED_QUANTITY` 收敛为 `private`。
+
+### 22.3 源码级死 Import 彻底拔除
+彻底清理核心服务中残留的 4 处未使用 Lombok 注解 Import：
+1. `CommandResultLedger.java`：删除 `import lombok.AccessLevel;`；
+2. `RuntimeIdentityRegistry.java`：删除 `import lombok.Getter;` 与 `import lombok.experimental.Accessors;`；
+3. `SystemLedgerLane.java`：删除 `import lombok.AccessLevel;`。
+
+---
+
+## 23. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -623,7 +647,8 @@
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
 | **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
 | **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission`、`OrderAdmissionMath`、`FuturesFillCalculator`、`OptionRiskRules`、`RuntimeCancelAllAfterStateTransitions`、`RuntimeRiskStateTransitions`、`RuntimeAccountStateTransitions` 等大量单方法工具类 | 物理彻底删除全部 9 个机械拆类孤立文件，逻辑自然归位至职责实体（`CoreContractMath`、`TradingAccountRuntime`、`AccountControlTask` 等） |
-| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`setValueAt`、`liquidationValuesForRead`、`positionValuesForRead`、`CLUSTER_MAX_MESSAGE_LENGTH` 等 | 物理彻底清除所有孤立死方法、死常量与残留死 Import，精简类与方法签名 |
+| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`setValueAt`、`liquidationValuesForRead`、`positionValuesForRead`、`CLUSTER_MAX_MESSAGE_LENGTH`、`EMPTY_ORDER_IDS` 等 | 物理彻底清除所有孤立死方法、死常量与残留死 Import，精简类与方法签名 |
+| **实现细节过度暴露** | 13 个类内部逻辑使用的静态标记常量声明为 `public` | 彻底收敛为 `private`，强化对象边界与类型系统封装 |
 | **死参数与无用转发** | `tryMatchingCommit`、`completeMutation`、`isNonFencingQuery` 等多余包装 | 彻底拔除无用包装，直接在调用点权威处理 |
 | **流水线空转计数器** | 4 个仅递增从不查询的 long 计数器（`drainedCommands`、`*Fences`） | 连同调用方埋点彻底拔除，消除纯空转开销 |
 | **准入伪参数** | 透传 `matcherWaitRequired`，内部多处防御分支 | 固定为异步流水线语义，彻底消除多余参数与防御分支 |
@@ -633,6 +658,7 @@
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
 | **死命令与死 Record** | `AccountUserCommand`, `UserMfaEnrollment` 等遗留 | 物理彻底清除所有死命令与死 Record |
 | **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，相关核心测试全绿** |
+
 
 
 

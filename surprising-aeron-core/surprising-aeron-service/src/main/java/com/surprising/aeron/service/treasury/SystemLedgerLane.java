@@ -4,7 +4,6 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
-import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 

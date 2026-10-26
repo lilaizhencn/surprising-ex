@@ -12,9 +12,9 @@ public final class ProductLineClusterLayout {
     public static final int MEMBER_COUNT = 3;
     public static final int ARCHIVE_CONTROL_OFFSET = 1;
     public static final int CLIENT_FACING_OFFSET = 2;
-    public static final int MEMBER_FACING_OFFSET = 3;
-    public static final int LOG_OFFSET = 4;
-    public static final int TRANSFER_OFFSET = 5;
+    private static final int MEMBER_FACING_OFFSET = 3;
+    private static final int LOG_OFFSET = 4;
+    private static final int TRANSFER_OFFSET = 5;
 
     private ProductLineClusterLayout() {
     }

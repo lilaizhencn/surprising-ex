@@ -543,13 +543,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 盘口引导快照同时保留的数量上限。 */
     public static final int MAX_BOOK_BOOTSTRAP_SNAPSHOTS = 4;
     /** 每轮触发扫描的默认工作预算，固定为两项。 */
-    public static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
-    /** 没有订单变化时复用的空原始数组。 */
-    public static final long[] EMPTY_ORDER_IDS = new long[0];
+    private static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
     /** FNV 摘要的初始值，不是业务序号。 */
-    public static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
+    private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
     /** FNV 字节混合所用乘数，溢出遵循长整数哈希规则。 */
-    public static final long HASH_PRIME = 0x100000001b3L;
+    private static final long HASH_PRIME = 0x100000001b3L;
     /** 没有响应正文时共享的空字节数组。 */
     public static final byte[] EMPTY_RESPONSE_DATA = new byte[0];
     private final CoreRuntimeConfiguration configuration;

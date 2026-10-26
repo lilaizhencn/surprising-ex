@@ -11,8 +11,8 @@ public final class AmendOrderCommand {
     private byte rawPostOnly;
     private final boolean commandSlot;
 
-    public static final long UNCHANGED_PRICE = 0L;
-    public static final long UNCHANGED_QUANTITY = 0L;
+    private static final long UNCHANGED_PRICE = 0L;
+    private static final long UNCHANGED_QUANTITY = 0L;
     public static final byte UNCHANGED_POST_ONLY = -1;
 
     public AmendOrderCommand(long originalOrderId, long replacementOrderId, String newClientOrderId, long rawPriceTicks, long rawQuantitySteps, CoreTimeInForce timeInForce, byte rawPostOnly) {

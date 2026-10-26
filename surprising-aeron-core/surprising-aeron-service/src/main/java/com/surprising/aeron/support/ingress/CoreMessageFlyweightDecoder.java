@@ -20,7 +20,7 @@ import org.agrona.DirectBuffer;
  */
 public final class CoreMessageFlyweightDecoder {
     /** 默认最多缓存五百一十二个复用消息槽。 */
-    public static final int DEFAULT_CACHE_SLOTS = 512;
+    private static final int DEFAULT_CACHE_SLOTS = 512;
     /** 允许进入复用缓存的帧长度上限十六 KiB，也是长度桶数组上界。 */
     private static final int MAX_CACHED_FRAME_BYTES = 16_384;
     /** 固定缓存槽数量，构造时校验二次幂。 */

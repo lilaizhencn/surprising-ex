@@ -20,17 +20,17 @@ import lombok.experimental.Accessors;
 @NoArgsConstructor
 public final class AccountControlTask implements IntFunction<Object>, BooleanSupplier {
     /** 余额增减任务标记，对应可用余额调整。 */
-    public static final byte KIND_BALANCE = 1;
+    private static final byte KIND_BALANCE = 1;
     /** 划转源账户扣款并登记待完成划转的任务标记。 */
-    public static final byte KIND_TRANSFER_OUT = 2;
+    private static final byte KIND_TRANSFER_OUT = 2;
     /** 移除源账户待完成划转记录的任务标记。 */
-    public static final byte KIND_TRANSFER_COMPLETE = 3;
+    private static final byte KIND_TRANSFER_COMPLETE = 3;
     /** 杠杆设置或显式全仓保证金重定价的任务标记。 */
-    public static final byte KIND_LEVERAGE = 4;
+    private static final byte KIND_LEVERAGE = 4;
     /** 持仓模式切换的任务标记。 */
-    public static final byte KIND_POSITION_MODE = 5;
+    private static final byte KIND_POSITION_MODE = 5;
     /** 逐仓保证金增减的任务标记。 */
-    public static final byte KIND_POSITION_MARGIN = 6;
+    private static final byte KIND_POSITION_MARGIN = 6;
 
     /** 当前准备的任务种类，零表示尚未准备。 */
     private byte kind;
