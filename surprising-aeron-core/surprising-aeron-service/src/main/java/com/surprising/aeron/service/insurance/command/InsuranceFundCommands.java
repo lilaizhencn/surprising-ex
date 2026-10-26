@@ -54,14 +54,14 @@ public final class InsuranceFundCommands {
     public static final class AdjustmentWork extends SystemLedgerCommand implements java.util.function.BooleanSupplier {
         private int assetId;
         private long deltaUnits, nextRevision;
-        private boolean dispatched, done;
+        private boolean done;
 
         void init(TradingAccountRuntime runtime, int assetId, long deltaUnits, long nextRevision) {
             initializeLedgerCommand(runtime);
             this.assetId = assetId;
             this.deltaUnits = deltaUnits;
             this.nextRevision = nextRevision;
-            this.dispatched = this.done = false;
+            this.done = false;
         }
 
         @Override protected void applyLedger(TreasuryRuntime ledger) {
@@ -72,14 +72,12 @@ public final class InsuranceFundCommands {
         }
 
         @Override public boolean getAsBoolean() {
-            if (done) return true;
-            if (!dispatched) {
-                if (!runtime.dispatchLedgerCommand(this)) return false;
-                dispatched = true;
+            if (!done) {
+                runtime.dispatchLedgerCommand(this);
+                ledgerCommandCompleted();
+                runtime.setMetadata(runtime.productLine(), nextRevision);
+                done = true;
             }
-            if (!ledgerCommandCompleted()) return false;
-            runtime.setMetadata(runtime.productLine(), nextRevision);
-            done = true;
             return true;
         }
     }

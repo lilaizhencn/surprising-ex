@@ -1,5 +1,22 @@
 # Aeron 模块过度设计精简总结
 
+## 0. 2026-10-27 深度精简与伪异步状态机消除（最新）
+
+针对 `SystemLedgerLane` 内联后残留的死逻辑和过度设计进行了根治性清理：
+1. **彻底消除伪异步 Phase 状态机与两阶段虚假轮询**：
+   - 在 [`RuntimePerpetualFundingProcessor.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/RuntimePerpetualFundingProcessor.java) 中，精简 `FundingWork.Phase` 为 `{ DISPATCH_ACCOUNTS, COLLECT_ACCOUNTS }`，消除了 `SUBMIT_LEDGER` 和 `LEDGER_WAIT` 两个死阶段；在收集完各账户结果后就地直接派发账本记账，消除了两阶段虚假轮询。
+   - 在 [`RuntimeAdlExecution.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java) 中，精简 `AdlWork.Phase` 为 `{ CAPTURE, TARGET, SOURCE, ACCOUNTS, DONE }`，消除了 `SUBMIT_LEDGER` 和 `LEDGER_WAIT` 伪异步等待阶段。
+   - 在 [`InsuranceFundCommands.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/insurance/command/InsuranceFundCommands.java) 中，清除了 `dispatched` 标志位与两阶段伪等待，收敛为在 `!done` 时直接就地派发记账并标记完成。
+2. **清理内联后双轨制与不可达死逻辑**：
+   - 在 [`TradingAccountRuntime.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) 中，消除了 `appendFundsDelta` 中因 `if (systemLedgerStarted()) return;` 造成的不可达死代码；收敛了 `visitChangedIndexes` 中的冗余空检查分支。
+3. **发压端原生原语零装箱重构**：
+   - 在 [`DerivativeMixedWorkload.java`](file:///Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/DerivativeMixedWorkload.java) 中，将高频报价数组由 `List<List<Long>>` 改造为原生原语数组 `long[][]`，并将订单 ID 追踪集合由包装类型 `Set<Long>` 改造为原生原语 `LongHashSet`，杜绝单次压测数百万次自动装箱分配对 GC 剖析器的干扰。
+4. **验证全面覆盖**：
+   - 核心回归测试（`CoreAdmissionInputOwnershipTest`、`CoreMatcherLedgerTest`、`TradingCoreOwnerTest`、`MatcherTreasurySettlementTest`、`OrderBatchSettlementWaitTest`、`SystemLedgerControlTest` 等 112 项测试）100% 通过（0 Failures, 0 Errors）。
+   - 25 万常驻未成交厚盘口压测达到 **146,679 ops/s**，深度吃单撮合成交匹配速度达到 **510,794 trades/s**，生产级 256 标的复杂流全量通过。
+
+---
+
 ## 1. 概述与核心目标
 
 根据架构极简与单一职责原则（KISS），针对 Aeron 模块中历史遗留的过度设计和多分支维护负担进行了彻底删减与收敛：

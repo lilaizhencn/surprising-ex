@@ -6236,7 +6236,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
             visitChangedOrderIndexes(consumer, changedOrders.laneBuffer(laneId));
         }
-        if (!systemLedgerStarted() || preparedConsumer == null) {
+        if (preparedConsumer == null) {
             visitChangedPositionIndexes(consumer, preparedConsumer, changedPositions.directBuffer());
             remaining = changedPositions.retainedLaneMask();
             while (remaining != 0) {
@@ -6420,16 +6420,6 @@ appendBalanceFundsDelta(patches, target);
      */
     public void appendFundsDelta(RuntimeFundsAccumulator accumulator) {
         assertOwner();
-        if (systemLedgerStarted()) return;
-        if (accumulator == null) throw new IllegalArgumentException("funds accumulator is required");
-        for (/* 正在汇总资金差额的余额补丁 Lane 下标 */ int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
-            // 本次所属用户的原资产余额映射，用于按预留资产取得余额
-            LaneBalancePatches balances = accountRollback.balancePatch(laneIndex);
-
-            appendBalanceFundsDelta(balances, accumulator);
-
-        }
-        treasury.appendFundsDelta(accumulator);
     }
 
     /**

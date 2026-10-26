@@ -33,10 +33,9 @@ import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class DerivativeMixedWorkload {
 
@@ -163,7 +162,7 @@ public final class DerivativeMixedWorkload {
             private final long[] markSequences = new long[template.symbols().size()];
             private final long[] fundingIds = new long[template.symbols().size()];
             private final long[] fundingCursors = new long[template.symbols().size()];
-            private Set<Long> latestLifecycleOrders = Set.of();
+            private final LongHashSet latestLifecycleOrders = new LongHashSet();
 
             {
                 for (int index = 0; index < markSequences.length; index++) {
@@ -180,13 +179,14 @@ public final class DerivativeMixedWorkload {
                 long acceptedCoreBefore = harness.acceptedCoreMessages();
                 long terminalCoreBefore = harness.terminalCoreMessages();
                 long[] laneBefore = completedLaneOperations(harness.state());
-                Set<Long> lifecycleOrders = new LinkedHashSet<>();
+                LongHashSet lifecycleOrders = new LongHashSet();
                 harness.refreshMarkPricesIfDue(template.symbols());
                 for (int round = 0; round < hftRounds; round++) {
                     executeTwoSidedBurst(harness, template, hftBatchSize, lifecycleOrders);
                     if (round < template.symbols().size()) executeHeavyWork(harness, template, round);
                 }
-                latestLifecycleOrders = Set.copyOf(lifecycleOrders);
+                latestLifecycleOrders.clear();
+                latestLifecycleOrders.addAll(lifecycleOrders);
                 operations = harness.executedMessages() - operationsBefore;
                 acceptedOperations = harness.acceptedMessages() - acceptedBefore;
                 terminalOperations = harness.terminalMessages() - terminalBefore;
@@ -262,14 +262,14 @@ public final class DerivativeMixedWorkload {
                 }
                 state.users().values().forEach(user -> user.balances().values().forEach(
                         DerivativeMixedWorkload::requireNonNegative));
-                for (long orderId : latestLifecycleOrders) {
+                latestLifecycleOrders.forEach(orderId -> {
                     var order = state.orders().get(orderId);
                     var reservation = order == null ? null : state.user(order.userId()).reservations().get(orderId);
                     if (order != null && (order.status() == CoreOrderStatus.OPEN
                             || reservation == null || reservation.remainingUnits() != 0)) {
                         throw new IllegalStateException("derivative lifecycle order is not terminal: " + orderId);
                     }
-                }
+                });
                 SnapshotTemplate checkpoint = harness.snapshotTemplate(template.snapshot().accountLanes());
                 try (Harness restored = Harness.restore(checkpoint)) {
                     TradingCoreState recovered = restored.state().tradingState();
@@ -285,17 +285,16 @@ public final class DerivativeMixedWorkload {
     }
 
     private static void executeTwoSidedBurst(Harness harness, Template template, int batchSize,
-                                              Set<Long> lifecycleOrders) {
-        List<List<Long>> quotes = new ArrayList<>(template.symbols().size());
-        for (int index = 0; index < template.symbols().size(); index++) {
-            List<Long> ids = placeBatch(harness, template.makers().get(index), template.symbols().get(index),
-                    CoreOrderSide.SELL, 102, 2, CoreTimeInForce.GTC, batchSize);
-            quotes.add(ids);
-            lifecycleOrders.addAll(ids);
+                                              LongHashSet lifecycleOrders) {
+        int symbolCount = template.symbols().size();
+        long[][] quotes = new long[symbolCount][batchSize];
+        for (int index = 0; index < symbolCount; index++) {
+            placeBatch(harness, template.makers().get(index), template.symbols().get(index),
+                    CoreOrderSide.SELL, 102, 2, CoreTimeInForce.GTC, quotes[index], lifecycleOrders);
         }
         harness.drainSubmitted();
-        for (int index = 0; index < quotes.size(); index++) {
-            cancelBatch(harness, template.makers().get(index), quotes.get(index));
+        for (int index = 0; index < symbolCount; index++) {
+            cancelBatch(harness, template.makers().get(index), quotes[index]);
         }
         harness.drainSubmitted();
         executePartialSide(harness, template, batchSize, CoreOrderSide.SELL, 101, lifecycleOrders);
@@ -304,9 +303,10 @@ public final class DerivativeMixedWorkload {
 
     private static void executePartialSide(Harness harness, Template template, int batchSize,
                                            CoreOrderSide makerSide, long price,
-                                           Set<Long> lifecycleOrders) {
-        long[] liquidity = new long[template.symbols().size()];
-        for (int index = 0; index < template.symbols().size(); index++) {
+                                           LongHashSet lifecycleOrders) {
+        int symbolCount = template.symbols().size();
+        long[] liquidity = new long[symbolCount];
+        for (int index = 0; index < symbolCount; index++) {
             long orderId = harness.nextOrderId();
             liquidity[index] = orderId;
             lifecycleOrders.add(orderId);
@@ -316,12 +316,13 @@ public final class DerivativeMixedWorkload {
         }
         harness.drainSubmitted();
         CoreOrderSide takerSide = makerSide == CoreOrderSide.SELL ? CoreOrderSide.BUY : CoreOrderSide.SELL;
-        for (int index = 0; index < template.symbols().size(); index++) {
-            lifecycleOrders.addAll(placeBatch(harness, template.takers().get(index),
-                    template.symbols().get(index), takerSide, price, 1, CoreTimeInForce.IOC, batchSize));
+        long[] takerOrders = new long[batchSize];
+        for (int index = 0; index < symbolCount; index++) {
+            placeBatch(harness, template.takers().get(index),
+                    template.symbols().get(index), takerSide, price, 1, CoreTimeInForce.IOC, takerOrders, lifecycleOrders);
         }
         harness.drainSubmitted();
-        for (int index = 0; index < template.symbols().size(); index++) {
+        for (int index = 0; index < symbolCount; index++) {
             harness.submit(harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
                     template.makers().get(index), TradingCommandCodec.encodeCancelOrder(
                             new CancelOrderCommand(liquidity[index]))));
@@ -329,24 +330,28 @@ public final class DerivativeMixedWorkload {
         harness.drainSubmitted();
     }
 
-    private static List<Long> placeBatch(Harness harness, long userId, String instrumentId, CoreOrderSide side,
-                                         long price, long quantity, CoreTimeInForce tif, int size) {
-        List<Long> ids = new ArrayList<>(size);
+    private static void placeBatch(Harness harness, long userId, String instrumentId, CoreOrderSide side,
+                                   long price, long quantity, CoreTimeInForce tif, long[] orderIdsOut,
+                                   LongHashSet lifecycleOrders) {
+        int size = orderIdsOut.length;
         List<PlaceOrderCommand> orders = new ArrayList<>(size);
         for (int index = 0; index < size; index++) {
             long orderId = harness.nextOrderId();
-            ids.add(orderId);
+            orderIdsOut[index] = orderId;
+            if (lifecycleOrders != null) lifecycleOrders.add(orderId);
             orders.add(orderCommand(orderId, instrumentId, side, price, quantity, tif));
         }
         harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY, userId,
                 TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
-        return List.copyOf(ids);
     }
 
-    private static void cancelBatch(Harness harness, long userId, List<Long> orderIds) {
+    private static void cancelBatch(Harness harness, long userId, long[] orderIds) {
+        List<CancelOrderCommand> orders = new ArrayList<>(orderIds.length);
+        for (int index = 0; index < orderIds.length; index++) {
+            orders.add(new CancelOrderCommand(orderIds[index]));
+        }
         harness.submit(harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY, userId,
-                TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(
-                        orderIds.stream().map(CancelOrderCommand::new).toList())), orderIds.size()));
+                TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)), orders.size()));
     }
 
     private static long[] completedLaneOperations(TradingCoreRuntime state) {

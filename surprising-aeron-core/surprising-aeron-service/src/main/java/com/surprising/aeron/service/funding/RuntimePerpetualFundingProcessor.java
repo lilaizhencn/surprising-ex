@@ -117,7 +117,7 @@ public final class RuntimePerpetualFundingProcessor {
         /** 按实际账户归属划分的用户列表，重置保留容量。 */
         private LongArrayList[] usersByLane;
         /** 本页账户与账本交接的位置，代替三个顺序阶段标记的组合。 */
-        private enum Phase { DISPATCH_ACCOUNTS, COLLECT_ACCOUNTS, SUBMIT_LEDGER, LEDGER_WAIT }
+        private enum Phase { DISPATCH_ACCOUNTS, COLLECT_ACCOUNTS }
         private Phase phase;
         /** 异步完成时由 Owner 保存的本页结果，重置后为空。 */
         private FundingResult result;
@@ -219,15 +219,12 @@ public final class RuntimePerpetualFundingProcessor {
                     for (long userId : receipt.changedUserIds()) runtime.markBalanceChanged(userId);
                 }
                 runtime.requireRevisionCapacity();
-                phase = Phase.SUBMIT_LEDGER;
+                runtime.dispatchLedgerCommand(this);
+                ledgerCommandCompleted();
+                result = finishOwnerResult();
+                return true;
             }
-            if (phase == Phase.SUBMIT_LEDGER) {
-                if (!runtime.dispatchLedgerCommand(this)) return false;
-                phase = Phase.LEDGER_WAIT;
-            }
-            if (!ledgerCommandCompleted()) return false;
-            result = finishOwnerResult();
-            return true;
+            return false;
         }
 
         /**

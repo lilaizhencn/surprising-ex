@@ -76,7 +76,7 @@ public final class RuntimeAdlExecution {
         /** 目标账户算出的清算对手项，完成账户回调后交给账本消费。 */
         private long clearingUnits;
         /** 原有源校验、目标减仓、源补亏、账户发布和账本交接的互斥阶段。 */
-        private enum Phase { CAPTURE, TARGET, SOURCE, ACCOUNTS, SUBMIT_LEDGER, LEDGER_WAIT, DONE }
+        private enum Phase { CAPTURE, TARGET, SOURCE, ACCOUNTS, DONE }
         /** Owner 推进当前阶段；账户阶段在派发前确定，收齐回执后才改变。 */
         private Phase phase;
         /** Owner 准备时捕获的该币对资金费切仓是否进行中，源校验据此拒绝冲突。 */
@@ -167,20 +167,17 @@ public final class RuntimeAdlExecution {
             if (phase == Phase.ACCOUNTS) {
                 runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
                 runtime.requireRevisionCapacity();
-                phase = Phase.SUBMIT_LEDGER;
+                runtime.dispatchLedgerCommand(this);
+                ledgerCommandCompleted();
+                runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                phase = Phase.DONE;
+                liquidation = null;
+                command = null;
+                instrument = null;
+                mark = null;
+                return true;
             }
-            if (phase == Phase.SUBMIT_LEDGER) {
-                if (!runtime.dispatchLedgerCommand(this)) return false;
-                phase = Phase.LEDGER_WAIT;
-            }
-            if (!ledgerCommandCompleted()) return false;
-            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-            phase = Phase.DONE;
-            liquidation = null;
-            command = null;
-            instrument = null;
-            mark = null;
-            return true;
+            return false;
         }
 
         /**
