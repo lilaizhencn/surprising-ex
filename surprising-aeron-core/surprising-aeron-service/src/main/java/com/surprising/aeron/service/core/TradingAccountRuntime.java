@@ -3956,7 +3956,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (ledgerControl != null && !ledgerControl.allowsRiskInput())
             throw new IllegalStateException("risk input requires a completed financial phase before scope close");
         risk.bindLedgerScope(ledgerControl);
-        risk.apply(treasury);
+        risk.applyRoutes();
         return true;
     }
 

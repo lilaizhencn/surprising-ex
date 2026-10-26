@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * 风险扫描的跨线程续步：Owner 固定本片市场输入，账本准备各 Lane 的有界用户页，账户 Lane 估值，Owner 按固定顺序分配强平编号，再交原 Lane 写入并提交游标。异步轮询在其他线程未完成时返回 false。
  */
-public final class RiskScanCoordinator implements TreasuryRuntime.Entry {
+public final class RiskScanCoordinator {
     /** 本命令固定的交易运行时，任务完成前按既有控制命令边界稳定风险输入。 */
     private final TradingAccountRuntime runtime;
     /** 本命令共用的业务编号映射，Owner 准备路由和 Lane 估值时使用。 */
@@ -33,10 +33,6 @@ public final class RiskScanCoordinator implements TreasuryRuntime.Entry {
     private final int[] allocations;
     /** 每个 Lane 复用的有界用户页，由账本清空填充，发布就绪后交给所属 Lane 读取。 */
     private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] userPages;
-    /** 账本已完整写好路由的 volatile 发布标记，Owner 看到 true 后才能消费输入数组。 */
-    private volatile boolean routesReady;
-    /** Owner 是否已成功把本片路由请求交给账本，避免重复入队。 */
-    private boolean routesQueued;
     /** 当前币对片段最多可分给各 Lane 的工作预算。 */
     private int sliceBudget;
     /** 准备用户路由时的账本命令引用，发布路由前用来同步风险持仓索引输入。 */
@@ -90,8 +86,6 @@ public final class RiskScanCoordinator implements TreasuryRuntime.Entry {
         if (maxWork <= 0 || maxWork > 4096) {
             throw new IllegalArgumentException("invalid risk scan budget");
         }
-        if (routesQueued && !routesReady) throw new IllegalStateException("Ledger still owns risk routes");
-        routesReady = routesQueued = false;
         // 直接命令槽由 Owner 串行复用。续步失败且 Lane 工作已回滚后，
         // 这里可能仍停在阶段 1 或 2；下一命令重置时必须丢弃旧页和旧输入。
         budget = runtime.riskScanControl().enabled()
@@ -119,7 +113,7 @@ public final class RiskScanCoordinator implements TreasuryRuntime.Entry {
     }
 
     /**
-     * Owner 非阻塞推进已有阶段：准备一片、等账本用户页、派发并收集 Lane 估值、给新强平编号并等原 Lane 写入，最后提交游标；预算未用完时继续下一币对片段。
+     * Owner 非阻塞推进已有阶段：准备一片、准备用户页、派发并收集 Lane 估值、给新强平编号并等原 Lane 写入，最后提交游标；预算未用完时继续下一币对片段。
      */
     public boolean poll() {
         runtime.assertOwner();
@@ -129,13 +123,7 @@ public final class RiskScanCoordinator implements TreasuryRuntime.Entry {
             RiskScanRuntime selected = remaining == 0 ? null : runtime.firstRiskIncompleteScan();
             if (selected == null) { phase = 3; return true; }
             prepare(selected, Math.min(8, remaining));
-            phase = 4;
-        }
-        if (phase == 4) {
-            if (!routesReady) {
-                if (!routesQueued) routesQueued = runtime.dispatchLedgerRiskInput(this);
-                if (!routesReady) return false;
-            }
+            runtime.dispatchLedgerRiskInput(this);
             if (laneMask != 0) runtime.dispatchRiskLanes(laneMask, this::scanLane);
             phase = 1;
         }
@@ -178,14 +166,12 @@ public final class RiskScanCoordinator implements TreasuryRuntime.Entry {
             throw new IllegalStateException("risk scan input is missing");
         settleAssetId = identities.assetId(instrument.settleAsset());
         this.sliceBudget = sliceBudget;
-        routesReady = routesQueued = false;
     }
 
     /**
-     * 先发布持仓用户索引输入，再为每个 Lane 准备有界用户页与恢复游标，从上次轮转点给未完成 Lane 分配预算，最后发布路由就绪。由账本执行并发布路由。
-     * @param ignored 账本回调统一签名中的资金状态参数；准备用户路由不使用它
+     * 先发布持仓用户索引输入，再为每个 Lane 准备有界用户页与恢复游标，从上次轮转点给未完成 Lane 分配预算。
      */
-    @Override public void apply(TreasuryRuntime ignored) {
+    public void applyRoutes() {
         if (ledgerScope != null) ledgerScope.publishRiskPositionInputs();
         // 原扫描已经保存的各 Lane 独立进度；空列表表示新扫描尚未分派。
         List<RiskLaneProgress> cursors = initial.laneProgress();
@@ -234,13 +220,10 @@ public final class RiskScanCoordinator implements TreasuryRuntime.Entry {
     }
 
     /**
-     * 账本释放当前路由命令引用，以 volatile 就绪标记发布用户页和分配结果，再通知 Owner 继续轮询。
+     * 账本释放当前路由命令引用。
      */
     private void publishRoutes() {
         ledgerScope = null;
-        // 发布就绪前暂存的运行时引用，完成信号通过它通知 Owner。
-
-        routesReady = true;
     }
 
     /**
