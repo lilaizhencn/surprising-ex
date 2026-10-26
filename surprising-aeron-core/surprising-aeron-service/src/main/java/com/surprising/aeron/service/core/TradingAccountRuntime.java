@@ -1742,7 +1742,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         event.prepare(
                 coreSequence, userId, commandId, settlementStatus,
                 assetId, laneId, this, identities, timestamp, position);
-        if (event.instrument().contractType().productLine().isDerivative() && !event.reduceOnly()) {
+        if (event.instrument().usesOpenInterestForUserLimit() && !event.reduceOnly()) {
             event.bindOpenInterest(ledgerAdmissionOpenInterest(event.instrumentId()));
         }
         try {
@@ -1797,7 +1797,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (event == null) event = new ReplacementAdmissionEvent();
         event.prepare(sequence, userId, originalOrderId, amend, replace, decision,
                 matcherShard, this, identities);
-        if (decision.instrument().contractType().productLine().isDerivative()) {
+        if (decision.instrument().usesOpenInterestForUserLimit()
+                && (replace == null || replace.replacement() == null || !replace.replacement().reduceOnly())) {
             event.bindOpenInterest(ledgerAdmissionOpenInterest(decision.instrument().instrumentId()));
         }
         try {
