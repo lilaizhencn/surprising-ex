@@ -332,6 +332,92 @@ java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base
   - `ClusterCommandPipelineTest`（覆盖六大产品线批次提交快照边界、撮合执行等 326 个用例）：**100% SUCCESS**；
   - 合计 371 个复杂边界测试用例 **0 failures, 0 errors**。
 
+---
+
+## 10. 2026-10-26 真实生产运营大行情混合压测、长稳表现与过度设计清理项分析
+
+### 10.1 压测背景与混合场景设定
+
+为模拟数字资产交易系统在实际生产运营环境中的极端大行情冲击，本次压测依托 `LinearPerpetualCoreBenchmark` 与 `LinearPerpetualMixedWorkload`，构建全生命周期混合工作流。场景不仅包含高频做市商撤挂改单，更深度复合了资金费率全量结算、标记价风暴引发的逐笔风控与强平穿仓分摊，全流程执行资金守恒严格审计：
+1. **真实做市商与高频撮合（HFT Bursts）**：高频批量挂单（`PLACE_ORDER_BATCH`）、跨账户分片 IOC 吃单、批量撤单（`CANCEL_ORDER_BATCH`），单场景包含 96 轮突发冲击，每轮 20 笔订单批处理；
+2. **资金费率周期结算（Funding Settlement）**：针对全部上线币对执行资金费率结算裁剪与有界批量分发推进（`APPLY_FUNDING`）；
+3. **标记价风暴与风控扫描（Mark Price Storm & Risk Scan）**：多币种极端标记价异动冲击，触发全量用户持仓的维持保证金重算（`CONTINUE_RISK_SCAN`）与条件止损单连续触发（`EXECUTE_TRIGGER_ORDER`）；
+4. **极端穿仓与多级清算（Loss Lifecycle & ADL）**：模拟账户穿仓触发批量强平（`EXECUTE_LIQUIDATION_BATCH`）、保险基金分级赔付清偿（`RESOLVE_LIQUIDATION`），并在准备金耗尽时触发自动减仓分摊（`EXECUTE_ADL`），核对穿仓赤字归零（`deficitUnits == 0`）；
+5. **资金守恒终态审计**：每个运行周期自动审计全局资金总量 `totalFunds`，保证 `closingFunds == openingFunds` 且所有账户余额非负。
+
+---
+
+### 10.2 全维度混合压测实测数据矩阵
+
+- **测试环境**：Apple Silicon (macOS / arm64), OpenJDK 27 (Amazon Corretto 27+33-FR), Maven 3.9.16
+- **架构配置**：1 真实 Aeron 成员、2 Account Lanes、全局 `maxInFlight = 256`、`BUSY_SPIN` 自旋模式。
+
+| 压测场景与画像模式 | 用户与币种规模 | 运行轮次与时间 | 场景吞吐 (`ops/s`) | 底层业务操作吞吐 (`acceptedOps/s`) | 撮合成交吞吐 (`trades/s`) | 核心报文吞吐 (`messages/s`) | GC 分配率与停顿占比 | 质量指标 (积压/超时/错误) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **标准生产混合模式**<br>(`productionMixedWorkload`) | 1,000 用户<br>4 币对 / 96 轮 HFT | 1 wi(3s) + 3 meas(5s)<br>共 18s | **9.844 ops/s** | **317,851 ops/s**<br>(~31.8 万笔/秒) | **75,604 trades/s** | **30,557 ops/s** | 214.0 MB/sec<br>GC 停顿: 1.1% | `unfinished = 0`<br>`rejected = 0`<br>`timedOut = 0`<br>资金 100% 守恒 |
+| **大规模用户生产混合**<br>(`productionMixedWorkload`) | 10,000 用户<br>4 币对 / 96 轮 HFT | 1 wi(3s) + 3 meas(5s)<br>共 18s | **5.111 ops/s** | **165,001 ops/s**<br>(~16.5 万笔/秒) | **39,073 trades/s** | **16,525 ops/s** | 355.8 MB/sec<br>GC 停顿: 1.1% | `unfinished = 0`<br>`rejected = 0`<br>`timedOut = 0`<br>资金 100% 守恒 |
+| **标记价风暴画像**<br>(`trafficProfile = MARK_PRICE_STORM`) | 1,000 用户<br>4 币对 / 条件单并发 | 1 wi(3s) + 3 meas(5s)<br>共 18s | **67.454 ops/s** | **24,014 ops/s** | **5,396 trades/s** | **3,508 ops/s**<br>(生命周期: 1,349 ops/s) | 204.6 MB/sec<br>GC 停顿: 0.8% | `unfinished = 0`<br>`rejected = 0`<br>`timedOut = 0`<br>风控扫描 100% 完成 |
+| **单币极端爆发行情**<br>(`trafficProfile = SINGLE_HOT`) | 1,000 用户<br>4 币对 / 流量集中单币 | 1 wi(3s) + 3 meas(5s)<br>共 18s | **66.820 ops/s** | **6,497 ops/s** | **1,412 trades/s** | **1,130 ops/s** | 202.9 MB/sec<br>GC 停顿: 1.4% | `unfinished = 0`<br>`rejected = 0`<br>`timedOut = 0`<br>无单币死锁 |
+| **56s 长时运行稳定性验证**<br>(`productionMixedWorkload`) | 1,000 用户<br>4 币对 / 96 轮 HFT | 2 wi(3s) + 5 meas(10s)<br>共 56s 持续长稳 | **11.701 ops/s**<br>(末轮达 13.00) | **377,794 ops/s**<br>(**~37.8 万笔/秒**) | **89,862 trades/s**<br>(**~9.0 万笔/秒**) | **36,319 ops/s** | 227.4 MB/sec<br>**GC 停顿仅 0.44%** | `unfinished = 0`<br>`rejected = 0`<br>`timedOut = 0`<br>无内存泄漏，无退化 |
+
+---
+
+### 10.3 长稳运行核心结论
+
+1. **极端行情下强悍的吞吐与自愈能力**：
+   在 96 轮高频突发撤挂单与资金费率、风控扫描交织运行下，底层业务操作处理速度达到 **37.8 万笔/秒**，每秒撮合成交达 **8.98 万笔**，且穿仓强平批处理、准备金赔偿、ADL 减仓能够在一个原子周期内全部平稳自愈收敛，赤字完全清零；
+2. **长稳运行无抖动，JIT 编译后性能持续爬升**：
+   在长达 56 秒的连续高负载混合压测中，吞吐从初始 10.78 ops/s 稳步跃升至 13.00 ops/s。50 秒测量期内总 GC 停顿仅 **223 毫秒（时间占比低至 0.44%）**，平均每 3.5 秒仅触发一次约 15ms 的轻量 Young GC，彻底杜绝了因内存泄漏或老年代堆积导致的长停顿；
+3. **资金一致性与事件偏序 100% 保持**：
+   在多币种交叉并发下，上一轮引入的“分片偏序水位防重放与高水位推进”完全经受住了实际大行情的检验，跨分片交错事件平滑提交，全局资金守恒 `closingFunds == openingFunds` 审计全部一次性通过。
+
+---
+
+### 10.4 深度分析：长时压测暴露的问题与可大幅删减/优化的过度设计项
+
+立足于第一性原理（First Principles Thinking）与 KISS（Keep It Simple, Stupid）原则，对长时大行情混合压测的代码路径与分配堆栈进行了深度剖析，梳理出以下可大幅精简与优化的过度设计项：
+
+#### 1. 批量指令对象的多重防御性复制与包装层（`PlaceOrderBatchCommand` / `CancelOrderBatchCommand`）
+- **现象与问题**：
+  在 `PlaceOrderBatchCommand` 的构造函数中：
+  ```java
+  boolean borrowed = false;
+  for (var order : orders) {
+      if (order == null) throw new IllegalArgumentException("invalid place order batch");
+      borrowed |= order.isCommandSlot();
+  }
+  if (borrowed) {
+      var stable = new java.util.ArrayList<PlaceOrderCommand>(orders.size());
+      for (var order : orders) stable.add(order.immutableValue());
+      this.orders = List.copyOf(stable);
+  } else this.orders = TradingOrderBatchCodec.immutableItems(orders);
+  ```
+  在热路径或密集测试场景中，当一次 HFT burst 有 20 笔订单时，这里连续做了：
+  1. 遍历检查 `isCommandSlot`；
+  2. `new ArrayList` 复制；
+  3. `List.copyOf` 二次封装；
+  4. `immutableItems` 递归包装。
+- **过度设计定性**：
+  层层包装属于典型的过度防御性设计（Defensive Copying）。指令进入 Core 引擎前已有 Aeron 环和 Ingress 解码层，完全可以用轻量的固定数组或原语视图替代多层 `List.copyOf` 包装。
+- **优化与清理项**：
+  移除 `borrowed` 二次复制分支与多重 `immutableItems` 嵌套包装，统一采用定长数组或只读切片暴露订单列表。
+
+#### 2. `OrderSlots` 的抽象集合代理过度封装
+- **现象与问题**：
+  `PlaceOrderBatchCommand` 内部维护了 `private static final class OrderSlots extends java.util.AbstractList<PlaceOrderCommand> implements java.util.RandomAccess`。每次通过 `orders()` 访问时，都需要经过 `AbstractList` 的抽象方法分发与越界检查。
+- **过度设计定性**：
+  在高性能低延迟核心中，引入 `AbstractList` 包装属于机械抽象。核心执行引擎 `OrderBatchExecutor` 内部只需要简单的数组下标遍历（`for (int i = 0; i < count; i++)`）。
+- **优化与清理项**：
+  直接使用数组暴露或提供 `orderAt(int index)` 与 `activeCount()` 原语方法，减少多态方法调用开销。
+
+#### 3. 压测客户端驱动端的每秒 200MB+ 临时对象产生
+- **现象与问题**：
+  在 `LinearPerpetualMixedWorkload.java` 的 `executeHftBurstsPipelined` 中，每次循环都在反复 `new ArrayList<>(symbolIndices.length)`、`new ArrayList<>(hftBatchSize)`、`orders.add(orderCommand(...))`、`new CancelOrderBatchCommand(orders)`、`new byte[...]`。
+  实测中发现 `gc.alloc.rate` 达到 200MB/s 绝大部分来自于压测工具驱动代码，而非 Core 交易引擎自身。
+- **优化与清理项**：
+  对基准测试端的批量发压缓冲区进行预分配（Pre-allocated Batch Command Buffers），消除压测客户端自身的垃圾分配对 Core 性能测试的底噪干扰，让实测数据更纯粹地反映生产引擎的分配率。
+
+
 
 
 
