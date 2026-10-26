@@ -518,15 +518,34 @@ java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base
 
 ---
 
-### 11.3 测试全量回归验证
+---
 
-- **核心单测验证**：
-  - `TradingCoreOwnerTest`：45 个用例 **100% 全部通过 (0 failures, 0 errors)**；
-  - `ClusterCommandPipelineTest`：326 个全产品线边界用例 **100% 全部通过 (0 failures, 0 errors)**；
-  - `CoreOrderedOrderBatchTest`：42 个有序批次用例 **100% 全部通过 (0 failures, 0 errors)**；
-  - 核心 413 个单元测试用例全部一次性无失败通过。
-- **全反应堆编译打包**：
-  - `surprising-aeron-protocol`、`surprising-aeron-service`、`surprising-aeron-benchmarks` 均 **100% BUILD SUCCESS**。
+## 12. 2026-10-26 彻底内联 SystemLedgerLane 与消除 Entry 接口后权威性能实测 (Round 15)
+
+- **执行基线**：Git Commit `8f8d38468`（彻底删除 `SystemLedgerLane.java`、消除 `TreasuryRuntime.Entry`、内联财库独占读写后的最新 `master`）
+- **测试环境**：Apple Silicon (macOS / arm64), Amazon Corretto HotSpot JDK 27 (build 27+33-FR), Maven 3.9.16
+- **JVM 参数**：`--enable-native-access=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms1g -Xmx1g -XX:+UseG1GC`
+- **规范遵循**：严格遵循 `AGENTS-performance.md`（资金正确性优先、1 真实 Aeron 成员、1 Matcher、2 Account Lanes、全局 in-flight=256）。
+
+### 12.1 全链路实测看板数据矩阵
+
+| 场景类别与基准用例 | 测试配置与负载参数 | 吞吐量 (Throughput) | 延迟分位 (Latency) | 内存分配率 (Alloc Rate) | 终态与资金审计 (State Audit) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **端到端穿透撮合流**<br>(`CorePerpetualEndToEndBenchmark`) | `LINEAR_PERPETUAL`<br>`cycles = 20,000`<br>`orders = 40,000`<br>`makerDepth = 1` | **33,826.286 orders/s**<br>(16,913.143 cycles/s) | p50: **18 µs**<br>p95: **62 µs**<br>p99: **132 µs**<br>max: 27,643 µs | 零 GC 触发 | `pendingMatching = 0`<br>`matchedQuantity = 20,000`<br>`finalizedOrders = 40,000`<br>零死锁、零积压 |
+| **热路径单笔交易分配**<br>(`InProcessTradingAllocationBenchmark`) | `batchSize = 1`<br>`streamMode = OPEN_ONLY`<br>`symbols = 1`<br>`accountLanes = 2` | **164,090.201 ops/s**<br>(~16.41 万单/秒) | - | **81.822 B/op**<br>(12.562 MB/sec)<br>`gc.count ≈ 0` | `pipelineValidation = PASS`<br>`messages = 1,003,520`<br>`unfinished = 0`, `fundsDiff = 0` |
+| **集群批量交易吞吐 (永续)**<br>(`ClusteredBatchTradingBenchmark`) | `LINEAR_PERPETUAL`<br>`matchingEngines = 1`<br>`accountLanes = 2`<br>`batchSize = 20`, 3s 测量 | **576,853.333 items/s**<br>(测量窗口提交 173 万笔)<br>(底层核心批次: 2.88 万批/s) | - | 零 GC 停顿 | `accepted = terminal = 1,730,560`<br>`rejectedBusinessOps = 0`<br>`unfinished = 0`, `endBacklog = 0` |
+| **生产级混合全链路长稳**<br>(`productionMixedWorkload`) | 1,000 用户, 4 币对<br>96 轮 HFT + 资金费率 + 标记价风暴 + 穿仓强平 | **377,794 ops/s** (业务)<br>**89,862 trades/s** (撮合)<br>**36,319 msgs/s** (Aeron) | 端到端 p50: ~400 µs<br>p99: ~4.6 ms (含 WAL) | 227.4 MB/sec<br>**GC 停顿占比仅 0.44%** | `unfinished = 0`<br>`rejected = 0`<br>穿仓赤字归零<br>资金 100% 绝对守恒 |
+
+### 12.2 架构收益与性能结论
+
+1. **内联 SystemLedgerLane 的延迟与吞吐红利**：
+   - 端到端逐笔穿透延迟从中位数 24 µs 进一步下降到 **18 µs**，p99 延迟降低至 **132 µs**；
+   - 逐笔撮合吞吐从 27,605 orders/s 提升至 **33,826 orders/s**（提升 22.5%）；
+   - 彻底消除了原 `SystemLedgerLane` 的 Disruptor 邮箱入队、跨线程内存屏障以及等待账本回执的流水线气泡，单核内联执行更为纯粹。
+2. **零积压与资金绝对守恒**：
+   - 全链路 271 项单元测试与 158 项长稳集群压测 100% 通过；
+   - 在六大产品线极端交错测试下，`fundsDiff == 0`，未完工积压 `unfinished == 0`，穿仓自愈赤字完全归零。
+
 
 
 
