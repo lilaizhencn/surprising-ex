@@ -487,7 +487,7 @@ public final class OrderBatchExecutor {
      * @param batch 本条批量命令的复用上下文
      * @param instrumentId 本项准入对应的品种名称
      */
-    com.surprising.aeron.service.order.admission.PlaceBatchIntentSource.Decision prepareBatchDecision(
+    com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision prepareBatchDecision(
             OrderBatchPending batch, String instrumentId) {
         // 当前批内项或变更用户的遍历下标
         int index = batch.preparedSymbols.indexOf(instrumentId);
@@ -510,7 +510,7 @@ public final class OrderBatchExecutor {
         int settleAssetId = quoteAsset.equals(settleAsset) ? quoteAssetId
                 : baseAsset.equals(settleAsset) ? baseAssetId : owner.identities().assetId(settleAsset);
         // 本品种共享的配置判断输入或其上下文
-        var decision = new com.surprising.aeron.service.order.admission.PlaceBatchIntentSource.Decision(context, 0,
+        var decision = new com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision(context, 0,
                 baseAssetId, quoteAssetId, settleAssetId);
         index = batch.preparedSymbols.size();
         batch.preparedSymbols.add(instrumentId);

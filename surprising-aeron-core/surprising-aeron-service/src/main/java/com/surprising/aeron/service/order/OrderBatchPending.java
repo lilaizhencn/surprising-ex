@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.service.matcher.CoreCancellationResult;
 import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
-import com.surprising.aeron.service.order.admission.PlaceBatchIntentSource;
+import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.order.command.OrderBatchKind;
@@ -65,7 +65,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     }
 
     /** 每项引用的产品判断输入，可指向同品种共享上下文。 */
-    final com.surprising.aeron.service.order.admission.PlaceBatchIntentSource.Decision[] preparedDecisions;
+    final com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[] preparedDecisions;
     /**
      * 返回需要生成 Lane 结果的批内项数。
      */
@@ -451,7 +451,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     /** 本批准入已经准备的品种名称，和共享上下文列同下标。 */
     final ArrayList<String> preparedSymbols;
     /** 按品种共用的只读配置判断上下文，账户及 OI 判断仍逐项执行。 */
-    final com.surprising.aeron.service.order.admission.PlaceBatchIntentSource.Decision[] preparedContextDecisions;
+    final com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[] preparedContextDecisions;
 
     /** 已收集单项或撤单片段累计的参与账户位图。 */
     long observedSettlementLaneMask;
@@ -634,13 +634,13 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         preparedOrders = new ResolvedPlaceOrder[capacity];
         resolvedOrderSlots = new ResolvedPlaceOrder[capacity];
-        preparedDecisions = new com.surprising.aeron.service.order.admission.PlaceBatchIntentSource.Decision[capacity];
+        preparedDecisions = new com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[capacity];
         preparedClientKeyValues = new long[capacity];
         preparedAdmittedOrders = new OrderRuntime[capacity];
         preparedCancellationOrderIds = new long[preparedAdmittedOrders.length];
         preparedSymbols = new ArrayList<>(capacity);
         preparedContextDecisions =
-                new com.surprising.aeron.service.order.admission.PlaceBatchIntentSource.Decision[capacity];
+                new com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[capacity];
     }
 
     /**

@@ -1,5 +1,11 @@
 # aeron-service 代码导航
 
+2026-10-26 核心抽象大幅精简与架构瘦身：
+彻底收敛 `order/admission` 微类碎片（删除 AdmissionIdentity、AdmissionOrderIndex、AdmissionSummary、PlaceBatchIntentSource 4个冗余小文件并内联）；
+拆解精简 `CommandSlot` 上帝类（提取统一 `OrderRuntimeSource`，删除 CommandResultBuilder 与 CommandSlot 中的重复代理集合，将 7 个内部 Continuation 抽离至 `CommandSlotContinuations.java`，瘦身 621 行）；
+拆解 `TradingAccountRuntime` 巨石类（独立提取 `LeverageLookup`、`PaddedReadyMask`、`PaddedCommittedSequenceSlot` 与 `ControlFundsValidation`，消除机械包装并保持向后兼容，瘦身 258 行）；
+累计净删除 1,008 行冗余抽象代码。全量测试通过（0失败，0错误），生产混合基准压测达到 41.8 万 ops/s（零积压、零错误）。
+
 2026-10-25 运行路径收敛：`AeronTradingClusterService` 只保留 Spring 与完整参数两个装配入口；
 `CoreSnapshotLifecycle` 统一按分片提交栅栏捕获，删除适配器内部快照注册表及同步 Matcher 调用包装；
 `CoreQueryService` 以 UUID 关联任务自身的完成 Future；`ClusterServiceEgress` 当场编码，背压只排字节。

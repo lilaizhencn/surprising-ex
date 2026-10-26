@@ -25,7 +25,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     /** 当前产品的身份表，客户键准备不建立第二份订单字典。 */
     private RuntimeIdentityRegistry identities;
     /** 本项币对、价格、费率及结算事实的既有决策输入。 */
-    private PlaceBatchIntentSource.Decision decision;
+    private PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision decision;
     /**
      * sequence：本项归属的 Core 命令序号。
      * userId：当前项所属用户编号。
@@ -37,7 +37,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
     /** 原批次命令槽保存的获准订单租约，寿命长于本项可复用任务。 */
     private OrderRuntime admittedOrder;
     /** 原批次项槽访问入口，Lane 把获准订单租约写回它，不增加 Owner 订单副本。 */
-    private PlaceBatchIntentSource source;
+    private PlaceBatchAdmissionEvent.PlaceBatchIntentSource source;
     /** 本项在原批次中的下标，用来保存到对应项槽。 */
     private int sourceIndex;
     /**  逆向非只减仓订单所需的平仓冲突撤单编号，供顺序批次后续撮合使用。 在控制回执完成后读取本项平仓容量冲突的前置撤单编号。 */
@@ -68,7 +68,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
      */
     public void prepare(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
             long sequence, long userId, UUID commandId, PlaceOrderCommand command,
-            PlaceBatchIntentSource.Decision decision, PlaceBatchIntentSource source, int sourceIndex) {
+            PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision decision, PlaceBatchAdmissionEvent.PlaceBatchIntentSource source, int sourceIndex) {
         if (runtime == null || identities == null || sequence <= 0 || userId <= 0
                 || commandId == null || command == null || decision == null || source == null || sourceIndex < 0)
             throw new IllegalArgumentException("invalid batch place reservation");

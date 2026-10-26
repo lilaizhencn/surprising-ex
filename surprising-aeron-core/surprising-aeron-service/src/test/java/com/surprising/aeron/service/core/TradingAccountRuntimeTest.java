@@ -15,7 +15,7 @@ import com.surprising.aeron.service.core.change.RuntimeChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.admission.PendingReservationTracker;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
-import com.surprising.aeron.service.order.admission.PlaceBatchIntentSource;
+import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.LaneCancelEvent;
 import com.surprising.aeron.service.order.state.OrderRuntime;

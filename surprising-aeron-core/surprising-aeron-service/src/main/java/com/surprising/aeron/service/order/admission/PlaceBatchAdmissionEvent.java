@@ -286,4 +286,16 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         completed = true;
         return value;
     }
+
+    /**
+     * Owner 固定的批量下单输入与命令槽访问边界。
+     */
+    public interface PlaceBatchIntentSource {
+        com.surprising.aeron.protocol.PlaceOrderCommand intent(int index);
+        Decision decision(int index);
+        ResolvedPlaceOrder resolvedOrderSlot(int index);
+        OrderRuntime captureAdmittedOrder(int index, OrderRuntime order);
+        record Decision(CoreOrderDecisionResolver.Context context, long openInterestSteps,
+                        int baseAssetId, int quoteAssetId, int settleAssetId) { }
+    }
 }

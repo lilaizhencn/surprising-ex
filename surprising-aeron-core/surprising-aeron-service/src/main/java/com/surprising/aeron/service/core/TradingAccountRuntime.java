@@ -52,7 +52,7 @@ import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.order.admission.PendingReservationTracker;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
-import com.surprising.aeron.service.order.admission.PlaceBatchIntentSource;
+import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource;
 import com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.LaneCancelEvent;
@@ -112,59 +112,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private final LeverageLookup ownerLeverageLookup = new LeverageLookup();
 
     /**
-     * 查杠杆时复用的可变探针，模拟正式杠杆键的哈希与字段比较；只在所属执行线程查找，不作为映射中的持久键。
+     * 查杠杆时复用的可变探针，继承自独立定义的 {@link com.surprising.aeron.service.core.LeverageLookup} 保持完全向后兼容。
      */
-    public static final class LeverageLookup {
-        /** 本次杠杆查找的用户身份，下次 set 覆盖。 */
-        long userId;
-        /** 本次杠杆查找的外部标的 ID，clear 时释放引用。 */
-        String instrumentId;
-        /** 本次杠杆查找的保证金模式，clear 时释放引用。 */
-        CoreMarginMode marginMode;
-
-        /**
-         * 替换本次查杠杆所用的用户、标的和保证金模式；这个可变探针只用于查找，不放入持久化映射。
-         * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
-         * @param instrumentId 本产品线的外部标的 ID
-         * @param marginMode 用于区分杠杆业务键的保证金模式
-         */
-        public void set(long userId, String instrumentId, CoreMarginMode marginMode) {
-            this.userId = userId;
-            this.instrumentId = instrumentId;
-            this.marginMode = marginMode;
-        }
-
-        /**
-         * 释放上次查找保存的标的和模式引用；用户数值可留待下次 set 覆盖，不再用已清理探针查找。
-         */
-        public void clear() {
-            instrumentId = null;
-            marginMode = null;
-        }
-
-        /**
-         * 按 CoreLeverageKey 的 record 字段顺序计算相同哈希，避免为每次成交查找创建新键。
-         */
-        @Override
-        public int hashCode() {
-            // 按 CoreLeverageKey 的 record 字段顺序计算相同哈希。
-            // 直接混合各字段，避免 Objects.hash 的可变参数数组。
-            // 按正式杠杆 record 键字段顺序累计的哈希中间值
-            int hash = 31 * Long.hashCode(userId) + instrumentId.hashCode();
-            return 31 * hash + marginMode.hashCode();
-        }
-
-        /**
-         * 只与正式 CoreLeverageKey 比较三个业务字段，让映射查找命中已有键；它不是可供任意对象双向比较的通用键。
-         * @param other 要与当前探针比较的对象，只识别正式 CoreLeverageKey
-         */
-        @Override
-        public boolean equals(Object other) {
-            return other instanceof CoreLeverageKey(/* 正式杠杆键解构出的用户身份，与当前探针比较 */ long id, /* 正式杠杆键解构出的外部标的 ID，与当前探针比较 */ String storedInstrumentId, /* 正式杠杆键解构出的保证金模式，与当前探针比较 */ CoreMarginMode mode)
-                    && userId == id
-                    && instrumentId.equals(storedInstrumentId)
-                    && marginMode == mode;
-        }
+    public static final class LeverageLookup extends com.surprising.aeron.service.core.LeverageLookup {
     }
 
     /**  撮合后结算的派发与完成收集入口，沿用各产品现有结算规则。 借出唯一撮合结算派发与收集入口。 */
@@ -199,7 +149,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /** 按 Lane 复用的用户路由临时列表，每次派发前清空，不保存第二份用户业务状态。 */
     final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
     /** 账户 Lane 生命周期，未启动时没有工作线程。 */
-    private final AccountLaneLifecycle laneLifecycle;
+    final AccountLaneLifecycle laneLifecycle;
+    public AccountLaneLifecycle laneLifecycle() { return laneLifecycle; }
     private final CoreRuntimeConfiguration configuration;
     /** 账户准入完成后按 Matcher 分片设置的唤醒提示，业务结果仍在原事件。 */
     private final PaddedReadyMask accountAdmissionReadyShards;
@@ -226,114 +177,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
 
     /**
-     * 跨线程就绪提示，每一位使用单独间隔的原始数组槽，减少不同 Lane 写相邻位置。读写使用 acquire/release，采样与清除不是原子的整体操作；提示可以合并，队列和事件完成标记才是实际完成依据。
+     * 跨线程就绪提示，继承自独立定义的 {@link com.surprising.aeron.service.core.PaddedReadyMask} 保持完全向后兼容。
      */
-    public static final class PaddedReadyMask {
-        /** 相邻提示槽间隔十六个 long，使不同位尽量不写同一缓存行。 */
-        private static final int STRIDE = 16;
-        /** long 数组元素访问器，提示读取使用 acquire、写入使用 release。 */
-        private static final java.lang.invoke.VarHandle CELLS =
-                java.lang.invoke.MethodHandles.arrayElementVarHandle(long[].class);
-        /** 实际存储就绪提示的原始数组，非零表示该位被发布过。 */
-        private final long[] cells;
-        /** 本提示数组实际支持的位数，构造时限定在 1 至 64。 */
-        private final int bitCount;
-
-        /**
-         * 建立最多 64 位的就绪提示数组，每位单独留出缓存行间隔。
-         */
-        public PaddedReadyMask() { this(Long.SIZE); }
-
-        /**
-         * 要求位数在 1 至 64 之间，按每位固定间隔分配原始数组。
-         * @param bitCount 支持的就绪位数，必须在 1 至 64 之间
-         */
-        public PaddedReadyMask(int bitCount) {
-            if (bitCount <= 0 || bitCount > Long.SIZE)
-                throw new IllegalArgumentException("ready bit count must be in [1,64]");
-            this.bitCount = bitCount;
-            cells = new long[Math.multiplyExact(bitCount, STRIDE)];
-        }
-
-        /**
-         * 校验位下标属于本数组，再换算为实际存储位置。
-         * @param bitIndex 本提示数组内的零起始位下标
-         */
-        private int offset(int bitIndex) {
-            if (bitIndex < 0 || bitIndex >= bitCount)
-                throw new IllegalArgumentException("ready bit is outside its topology");
-            return bitIndex * STRIDE;
-        }
-
-        /**
-         * 先以 acquire 读取提示，已非零就返回假，否则以 release 写入一并返回真；它不是原子的读改写，并发发布可能合并或重复唤醒。
-         * @param bitIndex 本提示数组内的零起始位下标
-         */
-        public boolean setBit(int bitIndex) {
-            // 本位在带间隔原始数组中的实际位置
-            int offset = offset(bitIndex);
-            if ((long) CELLS.getAcquire(cells, offset) != 0) return false;
-            CELLS.setRelease(cells, offset, 1L);
-            return true;
-        }
-
-        /**
-         * 校验位下标后，以 release 清除该位提示。
-         * @param bitIndex 本提示数组内的零起始位下标
-         */
-        public void clearBit(int bitIndex) {
-            CELLS.setRelease(cells, offset(bitIndex), 0L);
-        }
-
-        /**
-         * 逐个清除给定掩码对应的提示；调用方保证掩码只包含本拓扑内的位，此处不逐位做范围校验。
-         * @param bitsToClear 调用方保证属于本拓扑的待清除提示位集合
-         */
-        public void clearBits(long bitsToClear) {
-            while (bitsToClear != 0) {
-                // 当前正在采样或清除的提示位下标
-                int bit = Long.numberOfTrailingZeros(bitsToClear);
-                bitsToClear &= bitsToClear - 1;
-                CELLS.setRelease(cells, bit * STRIDE, 0L);
-            }
-        }
-
-        /**
-         * 逐位以 acquire 采样就绪提示并合成掩码，不清除提示，也不构成所有业务完成状态的原子快照。
-         */
-        public long get() {
-            // 本轮逐位采样得到的就绪提示掩码，不是全部事件完成的原子快照
-            long ready = 0;
-            for (/* 当前正在采样或清除的提示位下标 */ int bit = 0; bit < bitCount; bit++)
-                if ((long) CELLS.getAcquire(cells, bit * STRIDE) != 0) ready |= 1L << bit;
-            return ready;
-        }
-
-        /**
-         * 逐位采样非零提示后清零并返回所见掩码；这里只收集唤醒线索，真实结果仍以队列或事件完成标记为准。
-         */
-        public long getAndClear() {
-            // 本轮逐位采样得到的就绪提示掩码，不是全部事件完成的原子快照
-            long ready = 0;
-            for (/* 当前正在采样或清除的提示位下标 */ int bit = 0; bit < bitCount; bit++) {
-                // 本位在带间隔原始数组中的实际位置
-                int offset = bit * STRIDE;
-                // 空轮询只读提示槽；确实读到非零提示才写入清零。
-                if ((long) CELLS.getAcquire(cells, offset) != 0) {
-                    CELLS.setRelease(cells, offset, 0L);
-                    ready |= 1L << bit;
-                }
-            }
-            return ready;
-        }
-    }
-
-    /**
-     * 所属 Lane 已提交到的 Core 序号槽位，以 volatile 发布给 Owner。
-     */
-    private static final class PaddedCommittedSequenceSlot {
-        /** 所属 Lane 已提交到的 Core 序号，以 volatile 发布给 Owner。 */
-        protected volatile long sequence;
+    public static final class PaddedReadyMask extends com.surprising.aeron.service.core.PaddedReadyMask {
+        public PaddedReadyMask() { super(); }
+        public PaddedReadyMask(int bitCount) { super(bitCount); }
     }
 
     /** 单笔下单准入事件池，输入和消费者都结束使用后才能归还。 */
@@ -3256,7 +3104,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      * @param symbolId 本产品线标的内部身份
      */
-    public com.surprising.aeron.service.order.admission.AdmissionOrderIndex admissionOrders(long userId, int symbolId) {
+    public com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.AdmissionOrderIndex admissionOrders(long userId, int symbolId) {
         return onLane(userId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> lane.admissionOrderIndex(symbolId));
     }
 
@@ -6596,7 +6444,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /** 无专用财务控制槽时复用的账本资金及持仓索引校验条目。 */
-    private final ControlFundsValidation controlFundsValidation = new ControlFundsValidation();
+    private final ControlFundsValidation controlFundsValidation = new ControlFundsValidation(this);
 
     /**
      * 活动财务控制已有专用槽时沿用其校验；否则仅在账户余额或持仓有变化时推进独立资金校验续步。返回通过表示已验证，财务范围关闭仍需后续请求。
@@ -6626,90 +6474,6 @@ accountFundsChanged |= patches.size() != 0;
             // 该 Lane 已完成的账户余额前后补丁，财务收尾前保持有效
             LaneBalancePatches patches = accountRollback.balancePatch(laneIndex);
 appendBalanceFundsDelta(patches, target);
-        }
-    }
-
-    /**
-     * 没有专用财务命令槽时使用的账本校验续步：账本先核对账户资金并保留持仓索引撤销信息，Owner 再选择提交或回滚，最后账本发布范围关闭完成。
-     */
-    private final class ControlFundsValidation implements SystemLedgerLane.Entry {
-        /** 账本执行 ready 时汇总账户余额差额的复用累加器，校验通过后清空。 */
-        private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
-        /** 账本应用控制持仓索引时保存的撤销信息，回滚则恢复，提交则清除。 */
-        private final RuntimeFactIndexes.PositionUndo positionUndo = new RuntimeFactIndexes.PositionUndo();
-        /**
-         * queued：Owner 记录本条目是否已经被账本邮箱接纳，直到上一轮请求关闭且完成后才能开始新轮。
-         * externalAdjustment：Owner 入队前固定的外部资金增减选项，经邮箱交接给账本校验。
-         * rollback：Owner 选择本财务范围是否回滚，随后用 requested 发布给账本。
-         */
-        private boolean queued, externalAdjustment, rollback;
-        /**
-         * validated：账本已完成资金验证及持仓索引应用的可见标记，不等于范围已经关闭。
-         * requested：Owner 允许账本进入最终提交或回滚步骤的 volatile 请求标记。
-         * completed：账本已完成最终提交或回滚的 volatile 标记，初始为真，开始新轮时复位。
-         */
-        private volatile boolean validated, requested, completed = true;
-
-        /**
-         * Owner 尝试把本轮校验入账本；前轮已请求关闭但未完成时继续等待，邮箱满返回假，成功后只观察账本发布的 validated 标记。
-         * @param externalAdjustment 本命令是否允许外部资金增减，交给账本资金守恒检查
-         */
-        boolean poll(boolean externalAdjustment) {
-            if (queued && requested) {
-                if (!completed) return false;
-                queued = false;
-            }
-            if (!queued) {
-                this.externalAdjustment = externalAdjustment;
-                rollback = requested = validated = false;
-                completed = false;
-                if (!laneLifecycle.ledger().offer(this)) { completed = true; return false; }
-                queued = true;
-            }
-            return validated;
-        }
-
-        /**
-         * 账本先按余额补丁验证资金守恒并应用可撤销持仓索引，再发布 validated 唤醒 Owner；只有 Owner 请求提交或回滚后才允许条目进入 apply。
-         */
-        @Override public boolean ready() {
-            if (!validated && !requested) {
-                appendControlAccountFunds(funds);
-                funds.requireConserved(externalAdjustment);
-                funds.clear();
-                applyLedgerControlPositions(positionUndo);
-                validated = true;
-            }
-            return requested;
-        }
-
-        /**
-         * 账本按 Owner 选择回滚持仓索引或丢弃撤销记录，发布完成并唤醒 Owner；资金验证已在 ready 阶段执行。
-         * @param ledger 账本实际财库引用；本收尾步骤只处理持仓索引撤销记录
-         */
-        @Override public void apply(TreasuryRuntime ledger) {
-            if (rollback) rollbackLedgerPositions(positionUndo);
-            else positionUndo.clear();
-            completed = true;
-        }
-
-        /**
-         * Owner 对已排队校验发布回滚选择与关闭请求，返回是否已完成；未排队时无需等待。
-         */
-        boolean requestRollback() {
-            if (!queued) return true;
-            rollback = true;
-            requested = true;
-            return completed;
-        }
-
-        /**
-         * 提交清理时只对已验证且未完成条目发布关闭请求；未验证就清理视为流程错误，不在此等待账本退出。
-         */
-        void clear() {
-            if (!queued || completed) return;
-            if (!validated) throw new IllegalStateException("Ledger funds validation is incomplete");
-            requested = true;
         }
     }
 

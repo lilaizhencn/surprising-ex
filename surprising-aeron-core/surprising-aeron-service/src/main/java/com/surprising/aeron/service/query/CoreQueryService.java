@@ -204,7 +204,7 @@ public final class CoreQueryService {
             // 按固定市场和规则输入解析出的预检订单参数。
             var order = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.resolve(context, userId, command);
             // 当前用户的客户端订单身份、币对、持仓键和结算状态，交给账户预留检查。
-            var identity = new com.surprising.aeron.service.order.admission.AdmissionIdentity(
+            var identity = new com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.AdmissionIdentity(
                     owner.identities().findClientKeyValue(userId, command.clientOrderId()), context.symbolId(),
                     owner.identities().findPositionKeyValueInLane(lane, userId, context.instrument(), command.positionSide()),
                     context.settlementStatus());

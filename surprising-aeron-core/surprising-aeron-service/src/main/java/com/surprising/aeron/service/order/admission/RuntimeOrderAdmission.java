@@ -490,4 +490,47 @@ public final class RuntimeOrderAdmission {
         return new CoreStateRejectedException(code, message);
     }
 
+    /**
+     * 账户准入前已经准备好的身份值和借用的账本结算事实。
+     */
+    public record AdmissionIdentity(
+            long clientKey, int symbolId, long positionKey,
+            com.surprising.aeron.service.treasury.TreasuryRuntime.SettlementStatus settlementStatus) {
+        public boolean lifecycleSettled() { return settlementStatus.lifecycleSettled(); }
+        public boolean fundingInProgress() { return settlementStatus.fundingInProgress(); }
+    }
+
+    /**
+     * 一次挂单准入检查的可复用汇总结果，只存数量和冲突条数。
+     */
+    public static final class AdmissionSummary {
+        @lombok.experimental.Accessors(fluent = true, chain = false)
+        @lombok.Getter
+        private long pendingQuantity;
+        @lombok.experimental.Accessors(fluent = true, chain = false)
+        @lombok.Getter
+        private long reduceOnlyQuantity;
+        @lombok.experimental.Accessors(fluent = true, chain = false)
+        @lombok.Getter
+        private int marginModeCount;
+
+        public AdmissionSummary set(long pendingQuantity, long reduceOnlyQuantity, int marginModeCount) {
+            this.pendingQuantity = pendingQuantity;
+            this.reduceOnlyQuantity = reduceOnlyQuantity;
+            this.marginModeCount = marginModeCount;
+            return this;
+        }
+    }
+
+    /**
+     * 订单准入需要的挂单汇总读取边界。
+     */
+    public interface AdmissionOrderIndex {
+        AdmissionSummary inspect(long userId, String instrumentId, CorePositionSide positionSide,
+                                 CoreOrderSide side, CoreMarginMode conflictingMarginMode);
+
+        default void admitted(long userId, ResolvedPlaceOrder order) {
+        }
+    }
+
 }

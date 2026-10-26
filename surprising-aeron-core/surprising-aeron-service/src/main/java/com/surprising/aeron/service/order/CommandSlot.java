@@ -173,18 +173,18 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     private final LiquidationExecutionContinuation liquidationExecutionControl =
             new LiquidationExecutionContinuation();
     /** 预构造的 Matcher 准入收据等待任务。 */
-    private final AdmissionMatchingContinuation admissionMatching = new AdmissionMatchingContinuation();
+    private final AdmissionMatchingContinuation admissionMatching = new AdmissionMatchingContinuation(this);
     /** 共同前置撤单输入列表，Matcher 使用期间保持稳定。 */
     private List<CancellationOrder>
             matcherPreCancellations = List.of();
     /** 预构造的控制撤单 Matcher 任务。 */
-    private final ControlMatchingContinuation controlMatching = new ControlMatchingContinuation();
+    private final ControlMatchingContinuation controlMatching = new ControlMatchingContinuation(this);
     /** 预构造的普通或冻结批量项下单任务。 */
-    private final PlaceMatchingContinuation placeMatching = new PlaceMatchingContinuation();
+    private final PlaceMatchingContinuation placeMatching = new PlaceMatchingContinuation(this);
     /** 预构造的普通撤单任务。 */
-    private final CancelMatchingContinuation cancelMatching = new CancelMatchingContinuation();
+    private final CancelMatchingContinuation cancelMatching = new CancelMatchingContinuation(this);
     /** 预构造的替换/改单撮合任务。 */
-    private final ReplaceMatchingContinuation replaceMatching = new ReplaceMatchingContinuation();
+    private final ReplaceMatchingContinuation replaceMatching = new ReplaceMatchingContinuation(this);
     /**
      *  当前等待收集的 Lane 提交事件。
      * 返回待收集的账户 Lane 提交事件。
@@ -389,8 +389,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     java.util.function.Supplier<?> prepareControlMatching(TradingCoreRuntime owner,
             List<CancellationOrder> orders) {
-        controlMatching.owner = Objects.requireNonNull(owner);
-        controlMatching.orders = Objects.requireNonNull(orders);
+        controlMatching.prepare(owner, orders);
         return controlMatching;
     }
 
@@ -401,7 +400,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      * @param logicalOrderId 用于关联前置撤单失败的外层逻辑订单号
      * @param target 接收原生事实的结算目标或接收提交资金缓冲的目标，具体类型见签名
      */
-    private exchange.core2.core.common.MatcherResult applyMatcherPreCancellations(
+    exchange.core2.core.common.MatcherResult applyMatcherPreCancellations(
             TradingCoreRuntime owner, int shard, long logicalOrderId, MatcherSettlementEvent target) {
         for (/* 当前前置撤单或结果数组中的下标。 */ int index = 0; index < matcherPreCancellations.size(); index++) {
             // 当前按既定顺序执行的一条原生撤单身份。
@@ -417,27 +416,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
                     command.header().commandId(), logicalOrderId, result, target);
         }
         return null;
-    }
-
-    /**
-     * 复用当前命令身份执行有序控制撤单的 Matcher 任务。
-     */
-    private final class ControlMatchingContinuation implements java.util.function.Supplier<Object> {
-        /** 固定撮合任务借用的所属交易运行时。 */
-        private TradingCoreRuntime owner;
-        /** 控制撤单任务借用的有序请求列表。 */
-        private List<CancellationOrder> orders;
-        /**
-         * 在 Matcher 上执行本槽整组控制撤单，Core 序号、UUID 和业务时间取当前槽命令。
-         */
-        @Override public Object get() {
-            return owner.matchingAdapter().cancelControlOrders(coreSequence, command.header().commandId(),
-                    command.header().submittedAtEpochMillis(), orders);
-        }
-        /**
-         * 清掉控制任务借用的 Owner 及列表引用，任务对象继续复用。
-         */
-        void clear() { owner = null; orders = null; }
     }
 
     /**
@@ -1278,412 +1256,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     }
 
     /**
-     * 在 Matcher 上等待 Lane 下单准入收据并处理内部先撤意图的固定任务。
-     */
-    private final class AdmissionMatchingContinuation implements java.util.function.Supplier<Object> {
-        /** 固定撮合任务借用的所属交易运行时。 */
-        private TradingCoreRuntime owner;
-        /** Matcher 需要等待的 Lane 下单准入事件。 */
-        private PlaceAdmissionEvent admission;
-        /** 固定任务负责的全局 Matcher 分片。 */
-        private int matcherShard;
-        /** 等待准入后要发布到的直达结算事件。 */
-        private MatcherSettlementEvent settlement;
-        /** 准入与先撤成功后才调用的原始下单 Supplier。 */
-        private java.util.function.Supplier<?> original;
-
-        /**
-         * 要求 Owner、准入事件、结算目标及原任务非空后保存，分片号沿用调用方已确定值。
-         * @param owner 所属交易 Owner 运行时
-         * @param admission 对应方法签名的准入事件或已解析准入值，使用期间按租约只读
-         * @param matcherShard 调用方确定的目标 Matcher 分片
-         * @param settlement 当前准入等待任务要发布的直达结算事件
-         * @param original 准入接受且内部先撤完成后继续执行的原下单函数
-         */
-        void prepare(TradingCoreRuntime owner, PlaceAdmissionEvent admission, int matcherShard,
-                     MatcherSettlementEvent settlement, java.util.function.Supplier<?> original) {
-            this.owner = Objects.requireNonNull(owner);
-            this.admission = Objects.requireNonNull(admission);
-            this.matcherShard = matcherShard;
-            this.settlement = Objects.requireNonNull(settlement);
-            this.original = Objects.requireNonNull(original);
-        }
-
-        /**
-         * 清准入等待任务的所有借用引用与分片值，保留任务对象。
-         */
-        void clear() {
-            owner = null;
-            admission = null;
-            matcherShard = 0;
-            settlement = null;
-            original = null;
-        }
-
-        /**
-         * 在 Matcher 等 Lane 准入收据；拒绝则发布拒单，否则执行准入指定的先撤订单。UNKNOWN_ORDER 表示旧挂单已不在簿中，内部意图可跳过；其他失败保留前缀事实并返回，全部处理后调用原下单任务。
-         */
-        @Override
-        public Object get() {
-            admission.awaitMatcherReceipt(settlement);
-            if (!settlement.admissionAccepted()) {
-                // 当前命令解码后的原始下单输入，提供逻辑订单号与品种。
-                var place = decodedCommand.placeOrder();
-                owner.matchingAdapter().rejectedPlaceDirect(
-                        matcherShard, coreSequence, command.header().commandId(), place.orderId(),
-                        command.header().submittedAtEpochMillis(),
-                        settlement.admissionResultCode(), settlement);
-                return settlement;
-            }
-            // 准入收据保存的内部先撤订单列表，可能使用 primitive 不可变存储。
-            var cancellations = settlement.admissionCancellations();
-            // 当前命令解码后的原始下单输入，提供逻辑订单号与品种。
-            var place = decodedCommand.placeOrder();
-            for (/* 当前前置撤单或结果数组中的下标。 */ int index = 0; index < cancellations.size(); index++) {
-                // 当前准入表示关联的下单号或内部先撤订单号。
-                long orderId = cancellations instanceof ImmutableLongArrayList /* 已经是 primitive 不可变长整数列表的先撤输入，可直接按值读取。 */ primitive
-                        ? primitive.valueAt(index) : cancellations.get(index);
-                // 当前前置撤单的原生回执，用其状态决定记录事实或停止。
-                var result = owner.matchingAdapter().cancelDirectPrefix(
-                        command.header().submittedAtEpochMillis(), command.header().userId(),
-                        orderId, place.instrumentId());
-                if (result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.MATCHING_UNKNOWN_ORDER_ID) {
-                    // Lane 准入时可能还没消费较早的 maker 成交。内部意图只撤仍在簿中的订单；
-                    // 已不存在的挂单不再追加撤单事实，也不再做一次账户释放。
-                    continue;
-                }
-                if (result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.SUCCESS
-                        || result.resultCode() == exchange.core2.core.common.cmd.CommandResultCode.ACCEPTED) {
-                    settlement.recordDirectPreCancellation(orderId);
-                } else {
-                    return owner.matchingAdapter().publishDirectPrefixFailure(
-                            matcherShard, coreSequence, command.header().commandId(), place.orderId(), result, settlement);
-                }
-            }
-            return original.get();
-        }
-    }
-
-    /**
-     * 普通下单或顺序批量冻结项的固定 Matcher 任务，只借用一种准入表示与直达事件。
-     */
-    private final class PlaceMatchingContinuation implements java.util.function.Supplier<Object> {
-        /** 固定撮合任务借用的所属交易运行时。 */
-        private TradingCoreRuntime owner;
-        /** 固定任务负责的全局 Matcher 分片。 */
-        private int matcherShard;
-        /** 固定撮合任务请求所属用户。 */
-        private long userId;
-        /** 普通下单已经完成 Lane 准入的输入。 */
-        private ResolvedPlaceOrder resolvedOrder;
-        /** 普通下单独立撮合输入，与另外两种表示互斥。 */
-        private CoreMatchingOrder matchingOrder;
-        /** 已冻结并可由 Matcher 消费的订单租约。 */
-        private OrderRuntime admittedOrder;
-        /** 固定任务借用的直达结算事件。 */
-        private MatcherSettlementEvent direct;
-
-        /**
-         * 把已准入对象或独立撮合对象交给完整准备方法，不使用冻结 OrderRuntime 输入。
-         * @param owner 所属交易 Owner 运行时
-         * @param matcherShard 调用方确定的目标 Matcher 分片
-         * @param userId 请求所属用户编号
-         * @param resolvedOrder 已经完成准入的下单对象
-         * @param matchingOrder 独立的不可变撮合输入
-         * @param direct 本命令独占并尚未退休的直达结算事件
-         */
-        void prepare(TradingCoreRuntime owner, int matcherShard, long userId,
-                     ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
-                     MatcherSettlementEvent direct) {
-            prepare(owner, matcherShard, userId, resolvedOrder, matchingOrder, null, direct);
-        }
-
-        /**
-         * 要求三种订单表示恰好一种非空，并保存非空直达结算目标和 Owner；只准备固定任务，不在这里撮合。
-         * @param owner 所属交易 Owner 运行时
-         * @param matcherShard 调用方确定的目标 Matcher 分片
-         * @param userId 请求所属用户编号
-         * @param resolvedOrder 已经完成准入的下单对象
-         * @param matchingOrder 独立的不可变撮合输入
-         * @param admittedOrder 已经冻结供 Matcher 消费的批量项订单租约
-         * @param direct 本命令独占并尚未退休的直达结算事件
-         */
-        void prepare(TradingCoreRuntime owner, int matcherShard, long userId,
-                     ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
-                     OrderRuntime admittedOrder, MatcherSettlementEvent direct) {
-            if ((resolvedOrder == null ? 0 : 1) + (matchingOrder == null ? 0 : 1)
-                    + (admittedOrder == null ? 0 : 1) != 1 || admittedOrder != null && direct == null) {
-                throw new IllegalArgumentException("exactly one ordinary PLACE order representation is required");
-            }
-            this.owner = Objects.requireNonNull(owner);
-            this.matcherShard = matcherShard;
-            this.userId = userId;
-            this.resolvedOrder = resolvedOrder;
-            this.matchingOrder = matchingOrder;
-            this.admittedOrder = admittedOrder;
-            this.direct = Objects.requireNonNull(direct, "direct settlement");
-        }
-
-        /**
-         * 清普通下单任务的 Owner、用户、分片、三种订单表示和结算引用。
-         */
-        void clear() {
-            owner = null;
-            matcherShard = 0;
-            userId = 0;
-            resolvedOrder = null;
-            matchingOrder = null;
-            admittedOrder = null;
-            direct = null;
-        }
-
-        /**
-         * 先执行共同前置撤单，失败即返回；否则从当前命令头取 UUID 两半，按冻结订单、已准入对象或独立撮合对象调用对应直接下单接口。
-         */
-        @Override public Object get() {
-            // 当前准入表示关联的下单号或内部先撤订单号。
-            long orderId = admittedOrder != null ? admittedOrder.orderId()
-                    : resolvedOrder != null ? resolvedOrder.orderId() : matchingOrder.orderId();
-            // 共同前置撤单返回的可空失败事实，非空时不再执行本次普通操作。
-            var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
-            if (failure != null) return failure;
-            // 从当前命令头读取的 UUID 高六十四位。
-            long msb = command.header().commandIdMsb();
-            // 从当前命令头读取的 UUID 低六十四位。
-            long lsb = command.header().commandIdLsb();
-            if (admittedOrder != null)
-                return owner.matchingAdapter().placeAdmittedDirect(matcherShard, coreSequence, msb, lsb,
-                        command.header().submittedAtEpochMillis(), userId, admittedOrder, direct);
-            if (resolvedOrder != null)
-                return owner.matchingAdapter().placeDirect(matcherShard, coreSequence, msb, lsb,
-                        command.header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
-            return owner.matchingAdapter().placeDirect(matcherShard, coreSequence, msb, lsb,
-                    command.header().submittedAtEpochMillis(), userId, matchingOrder, direct);
-        }
-    }
-
-    /**
-     * 普通撤单固定任务，保存 Owner 准备的身份并在 Matcher 线程调用适配器。
-     */
-    private final class CancelMatchingContinuation implements java.util.function.Supplier<Object> {
-        /** 固定撮合任务借用的所属交易运行时。 */
-        private TradingCoreRuntime owner;
-        /** 固定任务负责的全局 Matcher 分片。 */
-        private int matcherShard;
-        /** 固定任务关联的逻辑或实际订单号，具体用途由对应任务确定。 */
-        private long orderId;
-        /** 固定撮合任务请求所属用户。 */
-        private long userId;
-        /** 撤单或替换任务的永久品种字符串。 */
-        private String instrumentId;
-        /** 固定任务借用的直达结算事件。 */
-        private MatcherSettlementEvent direct;
-
-        /**
-         * 保存撤单身份与非空 Owner、品种和直达结算目标，数值合法性在适配器入口继续检查。
-         * @param owner 所属交易 Owner 运行时
-         * @param matcherShard 调用方确定的目标 Matcher 分片
-         * @param orderId 当前逻辑命令或结果绑定的订单号
-         * @param userId 请求所属用户编号
-         * @param instrumentId 永久品种字符串
-         * @param direct 本命令独占并尚未退休的直达结算事件
-         */
-        void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                     long userId, String instrumentId, MatcherSettlementEvent direct) {
-            this.owner = Objects.requireNonNull(owner);
-            this.matcherShard = matcherShard;
-            this.orderId = orderId;
-            this.userId = userId;
-            this.instrumentId = Objects.requireNonNull(instrumentId);
-            this.direct = Objects.requireNonNull(direct, "direct settlement");
-        }
-
-        /**
-         * 清本固定撤单任务保留的身份与引用。
-         */
-        void clear() {
-            owner = null;
-            matcherShard = 0;
-            orderId = 0;
-            userId = 0;
-            instrumentId = null;
-            direct = null;
-        }
-
-        /**
-         * 先执行共同前置撤单，未失败才调用直接撤单，并把本槽 Core 身份与业务时间交给原生适配器。
-         */
-        @Override public Object get() {
-            // 共同前置撤单返回的可空失败事实，非空时不再执行本次普通操作。
-            var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
-            if (failure != null) return failure;
-            return owner.matchingAdapter().cancelDirect(matcherShard, coreSequence,
-                    command.header().commandIdMsb(), command.header().commandIdLsb(), orderId,
-                    command.header().submittedAtEpochMillis(), userId, instrumentId, direct);
-        }
-    }
-
-    /**
-     * 替换/改单固定任务，旧单及新单准入身份在提交前固定。
-     */
-    private final class ReplaceMatchingContinuation implements java.util.function.Supplier<Object> {
-        /** 固定撮合任务借用的所属交易运行时。 */
-        private TradingCoreRuntime owner;
-        /** 固定任务负责的全局 Matcher 分片。 */
-        private int matcherShard;
-        /** 固定任务关联的逻辑或实际订单号，具体用途由对应任务确定。 */
-        private long orderId;
-        /** 固定撮合任务请求所属用户。 */
-        private long userId;
-        /** 替换任务需要先撤掉的旧订单号。 */
-        private long originalOrderId;
-        /** 撤单或替换任务的永久品种字符串。 */
-        private String instrumentId;
-        /** 替换任务已经完成准入的新单输入。 */
-        private ResolvedPlaceOrder resolvedReplacement;
-        /** 固定任务借用的直达结算事件。 */
-        private MatcherSettlementEvent direct;
-
-        /**
-         * 保存替换身份与非空 Owner、品种、新准入及目标事件，实际撤旧下新延后到 Matcher 执行。
-         * @param owner 所属交易 Owner 运行时
-         * @param matcherShard 调用方确定的目标 Matcher 分片
-         * @param orderId 当前逻辑命令或结果绑定的订单号
-         * @param userId 请求所属用户编号
-         * @param originalOrderId 替换前要撤销的旧订单号
-         * @param instrumentId 永久品种字符串
-         * @param replacement 已经准入的新单输入
-         * @param direct 本命令独占并尚未退休的直达结算事件
-         */
-        void prepare(TradingCoreRuntime owner, int matcherShard, long orderId,
-                     long userId, long originalOrderId, String instrumentId, ResolvedPlaceOrder replacement,
-                     MatcherSettlementEvent direct) {
-            this.owner = Objects.requireNonNull(owner);
-            this.matcherShard = matcherShard;
-            this.orderId = orderId;
-            this.userId = userId;
-            this.originalOrderId = originalOrderId;
-            this.instrumentId = Objects.requireNonNull(instrumentId);
-            this.resolvedReplacement = Objects.requireNonNull(replacement);
-            this.direct = Objects.requireNonNull(direct);
-        }
-
-        /**
-         * 清替换任务所有借用引用和数值身份。
-         */
-        void clear() {
-            owner = null;
-            matcherShard = 0;
-            orderId = 0;
-            userId = 0;
-            originalOrderId = 0;
-            instrumentId = null;
-            resolvedReplacement = null;
-            direct = null;
-        }
-
-        /**
-         * 先处理共同前置撤单，再以旧单号和新准入调用直接替换接口；前置失败不再提交新替换业务。
-         */
-        @Override public Object get() {
-            // 共同前置撤单返回的可空失败事实，非空时不再执行本次普通操作。
-            var failure = applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
-            if (failure != null) return failure;
-            return owner.matchingAdapter().replaceDirect(matcherShard, coreSequence,
-                    command.header().commandIdMsb(), command.header().commandIdLsb(), orderId,
-                    command.header().submittedAtEpochMillis(), userId, originalOrderId, instrumentId, resolvedReplacement, direct);
-        }
-    }
-
-    /**
-     * Owner 独占的到期结算完成轮询器，完成后只汇集已有工作结果并请求发布。
-     */
-    private static final class SettlementControlContinuation implements java.util.function.BooleanSupplier {
-        /** 固定 Owner 控制轮询器借用的有序提交器。 */
-        private OrderedCommitCoordinator coordinator;
-        /** 固定控制轮询器借用的既有业务工作对象。 */
-        private com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation.SettlementWork work;
-
-        /**
-         * 绑定非空提交器和已有结算工作，后续在 Owner 轮询。
-         * @param coordinator 当前有序提交器
-         * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
-         */
-        void prepare(OrderedCommitCoordinator coordinator,
-                com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation.SettlementWork work) {
-            this.coordinator = Objects.requireNonNull(coordinator);
-            this.work = Objects.requireNonNull(work);
-        }
-
-        /**
-         * 清结算控制任务借用的提交器和工作引用。
-         */
-        void clear() {
-            coordinator = null;
-            work = null;
-        }
-
-        /**
-         * 结算工作未完成返回假；完成后把选中用户及结算进度加入 Owner 结果构建器，请求发布并返回真，不在这里重新结算。
-         */
-        @Override
-        public boolean getAsBoolean() {
-            if (!work.poll()) return false;
-            coordinator.owner().resultBuilder.beginChangedUsers();
-            for (long /* 结算工作已选中的一个变更用户号，加入 Owner 结果构建器。 */ user : work.selectedUsers()) coordinator.owner().resultBuilder.addChangedUser(user);
-            coordinator.owner().resultBuilder.commandSettlementProgress = work.result();
-            coordinator.publication.request();
-            return true;
-        }
-    }
-
-    /**
-     * Owner 独占的强平执行完成轮询器，复用本槽对象而不每次创建捕获函数。
-     */
-    private static final class LiquidationExecutionContinuation implements java.util.function.BooleanSupplier {
-        /** 固定 Owner 控制轮询器借用的有序提交器。 */
-        private OrderedCommitCoordinator coordinator;
-        /** 固定控制轮询器借用的既有业务工作对象。 */
-        private com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work;
-        /** 强平工作完成后写入结果构建器的进度值。 */
-        private com.surprising.aeron.protocol.CoreLiquidationProgressView progress;
-
-        /**
-         * 绑定非空提交器、强平工作和最终进度值。
-         * @param coordinator 当前有序提交器
-         * @param work 已存在的非空业务续步工作，具体类型由结算或强平入口决定
-         * @param progress 强平工作完成后要返回的进度值
-         */
-        void prepare(OrderedCommitCoordinator coordinator,
-                com.surprising.aeron.service.liquidation.RuntimeDerivativeLiquidationProcessor.ExecutionWork work,
-                com.surprising.aeron.protocol.CoreLiquidationProgressView progress) {
-            this.coordinator = Objects.requireNonNull(coordinator);
-            this.work = Objects.requireNonNull(work);
-            this.progress = Objects.requireNonNull(progress);
-        }
-
-        /**
-         * 清强平控制任务借用的提交器、工作及进度。
-         */
-        void clear() {
-            coordinator = null;
-            work = null;
-            progress = null;
-        }
-
-        /**
-         * 强平工作尚未完成返回假；完成后写入结果进度、请求发布并返回真。
-         */
-        @Override
-        public boolean getAsBoolean() {
-            if (!work.getAsBoolean()) return false;
-            coordinator.owner().resultBuilder.commandLiquidationProgress = progress;
-            coordinator.publication.request();
-            return true;
-        }
-    }
-
-    /**
      * 普通单笔/替换命令的 Lane 结果目标，最多保留两个身份、可复用订单副本和一个响应租约；它不是 Lane 实时订单表，借用期截至清理或复用。
      */
     static final class LaneResultTarget
@@ -1799,30 +1371,35 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
             prepared = false;
             response = null;
             responseLength = 0;
-            if (responseOrders.isEmpty()) {
+
+            int validCount = 0;
+            for (int i = 0; i < count; i++) {
+                if (orders[i] != null) {
+                    sources[validCount].set(orders[i], symbols[i]);
+                    validCount++;
+                }
+            }
+            if (validCount == 0) {
                 response = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
                 prepared = true;
                 return;
             }
             try {
-                // 非空订单压缩视图是否恰好只有一项。
-                boolean single = responseOrders.size() == 1;
-                // 非空订单压缩视图中的首个协议字段来源，用于确定响应编码大小。
-                var first = responseOrders.get(0);
-                // 本次单单或多单响应要求的字节容量。
+                boolean single = validCount == 1;
+                var first = sources[0];
+                var orderList = single ? java.util.List.of(first) : java.util.List.of(first, sources[1]);
                 int length = single
                         ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodedSingleOrderLength(first)
-                        : com.surprising.aeron.protocol.CoreCommandResultCodec.encodedLength(responseOrders, java.util.List.of());
+                        : com.surprising.aeron.protocol.CoreCommandResultCodec.encodedLength(orderList, java.util.List.of());
                 responseSlot = responseArena.acquireSlot(length);
-                // 协议实际写入的响应有效字节数。
                 int encodedLength = single
                         ? com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrderInto(first, responseSlot.writer())
                         : com.surprising.aeron.protocol.CoreCommandResultCodec.encodeInto(
-                                responseOrders, java.util.List.of(), responseSlot.storage(), 0);
+                                orderList, java.util.List.of(), responseSlot.storage(), 0);
                 responseLength = encodedLength;
                 response = responseSlot.storage();
                 prepared = true;
-            } catch (/* 本次响应编码抛出的运行异常或 Error，归还已取得租约后继续抛出。 */ RuntimeException | Error failure) {
+            } catch (RuntimeException | Error failure) {
                 if (responseSlot != null) responseArena.release(responseSlot);
                 responseSlot = null;
                 throw failure;
@@ -1830,155 +1407,10 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         }
 
         /** 固定位置零和一各自预构造的协议字段读取视图。 */
-        private final OrderSource[] sources = {new OrderSource(0), new OrderSource(1)};
-        /** 按非空订单压缩展示的只读列表视图，不另建订单对象列表。 */
-        private final java.util.List<com.surprising.aeron.protocol.CoreOrderStateSource> responseOrders = new OrderSources();
-
-        /**
-         * 最多两个非空订单结果的压缩只读列表视图，不另建 boxed 条目容器。
-         */
-        private final class OrderSources extends java.util.AbstractList<com.surprising.aeron.protocol.CoreOrderStateSource>
-                implements java.util.RandomAccess {
-            /**
-             * 统计最多两个绑定项中的非空订单数量，空订单不进入响应。
-             */
-            @Override public int size() {
-                // 压缩响应视图中已统计的非空订单数量。
-                int size = 0;
-                for (/* 当前扫描两个结果位置或清理副本的下标。 */ int i = 0; i < count; i++) if (orders[i] != null) size++;
-                return size;
-            }
-            /**
-             * 按非空订单的压缩下标返回固定字段视图，负数或超出实际数量时抛越界异常。
-             * @param index 当前结果位置或压缩列表下标，范围要求见当前方法
-             */
-            @Override public com.surprising.aeron.protocol.CoreOrderStateSource get(int index) {
-                if (index < 0) throw new IndexOutOfBoundsException(index);
-                for (/* 当前扫描两个结果位置或清理副本的下标。 */ int i = 0; i < count; i++) {
-                    if (orders[i] != null && index-- == 0) return sources[i];
-                }
-                throw new IndexOutOfBoundsException(index);
-            }
-        }
-
-        /** 固定结果位置的协议字段读取视图，读取本目标副本而非原 Lane 对象，位置复用后不能保留旧读视图作历史。 构造约定：固定绑定一个结果数组位置，字段读取始终取该位置当前副本。 参数 index：当前结果位置或压缩列表下标，范围要求见当前方法 */
-        @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-        private final class OrderSource implements com.surprising.aeron.protocol.CoreOrderStateSource {
-            /** 当前字段视图固定读取的结果数组位置。 */
-            private final int index;
-            /**
-             * 返回固定位置当前的订单副本，调用方只在该位置非空时使用。
-             */
-            private OrderRuntime value() { return orders[index]; }
-            /**
-             * 返回当前结果副本的订单编号，不读取 Lane 订单表。
-             */
-            public long orderId() { return value().orderId(); }
-            /**
-             * 返回当前结果副本的订单所属产品线，不读取 Lane 订单表。
-             */
-            public com.surprising.product.api.ProductLine productLine() { return value().productLine(); }
-            /**
-             * 返回当前结果副本的订单用户编号，不读取 Lane 订单表。
-             */
-            public long userId() { return value().userId(); }
-            /**
-             * 返回当前结果捕获时保存在 symbols 数组中的品种字符串，不向运行时注册表查询。
-             */
-            public String instrumentId() { return symbols[index]; }
-            /**
-             * 返回当前结果副本的买卖方向，不读取 Lane 订单表。
-             */
-            public com.surprising.aeron.protocol.CoreOrderSide side() { return value().side(); }
-            /**
-             * 返回当前结果副本的原订单展示价 tick 数，不读取 Lane 订单表。
-             */
-            public long priceTicks() { return value().priceTicks(); }
-            /**
-             * 返回当前结果副本的原始数量步数，不读取 Lane 订单表。
-             */
-            public long quantitySteps() { return value().quantitySteps(); }
-            /**
-             * 返回当前结果副本的累计已成交数量步数，不读取 Lane 订单表。
-             */
-            public long executedQuantitySteps() { return value().executedQuantitySteps(); }
-            /**
-             * 返回当前结果副本的剩余数量步数，不读取 Lane 订单表。
-             */
-            public long remainingQuantitySteps() { return value().remainingQuantitySteps(); }
-            /**
-             * 返回当前结果副本的只减仓标记，不读取 Lane 订单表。
-             */
-            public boolean reduceOnly() { return value().reduceOnly(); }
-            /**
-             * 返回当前结果副本的全仓或逐仓模式，不读取 Lane 订单表。
-             */
-            public com.surprising.aeron.protocol.CoreMarginMode marginMode() { return value().marginMode(); }
-            /**
-             * 返回当前结果副本的净仓或双向持仓侧，不读取 Lane 订单表。
-             */
-            public com.surprising.aeron.protocol.CorePositionSide positionSide() { return value().positionSide(); }
-            /**
-             * 返回当前结果副本的市价或限价类型，不读取 Lane 订单表。
-             */
-            public com.surprising.aeron.protocol.CoreOrderType orderType() { return value().orderType(); }
-            /**
-             * 返回当前结果副本的有效期策略，不读取 Lane 订单表。
-             */
-            public com.surprising.aeron.protocol.CoreTimeInForce timeInForce() { return value().timeInForce(); }
-            /**
-             * 返回当前结果副本的只挂单标记，不读取 Lane 订单表。
-             */
-            public boolean postOnly() { return value().postOnly(); }
-            /**
-             * 返回当前结果副本的客户端订单键，不读取 Lane 订单表。
-             */
-            public String clientOrderId() { return value().clientOrderId(); }
-            /**
-             * 返回当前结果副本的下单命令 UUID，不读取 Lane 订单表。
-             */
-            public java.util.UUID commandId() { return value().commandId(); }
-            /**
-             * 返回当前结果副本的固定 maker 手续费率百万分比，不读取 Lane 订单表。
-             */
-            public long makerFeeRatePpm() { return value().makerFeeRatePpm(); }
-            /**
-             * 返回当前结果副本的固定 taker 手续费率百万分比，不读取 Lane 订单表。
-             */
-            public long takerFeeRatePpm() { return value().takerFeeRatePpm(); }
-            /**
-             * 返回当前结果副本的累计已收手续费单位数，不读取 Lane 订单表。
-             */
-            public long cumulativeFeeUnits() { return value().cumulativeFeeUnits(); }
-            /**
-             * 返回当前结果副本的累计成交金额高六十四位，不读取 Lane 订单表。
-             */
-            public long executedValueHigh() { return value().executedValueHigh(); }
-            /**
-             * 返回当前结果副本的累计成交金额低六十四位的原位模式，不读取 Lane 订单表。
-             */
-            public long executedValueLow() { return value().executedValueLow(); }
-            /**
-             * 返回当前结果副本的订单创建业务时间，不读取 Lane 订单表。
-             */
-            public long createdAtEpochMillis() { return value().createdAtEpochMillis(); }
-            /**
-             * 返回当前结果副本的最近更新业务时间，不读取 Lane 订单表。
-             */
-            public long updatedAtEpochMillis() { return value().updatedAtEpochMillis(); }
-            /**
-             * 返回当前结果副本的对应 Cluster 日志位置，不读取 Lane 订单表。
-             */
-            public long clusterPosition() { return value().clusterPosition(); }
-            /**
-             * 返回当前结果副本的订单状态枚举的名称文本，不读取 Lane 订单表。
-             */
-            public String status() { return value().status().name(); }
-            /**
-             * 返回当前结果副本的订单修订号，不读取 Lane 订单表。
-             */
-            public long revision() { return value().revision(); }
-        }
+        private final com.surprising.aeron.service.result.OrderRuntimeSource[] sources = {
+                new com.surprising.aeron.service.result.OrderRuntimeSource(),
+                new com.surprising.aeron.service.result.OrderRuntimeSource()
+        };
 
         /**
          * 返回当前响应存储引用，移交租约后为空。
@@ -2011,6 +1443,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
                 // 该位置保留的命令独占订单副本，清内容后仍保留对象。
                 OrderRuntime copy = orderCopies[i];
                 if (copy != null) copy.clearCommandSlot();
+                sources[i].clear();
                 symbols[i] = null;
                 ids[i] = 0;
             }
