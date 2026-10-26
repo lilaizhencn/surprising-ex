@@ -228,6 +228,14 @@ public final class CommandResultLedger {
                 responseData == null ? 0 : responseData.length);
     }
 
+    public void storeOwnedResult(long commandIdMsb, long commandIdLsb, CommandFingerprint fingerprint, ResponseStatus status,
+                          CoreResultCode resultCode, long appliedCommandCount,
+                          byte[] responseData) {
+        storeOwnedResult(commandIdMsb, commandIdLsb, fingerprint, status, resultCode, appliedCommandCount,
+                responseData, 0,
+                responseData == null ? 0 : responseData.length);
+    }
+
     /**
      * 要求命令 UUID 非空，拆成两段后交给实际存储入口，保留原响应切片范围。
      * @param commandId 本次存入的非空命令 UUID

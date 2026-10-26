@@ -95,6 +95,7 @@ public final class CoreMessageHeader {
     public CoreMessageType messageType() { return messageType; }
     public long commandIdMsb() { return commandIdMsb; }
     public long commandIdLsb() { return commandIdLsb; }
+    public boolean hasCommandId() { return (commandIdMsb != 0L || commandIdLsb != 0L) || cachedCommandId != null; }
     public UUID commandId() {
         UUID id = cachedCommandId;
         if (id == null) {

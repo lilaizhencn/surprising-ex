@@ -468,7 +468,7 @@ public final class MatchingCommandAdmission {
      */
     CoreResponse recordRejectedDeferredMatching(CommandSlot pending, CoreResultCode resultCode) {
         owner.matchingFlow.commitMatchingSequence(pending.sequence());
-        owner.resultLedger().storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
+        owner.resultLedger().storeOwnedResult(pending.command().header().commandIdMsb(), pending.command().header().commandIdLsb(), pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, pending.sequence(),
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         owner.matchingFlow.removePendingMatching(pending.sequence());

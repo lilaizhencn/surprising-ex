@@ -829,7 +829,8 @@ class TradingCoreOwnerTest {
                             public Long get(int index) {
                                 if (StackWalker.getInstance().walk(/* StackWalker 提供的当前调用栈帧流，只用于定位终态准备方法 */ frames -> frames.anyMatch(
                                         /* 当前调用栈帧，按方法名决定是否注入终态故障 */ frame -> (frame.getMethodName().equals("stampChangedOrdersByLane")
-                                                || frame.getMethodName().equals("validateStampInputs")))))
+                                                || frame.getMethodName().equals("validateStampInputs")
+                                                || frame.getMethodName().equals("validateCommitStampInputs")))))
                                     throw new IllegalStateException("injected terminal metadata failure");
                                 return Long.MAX_VALUE;
                             }

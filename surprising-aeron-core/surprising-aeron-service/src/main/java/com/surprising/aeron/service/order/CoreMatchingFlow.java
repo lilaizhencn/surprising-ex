@@ -61,7 +61,7 @@ public final class CoreMatchingFlow {
         // 本次准备或记录拒绝所占的 Core 应用序号。
         long sequence = owner.nextAppliedSequence();
         owner.recordAppliedSequence(sequence, sourceKey, message.header().sourceSequence());
-        owner.resultLedger().storeOwnedResult(message.header().commandId(), fingerprint,
+        owner.resultLedger().storeOwnedResult(message.header().commandIdMsb(), message.header().commandIdLsb(), fingerprint,
                 ResponseStatus.REJECTED, resultCode, sequence,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,

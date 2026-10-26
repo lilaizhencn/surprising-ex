@@ -1490,7 +1490,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         int responseOffset = resultBuilder.responseDataOffset();
         // 当前响应正文的有效字节数
         int responseLength = resultBuilder.responseDataLength();
-        resultLedger.storeOwnedResult(message.header().commandId(), fingerprint, status, resultCode,
+        resultLedger.storeOwnedResult(message.header().commandIdMsb(), message.header().commandIdLsb(), fingerprint, status, resultCode,
                 appliedCommandCount, responseData,
                 responseOffset, responseLength);
         // 使用原请求与当前终态创建的响应，已获得对应正文租约

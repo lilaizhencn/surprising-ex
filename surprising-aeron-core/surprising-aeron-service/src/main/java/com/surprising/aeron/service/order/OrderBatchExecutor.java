@@ -1083,7 +1083,8 @@ public final class OrderBatchExecutor {
         int responseLength = batch.preparedResponseLength;
         owner.terminalTradeCount(Math.addExact(owner.terminalTradeCount(), batch.tradeCount));
         owner.matchingFlow.commitMatchingSequence(batch.sequence);
-        owner.resultLedger().storeOwnedResult(pending.command().header().commandId(),
+        owner.resultLedger().storeOwnedResult(pending.command().header().commandIdMsb(),
+                pending.command().header().commandIdLsb(),
                 pending.fingerprint(), ResponseStatus.APPLIED, CoreResultCode.NONE,
                 batch.sequence, responseData, 0, responseLength);
         if (batch.hasPreparedResponseSlot()) batch.transferPreparedResponseOwnership();

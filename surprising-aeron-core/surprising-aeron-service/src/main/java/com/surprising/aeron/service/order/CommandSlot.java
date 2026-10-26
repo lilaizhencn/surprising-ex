@@ -532,7 +532,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
                 || command.header().kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
             throw new IllegalArgumentException("invalid pending matching request");
         }
-        Objects.requireNonNull(command.header().commandId(), "commandId");
+        if (!command.header().hasCommandId()) throw new NullPointerException("commandId");
         clearLifecycleState();
         this.coreSequence = sequence;
         claimed = true;

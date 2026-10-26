@@ -328,7 +328,7 @@ public final class TradingCoreOwner {
             }
             commandPipeline.controlResponse(commandPipeline.matchingResponse());
         }
-        if (state.bookQueries.hasPendingQuery(request.header().commandId())) {
+        if (state.bookQueries.hasPendingQueries() && state.bookQueries.hasPendingQuery(request.header().commandId())) {
             CoreResponse result = state.bookQueries.takeQueryResult(request.header().commandId());
             if (result == null) { checkProgressDeadline(); return false; }
             commandPipeline.controlResponse(result);

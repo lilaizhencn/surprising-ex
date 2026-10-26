@@ -242,6 +242,10 @@ public final class AccountLaneState {
     private long appliedSequence;
     /** 该 Lane 已完成提交的 Core 命令水位。 */
     private long committedSequence;
+    /** 各 Matcher 分片已应用的 Core 命令水位，支持多 Matcher 并发偏序推进。 */
+    private final long[] appliedSequencesByShard = new long[Long.SIZE];
+    /** 各 Matcher 分片已完成提交的 Core 命令水位，支持多 Matcher 并发偏序推进。 */
+    private final long[] committedSequencesByShard = new long[Long.SIZE];
     /** 由所属写入方累计的命令处理次数。 */
     private long commandOperations;
     /** 由所属写入方累计的 Matcher 结算次数。 */
@@ -1339,20 +1343,53 @@ public final class AccountLaneState {
      * 要求 Core 水位严格前进后写入已应用序号，并精确增加 Lane 修订号；提交水位由后续完成边界推进。
      * @param coreSequence 本次推进或核对的 Core 命令序号
      */
+    /**
+     * 推进默认分片的已应用水位与 Lane 修订号，非分片命令沿用此入口。
+     * @param coreSequence 本次推进或核对的 Core 命令序号
+     */
     public void applied(long coreSequence) {
+        applied(0, coreSequence);
+    }
+
+    /**
+     * 推进指定 Matcher 分片的已应用水位，允许不同分片的事件按偏序交织到达，更新 Lane 全局高水位与修订号。
+     * @param shard 产生本次事件的 Matcher 分片编号
+     * @param coreSequence 本次推进或核对的 Core 命令序号
+     */
+    public void applied(int shard, long coreSequence) {
         assertOwner();
-        requireApplySequence(coreSequence);
-        appliedSequence = coreSequence;
+        requireApplySequence(shard, coreSequence);
+        if (shard >= 0 && shard < appliedSequencesByShard.length) {
+            appliedSequencesByShard[shard] = coreSequence;
+        }
+        appliedSequence = Math.max(appliedSequence, coreSequence);
         revision = Math.incrementExact(revision);
     }
 
     /**
-     * 要求新 Core 序号大于该 Lane 已应用水位，拒绝重复或倒序应用。
+     * 校验默认分片的新 Core 序号，要求大于该分片已应用水位。
      * @param coreSequence 本次推进或核对的 Core 命令序号
      */
     void requireApplySequence(long coreSequence) {
+        requireApplySequence(0, coreSequence);
+    }
+
+    /**
+     * 校验指定 Matcher 分片的新 Core 序号，拒绝同分片内的重复或倒序应用。
+     * @param shard 产生本次事件的 Matcher 分片编号
+     * @param coreSequence 本次推进或核对的 Core 命令序号
+     */
+    void requireApplySequence(int shard, long coreSequence) {
         assertOwner();
-        if (coreSequence <= appliedSequence) {
+        if (shard >= 0 && shard < appliedSequencesByShard.length) {
+            long lastShardSeq = appliedSequencesByShard[shard];
+            if (coreSequence <= lastShardSeq) {
+                throw new IllegalStateException("account lane apply is out of order: lane=" + laneId
+                        + ", shard=" + shard
+                        + ", incoming=" + coreSequence + ", applied=" + lastShardSeq
+                        + ", committed=" + committedSequencesByShard[shard]);
+            }
+        } else if (coreSequence <= appliedSequence) {
             throw new IllegalStateException("account lane apply is out of order: lane=" + laneId
                     + ", incoming=" + coreSequence + ", applied=" + appliedSequence
                     + ", committed=" + committedSequence);
@@ -1360,22 +1397,51 @@ public final class AccountLaneState {
     }
 
     /**
-     * 检查提交范围后推进提交水位，允许重复确认当前提交序号。
+     * 推进默认分片的已提交水位，允许重复确认当前提交序号。
      * @param coreSequence 本次推进或核对的 Core 命令序号
      */
     public void committed(long coreSequence) {
-        assertOwner();
-        requireCommit(coreSequence);
-        committedSequence = coreSequence;
+        committed(0, coreSequence);
     }
 
     /**
-     * 要求提交水位不倒退且不超过已应用水位。
+     * 推进指定 Matcher 分片的已提交水位，并更新 Lane 全局提交水位。
+     * @param shard 产生本次事件的 Matcher 分片编号
+     * @param coreSequence 本次推进或核对的 Core 命令序号
+     */
+    public void committed(int shard, long coreSequence) {
+        assertOwner();
+        requireCommit(shard, coreSequence);
+        if (shard >= 0 && shard < committedSequencesByShard.length) {
+            committedSequencesByShard[shard] = coreSequence;
+        }
+        committedSequence = Math.max(committedSequence, coreSequence);
+    }
+
+    /**
+     * 要求默认分片提交水位不倒退且不超过已应用水位。
      * @param coreSequence 本次推进或核对的 Core 命令序号
      */
     void requireCommit(long coreSequence) {
+        requireCommit(0, coreSequence);
+    }
+
+    /**
+     * 要求指定 Matcher 分片提交水位不倒退且不超过该分片已应用水位。
+     * @param shard 产生本次事件的 Matcher 分片编号
+     * @param coreSequence 本次推进或核对的 Core 命令序号
+     */
+    void requireCommit(int shard, long coreSequence) {
         assertOwner();
-        if (coreSequence < committedSequence || coreSequence > appliedSequence) {
+        if (shard >= 0 && shard < committedSequencesByShard.length) {
+            long lastShardCommit = committedSequencesByShard[shard];
+            long lastShardApply = appliedSequencesByShard[shard];
+            if (coreSequence < lastShardCommit || coreSequence > lastShardApply) {
+                throw new IllegalStateException("account lane commit is out of order: lane=" + laneId
+                        + ", shard=" + shard + ", incoming=" + coreSequence
+                        + ", committed=" + lastShardCommit + ", applied=" + lastShardApply);
+            }
+        } else if (coreSequence < committedSequence || coreSequence > appliedSequence) {
             throw new IllegalStateException("account lane commit is out of order");
         }
     }
@@ -1409,6 +1475,8 @@ public final class AccountLaneState {
         assertOwner();
         appliedSequence = coreSequence;
         committedSequence = coreSequence;
+        java.util.Arrays.fill(appliedSequencesByShard, coreSequence);
+        java.util.Arrays.fill(committedSequencesByShard, coreSequence);
     }
 
     /**
@@ -1430,6 +1498,8 @@ public final class AccountLaneState {
         this.revision = revision;
         this.appliedSequence = appliedSequence;
         this.committedSequence = committedSequence;
+        java.util.Arrays.fill(appliedSequencesByShard, appliedSequence);
+        java.util.Arrays.fill(committedSequencesByShard, committedSequence);
         this.localStateHash = localStateHash;
         this.localFundsHash = localFundsHash;
         userIds.clear();

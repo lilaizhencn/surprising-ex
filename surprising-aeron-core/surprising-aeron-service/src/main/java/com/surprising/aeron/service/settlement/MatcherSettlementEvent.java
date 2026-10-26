@@ -1069,8 +1069,8 @@ public final class MatcherSettlementEvent implements
                 LaneOrderResultTarget.capture(resultTarget, changes.laneDeltas[laneId], identities, lane);
             }
             if (commitSequence != 0) {
-                lane.applied(commitSequence);
-                lane.committed(commitSequence);
+                lane.applied(directShard, commitSequence);
+                lane.committed(directShard, commitSequence);
                 runtime.publishLaneCommittedSequence(lane);
             }
         } finally {

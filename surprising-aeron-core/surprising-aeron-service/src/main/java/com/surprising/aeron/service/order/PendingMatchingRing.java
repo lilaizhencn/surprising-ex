@@ -483,8 +483,9 @@ public final class PendingMatchingRing {
      * @param replaced 允许已占用同 UUID 的旧槽引用，空表示不允许其他项已存在
      */
     private void requireAvailableCommandId(CommandSlot pending, CommandSlot replaced) {
-        // 相同命令 UUID 现有的槽引用，用来拒绝重复链接。
-        CommandSlot duplicate = entriesByCommandId.get(pending.command().header().commandId());
+        // 相同命令身份现有的槽引用，用原语 MSB/LSB 查询避免热路径分配 UUID 对象，用来拒绝重复链接。
+        var header = pending.command().header();
+        CommandSlot duplicate = entriesByCommandId.get(header.commandIdMsb(), header.commandIdLsb());
         if (duplicate != null && duplicate != replaced) {
             throw new IllegalStateException("duplicate pending matching commandId");
         }
