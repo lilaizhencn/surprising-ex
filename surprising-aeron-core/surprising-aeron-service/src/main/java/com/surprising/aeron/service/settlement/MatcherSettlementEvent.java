@@ -1450,7 +1450,7 @@ public final class MatcherSettlementEvent implements
     /**
      * 本事件保留的唯一财务任务槽，等账户完成后在账本所有权内应用差额及核对资金，完成位发布后不再访问事件。
      */
-    private final class TreasurySettlement implements TreasuryRuntime.Entry {
+    private final class TreasurySettlement {
         /** 本财务槽独占的原语资金核对暂存，完成前校验守恒并清空，不是第二份资金账本。 */
         private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
         /** 本代财务工作已成功登记，包含真实邮箱及本地或内联完成路径。 */
@@ -1463,7 +1463,7 @@ public final class MatcherSettlementEvent implements
         /**
          * 账本消费者只在所有路由账户完成且发布租约已交出后应用财务事实。
          */
-        @Override public boolean ready() { return accountLanesCompleteForLedger(); }
+        public boolean ready() { return accountLanesCompleteForLedger(); }
 
         /**
          * 账户已完成的无成交路径就地汇集余额资金增量并校验守恒，清空临时资金后发布财务完成，不修改 Treasury。
@@ -1480,7 +1480,7 @@ public final class MatcherSettlementEvent implements
          * 在账本所有权内应用 Lane 财务差额，汇集账户与财库资金并校验守恒，更新持仓索引，最后发布完成位并用提前保存的运行时通知；发布后不再读本槽或事件字段。
          * @param treasury 当前账本执行方独占的原系统财库
          */
-        @Override public void apply(TreasuryRuntime treasury) {
+        public void apply(TreasuryRuntime treasury) {
             if (!ready() || completed || treasury.hasChangedValues())
                 throw new IllegalStateException("invalid Ledger financial scope");
             mergeTreasuryDeltas().apply(treasury);

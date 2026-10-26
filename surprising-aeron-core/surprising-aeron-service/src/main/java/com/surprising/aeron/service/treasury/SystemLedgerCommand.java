@@ -7,7 +7,7 @@ import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 /**
  * 控制命令已有续步的账本交接边界。子类保存指令及结果，当前账本所有者执行实际资金更新，Owner 观察阶段完成后决定验证、提交或回滚。Treasury 的首次写入前值一直保留到 ScopeClose 结束，阶段执行完成与整个财务作用域关闭是两个条件。
  */
-public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
+public abstract class SystemLedgerCommand {
     /** 本控制命令的财库及账户资金核对缓冲，验证或回滚后清空，不是长期余额状态。 */
     private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
     /** 本命令独占并复用的关闭任务，保留原前值及持仓索引撤销边界。 */
@@ -18,11 +18,6 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
     private volatile boolean completed = true;
     /** 账本阶段捕获的业务、算术或参数拒绝，Owner 观察完成后读取。 */
     private RuntimeException rejection;
-    /**
-     * closeQueued：本轮关闭任务是否已经成功登记到原账本队列。
-     * previousScopeOpen：提交当前阶段前是否已有未关闭财务范围，入队未接纳时据此恢复关闭标记。
-     */
-    private boolean closeQueued, previousScopeOpen;
     /** 子类是否确认财务计算已经结束，允许验证或风险输入继续。 */
     private boolean scopeCompleted = true;
 
@@ -40,27 +35,17 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
         if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds receipt was not consumed");
         this.runtime = runtime;
         funds.clear();
-        closeQueued = false;
         rejection = null;
         completed = scopeCompleted = true;
         close.requested = close.rollback = close.validationRequested = close.validated = false;
     }
 
     /**
-     * 阶段未被接纳入队时恢复执行完成位；如果没有沿用上一阶段未关闭作用域，也恢复关闭完成位。
-     */
-    public final void notAdmitted() {
-        completed = true;
-        if (!previousScopeOpen) close.completed = true;
-    }
-
-    /**
-     * 在前一阶段完成且未排队关闭时登记新阶段，记住是否沿用旧财务作用域，并撤下阶段与关闭完成位。
+     * 在前一阶段完成时登记新阶段，并撤下阶段与关闭完成位。
      */
     public final void submitted() {
-        if (!completed || closeQueued) throw new IllegalStateException("Ledger command phase was submitted twice");
+        if (!completed) throw new IllegalStateException("Ledger command phase was submitted twice");
         rejection = null;
-        previousScopeOpen = !close.completed;
         completed = false;
         close.completed = false;
     }
@@ -80,7 +65,7 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
      * 执行子类记账，财务范围完成才捕获 Treasury 资金增量。业务拒绝、算术和参数异常会恢复财库前值并保存拒绝；其他异常交外层账本故障边界。最后先保存通知目标再发布阶段完成。
      * @param ledger 当前执行方独占的原系统财库
      */
-    @Override public final void apply(TreasuryRuntime ledger) {
+    public final void apply(TreasuryRuntime ledger) {
         try {
             applyLedger(ledger);
             scopeCompleted = financialScopeComplete();
@@ -119,9 +104,9 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
      */
     public final boolean complete() { return completed; }
     /**
-     * 仅当前阶段及财务计算都完成、尚未排队关闭时允许继续风险输入估值，沿用强平批次原业务边界。
+     * 仅当前阶段及财务计算都完成时允许继续风险输入估值，沿用强平批次原业务边界。
      */
-    public final boolean allowsRiskInput() { return completed && scopeCompleted && !closeQueued; }
+    public final boolean allowsRiskInput() { return completed && scopeCompleted; }
 
     /**
      * 把本控制范围持仓变化应用到原账本派生索引，同时保留位置撤销信息；调用方遵守既有账本执行所有权。
@@ -129,20 +114,10 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
     public final void publishRiskPositionInputs() { runtime.applyLedgerControlPositions(close.positionUndo); }
 
     /**
-     * 只投递一次当前关闭任务；账本邮箱满时返回 false 并保留原范围供后续重试。
-     */
-    private boolean queueClose() {
-        if (closeQueued) return true;
-        if (!runtime.enqueueLedgerScopeClose(close)) return false;
-        closeQueued = true;
-        return true;
-    }
-
-    /**
-     * 等待阶段完成并成功登记关闭任务，再请求恢复财库及持仓索引；返回值表示关闭回执已完成，而非仅已请求。
+     * 等待阶段完成，再请求恢复财库及持仓索引；返回值表示关闭回执已完成，而非仅已请求。
      */
     public final boolean requestRollback() {
-        if (!completed || !queueClose()) return false;
+        if (!completed) return false;
         close.rollback = true;
         close.requested = true;
         close.apply(runtime.treasury());
@@ -150,27 +125,25 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
     }
 
     /**
-     * 要求阶段和财务计算完成且关闭任务已入队，再允许账本队首真正执行提交关闭。
+     * 要求阶段和财务计算完成，再执行提交关闭。
      */
     public final void commitScope() {
         if (!completed || !scopeCompleted)
             throw new IllegalStateException("Ledger financial scope is incomplete");
-        if (!closeQueued) queueClose();
         close.requested = true;
         close.apply(runtime.treasury());
     }
 
     /**
-     * 阶段正常完成后排队关闭任务，发布外部调整开关及资金验证请求；返回已完成验证的标记，此时仍等待 Owner 最终提交或回滚决定。
+     * 阶段正常完成后，发布外部调整开关及资金验证请求；返回已完成验证的标记，此时仍等待 Owner 最终提交或回滚决定。
      * @param externalAdjustment 本命令是否为外部资金调整，true 时按既有规则跳过逐资产合计为零检查
      */
     public final boolean validateFunds(boolean externalAdjustment) {
         if (!ledgerCommandCompleted() || !scopeCompleted) return false;
-        if (!queueClose()) return false;
         close.externalAdjustment = externalAdjustment;
         close.validationRequested = true;
         try {
-            close.ready();
+            close.validate();
         } catch (Throwable failure) {
             return false;
         }
@@ -178,9 +151,9 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
     }
 
     /**
-     * 占住原账本队首的关闭任务。在 Owner 给出决定前保留同一财务范围前值，可先核对资金与应用持仓索引，之后按提交或回滚决定关闭。
+     * 关闭任务。在 Owner 给出决定前保留同一财务范围前值，可先核对资金与应用持仓索引，之后按提交或回滚决定关闭。
      */
-    private final class ScopeClose implements TreasuryRuntime.Entry {
+    private final class ScopeClose {
         /** 本控制范围对账本持仓派生索引的撤销暂存，提交清除、回滚恢复。 */
         private final RuntimeFactIndexes.PositionUndo positionUndo = new RuntimeFactIndexes.PositionUndo();
         /** Owner 已决定执行提交或回滚关闭的 volatile 请求位。 */
@@ -195,10 +168,11 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
         private volatile boolean validated;
         /** 本控制命令是否允许外部资金变化，随验证请求发布。 */
         private boolean externalAdjustment;
+
         /**
-         * 推进队首时先按请求合并账户资金、检查守恒、应用持仓索引并发布验证完成；只有 Owner 另发最终关闭请求才允许 apply。
+         * 按请求合并账户资金、检查守恒、应用持仓索引并发布验证完成。
          */
-        @Override public boolean ready() {
+        void validate() {
             if (validationRequested && !validated) {
                 try {
                     runtime.appendControlAccountFunds(funds);
@@ -211,13 +185,13 @@ public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
                     throw failure;
                 }
             }
-            return requested;
         }
+
         /**
          * 按决定恢复 Treasury 前值及持仓索引，或清除位置撤销暂存；清理财库变化键后发布关闭完成，通知只用提前保存的运行时。
          * @param ledger 当前执行方独占的原系统财库
          */
-        @Override public void apply(TreasuryRuntime ledger) {
+        public void apply(TreasuryRuntime ledger) {
             if (rollback) {
                 ledger.rollbackChangedValues(); funds.clear();
                 runtime.rollbackLedgerPositions(positionUndo);

@@ -656,15 +656,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 内联执行财务范围关闭条目。
-     * @param close 财务范围关闭条目
-     */
-    public boolean enqueueLedgerScopeClose(TreasuryRuntime.Entry close) {
-        assertOwner();
-        return true;
-    }
-
-    /**
      * 在 Owner 上判断账户已启动、账本已启动或显式异步范围是否任一成立。
      */
     public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted() || laneLifecycle.ledgerStarted() || asynchronousCommandScope; }
@@ -3935,15 +3926,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 校验非空读取且没有财务控制占用，在 Owner 上就地同步应用。
-     * @param query 需要在财库拥有者线程执行的读取条目
+     * 校验非空读取且没有财务控制占用，在 Owner 上就地同步执行读取操作。
+     * @param query 需要在财库拥有者线程执行的读取回调
      */
-    public boolean dispatchLedgerQuery(TreasuryRuntime.Entry query) {
+    public boolean dispatchLedgerQuery(java.util.function.Consumer<TreasuryRuntime> query) {
         assertOwner();
         if (query == null) throw new IllegalArgumentException("Ledger query is required");
         if (ledgerControl != null) throw new IllegalStateException("Ledger query requires committed control work");
-        if (!query.ready()) return false;
-        query.apply(treasury);
+        query.accept(treasury);
         return true;
     }
 

@@ -14,12 +14,6 @@ import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
  * 系统资金权威运行时。资产余额由当前账本所有者读写，首次变更保存七列前值供提交核对和回滚；金额 setter 保存有符号值，不在此统一限制负余额。币对结算进度以 volatile 单元发布只读记录，准入可以跨线程读取这些记录。待划转路由由外层既有所有权约束，本类路由方法不另做线程检查。
  */
 public final class TreasuryRuntime {
-    /** 财务任务执行契约。由 Owner 线程就地同步应用。 */
-    public interface Entry {
-        void apply(TreasuryRuntime ledger);
-        default boolean ready() { return true; }
-    }
-
     /** 当前账本所有者独占的手续费有符号余额表。 */
     private final IntLongHashMap feeBalances = new IntLongHashMap();
     /** 保险基金有符号余额表。 */
