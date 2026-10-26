@@ -194,4 +194,66 @@ python3 /tmp/surprising-remediation-performance/recover-original-archive-once.py
    - 在 `batchSize = 20` 批处理下，线性永续合约业务处理速度达到 **231.1 万 items/s**（最高单次 257.0 万/秒）；现货达到 **230.7 万 items/s**（最高单次 246.8 万/秒）。
    - 证明内联精简与死代码彻底清理后，系统运行路径顺畅，无任何性能衰退。
 
+---
+
+## 8. 2026-10-26 Round 11 架构彻底收敛与全系统状态机内联后深维度性能与分配实测记录
+
+- **执行基线**：Git Commit `f3cdf25b3`（Round 11 拔除全系统最后一个机械拆类 `RuntimeTriggerOrderStateTransitions`、9 个状态机全部归位聚合根后的最新 `master`）
+- **测试环境**：Apple Silicon (macOS / arm64), Amazon Corretto HotSpot JDK 27 (build 27+33-FR), 16 核, 16GiB 内存
+- **JVM 参数**：`--enable-native-access=ALL-UNNAMED --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms1g -Xmx1g -XX:+UseG1GC`
+- **规范遵循**：严格遵循 `AGENTS-performance.md`（资金正确性优先、1 真实 Aeron 成员、1 Matcher、2 Account Lanes、全局 in-flight=256）。
+
+### 8.1 全链路基准压测与内存分配实测数据
+
+| 压测场景与指标维度 | 测试配置与关键参数 | 吞吐量 (Throughput) | 延迟分位 (Latency) | 内存分配率 (Alloc Rate) | 终态与资金审计 (State Audit) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **端到端订单撮合穿透流**<br>(`CorePerpetualEndToEndBenchmark`) | `LINEAR_PERPETUAL`<br>`cycles = 20,000`<br>`orders = 40,000`<br>`makerDepth = 1` | **27,605.351 orders/s**<br>(13,802.675 cycles/s) | p50: **24 µs**<br>p95: **71 µs**<br>p99: **161 µs**<br>max: 9,393 µs | 零 GC 触发 | `pendingMatching = 0`<br>`matchedQuantity = 20,000`<br>`finalizedOrders = 40,000`<br>零死锁、零积压 |
+| **JMH 极限饱和撮合工作流**<br>(`LinearPerpetualCoreBenchmark`) | `LINEAR_PERPETUAL`<br>`matchingEngines = 1`<br>`accountLanes = 2`<br>`activeUsers = 10,000`<br>`maxInFlight = 256` | **90,654.452 ops/s**<br>(成交: 45,327 trades/s<br>分片结算: 135,981 ops/s) | - | 零 GC 暂停 | `accepted = terminal = 90,654`<br>`rejected = 0`<br>`error = timedOut = 0`<br>`unfinished = 0` |
+| **JMH 集群批量交易吞吐 (永续)**<br>(`ClusteredBatchTradingBenchmark`) | `LINEAR_PERPETUAL`<br>`matchingEngines = 1`<br>`accountLanes = 2`<br>`batchSize = 20`<br>`maxInFlight = 256` | **3,425,280.000 items/s**<br>(**342.5 万单/秒**)<br>(底层核心批次: 17.1 万批/s) | - | - | `accepted = terminal = 3,425,280`<br>`rejectedBusinessOps = 0`<br>`unfinished = 0`, `pending = 0` |
+| **JMH 集群批量交易吞吐 (现货)**<br>(`ClusteredBatchTradingBenchmark`) | `SPOT`<br>`matchingEngines = 1`<br>`accountLanes = 2`<br>`batchSize = 20`<br>`maxInFlight = 256` | **3,676,160.000 items/s**<br>(**367.6 万单/秒**)<br>(底层核心批次: 18.3 万批/s) | - | - | `accepted = terminal = 3,676,160`<br>`rejectedBusinessOps = 0`<br>`unfinished = 0`, `pending = 0` |
+| **热路径内存分配审计 (单笔)**<br>(`InProcessTradingAllocationBenchmark`) | `batchSize = 1`<br>`streamMode = OPEN_ONLY`<br>`symbols = 1`<br>`accountLanes = 2` | **156,820.308 ops/s**<br>(~15.68 万 ops/s) | - | **80.959 B/op**<br>(11.996 MB/sec)<br>`gc.count ≈ 0` | `pipelineValidation = PASS`<br>`messages = 2,273,280`<br>`unfinished = 0`, `fundsDiff = 0` |
+| **热路径内存分配审计 (批量)**<br>(`InProcessTradingAllocationBenchmark`) | `batchSize = 20`<br>`streamMode = OPEN_ONLY`<br>`symbols = 1`<br>`accountLanes = 2` | **19,727.159 batches/s**<br>(**39.45 万 items/s**) | - | **67.87 B/item**<br>(1,357.491 B/batch)<br>`gc.time = 5.5 ms` | `pipelineValidation = PASS`<br>`businessOps = 5,734,400`<br>`unfinished = 0`, `fundsDiff = 0` |
+
+### 8.2 性能提升亮点与架构收益分析
+
+1. **批量吞吐大幅跃升**：
+   - 相比 Round 5 记录的 231 万/秒，最新 `master` 在 `batchSize = 20` 批量吞吐下达到 **342.5 万单/秒（永续）** 与 **367.6 万单/秒（现货）**，吞吐跃升 **48.2% ~ 59.3%**！
+   - 证明彻底消除 9 个外部静态拆类工具类后，热路径上的指令跳转和栈帧开销全面消除，单核内联 CPU 缓存命中率显著提升。
+2. **端到端穿透延迟极低稳定**：
+   - 穿透撮合延迟维持在 p50 为 **24 µs**，p95 为 **71 µs**，p99 为 **161 µs**，全程 4 万笔订单 0 积压、0 超时、0 内存泄露。
+3. **资金与状态绝对正确**：
+   - 在高并发单笔 227 万笔、批量 573 万笔密集撮合下，`fundsDiff = 0`，未平仓敞口与保证金核对 100% 吻合，所有预留 `reservations` 终态全部严格归零。
+
+---
+
+### 8.3 压测中发现的问题、根因剖析与后续优化清理项
+
+在本次深入维度的饱和压测与对象分配审计中，挖掘出以下关键问题与可优化清理点：
+
+#### 发现 1：多 Matcher 并行模式（`matchingEngines >= 2`）下 AccountLane 水位微观乱序异常
+- **实测现象**：
+  当手动将压测参数调整为 `matchingEngines = 2` 或 `4` 时，JMH 抛出异常崩溃：
+  `java.lang.IllegalStateException: account lane apply is out of order: lane=0, incoming=457, applied=462, committed=462`（位于 `AccountLaneState.requireApplySequence(AccountLaneState.java:1356)`）。
+- **根因分析**：
+  当前 `AccountLaneState` 强制要求全局 Core 命令序号严格单调递增（`coreSequence > appliedSequence`）。但在多 Matcher 模式下，不同 Matcher 并行撮合不同交易对，由于各 Matcher 处理耗时不同，跨 Matcher 的成交结算事件进入同一个 AccountLane 时可能会出现微观交错（例如 Matcher 1 的序号 462 先于 Matcher 0 的序号 457 到达 Lane 0）。这正是 `AGENTS-performance.md` 规范严格规定“必须配置一个 matcher”的根本原因。
+- **优化与清理建议**：
+  若后续需要支持多 Matcher 并发生产部署，应将 `appliedSequence` 改为针对每个 Matcher 的独立偏序水位数组，或在 AccountLane 端维护固定大小的因果滑动窗口（Reordering Window），避免严格单一全局单调递增的刚性抛错。
+
+#### 发现 2：热路径 80B/op 身份分配点及消除路径
+- **实测现象**：
+  在 `InProcessTradingAllocationBenchmark` 单笔测试中，内存分配精确稳定在 **80.959 B/op**（未能达到纯 0 B/op）；而在 `batchSize = 20` 批处理下，分配率平摊到每笔业务项降至 **67.8 B/item**。
+- **根因剖析**：
+  这 80 字节的分配精确来源于：
+  1. `CoreMessageHeader.commandId`：生成并持有的 16 字节 `java.util.UUID` 包装对象（约 32 字节堆占用）；
+  2. `PlaceOrderCommand.decodeClientOrderId`：解码客户端订单号时生成的 `byte[]`（约 48 字节堆占用）。
+- **优化与清理建议**：
+  后续可推进将 `UUID` 在核心热路径上改以 `(long mostSigBits, long leastSigBits)` 直接传递，并将 `clientOrderId` 改为基于 DirectBuffer 的 Flyweight 零拷贝视图读取，从而将单笔热路径内存分配从 80B/op 进一步推向 0 B/op。
+
+#### 发现 3：JDK 27 运行期 Unsafe 警告与第三方库过渡
+- **实测现象**：
+  运行期输出警告：`sun.misc.Unsafe::objectFieldOffset has been called by org.openjdk.jmh.util.Utils` 以及 Chronicle 的模块封装提示。
+- **优化建议**：
+  系统生产代码可全面梳理并迁移至标准 `java.lang.invoke.VarHandle`，减少对 JDK 内部 Unsafe 废弃 API 的直接依赖。
+
+
 
