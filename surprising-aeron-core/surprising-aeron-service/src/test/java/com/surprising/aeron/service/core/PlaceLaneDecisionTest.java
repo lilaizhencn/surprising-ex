@@ -17,7 +17,7 @@ import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -79,7 +79,7 @@ class PlaceLaneDecisionTest {
                         CoreTimeInForce.IOC, false, "client");
                 // 首次以过期业务时间派发、随后应拒绝的准入槽
                 var rejected = runtime.acquirePlaceAdmission();
-                CoreOrderDecisionResolver.prepare(rejected, runtime, identities, 7, command, 6_001);
+                RuntimeOrderAdmission.prepare(rejected, runtime, identities, 7, command, 6_001);
                 runtime.dispatchPlaceAdmission(2, 7, rejected, new UUID(1, 2), runtime.treasury().settlementStatus(symbol), asset,
                         identities, 6_001, 2);
                 assertThat(rejected.complete()).isFalse();
@@ -99,7 +99,7 @@ class PlaceLaneDecisionTest {
                 var oversized = new PlaceOrderCommand(12, "1", CoreOrderSide.BUY, 0, 1_000_000, false,
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
                         CoreTimeInForce.IOC, false, "client");
-                CoreOrderDecisionResolver.prepare(insufficient, runtime, identities, 7, oversized, 1_001);
+                RuntimeOrderAdmission.prepare(insufficient, runtime, identities, 7, oversized, 1_001);
                 runtime.dispatchPlaceAdmission(3, 7, insufficient, new UUID(1, 3), runtime.treasury().settlementStatus(symbol), asset,
                         identities, 1_001, 3);
                 await(runtime, insufficient);
@@ -112,7 +112,7 @@ class PlaceLaneDecisionTest {
                 // 拒绝槽归还后再次借出的同一实例，本轮使用有效价格时间
                 var accepted = runtime.acquirePlaceAdmission();
                 assertThat(accepted).isSameAs(rejected);
-                CoreOrderDecisionResolver.prepare(accepted, runtime, identities, 7, command, 1_001);
+                RuntimeOrderAdmission.prepare(accepted, runtime, identities, 7, command, 1_001);
                 runtime.dispatchPlaceAdmission(4, 7, accepted, new UUID(1, 4), runtime.treasury().settlementStatus(symbol), asset,
                         identities, 1_001, 4);
                 await(runtime, accepted);

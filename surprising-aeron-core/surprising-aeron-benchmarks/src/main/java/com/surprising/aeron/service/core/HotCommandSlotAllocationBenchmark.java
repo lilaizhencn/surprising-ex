@@ -46,7 +46,7 @@ public class HotCommandSlotAllocationBenchmark {
     private final CoreMessageFlyweightDecoder frameDecoder = new CoreMessageFlyweightDecoder();
     private AccountLaneState lane;
     private SynchronousMatchingEngine matcher;
-    private com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.Context decision;
+    private com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context decision;
     private long retiredSequence;
 
     @Setup public void setup() {
@@ -66,7 +66,7 @@ public class HotCommandSlotAllocationBenchmark {
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
-        decision = new com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.Context(
+        decision = new com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context(
                 instrument, 0, new com.surprising.aeron.service.market.MarkPriceRuntime(0, instrument, 100, 1, 1),
                 FeePolicyBook.from(java.util.Map.of(1L, new com.surprising.aeron.model.CoreFeePolicyState(
                         1, 1, 7, "1", -10, 20, 0, true, 1, 0))), 1_000,
@@ -116,7 +116,7 @@ public class HotCommandSlotAllocationBenchmark {
         long checksum = 0;
         for (int index = 0; index < WINDOW; index++) {
             var target = resolved[index];
-            com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.resolveInto(
+            com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto(
                     target, decision, 7, target.intent());
             checksum += target.matchingPriceTicks() + target.makerFeeRatePpm() + target.takerFeeRatePpm();
         }

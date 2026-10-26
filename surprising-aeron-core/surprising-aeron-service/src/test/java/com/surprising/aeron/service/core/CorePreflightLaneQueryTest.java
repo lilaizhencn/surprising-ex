@@ -6,7 +6,7 @@ import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.instrument.api.model.ContractType;
@@ -49,7 +49,7 @@ class CorePreflightLaneQueryTest {
                     // 尚未执行的预检下单意图，原单编号固定而买卖方向逐次变化。
                     var command = place(900, side, 95, 3, false, "preflight-900");
                     // 在冷运行时通过订单规则解析的确定输入，供预留公式作为参照。
-                    var resolved = CoreOrderDecisionResolver.resolve(cold, identities, 1, command, TIME);
+                    var resolved = RuntimeOrderAdmission.resolve(cold, identities, 1, command, TIME);
                     // 冷运行时按产品规则算出的应预留金额，不在查询时真的冻结。
                     long reserved = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
                             0, cold.admissionOrders(1, resolved.symbolId()));
@@ -121,7 +121,7 @@ class CorePreflightLaneQueryTest {
                 // 已有十步持仓和八步平仓占用后，仍可容纳的两步只减仓意图。
                 var valid = place(305, CoreOrderSide.SELL, 110, 2, true, "close-valid");
                 // 在冷运行时通过订单规则解析的确定输入，供预留公式作为参照。
-                var resolved = CoreOrderDecisionResolver.resolve(cold, identities, 1, valid, TIME);
+                var resolved = RuntimeOrderAdmission.resolve(cold, identities, 1, valid, TIME);
                 // 冷运行时结合实际 OI 和挂单汇总算出的两步只减仓预留金额。
                 long expected = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
                         new OpenInterestIndex(before).openInterestSteps("1"), cold.admissionOrders(1, resolved.symbolId()));
@@ -154,7 +154,7 @@ class CorePreflightLaneQueryTest {
             byte[] expected;
             try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = RuntimeStateProjector.project(core.tradingState(), ids)) {
                 // 更新前冷配置解析的订单输入，用来计算旧预检编码。
-                var order = CoreOrderDecisionResolver.resolve(cold, ids, 1, intent, TIME);
+                var order = RuntimeOrderAdmission.resolve(cold, ids, 1, intent, TIME);
                 expected = CoreOrderPreflightCodec.encode(new CoreOrderPreflightView(order.reservationAsset(),
                         RuntimeOrderAdmission.requiredReservation(cold, ids, 1, order, 0, cold.admissionOrders(1, order.symbolId()))));
             }

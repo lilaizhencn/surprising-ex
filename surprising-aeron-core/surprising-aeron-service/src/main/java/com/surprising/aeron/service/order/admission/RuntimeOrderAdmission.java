@@ -578,42 +578,49 @@ public final class RuntimeOrderAdmission {
                 clusterTimestamp, lifecycleSettled, target.intent());
     }
 
-    public static <T extends ResolvedPlaceOrder> T resolveInto(T target, CoreOrderDecisionResolver.Context context, long userId, PlaceOrderCommand intent) {
+    public record Context(CoreInstrument instrument, int symbolId, MarkPriceRuntime mark,
+                          FeePolicyBook policies, long clusterTimestamp,
+                          com.surprising.aeron.service.treasury.TreasuryRuntime.SettlementStatus settlementStatus) {
+        public boolean lifecycleSettled() { return settlementStatus.lifecycleSettled(); }
+        public boolean fundingInProgress() { return settlementStatus.fundingInProgress(); }
+    }
+
+    public static <T extends ResolvedPlaceOrder> T resolveInto(T target, Context context, long userId, PlaceOrderCommand intent) {
         if (target == null || context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
         resolveValues(target, context.instrument(), context.symbolId(), context.mark(), context.policies(), userId,
                 context.clusterTimestamp(), context.lifecycleSettled(), intent);
         return target;
     }
 
-    public static ResolvedPlaceOrder resolve(CoreOrderDecisionResolver.Context context, long userId, PlaceOrderCommand intent) {
+    public static ResolvedPlaceOrder resolve(Context context, long userId, PlaceOrderCommand intent) {
         if (context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
         return resolveValues(null, context.instrument(), context.symbolId(), context.mark(), context.policies(), userId,
                 context.clusterTimestamp(), context.lifecycleSettled(), intent);
     }
 
-    public static CoreOrderDecisionResolver.Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId, long clusterTimestamp) {
+    public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId, long clusterTimestamp) {
         return context(runtime, identities, com.surprising.product.api.utils.InstrumentIds.parse(instrumentId), clusterTimestamp);
     }
 
-    public static CoreOrderDecisionResolver.Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, int instrumentId, long clusterTimestamp) {
+    public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, int instrumentId, long clusterTimestamp) {
         runtime.assertOwner();
         CoreInstrument instrument = runtime.instrument(instrumentId);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         int symbolId = identities.findSymbolIdValue(instrument.instrumentIdValue());
         if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
-        return new CoreOrderDecisionResolver.Context(instrument, symbolId, runtime.markPrice(symbolId),
+        return new Context(instrument, symbolId, runtime.markPrice(symbolId),
                 runtime.feePolicyBook(), clusterTimestamp, runtime.treasury().settlementStatus(symbolId));
     }
 
-    public static CoreOrderDecisionResolver.Context queryContext(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId, long clusterTimestamp) {
-        CoreOrderDecisionResolver.Context source = context(runtime, identities, instrumentId, clusterTimestamp);
+    public static Context queryContext(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId, long clusterTimestamp) {
+        Context source = context(runtime, identities, instrumentId, clusterTimestamp);
         CoreInstrument instrument = source.instrument().captureForQuery();
         MarkPriceRuntime mark = source.mark();
         MarkPriceRuntime captured = mark == null || mark.instrument() != source.instrument() ? mark
                 : new MarkPriceRuntime(mark.symbolId(), instrument,
                 mark.markPriceTicks(), mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                 mark.generatedAtEpochMillis(), mark.lastPriceTicks());
-        return new CoreOrderDecisionResolver.Context(instrument, source.symbolId(), captured, source.policies(), source.clusterTimestamp(),
+        return new Context(instrument, source.symbolId(), captured, source.policies(), source.clusterTimestamp(),
                 source.settlementStatus());
     }
 

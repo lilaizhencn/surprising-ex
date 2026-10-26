@@ -140,7 +140,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     // 当前项已准备的币对市场输入、OI 和资产路由。
                     var decision = source.decision(index);
                     // 写入该项原命令槽的解析订单，后续检查和冻结都使用同一输入。
-                    ResolvedPlaceOrder order = CoreOrderDecisionResolver.resolveInto(
+                    ResolvedPlaceOrder order = RuntimeOrderAdmission.resolveInto(
                             source.resolvedOrderSlot(index), decision.context(), userId, source.intent(index));
                     orders[index] = order;
                     // 当前项币对的运行时稠密编号。
@@ -295,7 +295,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         Decision decision(int index);
         ResolvedPlaceOrder resolvedOrderSlot(int index);
         OrderRuntime captureAdmittedOrder(int index, OrderRuntime order);
-        record Decision(CoreOrderDecisionResolver.Context context, long openInterestSteps,
+        record Decision(RuntimeOrderAdmission.Context context, long openInterestSteps,
                         int baseAssetId, int quoteAssetId, int settleAssetId) { }
     }
 }

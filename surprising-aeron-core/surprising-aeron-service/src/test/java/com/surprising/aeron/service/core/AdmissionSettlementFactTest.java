@@ -17,7 +17,7 @@ import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
@@ -81,7 +81,7 @@ class AdmissionSettlementFactTest {
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "fact");
                 // 从池借出的准入事件，账户和 Matcher 借用结束后归还
                 var event = runtime.acquirePlaceAdmission();
-                CoreOrderDecisionResolver.prepare(event, runtime, ids, 7, intent, 1_001);
+                RuntimeOrderAdmission.prepare(event, runtime, ids, 7, intent, 1_001);
                 // 用户七所属账户 Lane 下标
                 int laneId = runtime.accountLaneId(7);
                 // 通知测试线程阻塞工作已经进入账户 Lane 的门闩

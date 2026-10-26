@@ -35,7 +35,7 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
     /** 完整替换意图，与 amend 互斥。 */
     private ReplaceOrderCommand replace;
     /** Owner 固定的币对决策输入，Lane 读取后写入本事件继承的解析字段。 */
-    private CoreOrderDecisionResolver.Context decision;
+    private RuntimeOrderAdmission.Context decision;
     /** 提供原账户与账本交接的所属运行时。 */
     private TradingAccountRuntime runtime;
     /** 当前产品身份查询表，不在此创建订单身份镜像。 */
@@ -57,7 +57,7 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
      */
     public ReplacementAdmissionEvent prepare(long sequence, long userId, long originalOrderId,
             AmendOrderCommand amend, ReplaceOrderCommand replace,
-            CoreOrderDecisionResolver.Context decision, int matcherShard,
+            RuntimeOrderAdmission.Context decision, int matcherShard,
             TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
         if (sequence <= 0 || userId <= 0 || originalOrderId <= 0 || (amend == null) == (replace == null)
                 || decision == null || runtime == null || identities == null
@@ -98,7 +98,7 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
                 throw rejected("INVALID_COMMAND", "order is not amendable");
             // 完整替换意图或按原单补齐的改单新意图，交给统一决策。
             PlaceOrderCommand command = replace == null ? amendCommand(original) : replace.replacement();
-            CoreOrderDecisionResolver.resolveInto(this, decision, userId, command);
+            RuntimeOrderAdmission.resolveInto(this, decision, userId, command);
             // 新意图对应的已有持仓身份，没有持仓时可为 0。
             long positionKey = identities.findPositionKeyValueInLane(lane, userId, instrument(), positionSide());
             // 排除原订单占用后算出的新订单应预留金额。

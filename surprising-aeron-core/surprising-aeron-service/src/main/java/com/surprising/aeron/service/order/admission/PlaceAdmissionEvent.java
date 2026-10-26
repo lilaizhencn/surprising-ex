@@ -187,7 +187,7 @@ public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
                 // 账本事实中的资金费截面处理中标记，准入不能跨越该生命周期边界。
                 boolean fundingInProgress = settlementStatus.fundingInProgress();
                 if (!resolvedOrderInitialized())
-                    com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.resolvePrepared(
+                    RuntimeOrderAdmission.resolvePrepared(
                             this, decisionMark, decisionPolicies, userId, decisionTimestamp, lifecycleSettled);
                 preparedClientKey = RuntimeIdentityRegistry.clientKeyValue(
                         identities.prepareClientKeyInLane(lane, userId, clientOrderId()));

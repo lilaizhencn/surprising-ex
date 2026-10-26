@@ -8,7 +8,7 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -193,7 +193,7 @@ public final class MatchingCommandAdmission {
      */
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint) {
-        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
+        return newPendingMatching(sequence, operation, command, fingerprint, List.of(),
                 owner.decodeMatchingCommand(command), null);
     }
 
@@ -208,7 +208,7 @@ public final class MatchingCommandAdmission {
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint,
                                    DecodedMatchingCommand decodedCommand) {
-        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
+        return newPendingMatching(sequence, operation, command, fingerprint, List.of(),
                 decodedCommand, null);
     }
 
@@ -516,7 +516,7 @@ public final class MatchingCommandAdmission {
         String instrumentId = amend ? order.instrumentId()
                 : decodedCommand.replaceOrder().replacement().instrumentId();
         // 按当前业务时间和产品规则准备的订单判断输入
-        var decision = CoreOrderDecisionResolver.context(owner.runtimeState(), owner.identities(), instrumentId, owner.currentClusterTimestamp());
+        var decision = RuntimeOrderAdmission.context(owner.runtimeState(), owner.identities(), instrumentId, owner.currentClusterTimestamp());
         owner.resultBuilder.setSingleChangedUser(message.header().userId());
         owner.resultBuilder.setSingleChangedOrder(originalOrderId);
         return owner.runtimeState().dispatchReplacementAdmission(sequence, message.header().userId(), originalOrderId,

@@ -88,7 +88,7 @@ class ReplacementAdmissionEventTest {
             guard(lane, "positions", eclipseGuard(AccountLaneTestAccess.positions(lane), owner));
             guard(lane, "balances", eclipseGuard(AccountLaneTestAccess.balances(lane), owner));
             // 当前改单固定的币对、价格、费率表和账本结算事实。
-            var decision = new CoreOrderDecisionResolver.Context(instrument, symbolId,
+            var decision = new RuntimeOrderAdmission.Context(instrument, symbolId,
                     new MarkPriceRuntime(symbolId, instrument, 100, 1, 1_000),
                     FeePolicyBook.EMPTY, 1_001, runtime.treasury().settlementStatus(symbolId));
             runtime.startAccountLanes();

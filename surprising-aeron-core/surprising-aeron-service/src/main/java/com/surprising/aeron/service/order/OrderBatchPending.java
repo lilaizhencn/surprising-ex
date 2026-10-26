@@ -895,7 +895,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
                 throw new IllegalStateException("batch place reservation requires its Account Lane");
             long identity = 0;
             try {
-                com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.resolveInto(this, decision.context(), userId, intent());
+                com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto(this, decision.context(), userId, intent());
                 int assetId = runtime.productLine().isDerivative() ? decision.settleAssetId()
                         : side() == com.surprising.aeron.protocol.CoreOrderSide.BUY ? decision.quoteAssetId() : decision.baseAssetId();
                 identity = identities.prepareClientKeyInLane(lane, userId, clientOrderId());

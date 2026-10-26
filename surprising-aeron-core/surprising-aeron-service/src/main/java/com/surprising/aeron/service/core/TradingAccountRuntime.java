@@ -1801,7 +1801,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public ReplacementAdmissionEvent dispatchReplacementAdmission(long sequence, long userId,
             long originalOrderId, com.surprising.aeron.protocol.AmendOrderCommand amend,
             com.surprising.aeron.protocol.ReplaceOrderCommand replace,
-            com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.Context decision,
+            com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context decision,
             int matcherShard, RuntimeIdentityRegistry identities) {
         assertOwner();
         // 当前按拓扑选中或从掩码取出的账户 Lane 编号

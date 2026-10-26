@@ -13,7 +13,7 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -41,7 +41,7 @@ public class ReplacementAdmissionBenchmark {
     @Param({"LINEAR_PERPETUAL", "SPOT"}) public String productLine;
     private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
-    private CoreOrderDecisionResolver.Context decision;
+    private RuntimeOrderAdmission.Context decision;
     private final AmendOrderCommand[] commands = new AmendOrderCommand[WINDOW];
     private final ReplacementAdmissionEvent[] pending = new ReplacementAdmissionEvent[WINDOW];
     private long sequence;
@@ -75,7 +75,7 @@ public class ReplacementAdmissionBenchmark {
         runtime = RuntimeStateProjector.project(new TradingCoreState(product, 1,
                 users, orders, Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty()),
                 identities, new LaneTopology(1, laneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, WINDOW, WINDOW, WINDOW));
-        decision = new CoreOrderDecisionResolver.Context(instrument, identities.symbolId("1"),
+        decision = new RuntimeOrderAdmission.Context(instrument, identities.symbolId("1"),
                 new MarkPriceRuntime(identities.symbolId("1"), instrument, 100, 1, 1_000),
                 FeePolicyBook.EMPTY, 1_001, runtime.treasury().settlementStatus(identities.symbolId("1")));
         runtime.startAccountLanes();

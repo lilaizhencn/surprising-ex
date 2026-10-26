@@ -901,7 +901,7 @@ public final class TriggerOrderCommands {
          */
         private int baseAssetId, quoteAssetId, settleAssetId;
         /** Owner 固定的订单决策上下文，账户 Lane 据此解析子单，交接完成后清引用。 */
-        private com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.Context decision;
+        private com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context decision;
         /** 唯一账本提供的市场未平仓量，只有标的额度需要它时才查询。 */
         private long openInterest;
         /** 跨线程输入已齐标志；账本写好未平仓量后以 volatile 发布。 */
@@ -932,7 +932,7 @@ public final class TriggerOrderCommands {
             trigger = null;
             this.triggerId = triggerId; this.triggerSequence = triggerSequence;
             this.price = price; this.triggeredAt = triggeredAt; this.commandId = commandId;
-            decision = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.context(
+            decision = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.context(
                     owner.runtimeState(), owner.identities(), route.instrumentId(), owner.currentClusterTimestamp());
             baseAssetId = owner.identities().assetId(decision.instrument().baseAsset());
             quoteAssetId = owner.identities().assetId(decision.instrument().quoteAsset());
@@ -969,7 +969,7 @@ public final class TriggerOrderCommands {
             com.surprising.aeron.service.order.admission.ResolvedPlaceOrder order = null;
             String failureReason = "";
             try {
-                order = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.resolve(
+                order = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolve(
                         decision, trigger.userId(), childOrder(trigger, price, trigger.instrument(), childOrderId));
             } catch (/* 子单决策或冻结中遇到的业务拒绝，记成触发失败而非技术故障 */ CoreStateRejectedException rejected) { failureReason = rejected.code(); }
             int assetId = order == null ? 0 : order.reservationAsset().equals(decision.instrument().baseAsset()) ? baseAssetId

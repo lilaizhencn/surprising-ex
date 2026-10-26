@@ -16,7 +16,7 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.matcher.MatchingResult;
-import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
@@ -493,7 +493,7 @@ public final class OrderBatchExecutor {
         int index = batch.preparedSymbols.indexOf(instrumentId);
         if (index >= 0) return batch.preparedContextDecisions[index];
         // 按整批业务时间捕获的品种配置、价格与产品判断上下文
-        var context = CoreOrderDecisionResolver.context(owner.runtimeState(), owner.identities(), instrumentId, batch.clusterTimestamp);
+        var context = RuntimeOrderAdmission.context(owner.runtimeState(), owner.identities(), instrumentId, batch.clusterTimestamp);
         // 该上下文中的品种配置
         var instrument = context.instrument();
         // 品种基础资产名称

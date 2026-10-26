@@ -48,7 +48,7 @@ import com.surprising.aeron.service.order.MatchingPipelineProgress;
 import com.surprising.aeron.service.order.OrderBatchExecutor;
 import com.surprising.aeron.service.order.OrderBatchPending;
 import com.surprising.aeron.service.order.PendingMatchingRing;
-import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
+import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
@@ -2213,7 +2213,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         // 本次下单需要预留的结算资产身份
         int assetId;
         try {
-            CoreOrderDecisionResolver.prepare(event, runtimeState, identities, userId,
+            RuntimeOrderAdmission.prepare(event, runtimeState, identities, userId,
                     command, currentClusterTimestamp);
             settlementStatus = runtimeState.treasury().settlementStatus(event.symbolId());
             // 当前业务查到的标的配置，用于身份、结算规则或路由判断

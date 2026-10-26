@@ -40,7 +40,6 @@ import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
-import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
@@ -185,7 +184,7 @@ public final class RuntimeTestStateTransitions {
         long decisionTimestamp = mark == null ? 1 : mark.generatedAtEpochMillis();
         UUID commandId = UUID.randomUUID();
         return mutate(before, (runtime, identities) -> {
-            ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(
+            ResolvedPlaceOrder resolved = RuntimeOrderAdmission.resolve(
                     runtime, identities, userId, command, decisionTimestamp);
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
                     resolved, 0, runtime.admissionOrders(userId, identities.symbolId(resolved.instrumentId())));

@@ -113,7 +113,7 @@ public final class CoreQueryService {
         if (owner.orderIdInUse(command.orderId())) throw new com.surprising.aeron.exception.CoreStateRejectedException(
                 "DUPLICATE_ORDER_ID", "orderId already exists");
         // Owner 为当前预检取得的币对决策输入，避免 Lane 任意回读变化中的产品元数据。
-        var context = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.queryContext(
+        var context = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.queryContext(
                 owner.runtimeState(), owner.identities(), command.instrumentId(), timestamp);
         // 可等待账本 OI 输入的预检任务，之后只读用户账户计算所需预留。
         var query = new PreflightQuery(owner.appliedCommandCount(), userId, command, context);
@@ -151,7 +151,7 @@ public final class CoreQueryService {
         /** 只读预检采用的下单意图，不作为真实撮合命令提交。 */
         private final com.surprising.aeron.protocol.PlaceOrderCommand command;
         /** Owner 固定的预检币对、标记价、费率及结算状态输入。 */
-        private final com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.Context context;
+        private final com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context context;
 
         /**
          * 保存本次预检的订单和固定决策输入；产品不依赖未平仓量或为只减仓单时可直接读账户，否则等待账本发布输入就绪。
@@ -161,7 +161,7 @@ public final class CoreQueryService {
          * @param context Owner 固定的币对、价格、费率和生命周期决策输入
          */
         private PreflightQuery(long commandCount, long userId, com.surprising.aeron.protocol.PlaceOrderCommand command,
-                com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.Context context) {
+                com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context context) {
             this.commandCount = commandCount; this.userId = userId;
             this.command = command; this.context = context;
             inputReady = !context.instrument().usesOpenInterestForUserLimit() || command.reduceOnly();
@@ -202,7 +202,7 @@ public final class CoreQueryService {
          */
         @Override public CoreResponse apply(AccountLaneState lane) {
             // 按固定市场和规则输入解析出的预检订单参数。
-            var order = com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver.resolve(context, userId, command);
+            var order = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolve(context, userId, command);
             // 当前用户的客户端订单身份、币对、持仓键和结算状态，交给账户预留检查。
             var identity = new com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.AdmissionIdentity(
                     owner.identities().findClientKeyValue(userId, command.clientOrderId()), context.symbolId(),
