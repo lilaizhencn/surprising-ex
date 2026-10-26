@@ -112,12 +112,6 @@ public final class RuntimePerpetualFundingProcessor {
         private UserIndexPage userPage;
         /** 等待账本选页的持仓用户索引来源，完成后释放引用。 */
         private Iterable<Long> indexedUserIds;
-        /** 用户页及各 Lane 分组已准备好的跨线程发布标记。 */
-        private volatile boolean usersReady;
-        /** 选页任务已被账本接受的标记，避免重复入队或提前重置。 */
-        private boolean usersQueued;
-        /** 复用的账本选页任务，调用时不读取接口传入的财库参数。 */
-        private final TreasuryRuntime.Entry userInput = /* 账本选页接口传入的财库参数，此任务只读取用户索引。 */ ignored -> selectAccountUsers();
         /** 本页含有用户的账户 Lane 位图。 */
         private long laneMask;
         /** 按实际账户归属划分的用户列表，重置保留容量。 */
@@ -133,7 +127,7 @@ public final class RuntimePerpetualFundingProcessor {
         private final ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
 
         /**
-         * 保存当前命令及固定价格输入，初始化该页可复用状态；账本未激活时立即选用户，否则等账本线程读取索引。
+         * 保存当前命令及固定价格输入，初始化该页可复用状态。
          * @param command 资金费结算编号、费率及用户分页参数
          * @param runtime 产品线和账户数据的原权威运行时
          * @param instrument 本轮固定使用的永续币对配置
@@ -150,7 +144,7 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         /**
-         * 拒绝覆盖账本尚未完成的选页输入；重置继承的财务范围与本页标记，清空回执和明细并复用 Lane 分组容量，拓扑数量变化时重新创建分组及回执数组。
+         * 重置继承的财务范围与本页标记，清空回执和明细并复用 Lane 分组容量，拓扑数量变化时重新创建分组及回执数组。
          * @param command 资金费结算编号、费率及用户分页参数
          * @param runtime 产品线和账户数据的原权威运行时
          * @param instrument 本轮固定使用的永续币对配置
@@ -162,13 +156,11 @@ public final class RuntimePerpetualFundingProcessor {
         private FundingWork reset(ApplyFundingCommand command,
                 TradingAccountRuntime runtime, CoreInstrument instrument, int symbolId,
                 int settleAssetId, long fundingMark, Iterable<Long> indexedUserIds) {
-            if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns funding routes");
             initializeLedgerCommand(runtime);
             this.command = command;
             this.instrument = instrument; this.symbolId = symbolId; this.settleAssetId = settleAssetId;
             this.fundingMark = fundingMark;
             this.indexedUserIds = indexedUserIds; userPage = null;
-            usersReady = usersQueued = false;
             if (usersByLane == null || usersByLane.length != runtime.topology().accountLaneCount()) {
                 usersByLane = new LongArrayList[runtime.topology().accountLaneCount()];
                 laneResults = new LaneFundingResult[usersByLane.length];
@@ -179,7 +171,7 @@ public final class RuntimePerpetualFundingProcessor {
             laneMask = 0; phase = Phase.DISPATCH_ACCOUNTS; result = null;
             java.util.Arrays.fill(laneResults, null);
             payments.clear();
-            if (!runtime.systemLedgerStarted()) selectAccountUsers();
+            selectAccountUsers();
             return this;
         }
 
@@ -197,8 +189,6 @@ public final class RuntimePerpetualFundingProcessor {
                 usersByLane[lane].add(user); laneMask |= 1L << lane;
             }
             indexedUserIds = null;
-
-            usersReady = true;
         }
 
         /**
@@ -212,15 +202,11 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         /**
-         * Owner 依次等账本选页、派发并收集账户收付、投递账本记账并等待完成，最后推进元数据并保存本页结果。每个阶段成功后置位，重复轮询不重复收付；true 表示本页有结果，是否全部结清仍看 progress.complete。
+         * Owner 依次派发并收集账户收付、投递账本记账并等待完成，最后推进元数据并保存本页结果。每个阶段成功后置位，重复轮询不重复收付；true 表示本页有结果，是否全部结清仍看 progress.complete。
          */
         public boolean poll() {
             runtime.assertOwner();
             if (result != null) return true;
-            if (!usersReady) {
-                if (!usersQueued) usersQueued = runtime.dispatchLedgerQuery(userInput);
-                if (!usersReady) return false;
-            }
             if (phase == Phase.DISPATCH_ACCOUNTS) {
                 phase = Phase.COLLECT_ACCOUNTS;
                 if (laneMask != 0) runtime.dispatchControlLanes(laneMask, this::applyLane);

@@ -134,14 +134,8 @@ public final class RuntimeLifecycleSettlementContinuation {
         private boolean moreOrders;
         /** 账本选出的全局用户页及续页信息；本页仅撤单或已完成时为空。 */
         private UserIndexPage userPage;
-        /** 等待账本消费的用户索引来源，完成选页后释放引用。 */
+        /** 等待消费的用户索引来源，完成选页后释放引用。 */
         private Iterable<Long> indexedUserIds;
-        /** 用户页和分组已经准备好的跨线程发布标记，Owner 读取后才继续派发账户。 */
-        private volatile boolean usersReady = true;
-        /** 账本是否已接受选页任务，避免尚未完成时重复投递或回收。 */
-        private boolean usersQueued;
-        /** 复用的账本选页任务，只负责读取用户索引与发布路由回执。 */
-        private final TreasuryRuntime.Entry userInput = /* 账本任务接口传入的财库参数；用户选页只用索引，不读取此参数。 */ ignored -> selectAccountUsers();
         /** 按实际账户所有权划分的用户原语列表，重置只清内容并保留容量。 */
         private final LongArrayList[] usersByLane;
         /** 账户侧撤单路由分组，具体列表按需分配并在后续页复用。 */
@@ -239,7 +233,6 @@ public final class RuntimeLifecycleSettlementContinuation {
                 CoreInstrument instrument, ProductTradingRules kernel, int symbolId, int assetId,
                 List<CancellationOrder> selectedOrders,
                 boolean moreOrders, Iterable<Long> indexedUserIds) {
-            if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns settlement routes");
             initializeLedgerCommand(runtime);
             if (usersByLane.length != runtime.topology().accountLaneCount()) {
                 throw new IllegalStateException("settlement continuation lane topology changed");
@@ -249,7 +242,6 @@ public final class RuntimeLifecycleSettlementContinuation {
             this.selectedOrders = selectedOrders;
             this.moreOrders = moreOrders; this.userPage = null;
             this.indexedUserIds = indexedUserIds;
-            usersReady = usersQueued = false;
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> /* 当前 Lane 可复用的撤单列表，未分配时为空。 */ orders : ordersByLane) if (orders != null) orders.clear();
             for (CancellationOrder /* 本页要按用户路由归组的撤单记录。 */ order : selectedOrders) {
@@ -273,12 +265,12 @@ public final class RuntimeLifecycleSettlementContinuation {
             financialPhase = null;
             this.result = null;
             this.phase = selectedOrders.isEmpty() ? Phase.CANCEL_WAIT : Phase.CANCEL;
-            if (!runtime.systemLedgerStarted()) selectAccountUsers();
+            selectAccountUsers();
             return this;
         }
 
         /**
-         * 由账本线程读取用户索引并按账户 Lane 分组；账本未激活时由初始化路径内联调用。订单仍有下一页时不选择持仓用户，最后发布 usersReady。
+         * 读取用户索引并按账户 Lane 分组；订单仍有下一页时不选择持仓用户。
          */
         private void selectAccountUsers() {
             userPage = moreOrders ? null
@@ -287,31 +279,27 @@ public final class RuntimeLifecycleSettlementContinuation {
             for (long /* 本次账本选页得到的用户编号。 */ user : selectedUserIds) usersByLane[runtime.topology().accountLaneId(user)].add(user);
             userLaneMask = RuntimeLifecycleSettlement.laneMask(usersByLane);
             indexedUserIds = null;
-
-            usersReady = true;
         }
 
         /**
-         * 返回本页实际交给账户 Lane 的同一份用户列表，避免结果路径再遍历索引；选页回执未发布时拒绝读取，工作对象重置或清理后不可继续借用旧页。
+         * 返回本页实际交给账户 Lane 的同一份用户列表，避免结果路径再遍历索引；工作对象重置或清理后不可继续借用旧页。
          */
         public List<Long> selectedUsers() {
-            if (!usersReady) throw new IllegalStateException("Ledger settlement routes are incomplete");
             return userPage == null ? List.of() : userPage.userIds();
         }
 
         /**
-         * 把可重用对象切换为已完成结果并清除用户、订单与准备后值；账本仍在选页时拒绝重置。这里只清理当前代码列出的缓冲，不声称清零所有财务字段。
+         * 把可重用对象切换为已完成结果并清除用户、订单与准备后值。这里只清理当前代码列出的缓冲，不声称清零所有财务字段。
          * @param runtime 保持原身份的权威运行时，元数据由 Owner 推进
          * @param result 无需再执行账户操作的结算完成回执
          */
         private SettlementWork resetCompleted(TradingAccountRuntime runtime, CoreSettlementProgressView result) {
-            if (usersQueued && !usersReady) throw new IllegalStateException("Ledger still owns settlement routes");
             initializeLedgerCommand(runtime);
             this.command = null;
             this.instrument = null; this.kernel = null; this.symbolId = this.assetId = 0;
             this.selectedOrders = List.of(); this.userPage = null;
             this.moreOrders = false; this.orderLaneMask = this.userLaneMask = 0;
-            indexedUserIds = null; usersReady = true; usersQueued = false;
+            indexedUserIds = null;
             for (LongArrayList /* 当前 Lane 可复用的用户列表，重置或清理时只清内容。 */ users : usersByLane) users.clear();
             for (ArrayList<CancellationOrder> /* 当前 Lane 可复用的撤单列表，未分配时为空。 */ orders : ordersByLane) if (orders != null) orders.clear();
             if (prepared != null) Arrays.fill(prepared, null);
@@ -320,10 +308,9 @@ public final class RuntimeLifecycleSettlementContinuation {
         }
 
         /**
-         * 命令槽回收前清除当前命令、页面和准备后值引用，并保留分组容量；若账本仍拥有选页任务则本次直接返回。runtime 及部分财务回执字段仍由后续重置管理。
+         * 命令槽回收前清除当前命令、页面和准备后值引用，并保留分组容量。runtime 及部分财务回执字段仍由后续重置管理。
          */
         public void clearReferences() {
-            if (usersQueued && !usersReady) return;
             indexedUserIds = null;
             command = null;  instrument = null; kernel = null;
             selectedOrders = List.of(); userPage = null;
@@ -343,15 +330,11 @@ public final class RuntimeLifecycleSettlementContinuation {
         }
 
         /**
-         * Owner 分次推进本页：先等账本选页，派发撤单并收齐回执，再派发后值计算、核对整页保险、应用账户，最后等账本记录差额和进度。保险不足也会结束本次工作并返回未完成进度；返回 true 只表示这页工作有结果，不等于整个结算已完成。
+         * Owner 分次推进本页：派发撤单并收齐回执，再派发后值计算、核对整页保险、应用账户，最后等账本记录差额和进度。保险不足也会结束本次工作并返回未完成进度；返回 true 只表示这页工作有结果，不等于整个结算已完成。
          */
         public boolean poll() {
             runtime.assertOwner();
             if (phase == Phase.DONE) return true;
-            if (!usersReady) {
-                if (!usersQueued) usersQueued = runtime.dispatchLedgerQuery(userInput);
-                if (!usersReady) return false;
-            }
             switch (phase) {
                 case CANCEL -> {
                     phase = Phase.CANCEL_WAIT;

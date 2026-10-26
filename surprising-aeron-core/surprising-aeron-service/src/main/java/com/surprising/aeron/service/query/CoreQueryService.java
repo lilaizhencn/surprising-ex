@@ -207,22 +207,13 @@ public final class CoreQueryService {
     }
 
     /**
-     * 创建风险查询对象并先投递账本选路由，登记外部命令与请求完成状态；投递成功后保留待账户交接对象，Owner 消费查询时继续投递 Lane。
+     * 创建风险查询对象，登记外部命令与请求完成状态，并投递到相应 Lane。
      * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     public CoreResponse beginRiskAccountQuery(CoreMessage message) {
-        // Owner 创建的风险或 ADL 查询交接对象，先让账本选择路由。
         var query = RiskAccountQuery.prepare(owner, message);
         registerQuery(message, query);
-        try {
-            if (!owner.runtimeState().dispatchLedgerQuery(query)) {
-                pendingQueries.remove(message.header().commandId());
-                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
-            }
-        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) {
-            pendingQueries.remove(message.header().commandId());
-            throw failure;
-        }
+        query.dispatchAccounts();
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 

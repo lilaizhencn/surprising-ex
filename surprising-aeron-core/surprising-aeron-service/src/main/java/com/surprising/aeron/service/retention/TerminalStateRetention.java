@@ -152,8 +152,8 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     /**
      * 直接控制命令复用的资金索引 I/O 任务。Owner 准备和轮询，Ledger 读写实际索引，通过完成位交回结果；冷阶段可在当前线程执行，不自建线程或另一份资金历史。
      */
-    public static final class FundsIndexWork implements com.surprising.aeron.service.treasury.TreasuryRuntime.Entry {
-        /** 当前任务借用的终态保留器，Ledger 经它访问资金索引。 */
+    public static final class FundsIndexWork {
+        /** 当前任务借用的终态保留器，访问资金索引。 */
         private TerminalStateRetention retention;
         /** 本次资金 UUID 高位。 */
         private long commandIdMsb;
@@ -167,11 +167,9 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
         /**
          * write：本次是否写入，假表示查找。
          * prepared：当前请求是否仍在使用，clear 前禁止再次准备。
-         * queued：是否已成功交给活动 Ledger，避免重复入队。
          */
-        private boolean write, prepared, queued;
-        /** 跨线程完成发布位，初始及 clear 后为真。 */
-        private volatile boolean completed = true;
+        private boolean write, prepared;
+        private boolean completed = true;
 
         /**
          * 以两段 UUID 准备一次查找，不创建额外 UUID 对象，结果待 Ledger 或冷阶段执行。
@@ -232,34 +230,25 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
             this.fingerprint = fingerprint;
             this.write = write;
             retained = null;
-            queued = false;
             completed = false;
             prepared = true;
         }
 
         /**
-         * 先检查 Core 健康与已准备状态；账本未启动时当前线程直接执行，活动阶段只投递一次 Ledger 查询。邮箱满返回未完成以便重试，已投递后读取完成位。
+         * 检查 Core 健康与已准备状态，并在当前线程就地执行索引 I/O。
          * @param owner 当前命令所属的健康 Core
          */
         public boolean poll(TradingCoreRuntime owner) {
             owner.assertHealthy();
             if (!prepared) throw new IllegalStateException("funds index request is not prepared");
-            if (!owner.runtimeState().systemLedgerStarted()) {
-                apply(null);
-                return true;
-            }
-            if (!queued) {
-                if (!owner.runtimeState().dispatchLedgerQuery(this)) return false;
-                queued = true;
-            }
-            return completed;
+            apply();
+            return true;
         }
 
         /**
-         * 由实际执行线程绑定索引 I/O 并读或写，最后公布完成位；此后不再访问可被 clear 或复用的任务字段。
-         * @param ignored 账本任务契约附带的 Treasury，本索引 I/O 不读取它
+         * 绑定索引 I/O 并读或写。
          */
-        @Override public void apply(com.surprising.aeron.service.treasury.TreasuryRuntime ignored) {
+        private void apply() {
             retention.fundsCommands.bindIoOwner();
             if (write) retention.fundsCommands.put(commandIdMsb, commandIdLsb, fingerprint);
             else retained = retention.fundsCommands.get(commandIdMsb, commandIdLsb);
@@ -281,7 +270,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
             retention = null;
             commandIdMsb = commandIdLsb = 0;
             fingerprint = retained = null;
-            write = prepared = queued = false;
+            write = prepared = false;
             completed = true;
         }
     }

@@ -16,8 +16,7 @@ import java.util.function.Function;
 /**
  * 一次风险快照或 ADL 候选查询的线程交接对象：Owner 固定市场输入，Ledger 选择有界路由，各账户 Lane 读取自己的状态，最后完成的 Lane 合并并编码响应。只保留本次路由和查询 DTO，不建立账户镜像。
  */
-final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<CoreQueryService.QueryResult> implements SettlementLaneWorker.Command, Function<AccountLaneState, Void>,
-        com.surprising.aeron.service.treasury.TreasuryRuntime.Entry {
+final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<CoreQueryService.QueryResult> implements SettlementLaneWorker.Command, Function<AccountLaneState, Void> {
     /** 提供账本、账户投递及查询结果登记的所属运行时，不代表任意线程都能直接访问其账户。 */
     private final TradingCoreRuntime owner;
     /**
@@ -32,8 +31,6 @@ final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<Core
      * positionKeys：与 users 对齐的 ADL 持仓身份数组；null 表示按用户生成风险快照。
      */
     private long[] users, positionKeys;
-    /** 账本完成路由或直接回复后发布的可见性标记，Owner 读到 true 才使用路由及直接回复状态。 */
-    private volatile boolean routesReady;
     private boolean accountsDispatched;
     /** ADL 查询的规范结算资产，风险快照查询用 null 区分分支。 */
     private final String asset;
@@ -91,13 +88,13 @@ final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<Core
             riskResults.add(new ArrayList<>());
             adlResults.add(new ArrayList<>(Math.min(limit, 64)));
         }
+        resolveRoutes();
     }
 
     /**
-     * 在 Ledger 线程按风险用户索引或 ADL 持仓索引选择有界路由，计算需要访问的账户 Lane；无路由或参数、规模错误就直接保存响应，最后发布就绪位并通知 Owner。
-     * @param ignored 账本任务接口传入的 TreasuryRuntime，本查询通过账本所属的持仓索引选路由，无须直接读该参数
+     * 按风险用户索引或 ADL 持仓索引选择有界路由，计算需要访问的账户 Lane；无路由或参数、规模错误就直接保存响应。
      */
-    @Override public void apply(com.surprising.aeron.service.treasury.TreasuryRuntime ignored) {
+    private void resolveRoutes() {
         try {
             if (asset == null) {
                 // 按指定用户或全部持仓用户取得的风险路由，已受索引扫描上限约束。
@@ -122,7 +119,6 @@ final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<Core
         } catch (/* 账本选择路由时发现扫描规模超限，转换为查询响应过大。 */ RuntimeOperationalQueryService.QueryTooLargeException failure) {
             failRoutes(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
         } catch (/* 账本选择路由时遇到的非法查询条件，转换为 INVALID_COMMAND。 */ IllegalArgumentException failure) { failRoutes(CoreResultCode.INVALID_COMMAND); }
-        routesReady = true;
     }
 
     /**
@@ -134,11 +130,10 @@ final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<Core
     }
 
     /**
-     * 由 Owner 等待账本发布路由，再把同一查询投到所选账户 Lane；已由账本直接回复则无需投递，邮箱暂不能接受时返回 false 供后续继续尝试。
+     * 由 Owner 把查询投到所选账户 Lane；已直接回复则无需投递，邮箱暂不能接受时返回 false 供后续继续尝试。
      */
     boolean dispatchAccounts() {
         if (accountsDispatched) return true;
-        if (!routesReady) return false;
         accountsDispatched = isDone() || owner.runtimeState().dispatchAccountQuery(laneMask, this);
         return accountsDispatched;
     }
