@@ -25,7 +25,6 @@ import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
@@ -169,20 +168,7 @@ class MatcherTreasurySettlementTest {
                 await(releaseMaker);
             });
             assertThat(makerParked.await(3, TimeUnit.SECONDS)).isTrue();
-            // 控制账本队首空任务是否就绪的原子开关。
-            var releaseLedgerHead = new java.util.concurrent.atomic.AtomicBoolean();
-            try (/* 实际运行且退出时自动关闭的系统账本线程，邮箱容量为一。 */ var ledger = new SystemLedgerLane(original, 1, failure::set)) {
-                assertThat(ledger.offer(/* 确定性占住账本队首的测试任务，原子门闩控制就绪，应用时不修改资金。 */ new SystemLedgerLane.Entry() {
-                    /**
-                     * 通过用例门闩控制空账本任务是否就绪，以确定性占住容量为一的队列。
-                     */
-                    @Override public boolean ready() { return releaseLedgerHead.get(); }
-                    /**
-                     * 队首门闩放开后执行空任务，仅用于释放被占住的账本槽，不修改系统资金。
-                     * @param treasury 账本任务收到的原系统财库，本空任务不读取或修改它
-                     */
-                    @Override public void apply(TreasuryRuntime treasury) { }
-                })).isTrue();
+            try {
                 event.reserveMatcherPublication();
                 event.beginMatcherPublication();
                 event.publishDirectNativeResult(new MatcherResult(1,
@@ -194,8 +180,8 @@ class MatcherTreasurySettlementTest {
                         new MatcherResult.MarketData(List.of(), List.of(), 0, 0)),
                         1, 1, 2, 11, 1, 0);
                 event.completeMatcherPublication();
+                assertThat(event.submitTreasurySettlement(original)).isTrue();
                 try {
-                    assertThat(event.submitTreasurySettlement(ledger)).isFalse();
                     long takerDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                     while ((event.completedLaneMask() & (1L << takerLane)) == 0) {
                         runtime.assertAccountLanesHealthy();
@@ -205,60 +191,34 @@ class MatcherTreasurySettlementTest {
                     assertThat(event.complete()).isFalse();
                     assertThatThrownBy(() -> runtime.releaseMatcherSettlement(event))
                             .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
-                    assertThatThrownBy(() -> original.fee(identities.assetId("USDT")))
-                            .isInstanceOf(IllegalStateException.class);
                 } finally { releaseMaker.countDown(); }
                 // 等待两个账户 Lane 都完成的有界单调时间截止点。
                 long accountDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.accountLanesCompleteForLedger()) {
-                    ledger.assertHealthy(); runtime.assertAccountLanesHealthy();
+                    runtime.assertAccountLanesHealthy();
                     if (System.nanoTime() >= accountDeadline) throw new AssertionError("accounts timed out");
                     Thread.onSpinWait();
                 }
-                assertThat(event.complete()).isFalse();
-                assertThat(runtime.collectMatcherSettlement(event, null, null)).isNull();
-                releaseLedgerHead.set(true);
-                // 账本队列满后重试投递的有界截止点。
-                long admissionDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-                while (!event.submitTreasurySettlement(ledger)) {
-                    if (System.nanoTime() >= admissionDeadline) throw new AssertionError("Ledger queue remained full");
-                    Thread.onSpinWait();
-                }
-                // 后续账本工作阻塞时，已完成的原事件仍可由 Owner 立即回收。
-                long tailDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-                while (!ledger.offer(treasury -> {
-                    financialSignalling.countDown();
-                    await(releaseFinancialSignal);
-                })) {
-                    ledger.assertHealthy();
-                    if (System.nanoTime() >= tailDeadline) throw new AssertionError("Ledger tail remained full");
-                    Thread.onSpinWait();
-                }
-                assertThatThrownBy(() -> event.submitTreasurySettlement(ledger))
+                assertThatThrownBy(() -> event.submitTreasurySettlement(original))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already queued");
                 // 等待财务槽完成或复用槽完成的有界截止点。
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!event.complete()) {
-                    ledger.assertHealthy(); runtime.assertAccountLanesHealthy();
+                    runtime.assertAccountLanesHealthy();
                     if (System.nanoTime() >= deadline) throw new AssertionError("financial settlement timed out");
                     Thread.onSpinWait();
                 }
-                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, new RuntimeFundsAccumulator(), null))
-                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("funds remain on SystemLedgerLane");
                 assertThat(runtime.collectMatcherSettlement(event, null, null).size()).isZero();
                 assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, null, null))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already collected");
                 runtime.releaseMatcherSettlement(event);
-                assertThat(financialSignalling.await(3, TimeUnit.SECONDS)).isTrue();
-                // 旧账本回调在发布完成位后仍未返回；此时可复用财务槽，
-                // 前提是旧回调不再读取池化事件字段。
                 // 复用事件新一代撤单命令的 UUID。
                 UUID secondId = new UUID(3, 4);
-                // 从池中借到的同一结算事件，用于检查旧账本回调不污染新代。
+                // 从池中借到的同一结算事件，用于检查旧财务回调不污染新代。
                 var reused = runtime.prepareDirectCancellation(2, originalTaker.userId(), originalTaker.orderId(),
                         secondId, 0, identities, 30, 40);
                 assertThat(reused).isSameAs(event);
-                assertThat(reused.submitTreasurySettlement(ledger)).isTrue();
+                assertThat(reused.submitTreasurySettlement(original)).isTrue();
                 reused.reserveMatcherPublication();
                 reused.beginMatcherPublication();
                 reused.publishDirectNativeResult(new MatcherResult(2,
@@ -269,10 +229,9 @@ class MatcherTreasurySettlementTest {
                         List.of(), new MatcherResult.MarketData(List.of(), List.of(), 0, 0)),
                         2, 3, 4, 11, 2, 0);
                 reused.completeMatcherPublication();
-                releaseFinancialSignal.countDown();
                 deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!reused.complete()) {
-                    ledger.assertHealthy(); runtime.assertAccountLanesHealthy();
+                    runtime.assertAccountLanesHealthy();
                     if (System.nanoTime() >= deadline) throw new AssertionError("reused financial slot timed out");
                     Thread.onSpinWait();
                 }
@@ -280,7 +239,7 @@ class MatcherTreasurySettlementTest {
                 runtime.releaseMatcherSettlement(reused);
                 assertThat(failure.get()).isNull();
             } finally {
-                releaseLedgerHead.set(true); releaseMaker.countDown(); releaseFinancialSignal.countDown();
+                releaseMaker.countDown();
             }
             assertThat(original.fee(identities.assetId("USDT"))).isEqualTo(2);
         }

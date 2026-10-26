@@ -2475,6 +2475,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
         catch (RuntimeException | Error problem) { failure = shutdownFailure(failure, problem); }
         try { runtimeState.close(); }
         catch (RuntimeException | Error problem) { failure = shutdownFailure(failure, problem); }
+        try { terminalRetention.assertHealthy(); }
+        catch (RuntimeException | Error problem) {
+            failure = shutdownFailure(failure, new IllegalStateException("Core workers stopped with a failure", problem));
+        }
         // 存活的消费者可能仍借用槽和索引；未确认全部线程退出时保留其输入引用。
         if (matcherPipeline.workersStopped() && runtimeState.workersStopped()) {
             try {

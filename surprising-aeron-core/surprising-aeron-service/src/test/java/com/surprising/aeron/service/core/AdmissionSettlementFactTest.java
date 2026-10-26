@@ -21,7 +21,6 @@ import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
@@ -66,14 +65,13 @@ class AdmissionSettlementFactTest {
             runtime.putMarkPrice(new MarkPriceRuntime(symbol, instrument, 100, 1, 1_000));
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
-            try (/* 直接绑定本运行时 Treasury 的独立账本工作资源，用例结束关闭 */ var ledger = new SystemLedgerLane(runtime.treasury(), 256, /* 账本异步故障通知或门闩中断；前者本测试不处理，由健康检查发现，后者转测试失败 */ failure -> { })) {
-                // 用于把标的设为资金费处理中状态的原进度值
-                var funding = new TreasuryRuntime.FundingProgressRuntime(1, instrument, 100, 7, 100);
-                if (transition.equals("FUNDING_TO_CLEAR")) run(ledger, /* 账本回调给出的权威 Treasury，仅在账本工作中修改 */ actual -> {
-                    actual.setFundingProgress(symbol, funding); actual.clearChangedKeys();
-                });
-                if (transition.equals("SETTLED_TO_ROLLBACK"))
-                    run(ledger, /* 账本回调给出的权威 Treasury，仅在账本工作中修改 */ actual -> actual.setLifecycleSettlement(symbol, 2));
+            // 用于把标的设为资金费处理中状态的原进度值
+            var funding = new TreasuryRuntime.FundingProgressRuntime(1, instrument, 100, 7, 100);
+            if (transition.equals("FUNDING_TO_CLEAR")) {
+                runtime.treasury().setFundingProgress(symbol, funding); runtime.treasury().clearChangedKeys();
+            }
+            if (transition.equals("SETTLED_TO_ROLLBACK"))
+                runtime.treasury().setLifecycleSettlement(symbol, 2);
                 // 派发前捕获的不可变结算状态事实，事件须保留同一实例
                 var captured = runtime.treasury().settlementStatus(symbol);
                 // 用户七买入一份的限价 GTC 下单意图
@@ -95,15 +93,13 @@ class AdmissionSettlementFactTest {
                     field.setAccessible(true);
                     assertThat(field.get(event)).isSameAs(captured);
                     assertThat(event.complete()).isFalse();
-                    run(ledger, /* 账本回调给出的权威 Treasury，仅在账本工作中修改 */ actual -> {
-                        switch (transition) {
-                            case "CLEAR_TO_FUNDING" -> actual.setFundingProgress(symbol, funding);
-                            case "FUNDING_TO_CLEAR" -> actual.setFundingSettlement(symbol, 1);
-                            case "SETTLED_TO_ROLLBACK" -> actual.rollbackChangedValues();
-                            default -> throw new AssertionError(transition);
-                        }
-                        actual.clearChangedKeys();
-                    });
+                    switch (transition) {
+                        case "CLEAR_TO_FUNDING" -> runtime.treasury().setFundingProgress(symbol, funding);
+                        case "FUNDING_TO_CLEAR" -> runtime.treasury().setFundingSettlement(symbol, 1);
+                        case "SETTLED_TO_ROLLBACK" -> runtime.treasury().rollbackChangedValues();
+                        default -> throw new AssertionError(transition);
+                    }
+                    runtime.treasury().clearChangedKeys();
                     assertThat(runtime.treasury().settlementStatus(symbol)).isNotSameAs(captured);
                     release.countDown();
                     // 放行后准入与后续资金核对共用的三秒单调时钟截止值
@@ -130,21 +126,7 @@ class AdmissionSettlementFactTest {
                     event.cancelMatcherWait();
                     runtime.releasePlaceAdmission(event);
                 } finally { release.countDown(); }
-            }
         } finally { release.countDown(); }
-    }
-
-    /**
-     * 要求账本工作成功入队，最多三秒等执行回执，再检查账本健康；工作抛错时由原账本故障机制暴露。
-     * @param lane 执行本次结算状态变化的真实独立账本 Lane
-     * @param work 要在账本线程执行的原工作
-     */
-    private static void run(SystemLedgerLane lane, SystemLedgerLane.Entry work) throws Exception {
-        // 账本工作执行完后通知测试线程的门闩
-        var done = new CountDownLatch(1);
-        assertThat(lane.offer(/* 账本回调给出的权威 Treasury，仅在账本工作中修改 */ actual -> { work.apply(actual); done.countDown(); })).isTrue();
-        assertThat(done.await(3, TimeUnit.SECONDS)).isTrue();
-        lane.assertHealthy();
     }
 
     /**

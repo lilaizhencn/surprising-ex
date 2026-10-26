@@ -68,7 +68,6 @@ class CoreShutdownFailureTest {
         var core = new TradingCoreRuntime(ProductLine.SPOT);
         core.activate();
         var accounts = core.runtimeState();
-        Thread ledger = AccountLaneTestAccess.ledger(accounts).thread();
         Thread[] workers = new Thread[accounts.laneCount()];
         for (int lane = 0; lane < workers.length; lane++) workers[lane] = accounts.accountWorkerThread(lane);
         try {
@@ -87,7 +86,6 @@ class CoreShutdownFailureTest {
             assertThatThrownBy(core::close).isSameAs(first).hasSuppressedException(laneFailure);
             assertThat(core.matcherPipeline().workersStopped()).isTrue();
             for (Thread worker : workers) assertThat(worker.isAlive()).isFalse();
-            assertThat(ledger.isAlive()).isFalse();
         } finally {
             // 断言意外失败时仍尝试清理本用例启动的所有线程。
             org.assertj.core.api.Assertions.catchThrowable(core::close);

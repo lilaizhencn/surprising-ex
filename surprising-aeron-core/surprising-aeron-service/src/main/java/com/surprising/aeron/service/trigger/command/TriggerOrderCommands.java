@@ -878,7 +878,7 @@ public final class TriggerOrderCommands {
      */
     private final class TriggerExecutionContinuation
             implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object>,
-            com.surprising.aeron.service.treasury.SystemLedgerLane.Entry {
+            com.surprising.aeron.service.treasury.TreasuryRuntime.Entry {
         /** 账户 Lane 复核并认领后的完整触发单，Owner 收集回执后清引用。 */
         private com.surprising.aeron.model.CoreTriggerOrderState trigger;
         /**

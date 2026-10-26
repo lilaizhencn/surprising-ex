@@ -12,7 +12,6 @@ import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.Can
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.service.product.ProductTradingRulesRegistry;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -142,7 +141,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         /** 账本是否已接受选页任务，避免尚未完成时重复投递或回收。 */
         private boolean usersQueued;
         /** 复用的账本选页任务，只负责读取用户索引与发布路由回执。 */
-        private final SystemLedgerLane.Entry userInput = /* 账本任务接口传入的财库参数；用户选页只用索引，不读取此参数。 */ ignored -> selectAccountUsers();
+        private final TreasuryRuntime.Entry userInput = /* 账本任务接口传入的财库参数；用户选页只用索引，不读取此参数。 */ ignored -> selectAccountUsers();
         /** 按实际账户所有权划分的用户原语列表，重置只清内容并保留容量。 */
         private final LongArrayList[] usersByLane;
         /** 账户侧撤单路由分组，具体列表按需分配并在后续页复用。 */

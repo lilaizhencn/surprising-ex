@@ -15,7 +15,6 @@ import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
@@ -49,9 +48,9 @@ class CoreLedgerQueryTest {
                     new UUID(936, 1), LINE, CommandSource.OPERATIONS, 936, 1, 0, 1, 1),
                     TradingCommandCodec.encodeAdjustInsuranceFund(new AdjustInsuranceFundCommand("USDT", 250)));
             assertThat(CoreTestCompletion.applyAsynchronously(core, adjustment).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            // USDT 的运行时资产编号，用于核对 Owner 不能直接读取活动账本。
+            // USDT 的运行时资产编号，账本内联由 Owner 同步持有，可直接读取。
             int assetId = core.identities().assetId("USDT");
-            assertThatThrownBy(() -> core.runtimeState().treasury().insurance(assetId)).isInstanceOf(IllegalStateException.class);
+            assertThat(core.runtimeState().treasury().insurance(assetId)).isEqualTo(250L);
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
             long handoff = core.runtimeState().laneHandoffEpoch();
             try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
@@ -238,59 +237,29 @@ class CoreLedgerQueryTest {
     }
 
     /**
-     * 用未就绪任务填满账本邮箱，第一笔查询可保留待投递，第二笔拒绝且不残留编号；放行账本后第一笔仍能完成并只消费一次。
+     * 强平执行页查询直接完成，核对结果可消费且不残留待决编号。
      */
     @Test
-    void fullLedgerMailboxKeepsOneDeferredQueryAndRejectsTheNextWithoutPoisoningLedger() {
-        // 占位账本任务的放行开关，finally 中同样置为 true，防止失败后遗留阻塞。
-        var release = new java.util.concurrent.atomic.AtomicBoolean();
+    void liquidationWorkQueryExecutesAndReturnsResult() {
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCoreRuntime(LINE)) {
             core.activate();
-            // 一直保持未就绪直到测试放行的账本占位任务，可重复投递以填满邮箱。
-            var blocked = /* 测试专用账本占位任务，以 ready 控制消费，apply 不改资金。 */ new SystemLedgerLane.Entry() {
-                /**
-                 * 只在测试放行开关置为 true 后允许账本消费，用未就绪头项制造邮箱积压。
-                 */
-                @Override public boolean ready() { return release.get(); }
-                /**
-                 * 测试占位任务不修改账本，只用于在放行后排空先前填入的任务。
-                 * @param ledger 账本线程传入的原 TreasuryRuntime，占位任务不需要读取或修改它
-                 */
-                @Override public void apply(TreasuryRuntime ledger) { }
-            };
-            try {
-                // 已经投进邮箱的占位任务计数，超过保护阈值就让测试失败，避免无限填充。
-                int queued = 0;
-                while (core.runtimeState().dispatchLedgerQuery(blocked)) {
-                    if (++queued > 65_536) throw new AssertionError("Ledger mailbox did not fill");
-                }
-                // 固定的一项强平执行页查询，两次请求使用相同载荷但不同命令编号。
-                var payload = CoreLiquidationWorkCodec.encodeQuery(new CoreLiquidationWorkView.Query(
-                        LINE, CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1, 1_024));
-                // 邮箱满时可被保留为待投递的第一笔工作页查询。
-                var first = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
-                assertThat(CoreTestCompletion.applyAsynchronously(core, first).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-                // 本次查询对应的内部异步编号，完成后只能取一次结果。
-                var id = first.header().commandId();
-                // 已有待投递查询时继续提交的第二笔查询，应被拒绝并清除编号关联。
-                var second = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
-                assertThat(CoreTestCompletion.applyAsynchronously(core, second).resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
-                assertThat(core.bookQueries.hasPendingQuery(second.header().commandId())).isFalse();
-                release.set(true);
-                // 本次查询消费到的最终响应，按场景核对成功、响应超限或页内容。
-                CoreResponse response;
-                // 放行账本后等待第一笔查询完成的三秒单调时钟上限。
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-                while ((response = core.bookQueries.takeQueryResult(id)) == null) {
-                    core.assertHealthy();
-                    if (System.nanoTime() >= deadline) throw new AssertionError("deferred query timed out");
-                    Thread.onSpinWait();
-                }
-                assertThat(CoreLiquidationWorkCodec.decodeWork(response.data()).complete()).isTrue();
-                assertThat(core.bookQueries.takeQueryResult(id)).isNull();
-                assertThat(core.bookQueries.hasPendingQuery(first.header().commandId())).isFalse();
+            // 固定的一项强平执行页查询，两次请求使用相同载荷但不同命令编号。
+            var payload = CoreLiquidationWorkCodec.encodeQuery(new CoreLiquidationWorkView.Query(
+                    LINE, CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1, 1_024));
+            var first = message(CoreMessageType.LIQUIDATION_WORK_QUERY, payload);
+            CoreTestCompletion.applyAsynchronously(core, first);
+            var id = first.header().commandId();
+            CoreResponse response;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while ((response = core.bookQueries.takeQueryResult(id)) == null) {
                 core.assertHealthy();
-            } finally { release.set(true); }
+                if (System.nanoTime() >= deadline) throw new AssertionError("query timed out");
+                Thread.onSpinWait();
+            }
+            assertThat(CoreLiquidationWorkCodec.decodeWork(response.data()).complete()).isTrue();
+            assertThat(core.bookQueries.takeQueryResult(id)).isNull();
+            assertThat(core.bookQueries.hasPendingQuery(first.header().commandId())).isFalse();
+            core.assertHealthy();
         }
     }
 

@@ -152,7 +152,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     /**
      * 直接控制命令复用的资金索引 I/O 任务。Owner 准备和轮询，Ledger 读写实际索引，通过完成位交回结果；冷阶段可在当前线程执行，不自建线程或另一份资金历史。
      */
-    public static final class FundsIndexWork implements com.surprising.aeron.service.treasury.SystemLedgerLane.Entry {
+    public static final class FundsIndexWork implements com.surprising.aeron.service.treasury.TreasuryRuntime.Entry {
         /** 当前任务借用的终态保留器，Ledger 经它访问资金索引。 */
         private TerminalStateRetention retention;
         /** 本次资金 UUID 高位。 */

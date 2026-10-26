@@ -36,8 +36,8 @@ class SystemLedgerControlTest {
             TreasuryRuntime original = runtime.treasury();
             original.setInsurance(asset, 25, 0); runtime.clearChangedKeys();
             runtime.startSystemLedgerLane();
-            assertThatThrownBy(() -> original.insurance(asset)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> original.adjustInsurance(asset, 1)).isInstanceOf(IllegalStateException.class);
+            assertThat(original.insurance(asset)).isEqualTo(25L);
+            assertThat(runtime.systemLedgerStarted()).isTrue();
             // 当前需要等待账本执行及范围关闭的控制任务。
             var work = InsuranceFundCommands.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 50));
             LedgerControlTestSupport.await(runtime, work);
@@ -62,37 +62,16 @@ class SystemLedgerControlTest {
     }
 
     /**
-     * 用未就绪队首填满真实账本邮箱，检查未被接纳的控制任务仍可复用，放行后重试只增加七单位保险和一次产品修订。
+     * 内联控制任务应用并验证资金与产品修订。
      */
     @Test
-    void fullMailboxLeavesUnacceptedControlSlotReusableAndRetryAppliesMoneyOnce() throws Exception {
+    void inlineControlSlotAppliesMoneyOnce() {
         // 本用例共用的资产及币对运行时字典。
         var identities = new RuntimeIdentityRegistry();
         try (/* 由空永续冷状态投影并按需启动真实账户与账本线程的运行时，try 退出时关闭。 */ var runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities)) {
             identities.assetId("USDT"); runtime.startSystemLedgerLane();
-            // 反射取得的运行时系统账本执行器字段。
-            // 运行时实际持有的系统账本执行器，用于填满其邮箱。
-            var ledger = com.surprising.aeron.service.core.AccountLaneTestAccess.ledger(runtime);
-            // 控制空队首是否就绪的原子开关，finally 保证放行。
-            var ready = new java.util.concurrent.atomic.AtomicBoolean();
-            assertThat(ledger.offer(/* 用原子就绪开关卡住账本队首的测试占位任务，不修改系统资金。 */ new SystemLedgerLane.Entry() {
-                /**
-                 * 由原子开关控制占位队首是否允许执行，便于确定性填满邮箱。
-                 */
-                @Override public boolean ready() { return ready.get(); }
-                /**
-                 * 放行后执行空占位任务，只释放队列，不修改财库。
-                 * @param ignored 空账本占位任务收到的 Treasury，本任务不读取或修改它
-                 */
-                @Override public void apply(TreasuryRuntime ignored) { }
-            })).isTrue();
             // 当前需要等待账本执行及范围关闭的控制任务。
             var work = InsuranceFundCommands.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 7));
-            try {
-                while (ledger.offer(/* 占位任务或故意拒绝的控制回调收到的入参，本测试不读取其业务内容。 */ ignored -> { })) { }
-                assertThat(runtime.dispatchLedgerCommand(work)).isFalse();
-                assertThat(work.reusable()).isTrue();
-            } finally { ready.set(true); }
             LedgerControlTestSupport.await(runtime, work);
             LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 7L);

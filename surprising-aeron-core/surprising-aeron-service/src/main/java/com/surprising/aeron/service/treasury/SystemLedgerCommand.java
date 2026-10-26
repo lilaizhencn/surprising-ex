@@ -7,7 +7,7 @@ import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 /**
  * 控制命令已有续步的账本交接边界。子类保存指令及结果，当前账本所有者执行实际资金更新，Owner 观察阶段完成后决定验证、提交或回滚。Treasury 的首次写入前值一直保留到 ScopeClose 结束，阶段执行完成与整个财务作用域关闭是两个条件。
  */
-public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
+public abstract class SystemLedgerCommand implements TreasuryRuntime.Entry {
     /** 本控制命令的财库及账户资金核对缓冲，验证或回滚后清空，不是长期余额状态。 */
     private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
     /** 本命令独占并复用的关闭任务，保留原前值及持仓索引撤销边界。 */
@@ -145,6 +145,7 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         if (!completed || !queueClose()) return false;
         close.rollback = true;
         close.requested = true;
+        close.apply(runtime.treasury());
         return close.completed;
     }
 
@@ -152,9 +153,11 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
      * 要求阶段和财务计算完成且关闭任务已入队，再允许账本队首真正执行提交关闭。
      */
     public final void commitScope() {
-        if (!completed || !scopeCompleted || !closeQueued)
+        if (!completed || !scopeCompleted)
             throw new IllegalStateException("Ledger financial scope is incomplete");
+        if (!closeQueued) queueClose();
         close.requested = true;
+        close.apply(runtime.treasury());
     }
 
     /**
@@ -166,13 +169,18 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         if (!queueClose()) return false;
         close.externalAdjustment = externalAdjustment;
         close.validationRequested = true;
+        try {
+            close.ready();
+        } catch (Throwable failure) {
+            return false;
+        }
         return close.validated;
     }
 
     /**
      * 占住原账本队首的关闭任务。在 Owner 给出决定前保留同一财务范围前值，可先核对资金与应用持仓索引，之后按提交或回滚决定关闭。
      */
-    private final class ScopeClose implements SystemLedgerLane.Entry {
+    private final class ScopeClose implements TreasuryRuntime.Entry {
         /** 本控制范围对账本持仓派生索引的撤销暂存，提交清除、回滚恢复。 */
         private final RuntimeFactIndexes.PositionUndo positionUndo = new RuntimeFactIndexes.PositionUndo();
         /** Owner 已决定执行提交或回滚关闭的 volatile 请求位。 */
@@ -188,15 +196,20 @@ public abstract class SystemLedgerCommand implements SystemLedgerLane.Entry {
         /** 本控制命令是否允许外部资金变化，随验证请求发布。 */
         private boolean externalAdjustment;
         /**
-         * 账本推进队首时先按请求合并账户资金、检查守恒、应用持仓索引并发布验证完成；只有 Owner 另发最终关闭请求才允许 apply，因此 ready 在此包含验证动作。
+         * 推进队首时先按请求合并账户资金、检查守恒、应用持仓索引并发布验证完成；只有 Owner 另发最终关闭请求才允许 apply。
          */
         @Override public boolean ready() {
             if (validationRequested && !validated) {
-                runtime.appendControlAccountFunds(funds);
-                funds.requireConserved(externalAdjustment);
-                funds.clear();
-                runtime.applyLedgerControlPositions(positionUndo);
-                validated = true;
+                try {
+                    runtime.appendControlAccountFunds(funds);
+                    funds.requireConserved(externalAdjustment);
+                    funds.clear();
+                    runtime.applyLedgerControlPositions(positionUndo);
+                    validated = true;
+                } catch (Throwable failure) {
+                    runtime.recordFailure(failure);
+                    throw failure;
+                }
             }
             return requested;
         }

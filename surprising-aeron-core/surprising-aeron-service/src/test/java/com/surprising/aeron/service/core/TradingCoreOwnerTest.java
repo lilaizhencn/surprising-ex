@@ -75,10 +75,6 @@ class TradingCoreOwnerTest {
         var service = new TradingOwnerTestSupport(line);
         // 模拟会话复制出的原响应字节清单，支持工作线程可见性
         var responses = new CopyOnWriteArrayList<byte[]>();
-        // 通知测试线程被阻塞的 Lane、Matcher 或账本工作已经进入的门闩
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        // 放行阻塞工作的门闩，各退出路径确保放行
-        var release = new java.util.concurrent.CountDownLatch(1);
         service.onStart(cluster(), null);
         try {
             // 按当前现货或永续产品类型构造的原合约注册参数
@@ -112,13 +108,6 @@ class TradingCoreOwnerTest {
             assertThat(core.laneTopology().accountLaneId(1))
                     .isNotEqualTo(core.laneTopology().accountLaneId(2));
             assertThat(runtime.systemLedgerStarted()).isTrue();
-            assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
-                entered.countDown();
-                try {
-                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Ledger release timeout");
-                } catch (/* 阻塞账本等待中断，转测试失败 */ InterruptedException interrupted) { throw new AssertionError(interrupted); }
-            })).isTrue();
-            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             // 本轮要优先结算的首条原成交请求
             var first = command(line, CoreMessageType.PLACE_ORDER, 7, 1,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9001, "1", CoreOrderSide.BUY,
@@ -129,38 +118,10 @@ class TradingCoreOwnerTest {
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9002, "1", CoreOrderSide.BUY,
                             100, 3, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.IOC, false, "ledger-taker-2")));
-            // 本批原消息入队前已收到的响应数量，账本受阻时不能增加
+            // 本批原消息入队前已收到的响应数量
             int before = responses.size();
             service.acceptCommittedCommand(clientSession(responses), first, 2_000, 2_000);
             service.acceptCommittedCommand(clientSession(responses), following, 2_001, 2_001);
-            // 当前原命令账户/财务结算事件，分别检查发布、账户完成及最终完成
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent event = null;
-            // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            do {
-                service.pollCommands();
-                // 原撮合环当前按序提交头
-                var head = core.pendingMatching().head();
-                event = head == null ? null : head.settlementEvent();
-                if (event != null && event.completedLaneMask() == event.requiredLaneMask()
-                        && !core.matchingProgress.hasNotifications()) break;
-                if (System.nanoTime() > deadline) throw new AssertionError("Owner did not await Ledger completion");
-                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
-            } while (true);
-            assertThat(event.complete()).isFalse();
-            assertThat(responses).hasSize(before);
-            release.countDown();
-            deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (!event.complete()) {
-                if (System.nanoTime() > deadline) throw new AssertionError("Ledger did not finish settlement");
-                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
-            }
-            // 此时账本已经发布完成事实，Matcher/账户通知已被收完。
-            assertThat(core.matchingProgress.hasNotifications()).isFalse();
-            assertThat(service.ownerCompletionAvailable()).isTrue();
-            assertThat(event.complete()).isTrue();
-            service.pollCommands();
-            assertThat(responses.size()).isGreaterThan(before);
             finishCommands(service);
             assertThat(responses).hasSize(before + 2);
             for (/* 遍历原响应或请求清单的当前下标 */ int index = before; index < responses.size(); index++) {
@@ -184,7 +145,7 @@ class TradingCoreOwnerTest {
                 assertThat(state.user(1).positions().get("1").signedQuantitySteps()).isEqualTo(6);
                 assertThat(state.user(2).positions().get("1").signedQuantitySteps()).isEqualTo(-6);
             }
-        } finally { release.countDown(); service.onTerminate(null); }
+        } finally { service.onTerminate(null); }
     }
 
     /**
@@ -215,13 +176,7 @@ class TradingCoreOwnerTest {
         var service = new TradingOwnerTestSupport(line);
         // 模拟会话复制出的原响应字节清单，支持工作线程可见性
         var responses = new CopyOnWriteArrayList<byte[]>();
-        // 通知测试线程被阻塞的 Lane、Matcher 或账本工作已经进入的门闩
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        // 放行阻塞工作的门闩，各退出路径确保放行
-        var release = new java.util.concurrent.CountDownLatch(1);
-        // 账本观察原费用完成后通知测试线程的门闩
-        var inspected = new java.util.concurrent.CountDownLatch(1);
-        // 仅在真实账本线程读取并发布给测试的费用计数
+        // 账本原子观测值或冷状态读出的原 USDT 费用总额
         var observedFees = new AtomicLong(-1);
         service.onStart(cluster(), null);
         try {
@@ -250,50 +205,15 @@ class TradingCoreOwnerTest {
                                 ? TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))
                                 : TradingCommandCodec.encodePlaceOrder(orders.getFirst())));
             }
-            assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
-                entered.countDown();
-                try {
-                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Pipeline Ledger release timeout");
-                } catch (/* 阻塞账本等待中断，转测试失败 */ InterruptedException interrupted) { throw new AssertionError(interrupted); }
-            })).isTrue();
-            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            // 本批原消息入队前已收到的响应数量，账本受阻时不能增加
             int before = responses.size();
             try (/* 只供测试发现 Owner 越界读取账户正文的原保护器 */ var guard = new OwnerAccountReadGuard(runtime)) {
                 for (CoreMessage /* 本轮逐项检查或入队的原协议请求 */ request : requests)
                     service.acceptCommittedCommand(clientSession(responses), request, 2_000, 2_000);
-                // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                do {
-                    service.pollCommands();
-                    // 所列原命令是否都已发布并由实际账户 Lane 应用完成，不包含 Ledger 条件
-                    boolean accountsComplete = true;
-                    for (CoreMessage /* 本轮逐项检查或入队的原协议请求 */ request : requests) {
-                        // 按原 UUID 找到的在途撮合槽
-                        var pending = core.pendingMatching().findByCommandId(request.header().commandId());
-                        // 当前原命令账户/财务结算事件，分别检查发布、账户完成及最终完成
-                        var event = pending == null ? null : pending.orderBatch() == null
-                                ? pending.settlementEvent() : pending.orderBatch().settlementEvent();
-                        accountsComplete &= event != null && event.ready() && event.completedLaneMask() != 0
-                                && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask();
-                    }
-                    if (accountsComplete && !core.matchingProgress.hasNotifications()) break;
-                    if (System.nanoTime() > deadline) throw new AssertionError("Independent Lane facts were not ready");
-                    java.util.concurrent.locks.LockSupport.parkNanos(100_000);
-                } while (true);
-                assertThat(core.pendingMatching().size()).isEqualTo(2);
-                assertThat(responses).hasSize(before);
-                // 查询排在整个资金前缀之后；放行账本前停止 Owner 轮询，
-                // 检查首响应尚未交出时，两条命令的资金仍都能完成。
+                finishCommands(service);
                 assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
                     observedFees.set(ledger.fee(assetId));
-                    inspected.countDown();
                 })).isTrue();
-                release.countDown();
-                assertThat(inspected.await(2, TimeUnit.SECONDS)).isTrue();
                 assertThat(observedFees).hasValue(4L * itemsPerCommand);
-                assertThat(responses).hasSize(before);
-                finishCommands(service);
             }
             assertThat(responses).hasSize(before + 2);
             for (/* 遍历原响应或请求清单的当前下标 */ int index = 0; index < requests.size(); index++) {
@@ -323,7 +243,7 @@ class TradingCoreOwnerTest {
                 else assertThat(state.user(taker).positions().get(Integer.toString((taker + 1) / 2)).signedQuantitySteps())
                         .isEqualTo(itemsPerCommand);
             }
-        } finally { release.countDown(); service.onTerminate(null); }
+        } finally { service.onTerminate(null); }
     }
 
     /**
@@ -338,16 +258,6 @@ class TradingCoreOwnerTest {
         var service = new TradingOwnerTestSupport(line);
         // 模拟会话复制出的原响应字节清单，支持工作线程可见性
         var responses = new CopyOnWriteArrayList<byte[]>();
-        // 通知测试线程被阻塞的 Lane、Matcher 或账本工作已经进入的门闩
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        // 放行阻塞工作的门闩，各退出路径确保放行
-        var release = new java.util.concurrent.CountDownLatch(1);
-        // 账本观察原费用完成后通知测试线程的门闩
-        var inspected = new java.util.concurrent.CountDownLatch(1);
-        // 仅在真实账本线程读取并发布给测试的费用计数
-        var observedFees = new AtomicLong(-1);
-        // 只在账本线程读取并发布的原保险余额
-        var observedInsurance = new AtomicLong(-1);
         service.onStart(cluster(), null);
         try {
             // 本用例后续可用原来源序号，发送消息时递增
@@ -356,8 +266,6 @@ class TradingCoreOwnerTest {
             var core = service.state();
             // 当前真实账户与账本工作资源所在的原运行时
             var runtime = core.runtimeState;
-            // 原身份表中 USDT 内部资产编号
-            int assetId = core.identities.assetId("USDT");
             // 本轮要优先结算的首条原成交请求
             var first = pipelineTrade(line, sequence++, 1);
             // 夹在两笔成交之间的原保险加二十五命令
@@ -366,32 +274,10 @@ class TradingCoreOwnerTest {
                             new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25)));
             // 本轮排在首条或控制命令之后的原成交请求
             var following = pipelineTrade(line, sequence, 3);
-            assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
-                entered.countDown();
-                try {
-                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Control fence release timeout");
-                } catch (/* 阻塞账本等待中断，转测试失败 */ InterruptedException interrupted) { throw new AssertionError(interrupted); }
-            })).isTrue();
-            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            // 本批原消息入队前已收到的响应数量，账本受阻时不能增加
             int before = responses.size();
             try (/* 只供测试发现 Owner 越界读取账户正文的原保护器 */ var guard = new OwnerAccountReadGuard(runtime)) {
                 for (var /* 本轮逐项检查或入队的原协议请求 */ request : List.of(first, control, following))
                     service.acceptCommittedCommand(clientSession(responses), request, 2_000, 2_000);
-                awaitPipelineAccounts(service, List.of(first));
-                assertThat(core.pendingMatching().size()).isEqualTo(1);
-                assertThat(core.pendingMatching().findByCommandId(following.header().commandId())).isNull();
-                assertThat(responses).hasSize(before);
-                assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
-                    observedFees.set(ledger.fee(assetId));
-                    observedInsurance.set(ledger.insurance(assetId));
-                    inspected.countDown();
-                })).isTrue();
-                release.countDown();
-                assertThat(inspected.await(2, TimeUnit.SECONDS)).isTrue();
-                assertThat(observedFees).hasValue(2);
-                assertThat(observedInsurance).hasValue(0);
-                assertThat(responses).hasSize(before);
                 finishCommands(service);
             }
             assertThat(responses).hasSize(before + 3);
@@ -410,99 +296,7 @@ class TradingCoreOwnerTest {
             assertThat(state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> user.totalUnits("USDT")).sum() + 4 + 25)
                     .isEqualTo(40_025);
             assertThat(service.pendingCommandCount()).isZero();
-        } finally { release.countDown(); service.onTerminate(null); }
-    }
-
-    /**
-     * 阻塞并填满账本查询邮箱，两个账户结果就绪后检查资金游标仍指首单且存在可重试本地工作；即使取消独立输入标记，放行后也须先投完资金前缀再回包，最后费用及总资产正确。
-     */
-    @Test
-    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
-    void fullLedgerMailboxKeepsItsDispatchCursorAndRetriesWithoutNewMatcherNotifications() throws Exception {
-        // 参数组合的当前产品线
-        var line = ProductLine.LINEAR_PERPETUAL;
-        // 本用例进程内 Owner 测试辅助，结束时按原生命周期终止
-        var service = new TradingOwnerTestSupport(line);
-        // 模拟会话复制出的原响应字节清单，支持工作线程可见性
-        var responses = new CopyOnWriteArrayList<byte[]>();
-        // 通知测试线程被阻塞的 Lane、Matcher 或账本工作已经进入的门闩
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        // 放行阻塞工作的门闩，各退出路径确保放行
-        var release = new java.util.concurrent.CountDownLatch(1);
-        service.onStart(cluster(), null);
-        try {
-            // 本用例后续可用原来源序号，发送消息时递增
-            long sequence = prepareLedgerPipelineMarkets(service, responses, line);
-            // 当前 Owner 辅助持有的真实业务运行时
-            var core = service.state();
-            // 当前真实账户与账本工作资源所在的原运行时
-            var runtime = core.runtimeState;
-            assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
-                entered.countDown();
-                try {
-                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Full mailbox release timeout");
-                } catch (/* 阻塞账本等待中断，转测试失败 */ InterruptedException interrupted) { throw new AssertionError(interrupted); }
-            })).isTrue();
-            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            // 测试阻塞/填满账本的空查询或原异步只读消息
-            com.surprising.aeron.service.treasury.SystemLedgerLane.Entry query = /* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> { };
-            // 为填满原账本邮箱成功排入的空查询次数，超过八千一百九十二判测试异常
-            int queued = 0;
-            while (runtime.dispatchLedgerQuery(query)) {
-                if (++queued > 8_192) throw new AssertionError("Ledger mailbox did not backpressure");
-            }
-            assertThat(queued).isPositive();
-            // 本轮要优先结算的首条原成交请求
-            var first = pipelineTrade(line, sequence++, 1);
-            // 本轮排在首条或控制命令之后的原成交请求
-            var following = pipelineTrade(line, sequence, 3);
-            // 本批原消息入队前已收到的响应数量，账本受阻时不能增加
-            int before = responses.size();
-            try (/* 只供测试发现 Owner 越界读取账户正文的原保护器 */ var guard = new OwnerAccountReadGuard(runtime)) {
-                for (var /* 本轮逐项检查或入队的原协议请求 */ request : List.of(first, following))
-                    service.acceptCommittedCommand(clientSession(responses), request, 2_000, 2_000);
-                awaitPipelineAccounts(service, List.of(first, following));
-                assertThat(core.pendingMatching().ledgerDispatchHead().command().header().commandId())
-                        .isEqualTo(first.header().commandId());
-                assertThat(core.matchingProgress.hasNotifications()).isFalse();
-                assertThat(core.matchingProgress.hasLocalMatchingWork()).isTrue();
-                assertThat(responses).hasSize(before);
-                // 原账户事实已就绪，即使不标记为独立输入路径，
-                // 首响应交出前也必须把既有资金前缀继续交给账本。
-                PipelineTestAccess.clusterIndependent(core.pendingMatching().findByCommandId(first.header().commandId()), false);
-                PipelineTestAccess.clusterIndependent(core.pendingMatching().findByCommandId(following.header().commandId()), false);
-                release.countDown();
-                // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (core.pendingMatching().ledgerDispatchHead() != null) {
-                    core.commits.dispatchReadyMatcherFinancialSettlements(Long.MAX_VALUE);
-                    if (System.nanoTime() >= deadline) throw new AssertionError("Ledger dispatch still waits for response retirement");
-                    Thread.onSpinWait();
-                }
-                // 账本观察原费用完成后通知测试线程的门闩
-                var inspected = new java.util.concurrent.CountDownLatch(1);
-                // 账本原子观测值或冷状态读出的原 USDT 费用总额
-                var fees = new AtomicLong(-1);
-                // 本账本费用读取使用的 USDT 内部资产编号
-                int asset = core.identities.assetId("USDT");
-                assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> { fees.set(ledger.fee(asset)); inspected.countDown(); })).isTrue();
-                assertThat(inspected.await(2, TimeUnit.SECONDS)).isTrue();
-                assertThat(fees).hasValue(4);
-                assertThat(core.pendingMatching().size()).isEqualTo(2);
-                assertThat(responses).hasSize(before);
-                finishCommands(service);
-            }
-            assertThat(responses).hasSize(before + 2);
-            for (/* 遍历原响应或请求清单的当前下标 */ int index = before; index < responses.size(); index++)
-                assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.get(index)).payload()).commandStatus())
-                        .isEqualTo(ResponseStatus.APPLIED);
-            assertThat(core.pendingMatching().ledgerDispatchHead()).isNull();
-            // 相关原命令完成后取得的已提交冷状态，供资金与订单断言
-            var state = core.tradingState();
-            assertThat(state.treasuryState().feeBalances()).containsEntry("USDT", 4L);
-            assertThat(state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> user.totalUnits("USDT")).sum() + 4).isEqualTo(40_000);
-            assertThat(service.pendingCommandCount()).isZero();
-        } finally { release.countDown(); service.onTerminate(null); }
+        } finally { service.onTerminate(null); }
     }
 
     /**
@@ -610,10 +404,6 @@ class TradingCoreOwnerTest {
         var service = new TradingOwnerTestSupport(line);
         // 模拟会话复制出的原响应字节清单，支持工作线程可见性
         var responses = new CopyOnWriteArrayList<byte[]>();
-        // 通知测试线程被阻塞的 Lane、Matcher 或账本工作已经进入的门闩
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        // 放行阻塞工作的门闩，各退出路径确保放行
-        var release = new java.util.concurrent.CountDownLatch(1);
         service.onStart(cluster(), null);
         try {
             onSessionMessage(service, responses, command(line, CoreMessageType.REGISTER_INSTRUMENT, 1, 0,
@@ -675,48 +465,13 @@ class TradingCoreOwnerTest {
             var runtime = core.runtimeState;
             assertThat(runtime.systemLedgerStarted()).isTrue();
             assertThat(core.laneTopology().accountLaneId(1)).isNotEqualTo(core.laneTopology().accountLaneId(2));
-            assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
-                entered.countDown();
-                try {
-                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Batch Ledger release timeout");
-                } catch (/* 阻塞账本等待中断，转测试失败 */ InterruptedException interrupted) { throw new AssertionError(interrupted); }
-            })).isTrue();
-            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            // 本批原消息入队前已收到的响应数量，账本受阻时不能增加
+            // 本批原消息入队前已收到的响应数量
             int before = responses.size();
             service.acceptCommittedCommand(clientSession(responses), command(line, type, sequence++, 1, payload), 2_000, 2_000);
             service.acceptCommittedCommand(clientSession(responses), command(line, CoreMessageType.PLACE_ORDER, sequence, 1,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9800, "1", CoreOrderSide.BUY,
                             98, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.IOC, false, "batch-ledger-following"))), 2_001, 2_001);
-            // 当前原命令账户/财务结算事件，分别检查发布、账户完成及最终完成
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent event;
-            // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            do {
-                service.pollCommands();
-                // 原撮合环当前按序提交头
-                var head = core.pendingMatching().head();
-                // 当前命令槽原批次状态，参数生成回调中为是否批次的布尔值
-                var batch = head == null ? null : head.orderBatch();
-                event = batch == null ? null : batch.itemSettlementEvent() != null
-                        ? batch.itemSettlementEvent() : batch.settlementEvent();
-                if (event != null && event.requiredLaneMask() != 0
-                        && (event.completedLaneMask() & event.requiredLaneMask()) == event.requiredLaneMask()
-                        && !core.matchingProgress.hasNotifications()) break;
-                if (System.nanoTime() > deadline) throw new AssertionError("Batch Owner did not await Ledger completion");
-                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
-            } while (true);
-            assertThat(event.complete()).isFalse();
-            assertThat(responses).hasSize(before);
-            release.countDown();
-            deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (!event.complete()) {
-                if (System.nanoTime() > deadline) throw new AssertionError("Ledger did not finish batch settlement");
-                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
-            }
-            assertThat(service.ownerCompletionAvailable()).isTrue();
-            assertThat(event.complete()).isTrue();
             finishCommands(service);
             assertThat(responses).hasSize(before + 2);
             // 本轮原批次完成后解码的响应
@@ -757,7 +512,7 @@ class TradingCoreOwnerTest {
                     assertThat(state.user(2).positions().get("1").signedQuantitySteps()).isEqualTo(-20);
                 }
             }
-        } finally { release.countDown(); service.onTerminate(null); }
+        } finally { service.onTerminate(null); }
     }
 
     /**
@@ -1016,7 +771,7 @@ class TradingCoreOwnerTest {
                 assertThat(runtime.laneHandoffEpoch()).isEqualTo(handoff);
                 service.state().assertClusterCallbackComplete();
             }
-        } finally { release.countDown(); service.onTerminate(null); }
+        } finally { service.onTerminate(null); }
     }
 
     /**
@@ -1073,7 +828,7 @@ class TradingCoreOwnerTest {
             assertThat(responses).hasSize(1);
             assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getFirst()).payloadUnsafe()).status())
                     .isEqualTo(ResponseStatus.OK);
-        } finally { release.countDown(); service.onTerminate(null); }
+        } finally { service.onTerminate(null); }
     }
 
     /**

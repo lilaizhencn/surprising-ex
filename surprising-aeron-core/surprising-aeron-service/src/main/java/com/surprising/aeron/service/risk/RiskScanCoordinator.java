@@ -7,7 +7,6 @@ import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.ArrayList;
 import java.util.List;
@@ -15,7 +14,7 @@ import java.util.List;
 /**
  * 风险扫描的跨线程续步：Owner 固定本片市场输入，账本准备各 Lane 的有界用户页，账户 Lane 估值，Owner 按固定顺序分配强平编号，再交原 Lane 写入并提交游标。异步轮询在其他线程未完成时返回 false。
  */
-public final class RiskScanCoordinator implements SystemLedgerLane.Entry {
+public final class RiskScanCoordinator implements TreasuryRuntime.Entry {
     /** 本命令固定的交易运行时，任务完成前按既有控制命令边界稳定风险输入。 */
     private final TradingAccountRuntime runtime;
     /** 本命令共用的业务编号映射，Owner 准备路由和 Lane 估值时使用。 */

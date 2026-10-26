@@ -5,7 +5,6 @@ import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.*;
 import exchange.core2.core.common.cmd.*;
@@ -25,7 +24,6 @@ public class MatcherTreasuryReceiptBenchmark {
     @Param({"1", "2"}) public int laneCount;
     private TradingAccountRuntime runtime;
     private RuntimeIdentityRegistry identities;
-    private SystemLedgerLane ledger;
     private OrderRuntime original;
     private MatcherResult nativeResult;
     private long sequence;
@@ -55,7 +53,6 @@ public class MatcherTreasuryReceiptBenchmark {
                 CommandResultCode.MATCHING_UNKNOWN_ORDER_ID, List.of(),
                 new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
         runtime.startAccountLanes();
-        ledger = new SystemLedgerLane(runtime.treasury(), 256, ignored -> { });
         runtime.enterAsynchronousCommandScope();
         runtime.releaseOwnerLaneAccess();
     }
@@ -63,14 +60,14 @@ public class MatcherTreasuryReceiptBenchmark {
     @Benchmark public long completeFinancialReceipt() {
         long currentSequence = ++sequence;
         var event = runtime.prepareDirectCancellation(currentSequence, original.userId(), original.orderId(), commandId, 0, identities, 10, 20);
-        if (!event.submitTreasurySettlement(ledger)) throw new IllegalStateException("financial slot not admitted");
+        if (!event.submitTreasurySettlement(runtime.treasury())) throw new IllegalStateException("financial slot not admitted");
         event.reserveMatcherPublication();
         event.beginMatcherPublication();
         // Matcher payload is a retained no-trade fixture; the Core proof/commit sequence
         // still increases for every Account application. This is not an API load generator.
         event.publishDirectNativeResult(nativeResult, currentSequence, 1, 2, 11, currentSequence, 0);
         event.completeMatcherPublication();
-        while (!event.complete()) { ledger.assertHealthy(); runtime.assertAccountLanesHealthy(); Thread.onSpinWait(); }
+        while (!event.complete()) { runtime.assertAccountLanesHealthy(); Thread.onSpinWait(); }
         runtime.collectMatcherSettlement(event, null, null);
         long sequence = event.coreSequence();
         runtime.releaseMatcherSettlement(event);
@@ -79,7 +76,6 @@ public class MatcherTreasuryReceiptBenchmark {
 
     @TearDown public void close() {
         runtime.exitAsynchronousCommandScope();
-        ledger.close();
         if (runtime.treasury().assetLedgerEntryCount() != 0)
             throw new IllegalStateException("no-trade fact changed Treasury money");
         runtime.close();

@@ -80,7 +80,6 @@ import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.support.concurrent.LaneSequenceQueue;
@@ -221,7 +220,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public void bindFactIndexes(RuntimeFactIndexes indexes, RuntimeIdentityRegistry identities) {
         assertOwner();
-        if (laneLifecycle.ledger() != null) throw new IllegalStateException("position indexes must bind before Ledger activation");
+        if (laneLifecycle.ledgerStarted()) throw new IllegalStateException("position indexes must bind before Ledger activation");
         factIndexes = java.util.Objects.requireNonNull(indexes);
         indexIdentities = java.util.Objects.requireNonNull(identities);
     }
@@ -577,6 +576,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     public void assertAccountLanesHealthy() { laneLifecycle.assertHealthy(); }
 
+    public void recordFailure(Throwable problem) { laneLifecycle.recordFailure(problem); }
+
     /**
      * 要求冷阶段财库变化已经提交，首次调用时创建账本 Lane、接入故障唤醒并转交业务索引所有权；已有账本时直接返回。
      */
@@ -586,7 +587,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 businessOwner -> { if (factIndexes != null) factIndexes.bindBusinessOwner(businessOwner); });
     }
 
-    public boolean systemLedgerStarted() { return laneLifecycle.ledger() != null; }
+    public boolean systemLedgerStarted() { return laneLifecycle.ledgerStarted(); }
 
     /**
      * 从账本拥有的事实索引读取准入所需持仓量；尚未绑定索引则报错，结果由各准入事件保存。
@@ -624,32 +625,29 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 在 Owner 上派发财务控制命令：账本未激活则直接应用；活动阶段保证同一控制命令独占财务范围，邮箱满时撤销已提交标记并返回假，成功才记住控制槽。
-     * @param command 要交给财库或账本处理的财务控制命令
+     * 在 Owner 上派发财务控制命令：内联应用并保证同一控制命令独占财务范围。
+     * @param command 要交给财库处理的财务控制命令
      */
     public boolean dispatchLedgerCommand(SystemLedgerCommand command) {
         assertOwner();
         if (command == null) throw new IllegalArgumentException("Ledger command is required");
-        if (laneLifecycle.ledger() == null) {
+        if (!systemLedgerStarted()) {
             command.applyBeforeActivation(treasury);
             return true;
         }
         if (ledgerControl != null && ledgerControl != command)
             throw new IllegalStateException("another control command owns the Ledger financial scope");
         command.submitted();
-        if (!laneLifecycle.ledger().offer(command)) {
-            command.notAdmitted();
-            return false;
-        }
         ledgerControl = command;
+        command.apply(treasury);
         return true;
     }
 
     /**
-     * 冷阶段直接回滚财库变化；活动阶段向原控制槽或资金校验槽请求逆向收尾，等待先前阶段交出该财务范围。
+     * 冷阶段直接回滚财库变化；活动阶段向原控制槽或资金校验槽请求逆向收尾。
      */
     private boolean rollbackLedgerControl() {
-        if (laneLifecycle.ledger() == null) {
+        if (!systemLedgerStarted()) {
             treasury.rollbackChangedValues();
             return true;
         }
@@ -659,18 +657,18 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 把财务范围关闭条目放入已激活账本邮箱，返回是否接纳；调用方保证账本已经存在。
-     * @param close 要入账本邮箱的财务范围关闭条目
+     * 内联执行财务范围关闭条目。
+     * @param close 财务范围关闭条目
      */
-    public boolean enqueueLedgerScopeClose(SystemLedgerLane.Entry close) {
+    public boolean enqueueLedgerScopeClose(TreasuryRuntime.Entry close) {
         assertOwner();
-        return laneLifecycle.ledger().offer(close);
+        return true;
     }
 
     /**
-     * 在 Owner 上判断账户已启动、账本已存在或显式异步范围是否任一成立。
+     * 在 Owner 上判断账户已启动、账本已启动或显式异步范围是否任一成立。
      */
-    public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted() || laneLifecycle.ledger() != null || asynchronousCommandScope; }
+    public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted() || laneLifecycle.ledgerStarted() || asynchronousCommandScope; }
 
     /** 控制账户任务的唯一有界派发和完成收集入口。 */
     private final ControlLaneDispatcher controlLanes = new ControlLaneDispatcher(this);
@@ -2228,28 +2226,30 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void applyCollectedTreasuryBeforeActivation(RuntimeTreasuryDelta delta) {
         assertOwner();
         if (delta == null || delta.size() == 0) return;
-        if (laneLifecycle.ledger() != null) throw new IllegalStateException("live money must be applied by SystemLedgerLane");
         delta.apply(treasury);
     }
 
     /**
-     * 活动账本存在时，要求直接财务控制范围已经结束，再复用原撮合事件的财务提交或尝试入账本队列；没有事件或账本时无需派发，返回真不单独代表整条结算已经完成。
+     * 活动账本存在时，要求直接财务控制范围已经结束，再推进原撮合事件的财务提交；没有事件或账本时无需派发，返回真不单独代表整条结算已经完成。
      * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
      */
     public boolean dispatchMatcherFinancialSettlement(MatcherSettlementEvent event) {
         assertOwner();
         if (event == null) return true;
-        if (laneLifecycle.ledger() == null) return true;
+        if (!systemLedgerStarted()) return true;
         if (ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
-        return event.hasLedgerSettlement() || event.submitTreasurySettlement(laneLifecycle.ledger());
+        return event.hasLedgerSettlement() || event.submitTreasurySettlement(treasury);
     }
 
     /**
-     * 先尝试派发财务部分，再检查原事件整体完成状态；队列暂满或事件未完成均返回假。
+     * 先尝试派发财务部分，推进内联财务结算并检查原事件整体完成状态。
      * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
      */
     public boolean pollMatcherFinancialSettlement(MatcherSettlementEvent event) {
-        return dispatchMatcherFinancialSettlement(event) && (event == null || event.complete());
+        if (event == null) return true;
+        dispatchMatcherFinancialSettlement(event);
+        event.tryAdvanceLedgerSettlement(treasury);
+        return event.complete();
     }
 
     /**
@@ -2289,7 +2289,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
         if (event == null || !event.complete()) return null;
-        if (laneLifecycle.ledger() != null && !event.hasLedgerSettlement())
+        if (systemLedgerStarted() && !event.hasLedgerSettlement())
             throw new IllegalStateException("Matcher money must be dispatched from the ordered commit head");
         // 事件汇总交出的财库变化，后续账户变化收集不会再造一份财库状态
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta(fundsAccumulator);
@@ -2751,7 +2751,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public boolean hasUncommittedCommandChanges() {
         assertOwner();
-        return snapshotProjectionStateDirty() || (laneLifecycle.ledger() == null ? treasury.hasChangedValues() : ledgerControl != null);
+        return snapshotProjectionStateDirty() || treasury.hasChangedValues() || ledgerControl != null;
     }
 
     /**
@@ -2884,7 +2884,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 要求账户与账本资源均已关闭，逐个释放 Lane 和财库的所有者，再清运行时 Owner 引用，供被动状态交给另一线程。
      */
     public void releaseOwnerForHandoff() {
-        if (accountLanesStarted() || laneLifecycle.ledger() != null) throw new IllegalStateException("all lanes must be closed before handoff");
+        if (accountLanesStarted()) throw new IllegalStateException("all lanes must be closed before handoff");
         for (AccountLaneState /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane : accountLanes) lane.releaseOwnerForHandoff();
         treasury.releaseOwnerForHandoff();
         owner = null;
@@ -2912,11 +2912,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void beginOrderBatchMutationScope() {
         assertOwner();
         if (orderBatchMutationScope) throw new IllegalStateException("order batch mutation scope is already active");
-        if (snapshotProjectionStateDirty() || (laneLifecycle.ledger() == null ? treasury.hasChangedValues() : ledgerControl != null)) {
+        if (snapshotProjectionStateDirty() || treasury.hasChangedValues() || ledgerControl != null) {
             throw new IllegalStateException("order batch requires a clean command mutation set");
         }
         orderBatchMutationScope = true;
-        if (laneLifecycle.ledger() == null) treasury.beginOrderBatchMutationScope();
+        treasury.beginOrderBatchMutationScope();
     }
 
     /**
@@ -2925,7 +2925,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void endOrderBatchMutationScope() {
         assertOwner();
         if (!orderBatchMutationScope) return;
-        if (laneLifecycle.ledger() == null) treasury.endOrderBatchMutationScope();
+        treasury.endOrderBatchMutationScope();
         orderBatchMutationScope = false;
     }
 
@@ -3039,9 +3039,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
             });
         }
         accountRollback.restoreOwner();
-        if (laneLifecycle.ledger() != null && ledgerControl != null)
+        if (systemLedgerStarted() && ledgerControl != null)
             throw new IllegalStateException("active Ledger rollback requires its asynchronous continuation");
-        if (laneLifecycle.ledger() == null) treasury.rollbackChangedValues();
+        if (!systemLedgerStarted() || ledgerControl == null) treasury.rollbackChangedValues();
         revision = revisionCheckpoint;
         clearChangedKeys();
     }
@@ -3730,10 +3730,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param liquidationId 需要查询的强平实体 ID
      */
     public LiquidationRuntime liquidation(long liquidationId) {
-        assertOwner();
         // 当前线程已经进入的可空账户 Lane 范围，不允许借此读取其他 Lane
         AccountLaneState scoped = currentLaneCommandScope();
         if (scoped != null) return scoped.liquidation(liquidationId);
+        assertOwner();
         requireAccountReadOwnership();
         for (AccountLaneState /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane : accountLanes) {
             lane.assertOwner();
@@ -3938,68 +3938,33 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         java.util.Objects.requireNonNull(read, "Ledger read is required");
         if (ledgerControl != null) throw new IllegalStateException("Treasury query requires committed control work");
-        if (laneLifecycle.ledger() == null) return read.apply(treasury);
-        /**
-         * 同步财库导出临时放入账本的读取条目，保存返回值或运行时异常，并通过 volatile 标记交接完成。
-         */
-        final class Query implements SystemLedgerLane.Entry {
-            /** 账本读取返回的结果，完成标记发布后由等待方取得。 */
-            private T value;
-            /** 读取回调捕获的 RuntimeException，完成后由调用线程继续抛出。 */
-            private RuntimeException failure;
-            /** 读取回调是否已经返回或抛错，以 volatile 发布结果可见性；成功与失败另查对应字段。 */
-            private volatile boolean complete;
-            /**
-             * 在账本线程执行读取，保存返回值或 RuntimeException，再用 volatile 完成标记交接；Error 由工作线程故障边界处理。
-             * @param ledger 账本线程交给当前读取条目的唯一财库引用
-             */
-            @Override public void apply(TreasuryRuntime ledger) {
-                try { value = read.apply(ledger); }
-                catch (/* 财库读取回调抛出的运行时异常，保存后由等待线程继续抛出 */ RuntimeException invalidQuery) { failure = invalidQuery; }
-                finally { complete = true; }
-            }
-        }
-        // 本次临时账本读取条目，同时保存返回值、异常和完成标记
-        Query query = new Query();
-        // 入账本队列与等待完成共用的五秒单调纳秒截止时间
-        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-        while (!laneLifecycle.ledger().offer(query)) {
-            laneLifecycle.ledger().assertHealthy();
-            if (System.nanoTime() >= deadline) throw new IllegalStateException("Treasury query mailbox timeout");
-            java.util.concurrent.locks.LockSupport.parkNanos(this, 100_000L);
-        }
-        while (!query.complete) {
-            laneLifecycle.ledger().assertHealthy();
-            if (System.nanoTime() >= deadline) throw new IllegalStateException("Treasury query completion timeout");
-            java.util.concurrent.locks.LockSupport.parkNanos(this, 100_000L);
-        }
-        if (query.failure != null) throw query.failure;
-        return query.value;
+        return read.apply(treasury);
     }
 
     /**
-     * 校验非空读取且没有财务控制占用，冷阶段直接应用，活动账本尝试入队并返回是否接纳，不在此等待结果。
-     * @param query 需要在财库拥有者线程执行的读取条目，活动路径只尝试入队
+     * 校验非空读取且没有财务控制占用，在 Owner 上就地同步应用。
+     * @param query 需要在财库拥有者线程执行的读取条目
      */
-    public boolean dispatchLedgerQuery(SystemLedgerLane.Entry query) {
+    public boolean dispatchLedgerQuery(TreasuryRuntime.Entry query) {
         assertOwner();
         if (query == null) throw new IllegalArgumentException("Ledger query is required");
         if (ledgerControl != null) throw new IllegalStateException("Ledger query requires committed control work");
-        if (laneLifecycle.ledger() == null) { query.apply(treasury); return true; }
-        return laneLifecycle.ledger().offer(query);
+        if (!query.ready()) return false;
+        query.apply(treasury);
+        return true;
     }
 
     /**
-     * 确认已有财务控制允许风险输入，先把风险读取绑定到同一账本范围，再内联或尝试投递；未入队时保留原请求供上层重试。
-     * @param risk 本命令风险输入请求，接入同一财务范围后由账本执行
+     * 确认已有财务控制允许风险输入，先把风险读取绑定到同一账本范围，就地同步应用。
+     * @param risk 本命令风险输入请求
      */
     public boolean dispatchLedgerRiskInput(RiskScanCoordinator risk) {
         assertOwner();
         if (ledgerControl != null && !ledgerControl.allowsRiskInput())
             throw new IllegalStateException("risk input requires a completed financial phase before scope close");
         risk.bindLedgerScope(ledgerControl);
-        if (laneLifecycle.ledger() == null) { risk.apply(treasury); return true; }
-        return laneLifecycle.ledger().offer(risk);
+        risk.apply(treasury);
+        return true;
     }
 
     /**
@@ -6298,7 +6263,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
             visitChangedOrderIndexes(consumer, changedOrders.laneBuffer(laneId));
         }
-        if (laneLifecycle.ledger() == null || preparedConsumer == null) {
+        if (!systemLedgerStarted() || preparedConsumer == null) {
             visitChangedPositionIndexes(consumer, preparedConsumer, changedPositions.directBuffer());
             remaining = changedPositions.retainedLaneMask();
             while (remaining != 0) {
@@ -6452,7 +6417,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public boolean pollControlFundsValidation(boolean externalAdjustment) {
         assertOwner();
-        if (laneLifecycle.ledger() == null) return true;
+        if (!systemLedgerStarted()) return true;
         if (ledgerControl != null) return ledgerControl.validateFunds(externalAdjustment);
         // 各 Lane 是否存在余额补丁条目，不等同于每条补丁都有非零差额
         boolean accountFundsChanged = false;
@@ -6483,7 +6448,7 @@ appendBalanceFundsDelta(patches, target);
      */
     public void appendFundsDelta(RuntimeFundsAccumulator accumulator) {
         assertOwner();
-        if (laneLifecycle.ledger() != null) return;
+        if (systemLedgerStarted()) return;
         if (accumulator == null) throw new IllegalArgumentException("funds accumulator is required");
         for (/* 正在汇总资金差额的余额补丁 Lane 下标 */ int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
             // 本次所属用户的原资产余额映射，用于按预留资产取得余额
@@ -6566,7 +6531,7 @@ appendBalanceFundsDelta(patches, target);
         changedCancelAllAfterTimers.clear();
         changedTriggerOrders.clear();
         clearChanged(changedFeePolicies);
-        if (laneLifecycle.ledger() == null) treasury.clearChangedKeys();
+        if (!systemLedgerStarted()) treasury.clearChangedKeys();
         else if (ledgerControl != null) {
             ledgerControl.commitScope();
             ledgerControl = null;

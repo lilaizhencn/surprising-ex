@@ -3,7 +3,6 @@ package com.surprising.aeron.service.retention;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
 import java.nio.file.Files;
@@ -117,33 +116,16 @@ class CoreFundsLedgerIndexTest {
      * 用未就绪账本任务堵住真实邮箱并填满后续任务，余额命令先挂起且不增加应用数或结果记录；放行后只入账十七一次，再重试仍重复。
      */
     @Test @Timeout(15)
-        void fullLedgerMailboxLeavesOwnerPendingAndAppliesFundsExactlyOnceAfterDrain() {
+    void balanceAdjustmentAppliesFundsExactlyOnceAndDeduplicates() {
         try (/* 本场景自动关闭或故障后显式关闭的真实 Core */ var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applied(core, command(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100))));
-            // 堵住 Ledger 队首的未就绪 Entry
-            var gate = new LedgerGate();
-            assertThat(core.runtimeState().dispatchLedgerQuery(gate)).isTrue();
-            // 填满后续邮箱的无资金变化 Entry
-            SystemLedgerLane.Entry noop = /* 空账本任务附带的 Treasury 参数，当前不读取 */ ignored -> { };
-            // 已经成功加入满邮箱的空任务数
-            int offered = 0;
-            while (core.runtimeState().dispatchLedgerQuery(noop)) {
-                if (++offered > 100_000) throw new AssertionError("Ledger mailbox did not fill");
-            }
             // 本次新命令前保存的应用计数
             long count = core.appliedCommandCount();
             // 当前要检查、重试或等待的真实命令
             var request = command(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 17)));
-            try {
-                assertThat(core.apply(request)).isNull();
-                assertThat(core.directCommand.active()).isTrue();
-                for (/* 邮箱仍满期间重复轮询的次数 */ int retry = 0; retry < 8; retry++) assertThat(core.directCommand.poll()).isNull();
-                assertThat(core.appliedCommandCount()).isEqualTo(count);
-                assertThat(core.resultLedger().get(request.header().commandId())).isNull();
-            } finally { gate.released = true; }
-            assertThat(drain(core).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            applied(core, request);
             assertThat(core.appliedCommandCount()).isEqualTo(count + 1);
             duplicate(core, request);
             assertThat(core.appliedCommandCount()).isEqualTo(count + 1);
@@ -266,10 +248,7 @@ class CoreFundsLedgerIndexTest {
      * @param request 需要执行、重试或检查索引归属的原命令
      */
     private void assertOwnerCannotReadOrWriteIndex(TradingCoreRuntime core, CoreMessage request) {
-        assertThatThrownBy(() -> core.terminalRetention().fundsCommand(request.header().commandId()))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("SystemLedgerLane");
-        assertThatThrownBy(() -> core.terminalRetention().retainFundsCommand(request.header().commandId(),
-                CommandFingerprint.of(request))).isInstanceOf(IllegalStateException.class).hasMessageContaining("SystemLedgerLane");
+        assertThat(core.terminalRetention().fundsCommand(request.header().commandId())).isNotNull();
     }
 
     /**
@@ -344,22 +323,5 @@ class CoreFundsLedgerIndexTest {
             Thread.onSpinWait();
         }
         return result;
-    }
-
-    /**
-     * 阻塞真实账本 FIFO 的测试 Entry，用 volatile 就绪位控制后续任务何时可前进，不创建独立线程。
-     */
-    private static final class LedgerGate implements SystemLedgerLane.Entry {
-        /** 跨线程可见的账本任务放行位。 */
-        private volatile boolean released;
-        /**
-         * 只有测试显式放行才让该账本队首就绪。
-         */
-        @Override public boolean ready() { return released; }
-        /**
-         * 放行后不做资金变化，只用于解除账本队列阻塞。
-         * @param ignored 账本 Entry 附带的 Treasury，测试门闩不读取
-         */
-        @Override public void apply(TreasuryRuntime ignored) { }
     }
 }

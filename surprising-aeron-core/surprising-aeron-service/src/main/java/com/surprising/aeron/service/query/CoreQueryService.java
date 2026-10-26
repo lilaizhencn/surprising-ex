@@ -19,7 +19,6 @@ import com.surprising.aeron.service.query.state.RuntimeLiquidationQueryService;
 import com.surprising.aeron.service.query.state.RuntimeOperationalQueryService;
 import com.surprising.aeron.service.query.state.RuntimeStateQueryService;
 import com.surprising.aeron.service.treasury.InsuranceAllocationPolicy;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -138,7 +137,7 @@ public final class CoreQueryService {
      * 一次下单预检的查询任务：必要时先由账本提供未平仓量，再由用户所属 Lane 检查订单和所需预留，只返回估算结果，不创建真实订单或冻结。
      */
     private final class PreflightQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command,
-            java.util.function.Function<AccountLaneState, CoreResponse>, SystemLedgerLane.Entry {
+            java.util.function.Function<AccountLaneState, CoreResponse>, TreasuryRuntime.Entry {
         /**
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
          * userId：必须存在的预检用户编号，只在其所属 Lane 读取账户。
@@ -703,7 +702,7 @@ public final class CoreQueryService {
     /**
      * 一次强平执行、保险或 ADL 工作页的交接任务。Owner 固定候选和市场输入，Lane 读取计划事实，账本等待所有 Lane 后计算保险建议并编码有界页，不实际执行强平或赔付。
      */
-    private final class LiquidationWorkQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
+    private final class LiquidationWorkQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command, TreasuryRuntime.Entry {
         /**
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
          * laneMask：本次任务全部目标账户 Lane 的位集合，用于投递和完成条件核对。
@@ -781,7 +780,7 @@ public final class CoreQueryService {
                 for (/* 当前检查的固定候选槽，下标同时定位所属 Lane、计划编号和市场输入。 */ int index = 0; index < ids.length; index++) {
                     if (lanes[index] != owned.laneId()) continue;
                     // 所属账户当前保留的强平计划，已经不存在时跳过该候选。
-                    var value = owner.runtimeState().liquidation(ids[index]);
+                    var value = owned.liquidation(ids[index]);
                     if (value == null) continue;
                     // 工作页类型，决定构造执行动作、保险缺口还是 ADL 缺口。
                     var purpose = requested.purpose();
@@ -908,7 +907,7 @@ public final class CoreQueryService {
      * 参数 maintenance：查询进入时取得的合约维护状态，随用户页一起编码返回
      */
     @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-    private final class LedgerQuery extends CompletableFuture<QueryResult> implements SystemLedgerLane.Entry {
+    private final class LedgerQuery extends CompletableFuture<QueryResult> implements TreasuryRuntime.Entry {
         /** 任务创建时固定的已应用命令计数，响应沿用此值。 */
         private final long commandCount;
         /** 任务固定的协议查询类型，决定读取对象和响应编码。 */

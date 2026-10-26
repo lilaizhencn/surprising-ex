@@ -17,7 +17,7 @@ import java.util.function.Function;
  * 一次风险快照或 ADL 候选查询的线程交接对象：Owner 固定市场输入，Ledger 选择有界路由，各账户 Lane 读取自己的状态，最后完成的 Lane 合并并编码响应。只保留本次路由和查询 DTO，不建立账户镜像。
  */
 final class RiskAccountQuery extends java.util.concurrent.CompletableFuture<CoreQueryService.QueryResult> implements SettlementLaneWorker.Command, Function<AccountLaneState, Void>,
-        com.surprising.aeron.service.treasury.SystemLedgerLane.Entry {
+        com.surprising.aeron.service.treasury.TreasuryRuntime.Entry {
     /** 提供账本、账户投递及查询结果登记的所属运行时，不代表任意线程都能直接访问其账户。 */
     private final TradingCoreRuntime owner;
     /**

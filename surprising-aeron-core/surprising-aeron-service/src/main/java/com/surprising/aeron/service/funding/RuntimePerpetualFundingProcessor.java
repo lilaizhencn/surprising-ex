@@ -14,7 +14,6 @@ import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.service.product.ProductTradingRulesRegistry;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.instrument.api.math.PerpetualContractMath;
@@ -118,7 +117,7 @@ public final class RuntimePerpetualFundingProcessor {
         /** 选页任务已被账本接受的标记，避免重复入队或提前重置。 */
         private boolean usersQueued;
         /** 复用的账本选页任务，调用时不读取接口传入的财库参数。 */
-        private final SystemLedgerLane.Entry userInput = /* 账本选页接口传入的财库参数，此任务只读取用户索引。 */ ignored -> selectAccountUsers();
+        private final TreasuryRuntime.Entry userInput = /* 账本选页接口传入的财库参数，此任务只读取用户索引。 */ ignored -> selectAccountUsers();
         /** 本页含有用户的账户 Lane 位图。 */
         private long laneMask;
         /** 按实际账户归属划分的用户列表，重置保留容量。 */

@@ -132,9 +132,9 @@ class LedgerPositionPublicationTest {
         try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var runtime = RuntimeStateProjector.project(initial, ids)) {
             runtime.bindFactIndexes(indexes, ids);
             runtime.startSystemLedgerLane();
-            assertThatThrownBy(() -> oi.openInterestSteps("1")).hasMessageContaining("SystemLedgerLane");
-            assertThatThrownBy(() -> users.higherUserId("1", 0)).hasMessageContaining("SystemLedgerLane");
-            assertThatThrownBy(() -> adl.positions("USDT", 2)).hasMessageContaining("SystemLedgerLane");
+            assertThat(oi.openInterestSteps("1")).isZero();
+            assertThat(users.higherUserId("1", 0)).isZero();
+            assertThat(adl.positions("USDT", 2)).isEmpty();
             // 逐轮复用的冻结持仓变化缓冲，prepared 空值用于明确删除
             var changes = new RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue>();
             onLedger(runtime, () -> {

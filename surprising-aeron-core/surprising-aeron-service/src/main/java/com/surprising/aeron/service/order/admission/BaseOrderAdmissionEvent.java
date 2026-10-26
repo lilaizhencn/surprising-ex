@@ -1,7 +1,7 @@
 package com.surprising.aeron.service.order.admission;
 
 import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
+import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.List;
 
 /**
@@ -9,7 +9,7 @@ import java.util.List;
  * 统一管理账本 OI 异步输入状态、完成标记、业务拒绝异常以及前置撤单列表。
  */
 public abstract class BaseOrderAdmissionEvent extends ResolvedPlaceOrder
-        implements SettlementLaneWorker.Command, SystemLedgerLane.Entry {
+        implements SettlementLaneWorker.Command, TreasuryRuntime.Entry {
 
     /** 账本准备的币对 OI 数量步数，账户准入用它检查比例限额。 */
     protected long openInterestSteps;

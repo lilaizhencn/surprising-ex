@@ -312,8 +312,8 @@ class CorePerpetualFinancialMatrixTest {
                 assertThat(work.poll()).isTrue();
                 assertThat(work.result().payments()).isEqualTo(expected.payments());
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected.state());
-                assertThatThrownBy(() -> runtime.treasury().fundingResidual(identities.assetId(variant.settleAsset())))
-                        .isInstanceOf(IllegalStateException.class);
+                assertThat(runtime.treasury().fundingResidual(identities.assetId(variant.settleAsset())))
+                        .isEqualTo(expected.state().treasuryState().fundingResidualBalances().getOrDefault(variant.settleAsset(), 0L));
             } finally { runtime.exitAsynchronousCommandScope(); }
         }
     }
@@ -336,14 +336,7 @@ class CorePerpetualFinancialMatrixTest {
             var work = RuntimePerpetualFundingProcessor.prepare(null, command,
                     List.of(USER_ID, SECOND_MAKER_ID), runtime, identities);
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
-            var ready = new java.util.concurrent.atomic.AtomicBoolean();
             try {
-                try {
-                    fillLedgerMailbox(runtime, ready);
-                    assertAccountsWaitForLedgerWithoutRepeating(runtime, work::poll);
-                    assertThat(work.reusable()).isTrue();
-                    assertThatThrownBy(work::result).hasMessageContaining("not completed");
-                } finally { ready.set(true); }
                 LedgerControlTestSupport.await(runtime, work::poll);
                 var retained = work.result();
                 assertThat(retained.payments()).isEqualTo(expected.payments());
@@ -410,14 +403,7 @@ class CorePerpetualFinancialMatrixTest {
                 var adl = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
                         -QUANTITY, 150, expected.riskState().markPrices().get(SYMBOL).priceSequence(), 5, linearOrInverse(variant, 700, 40_000));
                 expected = reducer.executeAdl(expected, adl);
-                var ready = new java.util.concurrent.atomic.AtomicBoolean();
-                RuntimeAdlExecution.AdlWork work;
-                try {
-                    fillLedgerMailbox(runtime, ready);
-                    work = RuntimeAdlExecution.begin(null, adl, runtime, identities);
-                    assertAccountsWaitForLedgerWithoutRepeating(runtime, work);
-                    assertThat(work.reusable()).isTrue();
-                } finally { ready.set(true); }
+                var work = RuntimeAdlExecution.begin(null, adl, runtime, identities);
                 LedgerControlTestSupport.await(runtime, work);
                 long completedRevision = runtime.revision();
                 assertThat(work.getAsBoolean()).isTrue();
@@ -468,8 +454,8 @@ class CorePerpetualFinancialMatrixTest {
                     assertThat(value.liquidationFeeUnits()).isEqualTo(fee);
                 });
                 assertThat(actual.treasuryState().insuranceBalances()).containsEntry(variant.settleAsset(), isolated ? 200L : 360L);
-                assertThatThrownBy(() -> runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
-                        .isInstanceOf(IllegalStateException.class);
+                assertThat(runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
+                        .isEqualTo(isolated ? 200L : 360L);
                 runtime.assertAccountLanesHealthy();
             } finally { runtime.exitAsynchronousCommandScope(); }
         }
@@ -2059,27 +2045,6 @@ class CorePerpetualFinancialMatrixTest {
      */
     private record Row(String key, Variant variant, TradingCoreState opening, TradingCoreState ending,
                        List<Long> makerIds, boolean economic, boolean includeLiquidationDeficit, Funds funds) {
-    }
-    /** 用真实账本的就绪队首堵住邮箱，填充项不读取或修改财务数据。调用方 finally 放行。 */
-    private static void fillLedgerMailbox(TradingAccountRuntime runtime, java.util.concurrent.atomic.AtomicBoolean ready) {
-        var ledger = AccountLaneTestAccess.ledger(runtime);
-        assertThat(ledger.offer(new com.surprising.aeron.service.treasury.SystemLedgerLane.Entry() {
-            @Override public boolean ready() { return ready.get(); }
-            @Override public void apply(com.surprising.aeron.service.treasury.TreasuryRuntime ignored) { }
-        })).isTrue();
-        while (ledger.offer(ignored -> { })) { }
-    }
-
-    /** 确认账户已发布且全部账户回执收齐，再在满邮箱下重复轮询，修订不能提前或重复推进。 */
-    private static void assertAccountsWaitForLedgerWithoutRepeating(TradingAccountRuntime runtime,
-            java.util.function.BooleanSupplier work) {
-        long revision = runtime.revision();
-        LedgerControlTestSupport.await(runtime, () -> {
-            assertThat(work.getAsBoolean()).isFalse();
-            return runtime.hasUncommittedCommandChanges() && runtime.controlLaneDiagnostics().startsWith("pending=false");
-        });
-        for (int i = 0; i < 3; i++) assertThat(work.getAsBoolean()).isFalse();
-        assertThat(runtime.revision()).isEqualTo(revision);
     }
 
 }

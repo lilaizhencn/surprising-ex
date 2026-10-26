@@ -2,7 +2,6 @@ package com.surprising.aeron.service.settlement;
 
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitEvent;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -95,33 +94,26 @@ class OrderBatchSettlementWaitTest {
         var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         // 两个账户完成后由账本空任务释放的门闩。
         var done = new java.util.concurrent.CountDownLatch(1);
-        try (/* 执行只读 readiness 与空财务任务的真实系统账本线程，退出时关闭。 */ var ledger = new SystemLedgerLane(new TreasuryRuntime(), 256, failure::set)) {
-            assertThat(ledger.offer(/* 只读取模拟账户完成位的测试账本任务，就绪后通知门闩，不执行真实账户或财务更新。 */ new SystemLedgerLane.Entry() {
-                /**
-                 * 账本线程只调用事件的账户完成检查，不运行账户结算，也不写 Owner 完成缓存。
-                 */
-                @Override public boolean ready() { return event.accountLanesCompleteForLedger(); }
-                /**
-                 * 两个账户标记都完成后只释放测试门闩，证明账本任务被放行，不修改财库。
-                 * @param actual 账本任务收到的实际 Treasury，本任务只通知完成而不读写它
-                 */
-                @Override public void apply(TreasuryRuntime actual) { done.countDown(); }
-            })).isTrue();
-            try {
-                assertThat(event.accountLanesCompleteForLedger()).isFalse();
-                assertThat(cache.getLong(event)).isZero();
-                longs.setRelease(slots, 0, 1L);
-                assertThat(event.accountLanesCompleteForLedger()).isFalse();
-                assertThat(cache.getLong(event)).isZero();
-                assertThat(done.getCount()).isOne();
-            } finally { longs.setRelease(slots, 16, 1L); }
-            assertThat(done.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-            assertThat(failure.get()).isNull();
-            assertThat(event.accountLanesCompleteForLedger()).isTrue();
+        var thread = new Thread(() -> {
+            while (!event.accountLanesCompleteForLedger()) Thread.onSpinWait();
+            done.countDown();
+        });
+        thread.start();
+        try {
+            assertThat(event.accountLanesCompleteForLedger()).isFalse();
             assertThat(cache.getLong(event)).isZero();
-            assertThat(event.completedLaneMask()).isEqualTo(3);
-            assertThat(cache.getLong(event)).isEqualTo(3);
-        }
+            longs.setRelease(slots, 0, 1L);
+            assertThat(event.accountLanesCompleteForLedger()).isFalse();
+            assertThat(cache.getLong(event)).isZero();
+            assertThat(done.getCount()).isOne();
+        } finally { longs.setRelease(slots, 16, 1L); }
+        assertThat(done.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        thread.join(3_000);
+        assertThat(failure.get()).isNull();
+        assertThat(event.accountLanesCompleteForLedger()).isTrue();
+        assertThat(cache.getLong(event)).isZero();
+        assertThat(event.completedLaneMask()).isEqualTo(3);
+        assertThat(cache.getLong(event)).isEqualTo(3);
         reset.invoke(event, 2);
         assertThat(event.accountLanesCompleteForLedger()).isFalse();
         assertThat(cache.getLong(event)).isZero();

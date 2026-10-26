@@ -3,7 +3,6 @@ package com.surprising.aeron.bootstrap.account;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -21,7 +20,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     private volatile long handoffEpoch;
     private boolean handoffRequested;
     private long handoffDeadline;
-    private SystemLedgerLane ledger;
+    private boolean ledgerStarted;
     private Consumer<Thread> ledgerOwner;
 
     public AccountLaneLifecycle(AccountLaneState[] lanes, LaneTopology topology, Runnable assertOwner) {
@@ -34,7 +33,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     public boolean started() { return started; }
     public boolean ownerHasAccess() { return ownerHasAccess; }
     public long handoffEpoch() { return handoffEpoch; }
-    public SystemLedgerLane ledger() { return ledger; }
+    public boolean ledgerStarted() { return ledgerStarted; }
 
     /** 只借出指定 Lane 的工作入口，不暴露可替换的资源数组；队列仍校验各生产者契约。 */
     public SettlementLaneWorker worker(int laneId) { return workers[laneId]; }
@@ -58,12 +57,12 @@ public final class AccountLaneLifecycle implements AutoCloseable {
 
     public void startLedger(TreasuryRuntime treasury, int capacity, Consumer<Thread> bindBusinessOwner) {
         assertOwner.run();
-        if (ledger != null) return;
+        if (ledgerStarted) return;
         if (treasury.hasChangedValues())
             throw new IllegalStateException("Ledger activation requires committed Treasury");
         ledgerOwner = bindBusinessOwner;
-        ledger = new SystemLedgerLane(treasury, capacity, this::recordFailure);
-        bindBusinessOwner.accept(ledger.thread());
+        bindBusinessOwner.accept(Thread.currentThread());
+        ledgerStarted = true;
     }
 
     /** 非阻塞取得所有账户 Lane；完成标记是事实来源，轮次仅表示本次交接。 */
@@ -108,7 +107,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
         if (problem != null) throw new IllegalStateException("account lane failed", problem);
     }
 
-    private void recordFailure(Throwable problem) {
+    public void recordFailure(Throwable problem) {
         failure.compareAndSet(null, problem);
     }
 
@@ -120,7 +119,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     public boolean workersStopped() {
         for (SettlementLaneWorker worker : workers)
             if (worker != null && worker.thread().isAlive()) return false;
-        return ledger == null || !ledger.thread().isAlive();
+        return true;
     }
 
     @Override
@@ -136,16 +135,12 @@ public final class AccountLaneLifecycle implements AutoCloseable {
                 else if (cleanup != problem) problem.addSuppressed(cleanup);
             }
         }
-        try { if (ledger != null) ledger.close(); }
-        catch (RuntimeException | Error cleanup) {
-            if (problem == null) problem = cleanup;
-            else if (cleanup != problem) problem.addSuppressed(cleanup);
-        } finally {
-            if (ledger != null && !ledger.thread().isAlive()) {
-                ledgerOwner.accept(null);
-                ledger = null;
-            }
+        if (ledgerStarted) {
+            if (ledgerOwner != null) ledgerOwner.accept(null);
+            ledgerStarted = false;
         }
+        Throwable unhealthy = failure.get();
+        if (problem == null && unhealthy != null) problem = unhealthy;
         if (problem instanceof Error error) throw error;
         if (problem != null) throw new IllegalStateException("Core workers stopped with a failure", problem);
     }

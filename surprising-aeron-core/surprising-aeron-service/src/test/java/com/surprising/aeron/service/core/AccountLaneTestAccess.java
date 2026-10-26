@@ -1,10 +1,8 @@
 package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 资源故障注入和清理仅供测试，生产不暴露可变资源数组。 */
 public final class AccountLaneTestAccess {
     private AccountLaneTestAccess() { }
     private static Object field(Object target, String name) {
@@ -16,9 +14,6 @@ public final class AccountLaneTestAccess {
     }
     public static SettlementLaneWorker[] workers(TradingAccountRuntime runtime) {
         return (SettlementLaneWorker[]) field(field(runtime, "laneLifecycle"), "workers");
-    }
-    public static SystemLedgerLane ledger(TradingAccountRuntime runtime) {
-        return (SystemLedgerLane) field(field(runtime, "laneLifecycle"), "ledger");
     }
     public static void ownerAccess(TradingAccountRuntime runtime, boolean access) {
         Object lifecycle = field(runtime, "laneLifecycle");

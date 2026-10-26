@@ -826,7 +826,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     /**
      * 顺序批量下单中一个当前项的准入和冻结任务。Owner 只推进原账本及控制邮箱，Lane 计算并冻结，订单租约保留在原批次槽；任务可复用，但必须等 Lane 释放并由控制调度器发布结果。
      */
-    public static final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object>, com.surprising.aeron.service.treasury.SystemLedgerLane.Entry, BooleanSupplier {
+    public static final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object>, com.surprising.aeron.service.treasury.TreasuryRuntime.Entry, BooleanSupplier {
         private com.surprising.aeron.service.core.TradingAccountRuntime runtime;
         private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
         private PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision decision;

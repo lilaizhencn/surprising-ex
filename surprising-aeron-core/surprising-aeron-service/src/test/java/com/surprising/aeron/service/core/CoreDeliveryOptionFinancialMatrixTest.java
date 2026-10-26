@@ -176,8 +176,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 assertThat(work.result().complete()).isTrue();
                 assertThat(work.poll()).isTrue();
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
-                assertThatThrownBy(() -> runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
-                        .isInstanceOf(IllegalStateException.class);
+                assertThat(runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
+                        .isEqualTo(expected.treasuryState().insuranceBalances().getOrDefault(variant.settleAsset(), 0L));
             } finally { runtime.exitAsynchronousCommandScope(); }
         }
     }

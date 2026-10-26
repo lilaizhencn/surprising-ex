@@ -29,7 +29,6 @@ import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.TradingRuntimeSnapshot;
-import com.surprising.aeron.service.treasury.SystemLedgerLane;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
@@ -381,9 +380,6 @@ class TradingAccountRuntimeTest {
         state.setMetadata(com.surprising.product.api.ProductLine.SPOT, 10);
         state.startAccountLanes();
         state.startSystemLedgerLane();
-        // 原运行时 SystemLedgerLane 的反射字段
-        // 本用例实际启动的原账本线程，关闭后应不再存活
-        Thread ledgerThread = com.surprising.aeron.service.core.AccountLaneTestAccess.ledger(state).thread();
         // 预先构造并由原故障探测传播的异常，跨线程测试中为发布原异常的原子槽
         var failure = new NoSuchMethodError("synthetic settlement linkage failure");
         try {
@@ -395,7 +391,6 @@ class TradingAccountRuntimeTest {
             assertThatThrownBy(state::close).isSameAs(failure);
         }
         for (int laneId = 0; laneId < state.laneCount(); laneId++) assertThat(state.accountWorkerThread(laneId).isAlive()).isFalse();
-        assertThat(ledgerThread.isAlive()).isFalse();
     }
 
     /**
