@@ -58,7 +58,7 @@ public final class FundsCommandIndex implements AutoCloseable {
         // 当前要求绑定 I/O 归属的线程
         Thread current = Thread.currentThread();
         if (ioOwner == null) ioOwner = current;
-        else if (ioOwner != current) throw new IllegalStateException("funds index I/O belongs to SystemLedgerLane");
+        else if (ioOwner != current) throw new IllegalStateException("funds index I/O belongs to bound owner thread");
     }
 
     /**
@@ -68,7 +68,7 @@ public final class FundsCommandIndex implements AutoCloseable {
         // 已经登记的可空 I/O 线程
         Thread expected = ioOwner;
         if (expected != null && expected != Thread.currentThread())
-            throw new IllegalStateException("funds index I/O belongs to SystemLedgerLane");
+            throw new IllegalStateException("funds index I/O belongs to bound owner thread");
     }
 
     /**

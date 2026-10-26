@@ -28,7 +28,7 @@ public final class OpenInterestIndex {
      */
     private void assertBusinessOwner() {
         if (businessOwner != null && businessOwner != Thread.currentThread())
-            throw new IllegalStateException("position business index requires SystemLedgerLane");
+            throw new IllegalStateException("position business index requires bound owner thread");
     }
 
     /** 按外部合约编号保存的可复用多空累计桶，含曾有仓但当前归零的条目。 */

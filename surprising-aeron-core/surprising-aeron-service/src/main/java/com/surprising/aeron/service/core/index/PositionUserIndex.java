@@ -29,7 +29,7 @@ public final class PositionUserIndex {
      */
     private void assertBusinessOwner() {
         if (businessOwner != null && businessOwner != Thread.currentThread())
-            throw new IllegalStateException("position business index requires SystemLedgerLane");
+            throw new IllegalStateException("position business index requires bound owner thread");
     }
 
     // 用户成员变更少于行情和风险游标的读取。按 Lane 保持整数用户列表有序，

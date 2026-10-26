@@ -1906,11 +1906,13 @@ public final class AccountLaneState {
      * 以原语订单编号和记录遍历订单表，避免把键转换为 Long；不自动排序。
      * @param consumer 在当前 Lane 访问边界内消费遍历项的回调，不应修改正在遍历的容器
      */
+    @SuppressWarnings("deprecation")
     public void forEachOrder(org.agrona.collections.LongObjConsumer<OrderRuntime> consumer) { orders.longForEach(consumer); }
     /**
      * 以原语订单编号和记录遍历预留表，不生成预留快照列表。
      * @param consumer 在当前 Lane 访问边界内消费遍历项的回调，不应修改正在遍历的容器
      */
+    @SuppressWarnings("deprecation")
     public void forEachReservation(org.agrona.collections.LongObjConsumer<ReservationRuntime> consumer) { reservations.longForEach(consumer); }
     /**
      * 检查订单权威表是否包含编号，不等同于检查订单是否仍活跃。

@@ -31,7 +31,7 @@ public final class AdlPositionIndex {
      */
     private void assertBusinessOwner() {
         if (businessOwner != null && businessOwner != Thread.currentThread())
-            throw new IllegalStateException("position business index requires SystemLedgerLane");
+            throw new IllegalStateException("position business index requires bound owner thread");
     }
 
     /** 每种结算资产的非空仓整数持仓键集合，空集合保留以降低平仓重开时的分配。 */
