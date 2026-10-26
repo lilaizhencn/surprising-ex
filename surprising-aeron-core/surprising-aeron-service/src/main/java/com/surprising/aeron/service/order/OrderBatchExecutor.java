@@ -1288,11 +1288,14 @@ public final class OrderBatchExecutor {
         if (type == CoreMessageType.PLACE_ORDER_BATCH) {
             // 按当前种类取出的单项或整批解码请求，具体类型见声明
             PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
+            List<PlaceOrderCommand> orders = command.orders();
+            int count = orders.size();
             // 新借、查询或当前正在处理的批次上下文
-            OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.PLACE, command.orders().size(),
+            OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.PLACE, count,
                     clusterTimestamp, clusterPosition);
             batch.decodedCommand = decodedCommand;
-            for (PlaceOrderCommand /* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value : command.orders()) {
+            for (int i = 0; i < count; i++) {
+                PlaceOrderCommand value = orders.get(i);
                 batch.addItem(value.orderId(), 0, 0, value);
             }
             return batch;
@@ -1300,11 +1303,14 @@ public final class OrderBatchExecutor {
         if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
             // 按当前种类取出的单项或整批解码请求，具体类型见声明
             CancelOrderBatchCommand command = decodedCommand.cancelOrderBatch();
+            List<CancelOrderCommand> orders = command.orders();
+            int count = orders.size();
             // 新借、查询或当前正在处理的批次上下文
-            OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.CANCEL, command.orders().size(),
+            OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.CANCEL, count,
                     clusterTimestamp, clusterPosition);
             batch.decodedCommand = decodedCommand;
-            for (CancelOrderCommand /* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value : command.orders()) {
+            for (int i = 0; i < count; i++) {
+                CancelOrderCommand value = orders.get(i);
                 batch.addItem(value.orderId(), 0, 0, value);
             }
             return batch;
@@ -1312,11 +1318,14 @@ public final class OrderBatchExecutor {
         if (type == CoreMessageType.AMEND_ORDER_BATCH) {
             // 按当前种类取出的单项或整批解码请求，具体类型见声明
             AmendOrderBatchCommand command = decodedCommand.amendOrderBatch();
+            List<AmendOrderCommand> orders = command.orders();
+            int count = orders.size();
             // 新借、查询或当前正在处理的批次上下文
-            OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.AMEND, command.orders().size(),
+            OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.AMEND, count,
                     clusterTimestamp, clusterPosition);
             batch.decodedCommand = decodedCommand;
-            for (AmendOrderCommand /* 仍占用原序号的命令槽，发生批次故障时停止其原撮合续步 */ value : command.orders()) {
+            for (int i = 0; i < count; i++) {
+                AmendOrderCommand value = orders.get(i);
                 batch.addItem(value.replacementOrderId(), value.originalOrderId(),
                         value.replacementOrderId(), value);
             }

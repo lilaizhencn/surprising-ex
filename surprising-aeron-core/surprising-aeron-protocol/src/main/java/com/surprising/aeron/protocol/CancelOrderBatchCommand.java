@@ -15,21 +15,21 @@ public final class CancelOrderBatchCommand {
         if (orders == null || orders.isEmpty() || orders.size() > MAX_ORDERS) {
             throw new IllegalArgumentException("invalid cancel order batch");
         }
-        boolean borrowed = false;
-        for (var order : orders) {
+        int count = orders.size();
+        CancelOrderCommand[] array = new CancelOrderCommand[count];
+        int i = 0;
+        for (CancelOrderCommand order : orders) {
             if (order == null) throw new IllegalArgumentException("invalid cancel order batch");
-            borrowed |= order.isCommandSlot();
+            array[i++] = order.isCommandSlot() ? order.immutableValue() : order;
         }
-        if (borrowed) {
-            var stable = new java.util.ArrayList<CancelOrderCommand>(orders.size());
-            for (var order : orders) stable.add(order.immutableValue());
-            this.orders = List.copyOf(stable);
-        } else this.orders = TradingOrderBatchCodec.immutableItems(orders);
+        this.orders = List.of(array);
     }
 
     private CancelOrderBatchCommand() { slots = new OrderSlots(); orders = slots; }
     public static CancelOrderBatchCommand commandSlot() { return new CancelOrderBatchCommand(); }
     public List<CancelOrderCommand> orders() { return orders; }
+    public int size() { return orders.size(); }
+    public CancelOrderCommand orderAt(int index) { return orders.get(index); }
     void activeCount(int count) {
         if (slots == null) throw new IllegalStateException("batch is not a decoder slot");
         slots.count = count;

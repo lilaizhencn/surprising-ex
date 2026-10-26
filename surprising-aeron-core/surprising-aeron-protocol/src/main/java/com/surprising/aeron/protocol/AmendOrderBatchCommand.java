@@ -15,21 +15,21 @@ public final class AmendOrderBatchCommand {
         if (orders == null || orders.isEmpty() || orders.size() > MAX_ORDERS) {
             throw new IllegalArgumentException("invalid amend order batch");
         }
-        boolean borrowed = false;
-        for (var order : orders) {
+        int count = orders.size();
+        AmendOrderCommand[] array = new AmendOrderCommand[count];
+        int i = 0;
+        for (AmendOrderCommand order : orders) {
             if (order == null) throw new IllegalArgumentException("invalid amend order batch");
-            borrowed |= order.isCommandSlot();
+            array[i++] = order.isCommandSlot() ? order.immutableValue() : order;
         }
-        if (borrowed) {
-            var stable = new java.util.ArrayList<AmendOrderCommand>(orders.size());
-            for (var order : orders) stable.add(order.immutableValue());
-            this.orders = List.copyOf(stable);
-        } else this.orders = TradingOrderBatchCodec.immutableItems(orders);
+        this.orders = List.of(array);
     }
 
     private AmendOrderBatchCommand() { slots = new OrderSlots(); orders = slots; }
     public static AmendOrderBatchCommand commandSlot() { return new AmendOrderBatchCommand(); }
     public List<AmendOrderCommand> orders() { return orders; }
+    public int size() { return orders.size(); }
+    public AmendOrderCommand orderAt(int index) { return orders.get(index); }
     void activeCount(int count) {
         if (slots == null) throw new IllegalStateException("batch is not a decoder slot");
         slots.count = count;

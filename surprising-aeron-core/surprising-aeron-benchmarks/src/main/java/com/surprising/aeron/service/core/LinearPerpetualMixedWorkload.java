@@ -606,17 +606,16 @@ public final class LinearPerpetualMixedWorkload {
 
     private static void executeHftBurstsPipelined(Harness harness, Template template, int hftBatchSize,
                                                   int[] symbolIndices, int maxInFlight) {
-        List<List<Long>> quoteOrderIds = new ArrayList<>(symbolIndices.length);
-        for (int index : symbolIndices) {
-            List<Long> symbolOrderIds = new ArrayList<>(hftBatchSize);
+        long[][] quoteOrderIds = new long[symbolIndices.length][hftBatchSize];
+        for (int cursor = 0; cursor < symbolIndices.length; cursor++) {
+            int index = symbolIndices[cursor];
             List<PlaceOrderCommand> orders = new ArrayList<>(hftBatchSize);
             for (int burst = 0; burst < hftBatchSize; burst++) {
                 long orderId = harness.nextOrderId();
-                symbolOrderIds.add(orderId);
+                quoteOrderIds[cursor][burst] = orderId;
                 orders.add(orderCommand(orderId, template.symbols().get(index), CoreOrderSide.SELL,
                         102, 2, CoreTimeInForce.GTC));
             }
-            quoteOrderIds.add(List.copyOf(symbolOrderIds));
             submitPipelined(harness, harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()),
@@ -625,9 +624,11 @@ public final class LinearPerpetualMixedWorkload {
         harness.drainSubmitted();
         for (int cursor = 0; cursor < symbolIndices.length; cursor++) {
             int index = symbolIndices[cursor];
-            List<Long> orderIds = quoteOrderIds.get(cursor);
-            List<CancelOrderCommand> orders = new ArrayList<>(orderIds.size());
-            for (long orderId : orderIds) orders.add(new CancelOrderCommand(orderId));
+            long[] orderIds = quoteOrderIds[cursor];
+            List<CancelOrderCommand> orders = new ArrayList<>(hftBatchSize);
+            for (int burst = 0; burst < hftBatchSize; burst++) {
+                orders.add(new CancelOrderCommand(orderIds[burst]));
+            }
             submitPipelined(harness, harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)), orders.size()),

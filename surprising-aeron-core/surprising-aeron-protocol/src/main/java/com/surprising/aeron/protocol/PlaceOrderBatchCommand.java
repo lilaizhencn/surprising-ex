@@ -15,21 +15,21 @@ public final class PlaceOrderBatchCommand {
         if (orders == null || orders.isEmpty() || orders.size() > MAX_ORDERS) {
             throw new IllegalArgumentException("invalid place order batch");
         }
-        boolean borrowed = false;
-        for (var order : orders) {
+        int count = orders.size();
+        PlaceOrderCommand[] array = new PlaceOrderCommand[count];
+        int i = 0;
+        for (PlaceOrderCommand order : orders) {
             if (order == null) throw new IllegalArgumentException("invalid place order batch");
-            borrowed |= order.isCommandSlot();
+            array[i++] = order.isCommandSlot() ? order.immutableValue() : order;
         }
-        if (borrowed) {
-            var stable = new java.util.ArrayList<PlaceOrderCommand>(orders.size());
-            for (var order : orders) stable.add(order.immutableValue());
-            this.orders = List.copyOf(stable);
-        } else this.orders = TradingOrderBatchCodec.immutableItems(orders);
+        this.orders = List.of(array);
     }
 
     private PlaceOrderBatchCommand() { slots = new OrderSlots(); orders = slots; }
     public static PlaceOrderBatchCommand commandSlot() { return new PlaceOrderBatchCommand(); }
     public List<PlaceOrderCommand> orders() { return orders; }
+    public int size() { return orders.size(); }
+    public PlaceOrderCommand orderAt(int index) { return orders.get(index); }
     void activeCount(int count) {
         if (slots == null) throw new IllegalStateException("batch is not a decoder slot");
         slots.count = count;

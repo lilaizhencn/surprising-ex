@@ -437,11 +437,6 @@ public final class TradingOrderBatchCodec {
         return new DecodedItems<>(items);
     }
 
-    /** 解码器独占数组不再复制；外部传入的集合仍必须防御性复制。 */
-    static <T> List<T> immutableItems(List<T> items) {
-        return items instanceof DecodedItems<?> ? items : List.copyOf(items);
-    }
-
     /** 仅持有本次解码产生、从不向外暴露的数组。 */
     private static final class DecodedItems<T> extends java.util.AbstractList<T>
             implements java.util.RandomAccess {
