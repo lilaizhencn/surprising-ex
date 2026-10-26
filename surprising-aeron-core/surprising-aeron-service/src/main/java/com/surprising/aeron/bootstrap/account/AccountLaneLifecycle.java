@@ -55,7 +55,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
         }
     }
 
-    public void startLedger(TreasuryRuntime treasury, int capacity, Consumer<Thread> bindBusinessOwner) {
+    public void startLedger(TreasuryRuntime treasury, Consumer<Thread> bindBusinessOwner) {
         assertOwner.run();
         if (ledgerStarted) return;
         if (treasury.hasChangedValues())

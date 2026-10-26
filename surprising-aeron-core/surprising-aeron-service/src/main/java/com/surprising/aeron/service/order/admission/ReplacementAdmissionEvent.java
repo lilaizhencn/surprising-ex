@@ -65,9 +65,6 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
         this.sequence = sequence; this.userId = userId; this.originalOrderId = originalOrderId;
         this.amend = amend; this.replace = replace; this.decision = decision;
         this.matcherShard = matcherShard; openInterestSteps = 0; this.runtime = runtime; this.identities = identities;
-        inputReady = !decision.instrument().usesOpenInterestForUserLimit()
-                || replace != null && replace.replacement().reduceOnly();
-        inputQueued = false;
         admission = null; rejection = null; completed = false; closeCapacityCancellations = List.of();
         return this;
     }
@@ -77,7 +74,6 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
      * @param lane 实际执行原单检查的所属账户 Lane
      */
     @Override public void execute(AccountLaneState lane) {
-        if (!inputReady) throw new IllegalStateException("Ledger replacement input is incomplete");
         // 完成位发布前先取得的通知目标，发布后不再从可回收事件读取运行时。
         TradingAccountRuntime completionRuntime = runtime;
         // 提前捕获的 Matcher 通知分片，避免事件复用后读取新命令路由。
@@ -155,14 +151,6 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
     }
 
     /**
-     * 账本读取对应币对的准入 OI，写值后发布输入就绪，供账户继续检查。
-     * @param ignored 账本接口传入的原财库，本方法仅从运行时的账本 OI 索引读取
-     */
-    @Override public void apply(TreasuryRuntime ignored) {
-        openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
-        inputReady = true;
-    }
-    /**
      * 返回本次改单命令的 Core 序号，准入结果和后续撮合沿用此序号。
      */
     public long coreSequence() { return sequence; }
@@ -180,10 +168,9 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
     }
 
     /**
-     * 在没有待账本输入的情况下清理意图、决策和结果引用并重置标记，供未投递清理或终态回收使用。
+     * 清理意图、决策和结果引用并重置标记，供未投递清理或终态回收使用。
      */
     public void discard() {
-        if (inputPending()) throw new IllegalStateException("Ledger still owns replacement input");
         clearBaseAdmission();
         amend = null; replace = null; decision = null; runtime = null; identities = null;
         admission = null;

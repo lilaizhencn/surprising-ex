@@ -583,7 +583,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public void startSystemLedgerLane() {
         laneLifecycle.startLedger(treasury,
-                Math.max(4_096, Math.multiplyExact(matcherSettlementChangesRing.length, 2)),
                 businessOwner -> { if (factIndexes != null) factIndexes.bindBusinessOwner(businessOwner); });
     }
 
@@ -1752,22 +1751,19 @@ public final class TradingAccountRuntime implements AutoCloseable {
         event.prepare(
                 coreSequence, userId, commandId, settlementStatus,
                 assetId, laneId, this, identities, timestamp, position);
+        if (event.instrument().contractType().productLine().isDerivative() && !event.reduceOnly()) {
+            event.bindOpenInterest(ledgerAdmissionOpenInterest(event.instrumentId()));
+        }
         try {
             if (accountLanesStarted() && !laneLifecycle.worker(laneId).hasAdmissionCapacity())
                 throw new java.util.concurrent.RejectedExecutionException("account admission mailbox is full");
-            if (!event.accountReady()) {
-                if (!dispatchLedgerQuery(event))
-                    throw new java.util.concurrent.RejectedExecutionException("Ledger admission mailbox is full");
-                event.inputQueued();
-            }
             if (!accountLanesStarted()) {
-                if (event.accountReady()) event.execute(accountLanes[laneId]);
+                event.execute(accountLanes[laneId]);
             } else {
                 releaseOwnerLaneAccess();
                 laneLifecycle.worker(laneId).submitAdmission(event);
             }
-        } catch (/* 准入派发失败；输入仍由账本持有时不能回收事件，否则清理后传播 */ RuntimeException | Error failure) {
-            if (event.inputPending()) throw new IllegalStateException("Ledger still owns failed admission input", failure);
+        } catch (/* 准入派发失败；清理后归还池并传播异常 */ RuntimeException | Error failure) {
             if (!event.complete()) event.discard();
             placeAdmissionEventPool.addFirst(event);
             throw failure;
@@ -1810,20 +1806,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (event == null) event = new ReplacementAdmissionEvent();
         event.prepare(sequence, userId, originalOrderId, amend, replace, decision,
                 matcherShard, this, identities);
+        if (decision.instrument().contractType().productLine().isDerivative()) {
+            event.bindOpenInterest(ledgerAdmissionOpenInterest(decision.instrument().instrumentId()));
+        }
         try {
-            if (!event.accountReady()) {
-                if (!dispatchLedgerQuery(event))
-                    throw new java.util.concurrent.RejectedExecutionException("Ledger replacement mailbox is full");
-                event.inputQueued();
-            }
             if (!accountLanesStarted()) {
-                if (event.accountReady()) event.execute(accountLanes[laneId]);
+                event.execute(accountLanes[laneId]);
             } else {
                 releaseOwnerLaneAccess();
                 laneLifecycle.worker(laneId).submit(event);
             }
-        } catch (/* 改单派发失败；先判断账本是否仍持有输入，避免提前复用事件 */ RuntimeException | Error failure) {
-            if (event.inputPending()) throw new IllegalStateException("Ledger still owns failed replacement input", failure);
+        } catch (/* 改单派发失败；清理后归还池并传播异常 */ RuntimeException | Error failure) {
             event.discard();
             replacementAdmissionEventPool.addFirst(event);
             throw failure;

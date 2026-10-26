@@ -134,8 +134,6 @@ public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
         this.userId = userId;
         this.commandId = commandId;
         openInterestSteps = 0;
-        inputQueued = false;
-        inputReady = !instrument().usesOpenInterestForUserLimit() || reduceOnly();
         this.settlementStatus = settlementStatus;
         this.identities = identities;
         this.assetId = assetId;
@@ -173,7 +171,6 @@ public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
      * @param lane 执行准入的账户 Lane，必须与用户拓扑一致
      */
     public void execute(AccountLaneState lane) {
-        if (!inputReady) throw new IllegalStateException("Ledger admission input is incomplete");
         if (lane.laneId() != runtime.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place admission reached the wrong Account Lane");
         }
@@ -230,19 +227,9 @@ public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
     }
 
     /**
-     * 在账本线程读取准入 OI，再发布输入就绪位，账户消费者随后才可执行。
-     * @param ignored 账本接口传入的原财库，本方法从运行时账本 OI 索引取值，不直接使用该参数
-     */
-    @Override public void apply(TreasuryRuntime ignored) {
-        openInterestSteps = runtime.ledgerAdmissionOpenInterest(instrumentId());
-        inputReady = true;
-    }
-
-    /**
-     * 清理从未正式交给账户 Lane 的已准备事件；账本仍持有输入或 Lane 已完成时必须走对应交接路径，不能直接丢弃。
+     * 清理从未正式交给账户 Lane 的已准备事件；Lane 已完成时必须走对应交接路径，不能直接丢弃。
      */
     public void discard() {
-        if (inputPending()) throw new IllegalStateException("Ledger still owns place admission input");
         if (complete()) throw new IllegalStateException("completed place admission must be collected");
         clearBaseAdmission();
         commandId = null;
