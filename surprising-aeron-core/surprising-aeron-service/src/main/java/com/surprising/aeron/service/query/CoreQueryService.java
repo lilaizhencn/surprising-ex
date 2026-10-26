@@ -114,14 +114,9 @@ public final class CoreQueryService {
         // Owner 为当前预检取得的币对决策输入，避免 Lane 任意回读变化中的产品元数据。
         var context = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.queryContext(
                 owner.runtimeState(), owner.identities(), command.instrumentId(), timestamp);
-        // 可等待账本 OI 输入的预检任务，之后只读用户账户计算所需预留。
         var query = new PreflightQuery(owner.appliedCommandCount(), userId, command, context);
         registerQuery(message, query);
         try {
-            if (!query.accountReady() && !owner.runtimeState().dispatchLedgerQuery(query)) {
-                pendingQueries.remove(message.header().commandId());
-                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
-            }
             if (!owner.runtimeState().dispatchAccountQuery(owner.runtimeState().topology().accountLaneMask(userId), query)) {
                 pendingQueries.remove(message.header().commandId());
                 return owner.rejected(CoreResultCode.MATCHING_REJECTED);
@@ -134,26 +129,24 @@ public final class CoreQueryService {
     }
 
     /**
-     * 一次下单预检的查询任务：必要时先由账本提供未平仓量，再由用户所属 Lane 检查订单和所需预留，只返回估算结果，不创建真实订单或冻结。
+     * 一次下单预检的查询任务：由用户所属 Lane 检查订单和所需预留，只返回估算结果，不创建真实订单或冻结。
      */
     private final class PreflightQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command,
-            java.util.function.Function<AccountLaneState, CoreResponse>, TreasuryRuntime.Entry {
+            java.util.function.Function<AccountLaneState, CoreResponse> {
         /**
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
          * userId：必须存在的预检用户编号，只在其所属 Lane 读取账户。
          */
         private final long commandCount, userId;
-        /** 账本准备的准入未平仓量，在 inputReady 发布后供账户预检使用。 */
-        private long openInterest;
-        /** 预检的 OI 输入就绪标记；不依赖 OI 的订单创建时即为 true，否则由账本写值后发布。 */
-        private volatile boolean inputReady;
+        /** 准入未平仓量，供账户预检使用。 */
+        private final long openInterest;
         /** 只读预检采用的下单意图，不作为真实撮合命令提交。 */
         private final com.surprising.aeron.protocol.PlaceOrderCommand command;
         /** Owner 固定的预检币对、标记价、费率及结算状态输入。 */
         private final com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context context;
 
         /**
-         * 保存本次预检的订单和固定决策输入；产品不依赖未平仓量或为只减仓单时可直接读账户，否则等待账本发布输入就绪。
+         * 保存本次预检的订单和固定决策输入；若标的需要则同步读取未平仓量。
          * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
          * @param userId 查询目标用户编号，具体查询类型决定是否允许用 0 表示未指定
          * @param command 已解码的普通下单意图，本次只做只读预检，不提交真实订单
@@ -163,21 +156,11 @@ public final class CoreQueryService {
                 com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context context) {
             this.commandCount = commandCount; this.userId = userId;
             this.command = command; this.context = context;
-            inputReady = !context.instrument().usesOpenInterestForUserLimit() || command.reduceOnly();
-        }
-
-        /**
-         * 返回预检所需的账本输入是否已就绪，账户消费者据此决定是否可以执行。
-         */
-        @Override public boolean accountReady() { return inputReady; }
-
-        /**
-         * 在账本线程取得该币对的准入未平仓量，先写数值再发布 volatile 就绪位。
-         * @param ignored 账本接口传入的 TreasuryRuntime，预检从运行时账本索引取 OI，不直接使用此参数
-         */
-        @Override public void apply(TreasuryRuntime ignored) {
-            openInterest = owner.runtimeState().ledgerAdmissionOpenInterest(command.instrumentId());
-            inputReady = true;
+            if (context.instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()) {
+                this.openInterest = owner.runtimeState().ledgerAdmissionOpenInterest(command.instrumentId());
+            } else {
+                this.openInterest = 0;
+            }
         }
 
         /**

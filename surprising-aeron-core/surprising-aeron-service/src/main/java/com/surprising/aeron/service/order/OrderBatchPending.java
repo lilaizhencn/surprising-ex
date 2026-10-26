@@ -826,7 +826,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     /**
      * 顺序批量下单中一个当前项的准入和冻结任务。Owner 只推进原账本及控制邮箱，Lane 计算并冻结，订单租约保留在原批次槽；任务可复用，但必须等 Lane 释放并由控制调度器发布结果。
      */
-    public static final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object>, com.surprising.aeron.service.treasury.TreasuryRuntime.Entry, BooleanSupplier {
+    public static final class BatchPlaceReservation extends ResolvedPlaceOrder implements IntFunction<Object>, BooleanSupplier {
         private com.surprising.aeron.service.core.TradingAccountRuntime runtime;
         private com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities;
         private PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision decision;
@@ -839,8 +839,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         @Getter
         private List<Long> closeCapacityCancellations = List.of();
         private volatile boolean completed = true;
-        private volatile boolean inputReady = true;
-        private boolean inputQueued, accountDispatched;
+        private boolean accountDispatched;
 
         public void prepare(com.surprising.aeron.service.core.TradingAccountRuntime runtime,
                 com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities,
@@ -862,9 +861,12 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
             this.sequence = sequence;
             this.userId = userId;
             this.commandId = commandId;
-            openInterestSteps = 0;
-            inputReady = !decision.context().instrument().usesOpenInterestForUserLimit() || command.reduceOnly();
-            inputQueued = accountDispatched = false;
+            if (decision.context().instrument().usesOpenInterestForUserLimit() && !command.reduceOnly()) {
+                this.openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.context().instrument().instrumentId());
+            } else {
+                this.openInterestSteps = 0;
+            }
+            accountDispatched = false;
             completed = false;
         }
 
@@ -872,10 +874,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
 
         public boolean pollAdmission() {
             runtime.assertOwner();
-            if (!inputReady) {
-                if (!inputQueued) inputQueued = runtime.dispatchLedgerQuery(this);
-                if (!inputReady) return false;
-            }
             if (!accountDispatched) {
                 runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), this);
                 accountDispatched = true;
@@ -883,13 +881,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
             return runtime.pollControlLanes();
         }
 
-        @Override public void apply(com.surprising.aeron.service.treasury.TreasuryRuntime ignored) {
-            openInterestSteps = runtime.ledgerAdmissionOpenInterest(decision.context().instrument().instrumentId());
-            inputReady = true;
-        }
-
         @Override public Object apply(int laneId) {
-            if (!inputReady) throw new IllegalStateException("Ledger batch admission input is incomplete");
             com.surprising.aeron.service.account.AccountLaneState lane = runtime.currentLaneCommandScope();
             if (lane == null || lane.laneId() != laneId || laneId != runtime.topology().accountLaneId(userId))
                 throw new IllegalStateException("batch place reservation requires its Account Lane");
@@ -943,8 +935,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
             source = null;
             sourceIndex = 0;
             closeCapacityCancellations = List.of();
-            inputReady = true;
-            inputQueued = accountDispatched = false;
+            accountDispatched = false;
         }
     }
 }

@@ -877,8 +877,7 @@ public final class TriggerOrderCommands {
      * 触发子单准入的复用续步：必要时先查询唯一账本，再派发所属账户 Lane 完成触发认领和冻结，Owner 收集回执后交撮合；不承担后续成交终态。
      */
     private final class TriggerExecutionContinuation
-            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object>,
-            com.surprising.aeron.service.treasury.TreasuryRuntime.Entry {
+            implements java.util.function.BooleanSupplier, java.util.function.IntFunction<Object> {
         /** 账户 Lane 复核并认领后的完整触发单，Owner 收集回执后清引用。 */
         private com.surprising.aeron.model.CoreTriggerOrderState trigger;
         /**
@@ -904,18 +903,13 @@ public final class TriggerOrderCommands {
         private com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.Context decision;
         /** 唯一账本提供的市场未平仓量，只有标的额度需要它时才查询。 */
         private long openInterest;
-        /** 跨线程输入已齐标志；账本写好未平仓量后以 volatile 发布。 */
-        private volatile boolean inputReady;
-        /**
-         * inputQueued：需要的账本查询是否已成功入队，未成功时允许下轮重试。
-         * accountDispatched：子单账户工作是否已派发，防止 Owner 轮询时重复派同一任务。
-         */
-        private boolean inputQueued, accountDispatched;
+        /** 子单账户工作是否已派发，防止 Owner 轮询时重复派同一任务。 */
+        private boolean accountDispatched;
         /** 本次可选借入的同组倒序集合，准备时固定来源、Owner 收集后清引用。 */
         private it.unimi.dsi.fastutil.longs.LongSortedSet siblings;
 
         /**
-         * 固定子单 ID 和本次触发输入，准备订单决策、资产整数身份及原命令序号；需要市场未平仓量时稍后问唯一账本，借入可选 OCO 集合并确定账户 Lane，不在这里冻结资金。
+         * 固定子单 ID 和本次触发输入，准备订单决策、资产整数身份及原命令序号；需要市场未平仓量时就地读取，借入可选 OCO 集合并确定账户 Lane，不在这里冻结资金。
          * @param route Owner 索引中的原触发路由，只用于定位账户与准备决策输入
          * @param triggerId 本次扫描变更或执行的触发单 ID
          * @param triggerSequence 本次执行或认领要求匹配的行情价格序列
@@ -937,9 +931,12 @@ public final class TriggerOrderCommands {
             baseAssetId = owner.identities().assetId(decision.instrument().baseAsset());
             quoteAssetId = owner.identities().assetId(decision.instrument().quoteAsset());
             settleAssetId = owner.identities().assetId(decision.instrument().settleAsset());
-            openInterest = 0;
-            inputReady = !decision.instrument().usesOpenInterestForUserLimit();
-            inputQueued = accountDispatched = false;
+            if (decision.instrument().usesOpenInterestForUserLimit()) {
+                openInterest = owner.runtimeState().ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
+            } else {
+                openInterest = 0;
+            }
+            accountDispatched = false;
             childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount(), 2), owner.queuedMatchingCount());
             siblings = cancelOco ? owner.triggerOrderIndex().ocoSiblingsDescending(route)
                     : it.unimi.dsi.fastutil.longs.LongSortedSets.EMPTY_SET;
@@ -948,22 +945,10 @@ public final class TriggerOrderCommands {
         }
 
         /**
-         * System Ledger 回调读取准入所需未平仓量，再发布 inputReady 并通知 Owner；账本形参当前不直接读取，数据通过原运行时入口取得。
-         * @param ignored 唯一账本回调提供的财库形参，本实现通过原运行时入口查询而不直接读取该形参
-         */
-        @Override public void apply(com.surprising.aeron.service.treasury.TreasuryRuntime ignored) {
-            openInterest = owner.runtimeState().ledgerAdmissionOpenInterest(decision.instrument().instrumentId());
-            // 账本查询完成后用于通知 Owner 的同一运行时引用
-            var runtime = owner.runtimeState();
-            inputReady = true;
-        }
-
-        /**
          * 账户 Lane 先用完整触发单复核行情及条件，解析子单准入；业务拒绝先记原因，随后处理同组撤销并认领，再记触发失败或冻结子单。客户端身份失败时只在这里撤回新准备的身份；技术异常继续传播，不扩大为本方法回滚所有业务状态。
          * @param ignoredLaneId 外层派发提供的账户 Lane 编号，本回调当前不读取
          */
         @Override public Object apply(int ignoredLaneId) {
-            if (!inputReady) throw new IllegalStateException("Ledger trigger admission input is incomplete");
             trigger = executableTrigger(owner.runtimeState().triggerOrder(triggerId), triggerSequence, price, decision.symbolId());
             if (trigger == null) return null;
             com.surprising.aeron.service.order.admission.ResolvedPlaceOrder order = null;
@@ -1013,13 +998,9 @@ public final class TriggerOrderCommands {
         }
 
         /**
-         * Owner 必要时入队账本查询，输入齐备后只派发一次账户工作；收集结果登记新客户端身份及变化，有子单回执才把预留接回并排入撮合，最后清大对象引用。本次返回真是准入交接完成，撮合与成交终态仍由后续链路处理。
+         * Owner 派发一次账户工作；收集结果登记新客户端身份及变化，有子单回执才把预留接回并排入撮合，最后清大对象引用。本次返回真是准入交接完成，撮合与成交终态仍由后续链路处理。
          */
         @Override public boolean getAsBoolean() {
-            if (!inputReady) {
-                if (!inputQueued) inputQueued = owner.runtimeState().dispatchLedgerQuery(this);
-                if (!inputReady) return false;
-            }
             if (!accountDispatched) {
                 owner.runtimeState().dispatchControlLanes(1L << laneId, this);
                 accountDispatched = true;
