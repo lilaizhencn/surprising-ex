@@ -669,14 +669,15 @@ public final class CoreQueryService {
             pendingQueries.remove(message.header().commandId());
             return owner.rejected(CoreResultCode.MATCHING_REJECTED);
         }
-        if (!owner.runtimeState().dispatchLedgerQuery(query)) deferredLiquidationWorkQuery = query;
+        if (query.ready()) query.apply(owner.runtimeState().treasury());
+        else deferredLiquidationWorkQuery = query;
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
-     * 一次强平执行、保险或 ADL 工作页的交接任务。Owner 固定候选和市场输入，Lane 读取计划事实，账本等待所有 Lane 后计算保险建议并编码有界页，不实际执行强平或赔付。
+     * 一次强平执行、保险或 ADL 工作页的交接任务。Owner 固定候选和市场输入，Lane 读取计划事实，等待所有 Lane 后计算保险建议并编码有界页，不实际执行强平或赔付。
      */
-    private final class LiquidationWorkQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command, TreasuryRuntime.Entry {
+    private final class LiquidationWorkQuery extends CompletableFuture<QueryResult> implements SettlementLaneWorker.Command {
         /**
          * commandCount：任务创建时固定的已应用命令计数，响应沿用此值。
          * laneMask：本次任务全部目标账户 Lane 的位集合，用于投递和完成条件核对。
@@ -796,14 +797,14 @@ public final class CoreQueryService {
             completed.getAndUpdate(/* 原子更新前已完成的 Lane 位集合，本次只合入当前 Lane 的位。 */ mask -> mask | (1L << lane.laneId()));
         }
         /**
-         * 只有所有目标 Lane 的完成位齐全，账本才可读取回执；空路由的零位集合直接就绪。
+         * 只有所有目标 Lane 的完成位齐全，才可读取回执；空路由的零位集合直接就绪。
          */
-        @Override public boolean ready() { return completed.get() == laneMask; }
+        public boolean ready() { return completed.get() == laneMask; }
         /**
-         * 在账本线程等待 Lane 已完成后，先返回失败或组装有界工作页；保险页依据全部请求和原基金余额计算建议金额，编码结果并通知 Owner，不执行资金支付。
-         * @param ledger 当前账本线程持有的原财库，用于只读查询或保险建议计算
+         * 等待 Lane 已完成后，先返回失败或组装有界工作页；保险页依据全部请求和原基金余额计算建议金额，编码结果并通知 Owner，不执行资金支付。
+         * @param ledger 当前原财库，用于只读查询或保险建议计算
          */
-        @Override public void apply(TreasuryRuntime ledger) {
+        public void apply(TreasuryRuntime ledger) {
             // 账本归并、保险建议计算及编码后产生的最终工作页响应。
             CoreResponse response;
             try {
@@ -844,31 +845,18 @@ public final class CoreQueryService {
             com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
         var query = new LedgerQuery(owner.appliedCommandCount(), message.header().messageType(), page, maintenance);
         registerQuery(message, query);
-        try {
-            if (!owner.runtimeState().dispatchLedgerQuery(query)) {
-                pendingQueries.remove(message.header().commandId());
-                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
-            }
-        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) { pendingQueries.remove(message.header().commandId()); throw failure; }
+        query.apply(owner.runtimeState().treasury());
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
     /**
-     * 创建财库查询并投递账本，邮箱满时拒绝本次查询，投递异常不留下外部命令关联。
+     * 创建财库查询并就地读取资产余额。
      * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
     private CoreResponse beginLedgerQuery(CoreMessage message) {
         LedgerQuery query = new LedgerQuery(owner.appliedCommandCount());
         registerQuery(message, query);
-        try {
-            if (!owner.runtimeState().dispatchLedgerQuery(query)) {
-                pendingQueries.remove(message.header().commandId());
-                return owner.rejected(CoreResultCode.MATCHING_REJECTED);
-            }
-        } catch (/* 投递任务时发生的原始异常，先移除请求关联，再继续上抛。 */ RuntimeException failure) {
-            pendingQueries.remove(message.header().commandId());
-            throw failure;
-        }
+        query.apply(owner.runtimeState().treasury());
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
     }
 
@@ -881,7 +869,7 @@ public final class CoreQueryService {
      * 参数 maintenance：查询进入时取得的合约维护状态，随用户页一起编码返回
      */
     @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-    private final class LedgerQuery extends CompletableFuture<QueryResult> implements TreasuryRuntime.Entry {
+    private final class LedgerQuery extends CompletableFuture<QueryResult> {
         /** 任务创建时固定的已应用命令计数，响应沿用此值。 */
         private final long commandCount;
         /** 任务固定的协议查询类型，决定读取对象和响应编码。 */
@@ -898,10 +886,10 @@ public final class CoreQueryService {
             this(commandCount, CoreMessageType.TREASURY_STATE_QUERY, null, null);
         }
         /**
-         * 在账本线程读取 OI 索引、按用户游标的合约维护页或财库资产，检查响应规模并编码；参数或规模错误只拒绝本次查询，随后保存响应通知 Owner。
-         * @param ledger 当前账本线程持有的原财库，用于只读查询或保险建议计算
+         * 读取 OI 索引、按用户游标的合约维护页或财库资产，检查响应规模并编码；参数或规模错误只拒绝本次查询，随后保存响应通知 Owner。
+         * @param ledger 当前原财库，用于只读查询
          */
-        @Override public void apply(TreasuryRuntime ledger) {
+        public void apply(TreasuryRuntime ledger) {
             // 原账本或索引读取后生成的成功或业务拒绝响应。
             CoreResponse response;
             try {
@@ -1029,8 +1017,10 @@ public final class CoreQueryService {
         var query = pendingQueries.get(commandId);
         if (query == null) return null;
         if (query instanceof RiskAccountQuery riskQuery) riskQuery.dispatchAccounts();
-        if (query == deferredLiquidationWorkQuery && owner.runtimeState().dispatchLedgerQuery(deferredLiquidationWorkQuery))
+        if (query == deferredLiquidationWorkQuery && deferredLiquidationWorkQuery.ready()) {
+            deferredLiquidationWorkQuery.apply(owner.runtimeState().treasury());
             deferredLiquidationWorkQuery = null;
+        }
         if (!query.isDone()) return null;
         pendingQueries.remove(commandId);
         QueryResult completed;
