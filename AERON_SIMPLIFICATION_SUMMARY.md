@@ -665,7 +665,40 @@
 
 ---
 
-## 25. 累计重构成果统计与系统现状
+## 25. Round 11: 拔除全系统最后一个机械拆类 StateTransitions 工具类并全量职责归位
+
+基于第一性原理与面向对象不可变领域模型自演进规范，Round 11 针对系统遗留的最后一个机械拆类静态工具类——`RuntimeTriggerOrderStateTransitions.java`（437 行）进行了彻底拔除与职责归位，使得全系统 9 个 `*StateTransitions` 类彻底全部清零：
+
+### 25.1 物理删除最后一个机械拆类工具类
+- `RuntimeTriggerOrderStateTransitions.java`（437 行）：物理彻底删除。
+- 净消除 437 行无状态静态方法胶水代码，消除了 `order/state` 包与 `trigger` 业务领域之间的边界错乱。
+
+### 25.2 职责深度内聚归位
+1. **不可变状态自演进归位至 `CoreTriggerOrderState`**：
+   - 将条件单状态转换方法归位为不可变 record 成员方法：
+     - `toPendingCancellation()`：待触发取消不可变转换；
+     - `toMatchedCompletion(placedOrderId, updatedAt)`：触发成功不可变转换；
+     - `toRejectedCompletion(reason, updatedAt)`：触发失败不可变转换；
+     - `transition(...)`：核心不可变版本自增迁移方法。
+2. **命令级准入与辅助解析归位至 `TriggerOrderCommands`**：
+   - `validateOcoPair(first, second)`：静态双腿配对准入检查内聚到命令入口；
+   - `preparedTriggerPositionKey(...)`：持仓键准备就地直接内聚。
+3. **账户级条件单生命周期与状态流转归位至 `TradingAccountRuntime`**：
+   - `upsertTriggerOrder(...)`：新条件单准入与保存；
+   - `placeOcoPair(...)`：OCO 双腿准入与保存；
+   - `cancelTriggerOrder(...)`：主动撤销条件单；
+   - `cancelPendingTriggerOrderForCommit(...)`：提交阶段取消待触发单；
+   - `claimTriggerOrder(...)`：行情认领推进；
+   - `completeTriggerOrder(...)`：子单终态推进；
+   - `updateTrailingTriggerOrder(...)`：移动止损极值与激活水位更新；
+   - `expireTriggerOrder(...)`：到期状态转换；
+   - `retryTriggerOrder(...)`：异常超时重试恢复。
+4. **外部调用点直通宿主实体**：
+   - `DirectCommandSlot`、`LaneCommitEvent`、`MatcherSettlementChanges`、`MatcherSettlementEvent` 与 `TriggerOrderCommands` 全量直通 `TradingAccountRuntime` 与 `CoreTriggerOrderState`，彻底消除了中间跳转与封装穿透。
+
+---
+
+## 26. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -674,7 +707,7 @@
 | **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
 | **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
-| **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission`、`OrderAdmissionMath`、`FuturesFillCalculator`、`OptionRiskRules`、`RuntimeCancelAllAfterStateTransitions`、`RuntimeRiskStateTransitions`、`RuntimeAccountStateTransitions`、`RuntimeOrderCommitStateTransitions`、`RuntimeInsuranceFundStateTransitions`、`RuntimeInstrumentStateTransitions`、`RuntimeOrderStateTransitions`、`RuntimeAlgoOrderStateTransitions` 等大量工具类 | 物理彻底删除全部 14 个机械拆类孤立文件（净减 ~1,000+ 行无用脚手架），逻辑自然归位至职责实体（`CoreContractMath`、`TradingAccountRuntime`、`AccountLaneState`、`AccountControlTask`、`InsuranceFundCommands` 等） |
+| **机械拆类过度设计** | 充斥 `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission`、`OrderAdmissionMath`、`FuturesFillCalculator`、`OptionRiskRules` 及 9 个 `*StateTransitions` 类等大量形式主义拆分 | **物理彻底删除全部 15 个机械拆类孤立文件（净减 ~1,500+ 行脚手架代码），全系统所有 `*StateTransitions` 类彻底全部清零**，逻辑自然归位至职责实体（`CoreContractMath`、`TradingAccountRuntime`、`AccountLaneState`、`CoreTriggerOrderState`、`AccountControlTask`、`InsuranceFundCommands`、`TriggerOrderCommands` 等） |
 | **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`setValueAt`、`liquidationValuesForRead`、`positionValuesForRead`、`CLUSTER_MAX_MESSAGE_LENGTH`、`EMPTY_ORDER_IDS` 等 | 物理彻底清除所有孤立死方法、死常量与残留死 Import，精简类与方法签名 |
 | **实现细节过度暴露** | 13 个类内部逻辑使用的静态标记常量声明为 `public` | 彻底收敛为 `private`，强化对象边界与类型系统封装 |
 | **死参数与无用转发** | `tryMatchingCommit`、`completeMutation`、`isNonFencingQuery` 等多余包装 | 彻底拔除无用包装，直接在调用点权威处理 |
@@ -685,7 +718,8 @@
 | **Gateway 孤岛计算与死代码** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件及多个死方法/模型，净减少死代码 |
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
 | **死命令与死 Record** | `AccountUserCommand`, `UserMfaEnrollment` 等遗留 | 物理彻底清除所有死命令与死 Record |
-| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，436 项全量单测与集成测试全绿通过** |
+| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，全量单测与集成测试全绿通过** |
+
 
 
 

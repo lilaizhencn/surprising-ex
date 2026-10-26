@@ -6,7 +6,6 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.LaneOrderResultTarget;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import lombok.Getter;
@@ -106,7 +105,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             // 当前 Lane 的触发列表或共享元数据候选列表，只访问本事件有效项。
             LongArrayList ids = triggerCancelIds[laneId];
             for (/* 当前候选列表中的连续下标。 */ int index = 0; index < ids.size(); index++)
-                if (RuntimeTriggerOrderStateTransitions.cancelPendingForCommit(runtime, ids.get(index)))
+                if (runtime.cancelPendingTriggerOrderForCommit(ids.get(index)))
                     canceledTriggers[laneId]++;
         } finally { runtime.exitLaneCommandScope(lane); }
     }

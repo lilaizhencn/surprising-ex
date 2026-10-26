@@ -11,7 +11,6 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.LaneOrderResultTarget;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
@@ -545,9 +544,9 @@ public final class MatcherSettlementEvent implements
             directNativeStateChanged = directAcceptedCancellationCount != 0 && !directNativeAccepted;
             if (sourceTrigger != null) {
                 batchStorage.plans[0].completeTrigger(directNativeAccepted
-                        ? RuntimeTriggerOrderStateTransitions.prepareMatchedCompletion(sourceTrigger,
+                        ? sourceTrigger.toMatchedCompletion(
                                 batchStorage.admittedOrders[0].orderId(), triggeredAt)
-                        : RuntimeTriggerOrderStateTransitions.prepareRejectedCompletion(sourceTrigger,
+                        : sourceTrigger.toRejectedCompletion(
                                 result.resultCode().name(), triggeredAt));
             }
             batchStorage.plans[0].acceptedPreCancellations(

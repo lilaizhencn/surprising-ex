@@ -10,7 +10,6 @@ import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import lombok.Getter;
@@ -223,7 +222,7 @@ public final class MatcherSettlementChanges {
                                 || trigger.marginMode() != position.marginMode()
                                 || !instrumentId.equals(trigger.instrumentId())) continue;
                         // 同合约、方向及保证金模式的待触发单取消值。
-                        CoreTriggerOrderState canceled = RuntimeTriggerOrderStateTransitions.preparePendingCancellation(trigger);
+                        CoreTriggerOrderState canceled = trigger.toPendingCancellation();
                         lane.putTrigger(canceled);
                         changes.putTrigger(id, canceled);
                         changes.closedTriggerCount(Math.incrementExact(changes.closedTriggerCount()));

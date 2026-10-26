@@ -3,10 +3,11 @@ package com.surprising.aeron.service.trigger.command;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
-import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.risk.RiskScanRuntime;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import java.util.UUID;
@@ -461,8 +462,8 @@ public final class TriggerOrderCommands {
              */
             private Object applyMutation() {
                 return switch (kind) {
-                    case EXPIRE -> RuntimeTriggerOrderStateTransitions.expire(owner.runtimeState(), triggerId, arg1);
-                    case TRAILING -> RuntimeTriggerOrderStateTransitions.updateTrailing(owner.runtimeState(), triggerId,
+                    case EXPIRE -> owner.runtimeState().expireTriggerOrder(triggerId, arg1);
+                    case TRAILING -> owner.runtimeState().updateTrailingTriggerOrder(triggerId,
                             arg1, arg2, arg3);
                     case SIBLINGS -> {
                         // 本段 OCO 兄弟中至少一个待触发单实际被取消的累计标记
@@ -475,7 +476,7 @@ public final class TriggerOrderCommands {
                             // 当前兄弟在账户 Lane 的真实状态，只取消仍为 PENDING 的单
                             var sibling = owner.runtimeState().triggerOrder(id);
                             if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
-                                changed |= RuntimeTriggerOrderStateTransitions.cancel(owner.runtimeState(),
+                                changed |= owner.runtimeState().cancelTriggerOrder(
                                         trigger.userId(), id);
                         }
                         yield changed;
@@ -642,14 +643,36 @@ public final class TriggerOrderCommands {
 
 
     /**
+     * 要求同用户、产品、币对、方向、资金模式及数量，组标识相同且非空，订单和客户编号不同；第一腿为止盈、第二腿为止损，卖出止盈价高于止损价，买入则相反。
+     */
+    public static void validateOcoPair(CoreTriggerOrderStateView first, CoreTriggerOrderStateView second) {
+        if (first == null || second == null || first.ocoGroupId().isBlank()
+                || !first.ocoGroupId().equals(second.ocoGroupId()) || first.userId() != second.userId()
+                || first.productLine() != second.productLine() || !first.instrumentId().equals(second.instrumentId())
+                || first.side() != second.side() || first.marginMode() != second.marginMode()
+                || first.positionSide() != second.positionSide() || first.quantitySteps() != second.quantitySteps()
+                || first.triggerOrderId() == second.triggerOrderId()
+                || first.clientTriggerOrderId().equals(second.clientTriggerOrderId())
+                || first.triggerType() != CoreTriggerOrderType.TAKE_PROFIT
+                || second.triggerType() != CoreTriggerOrderType.STOP_LOSS
+                || (first.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL
+                    ? first.triggerPriceTicks() <= second.triggerPriceTicks()
+                    : first.triggerPriceTicks() >= second.triggerPriceTicks())) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "invalid take-profit / stop-loss OCO pair");
+        }
+    }
+
+    /**
      * 按当前产品线、用户和触发视图，通过原身份表准备对应持仓键；不在这里修改真实持仓。
      * @param userId 触发单所属用户，决定账户访问与派发 Lane
      * @param trigger 本次判断、构造子单或 OCO 撤销所用的触发状态、路由或视图
      */
     long preparedTriggerPositionKey(
             long userId, com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
-        return RuntimeTriggerOrderStateTransitions.positionKey(
-                owner.identities(), owner.productLine(), userId, trigger);
+        if (!owner.productLine().isDerivative()) return 0;
+        return owner.identities().positionKey(userId,
+                com.surprising.aeron.service.order.state.OrderReservation.requireInstrumentId(trigger.instrumentId()),
+                trigger.positionSide());
     }
 
     /**
@@ -711,7 +734,7 @@ public final class TriggerOrderCommands {
         var first = views.get(0).materialize(message.header().productLine(), message.header().userId(), clusterTimestamp);
         // 按当前业务时间物化的 OCO 第二腿
         var second = views.get(1).materialize(message.header().productLine(), message.header().userId(), clusterTimestamp);
-        RuntimeTriggerOrderStateTransitions.validateOcoPair(first, second);
+        validateOcoPair(first, second);
         // 本触发单已有标的配置，供交易开关或子单产品规则检查
         var instrument = owner.runtimeState().instrument(first.instrumentId());
         if (instrument != null) {
@@ -958,12 +981,12 @@ public final class TriggerOrderCommands {
                 // 当前兄弟在账户 Lane 的真实状态，只取消仍为 PENDING 的单
                 var sibling = owner.runtimeState().triggerOrder(siblingId);
                 if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
-                    RuntimeTriggerOrderStateTransitions.cancel(owner.runtimeState(), trigger.userId(), siblingId);
+                    owner.runtimeState().cancelTriggerOrder(trigger.userId(), siblingId);
             }
-            RuntimeTriggerOrderStateTransitions.claim(owner.runtimeState(), triggerId, triggerSequence, price, triggeredAt);
+            owner.runtimeState().claimTriggerOrder(triggerId, triggerSequence, price, triggeredAt);
             trigger = owner.runtimeState().triggerOrder(triggerId);
             if (!failureReason.isEmpty()) {
-                RuntimeTriggerOrderStateTransitions.complete(owner.runtimeState(), triggerId, false, 0,
+                owner.runtimeState().completeTriggerOrder(triggerId, false, 0,
                         failureReason, triggeredAt);
                 return null;
             }
@@ -979,7 +1002,7 @@ public final class TriggerOrderCommands {
             } catch (/* 子单决策或冻结中遇到的业务拒绝，记成触发失败而非技术故障 */ CoreStateRejectedException rejected) {
                 if (key != 0) owner.identities().rollbackClientKeyInCurrentLane(trigger.userId(),
                         order.clientOrderId(), key);
-                RuntimeTriggerOrderStateTransitions.complete(owner.runtimeState(), triggerId, false, 0,
+                owner.runtimeState().completeTriggerOrder(triggerId, false, 0,
                         rejected.code(), triggeredAt);
                 return null;
             } catch (/* 子单冻结过程中遇到的技术异常或错误，只撤回新预备客户端身份后继续传播 */ RuntimeException | Error failure) {

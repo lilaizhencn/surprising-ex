@@ -265,7 +265,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A[1. PLACE_TRIGGER_ORDER / OCO_PAIR] --> B[TriggerOrderCommands → RuntimeTriggerOrderStateTransitions]
+    A[1. PLACE_TRIGGER_ORDER / OCO_PAIR] --> B[TriggerOrderCommands → TradingAccountRuntime]
     B --> C[PENDING / TriggerOrderIndex]
     P[2. APPLY_MARK_PRICE / CONTINUE_RISK_SCAN] --> S[PendingTriggerScan: 按索引和预算扫描]
     C --> S
@@ -278,7 +278,7 @@ flowchart TD
     T -->|过期或追踪更新| U[所属 Lane 更新触发状态并提交]
 ```
 
-入口在 [`TriggerOrderCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java)：`executePlaceTriggerOrder` / `executePlaceTriggerOcoPair`、`initializeTriggerScan`、`PendingTriggerScan`、`beginTriggerExecution` / `TriggerExecutionContinuation`；状态变更在 [`RuntimeTriggerOrderStateTransitions`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/state/RuntimeTriggerOrderStateTransitions.java)。
+入口在 [`TriggerOrderCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java)：`executePlaceTriggerOrder` / `executePlaceTriggerOcoPair`、`initializeTriggerScan`、`PendingTriggerScan`、`beginTriggerExecution` / `TriggerExecutionContinuation`；状态机流转内聚在 [`TradingAccountRuntime`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java)，状态不可变自演进内聚在 [`CoreTriggerOrderState`](surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreTriggerOrderState.java)。
 
 条件记录和子订单是不同生命周期。触发时重新校验准入与冻结，不能把条件成立当成子订单成交。子订单经 `MatchingCommandAdmission.appendQueuedMatching` 接回撮合、结算和终态提交。追踪价格、OCO、触发序号、重试与失效均保留在既有状态模型中。
 

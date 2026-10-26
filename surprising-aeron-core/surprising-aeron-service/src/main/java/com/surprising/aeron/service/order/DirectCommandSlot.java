@@ -17,7 +17,6 @@ import com.surprising.aeron.service.adl.RuntimeAdlExecution;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution;
-import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.risk.RiskScanCoordinator;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
@@ -758,19 +757,19 @@ public final class DirectCommandSlot {
             var runtime = owner.runtimeState();
             return switch (kind) {
                 case MUTATION -> switch (mutation) {
-                    case CANCEL -> RuntimeTriggerOrderStateTransitions.cancel(runtime, userId, triggerOrderId);
-                    case CLAIM -> RuntimeTriggerOrderStateTransitions.claim(runtime, triggerOrderId, arg1, arg2, arg3);
-                    case COMPLETE -> RuntimeTriggerOrderStateTransitions.complete(runtime, triggerOrderId,
+                    case CANCEL -> runtime.cancelTriggerOrder(userId, triggerOrderId);
+                    case CLAIM -> runtime.claimTriggerOrder(triggerOrderId, arg1, arg2, arg3);
+                    case COMPLETE -> runtime.completeTriggerOrder(triggerOrderId,
                             flag, arg1, text == null ? "" : text, arg2);
-                    case TRAILING -> RuntimeTriggerOrderStateTransitions.updateTrailing(runtime, triggerOrderId,
+                    case TRAILING -> runtime.updateTrailingTriggerOrder(triggerOrderId,
                             arg1, arg2, arg3);
-                    case EXPIRE -> RuntimeTriggerOrderStateTransitions.expire(runtime, triggerOrderId, arg1);
-                    case RETRY -> RuntimeTriggerOrderStateTransitions.retry(runtime, triggerOrderId, arg1, arg2);
+                    case EXPIRE -> runtime.expireTriggerOrder(triggerOrderId, arg1);
+                    case RETRY -> runtime.retryTriggerOrder(triggerOrderId, arg1, arg2);
                 };
                 case TRIGGER_UPSERT -> {
-                    if (secondTrigger == null) RuntimeTriggerOrderStateTransitions.upsert(runtime, userId, trigger, symbolId,
+                    if (secondTrigger == null) runtime.upsertTriggerOrder(userId, trigger, symbolId,
                             positionKey, instrumentSettled);
-                    else RuntimeTriggerOrderStateTransitions.placeOcoPair(runtime, userId, trigger, secondTrigger,
+                    else runtime.placeOcoPair(userId, trigger, secondTrigger,
                             symbolId, positionKey, instrumentSettled);
                     yield secondTrigger == null ? runtime.triggerOrder(trigger.triggerOrderId()).view()
                             : java.util.List.of(runtime.triggerOrder(trigger.triggerOrderId()).view(),

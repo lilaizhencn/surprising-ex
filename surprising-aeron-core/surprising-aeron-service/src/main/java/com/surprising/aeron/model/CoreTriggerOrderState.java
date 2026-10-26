@@ -169,4 +169,58 @@ public record CoreTriggerOrderState(
                 view.createdAtEpochMillis(), view.updatedAtEpochMillis(), view.revision(), view.priceSource());
     }
 
+    /**
+     * 要求当前仍待触发，构造记录版本加一的取消后状态；只返回值，不自行写账户。
+     */
+    public CoreTriggerOrderState toPendingCancellation() {
+        if (status != CoreTriggerOrderStatus.PENDING) {
+            throw new IllegalStateException("closing trigger must be pending");
+        }
+        return transition(CoreTriggerOrderStatus.CANCELED, 0, triggerSequence,
+                triggeredPriceTicks, rejectReason, updatedAtEpochMillis);
+    }
+
+    /**
+     * 要求正在触发且子订单编号为正，构造触发成功后状态并清拒绝原因。
+     * @param placedOrderId 已经生成的子订单编号，成功准备入口要求为正
+     * @param updatedAt 本次后状态的业务更新时间
+     */
+    public CoreTriggerOrderState toMatchedCompletion(long placedOrderId, long updatedAt) {
+        if (status != CoreTriggerOrderStatus.TRIGGERING || placedOrderId <= 0) {
+            throw new IllegalStateException("invalid matched trigger completion");
+        }
+        return transition(CoreTriggerOrderStatus.TRIGGERED, placedOrderId,
+                triggerSequence, triggeredPriceTicks, "", updatedAt);
+    }
+
+    /**
+     * 要求正在触发，构造带拒绝原因且无子单编号的失败后状态。
+     * @param reason 需要写入触发失败后状态的拒绝原因
+     * @param updatedAt 本次后状态的业务更新时间
+     */
+    public CoreTriggerOrderState toRejectedCompletion(String reason, long updatedAt) {
+        if (status != CoreTriggerOrderStatus.TRIGGERING) {
+            throw new IllegalStateException("invalid rejected trigger completion");
+        }
+        return transition(CoreTriggerOrderStatus.TRIGGER_FAILED, 0,
+                triggerSequence, triggeredPriceTicks, reason, updatedAt);
+    }
+
+    /**
+     * 复制原条件单意图、追踪信息和费率，只替换指定生命周期字段并将记录版本加一；TRIGGERED 或 TRIGGER_FAILED 才把 updatedAt 写入 triggeredAt 字段，其他状态保留旧值。
+     */
+    public CoreTriggerOrderState transition(CoreTriggerOrderStatus nextStatus, long nextPlacedOrderId,
+                                           long nextTriggerSequence, long nextTriggeredPriceTicks,
+                                           String nextRejectReason, long nextUpdatedAt) {
+        return new CoreTriggerOrderState(triggerOrderId, userId, clientTriggerOrderId, ocoGroupId,
+                instrument, side, triggerType, triggerCondition, triggerPriceTicks,
+                activationPriceTicks, callbackRatePpm, highestPriceTicks, lowestPriceTicks,
+                activatedAtEpochMillis, orderType, timeInForce, priceTicks, quantitySteps,
+                marginMode, positionSide, nextStatus, nextPlacedOrderId, nextTriggerSequence,
+                nextTriggeredPriceTicks, nextRejectReason, expiresAtEpochMillis,
+                nextStatus == CoreTriggerOrderStatus.TRIGGERED || nextStatus == CoreTriggerOrderStatus.TRIGGER_FAILED
+                        ? nextUpdatedAt : triggeredAtEpochMillis,
+                createdAtEpochMillis, nextUpdatedAt, Math.incrementExact(revision), priceSource);
+    }
+
 }
