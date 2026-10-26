@@ -10,7 +10,6 @@ import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.order.state.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
@@ -193,7 +192,7 @@ public final class MatcherSettlementChanges {
             }
             // 原生拒单保留已有的 REJECTED 查询记录，但不再持有冻结或 reservation。
             if (order.status() == CoreOrderStatus.REJECTED) continue;
-            RuntimeAlgoOrderStateTransitions.retireChild(lane, identities, order, changes);
+            lane.retireAlgoChild(identities, order, changes);
             // 从 Lane 订单表实际移除的权威订单，用于登记延后复用。
             OrderRuntime removed = lane.removeOrder(orderId);
             if (removed != null) {

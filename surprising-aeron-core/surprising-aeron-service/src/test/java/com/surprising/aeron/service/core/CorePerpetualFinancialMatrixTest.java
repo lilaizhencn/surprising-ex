@@ -37,7 +37,7 @@ import com.surprising.aeron.service.snapshot.state.*;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
-import com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions;
+import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.instrument.api.model.ContractType;
@@ -398,7 +398,7 @@ class CorePerpetualFinancialMatrixTest {
                 // 本次向结算资产保险基金增加指定数量的命令
                 var adjustment = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), coverage);
                 expected = reducer.adjustInsuranceFund(expected, adjustment);
-                LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, adjustment));
+                LedgerControlTestSupport.await(runtime, InsuranceFundCommands.prepare(runtime, identities, adjustment));
                 assertThat(LedgerControlTestSupport.commit(runtime, identities, true)).isEqualTo(expected);
                 coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(expected, 1);
                 // 按政策金额确认保险覆盖的强平结果命令

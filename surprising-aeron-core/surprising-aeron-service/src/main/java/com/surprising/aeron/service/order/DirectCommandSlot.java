@@ -17,7 +17,6 @@ import com.surprising.aeron.service.adl.RuntimeAdlExecution;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution;
-import com.surprising.aeron.service.order.state.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.risk.RiskScanCoordinator;
@@ -778,7 +777,7 @@ public final class DirectCommandSlot {
                                     runtime.triggerOrder(secondTrigger.triggerOrderId()).view());
                 }
                 case ALGO_UPSERT -> {
-                    RuntimeAlgoOrderStateTransitions.upsert(runtime, userId, algo, symbolId, arg1);
+                    runtime.upsertAlgoOrder(userId, algo, symbolId, arg1);
                     yield runtime.algoOrder(algo.algoOrderId());
                 }
                 default -> throw new IllegalStateException("unknown trigger continuation");

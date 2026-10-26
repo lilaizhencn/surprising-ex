@@ -7665,4 +7665,226 @@ appendBalanceFundsDelta(patches, target);
      * @param value 由恢复调用方直接交接的修订值
      */
     public void restoreRevision(long value) { revision = value; }
+
+    /**
+     * 再次核对订单和客户端标识未占用、用户及资产余额存在且可用金额足够，准备订单和冻结，写入并推进用户和命令版本。
+     */
+    public void placePreparedOrder(long userId, com.surprising.aeron.service.order.admission.ResolvedPlaceOrder command, java.util.UUID commandId,
+                                   long requiredReservation, long clientKey, int symbolId, int assetId) {
+        if (command == null || commandId == null || userId <= 0
+                || requiredReservation <= 0 || clientKey < 0 || symbolId < 0 || assetId < 0) {
+            throw new IllegalArgumentException("invalid prepared runtime place order");
+        }
+        assertOwner();
+        if (order(command.orderId()) != null) {
+            throw new com.surprising.aeron.exception.CoreStateRejectedException("DUPLICATE_ORDER_ID", "orderId already exists");
+        }
+        if (clientKey != 0 && orderIdByClient(userId, clientKey) != null) {
+            throw new com.surprising.aeron.exception.CoreStateRejectedException("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
+        }
+        com.surprising.aeron.service.account.UserRuntime user = user(userId);
+        com.surprising.aeron.service.account.BalanceRuntime balance = balance(userId, assetId);
+        if (user == null || balance == null || balance.availableUnits() < requiredReservation) {
+            throw new com.surprising.aeron.exception.CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
+                    "available balance is insufficient");
+        }
+        com.surprising.aeron.service.order.state.OrderRuntime order = prepareControlOrder(userId, command, commandId, symbolId);
+        com.surprising.aeron.service.order.state.ReservationRuntime reservation = order.prepareReservation(command.reservationKind(), assetId, requiredReservation);
+        long userRevision = Math.incrementExact(user.revision());
+        reserveOrder(order, reservation, clientKey);
+        setUserState(userId, userRevision, user.positionMode());
+        incrementCommandRevision();
+    }
+
+    /**
+     * 在触发子单所属 Lane 计算预留并写订单，标记待完成冻结；复制一份独立命令槽输入。
+     */
+    public com.surprising.aeron.service.order.state.OrderRuntime placeTriggerChildInLane(long userId,
+            com.surprising.aeron.service.order.admission.ResolvedPlaceOrder command, java.util.UUID commandId,
+            long coreSequence, long openInterestSteps,
+            com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities,
+            long clientKey, int assetId, boolean lifecycleSettled, boolean fundingInProgress) {
+        com.surprising.aeron.service.account.AccountLaneState lane = currentLaneCommandScope();
+        if (lane == null || lane.laneId() != topology.accountLaneId(userId))
+            throw new IllegalStateException("trigger child requires its Account Lane");
+        long positionKey = identities.findPositionKeyValueInLane(lane, userId,
+                command.instrument(), command.positionSide());
+        long required = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.requiredReservationPrepared(this, lane, userId, command,
+                openInterestSteps, lane.admissionOrderIndex(command.symbolId()), clientKey, positionKey, lifecycleSettled, fundingInProgress);
+        placePreparedOrder(userId, command, commandId, required, clientKey, command.symbolId(), assetId);
+        lane.markPendingReservation(command.orderId(), coreSequence);
+        com.surprising.aeron.service.order.state.OrderRuntime receipt = laneDelta(lane.laneId()).orders().get(command.orderId());
+        if (receipt == null) throw new IllegalStateException("trigger admission receipt is missing");
+        return receipt.copyIntoCommandSlot(null);
+    }
+
+    /**
+     * 核对订单存在和归属，释放活动订单冻结并推进命令版本。
+     */
+    public boolean cancelOpenOrder(long userId, long orderId) {
+        if (userId <= 0 || orderId <= 0) {
+            throw new IllegalArgumentException("invalid runtime cancel order");
+        }
+        assertOwner();
+        com.surprising.aeron.service.order.state.OrderRuntime order = order(orderId);
+        if (order == null) throw new com.surprising.aeron.exception.CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+        if (order.userId() != userId) {
+            throw new com.surprising.aeron.exception.CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
+        }
+        if (order.status().terminal()) return false;
+        com.surprising.aeron.service.order.state.ReservationRuntime reservation = reservation(orderId);
+        if (reservation == null) throw new IllegalStateException("open order is missing reservation");
+        cancelOrder(orderId, userId, reservation.reservedUnits());
+        incrementCommandRevision();
+        return true;
+    }
+
+    /**
+     * 检查非负提交时间、日志位置及非空迭代源，使延迟迭代异常在账户任务开始前暴露。
+     * @param timestamp 需要补写的非负集群业务毫秒时间
+     * @param position 需要补写的非负集群日志位置
+     * @param orderIds 本次普通订单编号列表或可重遍历编号源
+     */
+    public void validateCommitStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
+        if (timestamp < 0 || position < 0 || orderIds == null)
+            throw new IllegalArgumentException("invalid order commit metadata");
+        for (Long ignored : orderIds) { }
+    }
+
+    /**
+     * 按变更用户派发原账户任务，各 Lane 遍历稳定的命令编号集合，只给存在且元数据不同的订单补提交时间位置；至少一个 Lane 修改过就返回 true。
+     * @param timestamp 需要补写的非负集群业务毫秒时间
+     * @param clusterPosition 本次命令确定的集群日志位置
+     * @param changedOrderIds 命令独有且可重复遍历的变更订单编号集合
+     * @param changedUserIds 用来选择目标账户 Lane 的变更用户编号集合
+     */
+    public boolean stampChangedOrders(long timestamp, long clusterPosition,
+                                     Iterable<Long> changedOrderIds, Iterable<Long> changedUserIds) {
+        if (changedOrderIds == null || changedUserIds == null || timestamp < 0 || clusterPosition < 0) {
+            throw new IllegalArgumentException("invalid lane-batched runtime order commit metadata");
+        }
+        assertOwner();
+        if (changedOrderIds instanceof java.util.Collection<?> orders && orders.isEmpty()) return false;
+        boolean hasCandidates = false;
+        for (Long orderId : changedOrderIds) hasCandidates |= orderId != null;
+        if (!hasCandidates) return false;
+        long selectedLanes = 0;
+        for (Long userId : changedUserIds)
+            if (userId != null && userId > 0) selectedLanes |= topology.accountLaneMask(userId);
+        boolean changed = false;
+        while (selectedLanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(selectedLanes);
+            selectedLanes &= selectedLanes - 1;
+            changed |= onLane(laneId, lane -> {
+                boolean laneChanged = false;
+                for (Long orderId : changedOrderIds) {
+                    if (orderId == null) continue;
+                    OrderRuntime order = order(orderId);
+                    if (order == null || (order.updatedAtEpochMillis() == timestamp
+                            && order.clusterPosition() == clusterPosition)) continue;
+                    replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
+                    laneChanged = true;
+                }
+                lane.recordSettlementOperation();
+                return laneChanged;
+            });
+        }
+        return changed;
+    }
+
+    /**
+     * 在当前账户范围读取权威父单并应用算法父单命令更新。
+     */
+    public void upsertAlgoOrder(com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities,
+                               long userId, com.surprising.aeron.protocol.CoreAlgoOrderCommand command, long clusterTimestamp) {
+        if (identities == null || command == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid runtime algo order update");
+        }
+        var current = algoOrder(command.algoOrderId());
+        int symbolId = -1;
+        if (command instanceof com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create create) symbolId = identities.symbolId(create.instrumentId());
+        else if (current != null) symbolId = identities.symbolId(current.instrumentId());
+        upsertAlgoOrder(userId, command, symbolId, clusterTimestamp);
+    }
+
+    /**
+     * 新建只接收意图；更新从当前父单保留意图、历史子单和退休成交进度。
+     */
+    public void upsertAlgoOrder(long userId, com.surprising.aeron.protocol.CoreAlgoOrderCommand command,
+                               int symbolId, long clusterTimestamp) {
+        if (command == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid prepared algo update");
+        }
+        assertOwner();
+        com.surprising.aeron.model.CoreAlgoOrderState current = algoOrder(command.algoOrderId());
+        if (current != null && current.userId() != userId) {
+            throw new com.surprising.aeron.exception.CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
+        }
+        com.surprising.aeron.model.CoreAlgoOrderState next;
+        switch (command) {
+            case com.surprising.aeron.protocol.CoreAlgoOrderCommand.Create create -> {
+                if (current != null) throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_ALGO_ORDER_CREATE",
+                        "algo order already exists");
+                if (symbolId < 0 || clusterTimestamp <= 0) throw new IllegalArgumentException("invalid algo creation context");
+                if (create.clientAlgoOrderId().isBlank()) {
+                    throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_COMMAND", "clientAlgoOrderId is required");
+                }
+                if (hasAlgoClient(userId, create.clientAlgoOrderId())) {
+                    throw new com.surprising.aeron.exception.CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
+                            "clientAlgoOrderId already exists");
+                }
+                long start = Math.max(create.startAtEpochMillis(), clusterTimestamp);
+                next = new com.surprising.aeron.model.CoreAlgoOrderState(create.algoOrderId(), userId, create.clientAlgoOrderId(),
+                        create.instrumentId(), create.algoTypeCode(), create.side(), create.priceTicks(),
+                        create.quantitySteps(), create.childQuantitySteps(), create.intervalSeconds(),
+                        create.durationSeconds(),
+                        create.marginMode(), create.positionSide(), create.reduceOnly(),
+                        create.timeInForce(),
+                        0, 0, "", start, start, clusterTimestamp, clusterTimestamp, 1, java.util.List.of());
+            }
+            case com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update update -> {
+                if (current == null) throw new com.surprising.aeron.exception.CoreStateRejectedException("ENTITY_NOT_FOUND", "algo order is missing");
+                if (symbolId < 0) throw new IllegalArgumentException("invalid algo update symbol");
+                if (current.terminal() || current.statusCode() == 2 && update.statusCode() < 2) {
+                    throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION",
+                            "terminal or cancel-requested algo cannot resume execution");
+                }
+                if (update.expectedRevision() < current.revision()) {
+                    throw new com.surprising.aeron.exception.CoreStateRejectedException("STALE_ALGO_ORDER_REVISION", "algo order revision is stale");
+                }
+                if (update.expectedRevision() != current.revision()) {
+                    throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_ALGO_ORDER_REVISION",
+                            "algo order revision is not monotonic");
+                }
+                java.util.List<Long> children = current.childOrderIds();
+                long pending = current.pendingClosedChildId();
+                long appended = update.appendedChildOrderId();
+                if (appended != 0) {
+                    var child = order(appended);
+                    if ((child == null && pending != appended)
+                            || (child != null && (child.userId() != userId || child.symbolId() != symbolId
+                            || !("algo-" + current.algoOrderId() + "-" + children.size()).equals(child.clientOrderId())))) {
+                        throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_ALGO_CHILD", "algo child order is not authoritative");
+                    }
+                    var appendedChildren = new java.util.ArrayList<>(children);
+                    appendedChildren.add(appended);
+                    children = appendedChildren;
+                    if (pending == appended) pending = 0;
+                }
+                next = new com.surprising.aeron.model.CoreAlgoOrderState(current.algoOrderId(), current.userId(), current.clientAlgoOrderId(),
+                        current.instrumentId(), current.algoTypeCode(), current.side(), current.priceTicks(),
+                        current.quantitySteps(), current.childQuantitySteps(), current.intervalSeconds(),
+                        current.durationSeconds(),
+                        current.marginMode(), current.positionSide(), current.reduceOnly(),
+                        current.timeInForce(),
+                        update.statusCode(), update.currentOrderId(), update.rejectReason(), current.startAtEpochMillis(),
+                        update.nextSliceAtEpochMillis(), current.createdAtEpochMillis(),
+                        update.updatedAtEpochMillis(), Math.incrementExact(current.revision()), children,
+                        current.retiredExecutedQuantitySteps(), pending);
+            }
+        }
+        requireRevisionCapacity();
+        putAlgoOrder(next);
+        incrementCommandRevision();
+    }
 }

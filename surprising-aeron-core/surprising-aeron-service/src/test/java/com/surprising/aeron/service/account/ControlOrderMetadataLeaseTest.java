@@ -12,7 +12,6 @@ import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.RuntimeOrderStateTransitions;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -39,7 +38,7 @@ class ControlOrderMetadataLeaseTest {
             // 用户七实际所属的账户 Lane 编号。
             int laneId = state.accountLaneId(7);
             state.dispatchControlLanes(1L << laneId, /* 控制回调提供的 Lane 编号，本用例按固定用户及订单执行，不读取此参数。 */ ignored -> {
-                RuntimeOrderStateTransitions.placePrepared(state, 7, intent(11), new UUID(1, 11), 200, 91, 5, 3);
+                state.placePreparedOrder(7, intent(11), new UUID(1, 11), 200, 91, 5, 3);
                 authority.set(state.order(11));
                 return null;
             });
@@ -75,7 +74,7 @@ class ControlOrderMetadataLeaseTest {
             // 把 Lane 创建的实际权威订单引用交给测试线程核对的原子槽。
             var authority = new AtomicReference<OrderRuntime>();
             state.dispatchControlLanes(state.topology().accountLaneMask(7), /* 控制回调提供的 Lane 编号，本用例按固定用户及订单执行，不读取此参数。 */ ignored -> {
-                RuntimeOrderStateTransitions.placePrepared(state, 7, intent(11), new UUID(1, 11), 200, 91, 5, 3);
+                state.placePreparedOrder(7, intent(11), new UUID(1, 11), 200, 91, 5, 3);
                 authority.set(state.order(11)); return null;
             });
             await(state, state::pollControlLanes);

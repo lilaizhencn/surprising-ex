@@ -54,7 +54,6 @@ import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.order.commit.OrderedCommitCoordinator;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.RuntimeOrderCommitStateTransitions;
 import com.surprising.aeron.service.position.command.LeverageCommands;
 import com.surprising.aeron.service.position.command.PositionCommands;
 import com.surprising.aeron.service.query.CoreQueryService;
@@ -1420,7 +1419,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 java.util.List<Long> changedOrderIds = resultBuilder.commandChangedOrderIds == null
                         ? java.util.List.of() : resultBuilder.commandChangedOrderIds;
                 try {
-                    com.surprising.aeron.service.order.state.RuntimeOrderCommitStateTransitions.validateStampInputs(
+                    runtimeState.validateCommitStampInputs(
                             clusterTimestamp, clusterPosition, changedOrderIds);
                 } catch (/* 订单变化盖章准备失败，按异步续步或同步回滚路径处理 */ IllegalStateException exception) {
                     if (deferFinalizationRejection(CoreResultCode.INVALID_COMMAND)) return null;
@@ -2289,8 +2288,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     public void stampOrderChangesRuntime(long timestamp, long clusterPosition,
                                           Iterable<Long> changedOrderIds) {
-        if (RuntimeOrderCommitStateTransitions.stampChangedOrdersByLane(
-                runtimeState, timestamp, clusterPosition,
+        if (runtimeState.stampChangedOrders(
+                timestamp, clusterPosition,
                 changedOrderIds, resultBuilder.commandChangedUserIds)) {
             commits.publication.request();
         }

@@ -6,7 +6,6 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
-import com.surprising.aeron.service.order.state.RuntimeOrderStateTransitions;
 import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.risk.RiskScanRuntime;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
@@ -972,7 +971,7 @@ public final class TriggerOrderCommands {
             var key = owner.identities().prepareClientKeyInCurrentLane(trigger.userId(), order.clientOrderId());
             try {
                 // 子单资金准入成功后的运行时订单回执，交给 Owner 收集预留并排入撮合
-                var receipt = RuntimeOrderStateTransitions.placeTriggerChildInLane(owner.runtimeState(), trigger.userId(), order,
+                var receipt = owner.runtimeState().placeTriggerChildInLane(trigger.userId(), order,
                         commandId, childSequence, openInterest, owner.identities(),
                         com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.clientKeyValue(key), assetId,
                         decision.lifecycleSettled(), decision.fundingInProgress());

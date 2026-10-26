@@ -16,7 +16,7 @@ import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.instrument.RuntimeInstrumentStateTransitions;
+import com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
@@ -193,7 +193,7 @@ class RuntimeStateTransitionsTest {
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeInstrumentStateTransitions.applyConfiguration(runtime, identities, command);
+        InstrumentConfigurationCommands.applyConfiguration(runtime, identities, command);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
     }

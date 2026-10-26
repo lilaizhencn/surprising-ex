@@ -13,7 +13,6 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.product.ProductTradingRulesRegistry;
 import com.surprising.aeron.support.math.*;
@@ -237,7 +236,7 @@ public final class RuntimeOrderAdmission {
             long clientKey, long positionKey,
             boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument) {
         runtime.requireLaneAccess(lane, userId);
-        RuntimeAlgoOrderStateTransitions.requireChildAdmission(lane, userId, order);
+        lane.requireAlgoChildAdmission(userId, order);
         if (lane.order(order.orderId()) != null && order.orderId() != excludedOrderId) {
             throw rejected("DUPLICATE_ORDER_ID", "orderId already exists");
         }

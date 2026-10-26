@@ -48,7 +48,7 @@ import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchFixture;
 import com.surprising.aeron.service.settlement.RuntimeSpotMatchFixture;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions;
+import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.service.instrument.CoreInstrument;
@@ -189,7 +189,7 @@ public final class RuntimeTestStateTransitions {
                     runtime, identities, userId, command, decisionTimestamp);
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
                     resolved, 0, runtime.admissionOrders(userId, identities.symbolId(resolved.instrumentId())));
-            RuntimeOrderStateTransitions.placePrepared(runtime, userId, resolved, commandId, required,
+            runtime.placePreparedOrder(userId, resolved, commandId, required,
                     identities.clientKey(userId, resolved.clientOrderId()),
                     identities.symbolId(resolved.instrumentId()), identities.assetId(resolved.reservationAsset()));
         });
@@ -206,7 +206,7 @@ public final class RuntimeTestStateTransitions {
             // 生产账户准入根据本单和原运行态挂单算出的应预留金额。
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
                     command, 0, runtime.admissionOrders(userId, identities.symbolId(command.instrumentId())));
-            RuntimeOrderStateTransitions.placePrepared(runtime, userId, command, UUID.randomUUID(), required,
+            runtime.placePreparedOrder(userId, command, UUID.randomUUID(), required,
                     identities.clientKey(userId, command.clientOrderId()),
                     identities.symbolId(command.instrumentId()), identities.assetId(command.reservationAsset()));
         });
@@ -220,7 +220,7 @@ public final class RuntimeTestStateTransitions {
      */
     public TradingCoreState cancelOrder(TradingCoreState before, long userId, CancelOrderCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                RuntimeOrderStateTransitions.cancel(runtime, userId, command.orderId()));
+                runtime.cancelOpenOrder(userId, command.orderId()));
     }
 
     /**
@@ -241,8 +241,8 @@ public final class RuntimeTestStateTransitions {
                 : new com.surprising.aeron.protocol.CoreAlgoOrderCommand.Update(
                 view.algoOrderId(), view.revision() - 1, view.statusCode(), view.currentOrderId(), view.rejectReason(),
                         view.nextSliceAtEpochMillis(), view.updatedAtEpochMillis(), appended);
-        return mutate(before, (runtime, identities) -> RuntimeAlgoOrderStateTransitions.upsert(
-                runtime, identities, userId, command, Math.max(1, view.createdAtEpochMillis())));
+        return mutate(before, (runtime, identities) -> runtime.upsertAlgoOrder(
+                identities, userId, command, Math.max(1, view.createdAtEpochMillis())));
     }
 
     /**
@@ -452,7 +452,7 @@ public final class RuntimeTestStateTransitions {
     public TradingCoreState adjustInsuranceFund(TradingCoreState before, AdjustInsuranceFundCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
                 com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(
-                        RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, command)));
+                        InsuranceFundCommands.prepare(runtime, identities, command)));
     }
 
     /**

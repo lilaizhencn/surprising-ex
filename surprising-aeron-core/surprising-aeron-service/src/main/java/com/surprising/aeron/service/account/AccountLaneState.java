@@ -2053,6 +2053,64 @@ public final class AccountLaneState {
      */
     public java.util.TreeMap<CoreLeverageKey, Long> leveragesSnapshot() { return new java.util.TreeMap<>(cold.leverages); }
 
+    /**
+     * 非 algo- 前缀订单不参与此检查；算法子单解析父单和片序号，核对同用户、币对、方向、可执行状态、下一子单位置和数量，上一子单仍活动时拒绝。
+     */
+    public void requireAlgoChildAdmission(long userId, com.surprising.aeron.service.order.admission.ResolvedPlaceOrder child) {
+        String key = child.clientOrderId();
+        if (key == null || !key.startsWith("algo-")) return;
+        int separator = key.lastIndexOf('-');
+        long id; int slice;
+        try {
+            id = Long.parseLong(key.substring(5, separator));
+            slice = Integer.parseInt(key.substring(separator + 1));
+        } catch (RuntimeException invalid) {
+            throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_ALGO_CHILD", "invalid algo child identity");
+        }
+        var parent = algoOrder(id);
+        if (parent == null || !("algo-" + id + "-" + slice).equals(key)
+                || parent.userId() != userId || parent.statusCode() >= 2
+                || !parent.instrumentId().equals(child.instrumentId()) || parent.side() != child.side()
+                || slice != parent.childOrderIds().size() || parent.pendingClosedChildId() != 0
+                || child.quantitySteps() > parent.childQuantitySteps()
+                || child.quantitySteps() > parent.quantitySteps() - parent.retiredExecutedQuantitySteps()) {
+            throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_ALGO_CHILD", "algo parent cannot admit this child");
+        }
+        var active = order(parent.currentOrderId());
+        if (active != null && !active.status().terminal())
+            throw new com.surprising.aeron.exception.CoreStateRejectedException("INVALID_ALGO_CHILD", "algo child is still active");
+    }
+
+    /**
+     * 原结算退休流程在回收子单前调用，核对同 Lane 父单和关联片序号，将该子单成交量并入已退休进度，并记录可能尚未列入父单列表的结束子单编号；不相关或畸形标识直接忽略。
+     */
+    public void retireAlgoChild(com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry identities,
+                               com.surprising.aeron.service.order.state.OrderRuntime child,
+                               com.surprising.aeron.service.core.change.LaneCommitDelta changes) {
+        assertOwner();
+        String client = child.clientOrderId();
+        if (client == null || !client.startsWith("algo-")) return;
+        int separator = client.lastIndexOf('-');
+        if (separator <= 5) return;
+        final long parentId;
+        final int slice;
+        try {
+            parentId = Long.parseLong(client.substring(5, separator));
+            slice = Integer.parseInt(client.substring(separator + 1));
+        } catch (NumberFormatException malformed) { return; }
+        var parent = algoOrder(parentId);
+        if (parent == null || parent.userId() != child.userId() || slice < 0
+                || !parent.instrumentId().equals(identities.instrumentId(child.symbolId()))) return;
+        boolean linked = slice < parent.childOrderIds().size() && parent.childOrderIds().get(slice) == child.orderId();
+        boolean pending = slice == parent.childOrderIds().size()
+                && (parent.pendingClosedChildId() == 0 || parent.pendingClosedChildId() == child.orderId());
+        if ((!linked && !pending) || child.executedQuantitySteps() > parent.quantitySteps() - parent.retiredExecutedQuantitySteps()) return;
+        long executed = Math.addExact(parent.retiredExecutedQuantitySteps(), child.executedQuantitySteps());
+        var updated = parent.withRetiredProgress(executed, pending ? child.orderId() : parent.pendingClosedChildId());
+        storeAlgoOrder(updated.algoOrderId(), updated);
+        changes.putAlgo(updated.algoOrderId(), updated);
+    }
+
 }
 
 /**

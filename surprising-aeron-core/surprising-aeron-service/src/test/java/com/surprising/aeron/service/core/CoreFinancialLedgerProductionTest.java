@@ -9,7 +9,7 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
-import com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions;
+import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
@@ -127,7 +127,7 @@ class CoreFinancialLedgerProductionTest {
             // 使保险余额达到25所需的差额调整，不能直接理解为固定充值25
             var topUp = new AdjustInsuranceFundCommand("USDT", 25 - expected.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
             expected = expected(expected, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
-                    LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, topUp)));
+                    LedgerControlTestSupport.await(runtime, InsuranceFundCommands.prepare(runtime, identities, topUp)));
             appliedWithGuard(core, CoreMessageType.ADJUST_INSURANCE_FUND, 0, TradingCommandCodec.encodeAdjustInsuranceFund(topUp), TIME);
             assertThat(core.tradingState()).isEqualTo(expected);
             // 由保险承担25的强平处置命令

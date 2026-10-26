@@ -637,7 +637,35 @@
 
 ---
 
-## 23. 累计重构成果统计与系统现状
+## 24. Round 10: 消除 5 个机械拆类 StateTransitions 工具类并彻底归位职责
+
+基于第一性原理与面向对象高内聚低耦合原则，Round 10 针对核心模块中将状态变更与实体操作割裂、形式主义拆分为外部静态工具类（`*StateTransitions`）的严重过度设计进行了彻底拔除与职责归位，物理删除了 5 个 Java 源文件，净减少 606 行脚手架与胶水代码：
+
+### 24.1 物理删除 5 个机械拆类 Java 源码文件
+1. `RuntimeOrderCommitStateTransitions.java`（87 行）：物理彻底删除；
+2. `RuntimeInsuranceFundStateTransitions.java`（68 行）：物理彻底删除；
+3. `RuntimeInstrumentStateTransitions.java`（85 行）：物理彻底删除；
+4. `RuntimeOrderStateTransitions.java`（267 行）：物理彻底删除；
+5. `RuntimeAlgoOrderStateTransitions.java`（99 行）：物理彻底删除。
+
+### 24.2 职责深度归位与对象边界重构
+- **订单提交元数据补写归位至 `TradingAccountRuntime`**：
+  - 原 `RuntimeOrderCommitStateTransitions` 中负责订单提交版本敲章与校验的方法 `validateCommitStampInputs` 与 `stampChangedOrders` 直接归位为 `TradingAccountRuntime` 的成员方法；
+  - `TradingCoreRuntime` 消除二次中转，直接调用宿主实体。
+- **保险基金调整逻辑归位至 `InsuranceFundCommands`**：
+  - 原 `RuntimeInsuranceFundStateTransitions` 中的内部任务 `AdjustmentWork` 与静态工厂 `prepare` 直接归位到 `InsuranceFundCommands`，完全封装在保险基金命令命名空间内，消除违背包访问权限的跨包继承暴露。
+- **品种生命周期状态流转归位至 `InstrumentConfigurationCommands`**：
+  - 原 `RuntimeInstrumentStateTransitions` 中的 `applyConfiguration`、`updateMaintenance` 与 `sameInstrumentIdentity` 直接内归至 `InstrumentConfigurationCommands`，实现品种配置命令与其状态流转的严密内聚。
+- **控制订单准入与撤单归位至 `TradingAccountRuntime`**：
+  - 原 `RuntimeOrderStateTransitions` 中的 `placePreparedOrder`、`placeTriggerChildInLane` 与 `cancelOpenOrder` 归位为 `TradingAccountRuntime` 的成员方法；
+  - `AccountLaneState` 内聚了原子订单生命周期（准入、排队与释放），消除外部类对其内部数组或集合的旁路穿透。
+- **算法订单准入与状态维护归位至 `AccountLaneState` 与 `TradingAccountRuntime`**：
+  - 原 `RuntimeAlgoOrderStateTransitions` 中算法子单准入检查 `requireAlgoChildAdmission` 与子单退休注销 `retireAlgoChild` 归位为 `AccountLaneState` 自身的原子方法；
+  - 算法父单更新状态机 `upsertAlgoOrder` 归位为 `TradingAccountRuntime` 的成员方法。
+
+---
+
+## 25. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -646,7 +674,7 @@
 | **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
 | **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
-| **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission`、`OrderAdmissionMath`、`FuturesFillCalculator`、`OptionRiskRules`、`RuntimeCancelAllAfterStateTransitions`、`RuntimeRiskStateTransitions`、`RuntimeAccountStateTransitions` 等大量单方法工具类 | 物理彻底删除全部 9 个机械拆类孤立文件，逻辑自然归位至职责实体（`CoreContractMath`、`TradingAccountRuntime`、`AccountControlTask` 等） |
+| **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission`、`OrderAdmissionMath`、`FuturesFillCalculator`、`OptionRiskRules`、`RuntimeCancelAllAfterStateTransitions`、`RuntimeRiskStateTransitions`、`RuntimeAccountStateTransitions`、`RuntimeOrderCommitStateTransitions`、`RuntimeInsuranceFundStateTransitions`、`RuntimeInstrumentStateTransitions`、`RuntimeOrderStateTransitions`、`RuntimeAlgoOrderStateTransitions` 等大量工具类 | 物理彻底删除全部 14 个机械拆类孤立文件（净减 ~1,000+ 行无用脚手架），逻辑自然归位至职责实体（`CoreContractMath`、`TradingAccountRuntime`、`AccountLaneState`、`AccountControlTask`、`InsuranceFundCommands` 等） |
 | **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`setValueAt`、`liquidationValuesForRead`、`positionValuesForRead`、`CLUSTER_MAX_MESSAGE_LENGTH`、`EMPTY_ORDER_IDS` 等 | 物理彻底清除所有孤立死方法、死常量与残留死 Import，精简类与方法签名 |
 | **实现细节过度暴露** | 13 个类内部逻辑使用的静态标记常量声明为 `public` | 彻底收敛为 `private`，强化对象边界与类型系统封装 |
 | **死参数与无用转发** | `tryMatchingCommit`、`completeMutation`、`isNonFencingQuery` 等多余包装 | 彻底拔除无用包装，直接在调用点权威处理 |
@@ -657,7 +685,8 @@
 | **Gateway 孤岛计算与死代码** | 遗留 12 个仅内部自测的数学类、数据模型与单测，与核心冲突 | 物理彻底删除 12 个孤岛文件及多个死方法/模型，净减少死代码 |
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
 | **死命令与死 Record** | `AccountUserCommand`, `UserMfaEnrollment` 等遗留 | 物理彻底清除所有死命令与死 Record |
-| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，相关核心测试全绿** |
+| **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，436 项全量单测与集成测试全绿通过** |
+
 
 
 

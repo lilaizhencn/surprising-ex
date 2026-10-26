@@ -6,7 +6,6 @@ import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.RuntimeOrderStateTransitions;
 import com.surprising.aeron.service.position.PositionCloseCapacity;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.treasury.SystemLedgerLane;
@@ -156,7 +155,7 @@ public final class BatchPlaceReservation extends ResolvedPlaceOrder implements I
                 closeCapacityCancellations = PositionCloseCapacity.inspectLane(lane, userId, symbolId(),
                         positionKey, positionSide(), side(), orderId()).conflictsFor(quantitySteps());
             }
-            RuntimeOrderStateTransitions.placePrepared(runtime, userId, this, commandId,
+            runtime.placePreparedOrder(userId, this, commandId,
                     required, clientKey, symbolId(), assetId);
             // Lane 先登记待完成预留；Owner 等控制回执发布后再登记路由。
             lane.markPendingReservation(orderId(), sequence);

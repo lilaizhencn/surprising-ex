@@ -46,7 +46,7 @@ import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions;
+import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import com.surprising.aeron.support.math.*;
 import com.surprising.aeron.support.math.OptionContractMath;
 import com.surprising.instrument.api.model.ContractType;
@@ -215,8 +215,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 cold.clearChangedKeys();
                 // 给缺口对应结算资产保险基金增加二十的补款命令
                 var topUp = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), 20);
-                LedgerControlTestSupport.await(runtime, RuntimeInsuranceFundStateTransitions.prepare(runtime, identities, topUp));
-                LedgerControlTestSupport.await(cold, RuntimeInsuranceFundStateTransitions.prepare(cold, coldIdentities, topUp));
+                LedgerControlTestSupport.await(runtime, InsuranceFundCommands.prepare(runtime, identities, topUp));
+                LedgerControlTestSupport.await(cold, InsuranceFundCommands.prepare(cold, coldIdentities, topUp));
                 LedgerControlTestSupport.commit(runtime, identities, true); cold.clearChangedKeys();
                 work = RuntimeLifecycleSettlementContinuation.prepare(work, command, List.of(USER_ID), index, runtime, identities);
                 LedgerControlTestSupport.await(runtime, work::poll);
