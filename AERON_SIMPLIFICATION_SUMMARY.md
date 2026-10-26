@@ -524,7 +524,38 @@
 
 ---
 
-## 16. 累计重构成果统计与系统现状
+## 16. Round 6: 消除期货规则过度拆类与拔除孤立死方法与包装层
+
+在 Round 4、5 完成现货、期权机械拆类消除后，Round 6 针对期货产品线（交割与永续）交易规则及核心内部的死方法、多余包装进行了纵深清理：
+
+### 16.1 消除过度拆类：期货规则基类抽象化与物理删除 `FuturesOrderAdmission`
+- **问题现象**：
+  在 `com.surprising.aeron.service.product.derivative` 中，交割合约规则 `DeliveryTradingRules`（57 行）与永续合约规则 `PerpetualTradingRules`（62 行）大量逻辑重复（`productLine`、`contractType`、`realizedPnlUnits`、`reservationUnits` 及 `lifecycleSettlementCashDeltaUnits` 完全相同），却将 59 行的保证金及费用计算逻辑剥离到了独立的静态工具类 `FuturesOrderAdmission.java` 中做单行中转。
+- **重构落地**：
+  1. 提取包私有抽象基类 `AbstractFuturesTradingRules`，将 `reservationUnits`、`openingMargin` 与共同的 PnL 计算及字段封装直接内联收敛至基类；
+  2. `PerpetualTradingRules` 与 `DeliveryTradingRules` 继承 `AbstractFuturesTradingRules`，各自精简为仅保留特有业务逻辑；
+  3. 物理彻底删除 `FuturesOrderAdmission.java` 孤立文件，全系统 6 条产品线（现货、期权、线性永续、反向永续、线性交割、反向交割）规则体系彻底对齐且消除冗余。
+
+### 16.2 拔除孤立死代码与历史冷同步残留
+- **`RuntimeChangeBuffer` 孤立死方法 `setValueAt` 物理删除**：
+  - 全工程（包括测试）0 调用，物理彻底删除。
+- **`TriggerOrderCommands.ScanMutation` 冷同步残留接口与死方法清理**：
+  - 移除了实现但已失效的历史冷同步接口 `Supplier<Object>` 及 `public Object get()` 方法；
+  - 内部仅有 1 处调用的单行转调方法 `completeMutation()`（内容为 `if (kind == SIBLINGS) finishSiblings();`）直接就地内联并删除。
+- **`OrderedCommitCoordinator` 单行冗余转发方法 `tryMatchingCommit` 消除**：
+  - 该方法仅 1 行直接转调 `completeMatching`，且全工程仅 1 处调用，在调用处直接收敛为 `completeMatching` 并物理删除原方法。
+- **`TradingCoreRuntime` 内部方法 `isNonFencingQuery` 内联**：
+  - 仅 1 处调用，直接内联进 `isCommitCursorSafeWhileMatching`，消除无谓跨方法跳转。
+
+### 16.3 方法可见性规范收敛
+- **`OptionContractMath` 方法收敛**：
+  - 将仅在类内部调用的 `optionOutOfMoneyTicks` 从 `public` 收敛为 `private`。
+- **`SurprisingAeronClient` 方法收敛**：
+  - 将仅在类内部调用的 `takeResponse` 从 `public` 收敛为 `private`。
+
+---
+
+## 17. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -533,9 +564,9 @@
 | **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
 | **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
-| **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission` 抽离独立类，仅单行转发 | 彻底内联回 `SpotTradingRules` 与 `OptionTradingRules`，物理删除独立类 |
-| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`ensureInstrumentAsync` 等 | 物理彻底清除所有孤立死方法，精简方法签名 |
-| **死参数与无用转发** | `OrderBatchExecutor`、`LaneCommitDelta`、`DeterministicExchangeCoreAdapter` 等带死参数 | 彻底拔除方法死参数与 Lambda 冗余强引用闭包 |
+| **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission` 抽离独立类，仅单行转发 | 现货、期权分别内联，期货抽取基类并内联，物理删除全部 3 个 `*Admission` 工具类 |
+| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`setValueAt` 等 | 物理彻底清除所有孤立死方法，精简方法签名 |
+| **死参数与无用转发** | `tryMatchingCommit`、`completeMutation`、`isNonFencingQuery` 等多余包装 | 彻底拔除无用包装，直接在调用点权威处理 |
 | **流水线空转计数器** | 4 个仅递增从不查询的 long 计数器（`drainedCommands`、`*Fences`） | 连同调用方埋点彻底拔除，消除纯空转开销 |
 | **准入伪参数** | 透传 `matcherWaitRequired`，内部多处防御分支 | 固定为异步流水线语义，彻底消除多余参数与防御分支 |
 | **跨模块协议冗余别名** | Codec 中重复定义 `encodeBatchResult`、`trySubmit` 等假抽象别名 | 彻底清理冗余别名包装，直调权威方法 |
@@ -544,6 +575,7 @@
 | **跨模块分页游标** | 9 个子模块 Copy-Paste 完全相同的 `AdminCursorPage` 类 | 统一收敛至 `surprising-trading-api`，并兼容历史双格式 |
 | **死命令与死 Record** | `AccountUserCommand`, `UserMfaEnrollment` 等遗留 | 物理彻底清除所有死命令与死 Record |
 | **系统构建与测试** | 维护成本高、历史测试依赖陈旧参数 | **23 个 Maven 反应堆模块 `mvn test-compile` 100% 成功，相关核心测试全绿** |
+
 
 
 

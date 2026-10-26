@@ -171,16 +171,6 @@ public class RuntimeChangeBuffer<V> {
     }
 
     /**
-     * 校验有效下标后只替换该项值，不改变键、位置或索引。
-     * @param index 当前有效连续变化槽下标
-     * @param value 要保存的业务值引用，null 表示删除或调用方定义的空值
-     */
-    void setValueAt(int index, V value) {
-        if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
-        values[index] = value;
-    }
-
-    /**
      * 按键读取当前值，缺失与已记录 null 都返回 null，需要区分时使用 containsKey。
      * @param key 原语 long 业务键，允许零与负数
      */

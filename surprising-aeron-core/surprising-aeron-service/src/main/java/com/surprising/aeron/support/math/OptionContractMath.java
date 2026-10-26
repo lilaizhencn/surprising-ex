@@ -90,7 +90,7 @@ public final class OptionContractMath {
      * @param instrument 当前币对的合约类型、价格数量精度和结算资产配置
      * @param forwardPriceTicks 与期权相同到期日的远期价格，单位为价格 tick
      */
-    public static long optionOutOfMoneyTicks(CoreInstrument instrument, long forwardPriceTicks) {
+    private static long optionOutOfMoneyTicks(CoreInstrument instrument, long forwardPriceTicks) {
         return instrument.optionType() == OptionType.CALL
                 ? Math.max(0, Math.subtractExact(instrument.strikePriceTicks(), forwardPriceTicks))
                 : Math.max(0, Math.subtractExact(forwardPriceTicks, instrument.strikePriceTicks()));

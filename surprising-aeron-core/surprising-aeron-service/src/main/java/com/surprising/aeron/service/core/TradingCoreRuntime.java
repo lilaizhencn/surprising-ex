@@ -1629,19 +1629,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
      */
     static boolean isCommitCursorSafeWhileMatching(CoreMessage message) {
-        return isNonFencingQuery(message) || (message.header().kind() == WireMessageKind.COMMAND
-                && isMatchingCommand(message.header().messageType()));
-    }
-
-    // 运行指标是观测计数，不能用来表示一致的账户或订单状态。
-    // 业务查询继续保留输入栅栏，命令结果查询也不能越过之前的写入。
-    /**
-     * 只识别运行指标查询；业务查询包括命令结果查询都不能凭此越过写入前缀。
-     * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
-     */
-    static boolean isNonFencingQuery(CoreMessage message) {
-        return message.header().kind() == WireMessageKind.QUERY
+        boolean nonFencingQuery = message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.LANE_METRICS_QUERY;
+        return nonFencingQuery || (message.header().kind() == WireMessageKind.COMMAND
+                && isMatchingCommand(message.header().messageType()));
     }
 
     /**

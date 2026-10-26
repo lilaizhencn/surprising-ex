@@ -1238,20 +1238,6 @@ public final class OrderedCommitCoordinator {
         return matching;
     }
 
-    /**
-     * 把已有事实交同一完成入口；账户或财务未齐时返回空，留到下轮 Owner 推进。
-     * @param pending 当前仍占用的命令槽
-     * @param matching 当前可用的 Matcher 事实
-     * @param clusterTimestamp 本次推进可用于首次固定提交边界的 Cluster 时间
-     * @param clusterPosition 本次推进可用于首次固定提交边界的日志位置
-     */
-    private CoreResponse tryMatchingCommit(
-            CommandSlot pending,
-            MatchingResult matching,
-            long clusterTimestamp,
-            long clusterPosition) {
-        return completeMatching(pending, matching, clusterTimestamp, clusterPosition);
-    }
 
     /**
      * 使用不受限的序号上限，按给定尝试预算推进队首并回调实际完成响应。
@@ -1379,7 +1365,7 @@ public final class OrderedCommitCoordinator {
         // 当前从槽或事件取得的可空 Matcher 事实
         MatchingResult matching = matchingResult(pending);
         return matching == null ? null
-                : tryMatchingCommit(pending, matching, clusterTimestamp, clusterPosition);
+                : completeMatching(pending, matching, clusterTimestamp, clusterPosition);
     }
 
     /**

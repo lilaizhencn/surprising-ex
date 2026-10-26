@@ -374,10 +374,10 @@ public final class TriggerOrderCommands {
         }
 
         /**
-         * 扫描页复用的账户任务：同一对象分别承担 Lane 操作、冷同步回调和 Owner 完成轮询，使用前明确准备一种任务。
+         * 扫描页复用的账户任务：同一对象分别承担 Lane 操作和 Owner 完成轮询，使用前明确准备一种任务。
          */
         private final class ScanMutation implements java.util.function.BooleanSupplier,
-                java.util.function.IntFunction<Object>, java.util.function.Supplier<Object> {
+                java.util.function.IntFunction<Object> {
             /**
              * EXPIRE：扫描任务内部类型一：检查并写入过期状态。
              * TRAILING：扫描任务内部类型二：更新追踪高低价和激活时间。
@@ -489,13 +489,6 @@ public final class TriggerOrderCommands {
             }
 
             /**
-             * 账户结果收集后只对同组撤销推进页状态；过期和追踪更新没有额外页尾动作。
-             */
-            void completeMutation() {
-                if (kind == SIBLINGS) finishSiblings();
-            }
-
-            /**
              * 扣除本段遍历工作量；未撤完保存目标单和下一游标并结束本页，恢复段撤完则清 OCO 游标，普通段撤完则允许当前候选执行。
              */
             private void finishSiblings() {
@@ -523,10 +516,6 @@ public final class TriggerOrderCommands {
              * @param ignoredLaneId 外层派发提供的账户 Lane 编号，本回调当前不读取
              */
             @Override public Object apply(int ignoredLaneId) { return applyMutation(); }
-            /**
-             * 冷同步用户结算回调，执行与账户 Lane 相同的本次变更。
-             */
-            @Override public Object get() { return applyMutation(); }
 
             /**
              * Owner 等待控制 Lane 结果，未齐返回假；真实变化请求发布，再推进 OCO 页状态并返回本次任务完成。
@@ -537,7 +526,7 @@ public final class TriggerOrderCommands {
                 Object result = owner.runtimeState().controlLaneResult(
                         owner.runtimeState().topology().accountLaneId(userId));
                 if (Boolean.TRUE.equals(result)) owner.requestCommitPublication();
-                completeMutation();
+                if (kind == SIBLINGS) finishSiblings();
                 return true;
             }
         }

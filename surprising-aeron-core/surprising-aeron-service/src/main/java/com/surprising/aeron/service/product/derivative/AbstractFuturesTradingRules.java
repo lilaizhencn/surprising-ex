@@ -4,23 +4,38 @@ import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.product.OrderAdmissionMath;
+import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.support.math.CoreContractMath;
-import lombok.AccessLevel;
-import lombok.NoArgsConstructor;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.product.api.ProductLine;
+import java.util.Objects;
 
-/** 四条期货产品线的下单预留计算：先按本合约风险档位计算开仓保证金，再加上足够覆盖成交分片的费用。 这里只读入持仓和配置并返回金额，不负责真正冻结资产，也不把线性与反向合约的数学公式混用。 构造约定： 仅提供无状态的金额计算，不需要构造计算器实例。 */
-@NoArgsConstructor(access = AccessLevel.PRIVATE)
-public final class FuturesOrderAdmission {
+/**
+ * 期货产品线（交割与永续）公共交易规则抽象基类。
+ * 封装统一的合约类型、平仓盈亏计算以及开仓预留保证金和费用公式，子类专注各自特有的生命周期结算或资金费逻辑。
+ */
+abstract class AbstractFuturesTradingRules implements ProductTradingRules {
+    protected final ContractType contractType;
 
-    /**
-     * 计算在线下单要预留的保证金与费用；只减仓单不开新仓，因此保证金部分为 0。
-     * @param instrument 当前永续或交割合约的精度、资产与风险档位配置
-     * @param position 当前对应持仓，没有持仓时为 null
-     * @param order 已解析的委托方向、数量、价格和有效费率
-     * @param leverage 杠杆倍数，按一百万倍缩放保存
-     * @return 结算资产最小整数单位表示的预留金额，当前结果至少为 1
-     */
-    public static long reservationUnits(CoreInstrument instrument, PositionRuntime position, ResolvedPlaceOrder order, long leverage) {
+    protected AbstractFuturesTradingRules(ContractType contractType) {
+        this.contractType = Objects.requireNonNull(contractType, "contractType is required");
+    }
+
+    @Override
+    public ProductLine productLine() { return contractType.productLine(); }
+
+    @Override
+    public ContractType contractType() { return contractType; }
+
+    @Override
+    public long realizedPnlUnits(CoreInstrument instrument, long quantity, long entry, long execution) {
+        requireInstrument(instrument);
+        return CoreContractMath.pnlUnits(instrument, quantity, entry, execution);
+    }
+
+    @Override
+    public long reservationUnits(CoreInstrument instrument, PositionRuntime position,
+                                 ResolvedPlaceOrder order, long leverage, long pendingQuantitySteps) {
         // 现有持仓的带方向数量；没有持仓时以 0 参与风险规模计算。
         long current = position == null ? 0 : position.signedQuantitySteps();
 
@@ -37,11 +52,6 @@ public final class FuturesOrderAdmission {
 
     /**
      * 选择风险档位，并从币对、档位和杠杆三个要求中取最严格的开仓保证金率。
-     * @param instrument 当前合约配置，决定线性或反向计算口径
-     * @param projectedQuantity 供风险选档使用的预计风险数量，单位为数量步数
-     * @param openSteps 需要按开仓处理的数量，0 表示没有开仓保证金
-     * @param priceTicks 订单冻结价格，单位为价格 tick
-     * @param leveragePpm 杠杆倍数，按一百万倍缩放保存
      */
     private static long openingMargin(
             CoreInstrument instrument, long projectedQuantity, long openSteps, long priceTicks, long leveragePpm) {
@@ -56,4 +66,9 @@ public final class FuturesOrderAdmission {
                 instrument.priceTickUnits(), instrument.settleScaleUnits(), rate);
     }
 
+    @Override
+    public long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument,
+                                                  long quantity, long entry, long settlement) {
+        return realizedPnlUnits(instrument, quantity, entry, settlement);
+    }
 }

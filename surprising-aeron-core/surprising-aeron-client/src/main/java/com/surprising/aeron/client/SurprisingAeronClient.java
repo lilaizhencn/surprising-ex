@@ -283,7 +283,7 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
         return workCount;
     }
 
-    public CoreResponse takeResponse(long correlationId) {
+    private CoreResponse takeResponse(long correlationId) {
         return responses.remove(correlationId);
     }
 
