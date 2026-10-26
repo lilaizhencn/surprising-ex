@@ -1699,10 +1699,6 @@ public final class AccountLaneState {
      */
     public boolean anyLiquidation(org.eclipse.collections.api.block.predicate.Predicate<? super com.surprising.aeron.service.risk.LiquidationRuntime> predicate) { return cold.liquidations.anySatisfy(predicate); }
     /**
-     * 返回直接关联强平表的值视图，不复制容器，不能跨越 Lane 后续写入长期遍历。
-     */
-    public Iterable<com.surprising.aeron.service.risk.LiquidationRuntime> liquidationValuesForRead() { return cold.liquidations.values(); }
-    /**
      * 按持仓键读取风险估值记录。
      * @param key 对应持仓的运行时键
      */
@@ -1711,10 +1707,6 @@ public final class AccountLaneState {
      * 返回持仓记录条数，包括表中保留的零仓位记录；不是净持仓数量或未平仓量。
      */
     public int positionCount() { return positions.size(); }
-    /**
-     * 返回直接关联持仓表的值视图，调用方在读取保护范围内消费。
-     */
-    public Iterable<com.surprising.aeron.service.position.PositionRuntime> positionValuesForRead() { return positions.values(); }
     /**
      * 直接写入并返回旧杠杆设置，用户键索引由调用方同步维护。
      * @param key 用户、合约和保证金模式组成的杠杆键

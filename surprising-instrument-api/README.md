@@ -33,7 +33,7 @@ Feign、Spring Web、Kafka、Jackson、Jakarta Annotation 依赖均为 Maven `op
 | [`CoreArithmetic`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreArithmetic.java) | 只依赖整数和 `BigInteger`，可以迁为共享整数工具；本轮只做评估，不扩大到金融计算调用点改造。迁移时保留舍入、符号、溢出和异常契约。 |
 | [`CoreContractMath`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java) | 部分金额、费用、资金费公式适合提取；整类依赖 `CoreInstrument`、`CoreOrderSide`、`CoreRiskLimitBracket` 和 `CoreStateRejectedException`，直接迁入会形成反向依赖。Aeron 保留参数适配与拒绝语义。 |
 | [`OptionContractMath`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/OptionContractMath.java) | 权利金、虚值和到期现金等公式可按共享参数提取；当前方法签名和风险价格异常仍依赖 Core，不整类搬迁。 |
-| [`OrderAdmissionMath`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/product/OrderAdmissionMath.java)、`FuturesFillCalculator` | 依赖已解析订单、行情、用户杠杆和成交后持仓口径，属于订单准入/结算业务，留在 Aeron service。 |
+| `CoreContractMath`（含防分片费用与期货开仓保证金） | 依赖已解析订单、行情、用户杠杆和成交后持仓口径，属于订单准入/结算业务，留在 Aeron service。 |
 | [`CoreInstrument`](../surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/CoreInstrument.java)、注册/状态转换和产品交易规则 | 持有或管理 Core 配置、维护状态及执行约束，继续由 Aeron 运行时拥有，不成为共享 API 状态。 |
 
 后续若提取公式，应按具体业务需求迁移实际复用部分，保持 ticks、steps、ppm、资产单位、

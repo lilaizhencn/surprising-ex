@@ -44,7 +44,6 @@ import com.surprising.aeron.service.order.admission.CoreOrderDecisionResolver;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.admission.RuntimeOrderAdmission;
 import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
-import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 import com.surprising.aeron.service.settlement.RuntimeDerivativeMatchFixture;
 import com.surprising.aeron.service.settlement.RuntimeSpotMatchFixture;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
@@ -116,7 +115,7 @@ public final class RuntimeTestStateTransitions {
     public TradingCoreState updateRiskScanControl(TradingCoreState before, UpdateRiskScanControlCommand command,
                                            long updatedAtEpochMillis) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                RuntimeRiskStateTransitions.updateScanControl(runtime, command, updatedAtEpochMillis));
+                runtime.updateRiskScanControl(command, updatedAtEpochMillis));
     }
 
     /**
@@ -255,7 +254,7 @@ public final class RuntimeTestStateTransitions {
     public TradingCoreState updateCancelAllAfter(TradingCoreState before, long userId,
                                           CoreCancelAllAfterCommand command) {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) ->
-                RuntimeCancelAllAfterStateTransitions.update(runtime, userId, command));
+                runtime.updateCancelAllAfter(userId, command));
     }
 
     /**

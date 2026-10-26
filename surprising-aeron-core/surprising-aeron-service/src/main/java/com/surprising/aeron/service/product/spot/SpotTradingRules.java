@@ -4,7 +4,6 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.product.OrderAdmissionMath;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.instrument.api.model.ContractType;
@@ -31,7 +30,7 @@ public final class SpotTradingRules implements ProductTradingRules {
                                  long pendingQuantitySteps) {
         if (order.side() == CoreOrderSide.SELL) return CoreContractMath.spotBaseUnits(instrument, order.quantitySteps());
         long notional = CoreContractMath.spotQuoteUnits(instrument, order.reservationPriceTicks(), order.quantitySteps());
-        long feeDebit = OrderAdmissionMath.fragmentationSafeFeeDebit(instrument, order);
+        long feeDebit = CoreContractMath.fragmentationSafeFeeDebit(instrument, order);
         return Math.addExact(notional, feeDebit);
     }
 }

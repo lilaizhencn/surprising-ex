@@ -7,7 +7,6 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.risk.RiskScanCoordinator;
 import com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor;
-import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 
 /**
  * 风控命令入口：更新标记价并建立触发扫描，后续复制命令按预算续扫风险和触发单。账户估值交给原控制槽推进；形成强平计划后，实际强平仍由后续命令执行。
@@ -92,7 +91,7 @@ public final class RiskCommands {
     public void executeUpdateRiskScanControl(CoreMessage message, long clusterTimestamp) {
         // 本次风险规则版本、启用状态、间隔及扫描批量配置
         var command = CoreRiskScanControlCodec.decodeCommand(message.payloadUnsafe());
-        RuntimeRiskStateTransitions.updateScanControl(owner.runtimeState(), command, clusterTimestamp);
+        owner.runtimeState().updateRiskScanControl(command, clusterTimestamp);
         owner.requestCommitPublication();
         owner.resultBuilder.commandRiskScanControl = owner.runtimeState().riskScanControl();
     }

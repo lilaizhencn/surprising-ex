@@ -533,7 +533,7 @@ flowchart TD
 | 强平 | `MatchingCommandAdmission` / `CoreMatchingFlow` → `ExecutionCheck` / `CrossShardCancellationCoordinator` → [`LiquidationCommands`](src/main/java/com/surprising/aeron/service/liquidation/command/LiquidationCommands.java) → `RuntimeDerivativeLiquidationProcessor` | 先校验状态、价格和游标，分批撤单；撤单未完成时只提交进度，后续命令继续 |
 | 强平确认 / 保险 / ADL | `RuntimeLiquidationResolution`；`InsuranceFundCommands`；`AdlCommands` / `RuntimeAdlExecution` | 各有独立复制命令和幂等边界，并非每次强平都无条件执行 |
 | 资金费 / 交割 / 行权 | `PerpetualFundingCommands` / `RuntimePerpetualFundingProcessor`；`InstrumentSettlementCommands` / `RuntimeLifecycleSettlementContinuation` | 分页资金费与到期结算各保留游标；到期结算先完成撤单，再推进持仓和账本 |
-| 余额 / 划转 | `DirectCommandDispatcher` → `BalanceTransferCommands` → `AccountControlTask` → `RuntimeAccountStateTransitions` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
+| 余额 / 划转 | `DirectCommandDispatcher` → `BalanceTransferCommands` → `AccountControlTask` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
 
 快照入口为 `AeronTradingClusterService.onTakeSnapshot` → `TradingCoreOwner.captureSnapshotSections`
 → `CoreSnapshotLifecycle`。先排空快照边界前的命令，再捕获同一 fence 的账户、Matcher、账本、

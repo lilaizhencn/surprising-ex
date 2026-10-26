@@ -18,10 +18,13 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.model.TradingCoreState;
+import com.surprising.aeron.protocol.CoreCancelAllAfterCommand;
+import com.surprising.aeron.protocol.CoreCancelAllAfterStatus;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
+import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.account.ControlLaneDispatcher;
@@ -4436,6 +4439,81 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
+     * 核对用户后按用户及币对范围读旧计时器；SET 新建或重置，其他动作须匹配原版本及到期或认领状态，成功写入下一状态并推进命令版本。
+     * @param userId 命令头所指定的计时器用户，作为唯一归属身份
+     * @param command 复制命令中的动作、范围、业务时间、预期版本
+     */
+    public void updateCancelAllAfter(long userId, CoreCancelAllAfterCommand command) {
+        if (command == null || userId <= 0) {
+            throw new IllegalArgumentException("invalid runtime cancel-all-after update");
+        }
+        assertOwner();
+        CoreCancelAllAfterKey key = new CoreCancelAllAfterKey(userId, command.symbolScope());
+        CoreCancelAllAfterState current = cancelAllAfterTimer(key);
+        CoreCancelAllAfterState next;
+        switch (command.action()) {
+            case SET -> {
+                CoreCancelAllAfterStatus status = command.countdownMillis() == 0
+                        ? CoreCancelAllAfterStatus.DISABLED : CoreCancelAllAfterStatus.ACTIVE;
+                long triggerAt;
+                try {
+                    triggerAt = command.countdownMillis() == 0 ? 0
+                            : Math.addExact(command.updatedAtEpochMillis(), command.countdownMillis());
+                } catch (ArithmeticException overflow) {
+                    throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_TRIGGER", "timer deadline overflow");
+                }
+                next = new CoreCancelAllAfterState(userId, command.symbolScope(), status,
+                        triggerAt,
+                        command.updatedAtEpochMillis(),
+                        current == null ? 1 : Math.incrementExact(current.revision()));
+            }
+            case CLAIM -> {
+                requireCancelAllAfterRevision(current, command);
+                if (!current.claimableAt(command.updatedAtEpochMillis())) {
+                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_DUE", "timer is not due");
+                }
+                next = new CoreCancelAllAfterState(userId, current.symbolScope(),
+                        CoreCancelAllAfterStatus.TRIGGERING, current.triggerAtEpochMillis(),
+                        command.updatedAtEpochMillis(),
+                        Math.incrementExact(current.revision()));
+            }
+            case COMPLETE -> {
+                requireCancelAllAfterRevision(current, command);
+                if (current.status() != CoreCancelAllAfterStatus.TRIGGERING) {
+                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_CLAIMED", "timer is not claimed");
+                }
+                next = new CoreCancelAllAfterState(userId, current.symbolScope(),
+                        CoreCancelAllAfterStatus.TRIGGERED, current.triggerAtEpochMillis(),
+                        command.updatedAtEpochMillis(),
+                        Math.incrementExact(current.revision()));
+            }
+            case RETRY -> {
+                requireCancelAllAfterRevision(current, command);
+                if (current.status() != CoreCancelAllAfterStatus.TRIGGERING) {
+                    throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_CLAIMED", "timer is not claimed");
+                }
+                next = new CoreCancelAllAfterState(userId, current.symbolScope(),
+                        CoreCancelAllAfterStatus.ACTIVE, current.triggerAtEpochMillis(),
+                        command.updatedAtEpochMillis(),
+                        Math.incrementExact(current.revision()));
+            }
+            default -> throw new CoreStateRejectedException("INVALID_CANCEL_ALL_AFTER_ACTION", "unsupported action");
+        }
+        requireRevisionCapacity();
+        putCancelAllAfterTimer(key, next);
+        incrementCommandRevision();
+    }
+
+    private static void requireCancelAllAfterRevision(CoreCancelAllAfterState current, CoreCancelAllAfterCommand command) {
+        if (current == null) {
+            throw new CoreStateRejectedException("CANCEL_ALL_AFTER_NOT_FOUND", "timer not found");
+        }
+        if (command.expectedRevision() != current.revision()) {
+            throw new CoreStateRejectedException("STALE_CANCEL_ALL_AFTER_REVISION", "timer revision is stale");
+        }
+    }
+
+    /**
      * 读取本命令已经收集的触发单变化，保留到有序发布清理结束。
      * @param id 本次路由、登记或删除使用的业务实体 ID
      */
@@ -5609,6 +5687,41 @@ public final class TradingAccountRuntime implements AutoCloseable {
         rejectUnsupportedOrderBatchMutation("risk-scan state");
         riskScans.put(scan.symbolId(), scan);
         changedRiskScans.add(scan.symbolId());
+    }
+
+    /**
+     * Owner 校验期望控制版本，生成下一版本的启用、间隔和工作量配置；更新时间最低取 0，写入后增加命令修订号。
+     * @param command 带期望版本、扫描开关、间隔、工作量和操作原因的控制更新命令
+     * @param updatedAtEpochMillis 本次控制更新的 Unix 毫秒时间戳，负值会归为 0
+     */
+    public void updateRiskScanControl(UpdateRiskScanControlCommand command, long updatedAtEpochMillis) {
+        if (command == null) {
+            throw new IllegalArgumentException("invalid runtime risk scan control update");
+        }
+        assertOwner();
+        CoreRiskScanControlView current = riskScanControl();
+        if (command.expectedVersion() != current.version()) {
+            throw new CoreStateRejectedException("STALE_RISK_SCAN_CONTROL_VERSION",
+                    "risk scan control version does not match");
+        }
+        requireRevisionCapacity();
+        setRiskScanControl(new CoreRiskScanControlView(
+                Math.incrementExact(current.version()), command.ruleName(), command.enabled(),
+                command.scanDelayMs(), command.scanBatchSize(), command.adminUserId(), command.reason(),
+                Math.max(0, updatedAtEpochMillis)));
+        incrementCommandRevision();
+    }
+
+    /**
+     * 直接写入已使用整数币对编号的运行时扫描记录，再增加命令修订号。
+     * @param scan 包含账户风险及条件单游标的原扫描记录
+     */
+    public void replaceRiskScan(RiskScanRuntime scan) {
+        if (scan == null) {
+            throw new IllegalArgumentException("invalid runtime risk scan");
+        }
+        putRiskScan(scan);
+        incrementCommandRevision();
     }
 
     /**

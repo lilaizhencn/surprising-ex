@@ -7,7 +7,6 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.product.option.OptionRiskRules;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -35,7 +34,7 @@ public final class RuntimeDerivativeRiskProcessor {
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
         }
-        OptionRiskRules.requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
+        requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
         runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument, command.markPriceTicks(),
                 command.indexPriceTicks(), command.forwardPriceTicks(), command.priceSequence(),
                 command.generatedAtEpochMillis(), command.lastPriceTicks()));
@@ -80,4 +79,11 @@ public final class RuntimeDerivativeRiskProcessor {
         return instrument;
     }
 
+    private static void requireOptionRiskPrices(CoreInstrument instrument, long indexPriceTicks,
+                                               long forwardPriceTicks) {
+        if (instrument.contractType().isOption() && (indexPriceTicks <= 0 || forwardPriceTicks <= 0)) {
+            throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
+                    "option mark requires index and same-expiry forward prices");
+        }
+    }
 }

@@ -555,7 +555,41 @@
 
 ---
 
-## 17. 累计重构成果统计与系统现状
+## 18. Round 7: 拔除孤立死方法与消除 6 个机械拆类工具类架构收敛
+
+基于全工程 2,171 个 Java 文件的全局词法倒排索引与架构依赖链分析，Round 7 彻底消除了 2 处孤立死方法与 6 个单方法/单调用机械拆类工具类（物理删除 6 个 Java 源文件，减少 ~360 行多余脚手架代码）：
+
+### 18.1 拔除孤立死方法
+- **`AccountLaneState` 死只读方法清理**：
+  - 物理删除 `liquidationValuesForRead()` 与 `positionValuesForRead()` 两个全工程 0 引用的遗留方法。
+
+### 18.2 消除计算与规则的机械拆类
+- **`OrderAdmissionMath` 物理删除与方法归位**：
+  - 将单一方法 `fragmentationSafeFeeDebit` 归入 `CoreContractMath.java`；
+  - `SpotTradingRules`、`OptionTradingRules` 与 `AbstractFuturesTradingRules` 改为直接调用；
+  - 物理删除 `OrderAdmissionMath.java`。
+- **`FuturesFillCalculator` 物理删除与方法归位**：
+  - 将单一方法 `openingMarginForFill` 归入 `CoreContractMath.java`，与现有 15 个无状态合约保证金计算方法对齐；
+  - `RuntimeDerivativeFillCalculator` 与 `DerivativeAccountCommandProcessor` 改为直接调用；
+  - 物理删除 `FuturesFillCalculator.java`。
+- **`OptionRiskRules` 物理删除与内联收敛**：
+  - 将全工程仅调用 1 次的 `requireOptionRiskPrices` 内联收敛至 `RuntimeDerivativeRiskProcessor.java`；
+  - 物理删除 `OptionRiskRules.java`。
+
+### 18.3 消除状态机与控制命令的机械拆类
+- **`RuntimeCancelAllAfterStateTransitions` 物理删除与职责归位**：
+  - 将 `update` 状态机逻辑收敛为 `TradingAccountRuntime` 的成员方法 `updateCancelAllAfter`，内聚所有权断言、计时器状态迁移与版本递增；
+  - 更新 `TriggerOrderCommands` 与相关单测，物理删除 `RuntimeCancelAllAfterStateTransitions.java`。
+- **`RuntimeRiskStateTransitions` 物理删除与职责归位**：
+  - 将 `updateScanControl` 与 `replaceScan` 收敛为 `TradingAccountRuntime` 的原子成员方法 `updateRiskScanControl` 与 `replaceRiskScan`；
+  - 更新 `RiskCommands`、`TriggerOrderCommands` 与相关单测，物理删除 `RuntimeRiskStateTransitions.java`。
+- **`RuntimeAccountStateTransitions` 物理删除与内联收敛**：
+  - 将其全部 5 个专供账户控制的方法（`adjustAccountBalance`、`prepareTransferOut`、`validateTransferSource`、`debitTransferAccount`、`completeTransfer`）完全归并至 `AccountControlTask.java`；
+  - 更新相关单测，物理删除 `RuntimeAccountStateTransitions.java`。
+
+---
+
+## 19. 累计重构成果统计与系统现状
 
 | 优化维度 | 重构前状况 | 重构后收敛成果 |
 | :--- | :--- | :--- |
@@ -564,8 +598,8 @@
 | **伪共享 Padding** | 堆叠 20+ 个抽象 Padding 类，200+ 个无业务意义的填充字段 | 彻底拍平为单一实体类，结构清晰透明，消除内存屏障颠簸 |
 | **Aeron 服务架构** | 依赖独立的平台线程与多线程交接队列，跨线程超时等待 | Aeron 容器线程就地推进，彻底删除 `TradingOwnerLoop` 胶水包装 |
 | **指标镜像类** | 形式主义维护 `CoreLaneMetrics` 与 `CoreLaneMetricsView` 双重镜像 | 物理删除 `CoreLaneMetrics`，直通协议层，消除二次数组克隆 |
-| **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission` 抽离独立类，仅单行转发 | 现货、期权分别内联，期货抽取基类并内联，物理删除全部 3 个 `*Admission` 工具类 |
-| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`setValueAt` 等 | 物理彻底清除所有孤立死方法，精简方法签名 |
+| **机械拆类过度设计** | `SpotOrderAdmission`、`OptionOrderAdmission`、`FuturesOrderAdmission`、`OrderAdmissionMath`、`FuturesFillCalculator`、`OptionRiskRules`、`RuntimeCancelAllAfterStateTransitions`、`RuntimeRiskStateTransitions`、`RuntimeAccountStateTransitions` 等大量单方法工具类 | 物理彻底删除全部 9 个机械拆类孤立文件，逻辑自然归位至职责实体（`CoreContractMath`、`TradingAccountRuntime`、`AccountControlTask` 等） |
+| **Aeron 核心死代码** | 遗留 `sessionOpened/Closed`、`admissionDepthIfAvailable`、`hasRoute`、`setValueAt`、`liquidationValuesForRead`、`positionValuesForRead` 等 | 物理彻底清除所有孤立死方法，精简方法签名 |
 | **死参数与无用转发** | `tryMatchingCommit`、`completeMutation`、`isNonFencingQuery` 等多余包装 | 彻底拔除无用包装，直接在调用点权威处理 |
 | **流水线空转计数器** | 4 个仅递增从不查询的 long 计数器（`drainedCommands`、`*Fences`） | 连同调用方埋点彻底拔除，消除纯空转开销 |
 | **准入伪参数** | 透传 `matcherWaitRequired`，内部多处防御分支 | 固定为异步流水线语义，彻底消除多余参数与防御分支 |

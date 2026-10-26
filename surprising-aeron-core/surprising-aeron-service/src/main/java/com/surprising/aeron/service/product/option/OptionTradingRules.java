@@ -5,7 +5,6 @@ import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.product.OrderAdmissionMath;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.aeron.support.math.OptionContractMath;
@@ -106,7 +105,7 @@ public final class OptionTradingRules implements ProductTradingRules {
         // 扣除平仓部分后的新开仓数量，只减仓单始终不计新开仓。
         long openSteps = order.reduceOnly() ? 0 : Math.subtractExact(order.quantitySteps(), closeSteps);
         // 按数量步覆盖手续费扣款，避免多次成交的舍入导致预留不足。
-        long feeDebit = OrderAdmissionMath.fragmentationSafeFeeDebit(instrument, order);
+        long feeDebit = CoreContractMath.fragmentationSafeFeeDebit(instrument, order);
         if (order.side() == CoreOrderSide.BUY) {
             // 买入整笔委托需要支付的权利金，不因为其中一部分用于平仓而省略。
             long premium = OptionContractMath.optionPremiumUnits(

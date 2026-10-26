@@ -3,7 +3,6 @@ package com.surprising.aeron.service.product.derivative;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.product.OrderAdmissionMath;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.support.math.CoreContractMath;
 import com.surprising.instrument.api.model.ContractType;
@@ -46,7 +45,7 @@ abstract class AbstractFuturesTradingRules implements ProductTradingRules {
         // 按合约风险档位、指定杠杆和冻结价格得到开仓保证金。
         long margin = openingMargin(instrument, projectedRisk, openSteps, order.reservationPriceTicks(), leverage);
         // 覆盖订单拆成多次成交时的费用舍入，返佣不抵减这项冻结。
-        long feeDebit = OrderAdmissionMath.fragmentationSafeFeeDebit(instrument, order);
+        long feeDebit = CoreContractMath.fragmentationSafeFeeDebit(instrument, order);
         return Math.max(1, Math.addExact(margin, feeDebit));
     }
 

@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.instrument.CoreInstrument;
+import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.math.BigInteger;
 import lombok.AccessLevel;
@@ -390,5 +391,44 @@ public final class CoreContractMath {
                     .add(big(addedAbs).multiply(big(currentPrice)));
             return Math.max(1, divideRounded(numerator, denominator));
         }
+    }
+
+    /**
+     * 按单步费用计算冻结额度，避免先计算整笔费用时的分片舍入造成少冻结。
+     * @param instrument 当前订单所属币对的费用和精度配置
+     * @param order 已解析并固定冻结价格、数量和有效 taker 费率的订单
+     * @return 覆盖逐步成交手续费扣款的冻结金额；返佣不会抵减这项预留
+     */
+    public static long fragmentationSafeFeeDebit(CoreInstrument instrument,
+                                                  ResolvedPlaceOrder order) {
+        long feePerStep = feeDeltaUnits(
+                instrument, order.reservationPriceTicks(), 1, order.takerFeeRatePpm());
+        long debitPerStep = Math.max(0, Math.negateExact(feePerStep));
+        return Math.multiplyExact(debitPerStep, order.quantitySteps());
+    }
+
+    /**
+     * 先按成交后总持仓选档，再取币对基础、风险档位、用户杠杆三者中最高的保证金率，计算本次新开仓部分的要求。
+     * @param instrument 该期货合约的类型、精度和风险档位配置
+     * @param projectedQuantitySteps 成交后的带方向总持仓步数，选档时使用其绝对值
+     * @param openSteps 本次成交中新增加仓的绝对数量步数，0 表示全部是在平仓
+     * @param priceTicks 本次成交价格 tick，同时用于选档和保证金换算
+     * @param leveragePpm 用户设置的杠杆倍数，按一百万倍保存
+     */
+    public static long openingMarginForFill(CoreInstrument instrument,
+                                            long projectedQuantitySteps,
+                                            long openSteps,
+                                            long priceTicks,
+                                            long leveragePpm) {
+        if (openSteps <= 0) return 0;
+        long projectedNotional = riskNotionalUnits(instrument,
+                Math.absExact(projectedQuantitySteps), priceTicks);
+        var bracket = maintenanceRiskBracket(instrument, projectedNotional);
+        long leverageRate = initialMarginRateFromLeverage(leveragePpm);
+        long effectiveRate = Math.max(Math.max(instrument.initialMarginRatePpm(), bracket.initialMarginRatePpm()),
+                leverageRate);
+        return PerpetualContractMath.initialMarginUnits(
+                instrument.contractType(), openSteps, priceTicks, instrument.notionalMultiplierUnits(),
+                instrument.priceTickUnits(), instrument.settleScaleUnits(), effectiveRate);
     }
 }

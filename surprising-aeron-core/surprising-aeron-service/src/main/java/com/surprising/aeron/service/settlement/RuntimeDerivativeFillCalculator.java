@@ -14,7 +14,6 @@ import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.product.ProductTradingRules;
 import com.surprising.aeron.service.product.ProductTradingRulesRegistry;
-import com.surprising.aeron.service.product.derivative.FuturesFillCalculator;
 import com.surprising.aeron.service.product.option.OptionFillCalculator;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.support.math.*;
@@ -540,6 +539,6 @@ public final class RuntimeDerivativeFillCalculator {
                                              MarkPriceRuntime riskMark) {
         return instrument.contractType().isOption()
                 ? OptionFillCalculator.openingMarginForFill(instrument, projectedQuantitySteps, signedFillSteps, openSteps, riskMark)
-                : FuturesFillCalculator.openingMarginForFill(instrument, projectedQuantitySteps, openSteps, priceTicks, leveragePpm);
+                : CoreContractMath.openingMarginForFill(instrument, projectedQuantitySteps, openSteps, priceTicks, leveragePpm);
     }
 }

@@ -249,7 +249,7 @@ flowchart LR
 - **撤单**：`MatchingCommandAdmission.validatePendingCancel` → `CoreMatchingFlow` → `DeterministicExchangeCoreAdapter` → `MatcherSettlementEvent`。以撮合确认的剩余量释放预留，不能收到请求就先解冻；重复命令走幂等结果。
 - **改单**：`REPLACE_ORDER` / `AMEND_ORDER` → `dispatchReplacementAdmission` → `ReplacementAdmissionEvent` → Matcher → 账户结算 → 有序提交。新旧身份、价格/数量和预留差异在同一边界处理，不拆成两个无关联命令。
 - **批量**：[`OrderBatchExecutor.beginOrderBatchMatching`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderBatchExecutor.java) → `OrderBatchPending` / `OrderBatchItem` → 批量准入或逐项执行 → Matcher 分块 → Lane 结算 → 批次终态。批次保留 Core 序号和项游标，不能用单项回包代替整批完成。
-- **Cancel-all-after**：`TriggerOrderCommands.executeUpdateCancelAllAfter` → `RuntimeCancelAllAfterStateTransitions` / `CancelAllAfterIndex` 保存控制状态；实际撤单仍经复制命令和上述流程。`onTimerEvent` 当前只检查 Owner 故障，不驱动交易状态。
+- **Cancel-all-after**：`TriggerOrderCommands.executeUpdateCancelAllAfter` → `TradingAccountRuntime.updateCancelAllAfter` / `CancelAllAfterIndex` 保存控制状态；实际撤单仍经复制命令和上述流程。`onTimerEvent` 当前只检查 Owner 故障，不驱动交易状态。
 
 ```mermaid
 flowchart LR
@@ -343,7 +343,7 @@ flowchart TD
 
 ### 余额、划转与账户设置
 
-`ADJUST_BALANCE` / `TRANSFER_OUT` / `TRANSFER_IN` / `COMPLETE_TRANSFER` → [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `BalanceTransferCommands` → `RuntimeAccountStateTransitions` / `TransferRuntime` → 所属 Lane 与 System Ledger → 终态提交。不同产品账户通过显式划转连接，保留转出、转入、完成的幂等与恢复状态。
+`ADJUST_BALANCE` / `TRANSFER_OUT` / `TRANSFER_IN` / `COMPLETE_TRANSFER` → [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `BalanceTransferCommands` → `AccountControlTask` / `TransferRuntime` → 所属 Lane 与 System Ledger → 终态提交。不同产品账户通过显式划转连接，保留转出、转入、完成的幂等与恢复状态。
 
 ```mermaid
 flowchart LR

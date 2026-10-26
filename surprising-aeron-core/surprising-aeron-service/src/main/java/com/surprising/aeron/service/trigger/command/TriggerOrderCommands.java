@@ -7,11 +7,9 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
 import com.surprising.aeron.service.order.state.RuntimeAlgoOrderStateTransitions;
-import com.surprising.aeron.service.order.state.RuntimeCancelAllAfterStateTransitions;
 import com.surprising.aeron.service.order.state.RuntimeOrderStateTransitions;
 import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.risk.RiskScanRuntime;
-import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import java.util.UUID;
 import lombok.AccessLevel;
@@ -89,7 +87,7 @@ public final class TriggerOrderCommands {
         if (scan == null || scan.priceSequence() != command.priceSequence()) return;
         // 本价格序列开始时固定的最大待触发 ID，后续新建更大 ID 不纳入这次页范围
         long upperId = owner.triggerOrderIndex().maxPendingId(command.instrumentId());
-        RuntimeRiskStateTransitions.replaceScan(owner.runtimeState(),
+        owner.runtimeState().replaceRiskScan(
                 scan.withTriggerProgress(upperId == 0, TriggerOrderIndex.PHASE_GREATER_OR_EQUAL,
                 Long.MAX_VALUE, Long.MAX_VALUE, upperId, command.markPriceTicks(),
                 command.generatedAtEpochMillis()).withTriggerOcoProgress(0, 0));
@@ -537,7 +535,7 @@ public final class TriggerOrderCommands {
      * @param scan 当前需要保存或接续的风险及触发扫描进度
      */
     void replaceRiskScan(RiskScanRuntime scan) {
-        RuntimeRiskStateTransitions.replaceScan(owner.runtimeState(), scan);
+        owner.runtimeState().replaceRiskScan(scan);
         owner.requestCommitPublication();
     }
 
@@ -697,7 +695,7 @@ public final class TriggerOrderCommands {
      * @param message 当前借用的原命令头和载荷，使用期间保持缓冲有效
      */
     public void executeUpdateCancelAllAfter(CoreMessage message) {
-        RuntimeCancelAllAfterStateTransitions.update(owner.runtimeState(), message.header().userId(),
+        owner.runtimeState().updateCancelAllAfter(message.header().userId(),
                 com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payloadUnsafe()));
         owner.requestCommitPublication();
     }

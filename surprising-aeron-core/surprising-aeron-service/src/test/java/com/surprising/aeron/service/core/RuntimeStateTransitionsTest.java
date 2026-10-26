@@ -14,11 +14,10 @@ import com.surprising.aeron.protocol.TransferFundsCommand;
 import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
-import com.surprising.aeron.service.account.RuntimeAccountStateTransitions;
+import com.surprising.aeron.service.account.AccountControlTask;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.RuntimeInstrumentStateTransitions;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
-import com.surprising.aeron.service.risk.RuntimeRiskStateTransitions;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.product.api.ProductLine;
@@ -83,9 +82,9 @@ class RuntimeStateTransitionsTest {
         assertThat(runtime.revision()).isEqualTo(beforeRetry);
         assertThat(runtime.balance(7L, identities.assetId("USDT")).availableUnits()).isEqualTo(750L);
 
-        assertThat(RuntimeAccountStateTransitions.completeTransfer(runtime, 7L, 91L)).isTrue();
+        assertThat(AccountControlTask.completeTransfer(runtime, 7L, 91L)).isTrue();
         assertThat(runtime.pendingTransfer(91L)).isNull();
-        assertThat(RuntimeAccountStateTransitions.completeTransfer(runtime, 7L, 91L)).isFalse();
+        assertThat(AccountControlTask.completeTransfer(runtime, 7L, 91L)).isFalse();
     }
 
     /**
@@ -172,7 +171,7 @@ class RuntimeStateTransitionsTest {
         // 从变更前状态投影的冷运行时，供直接转换和结果物化使用
         TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeRiskStateTransitions.updateScanControl(runtime, command, 123);
+        runtime.updateRiskScanControl(command, 123);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
     }
