@@ -20,8 +20,6 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     private volatile long handoffEpoch;
     private boolean handoffRequested;
     private long handoffDeadline;
-    private boolean ledgerStarted;
-    private Consumer<Thread> ledgerOwner;
 
     public AccountLaneLifecycle(AccountLaneState[] lanes, LaneTopology topology, Runnable assertOwner) {
         this.lanes = lanes;
@@ -33,7 +31,6 @@ public final class AccountLaneLifecycle implements AutoCloseable {
     public boolean started() { return started; }
     public boolean ownerHasAccess() { return ownerHasAccess; }
     public long handoffEpoch() { return handoffEpoch; }
-    public boolean ledgerStarted() { return ledgerStarted; }
 
     /** 只借出指定 Lane 的工作入口，不暴露可替换的资源数组；队列仍校验各生产者契约。 */
     public SettlementLaneWorker worker(int laneId) { return workers[laneId]; }
@@ -53,16 +50,6 @@ public final class AccountLaneLifecycle implements AutoCloseable {
             closeAfterFailure(problem);
             throw problem;
         }
-    }
-
-    public void startLedger(TreasuryRuntime treasury, Consumer<Thread> bindBusinessOwner) {
-        assertOwner.run();
-        if (ledgerStarted) return;
-        if (treasury.hasChangedValues())
-            throw new IllegalStateException("Ledger activation requires committed Treasury");
-        ledgerOwner = bindBusinessOwner;
-        bindBusinessOwner.accept(Thread.currentThread());
-        ledgerStarted = true;
     }
 
     /** 非阻塞取得所有账户 Lane；完成标记是事实来源，轮次仅表示本次交接。 */
@@ -134,10 +121,6 @@ public final class AccountLaneLifecycle implements AutoCloseable {
                 if (problem == null) problem = cleanup;
                 else if (cleanup != problem) problem.addSuppressed(cleanup);
             }
-        }
-        if (ledgerStarted) {
-            if (ledgerOwner != null) ledgerOwner.accept(null);
-            ledgerStarted = false;
         }
         Throwable unhealthy = failure.get();
         if (problem == null && unhealthy != null) problem = unhealthy;

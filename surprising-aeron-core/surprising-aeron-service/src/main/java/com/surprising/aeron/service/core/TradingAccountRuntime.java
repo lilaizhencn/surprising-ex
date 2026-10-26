@@ -220,7 +220,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public void bindFactIndexes(RuntimeFactIndexes indexes, RuntimeIdentityRegistry identities) {
         assertOwner();
-        if (laneLifecycle.ledgerStarted()) throw new IllegalStateException("position indexes must bind before Ledger activation");
         factIndexes = java.util.Objects.requireNonNull(indexes);
         indexIdentities = java.util.Objects.requireNonNull(identities);
     }
@@ -579,14 +578,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void recordFailure(Throwable problem) { laneLifecycle.recordFailure(problem); }
 
     /**
-     * 要求冷阶段财库变化已经提交，首次调用时创建账本 Lane、接入故障唤醒并转交业务索引所有权；已有账本时直接返回。
+     * 首次调用时将业务持仓索引绑定至当前 Owner 线程；已有账本时直接返回。
      */
     public void startSystemLedgerLane() {
-        laneLifecycle.startLedger(treasury,
-                businessOwner -> { if (factIndexes != null) factIndexes.bindBusinessOwner(businessOwner); });
+        assertOwner();
+        if (factIndexes != null) factIndexes.bindBusinessOwner(Thread.currentThread());
     }
 
-    public boolean systemLedgerStarted() { return laneLifecycle.ledgerStarted(); }
+    public boolean systemLedgerStarted() { return true; }
 
     /**
      * 从账本拥有的事实索引读取准入所需持仓量；尚未绑定索引则报错，结果由各准入事件保存。
@@ -630,10 +629,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean dispatchLedgerCommand(SystemLedgerCommand command) {
         assertOwner();
         if (command == null) throw new IllegalArgumentException("Ledger command is required");
-        if (!systemLedgerStarted()) {
-            command.applyBeforeActivation(treasury);
-            return true;
-        }
         if (ledgerControl != null && ledgerControl != command)
             throw new IllegalStateException("another control command owns the Ledger financial scope");
         command.submitted();
@@ -643,22 +638,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 冷阶段直接回滚财库变化；活动阶段向原控制槽或资金校验槽请求逆向收尾。
+     * 向原控制槽或资金校验槽请求逆向收尾。
      */
     private boolean rollbackLedgerControl() {
-        if (!systemLedgerStarted()) {
-            treasury.rollbackChangedValues();
-            return true;
-        }
         if (ledgerControl == null) return controlFundsValidation.requestRollback();
-        // 先让原派发阶段释放财务范围，再请求逆向收尾。
         return ledgerControl.requestRollback();
     }
 
     /**
      * 在 Owner 上判断账户已启动、账本已启动或显式异步范围是否任一成立。
      */
-    public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted() || laneLifecycle.ledgerStarted() || asynchronousCommandScope; }
+    public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted() || asynchronousCommandScope; }
 
     /** 控制账户任务的唯一有界派发和完成收集入口。 */
     private final ControlLaneDispatcher controlLanes = new ControlLaneDispatcher(this);
@@ -2221,7 +2211,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean dispatchMatcherFinancialSettlement(MatcherSettlementEvent event) {
         assertOwner();
         if (event == null) return true;
-        if (!systemLedgerStarted()) return true;
         if (ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
         return event.hasLedgerSettlement() || event.submitTreasurySettlement(treasury);
     }
@@ -2274,7 +2263,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
         if (event == null || !event.complete()) return null;
-        if (systemLedgerStarted() && !event.hasLedgerSettlement())
+        if (!event.hasLedgerSettlement())
             throw new IllegalStateException("Matcher money must be dispatched from the ordered commit head");
         // 事件汇总交出的财库变化，后续账户变化收集不会再造一份财库状态
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta(fundsAccumulator);
@@ -2673,7 +2662,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         pendingReservations.assertPendingReservationCounts();
         // 本方法是否需要临时取得账户访问权，不表示此刻已经取得
-        boolean acquired = (accountLanesStarted() || systemLedgerStarted()) && !ownerLaneAccess();
+        boolean acquired = accountLanesStarted() && !ownerLaneAccess();
         try {
             if (acquired) {
                 while (!tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
@@ -3024,9 +3013,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
             });
         }
         accountRollback.restoreOwner();
-        if (systemLedgerStarted() && ledgerControl != null)
+        if (ledgerControl != null)
             throw new IllegalStateException("active Ledger rollback requires its asynchronous continuation");
-        if (!systemLedgerStarted() || ledgerControl == null) treasury.rollbackChangedValues();
+        treasury.rollbackChangedValues();
         revision = revisionCheckpoint;
         clearChangedKeys();
     }
@@ -6401,7 +6390,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public boolean pollControlFundsValidation(boolean externalAdjustment) {
         assertOwner();
-        if (!systemLedgerStarted()) return true;
         if (ledgerControl != null) return ledgerControl.validateFunds(externalAdjustment);
         // 各 Lane 是否存在余额补丁条目，不等同于每条补丁都有非零差额
         boolean accountFundsChanged = false;
@@ -6515,10 +6503,11 @@ appendBalanceFundsDelta(patches, target);
         changedCancelAllAfterTimers.clear();
         changedTriggerOrders.clear();
         clearChanged(changedFeePolicies);
-        if (!systemLedgerStarted()) treasury.clearChangedKeys();
-        else if (ledgerControl != null) {
+        if (ledgerControl != null) {
             ledgerControl.commitScope();
             ledgerControl = null;
+        } else {
+            treasury.clearChangedKeys();
         }
         accountRollback.publishAndClearBalances();
         controlFundsValidation.clear();

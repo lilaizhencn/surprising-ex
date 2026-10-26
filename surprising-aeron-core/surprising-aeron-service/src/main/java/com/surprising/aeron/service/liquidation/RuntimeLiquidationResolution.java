@@ -57,8 +57,8 @@ public final class RuntimeLiquidationResolution {
         private LiquidationRuntime liquidation, nextLiquidation;
         /** 源合约结算资产整数编号，保险池、索赔和亏空必须使用同一资产。 */
         private int assetId;
-        /** done：账本和源账户写入都完成后的标记，重复轮询直接返回完成；ledgerDispatched：本决议账本命令是否已经成功入队，防止重复扣保险余额；accountsDispatched：账本完成后是否已经派发源账户新状态写入。 */
-        private boolean done, ledgerDispatched, accountsDispatched;
+        /** done：账本和源账户写入都完成后的标记，重复轮询直接返回完成；accountsDispatched：账本完成后是否已经派发源账户新状态写入。 */
+        private boolean done, accountsDispatched;
         /** 源强平路由中的用户编号，用于还未读取记录时定位所属 Lane。 */
         private long sourceUserId;
         /** 当前是否正在等待账户 Lane 提供源强平和保险索赔回执。 */
@@ -81,7 +81,7 @@ public final class RuntimeLiquidationResolution {
             this.command = command;
             this.assetId = assetId;
             liquidation = nextLiquidation = null;
-            done = ledgerDispatched = accountsDispatched = capturingClaims = false;
+            done = accountsDispatched = capturingClaims = false;
         }
 
         /**
@@ -199,12 +199,8 @@ public final class RuntimeLiquidationResolution {
                 if (!runtime.pollControlLanes()) return false;
                 capturingClaims = false;
             }
-            if (!ledgerDispatched) {
-                if (!runtime.dispatchLedgerCommand(this)) return false;
-                ledgerDispatched = true;
-            }
-            if (!ledgerCommandCompleted()) return false;
             if (!accountsDispatched) {
+                runtime.dispatchLedgerCommand(this);
                 runtime.dispatchControlLanes(runtime.topology().accountLaneMask(sourceUserId), this);
                 accountsDispatched = true;
             }

@@ -78,7 +78,7 @@ public final class MatcherSettlementEvent implements
     /** 本代财务结果是否已被收集，防止重复消费。 */
     private boolean collected;
     /** 本事件保留并复用的唯一财务任务槽，系统资金权威仍在原 Treasury。 */
-    private volatile TreasurySettlement treasurySettlement;
+    private TreasurySettlement treasurySettlement;
     /** Owner 已 acquire 观察完成的路由位图，本代只增加，下一代准备时清零。 */
     private long observedCompletedLaneMask;
 
@@ -1457,8 +1457,8 @@ public final class MatcherSettlementEvent implements
         private boolean queued;
         /** 本代选择账户完成后就地核对无成交资金的标记。 */
         private boolean localNoTrade;
-        /** 本代财务处理已结束的 volatile 完成发布标记。 */
-        private volatile boolean completed;
+        /** 本代财务处理已结束的完成标记。 */
+        private boolean completed;
 
         /**
          * 账本消费者只在所有路由账户完成且发布租约已交出后应用财务事实。

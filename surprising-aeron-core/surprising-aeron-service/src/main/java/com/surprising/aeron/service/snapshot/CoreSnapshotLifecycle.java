@@ -192,7 +192,7 @@ public final class CoreSnapshotLifecycle {
             }
             owner.runtimeState().requireSnapshotFenceReady();
             // 本轮是否需要临时取得 Owner 对账户 Lane 的读取权限；成功取得后在 finally 释放。
-            boolean acquired = (owner.runtimeState().accountLanesStarted() || owner.runtimeState().systemLedgerStarted()) && !owner.runtimeState().ownerLaneAccess();
+            boolean acquired = owner.runtimeState().accountLanesStarted() && !owner.runtimeState().ownerLaneAccess();
             try {
                 if (acquired) {
                     while (!owner.runtimeState().tryAcquireOwnerLaneAccess()) Thread.onSpinWait();

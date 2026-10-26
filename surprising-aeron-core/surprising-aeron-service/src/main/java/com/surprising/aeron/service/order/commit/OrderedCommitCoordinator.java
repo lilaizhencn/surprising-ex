@@ -1052,7 +1052,6 @@ public final class OrderedCommitCoordinator {
      * @param throughSequence 本轮允许推进或提交的 Core 序号上限
      */
     public void dispatchReadyMatcherFinancialSettlements(long throughSequence) {
-        if (!owner.runtimeState().systemLedgerStarted()) return;
         // 当前按完整序号或有序游标取得的命令槽
         CommandSlot pending;
         while ((pending = owner.pendingMatching().ledgerDispatchHead()) != null
@@ -1078,7 +1077,6 @@ public final class OrderedCommitCoordinator {
      * 检查账本游标是否有可重试的关闭或派发工作，让邮箱曾满的 Owner 即使没有新通知也能再推进。
      */
     public boolean hasFinancialDispatchWork() {
-        if (!owner.runtimeState().systemLedgerStarted()) return false;
         // 当前按完整序号或有序游标取得的命令槽
         CommandSlot pending = owner.pendingMatching().ledgerDispatchHead();
         if (pending == null) return false;
@@ -1106,21 +1104,19 @@ public final class OrderedCommitCoordinator {
     }
 
     /**
-     * 只在账本启用时关闭本命令资金顺序边界并尝试推进后继资金，不释放发布或响应租约。
+     * 关闭本命令资金顺序边界并尝试推进后继资金，不释放发布或响应租约。
      * @param pending 当前仍占用的命令槽
      */
     public void closeFinancialDispatch(CommandSlot pending) {
-        if (!owner.runtimeState().systemLedgerStarted()) return;
         pending.ledgerDispatchClosed(true);
         dispatchReadyMatcherFinancialSettlements(Long.MAX_VALUE);
     }
 
     /**
-     * 无独立账本时直接通过；账本启用时要求全局队首，并等当前普通或批次资金结算，已登记拒单无需再等资金事实。
+     * 要求全局队首并等当前普通或批次资金结算，已登记拒单无需再等资金事实。
      * @param pending 当前仍占用的命令槽
      */
     private boolean financialHeadReady(CommandSlot pending) {
-        if (!owner.runtimeState().systemLedgerStarted()) return true;
         if (pending.sequence() != owner.pendingMatching().firstSequence()) return false;
         if (pending.hasMatchingRejection() || owner.matchingFlow.hasPendingMatchingRejection(pending.sequence())) return true;
         // 当前命令关联的可空批次

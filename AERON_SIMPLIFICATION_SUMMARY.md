@@ -805,3 +805,25 @@
   4. 从 `TreasuryRuntime.java` 中彻底物理删除 `public interface Entry { ... }` 接口契约，全工程 `TreasuryRuntime.Entry` 引用彻底归零；
   5. 更新持仓和资金索引异常文案，消除废弃 API 编译警告。
 
+---
+
+## 32. Round 16: 深度清理过度设计、内存屏障与内联残留代码 (2026-10-27)
+
+在完成 `SystemLedgerLane` 内联与 `Entry` 接口删除后，代码库中仍残留了数处多线程时期的防御性过度设计、内存屏障与伪状态流。Round 16 秉承 KISS 原则进行了彻底的物理清理：
+
+### 32.1 物理删除死方法与剥离伪生命周期
+1. **删除 `TreasuryRuntime` 死方法**：物理删除了已无任何调用的所有权交接代码 `handoffTo(Thread)`、`transferOwner(Thread)`、`bindOwner()`。
+2. **剥离 `AccountLaneLifecycle` 残留伪账本生命周期**：清理 `ledgerStarted`、`ledgerOwner`、`ledgerStarted()`、`startLedger(...)` 及 `close()` 内部重置逻辑，生命周期类专职于账户分片生命周期管理。
+
+### 32.2 消除内存屏障与伪多线程两阶段握手
+1. **重构 `SystemLedgerCommand`**：彻底删除 5 处 `volatile` 屏障与内部类 `ScopeClose` 的 `requested`、`validationRequested` 伪多线程两阶段握手标记，物理删除死方法 `applyBeforeActivation`；精简 `TradingAccountRuntime` 内的命令派发和回滚代码。
+2. **消除 `ledgerDispatched` 过渡变量**：在 `RuntimeDerivativeLiquidationProcessor`、`RuntimeLiquidationResolution`、`RuntimeLifecycleSettlementContinuation` 中彻底删除过渡轮询变量，伪异步轮询收敛为同步内联直调。
+3. **移除 `systemLedgerStarted()` 伪双轨制死分支**：清理 `TradingAccountRuntime`、`CoreSnapshotLifecycle`、`OrderedCommitCoordinator` 中的无用假判断。
+4. **消除 `MatcherSettlementEvent` 内存屏障**：移除 `treasurySettlement` 与 `TreasurySettlement.completed` 的 `volatile` 修饰。
+
+### 32.3 验证结果
+- 全量 438 项关键单元测试全部 PASS，0 Failure，0 Error；
+- 25 万笔厚盘口常驻单连续报撤单吞吐达 **146,446 ops/s**，深度吃单撮合成交达 **374,930 trades/s**；
+- 256 标的高频做市复合流业务吞吐达 **374,520 ops/s**，未完成与积压为 0，资金 100% 绝对守恒。
+
+

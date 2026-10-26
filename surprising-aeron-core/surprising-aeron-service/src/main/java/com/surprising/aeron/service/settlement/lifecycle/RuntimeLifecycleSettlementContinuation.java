@@ -153,10 +153,9 @@ public final class RuntimeLifecycleSettlementContinuation {
         /** 本次账本调用要执行的撤单进度、保险预算或最终记账阶段。 */
         private FinancialPhase financialPhase;
         /**
-         * ledgerDispatched：当前财务阶段是否已成功投递，Owner 轮询时据此避免重复记账。
          * budgetSufficient：账本核对整页保险后的结果，完成回执发布后由 Owner 读取。
          */
-        private boolean ledgerDispatched, budgetSufficient;
+        private boolean budgetSufficient;
         /**
          * requiredInsurance：本页准备后值需要的保险总额，由账本精确汇总。
          * nextOrderCursor：撤单尚未全部结束时写入进度及结果的下一订单游标。
@@ -260,7 +259,7 @@ public final class RuntimeLifecycleSettlementContinuation {
             else Arrays.fill(prepared, null);
             if (clearingByLane == null) clearingByLane = new long[usersByLane.length];
             else Arrays.fill(clearingByLane, 0);
-            ledgerDispatched = budgetSufficient = false;
+            budgetSufficient = false;
             requiredInsurance = nextOrderCursor = 0;
             financialPhase = null;
             this.result = null;
@@ -361,7 +360,6 @@ public final class RuntimeLifecycleSettlementContinuation {
                 case PREPARE_WAIT -> {
                     if (!runtime.pollControlLanes()) return false;
                     financialPhase = FinancialPhase.INSURANCE;
-                    ledgerDispatched = false;
                     phase = Phase.BUDGET_WAIT;
                     return false;
                 }
@@ -383,7 +381,6 @@ public final class RuntimeLifecycleSettlementContinuation {
                 case APPLY_WAIT -> {
                     if (!runtime.pollControlLanes()) return false;
                     financialPhase = FinancialPhase.FINAL;
-                    ledgerDispatched = false;
                     phase = Phase.FINAL_WAIT;
                     return false;
                 }
@@ -423,14 +420,11 @@ public final class RuntimeLifecycleSettlementContinuation {
         }
 
         /**
-         * 预检元数据修订号容量，尝试把当前财务阶段交给账本；队列未接受或账本尚未完成时返回 false，已经接受后不重复投递。
+         * 预检元数据修订号容量，直接把当前财务阶段交给账本内联执行。
          */
         private boolean pollLedger() {
-            if (!ledgerDispatched) {
-                Math.addExact(runtime.revision(), financialPhase == FinancialPhase.INSURANCE ? 1 : selectedOrders.isEmpty() ? 1 : 2);
-                if (!runtime.dispatchLedgerCommand(this)) return false;
-                ledgerDispatched = true;
-            }
+            Math.addExact(runtime.revision(), financialPhase == FinancialPhase.INSURANCE ? 1 : selectedOrders.isEmpty() ? 1 : 2);
+            runtime.dispatchLedgerCommand(this);
             return ledgerCommandCompleted();
         }
 

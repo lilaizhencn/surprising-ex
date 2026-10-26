@@ -340,10 +340,9 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private final BatchExecutionStage[] stages;
         /**
          * accountsCollected：Owner 是否已经收集并登记账户阶段结果，防止重复登记变更。
-         * ledgerDispatched：资金账本命令是否已经成功入队，防止重复记账。
          * done：本阶段已经完成的标记，Owner 重复轮询时可直接结束。
          */
-        private boolean accountsCollected, ledgerDispatched, done;
+        private boolean accountsCollected, done;
         /** 本批各步骤应增加的全局修订号合计，提交前先检查整数范围。 */
         private long revisionDelta;
 
@@ -374,11 +373,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 Math.addExact(runtime.revision(), revisionDelta);
                 accountsCollected = true;
             }
-            if (!ledgerDispatched) {
-                if (!runtime.dispatchLedgerCommand(this)) return false;
-                ledgerDispatched = true;
-            }
-            if (!ledgerCommandCompleted()) return false;
+            runtime.dispatchLedgerCommand(this);
             runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), revisionDelta));
             done = true;
             return true;
@@ -622,9 +617,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
         /**
          * done：本阶段已经完成的标记，Owner 重复轮询时可直接结束。
          * accountsCollected：Owner 是否已经收集并登记账户阶段结果，防止重复登记变更。
-         * ledgerDispatched：资金账本命令是否已经成功入队，防止重复记账。
          */
-        private boolean done, accountsCollected, ledgerDispatched;
+        private boolean done, accountsCollected;
 
         /**
          * 绑定本次命令、撤单回执及下一游标，通过源强平路由定位 Lane，重置账户和账本完成标记并返回派发位图。
@@ -643,7 +637,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             var route = runtime.liquidationRoute(command.liquidationId());
             // 从强平路由或同步强平记录得到的源用户编号，没有记录时为 0。
             long userId = route == null ? runtime.liquidation(command.liquidationId()).userId() : route.userId();
-            this.done = accountsCollected = ledgerDispatched = false;
+            this.done = accountsCollected = false;
             return runtime.topology().accountLaneMask(userId);
         }
 
@@ -672,11 +666,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1);
                 accountsCollected = true;
             }
-            if (!ledgerDispatched) {
-                if (!runtime.dispatchLedgerCommand(this)) return false;
-                ledgerDispatched = true;
-            }
-            if (!ledgerCommandCompleted()) return false;
+            runtime.dispatchLedgerCommand(this);
             runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1));
             done = true;
             return true;

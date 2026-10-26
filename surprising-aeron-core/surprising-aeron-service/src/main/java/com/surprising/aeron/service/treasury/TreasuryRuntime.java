@@ -76,34 +76,12 @@ public final class TreasuryRuntime {
     }
 
     /**
-     * 由预定账本线程确认自己与当前所有者一致，未绑定时按既有规则认领。
-     */
-    void bindOwner() { assertOwner(); }
-
-    /**
-     * 原所有者在启动工作线程前交出同一财库，目标必须非空且尚未启动。
-     * @param nextOwner 按既有静默边界接管原财库的线程，transferOwner 可用空值解除绑定
-     */
-    void handoffTo(Thread nextOwner) {
-        assertOwner();
-        if (nextOwner == null || nextOwner.isAlive())
-            throw new IllegalArgumentException("ledger handoff requires an unstarted owner thread");
-        owner = nextOwner;
-    }
-
-    /**
      * 当前所有者显式解除绑定，下一执行方可在既有交接边界认领。
      */
     public void releaseOwnerForHandoff() {
         assertOwner();
         owner = null;
     }
-
-    /**
-     * 按 SystemLedgerLane 已确认静默的边界直接迁移所有者，volatile 写入提供可见性；本方法不自行等在途工作。
-     * @param nextOwner 按既有静默边界接管原财库的线程，transferOwner 可用空值解除绑定
-     */
-    void transferOwner(Thread nextOwner) { owner = nextOwner; }
 
     /**
      * 当前所有者读取指定资产手续费余额，缺失按原语 Map 返回零。
