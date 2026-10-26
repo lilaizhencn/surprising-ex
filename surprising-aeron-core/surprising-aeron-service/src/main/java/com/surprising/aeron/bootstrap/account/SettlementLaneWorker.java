@@ -5,7 +5,6 @@ import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.LockSupport;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;

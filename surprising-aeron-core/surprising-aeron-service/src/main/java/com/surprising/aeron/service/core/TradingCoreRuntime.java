@@ -55,7 +55,6 @@ import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.order.commit.OrderedCommitCoordinator;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.RuntimeOrderCommitStateTransitions;
-import com.surprising.aeron.service.order.state.RuntimeOrderStateTransitions;
 import com.surprising.aeron.service.position.command.LeverageCommands;
 import com.surprising.aeron.service.position.command.PositionCommands;
 import com.surprising.aeron.service.query.CoreQueryService;

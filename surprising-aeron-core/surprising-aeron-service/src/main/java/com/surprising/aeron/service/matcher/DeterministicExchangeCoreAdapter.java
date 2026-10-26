@@ -8,7 +8,6 @@ import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.CoreOrderSide;
-import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import exchange.core2.core.SynchronousMatchingEngine;
 import exchange.core2.core.common.CoreSymbolSpecification;

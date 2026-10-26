@@ -21,7 +21,6 @@ import com.surprising.aeron.service.order.state.RuntimeAlgoOrderStateTransitions
 import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.risk.RiskScanCoordinator;
-import com.surprising.aeron.service.treasury.RuntimeInsuranceFundStateTransitions;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;

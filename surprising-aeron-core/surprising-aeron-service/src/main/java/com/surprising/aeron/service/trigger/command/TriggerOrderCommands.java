@@ -6,7 +6,6 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
-import com.surprising.aeron.service.order.state.RuntimeAlgoOrderStateTransitions;
 import com.surprising.aeron.service.order.state.RuntimeOrderStateTransitions;
 import com.surprising.aeron.service.order.state.RuntimeTriggerOrderStateTransitions;
 import com.surprising.aeron.service.risk.RiskScanRuntime;

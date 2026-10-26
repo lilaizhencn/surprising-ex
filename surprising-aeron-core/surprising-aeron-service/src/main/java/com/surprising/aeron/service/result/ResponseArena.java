@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.result;
 
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.order.ClusterCommandWindow;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongArray;
 import lombok.Getter;

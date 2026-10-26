@@ -3,7 +3,6 @@ package com.surprising.aeron.protocol;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Objects;
-import java.util.UUID;
 
 public final class CoreMessageCodec {
 

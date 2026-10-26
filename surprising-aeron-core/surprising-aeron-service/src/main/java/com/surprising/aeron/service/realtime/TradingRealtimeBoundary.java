@@ -5,7 +5,6 @@ import com.surprising.aeron.config.RealtimeConfiguration;
 import com.surprising.aeron.client.AeronRealtimeReceiver;
 import com.surprising.aeron.client.AeronRealtimeSender;
 import com.surprising.aeron.client.RealtimeOutbox;
-import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.realtime.state.RealtimeStateCapture;

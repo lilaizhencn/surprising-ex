@@ -9,7 +9,6 @@ public final class CoreProtocol {
     public static final int SCHEMA_VERSION = 17;
     public static final int HEADER_LENGTH = 72;
     public static final int RESPONSE_FIXED_PAYLOAD_LENGTH = 32;
-    public static final int CLUSTER_MAX_MESSAGE_LENGTH = 2 * 1024 * 1024;
 
     private CoreProtocol() {
     }
