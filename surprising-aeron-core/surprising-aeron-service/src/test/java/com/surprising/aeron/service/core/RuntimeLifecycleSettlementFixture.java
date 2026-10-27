@@ -16,6 +16,8 @@ public final class RuntimeLifecycleSettlementFixture {
             RuntimeIdentityRegistry identities) {
         var work = RuntimeLifecycleSettlementContinuation.prepare(null, command, userIds, orders, runtime, identities);
         CoreTestCompletion.completeControlWork(work::poll);
-        return work.result();
+        var result = work.result();
+        runtime.clearChangedKeys();
+        return result;
     }
 }

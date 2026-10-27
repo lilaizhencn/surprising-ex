@@ -191,7 +191,9 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             runtime.rollbackPlaceBatchAdmissionInLane(
                     lane, userId, coreSequence, orders, clientKeys, admittedCount, userBefore);
             for (/* 失败回退时遍历所有已准备客户身份的项下标，回退后清零对应键。 */ int i = 0; i < itemCount; i++) {
-                if (orders[i] != null) identities.rollbackClientKeyInLane(lane, userId, orders[i].clientOrderId(), clientKeys[i]);
+                if (clientKeys[i] != 0 && orders[i] != null && orders[i].hasIntent()) {
+                    identities.rollbackClientKeyInLane(lane, userId, orders[i].clientOrderId(), clientKeys[i]);
+                }
                 clientKeys[i] = 0;
             }
             admittedCount = 0;

@@ -48,7 +48,7 @@ public final class RuntimeOrderAdmission {
     }
 
     /**
-     * 定位用户所属 Lane，准备客户、币对、持仓及账本身份；改单时读取被替换订单的币对，随后执行统一校验和金额计算。
+     * 定位用户所属 Lane，准备客户、币对、持仓及账本身份；改单时读取被替换订单，随后执行统一校验和金额计算。
      * @param runtime 所属交易运行时，提供 Lane 权限、规范币对及账本状态入口
      * @param identities 当前产品运行时身份表，币对、客户标识和持仓键从这里准备
      * @param userId 下单用户编号，账户与挂单都必须属于这个用户
@@ -64,20 +64,15 @@ public final class RuntimeOrderAdmission {
         if (runtime == null || identities == null || order == null || activeOrders == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission input");
         }
-        // 当前用户实际所属的账户 Lane，所有账户和订单检查从这里读取。
         AccountLaneState lane = runtime.accountLaneForUser(userId);
-        // 为本次准入准备的客户、币对、持仓身份和借用的账本事实。
-        AdmissionIdentity identity = admissionIdentity(runtime, identities, userId, order);
-        // 被替换订单实际所属币对，未排除任何订单时保持 null。
-        String excludedSymbol = null;
-        if (excludedOrderId != 0) {
-            // 调用方要求排除的原单，存在时取其币对身份再做统一校验。
-            OrderRuntime excluded = lane.order(excludedOrderId);
-            if (excluded != null) excludedSymbol = identities.instrumentId(excluded.symbolId());
-        }
+        int symbolId = identities.symbolId(order.instrumentId());
+        long clientKey = identities.findClientKeyValue(userId, order.clientOrderId());
+        long positionKey = identities.findPositionKeyValue(userId, order.instrument(), order.positionSide());
+        var settlement = runtime.treasury().settlementStatus(symbolId);
+        OrderRuntime excluded = excludedOrderId == 0 ? null : lane.order(excludedOrderId);
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                excludedOrderId, identity.clientKey(), identity.positionKey(),
-                identity.lifecycleSettled(), identity.fundingInProgress(), excludedSymbol);
+                excluded, clientKey, positionKey,
+                settlement.lifecycleSettled(), settlement.fundingInProgress(), null);
     }
 
     /**
@@ -93,7 +88,6 @@ public final class RuntimeOrderAdmission {
         if (runtime == null || identities == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission identity");
         }
-        // 从永久币对编号取得的运行时稠密身份，用于账本及持仓路由。
         int symbolId = identities.symbolId(order.instrumentId());
         return new AdmissionIdentity(identities.findClientKeyValue(userId, order.clientOrderId()),
                 symbolId,
@@ -103,13 +97,6 @@ public final class RuntimeOrderAdmission {
 
     /**
      * 使用已准备好的身份事实在显式 Lane 中检查普通订单，避免账户消费者重新组装这些输入。
-     * @param runtime 所属交易运行时，提供 Lane 权限、规范币对及账本状态入口
-     * @param lane 明确属于当前用户的账户 Lane，调用线程必须已持有合法访问权
-     * @param userId 下单用户编号，账户与挂单都必须属于这个用户
-     * @param order 已经完成价格、费率和冻结资产决策的订单输入
-     * @param openInterestSteps 账本或调用方固定的该币对 OI 数量步数，用于比例限额检查
-     * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
-     * @param identity 已经准备好的客户、币对、持仓身份和账本结算事实
      */
     public static long requiredReservationPrepared(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
@@ -118,22 +105,12 @@ public final class RuntimeOrderAdmission {
             throw new IllegalArgumentException("invalid prepared runtime order admission input");
         }
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                0, identity.clientKey(), identity.positionKey(),
+                null, identity.clientKey(), identity.positionKey(),
                 identity.lifecycleSettled(), identity.fundingInProgress(), null);
     }
 
     /**
      * 直接使用已准备的 primitive 身份值和生命周期标记执行普通订单准入，不额外构造身份记录。
-     * @param runtime 所属交易运行时，提供 Lane 权限、规范币对及账本状态入口
-     * @param lane 明确属于当前用户的账户 Lane，调用线程必须已持有合法访问权
-     * @param userId 下单用户编号，账户与挂单都必须属于这个用户
-     * @param order 已经完成价格、费率和冻结资产决策的订单输入
-     * @param openInterestSteps 账本或调用方固定的该币对 OI 数量步数，用于比例限额检查
-     * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
-     * @param clientKey 当前客户端订单标识的整数身份，0 表示没有已有身份
-     * @param positionKey 当前用户、币对和持仓腿的已有持仓键，0 表示没有持仓身份
-     * @param lifecycleSettled 当前币对是否已经完成到期结算，已完成就拒绝新准入
-     * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
      */
     public static long requiredReservationPrepared(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
@@ -144,69 +121,34 @@ public final class RuntimeOrderAdmission {
             throw new IllegalArgumentException("invalid primitive prepared runtime order admission input");
         }
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                0, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
+                null, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
     /**
-     * 取得被替换原单并限定相同币对，统一校验时排除原单已有数量和身份占用，再计算新单所需预留。
-     * @param runtime 所属交易运行时，提供 Lane 权限、规范币对及账本状态入口
-     * @param lane 明确属于当前用户的账户 Lane，调用线程必须已持有合法访问权
-     * @param userId 下单用户编号，账户与挂单都必须属于这个用户
-     * @param order 已经完成价格、费率和冻结资产决策的订单输入
-     * @param openInterestSteps 账本或调用方固定的该币对 OI 数量步数，用于比例限额检查
-     * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
-     * @param excludedOrderId 改单时排除的原订单编号，普通下单使用 0
-     * @param clientKey 当前客户端订单标识的整数身份，0 表示没有已有身份
-     * @param positionKey 当前用户、币对和持仓腿的已有持仓键，0 表示没有持仓身份
-     * @param lifecycleSettled 当前币对是否已经完成到期结算，已完成就拒绝新准入
-     * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
+     * 改单准入直接接收已读取的原单引用，排除原单占用并校验新单预留，消除多重哈希查找。
+     */
+    public static long requiredReplacementReservationPrepared(
+            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, OrderRuntime original,
+            long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
+        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
+                original, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
+    }
+
+    /**
+     * 兼容原单编号入参的改单准入，在当前所属 Lane 一次性查找原单后直达核心检查。
      */
     static long requiredReplacementReservationPrepared(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
             long clientKey, long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
-        // 改单要替换的原订单，必须属于当前 Lane。
-        OrderRuntime original = lane.order(excludedOrderId);
-        // 只有原单和新单稠密币对一致时保留新单的规范编号，否则交统一检查拒绝。
-        String originalSymbol = original != null && original.symbolId() == order.symbolId()
-                ? order.instrumentId() : null;
+        OrderRuntime original = excludedOrderId == 0 ? null : lane.order(excludedOrderId);
         return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                excludedOrderId, clientKey, positionKey,
-                lifecycleSettled, fundingInProgress, originalSymbol);
-    }
-
-    /**
-     * 把运行态准入参数交给统一检查入口，币对从当前所属 Lane 的运行时配置读取。
-     * @param runtime 所属交易运行时，提供 Lane 权限、规范币对及账本状态入口
-     * @param lane 明确属于当前用户的账户 Lane，调用线程必须已持有合法访问权
-     * @param userId 下单用户编号，账户与挂单都必须属于这个用户
-     * @param order 已经完成价格、费率和冻结资产决策的订单输入
-     * @param openInterestSteps 账本或调用方固定的该币对 OI 数量步数，用于比例限额检查
-     * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
-     * @param excludedOrderId 改单时排除的原订单编号，普通下单使用 0
-     * @param clientKey 当前客户端订单标识的整数身份，0 表示没有已有身份
-     * @param positionKey 当前用户、币对和持仓腿的已有持仓键，0 表示没有持仓身份
-     * @param lifecycleSettled 当前币对是否已经完成到期结算，已完成就拒绝新准入
-     * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
-     * @param excludedSymbol 被替换原单的币对编号文本，用于核对原单归属和币对一致性
-     */
-    private static long requiredReservation(
-            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
-            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
-            long clientKey, long positionKey,
-            boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol) {
-        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders, excludedOrderId,
-                clientKey, positionKey, lifecycleSettled, fundingInProgress, excludedSymbol, null);
+                original, clientKey, positionKey, lifecycleSettled, fundingInProgress, null);
     }
 
     /**
      * 预检只读取显式所属 Lane 和 Owner 捕获的币对配置；使用现有身份及挂单索引计算金额，不分配新身份、创建订单或冻结资金。
-     * @param runtime 所属交易运行时，提供 Lane 权限、规范币对及账本状态入口
-     * @param lane 明确属于当前用户的账户 Lane，调用线程必须已持有合法访问权
-     * @param userId 下单用户编号，账户与挂单都必须属于这个用户
-     * @param order 已经完成价格、费率和冻结资产决策的订单输入
-     * @param openInterestSteps 账本或调用方固定的该币对 OI 数量步数，用于比例限额检查
-     * @param identity 已经准备好的客户、币对、持仓身份和账本结算事实
      */
     public static long requiredReservationForQuery(TradingAccountRuntime runtime, AccountLaneState lane, long userId,
             ResolvedPlaceOrder order, long openInterestSteps, AdmissionIdentity identity) {
@@ -214,33 +156,21 @@ public final class RuntimeOrderAdmission {
                 || order == null || identity == null)
             throw new IllegalStateException("preflight query requires its owning Lane scope");
         return requiredReservation(runtime, lane, userId, order, openInterestSteps,
-                lane.admissionOrderIndex(identity.symbolId()), 0, identity.clientKey(),
-                identity.positionKey(), identity.lifecycleSettled(), identity.fundingInProgress(), null, order.instrument());
+                lane.admissionOrderIndex(identity.symbolId()), null, identity.clientKey(),
+                identity.positionKey(), identity.lifecycleSettled(), identity.fundingInProgress(), order.instrument());
     }
 
     /**
-     * 统一核对 Lane 权限、算法子单、订单与客户端身份、币对和生命周期，再检查持仓模式、只减仓容量、风险限额及杠杆，最后由所属产品规则计算预留。
-     * @param runtime 所属交易运行时，提供 Lane 权限、规范币对及账本状态入口
-     * @param lane 明确属于当前用户的账户 Lane，调用线程必须已持有合法访问权
-     * @param userId 下单用户编号，账户与挂单都必须属于这个用户
-     * @param order 已经完成价格、费率和冻结资产决策的订单输入
-     * @param openInterestSteps 账本或调用方固定的该币对 OI 数量步数，用于比例限额检查
-     * @param activeOrders 当前用户、币对及方向的准入挂单汇总视图，可包含本批已获准订单影响
-     * @param excludedOrderId 改单时排除的原订单编号，普通下单使用 0
-     * @param clientKey 当前客户端订单标识的整数身份，0 表示没有已有身份
-     * @param positionKey 当前用户、币对和持仓腿的已有持仓键，0 表示没有持仓身份
-     * @param lifecycleSettled 当前币对是否已经完成到期结算，已完成就拒绝新准入
-     * @param fundingInProgress 当前币对是否仍有资金费持仓截面处理中任务，需要拒绝冲突准入
-     * @param excludedSymbol 被替换原单的币对编号文本，用于核对原单归属和币对一致性
-     * @param queryInstrument 只读预检捕获的配置副本，null 表示读取当前运行态规范币对
+     * 统一核对算法子单、订单与客户端身份、币对和生命周期，再检查持仓模式、只减仓容量、风险限额及杠杆，最后由所属产品规则计算预留。
      */
     private static long requiredReservation(
             TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
-            long openInterestSteps, AdmissionOrderIndex activeOrders, long excludedOrderId,
+            long openInterestSteps, AdmissionOrderIndex activeOrders, OrderRuntime excluded,
             long clientKey, long positionKey,
-            boolean lifecycleSettled, boolean fundingInProgress, String excludedSymbol, CoreInstrument queryInstrument) {
-        runtime.requireLaneAccess(lane, userId);
+            boolean lifecycleSettled, boolean fundingInProgress, CoreInstrument queryInstrument) {
+        lane.assertOwner();
         lane.requireAlgoChildAdmission(userId, order);
+        long excludedOrderId = excluded == null ? 0 : excluded.orderId();
         if (lane.order(order.orderId()) != null && order.orderId() != excludedOrderId) {
             throw rejected("DUPLICATE_ORDER_ID", "orderId already exists");
         }
@@ -270,9 +200,7 @@ public final class RuntimeOrderAdmission {
         // 按已准备持仓键读取的当前持仓，无键或未建仓时为 null。
         PositionRuntime position = positionKey == 0 ? null : lane.position(positionKey);
         // 本次改单排除的原单，必须存在且用户及币对一致。
-        OrderRuntime excluded = excludedOrderId == 0 ? null : lane.order(excludedOrderId);
-        if (excludedOrderId != 0 && (excluded == null || excluded.userId() != userId
-                || !order.instrumentId().equals(excludedSymbol))) {
+        if (excluded != null && (excluded.userId() != userId || excluded.symbolId() != order.symbolId())) {
             throw rejected("ORDER_NOT_FOUND", "excluded replacement order is invalid");
         }
         // 当前订单另一种保证金模式，用它统计未清委托冲突。

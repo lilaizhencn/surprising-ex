@@ -29,6 +29,7 @@ public final class RuntimeStateParityChecker {
         if (expected == null || identities == null || actual == null) {
             throw new IllegalArgumentException("parity arguments are required");
         }
+        actual.clearChangedKeys();
         // 按同一身份表物化的实际完整冷状态，先做值和哈希比较
         TradingCoreState materialized = RuntimeStateMaterializer.materialize(actual, identities);
         if (!expected.equals(materialized) || expected.businessStateHash() != materialized.businessStateHash()) {

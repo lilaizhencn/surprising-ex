@@ -42,33 +42,30 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public PlaceBatchIntentSource.Decision decision(int index) { return preparedDecisions[index]; }
-    /** 每项可复用的解析订单槽，借用时才创建，整批退休后清理内容。 */
-    private final ResolvedPlaceOrder[] resolvedOrderSlots;
+    /** 每项引用的产品判断输入，可指向同品种共享上下文。 */
+    final com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[] preparedDecisions;
+
     /**
      * 按有效下标取得本项可复用的解析订单槽，首次使用才创建；调用方遵守当前阶段的独占写权限。
+     * 直接复用 preparedOrders 数组，消除冗余并行数组与双重清空。
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public ResolvedPlaceOrder resolvedOrderSlot(int index) {
-        // 当前下标可复用的解析订单槽，首次使用前为空
-        var slot = resolvedOrderSlots[index];
-        if (slot == null) resolvedOrderSlots[index] = slot = new ResolvedPlaceOrder();
+        var slot = preparedOrders[index];
+        if (slot == null) preparedOrders[index] = slot = new ResolvedPlaceOrder();
         return slot;
     }
+
     /**
      * 把账户准入订单捕获到对应项的固定副本，返回该份可借用回执，整批退休前保留。
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      * @param order 当前由账户提供的可空准入或结果订单
      */
     public OrderRuntime captureAdmittedOrder(int index, OrderRuntime order) {
-        // 该项持有准入副本直到整批退休；Matcher 与实时输出共用这份回执，不再重复捕获。
-        // 当前被捕获、检查、编码或清理的批内项
         OrderBatchItem item = items.get(index);
         item.captureAdmittedOrder(order);
         return item.admittedOrder;
     }
-
-    /** 每项引用的产品判断输入，可指向同品种共享上下文。 */
-    final com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[] preparedDecisions;
     /**
      * 返回需要生成 Lane 结果的批内项数。
      */
@@ -635,7 +632,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         preparedOrders = new ResolvedPlaceOrder[capacity];
-        resolvedOrderSlots = new ResolvedPlaceOrder[capacity];
         preparedDecisions = new com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource.Decision[capacity];
         preparedClientKeyValues = new long[capacity];
         preparedAdmittedOrders = new OrderRuntime[capacity];
@@ -720,13 +716,13 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         pipelinedMatchingFailure = null;
         settlementEvent = null;
         placeBatchAdmissionEvent = null;
+        for (int index = 0; index < preparedCount; index++) {
+            if (preparedOrders[index] != null) preparedOrders[index].clear();
+        }
         java.util.Arrays.fill(preparedOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedDecisions, 0, preparedCount, null);
         java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, 0);
         java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);
-        for (/* 当前项槽、预备身份或 Matcher 事实的遍历下标 */ int index = 0; index < preparedCount; index++) {
-            if (resolvedOrderSlots[index] != null) resolvedOrderSlots[index].clear();
-        }
         clearPreparedDecisionCache();
         lifecycleFlags = 0;
         observedSettlementLaneMask = 0;

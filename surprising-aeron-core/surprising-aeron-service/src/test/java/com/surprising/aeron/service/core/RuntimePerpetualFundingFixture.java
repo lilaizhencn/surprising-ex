@@ -36,6 +36,8 @@ public final class RuntimePerpetualFundingFixture {
         var work = com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor.prepare(
                 null, command, userIds, runtime, identities);
         com.surprising.aeron.service.order.CoreTestCompletion.completeControlWork(work::poll);
-        return work.result();
+        var result = work.result();
+        runtime.clearChangedKeys();
+        return result;
     }
 }

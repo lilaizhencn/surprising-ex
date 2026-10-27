@@ -195,6 +195,7 @@ class CoreFinancialLedgerProductionTest {
         var identities = new RuntimeIdentityRegistry();
         try (/* 冷对照回调实际操作的账户运行时 */ var runtime = RuntimeStateProjector.project(before, identities)) {
             mutation.accept(runtime, identities);
+            runtime.clearChangedKeys();
             return RuntimeStateMaterializer.materialize(runtime, identities);
         }
     }

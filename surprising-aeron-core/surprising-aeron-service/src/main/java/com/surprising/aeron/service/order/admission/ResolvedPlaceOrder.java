@@ -263,8 +263,9 @@ public class ResolvedPlaceOrder {
      * 返回原下单意图是否只允许成为挂单方。
      */
     public boolean postOnly() { return intent.postOnly(); }
+    public boolean hasIntent() { return intent != null; }
     /**
      * 返回原下单意图的客户端订单标识。
      */
-    public String clientOrderId() { return intent.clientOrderId(); }
+    public String clientOrderId() { return intent == null ? "" : intent.clientOrderId(); }
 }

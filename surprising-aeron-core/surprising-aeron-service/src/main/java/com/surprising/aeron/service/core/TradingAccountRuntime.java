@@ -582,10 +582,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public void startSystemLedgerLane() {
         assertOwner();
+        systemLedgerStarted = true;
         if (factIndexes != null) factIndexes.bindBusinessOwner(Thread.currentThread());
     }
 
-    public boolean systemLedgerStarted() { return true; }
+    private boolean systemLedgerStarted;
+
+    public boolean systemLedgerStarted() { return systemLedgerStarted; }
 
     /**
      * 从账本拥有的事实索引读取准入所需持仓量；尚未绑定索引则报错，结果由各准入事件保存。
@@ -1396,7 +1399,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 先归还 Owner 账户访问权并清账户启动标记，再逐一关闭账户工作对象与账本，汇总已捕获的关闭异常；账本线程确认退出后解除索引业务所有者，最后保留 Error 或包装其他故障抛出。
      */
     @Override
-    public void close() { laneLifecycle.close(); }
+    public void close() {
+        systemLedgerStarted = false;
+        laneLifecycle.close();
+    }
 
     public boolean workersStopped() { return laneLifecycle.workersStopped(); }
 
@@ -2263,7 +2269,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
         if (event == null || !event.complete()) return null;
-        if (!event.hasLedgerSettlement())
+        if (systemLedgerStarted && !event.hasLedgerSettlement())
             throw new IllegalStateException("Matcher money must be dispatched from the ordered commit head");
         // 事件汇总交出的财库变化，后续账户变化收集不会再造一份财库状态
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta(fundsAccumulator);
@@ -3217,52 +3223,48 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param cursor 上次已消费的订单号，结果必须严格大于它
      */
     public long nextRiskReservationId(long userId, long cursor) {
-        // 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限
         AccountLaneState lane = riskCursorLane(userId);
-        // 该用户当前预留或持仓身份索引，只在对应账户读取边界内遍历
         var ids = lane.reservationIds(userId);
-        // 当前找到的严格大于数字游标的最小预留订单号，零表示尚未找到
+        if (ids == null || ids.isEmpty()) return 0;
+        if (ids.size() == 1) {
+            long single = ids.iterator().nextValue();
+            return single > cursor ? single : 0;
+        }
         long selected = 0;
-        if (ids != null) {
-            // 当前原始身份集合的迭代器，避免先复制完整集合
-            var iterator = ids.iterator();
-            while (iterator.hasNext()) {
-                // 当前遍历到的预留订单号，用数字大小与游标比较
-                long id = iterator.nextValue();
-                if (id > cursor && (selected == 0 || id < selected)) selected = id;
-            }
+        var iterator = ids.iterator();
+        while (iterator.hasNext()) {
+            long id = iterator.nextValue();
+            if (id > cursor && (selected == 0 || id < selected)) selected = id;
         }
         return selected;
     }
 
     /**
      * 按持仓对外身份文本的字典序取下一项，返回它的内部长整数键；游标为减号时从头开始，没有后续项返回零。
+     * 单持仓快速路径无需遍历，多持仓时按序递进。
      * @param userId 业务所属用户身份，按本产品线固定拓扑路由
      * @param cursor 上次持仓对外身份文本，减号表示从第一项开始
      * @param identities 与本产品线配套的身份注册表
      */
     public long nextRiskPositionKey(long userId, String cursor, RuntimeIdentityRegistry identities) {
-        // 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限
         AccountLaneState lane = riskCursorLane(userId);
-        // 该用户当前预留或持仓身份索引，只在对应账户读取边界内遍历
         LongHashSet ids = lane.positionKeys(userId);
-        // 当前字典序最小候选持仓对应的内部长整数键
+        if (ids == null || ids.isEmpty()) return 0;
+        if (ids.size() == 1) {
+            long single = ids.longIterator().next();
+            if ("-".equals(cursor)) return single;
+            return identities.positionKey(userId, single).compareTo(cursor) > 0 ? single : 0;
+        }
         long selected = 0;
-        // 当前候选持仓的对外身份文本，用字典序决定下一项
         String selectedIdentity = null;
-        if (ids != null) {
-            // 当前原始身份集合的迭代器，避免先复制完整集合
-            var iterator = ids.longIterator();
-            while (iterator.hasNext()) {
-                // 当前遍历到的持仓内部键，先转换为对外身份文本再比较
-                long id = iterator.next();
-                // 该内部持仓键对应的对外身份文本，下一页按此文本字典序选择
-                String identity = identities.positionKey(userId, id);
-                if (!"-".equals(cursor) && identity.compareTo(cursor) <= 0) continue;
-                if (selectedIdentity == null || identity.compareTo(selectedIdentity) < 0) {
-                    selected = id;
-                    selectedIdentity = identity;
-                }
+        var iterator = ids.longIterator();
+        while (iterator.hasNext()) {
+            long id = iterator.next();
+            String identity = identities.positionKey(userId, id);
+            if (!"-".equals(cursor) && identity.compareTo(cursor) <= 0) continue;
+            if (selectedIdentity == null || identity.compareTo(selectedIdentity) < 0) {
+                selected = id;
+                selectedIdentity = identity;
             }
         }
         return selected;
@@ -6236,7 +6238,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
             visitChangedOrderIndexes(consumer, changedOrders.laneBuffer(laneId));
         }
-        if (preparedConsumer == null) {
+        if (!systemLedgerStarted || preparedConsumer == null) {
             visitChangedPositionIndexes(consumer, preparedConsumer, changedPositions.directBuffer());
             remaining = changedPositions.retainedLaneMask();
             while (remaining != 0) {

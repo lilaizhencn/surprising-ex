@@ -201,6 +201,7 @@ public final class RuntimeLiquidationResolution {
             }
             if (!accountsDispatched) {
                 runtime.dispatchLedgerCommand(this);
+                ledgerCommandCompleted();
                 runtime.dispatchControlLanes(runtime.topology().accountLaneMask(sourceUserId), this);
                 accountsDispatched = true;
             }

@@ -344,6 +344,7 @@ public final class RuntimeTestStateTransitions {
                     activeOrders,
                     runtime,
                     identities);
+            runtime.clearChangedKeys();
             return new SettlementApplication(RuntimeStateMaterializer.materialize(runtime, identities), progress);
         }
     }
@@ -518,6 +519,7 @@ public final class RuntimeTestStateTransitions {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(before, identities)) {
             mutation.apply(runtime, identities);
+            runtime.clearChangedKeys();
             return RuntimeStateMaterializer.materialize(runtime, identities);
         }
     }
