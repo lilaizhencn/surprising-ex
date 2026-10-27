@@ -60,10 +60,9 @@ public final class RuntimeDerivativeMatchProcessor {
                 runtime.updateOrderStatusInLane(lane, localTaker.orderId(), CoreOrderStatus.CANCELED,
                         Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition);
             }
-            if (lane.order(takerOrderId).canceled()) {
+            if (localTaker.canceled()) {
                 // 终态订单仍可释放的订单预留金额，正数才额外推进用户修订。
-                long releaseUnits = lane.reservation(takerOrderId).reservedUnits();
-                runtime.releaseTerminalReservationInLane(lane, takerOrderId);
+                long releaseUnits = runtime.releaseTerminalReservationInLane(lane, localTaker, null);
                 if (releaseUnits > 0) runtime.advanceUserRevision(lane, localTaker.userId());
             }
         }
@@ -104,15 +103,14 @@ public final class RuntimeDerivativeMatchProcessor {
             // 当前成交在允许读取边界内取得的对手订单值。
             OrderRuntime maker = lane.order(match.matchedOrderId());
             if (maker != null) {
-                maker = requireOpen(lane, maker.orderId());
+                maker = requireOpen(maker, maker.orderId());
                 // 本笔数量是否正好耗尽 maker 当前剩余量。
                 boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
                 applyFill(runtime, lane, identities, instrument, maker, match.price(), match.size(), false,
                         settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
                 if (makerTerminal) {
                     // 终态订单仍可释放的订单预留金额，正数才额外推进用户修订。
-                    long releaseUnits = lane.reservation(maker.orderId()).reservedUnits();
-                    runtime.releaseTerminalReservationInLane(lane, maker.orderId());
+                    long releaseUnits = runtime.releaseTerminalReservationInLane(lane, maker, null);
                     if (releaseUnits > 0) runtime.advanceUserRevision(lane, maker.userId());
                 }
             }
@@ -308,8 +306,7 @@ public final class RuntimeDerivativeMatchProcessor {
             OrderRuntime order = cursor.publish(runtime, lane, cursor.positionKey(), null);
             if (order != null && order.canceled()) {
                 // 终态订单仍可释放的订单预留金额，正数才额外推进用户修订。
-                long releaseUnits = lane.reservation(order.orderId()).reservedUnits();
-                runtime.releaseTerminalReservationInLane(lane, order.orderId());
+                long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
                 if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
             }
         }
@@ -351,8 +348,11 @@ public final class RuntimeDerivativeMatchProcessor {
      * @param orderId 当前要累加、刷新或读取的订单编号
      */
     private static OrderRuntime requireOpen(AccountLaneState lane, long orderId) {
-        // 当前首次累加或发布后重新取得的权威订单引用。
         OrderRuntime order = lane.order(orderId);
+        return requireOpen(order, orderId);
+    }
+
+    private static OrderRuntime requireOpen(OrderRuntime order, long orderId) {
         if (order == null || order.canceled() || order.remainingQuantitySteps() == 0)
             throw new IllegalStateException("runtime matched order is not open: " + orderId);
         return order;

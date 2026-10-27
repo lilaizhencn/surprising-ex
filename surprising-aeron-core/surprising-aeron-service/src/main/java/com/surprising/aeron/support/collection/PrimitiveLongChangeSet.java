@@ -11,7 +11,7 @@ import lombok.experimental.Accessors;
 /**
  * 单个业务范围复用的变更 ID 集合：long 数组保留首次出现顺序，开放寻址索引去重，代号清空让旧槽立即失效。它继承 Collection 以接入现有边界，非线程安全，也不是任意删除或并发修改安全的通用 Set。
  */
-public final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
+public final class PrimitiveLongChangeSet extends AbstractCollection<Long> implements PrimitiveLongView {
 
     /** 按本代首次出现顺序保存的原始 ID 数组，size 之外为不可读旧值或空槽。 */
     private long[] values;
@@ -25,6 +25,25 @@ public final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
     @Accessors(fluent = true, chain = false)
     @Getter(onMethod_ = {@Override})
     private int size;
+
+    @Override
+    public int primitiveSize() {
+        return size;
+    }
+
+    @Override
+    public long primitiveValueAt(int index) {
+        if (index < 0 || index >= size) {
+            throw new IndexOutOfBoundsException("index=" + index + " size=" + size);
+        }
+        return values[index];
+    }
+
+    public void forEachLong(java.util.function.LongConsumer consumer) {
+        for (int index = 0; index < size; index++) {
+            consumer.accept(values[index]);
+        }
+    }
 
     /**
      * 按预期八条建立有序变更集合。

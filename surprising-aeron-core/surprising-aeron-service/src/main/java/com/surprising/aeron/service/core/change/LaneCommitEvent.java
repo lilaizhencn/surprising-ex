@@ -6,6 +6,7 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.order.state.LaneOrderResultTarget;
 import com.surprising.aeron.service.order.state.OrderRuntime;
+import com.surprising.aeron.support.collection.PrimitiveLongView;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import lombok.Getter;
@@ -121,13 +122,26 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         if (timestamp < 0 || position < 0) throw new IllegalArgumentException("invalid commit metadata");
         metadataTimestamp = timestamp;
         metadataPosition = position;
-        for (Long /* 输入迭代到的订单编号，null 项跳过。 */ orderId : orderIds) {
-            if (orderId == null) continue;
-            if (metadataOrderIds == null) {
-                metadataOrderIds = new LongArrayList(4);
-                metadataOrders = new RuntimeOrderChangeBuffer[usersByLane.length];
+        if (orderIds instanceof PrimitiveLongView view) {
+            int viewSize = view.primitiveSize();
+            if (viewSize > 0) {
+                if (metadataOrderIds == null) {
+                    metadataOrderIds = new LongArrayList(viewSize);
+                    metadataOrders = new RuntimeOrderChangeBuffer[usersByLane.length];
+                }
+                for (int i = 0; i < viewSize; i++) {
+                    metadataOrderIds.add(view.primitiveValueAt(i));
+                }
             }
-            metadataOrderIds.add(orderId);
+        } else {
+            for (Long /* 输入迭代到的订单编号，null 项跳过。 */ orderId : orderIds) {
+                if (orderId == null) continue;
+                if (metadataOrderIds == null) {
+                    metadataOrderIds = new LongArrayList(4);
+                    metadataOrders = new RuntimeOrderChangeBuffer[usersByLane.length];
+                }
+                metadataOrderIds.add(orderId);
+            }
         }
         if (metadataOrderIds == null) return;
         // 尚未处理的参与 Lane 位图，每次清除最低有效位。

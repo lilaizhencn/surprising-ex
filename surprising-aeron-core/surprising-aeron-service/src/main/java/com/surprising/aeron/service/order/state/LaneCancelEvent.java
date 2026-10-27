@@ -80,7 +80,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                 || ownerLaneId < 0 || owner == null || commandChanges == null || coreSequence != 0 || completed) {
             throw new IllegalStateException("invalid Account Lane cancel event");
         }
-        if (orderIds == null) orderIds = new long[1];
+        if (orderIds == null) orderIds = new long[8];
         orderIds[0] = targetOrderId;
         orderCount = 1;
         return prepare(sequence, ownerUserId, orderIds, orderCount, timestamp, clusterPosition,
@@ -155,6 +155,8 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                     // 即使时间和日志位置相同，也把该终态纳入本事件的变化捕获。
                     runtime.updateOrderStatusInLane(lane, orderId, order.status(), order.revision(),
                             commitTimestamp, commitClusterPosition);
+                } else if (order != null) {
+                    runtime.cancelOrderInLane(lane, userId, order, commitTimestamp, commitClusterPosition);
                 } else {
                     runtime.cancelOrderInLane(lane, userId, orderId, commitTimestamp, commitClusterPosition);
                 }

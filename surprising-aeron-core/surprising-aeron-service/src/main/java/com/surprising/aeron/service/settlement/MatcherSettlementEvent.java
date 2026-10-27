@@ -1132,7 +1132,7 @@ public final class MatcherSettlementEvent implements
             // 当前前置撤单编号在本 Lane 中的权威订单，仅开放时应用取消。
             OrderRuntime order = lane.order(orderId);
             if (order != null && order.status() == CoreOrderStatus.OPEN) {
-                runtime.cancelOrderInLane(lane, order.userId(), orderId);
+                runtime.cancelOrderInLane(lane, order.userId(), order, -1, -1);
             }
         }
         if (value.rejectedTaker()) {

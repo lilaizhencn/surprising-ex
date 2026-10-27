@@ -99,7 +99,7 @@ public final class RuntimeSpotMatchProcessor {
             // 本笔对应的权威对手订单，Lane 路径只读取本地对象。
             OrderRuntime maker = lane.order(match.matchedOrderId());
             if (maker != null) {
-                maker = requireOpen(lane, maker.orderId());
+                maker = requireOpen(maker, maker.orderId());
                 // 本笔成交量是否恰好耗尽 maker 剩余量。
                 boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
                 maker = applyFill(runtime, lane, instrument, maker, match.price(), match.size(),
@@ -261,6 +261,9 @@ public final class RuntimeSpotMatchProcessor {
         /** 本 Lane 保留的空用户资产 Map 池，不保存旧轮余额暂存对象。 */
         private final java.util.ArrayDeque<IntObjectHashMap<SpotBalanceState>> freeBalanceMaps =
                 new java.util.ArrayDeque<>();
+        /** 本 Lane 保留的空闲单用户资产余额暂存对象池，避免每轮结算重新分配。 */
+        private final java.util.ArrayDeque<SpotBalanceState> freeBalanceStates =
+                new java.util.ArrayDeque<>();
         /** 本轮账户写回和修订捕获的所属运行时。 */
         private TradingAccountRuntime runtime;
         /** 本轮独占服务的账户 Lane。 */
@@ -346,6 +349,7 @@ public final class RuntimeSpotMatchProcessor {
             });
             cursors.clear();
             balances.forEachKeyValue((/* 当前遍历的用户余额暂存编号。 */ userId, /* 当前用户本轮共用的按资产余额暂存 Map，清空后才归还 Map 池。 */ userBalances) -> {
+                userBalances.forEachKeyValue((assetId, balanceState) -> freeBalanceStates.addFirst(balanceState));
                 userBalances.clear();
                 freeBalanceMaps.addFirst(userBalances);
             });
@@ -356,7 +360,7 @@ public final class RuntimeSpotMatchProcessor {
         }
 
         /**
-         * 为本轮用户资产取得共用余额暂存，首次访问从 Lane 权威余额初始化，缺失余额从零开始；只复用空资产 Map，不复用旧余额值。
+         * 为本轮用户资产取得共用余额暂存，首次访问从 Lane 权威余额初始化，缺失余额从零开始；复用空资产 Map 及余额暂存对象。
          * @param userId 当前余额所属用户编号
          * @param assetId 当前余额所属资产编号
          */
@@ -373,22 +377,24 @@ public final class RuntimeSpotMatchProcessor {
             if (state == null) {
                 // 首次加载本轮资产暂存时读取的可空权威余额。
                 BalanceRuntime current = runtime.balance(lane, userId, assetId);
-                state = new SpotBalanceState(userId, assetId, current);
+                state = freeBalanceStates.pollFirst();
+                if (state == null) state = new SpotBalanceState();
+                state.reset(userId, assetId, current);
                 userBalances.put(assetId, state);
             }
             return state;
         }
 
         /**
-         * 仅存活于本轮结算的单用户单资产余额标量后值，由该用户各订单共用；发布后清理，不作为长期权威余额镜像。
+         * 仅存活于本轮结算的单用户单资产余额标量后值，由该用户各订单共用；发布后清理并归还池，不作为长期权威余额镜像。
          */
         private static final class SpotBalanceState {
             /** 本余额暂存对应的账户用户编号。 */
-            private final long userId;
+            private long userId;
             /** 本余额暂存对应的资产编号。 */
-            private final int assetId;
+            private int assetId;
             /** 本轮开始时该账户资产是否已有权威余额，决定发布时创建或更新。 */
-            private final boolean exists;
+            private boolean exists;
             /** 本轮同用户各订单共同累加后的可用余额。 */
             private long available;
             /** 本轮共同累加后的冻结余额。 */
@@ -400,7 +406,7 @@ public final class RuntimeSpotMatchProcessor {
              * @param assetId 当前余额所属资产编号
              * @param current 起点已有的可空权威余额，空值表示需要创建余额
              */
-            SpotBalanceState(long userId, int assetId, BalanceRuntime current) {
+            void reset(long userId, int assetId, BalanceRuntime current) {
                 this.userId = userId;
                 this.assetId = assetId;
                 exists = current != null;
@@ -541,8 +547,7 @@ public final class RuntimeSpotMatchProcessor {
                 state.advanceUserRevision(lane, originalOrder.userId(), fills);
                 if (nextOrder.canceled()) {
                     // 终态订单当前仍可释放的预留金额，正数才额外推进用户修订。
-                    long releaseUnits = lane.reservation(nextOrder.orderId()).reservedUnits();
-                    state.releaseTerminalReservationInLane(lane, nextOrder.orderId());
+                    long releaseUnits = state.releaseTerminalReservationInLane(lane, nextOrder, originalReservation);
                     if (releaseUnits > 0) state.advanceUserRevision(lane, nextOrder.userId());
                 }
             }
@@ -586,12 +591,12 @@ public final class RuntimeSpotMatchProcessor {
         // 当前首次累加、终态释放或读取时取得的权威订单。
         OrderRuntime order = lane.order(orderId);
         if (order == null || !order.canceled()) return;
-        // 终态订单当前仍可释放的预留金额，正数才额外推进用户修订。
-        long releaseUnits = lane.reservation(orderId).reservedUnits();
         if (lane.matcherSettlementChanges() != null) {
-            runtime.releaseTerminalReservationInLane(lane, orderId);
+            long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
             if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
         } else {
+            // 终态订单当前仍可释放的预留金额，正数才额外推进用户修订。
+            long releaseUnits = lane.reservation(orderId).reservedUnits();
             runtime.releaseTerminalReservation(orderId);
             if (releaseUnits > 0) runtime.advanceUserRevision(order.userId());
         }
@@ -603,8 +608,11 @@ public final class RuntimeSpotMatchProcessor {
      * @param orderId 当前要累加、读取或释放预留的订单编号
      */
     private static OrderRuntime requireOpen(AccountLaneState lane, long orderId) {
-        // 当前首次累加、终态释放或读取时取得的权威订单。
         OrderRuntime order = lane.order(orderId);
+        return requireOpen(order, orderId);
+    }
+
+    private static OrderRuntime requireOpen(OrderRuntime order, long orderId) {
         if (order == null || order.canceled() || order.remainingQuantitySteps() == 0)
             throw new IllegalStateException("runtime matched order is not open: " + orderId);
         return order;

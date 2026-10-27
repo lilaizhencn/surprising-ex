@@ -48,6 +48,7 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 import com.surprising.aeron.service.fee.FeePolicyBook;
 import com.surprising.aeron.service.instrument.CoreInstrument;
+import com.surprising.aeron.support.collection.PrimitiveLongView;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.order.admission.PendingReservationTracker;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
@@ -1407,14 +1408,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean workersStopped() { return laneLifecycle.workersStopped(); }
 
     /**
-     * 订单转为终态时一并交出的订单与预留引用；不单独表示整条命令已经有序提交。
-     * @param order 终态处理交出的订单引用
-     * @param reservation 该订单配套的可空预留引用，沿用原处理分支含义
-     */
-    record CanceledOrder(OrderRuntime order, ReservationRuntime reservation) {
-    }
-
-    /**
      * 校验序号及用户集合，按 Lane 收集正用户身份后同步等待提交，返回实际提交掩码。
      * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
@@ -1525,6 +1518,13 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private void addLaneUsers(Iterable<Long> userIds) {
         if (userIds instanceof ImmutableLongArrayList /* 支持原始长整数遍历的只读用户列表，直接取值而不逐项装箱 */ primitive) {
             primitive.forEachLong(/* 本轮读出的用户身份，按对应入口过滤或路由 */ userId -> { if (userId > 0) addLaneUser(userId); });
+            return;
+        }
+        if (userIds instanceof PrimitiveLongView view) {
+            for (int i = 0; i < view.primitiveSize(); i++) {
+                long userId = view.primitiveValueAt(i);
+                if (userId > 0) addLaneUser(userId);
+            }
             return;
         }
         for (Long /* 本轮读出的用户身份，按对应入口过滤或路由 */ userId : userIds) if (userId != null && userId > 0) addLaneUser(userId);
@@ -5647,73 +5647,23 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 使用未显式给定提交元数据的方式取消订单，原有负值哨兵交给统一终态处理。
+     * 保存用户、订单与预留前值，在所属账户完成精确冻结释放及终态更新，再交出变化并推进用户修订。
      * @param orderId 本次操作关联的订单实体 ID
      * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param releaseUnits 必须与预留剩余冻结一致的本次释放数量
      */
     public void cancelOrder(long orderId, long userId, long releaseUnits) {
-        cancelOrder(orderId, userId, releaseUnits, -1, -1);
-    }
-
-    /**
-     * 把取消状态和原提交元数据交给统一冻结释放入口。
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param releaseUnits 必须与预留剩余冻结一致的本次释放数量
-     * @param commitTimestamp 原命令提交业务时间，未指定时沿用负值哨兵约定
-     * @param commitPosition 原命令复制日志位置，未指定时沿用负值哨兵约定
-     */
-    void cancelOrder(long orderId, long userId, long releaseUnits,
-                             long commitTimestamp, long commitPosition) {
-        releaseOrderToTerminal(orderId, userId, releaseUnits, commitTimestamp, commitPosition, CoreOrderStatus.CANCELED);
-    }
-
-    /**
-     * 为普通终态处理补上空的已准备订单和预留，交给统一实现。
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param releaseUnits 必须与预留剩余冻结一致的本次释放数量
-     * @param commitTimestamp 原命令提交业务时间，未指定时沿用负值哨兵约定
-     * @param commitPosition 原命令复制日志位置，未指定时沿用负值哨兵约定
-     * @param terminalStatus 本次冻结释放后需要写入的订单终态
-     */
-    private void releaseOrderToTerminal(long orderId, long userId, long releaseUnits,
-                             long commitTimestamp, long commitPosition, CoreOrderStatus terminalStatus) {
-        releaseOrderToTerminal(orderId, userId, releaseUnits, commitTimestamp, commitPosition, terminalStatus,
-                null, null);
-    }
-
-    /**
-     * 保存用户、订单与预留前值，在所属账户完成精确冻结释放及终态更新，再交出变化并推进用户修订。已准备实体由原校验边界保证有效。
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param releaseUnits 必须与预留剩余冻结一致的本次释放数量
-     * @param commitTimestamp 原命令提交业务时间，未指定时沿用负值哨兵约定
-     * @param commitPosition 原命令复制日志位置，未指定时沿用负值哨兵约定
-     * @param terminalStatus 本次冻结释放后需要写入的订单终态
-     * @param preparedOrder 可空的已在同一 Lane 校验过的订单引用
-     * @param preparedReservation 可空的已在同一 Lane 校验过的预留引用
-     */
-    private void releaseOrderToTerminal(long orderId, long userId, long releaseUnits,
-                             long commitTimestamp, long commitPosition, CoreOrderStatus terminalStatus,
-                             OrderRuntime preparedOrder, ReservationRuntime preparedReservation) {
         assertOwner();
         accountRollback.captureUserBefore(userId);
         accountRollback.captureOrderBefore(orderId);
         accountRollback.captureReservationBefore(orderId);
         // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
         AccountLaneState scoped = currentLaneCommandScope();
-        // 所属 Lane 已完成冻结释放和终态更新后交出的订单与预留结果
-        CanceledOrder canceled = scoped == null
-                ? onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> releaseOrderToTerminalInLane(lane, orderId, userId, releaseUnits,
-                        commitTimestamp, commitPosition, terminalStatus, preparedOrder, preparedReservation))
-                : releaseOrderToTerminalInLane(scoped, orderId, userId, releaseUnits,
-                        commitTimestamp, commitPosition, terminalStatus, preparedOrder, preparedReservation);
-        publishOrder(orderId, canceled.order());
-        publishReservation(orderId, canceled.reservation());
+        OrderRuntime terminalOrder = scoped == null
+                ? onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> cancelOrderInOwnerLane(lane, orderId, userId, releaseUnits))
+                : cancelOrderInOwnerLane(scoped, orderId, userId, releaseUnits);
         if (currentMatcherSettlementChangesScope() == null) {
-            changedOrder(orderId, canceled.order());
+            changedOrder(orderId, terminalOrder);
             markReservationChanged(orderId);
             markUserChanged(userId);
             markBalancesChanged();
@@ -5722,29 +5672,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 核对订单所属用户，要求订单与预留存在、订单尚未终态，且释放量等于剩余冻结。释放后更新终态；撮合范围内原地修改，其他路径建立更新值并维护待预留差额，最后交出订单与预留。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param releaseUnits 必须与预留剩余冻结一致的本次释放数量
-     * @param commitTimestamp 原命令提交业务时间，未指定时沿用负值哨兵约定
-     * @param commitPosition 原命令复制日志位置，未指定时沿用负值哨兵约定
-     * @param terminalStatus 本次冻结释放后需要写入的订单终态
-     * @param preparedOrder 可空的已在同一 Lane 校验过的订单引用
-     * @param preparedReservation 可空的已在同一 Lane 校验过的预留引用
+     * 核对订单所属用户，要求订单与预留存在、订单尚未终态，且释放量等于剩余冻结。释放后更新终态；撮合范围内原地修改，其他路径建立更新值并维护待预留差额，原位发布订单与预留。
      */
-    private CanceledOrder releaseOrderToTerminalInLane(
-            AccountLaneState lane, long orderId, long userId, long releaseUnits,
-            long commitTimestamp, long commitPosition, CoreOrderStatus terminalStatus,
-            OrderRuntime preparedOrder, ReservationRuntime preparedReservation) {
+    private OrderRuntime cancelOrderInOwnerLane(AccountLaneState lane, long orderId, long userId, long releaseUnits) {
         if (lane.laneId() != topology.accountLaneId(userId)) {
             throw new IllegalStateException("terminal order release crossed its owner Lane");
         }
         // 当前处理的原订单或更新后订单，使用范围由本分支的账户所有权限定
-        OrderRuntime order = preparedOrder == null ? lane.order(orderId) : preparedOrder;
+        OrderRuntime order = lane.order(orderId);
         // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
-        ReservationRuntime reservation = preparedReservation == null
-                ? lane.reservation(orderId) : preparedReservation;
+        ReservationRuntime reservation = lane.reservation(orderId);
         if (order == null || reservation == null || order.userId() != userId || order.canceled()) {
             throw new IllegalArgumentException("runtime order is not cancelable: " + orderId);
         }
@@ -5766,21 +5703,25 @@ public final class TradingAccountRuntime implements AutoCloseable {
             reservation.releaseInPlace(releaseUnits);
             lane.updatePendingReservationInPlace(reservation, previousReserved);
             // 增加订单修订并写入指定终态及原提交元数据后的订单
-            OrderRuntime terminalOrder = lane.updateOrderStatusInPlace(orderId, terminalStatus,
-                    Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
+            OrderRuntime terminalOrder = lane.updateOrderStatusInPlace(orderId, CoreOrderStatus.CANCELED,
+                    Math.incrementExact(order.revision()), -1, -1);
             accountRollback.captureBalanceAfter(lane, userId, reservation.assetId());
-            return new CanceledOrder(terminalOrder, reservation);
+            publishOrder(orderId, terminalOrder);
+            publishReservation(orderId, reservation);
+            return terminalOrder;
         }
         // 增加订单修订并写入指定终态及原提交元数据后的订单
-        OrderRuntime terminalOrder = order.withStatus(terminalStatus,
-                Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
+        OrderRuntime terminalOrder = order.withStatus(CoreOrderStatus.CANCELED,
+                Math.incrementExact(order.revision()), -1, -1);
         // 释放本次冻结数量后的预留值，随后替换原账户预留
         ReservationRuntime released = reservation.release(releaseUnits);
         lane.replacePendingReservation(reservation, released);
         lane.putOrder(terminalOrder);
         lane.storeReservation(orderId, released.laneValue());
         accountRollback.captureBalanceAfter(lane, userId, reservation.assetId());
-        return new CanceledOrder(terminalOrder, released);
+        publishOrder(orderId, terminalOrder);
+        publishReservation(orderId, released);
+        return terminalOrder;
     }
 
     /**
@@ -5791,6 +5732,19 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public void cancelOrderInLane(AccountLaneState lane, long userId, long orderId) {
         cancelOrderInLane(lane, userId, orderId, -1, -1);
+    }
+
+    /**
+     * 在明确撮合 Lane 中释放剩余冻结并把已解析订单改为 CANCELED，避免重复 HashMap 查表。
+     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
+     * @param userId 本次业务所属用户身份，按固定拓扑路由
+     * @param order 本次操作关联的已解析订单引用
+     * @param timestamp 原命令业务时间，随账户任务或结算边界保存
+     * @param position 原复制日志位置，随本次账户或结算边界保存
+     */
+    public void cancelOrderInLane(AccountLaneState lane, long userId, OrderRuntime order,
+                           long timestamp, long position) {
+        releaseOrderToTerminalInLane(lane, userId, order, null, timestamp, position, CoreOrderStatus.CANCELED);
     }
 
     /**
@@ -5830,14 +5784,24 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     private void releaseOrderToTerminalInLane(AccountLaneState lane, long userId, long orderId,
             long timestamp, long position, CoreOrderStatus status) {
+        OrderRuntime order = lane.order(orderId);
+        releaseOrderToTerminalInLane(lane, userId, order, null, timestamp, position, status);
+    }
+
+    /**
+     * 已持订单引用直接推进终态，省去 Lane 内部二次查表。
+     */
+    private void releaseOrderToTerminalInLane(AccountLaneState lane, long userId, OrderRuntime order,
+            ReservationRuntime preparedReservation, long timestamp, long position, CoreOrderStatus status) {
         requireLaneAccess(lane, userId);
         if (lane.matcherSettlementChanges() == null)
             throw new IllegalStateException("terminal order requires its settlement Lane");
-        // 当前处理的原订单或更新后订单，使用范围由本分支的账户所有权限定
-        OrderRuntime order = lane.order(orderId);
+        if (order == null || order.userId() != userId || order.status().terminal())
+            throw new IllegalStateException("terminal order reservation is missing: " + (order == null ? 0 : order.orderId()));
+        long orderId = order.orderId();
         // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
-        ReservationRuntime reservation = lane.reservation(orderId);
-        if (order == null || reservation == null || order.userId() != userId || order.status().terminal())
+        ReservationRuntime reservation = preparedReservation == null ? lane.reservation(orderId) : preparedReservation;
+        if (reservation == null)
             throw new IllegalStateException("terminal order reservation is missing: " + orderId);
         // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
         BalanceRuntime balance = balance(lane, userId, reservation.assetId());
@@ -5861,16 +5825,34 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param orderId 本次操作关联的订单实体 ID
      */
     public long releaseTerminalReservationInLane(AccountLaneState lane, long orderId) {
+        return releaseTerminalReservationInLane(lane, orderId, null, null);
+    }
+
+    /**
+     * 在明确撮合 Lane 内释放已持有的终态订单引用，省去 Lane 内部二次查表。
+     */
+    public long releaseTerminalReservationInLane(AccountLaneState lane, OrderRuntime preparedOrder,
+            ReservationRuntime preparedReservation) {
+        return releaseTerminalReservationInLane(lane, preparedOrder == null ? 0 : preparedOrder.orderId(),
+                preparedOrder, preparedReservation);
+    }
+
+    /**
+     * 在明确撮合 Lane 内释放已经终态订单仍保留的冻结，原地更新预留及余额补丁；支持直通订单和预留引用。
+     */
+    public long releaseTerminalReservationInLane(AccountLaneState lane, long orderId,
+            OrderRuntime preparedOrder, ReservationRuntime preparedReservation) {
         lane.assertOwner();
         if (lane == null || lane.matcherSettlementChanges() == null) {
             throw new IllegalStateException("terminal release must execute in its owning Account Lane");
         }
         // 当前处理的原订单或更新后订单，使用范围由本分支的账户所有权限定
-        OrderRuntime order = lane.order(orderId);
+        OrderRuntime order = preparedOrder == null ? lane.order(orderId) : preparedOrder;
+        long targetOrderId = order != null ? order.orderId() : orderId;
         // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
-        ReservationRuntime reservation = lane.reservation(orderId);
+        ReservationRuntime reservation = preparedReservation == null ? lane.reservation(targetOrderId) : preparedReservation;
         if (order == null || reservation == null || !order.canceled()) {
-            throw new IllegalArgumentException("runtime order is not terminal: " + orderId);
+            throw new IllegalArgumentException("runtime order is not terminal: " + targetOrderId);
         }
         // 该预留当前全部剩余冻结量，零时不再产生余额释放
         long releaseUnits = reservation.reservedUnits();
@@ -5879,14 +5861,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
         IntObjectHashMap<BalanceRuntime> balances = lane.userBalances(order.userId());
         // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
         BalanceRuntime balance = balances == null ? null : balances.get(reservation.assetId());
-        if (balance == null) throw new IllegalStateException("runtime terminal balance is missing: " + orderId);
+        if (balance == null) throw new IllegalStateException("runtime terminal balance is missing: " + targetOrderId);
         accountRollback.captureBalanceBefore(lane, order.userId(), reservation.assetId());
         balance.release(releaseUnits);
         // 修改前的剩余冻结量，用来修正账户待预留数量
         long previousReserved = reservation.reservedUnits();
         reservation.releaseInPlace(releaseUnits);
         lane.updatePendingReservationInPlace(reservation, previousReserved);
-        publishReservation(lane, orderId, reservation);
+        publishReservation(lane, targetOrderId, reservation);
         accountRollback.captureBalanceAfter(lane, order.userId(), reservation.assetId());
         return releaseUnits;
     }
