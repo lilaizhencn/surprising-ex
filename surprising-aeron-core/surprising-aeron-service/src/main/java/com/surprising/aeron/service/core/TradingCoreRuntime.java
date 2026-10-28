@@ -18,8 +18,6 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.WireMessageKind;
-import com.surprising.aeron.service.account.command.BalanceTransferCommands;
-import com.surprising.aeron.service.adl.command.AdlCommands;
 import com.surprising.aeron.service.core.command.DirectCommandDispatcher;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
@@ -29,11 +27,9 @@ import com.surprising.aeron.service.core.index.LiquidationIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
-import com.surprising.aeron.service.fee.command.FeePolicyCommands;
 import com.surprising.aeron.service.funding.command.PerpetualFundingCommands;
 import com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands;
 import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
-import com.surprising.aeron.service.liquidation.command.LiquidationCommands;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
@@ -54,8 +50,6 @@ import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.order.commit.OrderedCommitCoordinator;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.position.command.LeverageCommands;
-import com.surprising.aeron.service.position.command.PositionCommands;
 import com.surprising.aeron.service.query.CoreQueryService;
 import com.surprising.aeron.service.result.CommandResultBuilder;
 import com.surprising.aeron.service.result.CommandResultLedger;
@@ -125,21 +119,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
     @Getter
     final PerpetualFundingCommands funding = new PerpetualFundingCommands(this);
 
-    /**  强平命令及后续工作入口。 借出强平命令处理对象，沿用当前事实和提交作用域。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final LiquidationCommands liquidations = new LiquidationCommands(this);
-
     /** 触发单、算法单、触发扫描及衍生子单的业务入口。 */
     final TriggerOrderCommands triggers = new TriggerOrderCommands(this);
 
     /** 直接控制命令的统一业务派发入口。 */
     final DirectCommandDispatcher directCommands = new DirectCommandDispatcher(
-            new BalanceTransferCommands(this), new InstrumentConfigurationCommands(this),
-            funding, new RiskCommands(this), liquidations, new AdlCommands(this),
-            new InsuranceFundCommands(this), new PositionCommands(this),
-            new LeverageCommands(this), new FeePolicyCommands(this),
-            triggers);
+            this, new InstrumentConfigurationCommands(this),
+            funding, new RiskCommands(this),
+            new InsuranceFundCommands(this), triggers);
     /**  本次调用是否采用独立窗口准入，执行结束恢复外层值。 返回本次调用是否允许按独立撮合窗口接纳。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -348,7 +335,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 && (message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.STATE_HASH_QUERY
                 || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.BUSINESS_STATE_HASH_QUERY)) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.OK, appliedCommandCount,
-                    com.surprising.aeron.protocol.CoreStateQueryCodec.encodeStateHash(currentBusinessStateHash()));
+                    com.surprising.aeron.protocol.CoreStateQueryCodec.encodeStateHash(stateHash()));
         }
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.LANE_METRICS_QUERY) {
@@ -1830,10 +1817,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 取得当前业务状态哈希，使用完整业务读取及快照栅栏边界。
+     * 取得当前业务状态哈希，在完整快照与账户访问边界内物化状态，并合并费用政策和待完成划转哈希；读边界在退出时释放。
      */
     public long stateHash() {
-        return currentBusinessStateHash();
+        runtimeState.requireSnapshotFenceReady();
+        // 当前是否需要由本方法取得账户访问边界；它不表示访问已经取得
+        boolean acquired = acquireOwnerLaneAccess("businessStateHash");
+        try {
+            // 在账户和快照读取边界内取得的业务物化视图
+            TradingCoreState current = tradingState();
+            return canonicalBusinessStateHash(current.businessStateHash(),
+                    runtimeState.feePoliciesSnapshot(), runtimeState.pendingTransfersSnapshot());
+        } finally {
+            if (acquired) runtimeState.releaseOwnerLaneAccess();
+        }
     }
 
     /**
@@ -2003,23 +2000,33 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
+     * 活动账户已启动且当前未持有 Owner 访问边界时，最多自旋等待五秒取得访问权；返回是否由本次调用新取得访问权。
+     * @param operation 超时报错信息中的操作名称
+     */
+    private boolean acquireOwnerLaneAccess(String operation) {
+        // 当前是否需要由本方法取得账户访问边界
+        boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess();
+        if (acquired) {
+            // 等待账户访问权的单调纳秒截止时间，最多五秒
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (!runtimeState.tryAcquireOwnerLaneAccess()) {
+                if (System.nanoTime() - deadline >= 0) {
+                    throw new IllegalStateException("timed out waiting for owner lane access in " + operation);
+                }
+                Thread.onSpinWait();
+            }
+        }
+        return acquired;
+    }
+
+    /**
      * 在快照及账户读取边界内取得物化业务视图；运行时修订、行情修订或发布序号变化才重建缓存。活动账户访问最多自旋等待五秒，最后释放本方法需要取得的访问边界。
      */
     public TradingCoreState tradingState() {
         runtimeState.requireSnapshotFenceReady();
         // 当前是否需要由本方法取得账户访问边界；它不表示访问已经取得
-        boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess();
+        boolean acquired = acquireOwnerLaneAccess("current state materialization");
         try {
-            if (acquired) {
-                // 等待账户访问权的单调纳秒截止时间，最多五秒
-                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                while (!runtimeState.tryAcquireOwnerLaneAccess()) {
-                    if (System.nanoTime() - deadline >= 0) {
-                        throw new IllegalStateException("timed out waiting for owner lane access in current state materialization");
-                    }
-                    Thread.onSpinWait();
-                }
-            }
             // 当前运行时修订，与物化缓存对应值比较
             long currentRevision = runtimeState.revision();
             // 当前行情修订，与物化缓存对应值比较
@@ -2046,10 +2053,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         CoreSnapshotLifecycle.SnapshotFence fence = snapshots.snapshotFence();
         return fence != null && fence.snapshotState() != null ? fence.snapshotState() : tradingState();
     }
-    /**
-     * 对快照所见状态及其费用、划转信息计算业务哈希。
-     */
-    public long snapshotBusinessStateHash() { return currentBusinessStateHash(); }
     /**
      * 取得当前快照编码使用的已发布投影序号。
      */
@@ -2100,18 +2103,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     LiquidationRuntime runtimeLiquidation(long liquidationId) {
         // 当前是否需要由本方法取得账户访问边界；它不表示访问已经取得
-        boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess();
+        boolean acquired = acquireOwnerLaneAccess("runtimeLiquidation");
         try {
-            if (acquired) {
-                // 等待账户访问权的单调纳秒截止时间，最多五秒
-                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                while (!runtimeState.tryAcquireOwnerLaneAccess()) {
-                    if (System.nanoTime() - deadline >= 0) {
-                        throw new IllegalStateException("timed out waiting for owner lane access in runtimeLiquidation");
-                    }
-                    Thread.onSpinWait();
-                }
-            }
             return runtimeState.liquidation(liquidationId);
         } finally {
             if (acquired) {
@@ -2136,18 +2129,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     public Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers() {
         // 当前是否需要由本方法取得账户访问边界；它不表示访问已经取得
-        boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess();
+        boolean acquired = acquireOwnerLaneAccess("pendingTransfers");
         try {
-            if (acquired) {
-                // 等待账户访问权的单调纳秒截止时间，最多五秒
-                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                while (!runtimeState.tryAcquireOwnerLaneAccess()) {
-                    if (System.nanoTime() - deadline >= 0) {
-                        throw new IllegalStateException("timed out waiting for owner lane access in pendingTransfers");
-                    }
-                    Thread.onSpinWait();
-                }
-            }
             return runtimeState.pendingTransfersSnapshot();
         } finally {
             if (acquired) runtimeState.releaseOwnerLaneAccess();
@@ -2247,26 +2230,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * 先查本命令变化缓冲，包括已删除的空值，再查账户运行时中的订单。
      * @param orderId 需要查询或检查占用的订单实体 ID
      */
-    OrderRuntime runtimeOrder(long orderId) {
+    public OrderRuntime runtimeOrder(long orderId) {
         return runtimeState.hasChangedOrder(orderId) ? runtimeState.changedOrderValue(orderId)
                 : runtimeState.order(orderId);
-    }
-
-    /**
-     * 把订单的标的内部身份转换为对外标的 ID。
-     * @param order 借用的运行时订单，调用方遵守状态读取边界
-     */
-    public String runtimeOrderSymbol(OrderRuntime order) {
-        return identities.instrumentId(order.symbolId());
-    }
-
-    /**
-     * 把强平状态的标的内部身份转换为对外标的 ID。
-     * @param liquidation 借用的运行时强平状态
-     */
-    public String runtimeLiquidationSymbol(
-            com.surprising.aeron.service.risk.LiquidationRuntime liquidation) {
-        return identities.instrumentId(liquidation.symbolId());
     }
 
     /**
@@ -2544,41 +2510,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         for (/* 当前数组或事件列表的遍历下标 */ int index = 0; index < plan.matcherEventCount(); index++)
             if (plan.matcherEvent(index).eventType() == MatcherEventType.TRADE) trades++;
         return trades;
-    }
-
-    /**
-     * 按正常运行时订单读取规则取得响应所需订单引用。
-     * @param orderId 需要查询或检查占用的订单实体 ID
-     */
-    public OrderRuntime responseOrder(long orderId) {
-        return runtimeOrder(orderId);
-    }
-
-    /**
-     * 在完整快照与账户访问边界内物化状态，并合并费用政策和待完成划转哈希；读边界在退出时释放。
-     */
-    long currentBusinessStateHash() {
-        runtimeState.requireSnapshotFenceReady();
-        // 当前是否需要由本方法取得账户访问边界；它不表示访问已经取得
-        boolean acquired = runtimeState.accountLanesStarted() && !runtimeState.ownerLaneAccess();
-        try {
-            if (acquired) {
-                // 等待账户访问权的单调纳秒截止时间，最多五秒
-                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                while (!runtimeState.tryAcquireOwnerLaneAccess()) {
-                    if (System.nanoTime() - deadline >= 0) {
-                        throw new IllegalStateException("timed out waiting for owner lane access in businessStateHash");
-                    }
-                    Thread.onSpinWait();
-                }
-            }
-            // 在账户和快照读取边界内取得的业务物化视图
-            TradingCoreState current = tradingState();
-            return canonicalBusinessStateHash(current.businessStateHash(),
-                    runtimeState.feePoliciesSnapshot(), runtimeState.pendingTransfersSnapshot());
-        } finally {
-            if (acquired) runtimeState.releaseOwnerLaneAccess();
-        }
     }
 
     /**

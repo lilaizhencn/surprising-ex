@@ -393,7 +393,7 @@ public final class LinearPerpetualMixedWorkload {
                     laneOperations = Math.addExact(laneOperations, laneOperationsByType[type]);
                 }
                 harness.commitBusinessLatencies();
-                return harness.state().snapshotBusinessStateHash();
+                return harness.state().stateHash();
             }
 
             private void executeLossLifecycle(Harness target, Template source) {

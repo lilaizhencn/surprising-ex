@@ -104,7 +104,7 @@ class AccountLaneOwnershipTest {
                 if (System.nanoTime() >= deadline) throw new AssertionError("handoff timeout");
                 Thread.onSpinWait();
             }
-            lane.bindOwner();
+            lane.assertOwner();
             // 交接恢复后准入登记新用户的完成门闩
             var admitted = new CountDownLatch(1);
             try {

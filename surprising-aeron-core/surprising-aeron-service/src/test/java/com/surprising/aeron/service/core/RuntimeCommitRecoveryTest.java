@@ -137,8 +137,6 @@ class RuntimeCommitRecoveryTest {
                     assertThat(recoveredAgain.tradingState().user(1001).totalUnits("USDT")).isEqualTo(500);
                     assertThat(recoveredAgain.feePolicies()).containsEntry(feePolicy.policyId(), feePolicy);
                     assertThat(recoveredAgain.pendingTransfers()).containsEntry(transfer.transferId(), transfer);
-                    assertThat(recoveredAgain.snapshotBusinessStateHash())
-                            .isEqualTo(restored.snapshotBusinessStateHash());
                 }
             }
         }
@@ -1003,7 +1001,6 @@ class RuntimeCommitRecoveryTest {
         assertThat(actualState.tradingState().treasuryState())
                 .isEqualTo(expectedState.tradingState().treasuryState());
         assertThat(actualState.stateHash()).isEqualTo(expectedState.stateHash());
-        assertThat(actualState.snapshotBusinessStateHash()).isEqualTo(expectedState.snapshotBusinessStateHash());
         assertThat(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(actualState.snapshotTradingState()))
                 .isEqualTo(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
                         expectedState.snapshotTradingState()));
@@ -1330,7 +1327,6 @@ class RuntimeCommitRecoveryTest {
                 .isEqualTo(com.surprising.aeron.service.core.identity.IdentityTestContents.capture(referenceIdentities));
         assertThat(recovered.tradingState().riskState()).isEqualTo(reference.tradingState().riskState());
         assertThat(recovered.tradingState().treasuryState()).isEqualTo(reference.tradingState().treasuryState());
-        assertThat(recovered.snapshotBusinessStateHash()).isEqualTo(reference.snapshotBusinessStateHash());
         assertThat(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(recovered.snapshotTradingState()))
                 .isEqualTo(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
                         reference.snapshotTradingState()));

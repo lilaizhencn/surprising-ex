@@ -138,7 +138,7 @@ class LaneEntityMembershipTest {
             state.putBalance(new BalanceRuntime(7, 1, 1000, 0));
             state.putBalance(new BalanceRuntime(7, 2, 1000, 0));
             state.putReservation(CoreStateTestFixtures.reservation(11, 7, 1, 40));
-            state.markPendingReservation(7, 11, 1);
+            state.pendingReservations().markPendingReservation(7, 11, 1);
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
             var lane = state.onLane(7L, /* onLane 回调收到的所属 Lane，这里原样返回以便断言。 */ value -> value);
             // 用户七复用的预留编号集合，金额和资产改变不应替换它。
@@ -154,7 +154,7 @@ class LaneEntityMembershipTest {
             assertThatThrownBy(() -> state.replaceReservation(CoreStateTestFixtures.reservation(11, 8, 2, 10)))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
-            state.completePendingReservations(1);
+            state.pendingReservations().completePendingReservations(1);
             state.removeReservation(11, 7);
             assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
             assertThat(ids.size()).isZero();
@@ -193,7 +193,7 @@ class LaneEntityMembershipTest {
     void pendingSequenceAndClientTablesSurviveUniqueIdChurnWithoutLosingLiveEntries() throws Exception {
         // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 始终保留、金额为十三的预留权威记录。
         var held = CoreStateTestFixtures.reservation(1, 7, 3, 13);
         lane.reservations.put(1, held);

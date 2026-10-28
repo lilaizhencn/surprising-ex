@@ -11,7 +11,7 @@ import org.openjdk.jmh.annotations.*;
 @Fork(value = 1, jvmArgsAppend = {"-Xms128m", "-Xmx128m", "-XX:+UseG1GC"})
 @State(Scope.Group)
 public class ReadyLaneMaskBenchmark {
-    private final TradingAccountRuntime.PaddedReadyMask ready = new TradingAccountRuntime.PaddedReadyMask(2);
+    private final PaddedReadyMask ready = new PaddedReadyMask(2);
     @Benchmark @Group("laneNotifications") @GroupThreads(1)
     public boolean makerReady() { return ready.setBit(0); }
     @Benchmark @Group("laneNotifications") @GroupThreads(1)

@@ -69,9 +69,9 @@ public final class RuntimeLifecycleSettlementContinuation {
         boolean moreOrders = false;
         if (!ordersComplete) {
             // 本次从活动订单或用户索引读取的页面。
-            RuntimeLifecycleSettlement.OrderPage page = RuntimeLifecycleSettlement.selectOrders(activeOrderIndex, instrument.instrumentId(), command.cursorOrderId(), command.maxOrders());
+            var page = RuntimeLifecycleSettlement.selectOrders(activeOrderIndex, instrument.instrumentId(), command.cursorOrderId(), command.maxOrders());
             selectedOrders = page.orders();
-            moreOrders = !page.complete();
+            moreOrders = page.nextCursorOrderId() != 0;
         }
         // 币对结算资产的内部编号。
         int assetId = identities.assetId(instrument.settleAsset());

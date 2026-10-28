@@ -131,7 +131,7 @@ public final class AccountLaneState {
     /**  本 Lane 复用的杠杆读取结果槽。 返回可复用的杠杆查找槽，后续查找可能覆盖其中结果。 */
     @Accessors(fluent = true, chain = false)
     @Getter
-    final TradingAccountRuntime.LeverageLookup leverageLookup = new TradingAccountRuntime.LeverageLookup();
+    final com.surprising.aeron.service.core.LeverageLookup leverageLookup = new com.surprising.aeron.service.core.LeverageLookup();
     /**  本 Lane 复用的运行时身份查找工作槽。 返回本 Lane 复用的身份查找结果槽；调用方遵守所属线程或有效读取边界，不能长期保留可变结果。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -370,11 +370,6 @@ public final class AccountLaneState {
         try { OWNER = MethodHandles.lookup().findVarHandle(AccountLaneState.class, "owner", Thread.class); }
         catch (/* 反射查找句柄失败的原因，转为类初始化错误暴露。 */ ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
     }
-
-    /**
-     * 让当前线程取得尚未绑定的 Lane，或核对自己已经是持有者。
-     */
-    public void bindOwner() { assertOwner(); }
 
     /**
      * 借用当前命令收据，逐用户应用结算带来的修订增量并写入收据；禁止嵌套遍历，结束后释放借用。
@@ -1590,7 +1585,7 @@ public final class AccountLaneState {
         hash = mix(hash, userSum);
         hash = mix(hash, mixMapUnordered(orders));
         hash = mix(hash, mixMapUnordered(reservations));
-        hash = mix(hash, mixMapUnordered(positions));
+        hash = mix(hash, mixPrimitiveMapUnordered(positions));
         hash = mix(hash, mixPrimitiveMapUnordered(cold.liquidations));
         hash = mix(hash, mixPrimitiveMapUnordered(cold.riskSnapshots));
         // 各杠杆业务键与设置值的无序哈希加和。
@@ -1682,15 +1677,6 @@ public final class AccountLaneState {
             sum += mix(mix(0x9e3779b97f4a7c15L, key), mixValue(0, values.get(key)));
         }
         return sum;
-    }
-
-    /**
-     * 把 Eclipse long 键对象表交给同一无序加和算法处理。
-     * @param <T> 表中业务值的类型，混合时使用其值哈希
-     * @param values 要计算无序键值哈希的原语键表
-     */
-    private <T> long mixMapUnordered(LongObjectHashMap<T> values) {
-        return mixPrimitiveMapUnordered(values);
     }
 
     /**

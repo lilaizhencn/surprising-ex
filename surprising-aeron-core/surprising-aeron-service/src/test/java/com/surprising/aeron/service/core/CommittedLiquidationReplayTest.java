@@ -64,7 +64,7 @@ class CommittedLiquidationReplayTest {
                 var response = CoreTestCompletion.applyAsynchronously(reference, command, time, position);
                 assertThat(response.commandStatus()).as("liquidation execution: %s", response.resultCode())
                         .isEqualTo(ResponseStatus.APPLIED);
-                assertThat(restored.businessHash()).isEqualTo(reference.snapshotBusinessStateHash());
+                assertThat(restored.businessHash()).isEqualTo(reference.stateHash());
                 var change = restored.liquidationChanges().stream()
                         .filter(c -> c.state().liquidationId() == planned.state().liquidationId()).findFirst().orElseThrow();
                 var actual = reference.tradingState().riskState().liquidations().get(planned.state().liquidationId());
@@ -85,7 +85,7 @@ class CommittedLiquidationReplayTest {
         replay.apply(CoreMessageCodec.encode(command), TIME + sequence, sequence * 4096);
         var response = CoreTestCompletion.applyAsynchronously(reference, command, TIME + sequence, sequence * 4096);
         assertThat(response.commandStatus()).as("fixture %s: %s", type, response.resultCode()).isEqualTo(ResponseStatus.APPLIED);
-        assertThat(replay.businessHash()).isEqualTo(reference.snapshotBusinessStateHash());
+        assertThat(replay.businessHash()).isEqualTo(reference.stateHash());
     }
 
     private CoreMessage message(CoreMessageType type, long user, byte[] payload) {

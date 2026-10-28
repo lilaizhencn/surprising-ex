@@ -52,7 +52,6 @@ class CoreMatcherLedgerTest {
                 assertThat(state.activeOrderIndex().activeOrderRoute(1)).isNotNull();
                 assertThat(state.runtimeState.hasChangedOrder(1)).isTrue();
                 assertThat(state.runtimeOrder(1)).isNull();
-                assertThat(state.responseOrder(1)).isNull();
             }
         }
     }

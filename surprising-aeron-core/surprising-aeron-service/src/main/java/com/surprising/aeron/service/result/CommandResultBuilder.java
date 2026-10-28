@@ -312,8 +312,8 @@ public final class CommandResultBuilder {
             // 当前需要尝试读取并加入响应的订单 ID
             long orderId = primitiveOrderId(commandChangedOrderIds, index);
             // 本轮借用的现存订单或撤单条目，空项按当前入口规则跳过
-            OrderRuntime order = owner.responseOrder(orderId);
-            if (order != null) commandOrderSources.add(order, owner.runtimeOrderSymbol(order));
+            OrderRuntime order = owner.runtimeOrder(orderId);
+            if (order != null) commandOrderSources.add(order, owner.identities().instrumentId(order.symbolId()));
         }
     }
 
@@ -334,7 +334,7 @@ public final class CommandResultBuilder {
     void materializeResponseOrder(long orderId) {
         commandOrderSources.clear();
         // 本轮借用的现存订单或撤单条目，空项按当前入口规则跳过
-        OrderRuntime order = owner.responseOrder(orderId);
+        OrderRuntime order = owner.runtimeOrder(orderId);
         commandSingleOrder = order;
     }
 
@@ -347,7 +347,7 @@ public final class CommandResultBuilder {
         if (pending != null && pending.laneResultPrepared()) {
             return pending.laneResultOrder(orderId);
         }
-        return owner.responseOrder(orderId);
+        return owner.runtimeOrder(orderId);
     }
 
     /**
@@ -360,7 +360,7 @@ public final class CommandResultBuilder {
         if (pending != null && pending.laneResultPrepared()) {
             return pending.laneResultSymbol(orderId);
         }
-        return owner.runtimeOrderSymbol(order);
+        return owner.identities().instrumentId(order.symbolId());
     }
 
     /**
@@ -449,7 +449,7 @@ public final class CommandResultBuilder {
         }
         try {
             if (commandSingleOrder != null) {
-                commandSingleOrderSource.set(commandSingleOrder, owner.runtimeOrderSymbol(commandSingleOrder));
+                commandSingleOrderSource.set(commandSingleOrder, owner.identities().instrumentId(commandSingleOrder.symbolId()));
                 // 编码器计算的当前有效响应字节数
                 int length = CoreCommandResultCodec.encodedSingleOrderLength(commandSingleOrderSource);
                 // 向共享响应池申请的实际编码目标数组

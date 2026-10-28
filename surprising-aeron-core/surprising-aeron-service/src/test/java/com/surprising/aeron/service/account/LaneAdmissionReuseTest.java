@@ -103,7 +103,7 @@ class LaneAdmissionReuseTest {
     private static AccountLaneState lane() {
         // 已绑定当前线程、登记两个用户的测试 Lane。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner(); lane.registerUser(7); lane.registerUser(8);
+        lane.assertOwner(); lane.registerUser(7); lane.registerUser(8);
         return lane;
     }
 

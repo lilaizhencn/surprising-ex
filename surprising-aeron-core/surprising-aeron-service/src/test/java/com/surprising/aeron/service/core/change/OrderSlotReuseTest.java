@@ -39,7 +39,7 @@ class OrderSlotReuseTest {
     @Test void authoritativeOrderWaitsForResponseRetirementBeforeReinitialization() {
         // 当前线程持有的独立账户 Lane，直接控制回收水位。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 最初由 Lane 准备的可回收权威订单对象。
         var first = lane.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, intent(1), new UUID(1, 1), 0, 100, 200, 0);
         first.applyFillInPlace(10, 0, 3, CoreOrderStatus.FILLED, 2, 110, 210);
@@ -75,7 +75,7 @@ class OrderSlotReuseTest {
     @Test void reservationReuseWaitsForItsOrderFenceAndKeepsIndependentValuesStable() {
         // 当前线程持有的独立账户 Lane，直接控制回收水位。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 最初由 Lane 准备的可回收权威订单对象。
         var first = lane.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, intent(1), new UUID(1, 1), 0, 100, 200, 0);
         // 与原订单绑定、生命周期跟随订单的预留权威对象。

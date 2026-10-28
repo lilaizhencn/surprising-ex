@@ -112,7 +112,7 @@ public final class MatchingPipelineProgress {
                 // 当前批次共用的可空流水准入事件。
                 PlaceBatchAdmissionEvent batchAdmission = orderBatch == null
                         ? null : orderBatch.placeBatchAdmissionEvent;
-                if (ownerHasPendingMatchingRejection(pending)) {
+                if (pending != null && pending.hasMatchingRejection()) {
                     // 同步准入可能在登记分片提交头之前就拒绝；其拒绝由有序提交消费，不再给它重建撮合订单。
                     readyShardMask &= ~shardBit;
                     break;
@@ -156,7 +156,7 @@ public final class MatchingPipelineProgress {
                                     ? CoreResultCode.fromRejectionCode(stateRejection.code())
                                     : rejection instanceof ArithmeticException
                                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
-                            owner.batches().appendOrderBatchResult(orderBatch, orderBatch.items.getFirst(),
+                            owner.batches().appendOrderBatchResult(orderBatch.items.getFirst(),
                                     ResponseStatus.REJECTED, code);
                             orderBatch.nextIndex = 1;
                         }
@@ -327,17 +327,9 @@ public final class MatchingPipelineProgress {
     private boolean hasDeferredMatchingSubmission() {
         // 当前全局队首，用于补充可推进分片或判断本地续步。
         CommandSlot head = owner.pendingMatching().get(owner.pendingMatching().firstSequence());
-        return head != null && !ownerHasPendingMatchingRejection(head)
+        return head != null && !head.hasMatchingRejection()
                 && !head.isMatchingSubmitted() && !head.deferredMatching()
                 && head.orderBatch == null;
-    }
-
-    /**
-     * 非空槽已保存拒绝原因时返回真，不重新解码或校验业务。
-     * @param pending 当前准备释放提交链接或检查拒绝的命令槽
-     */
-    private boolean ownerHasPendingMatchingRejection(CommandSlot pending) {
-        return pending != null && pending.hasMatchingRejection();
     }
 
     /**

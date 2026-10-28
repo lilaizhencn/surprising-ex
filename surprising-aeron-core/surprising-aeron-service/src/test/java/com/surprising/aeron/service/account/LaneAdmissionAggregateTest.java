@@ -24,7 +24,7 @@ class LaneAdmissionAggregateTest {
     @Test void orderAndReservationChurnRetainsTablesAndUnrelatedLiveState() throws Exception {
         // 本场景由当前线程持有的独立账户 Lane。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 全程保留的基准订单，用于检查无关订单周转不改变它。
         var held = CoreStateTestFixtures.order(1, 7, 3, 50);
         // 与基准订单对应、全程保留的预留值。
@@ -66,7 +66,7 @@ class LaneAdmissionAggregateTest {
             for (var /* 当前枚举到的全仓或逐仓模式。 */ margin : CoreMarginMode.values()) for (boolean /* 当前测试订单是否只减仓。 */ reduce : new boolean[]{false, true}) {
                 // 本场景由当前线程持有的独立账户 Lane。
                 var lane = new AccountLaneState(0, 256);
-                lane.bindOwner();
+                lane.assertOwner();
                 // 当前组合的原始订单，稍后直接写回它来模拟恢复数量。
                 var order = order(side, position, margin, reduce);
                 lane.putOrder(order);
@@ -109,7 +109,7 @@ class LaneAdmissionAggregateTest {
     void quantityUpdatePreservesOtherOrdersInTheSameAggregate() {
         // 本场景由当前线程持有的独立账户 Lane。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 同分组中准备部分成交并结束的第一笔订单。
         var first = order(CoreOrderSide.BUY, CorePositionSide.NET, CoreMarginMode.CROSS, false);
         lane.putOrder(first);
@@ -134,7 +134,7 @@ class LaneAdmissionAggregateTest {
     void changedSideAndMarginMoveBetweenScopes() {
         // 本场景由当前线程持有的独立账户 Lane。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         lane.putOrder(order(CoreOrderSide.BUY, CorePositionSide.NET, CoreMarginMode.CROSS, false));
         lane.putOrder(order(CoreOrderSide.SELL, CorePositionSide.NET, CoreMarginMode.ISOLATED, true));
         // 已经选择合约三的复用准入汇总视图。

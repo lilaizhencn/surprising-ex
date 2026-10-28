@@ -144,38 +144,6 @@ public final class PendingReservationTracker {
     }
 
     /**
-     * 单笔账户预留完成时交出的原冻结记录引用，用于决定余额变化是否需要标记，不创建新的冻结状态。
-     * @param reservation 所属 Lane 读取出的原冻结记录引用，部分辅助完成记录允许为 null，按实际路径处理
-     */
-    record PendingReservationCompletion(ReservationRuntime reservation) {}
-
-    /**
-     * 需要完成的一笔预留的订单与用户路由，只作为本次多笔完成准备使用。
-     * @param orderId 当前预留所属的普通订单编号
-     * @param userId 预留或批次所属用户编号，必须与真实账户路由一致
-     */
-    record PendingReservationRef(long orderId, long userId) {
-    }
-
-    /**
-     * 多笔预留完成预检通过后的订单、用户和原冻结记录交接值，供所属 Lane 完成及回滚捕获使用。
-     * @param orderId 当前预留所属的普通订单编号
-     * @param userId 预留或批次所属用户编号，必须与真实账户路由一致
-     * @param reservation 所属 Lane 读取出的原冻结记录引用，部分辅助完成记录允许为 null，按实际路径处理
-     */
-    record PendingReservationBatchCompletion(
-            long orderId, long userId, ReservationRuntime reservation) {
-        /**
-         * 检查交接的订单和用户编号均为正数，冻结记录引用由具体读取路径提供。
-         */
-        PendingReservationBatchCompletion {
-            if (orderId <= 0 || userId <= 0) {
-                throw new IllegalArgumentException("invalid pending reservation completion");
-            }
-        }
-    }
-
-    /**
      * 捕获回滚前值并在所属 Lane 核对冻结归属、设置待完成序号，成功后登记 Owner 路由及计数，不能重复标记同一预留。
      * @param userId 预留或批次所属用户编号，必须与真实账户路由一致
      * @param orderId 当前预留所属的普通订单编号
@@ -259,19 +227,19 @@ public final class PendingReservationTracker {
         }
         requirePendingReservationIndex(orderId, coreSequence, userId);
         // 所属 Lane 完成单项后交出的原冻结引用，有冻结才标记余额变化。
-        PendingReservationCompletion completion = owner.onLane(userId, /* 实际完成该用户单项预留的 Lane，完成前后捕获余额和客户身份回滚信息。 */ accountLane -> {
+        ReservationRuntime reservation = owner.onLane(userId, /* 实际完成该用户单项预留的 Lane，完成前后捕获余额和客户身份回滚信息。 */ accountLane -> {
             // 当前 Lane 持有的原冻结记录，用其资产捕获需要的余额回滚前后值。
-            ReservationRuntime reservation = accountLane.reservation(orderId);
-            if (reservation != null) owner.accountRollback().captureBalanceBefore(userId, reservation.assetId());
+            ReservationRuntime currentReservation = accountLane.reservation(orderId);
+            if (currentReservation != null) owner.accountRollback().captureBalanceBefore(userId, currentReservation.assetId());
             accountLane.clientKeysByOrderId().forEach(orderId, /* 当前订单绑定的客户身份键，先捕获其回滚前值再完成预留。 */ clientKey -> owner.accountRollback().captureClientOrderBefore(userId, clientKey));
             accountLane.completePendingReservation(orderId, coreSequence);
-            if (reservation != null) owner.accountRollback().captureBalanceAfter(accountLane, userId, reservation.assetId());
-            return new PendingReservationCompletion(reservation);
+            if (currentReservation != null) owner.accountRollback().captureBalanceAfter(accountLane, userId, currentReservation.assetId());
+            return currentReservation;
         });
         owner.changedOrder(orderId);
         owner.changedReservation(orderId);
         owner.changedUser(userId);
-        if (completion.reservation() != null) owner.markBalancesChanged();
+        if (reservation != null) owner.markBalancesChanged();
         unindexPendingReservation(orderId, coreSequence, userId, nextTotalPendingReservations);
     }
 
@@ -299,77 +267,67 @@ public final class PendingReservationTracker {
         // 当前命令多项预留导出的编号数组，单项路径不会分配该数组。
         long[] pending = pendingReservationsBySequence.orderIds(coreSequence);
         if (pending.length == 0) return;
-        // 根据 Owner 路由组装的订单与用户引用列表，先整体预检再实际完成。
-        List<PendingReservationRef> refs = new ArrayList<>(pending.length);
-        for (long /* 当前单项、撮合计划或序号索引正在处理的普通订单编号。 */ orderId : pending) {
-            // 从预留路由取得或按用户聚合的所属用户，未找到时用 0 识别索引缺失。
-            long userId = pendingReservationUsers.getOrDefault(orderId, 0);
+        // 与 pending 按相同下标对应的所属用户编号数组，先全部核对存在再进入预检。
+        long[] userIds = new long[pending.length];
+        for (int index = 0; index < pending.length; index++) {
+            long userId = pendingReservationUsers.getOrDefault(pending[index], 0);
             if (userId == 0) throw new IllegalStateException("pending reservation owner is missing");
-            refs.add(new PendingReservationRef(orderId, userId));
+            userIds[index] = userId;
         }
-        // 本次多项完成的准备列表，包含已核对路由及原冻结引用。
-        List<PendingReservationBatchCompletion> completions = preflightPendingReservationCompletions(
-                coreSequence, refs);
-        long selectedLanes = 0;
-        for (var completion : completions) selectedLanes |= owner.topology().accountLaneMask(completion.userId());
-        while (selectedLanes != 0) {
-            int laneId = Long.numberOfTrailingZeros(selectedLanes);
-            selectedLanes &= selectedLanes - 1;
-            owner.onLane(laneId, lane -> {
-                for (var completion : completions) {
-                    if (owner.topology().accountLaneId(completion.userId()) != laneId) continue;
-                    lane.completePendingReservation(completion.orderId(), coreSequence);
-                    owner.accountRollback().captureBalanceAfter(lane, completion.userId(), completion.reservation().assetId());
-                }
-                lane.recordSettlementOperation();
-                return null;
-            });
-        }
-        for (PendingReservationBatchCompletion /* Lane 工作完成后供 Owner 标记变化并删除路由的一项交接值。 */ completion : completions) {
-            owner.changedOrder(completion.orderId());
-            owner.changedReservation(completion.orderId());
-            owner.changedUser(completion.userId());
-            owner.markBalancesChanged();
-            // 调用方提前用精确加减算出的下一全局路由数，真正更新索引时再采用。
-            int nextTotalPendingReservations = Math.subtractExact(totalPendingReservations, 1);
-            unindexPendingReservation(completion.orderId(), coreSequence, completion.userId(),
-                    nextTotalPendingReservations);
-        }
-    }
-
-    /**
-     * 实际完成多项前先逐项核对 Owner 与 Lane 索引并捕获回滚前值，提前检查总数不会减成负数，返回只读的本次完成准备列表。
-     * @param coreSequence 需要标记、完成或查询成员关系的 Core 命令序号
-     * @param refs 本次多笔完成需要校验的订单及用户路由列表
-     */
-    List<PendingReservationBatchCompletion> preflightPendingReservationCompletions(
-            long coreSequence, List<PendingReservationRef> refs) {
         // 预检阶段模拟逐项扣减的全局剩余数，只验证不会为负，不提前修改真实总计数。
         int remainingPendingReservations = totalPendingReservations;
-        // 本次多项完成的准备列表，包含已核对路由及原冻结引用。
-        List<PendingReservationBatchCompletion> completions = new ArrayList<>(refs.size());
-        for (PendingReservationRef /* 当前待预检的订单与用户身份引用，先核对索引和回滚前值。 */ ref : refs) {
-            owner.accountRollback().captureUserBefore(ref.userId());
-            owner.accountRollback().captureOrderBefore(ref.orderId());
-            owner.accountRollback().captureReservationBefore(ref.orderId());
-            requirePendingReservationIndex(ref.orderId(), coreSequence, ref.userId());
-            // 当前所属 Lane 预检通过后交出的订单、用户和原冻结记录。
-            PendingReservationBatchCompletion completion = owner.onLane(ref.userId(), /* 通过原账户访问范围进入的 Lane，只处理属于本 Lane 的用户和预留。 */ lane -> {
-                // 当前 Lane 持有的原冻结记录，用其资产捕获需要的余额回滚前后值。
-                ReservationRuntime reservation = lane.reservation(ref.orderId());
-                if (reservation != null) owner.accountRollback().captureBalanceBefore(ref.userId(), reservation.assetId());
-                lane.clientKeysByOrderId().forEach(ref.orderId(),
-                        /* 当前订单绑定的客户身份键，先捕获其回滚前值再完成预留。 */ clientKey -> owner.accountRollback().captureClientOrderBefore(ref.userId(), clientKey));
-                lane.requirePendingReservationCompletion(ref.orderId(), coreSequence);
-                return new PendingReservationBatchCompletion(ref.orderId(), ref.userId(), reservation);
+        // 与 pending 按相同下标对应的原冻结记录数组。
+        ReservationRuntime[] reservations = new ReservationRuntime[pending.length];
+        long selectedLanes = 0;
+        for (int index = 0; index < pending.length; index++) {
+            long orderId = pending[index];
+            long userId = userIds[index];
+            if (orderId <= 0 || userId <= 0) {
+                throw new IllegalArgumentException("invalid pending reservation completion");
+            }
+            owner.accountRollback().captureUserBefore(userId);
+            owner.accountRollback().captureOrderBefore(orderId);
+            owner.accountRollback().captureReservationBefore(orderId);
+            requirePendingReservationIndex(orderId, coreSequence, userId);
+            reservations[index] = owner.onLane(userId, /* 通过原账户访问范围进入的 Lane，只处理属于本 Lane 的用户和预留。 */ lane -> {
+                ReservationRuntime reservation = lane.reservation(orderId);
+                if (reservation != null) owner.accountRollback().captureBalanceBefore(userId, reservation.assetId());
+                lane.clientKeysByOrderId().forEach(orderId,
+                        /* 当前订单绑定的客户身份键，先捕获其回滚前值再完成预留。 */ clientKey -> owner.accountRollback().captureClientOrderBefore(userId, clientKey));
+                lane.requirePendingReservationCompletion(orderId, coreSequence);
+                return reservation;
             });
             remainingPendingReservations = Math.subtractExact(remainingPendingReservations, 1);
             if (remainingPendingReservations < 0) {
                 throw new IllegalStateException("pending reservation counters are inconsistent");
             }
-            completions.add(completion);
+            selectedLanes |= owner.topology().accountLaneMask(userId);
         }
-        return List.copyOf(completions);
+        while (selectedLanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(selectedLanes);
+            selectedLanes &= selectedLanes - 1;
+            owner.onLane(laneId, lane -> {
+                for (int index = 0; index < pending.length; index++) {
+                    long userId = userIds[index];
+                    if (owner.topology().accountLaneId(userId) != laneId) continue;
+                    lane.completePendingReservation(pending[index], coreSequence);
+                    owner.accountRollback().captureBalanceAfter(lane, userId, reservations[index].assetId());
+                }
+                lane.recordSettlementOperation();
+                return null;
+            });
+        }
+        for (int index = 0; index < pending.length; index++) {
+            long orderId = pending[index];
+            long userId = userIds[index];
+            owner.changedOrder(orderId);
+            owner.changedReservation(orderId);
+            owner.changedUser(userId);
+            owner.markBalancesChanged();
+            // 调用方提前用精确加减算出的下一全局路由数，真正更新索引时再采用。
+            int nextTotalPendingReservations = Math.subtractExact(totalPendingReservations, 1);
+            unindexPendingReservation(orderId, coreSequence, userId, nextTotalPendingReservations);
+        }
     }
 
     /**

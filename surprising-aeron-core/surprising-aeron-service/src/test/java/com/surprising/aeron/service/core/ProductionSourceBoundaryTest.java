@@ -33,21 +33,17 @@ class ProductionSourceBoundaryTest {
     void d5CommandsUseTheConcreteRuntimeWithoutCapabilityInterfaces() throws Exception {
         assertThat(TradingCoreRuntime.class.getInterfaces()).containsExactly(AutoCloseable.class);
         for (Class<?> /* 当前要求直接依赖实际运行时的业务命令类型 */ handler : java.util.List.of(
-                com.surprising.aeron.service.account.command.BalanceTransferCommands.class,
                 com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands.class,
-                com.surprising.aeron.service.fee.command.FeePolicyCommands.class,
                 com.surprising.aeron.service.funding.command.PerpetualFundingCommands.class,
                 com.surprising.aeron.service.risk.command.RiskCommands.class,
-                com.surprising.aeron.service.liquidation.command.LiquidationCommands.class,
-                com.surprising.aeron.service.adl.command.AdlCommands.class,
                 com.surprising.aeron.service.insurance.command.InsuranceFundCommands.class,
-                com.surprising.aeron.service.position.command.PositionCommands.class,
-                com.surprising.aeron.service.position.command.LeverageCommands.class,
                 com.surprising.aeron.service.settlement.command.InstrumentSettlementCommands.class,
                 com.surprising.aeron.service.trigger.command.TriggerOrderCommands.class)) {
             assertThat(handler.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
             assertThat(handler.getConstructor(TradingCoreRuntime.class)).isNotNull();
         }
+        assertThat(com.surprising.aeron.service.core.command.DirectCommandDispatcher.class
+                .getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
         assertThat(DirectCommandSlot.class.getDeclaredField("owner").getType()).isEqualTo(TradingCoreRuntime.class);
         // 从当前目录向上找到的交易仓库根，找不到即测试失败
         Path root = Path.of("").toAbsolutePath();

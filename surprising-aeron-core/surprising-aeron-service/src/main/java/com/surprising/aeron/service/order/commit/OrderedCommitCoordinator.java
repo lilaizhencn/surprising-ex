@@ -214,7 +214,7 @@ public final class OrderedCommitCoordinator {
                 // 账户业务工作只消费一次；后续发布和提交可能还需多轮推进。
                 pending.controlWork(null);
                 if (!pending.controlAccountsCommitted() && pending.commitEvent() == null) {
-                    owner.runtimeState().completePendingReservations(sequence);
+                    owner.runtimeState().pendingReservations().completePendingReservations(sequence);
                     owner.resultBuilder.materializeChangeAccumulators();
                     // 挂起控制命令可跨多个风险页累积用户。
                     // 登记完整提交输入，不能只看最后一页变化。
@@ -391,7 +391,7 @@ public final class OrderedCommitCoordinator {
                     boolean executable = matchingResult.accepted() && liquidation != null && pending.liquidationCheck().executable(0);
                     // 本次实际选择的撤单页，不可执行时为空页
                     TradingCoreRuntime.LifecycleOrderChunk chunk = !executable ? new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0)
-                            : owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                            : owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
                             command.cursorOrderId(),
                             command.maxOrders());
                     owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
@@ -436,7 +436,7 @@ public final class OrderedCommitCoordinator {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             }
-            owner.runtimeState().completePendingReservations(pending.sequence());
+            owner.runtimeState().pendingReservations().completePendingReservations(pending.sequence());
         } catch (/* 当前事实应用、账户收集或资金计算错误，转为需要恢复的命令故障 */ CoreStateRejectedException exception) {
             throw owner.failMatching(pending, "Core rejected an accepted matcher result", exception);
         } catch (/* 当前事实应用、账户收集或资金计算错误，转为需要恢复的命令故障 */ ArithmeticException | IllegalArgumentException exception) {
@@ -836,7 +836,7 @@ public final class OrderedCommitCoordinator {
                         continue;
                     }
                     // 本次实际选择的撤单页，不可执行时为空页
-                    var chunk = executable ? owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                    var chunk = executable ? owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
                             action.cursorOrderId(), remaining) : new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0);
                     for (var /* 当前活动订单路由或撤单页身份 */ order : chunk.orders()) owner.resultBuilder.markOrderChanged(order.orderId());
                     owner.resultBuilder.markUserChanged(liquidation.userId());

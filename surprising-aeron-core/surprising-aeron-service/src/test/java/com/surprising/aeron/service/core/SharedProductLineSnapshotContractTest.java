@@ -99,8 +99,6 @@ class SharedProductLineSnapshotContractTest {
             long laneFence = original.appliedCommandCount();
             // 保存快照时的运行时状态哈希。
             long stateHash = original.stateHash();
-            // 包含费率和待完成划转的业务哈希。
-            long businessHash = original.snapshotBusinessStateHash();
             // 从物化交易状态计算的资金哈希。
             long fundsHash = com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
                     original.snapshotTradingState());
@@ -117,7 +115,6 @@ class SharedProductLineSnapshotContractTest {
                 assertThat(restored.productLine()).isEqualTo(productLine);
                 assertThat(restored.tradingState()).isEqualTo(original.tradingState());
                 assertThat(restored.stateHash()).isEqualTo(stateHash);
-                assertThat(restored.snapshotBusinessStateHash()).isEqualTo(businessHash);
                 assertThat(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
                         restored.snapshotTradingState())).isEqualTo(fundsHash);
                 assertThat(economicAssetUnits(restored, settleAsset(productLine))).isEqualTo(economicUnits);

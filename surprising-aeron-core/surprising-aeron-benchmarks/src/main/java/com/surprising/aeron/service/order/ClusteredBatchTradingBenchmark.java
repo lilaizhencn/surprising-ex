@@ -165,7 +165,7 @@ public class ClusteredBatchTradingBenchmark {
     public long singleOrderSettlementReuse(Workload workload, Counters counters) {
         for (int round = 0; round < 2; round++) {
             workload.runRoundTripTrades();
-            if (workload.service.state().runtimeState().hasPendingReservations())
+            if (workload.service.state().runtimeState().pendingReservations().hasPendingReservations())
                 throw new IllegalStateException("reservation turnover retained pending users");
             counters.acceptedBusinessOperations += 1024;
             counters.terminalBusinessOperations += 1024;

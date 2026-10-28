@@ -1,9 +1,14 @@
 # aeron-service 代码导航
 
+2026-10-28 多层转发与无意义对象转换深度清理：
+彻底消除 `PendingTransferRoutes`、`PendingReservationTracker`（删除 3 个中间过渡 Record 与 3 层列表复制）、`RuntimeLifecycleSettlement.OrderPage` 及 `RuntimeOrderAdmission.AdmissionIdentity` 等无实际工作内容的多层对象/集合转换；
+内联并删除 `MatcherSettlementDispatcher`、`ControlFundsValidation` 及 6 个 30~70 行的微型 `*Commands` 转发薄壳类（`LeverageCommands`、`AdlCommands`、`PositionCommands`、`FeePolicyCommands`、`BalanceTransferCommands`、`LiquidationCommands`统一归入 `DirectCommandDispatcher`）；
+删除 `TradingAccountRuntime` 向后兼容空壳子类（`LeverageLookup`、`PaddedReadyMask`）、6 个 `pendingReservations` 单行代理方法及 `CoreMatchingFlow`、`OrderBatchExecutor`、`MatchingPipelineProgress`、`MatchingCommandAdmission`、`TradingCoreRuntime`、`TradingAccountRuntime`、`AccountLaneState` 中的同义单行转发与套娃重载。`surprising-aeron-service`、`surprising-aeron-benchmarks` 测试编译与 `TradingAccountRuntimeTest` 等针对性单元测试验证通过。
+
 2026-10-26 核心抽象大幅精简与架构瘦身：
 彻底收敛 `order/admission` 微类碎片（删除 AdmissionIdentity、AdmissionOrderIndex、AdmissionSummary、PlaceBatchIntentSource 4个冗余小文件并内联）；
 拆解精简 `CommandSlot` 上帝类（提取统一 `OrderRuntimeSource`，删除 CommandResultBuilder 与 CommandSlot 中的重复代理集合，将 7 个内部 Continuation 抽离至 `CommandSlotContinuations.java`，瘦身 621 行）；
-拆解 `TradingAccountRuntime` 巨石类（独立提取 `LeverageLookup`、`PaddedReadyMask`、`PaddedCommittedSequenceSlot` 与 `ControlFundsValidation`，消除机械包装并保持向后兼容，瘦身 258 行）；
+拆解 `TradingAccountRuntime` 巨石类（独立提取 `LeverageLookup`、`PaddedReadyMask`、`PaddedCommittedSequenceSlot`，消除机械包装，瘦身 258 行）；
 累计净删除 1,008 行冗余抽象代码。全量测试通过（0失败，0错误），生产混合基准压测达到 41.8 万 ops/s（零积压、零错误）。
 
 2026-10-25 运行路径收敛：`AeronTradingClusterService` 只保留 Spring 与完整参数两个装配入口；
@@ -416,7 +421,7 @@ flowchart LR
 | 1 输入 | `AeronTradingClusterService` → `TradingCoreOwner` → `TradingCoreRuntime.apply` | 交接命令、指纹、会话和日志元数据；检查协议、产品线和幂等 |
 | 2 准入 | [`MatchingCommandAdmission`](src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java) → [`CoreOrderDecisionResolver`](src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java) → `PlaceAdmissionEvent` / [`RuntimeOrderAdmission`](src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java) | 检查订单规则、资金、保证金、平仓容量及生命周期冲突；所属账户完成订单和预留变更 |
 | 3 撮合 | [`CoreMatchingFlow`](src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java) → `MatcherCommandPipeline` → `DeterministicExchangeCoreAdapter` | 固定分片并交接命令；PIPELINED 可提前提交带门闩的输入，账户准入成功后才能撮合 |
-| 4 结算 | [`MatcherSettlementDispatcher`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.java) / `MatcherSettlementEvent` → `RuntimeSpotMatchProcessor` / `RuntimeDerivativeMatchProcessor` | Matcher 事实直接交给所属账户，按产品计算余额、冻结、费用与持仓变化；财务事实交给 Ledger |
+| 4 结算 | [`TradingAccountRuntime`](src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) / [`MatcherSettlementEvent`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementEvent.java) → `RuntimeSpotMatchProcessor` / `RuntimeDerivativeMatchProcessor` | Matcher 事实直接交给所属账户，按产品计算余额、冻结、费用与持仓变化；财务事实交给 Ledger |
 | 5 提交 | [`OrderedCommitCoordinator`](src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java) → `CommitPublication` | 核验证据、收集账户与账本完成，按命令顺序提交；不在此重复计算资金 |
 | 6 输出 | `CommandResultLedger`、`TradingRealtimeBoundary`、`ClusterServiceEgress` | 保存可幂等重试的终态，输出实时变化，并由 Cluster 回调线程发送响应 |
 
@@ -433,7 +438,7 @@ flowchart LR
 | 2.1 决定现在做还是延后 | [`MatchingCommandAdmission.beginMatching / deferMatching`](src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java) | 有尚未结束的批次且不允许独立准入时，保存原序号、解码输入、来源与日志时间，之后再做业务准入 |
 | 2.2 检查并派发准入 | `MatchingCommandAdmission.prepareMatching` → `dispatchPlaceAdmission` / `dispatchReplacementAdmission` | 检查身份、归属、产品规则和生命周期冲突；账户工作由所属 Lane 执行。已知业务错误按当前命令边界拒绝或回滚，不能跨其他在途账户命令回滚 |
 | 2.3 登记在途命令 | `prepareMatching` → `CoreMatchingFlow.putPendingMatching` | 把解码输入及准入事件放入 `CommandSlot`，固定分片及原业务时间；释放 Owner 事实作用域和账户访问权，再交出撮合输入 |
-| 3.1 交给 Matcher | [`CoreMatchingFlow.submitMatching / submitMatchingInCommandScope`](src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java) | 按分片提交顺序派发；普通 PLACE 可先把带准入门闩的任务交出，账户准入成功后 Matcher 才能执行 |
+| 3.1 交给 Matcher | [`CoreMatchingFlow.submitMatching`](src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java) | 按分片提交顺序派发；普通 PLACE 可先把带准入门闩的任务交出，账户准入成功后 Matcher 才能执行 |
 | 3.2 推进异步工作 | [`MatchingPipelineProgress.progressPlaceBatchAdmissions / submitDeferredMatchingAfterBatch`](src/main/java/com/surprising/aeron/service/order/MatchingPipelineProgress.java) | Owner 消费就绪提示并重试可推进项；准入事件和命令槽仍保存事实，就绪位只用于调度 |
 | 3.3 收据与提交头释放 | `CoreMatchingFlow.collectPlaceAdmissionIfReady` → `MatchingPipelineProgress.submissionCompleted` | Owner 收据收齐与 Matcher 消费是两个条件，均满足后才归还准入事件；释放分片提交头只允许后继继续，不表示当前订单已到终态 |
 
@@ -444,9 +449,9 @@ flowchart LR
 
 | 阅读步骤 | 类与方法 | 本步做什么、由谁做 |
 | --- | --- | --- |
-| 4.1 准备交接 | [`MatcherSettlementDispatcher.prepareDirectAdmission / prepareDirect / prepareDirectReplacement / prepareDirectCancellation`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.java) | Owner 借用事件槽，保存命令身份、币对与资产编号、初始路由和准入输入 |
+| 4.1 准备交接 | [`TradingAccountRuntime.prepareDirectPlaceAdmission / prepareDirectMatcherSettlement / prepareDirectReplacement / prepareDirectCancellation`](src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) | Owner 借用事件槽，保存命令身份、币对与资产编号、初始路由和准入输入 |
 | 4.2 整理事实 | [`MatcherSettlementEvent.publishDirectNativeResult / publishDirectNativeBatchItem / publishDirectNativeReplacement`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementEvent.java) → [`MatcherSettlementPlan`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementPlan.java) | Matcher 校验序号与命令证据，整理成交、已接受的前置撤单和实际参与 Lane；不读取其他线程的账户表 |
-| 4.3 发布给账户 | `MatcherSettlementEvent.notifyDirectPublication` → `MatcherSettlementDispatcher.publishMatcherOwned` | PIPELINED 由 Matcher 直接写各 Lane 的分片 SPSC 队列；FUSED 在当前线程内联执行 |
+| 4.3 发布给账户 | `MatcherSettlementEvent.notifyDirectPublication` → `TradingAccountRuntime.publishMatcherOwned` | PIPELINED 由 Matcher 直接写各 Lane 的分片 SPSC 队列；FUSED 在当前线程内联执行 |
 | 4.4 应用账户变化 | `MatcherSettlementEvent.execute / applyPlan` → [`RuntimeSpotMatchProcessor.applyLane`](src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java) 或 [`RuntimeDerivativeMatchProcessor.applyLane`](src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java) | 各账户所有者只写自己的订单、预留、余额与持仓；衍生品成交计算由 [`RuntimeDerivativeFillCalculator`](src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeFillCalculator.java) 承担 |
 | 4.4 收尾与回执 | [`MatcherSettlementChanges.prepareLaneTerminal`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementChanges.java) → `MatcherSettlementEvent.publishCompletion` | 所属 Lane 整理用户修订、终态身份、持仓及余额资金增量，然后发布自己的完成位 |
 | 4.5 财务完成 | `MatcherSettlementEvent.submitTreasurySettlement` → `TreasurySettlement` / [`SystemLedgerLane`](src/main/java/com/surprising/aeron/service/treasury/SystemLedgerLane.java) | Owner 尝试投递财务槽；账本等账户回执到齐后应用 Treasury 差额、校验资金守恒并更新持仓索引 |
@@ -536,10 +541,10 @@ flowchart TD
 | 改单 / 批量 | `ReplacementAdmissionEvent`；`OrderBatchExecutor` / `OrderBatchPending` | 改单处理新旧预留差异；批量保留项游标和整批终态 |
 | 触发 / 止盈止损 / OCO | [`TriggerOrderCommands`](src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java) → `PendingTriggerScan` → `TriggerExecutionContinuation` → `MatchingCommandAdmission.appendQueuedMatching` | 条件记录与子订单是不同生命周期；条件成立后仍须重新准入、冻结和撮合 |
 | 风控 | [`RiskCommands`](src/main/java/com/surprising/aeron/service/risk/command/RiskCommands.java) → `RuntimeDerivativeRiskProcessor` → `RiskScanCoordinator` → `RiskLaneProcessor` | 按价格序号、修订和预算续扫；扫描生成强平计划，不直接等于强平执行 |
-| 强平 | `MatchingCommandAdmission` / `CoreMatchingFlow` → `ExecutionCheck` / `CrossShardCancellationCoordinator` → [`LiquidationCommands`](src/main/java/com/surprising/aeron/service/liquidation/command/LiquidationCommands.java) → `RuntimeDerivativeLiquidationProcessor` | 先校验状态、价格和游标，分批撤单；撤单未完成时只提交进度，后续命令继续 |
-| 强平确认 / 保险 / ADL | `RuntimeLiquidationResolution`；`InsuranceFundCommands`；`AdlCommands` / `RuntimeAdlExecution` | 各有独立复制命令和幂等边界，并非每次强平都无条件执行 |
+| 强平 | `MatchingCommandAdmission` / `CoreMatchingFlow` → `ExecutionCheck` / `CrossShardCancellationCoordinator` → [`DirectCommandDispatcher`](src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `RuntimeDerivativeLiquidationProcessor` | 先校验状态、价格和游标，分批撤单；撤单未完成时只提交进度，后续命令继续 |
+| 强平确认 / 保险 / ADL | `RuntimeLiquidationResolution`；`InsuranceFundCommands`；`DirectCommandDispatcher` / `RuntimeAdlExecution` | 各有独立复制命令和幂等边界，并非每次强平都无条件执行 |
 | 资金费 / 交割 / 行权 | `PerpetualFundingCommands` / `RuntimePerpetualFundingProcessor`；`InstrumentSettlementCommands` / `RuntimeLifecycleSettlementContinuation` | 分页资金费与到期结算各保留游标；到期结算先完成撤单，再推进持仓和账本 |
-| 余额 / 划转 | `DirectCommandDispatcher` → `BalanceTransferCommands` → `AccountControlTask` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
+| 余额 / 划转 | [`DirectCommandDispatcher`](src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `AccountControlTask` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
 
 快照入口为 `AeronTradingClusterService.onTakeSnapshot` → `TradingCoreOwner.captureSnapshotSections`
 → `CoreSnapshotLifecycle`。先排空快照边界前的命令，再捕获同一 fence 的账户、Matcher、账本、
@@ -608,7 +613,7 @@ flowchart LR
 | [service.core](src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java) | `TradingCoreOwner` 编排复制命令；`TradingCoreRuntime` 连接各业务；`TradingAccountRuntime` 保存并处理唯一账户业务状态 |
 | [service.order](src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java) | `MatchingCommandAdmission` → `CoreMatchingFlow` → `OrderedCommitCoordinator`，依次完成准入、撮合交接及终态提交 |
 | [service.matcher](src/main/java/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.java) | `DeterministicExchangeCoreAdapter` 操作订单簿；`pipeline` 保留分片串行执行、完成回执与关闭协议 |
-| [service.settlement](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.java) | Matcher 事实交给所属账户；资金、费用和持仓应用后收集账户与系统账本完成回执 |
+| [service.settlement](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementEvent.java) | Matcher 事实交给所属账户；资金、费用和持仓应用后收集账户与系统账本完成回执 |
 | [service.account](src/main/java/com/surprising/aeron/service/account/AccountLaneState.java) / [service.treasury](src/main/java/com/surprising/aeron/service/treasury/SystemLedgerLane.java) | 账户 Lane 持有用户状态；Ledger 持有系统资金及财务索引；资金费和到期结算共用 `UserIndexPage` 游标选页 |
 | [model](src/main/java/com/surprising/aeron/model/TradingCoreState.java) / [support](src/main/java/com/surprising/aeron/support/concurrent/LaneSequenceQueue.java) | 导出值与通用设施；在线可变状态留在相应业务服务中 |
 
@@ -630,8 +635,8 @@ flowchart LR
 | 风控 4–7：估值与计划 | `service.risk.RiskScanCoordinator.poll` → `RiskLaneProcessor` | 所属 Lane 估值，Owner 确定性分配编号，再由 Lane 写入 `PLANNED` 记录并提交 |
 | 强平 2–4：输入、校验与撤单 | `service.order.MatchingCommandAdmission` → [`RuntimeDerivativeLiquidationProcessor.ExecutionCheck`](src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java) → `service.order.CoreMatchingFlow` | 步骤 1 为风控计划；此处核对价格、状态及游标，Matcher 完成分页撤单后才能推进账户执行 |
 | 强平 5–6：账户与账本 | 同类的 `ExecutionWork` / `BatchFinancialWork` → `service.order.commit.OrderedCommitCoordinator` | 所属 Lane 更新持仓与余额，Ledger 应用财务差额，两边完成才提交 |
-| 强平 7：后续确认命令 | `service.liquidation.command.LiquidationCommands.executeResolveLiquidation` → [`RuntimeLiquidationResolution.ResolutionWork`](src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java) | 捕获索赔、账本分配并补亏、源 Lane 更新记录；执行提交与亏空解决分别确认 |
-| ADL 1–4：后续减仓命令 | `service.adl.command.AdlCommands` → [`RuntimeAdlExecution.AdlWork`](src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java) | 源强平校验 → 目标账户减仓 → 源记录补亏 → Ledger 完成；同 Lane 时复用已有账户回调 |
+| 强平 7：后续确认命令 | `service.core.command.DirectCommandDispatcher.executeResolveLiquidation` → [`RuntimeLiquidationResolution.ResolutionWork`](src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java) | 捕获索赔、账本分配并补亏、源 Lane 更新记录；执行提交与亏空解决分别确认 |
+| ADL 1–4：后续减仓命令 | `service.core.command.DirectCommandDispatcher.executeAdl` → [`RuntimeAdlExecution.AdlWork`](src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java) | 源强平校验 → 目标账户减仓 → 源记录补亏 → Ledger 完成；同 Lane 时复用已有账户回调 |
 
 `service.risk.LiquidationRuntime` 被扫描、强平、保险和 ADL 共用，保留为一份记录；
 `service.treasury` 继续拥有系统资金，`service.account` 继续拥有用户状态。

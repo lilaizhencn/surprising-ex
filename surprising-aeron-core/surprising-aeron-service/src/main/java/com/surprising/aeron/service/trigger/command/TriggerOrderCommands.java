@@ -1012,7 +1012,7 @@ public final class TriggerOrderCommands {
             if (result != null) {
                 // 账户返回的子单订单回执，先收集冻结预留再排入撮合
                 var receipt = (com.surprising.aeron.service.order.state.OrderRuntime) result;
-                owner.runtimeState().collectControlReservation(receipt, childSequence);
+                owner.runtimeState().pendingReservations().collectControlReservation(receipt, childSequence);
                 owner.resultBuilder.markUserChanged(trigger.userId());
                 owner.resultBuilder.markOrderChanged(receipt.orderId());
                 owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, receipt);

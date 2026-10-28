@@ -362,7 +362,7 @@ class RiskBatchBudgetTest {
                 assertThat(apply(restored, obsolete).data()).isEqualTo(obsoleteResult.data());
                 try (/* 从相同快照开始的已提交交易重放器，用它核对旧动作执行后的业务哈希。 */ var replay = new CommittedTradeReplay(line, beforeObsolete)) {
                     replay.apply(CoreMessageCodec.encode(obsolete), TIME, obsolete.header().sourceSequence());
-                    assertThat(replay.businessHash()).isEqualTo(state.snapshotBusinessStateHash());
+                    assertThat(replay.businessHash()).isEqualTo(state.stateHash());
                 }
                 assertThat(state.tradingState().businessStateHash()).isEqualTo(restored.tradingState().businessStateHash());
                 assertThat(liquidationFunds(state)).isEqualTo(funds);

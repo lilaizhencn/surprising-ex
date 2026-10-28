@@ -7,7 +7,7 @@ import java.lang.invoke.VarHandle;
  * 跨线程就绪提示，每一位使用单独间隔的原始数组槽，减少不同 Lane 写相邻位置。
  * 读写使用 acquire/release，采样与清除不是原子的整体操作；提示可以合并，队列和事件完成标记才是实际完成依据。
  */
-public class PaddedReadyMask {
+public final class PaddedReadyMask {
     /** 相邻提示槽间隔十六个 long，使不同位尽量不写同一缓存行。 */
     private static final int STRIDE = 16;
     /** long 数组元素访问器，提示读取使用 acquire、写入使用 release。 */

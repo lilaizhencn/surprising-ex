@@ -185,14 +185,12 @@ public final class CoreQueryService {
         @Override public CoreResponse apply(AccountLaneState lane) {
             // 按固定市场和规则输入解析出的预检订单参数。
             var order = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolve(context, userId, command);
-            // 当前用户的客户端订单身份、币对、持仓键和结算状态，交给账户预留检查。
-            var identity = new com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.AdmissionIdentity(
-                    owner.identities().findClientKeyValue(userId, command.clientOrderId()), context.symbolId(),
-                    owner.identities().findPositionKeyValueInLane(lane, userId, context.instrument(), command.positionSide()),
-                    context.settlementStatus());
             // 本次只读预检算出的所需冻结金额，只编码返回而不真正冻结。
             long reserved = com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.requiredReservationForQuery(
-                    owner.runtimeState(), lane, userId, order, openInterest, identity);
+                    owner.runtimeState(), lane, userId, order, openInterest, context.symbolId(),
+                    owner.identities().findClientKeyValue(userId, command.clientOrderId()),
+                    owner.identities().findPositionKeyValueInLane(lane, userId, context.instrument(), command.positionSide()),
+                    context.settlementStatus());
             return new CoreResponse(ResponseStatus.OK, commandCount, com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(
                     new com.surprising.aeron.protocol.CoreOrderPreflightView(order.reservationAsset(), reserved)));
         }

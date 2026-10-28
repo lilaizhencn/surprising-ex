@@ -19,7 +19,7 @@ class ReadyLaneNotificationTest {
         // 每条 Lane 需要逐代确认的次数，固定一万
         int generations = 10_000;
         // 真实64位提示数组，采样和清除不代替业务结果
-        var ready = new TradingAccountRuntime.PaddedReadyMask(64);
+        var ready = new PaddedReadyMask(64);
         // 每条 Lane 已确认的代数，生产线程等到确认再发布下一代
         var acknowledged = new AtomicIntegerArray(64);
         // 让各生产线程开始竞争发布的统一门闩

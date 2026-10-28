@@ -95,7 +95,7 @@ class UserRevisionReuseTest {
     void coalescedSettlementKeepsAuthorityAndEarlierCommandReceipt(ProductLine product) {
         // 当前测试线程或控制回调受控持有的账户 Lane。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 当前场景的 Lane 权威用户，同一 Lane 的修订更新可原位进行。
         var authority = new UserRuntime(product, 7, 3, CorePositionMode.ONE_WAY).laneValue();
         AccountLaneTestAccess.users(lane).put(7, authority);
@@ -147,7 +147,7 @@ class UserRevisionReuseTest {
     @Test void failedRevisionTraversalReleasesItsReceiptBeforeTheNextCommand() {
         // 当前测试线程或控制回调受控持有的账户 Lane。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 修订已达到 long 上限的 Lane 用户权威值。
         var overflowing = new UserRuntime(ProductLine.LINEAR_PERPETUAL, 7,
                 Long.MAX_VALUE, CorePositionMode.ONE_WAY).laneValue();

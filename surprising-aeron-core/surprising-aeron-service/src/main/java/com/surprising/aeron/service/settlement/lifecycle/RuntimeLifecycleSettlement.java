@@ -135,7 +135,8 @@ public final class RuntimeLifecycleSettlement {
     }
 
     /** 按币对的全局活动订单索引选页，校验每条订单路由并返回后续游标。 */
-    static OrderPage selectOrders(ActiveOrderIndex index, String instrumentId, long startCursorOrderId, int limit) {
+    static com.surprising.aeron.service.core.TradingCoreRuntime.LifecycleOrderChunk selectOrders(
+            ActiveOrderIndex index, String instrumentId, long startCursorOrderId, int limit) {
         // 索引选出的当前页及续页位置。
         var page = index.page(0, instrumentId, startCursorOrderId, limit);
         // 本页由活动订单路由转换出的撤单记录。
@@ -148,7 +149,8 @@ public final class RuntimeLifecycleSettlement {
             }
             selected.add(new CancellationOrder(orderId, order.userId(), order.instrumentId()));
         }
-        return new OrderPage(selected, page.nextCursorOrderId(), page.nextCursorOrderId() == 0);
+        return new com.surprising.aeron.service.core.TradingCoreRuntime.LifecycleOrderChunk(
+                selected, page.nextCursorOrderId());
     }
 
     /**
@@ -223,15 +225,5 @@ public final class RuntimeLifecycleSettlement {
                 || progress.nextCursorUserId() != command.cursorUserId())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
         }
-    }
-
-    /**
-     * 活动订单页的路由与后续游标，不代表这些订单已经从 Matcher 撤销。
-     * @param orders 本页选出的活动订单路由列表
-     * @param nextCursorOrderId 下一订单页游标，零表示已读完
-     * @param complete 本次分页是否已经读完后续记录
-     */
-    record OrderPage(List<CancellationOrder> orders,
-                     long nextCursorOrderId, boolean complete) {
     }
 }

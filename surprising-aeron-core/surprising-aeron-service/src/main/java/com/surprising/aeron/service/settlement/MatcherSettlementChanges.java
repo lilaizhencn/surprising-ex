@@ -61,7 +61,7 @@ public final class MatcherSettlementChanges {
     /** 按 Lane 保存的实体与终态变化列，完成交接前由所属 Lane 独占写入。 */
     final LaneCommitDelta[] laneDeltas;
     /** 按 Lane 保存的余额前后值，供回滚及资金差额核对。 */
-    final LaneBalancePatches[] balancePatches;
+    public final LaneBalancePatches[] balancePatches;
     /** 由各 Lane 余额前后值准备的资金增量，交接后供账本或未激活路径消费。 */
     final RuntimeFundsAccumulator[] laneFundsDeltas;
     /** 本代每 Lane 按用户聚合的修订次数，收尾应用成功后清空。 */

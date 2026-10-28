@@ -214,7 +214,7 @@ public final class CoreMatchingFlow {
                     && liquidation.status() != CoreLiquidationState.Status.ORDERED)) continue;
             // 当前用户/品种在剩余预算内的活动订单页。
             TradingCoreRuntime.LifecycleOrderChunk chunk = lifecycleOrders(
-                    liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                    liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
                     action.cursorOrderId(), remaining);
             orders.addAll(chunk.orders());
             remaining -= chunk.orders().size();
@@ -223,18 +223,10 @@ public final class CoreMatchingFlow {
     }
 
     /**
-     * 提交命令槽到撮合流程。
-     * @param pending 本池仍在生命周期内的命令槽
-     */
-    void submitMatching(CommandSlot pending) {
-        submitMatchingInCommandScope(pending);
-    }
-
-    /**
      * 等待本分片提交头及替换/强平校验，准备 Lane 结果目标；批量交既有批次执行器，多分片强平撤单必要时交跨分片协调。普通命令构造固定任务并可加准入等待门闩，再提交 Matcher；未就绪时直接返回，不在 Owner 阻塞等 Lane。
      * @param pending 本池仍在生命周期内的命令槽
      */
-    private void submitMatchingInCommandScope(CommandSlot pending) {
+    void submitMatching(CommandSlot pending) {
         // 批次多项共用 Core 序号；有序提交已拥有后续项游标时，不再重进初次分片准入门闩。
         // 批次已开始提交且后续项继续使用同 Core 序号，允许绕过初次分片提交门闩。
         boolean batchContinuation = pending.orderBatch != null && pending.orderBatch.commitStarted()
@@ -554,7 +546,7 @@ public final class CoreMatchingFlow {
                 // 账户校验收据确认的当前强平计划状态。
                 var liquidation = pending.liquidationCheck().liquidation(0);
                 orders = liquidation == null || !pending.liquidationCheck().executable(0) ? List.of()
-                        : lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                        : lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
                                 command.cursorOrderId(), command.maxOrders()).orders();
             }
             case LIQUIDATION_BATCH -> orders = batchCancellationOrders(pending);

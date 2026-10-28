@@ -17,7 +17,7 @@ class AccountLanePendingReservationTest {
     void completedUsersLeaveNoEntriesAndAssetsReuseTheirTables() throws Exception {
         // 当前线程持有的独立测试 Lane，直接维护预留权威表及待完成索引。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 读取分资产待完成金额表的反射字段。
         var field = AccountLaneState.class.getDeclaredField("pendingReservedUnitsByAsset");
         field.setAccessible(true);
@@ -54,7 +54,7 @@ class AccountLanePendingReservationTest {
     void assetMigrationOverflowAndReverseReplacementPreserveOtherReservations() {
         // 当前线程持有的独立测试 Lane，直接维护预留权威表及待完成索引。
         var lane = new AccountLaneState(0, 256);
-        lane.bindOwner();
+        lane.assertOwner();
         // 用户七在资产零上待完成的四十单位预留。
         var previous = CoreStateTestFixtures.reservation(1, 7, 0, 40);
         // 同用户资产一上的其他大额预留，迁移时必须保留其金额。

@@ -61,7 +61,7 @@ public final class MatcherSettlementEvent implements
     private long commitClusterPosition;
     /**  当前代所属运行时，事件归还前解除引用。 借用事件关联的所属交易运行时，回收后引用为空。 */
     @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
+    @Getter
     private TradingAccountRuntime runtime;
     /**  当前代解析资产、币对及持仓身份的运行时字典。 借用当前代运行时身份字典，事件回收后引用为空。 */
     @Accessors(fluent = true, chain = false)
@@ -107,7 +107,7 @@ public final class MatcherSettlementEvent implements
     private boolean dispatched;
     /**  单 Matcher 发布方已登记投递的路由 Lane 位图，不是完成位图。 返回发布方已登记投递的 Lane 位图，不能代替账户完成位。 */
     @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
+    @Getter
     private long queuedLaneMask;
     /** 初始只含一个 Lane 时允许随 maker 成交扩展路由的标记。 */
     private boolean expandLaneRoute;
@@ -119,13 +119,13 @@ public final class MatcherSettlementEvent implements
     private Throwable directFailure;
     /**  必须消费本事件票据的 Lane 位图，固定多 Lane 预约可含本代无业务变化的 Lane。 返回必须消费本事件票据的路由 Lane 位图，可能包含本代已无业务变化的预约 Lane。 */
     @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
+    @Getter
     private long routedLaneMask;
     /** 本代命令 UUID，供结果证据校验。 */
     private java.util.UUID directCommandId;
     /**  本代命令固定的 Matcher 分片。 返回本代命令固定的 Matcher 分片编号。 */
     @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
+    @Getter
     private int directShard;
     /** Owner 与已接受准入回执合并后的授权撤单列表，不等于成功列表。 */
     private java.util.List<Long> authorizedCancellations = java.util.List.of();
@@ -172,30 +172,30 @@ public final class MatcherSettlementEvent implements
     /**
      * 本事件独占复用的批量计划、准入引用、原生结果槽及币对资产列，容量与本代有效前缀分开管理。
      */
-    static final class BatchStorage {
+    public static final class BatchStorage {
         /** Owner 准备阶段的币对编号到首个元数据槽映射，负一表示没有缓存，回收时清空。 */
-        final org.agrona.collections.Int2IntHashMap metadataSlots =
+        public final org.agrona.collections.Int2IntHashMap metadataSlots =
                 new org.agrona.collections.Int2IntHashMap(8, 0.65f, -1, false);
         /** 按容量预创建并由事件独占复用的结算计划列，只读取本代有效前缀。 */
-        final MatcherSettlementPlan[] plans;
+        public final MatcherSettlementPlan[] plans;
         /** 每有效项对应的规范币对引用，撤单等路径可以不填写。 */
-        final CoreInstrument[] instruments;
+        public final CoreInstrument[] instruments;
         /** 各有效项持有的准入订单值或命令槽引用，普通不可变准入路径可以为空。 */
-        final OrderRuntime[] admittedOrders;
+        public final OrderRuntime[] admittedOrders;
         /** 直接单笔或批量撤单目标的原语编号列。 */
-        final long[] cancellationOrderIds;
+        public final long[] cancellationOrderIds;
         /** 各项按需创建的原生结果命令槽，Matcher 在结果发布前填写，回收时清空内容但保留对象。 */
-        final exchange.core2.core.common.MatcherResult[] nativeResults;
+        public final exchange.core2.core.common.MatcherResult[] nativeResults;
         /** 本事件独占复用的替换原单撤单结果槽。 */
-        exchange.core2.core.common.MatcherResult replacementCancellation;
+        public exchange.core2.core.common.MatcherResult replacementCancellation;
         /** 本事件独占复用的新单命令槽，仍须遵守事件代次租约。 */
-        OrderRuntime replacementOrder;
+        public OrderRuntime replacementOrder;
         /**
          * baseAssetIds：各有效项预解析的基础资产编号列，不依赖容量尾部旧值。
          * quoteAssetIds：各有效项预解析的计价资产编号列。
          * settleAssetIds：各有效项预解析的结算资产编号列。
          */
-        final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
+        public final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
         /** 本次准备使用的存储有效前缀，清理按此前缀释放引用。 */
         private int activeSize;
         /**
@@ -264,7 +264,7 @@ public final class MatcherSettlementEvent implements
      * 事件尚未激活时准备批量存储，容量不足才重建；设置本次有效前缀，调用方仍须确保没有旧代消费者。
      * @param size 本次批量存储需要的容量或有效前缀数量
      */
-    BatchStorage batchStorage(int size) {
+    public BatchStorage batchStorage(int size) {
         if (batchPlanCount != 0) throw new IllegalStateException("settlement event is still active");
         if (size <= 0) throw new IllegalArgumentException("settlement batch must not be empty");
         if (batchStorage == null || batchStorage.plans.length < size)
@@ -287,7 +287,7 @@ public final class MatcherSettlementEvent implements
      * @param cancellations 准入已授权的前置撤单编号，只读保留到本代事件结束
      * @param target 在事件租约内接收最终订单值的命令目标，可为空
      */
-    void prepareDirect(long sequence, long laneMask, long timestamp, long position,
+    public void prepareDirect(long sequence, long laneMask, long timestamp, long position,
                        java.util.UUID commandId, int shard, TradingAccountRuntime runtime,
                        RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
                        LaneOrderResultTarget target) {
@@ -310,7 +310,7 @@ public final class MatcherSettlementEvent implements
      * @param cancellations 准入已授权的前置撤单编号，只读保留到本代事件结束
      * @param target 在事件租约内接收最终订单值的命令目标，可为空
      */
-    void prepareDirect(long coreSequence, long commitSequence, long laneMask, long timestamp, long position,
+    public void prepareDirect(long coreSequence, long commitSequence, long laneMask, long timestamp, long position,
                        java.util.UUID commandId, int shard, TradingAccountRuntime runtime,
                        RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
                        LaneOrderResultTarget target) {
@@ -347,7 +347,7 @@ public final class MatcherSettlementEvent implements
      * Owner 在预约 Matcher 发布前选定撤单业务及用户，后续 Lane 只应用 Matcher 接受的撤单。
      * @param userId 当前撤单、普通准入或改单所属用户编号
      */
-    void cancellation(long userId) {
+    public void cancellation(long userId) {
         if (batchPlanCount == 0 || dispatched || directPublished || userId <= 0)
             throw new IllegalStateException("invalid direct cancellation preparation");
         cancellation = true;
@@ -373,7 +373,7 @@ public final class MatcherSettlementEvent implements
      * @param admission 已经校验的改单输入及原单身份
      * @param assetId 改单新预留所用资产编号
      */
-    void replacement(com.surprising.aeron.service.order.command.ResolvedMatchingAdmission admission, int assetId) {
+    public void replacement(com.surprising.aeron.service.order.command.ResolvedMatchingAdmission admission, int assetId) {
         if (dispatched || directPublished || batchPlanCount != 1 || admission == null)
             throw new IllegalStateException("invalid direct replacement preparation");
         replacement = admission;
@@ -400,7 +400,7 @@ public final class MatcherSettlementEvent implements
      * 单 Matcher 发布方为实际路由中的 Lane 登记一次投递，拒绝越界、未预约、非路由和重复投递。
      * @param laneId 当前操作的账户 Lane 编号
      */
-    void markLaneQueued(int laneId) {
+    public void markLaneQueued(int laneId) {
         if (batchPlanCount == 0 || !dispatched || laneId < 0 || laneId >= Long.SIZE)
             throw new IllegalStateException("invalid direct settlement Lane queue");
         // 当前账户 Lane 在位图中的单个位。
@@ -440,7 +440,7 @@ public final class MatcherSettlementEvent implements
      * @param order 普通下单已经解析的不可变准入订单输入
      * @param userId 当前撤单、普通准入或改单所属用户编号
      */
-    void admissionOrder(ResolvedPlaceOrder order, long userId) {
+    public void admissionOrder(ResolvedPlaceOrder order, long userId) {
         if (batchPlanCount == 0 || !admissionRequired || order == null || userId <= 0) {
             throw new IllegalStateException("invalid place admission order");
         }
@@ -820,7 +820,7 @@ public final class MatcherSettlementEvent implements
         matcherPublicationDeferred = true;
         releaseMatcherCompletionBeforeSignal();
         directPublished = true;
-        completionRuntime.settlements().publishMatcherOwned(this);
+        completionRuntime.publishMatcherOwned(this);
         matcherPublicationDeferred = false;
     }
 
@@ -956,7 +956,7 @@ public final class MatcherSettlementEvent implements
      * 校验普通下单准入 Lane，并为活动事件设置一次需要准入回执的边界。
      * @param laneId 当前操作的账户 Lane 编号
      */
-    void admissionRoute(int laneId) {
+    public void admissionRoute(int laneId) {
         if (batchPlanCount == 0 || admissionRequired || laneId < 0) {
             throw new IllegalStateException("invalid place admission route");
         }
@@ -976,7 +976,7 @@ public final class MatcherSettlementEvent implements
     /**
      * 仅在事件完成且 changes 已交出后清理命令、准入、结果及槽引用，保留批量数组和财务槽容量；下一代 prepareDirect 再重置完成位及 Owner 缓存，不能把此方法当等待在途消费者。
      */
-    void clear() {
+    public void clear() {
         if (!complete() || changes != null) {
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
@@ -1343,7 +1343,7 @@ public final class MatcherSettlementEvent implements
     /**
      * 借用本代保留的结算变化缓冲，已交出或未准备时失败。
      */
-    MatcherSettlementChanges changes() {
+    public MatcherSettlementChanges changes() {
         if (changes == null) throw new IllegalStateException("matcher settlement changes are unavailable");
         return changes;
     }
@@ -1351,7 +1351,7 @@ public final class MatcherSettlementEvent implements
     /**
      * 检查当前事件是否仍持有变化缓冲。
      */
-    boolean hasChanges() { return changes != null; }
+    public boolean hasChanges() { return changes != null; }
     /**
      * 把变化缓冲引用交给收集方并从事件解除，不等待消费者；调用方须先满足既有完成边界。
      */

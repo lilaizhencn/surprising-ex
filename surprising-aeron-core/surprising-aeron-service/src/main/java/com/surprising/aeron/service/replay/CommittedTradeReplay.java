@@ -635,7 +635,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
      * 读取本副本用于快照配对的业务哈希。
      */
     public long businessHash() {
-        return state.snapshotBusinessStateHash();
+        return state.stateHash();
     }
 
     /**

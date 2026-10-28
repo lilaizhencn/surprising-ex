@@ -217,7 +217,7 @@ sequenceDiagram
 | 2 | [`CoreOrderDecisionResolver`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/CoreOrderDecisionResolver.java)、[`RuntimeOrderAdmission`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java)、`PlaceAdmissionEvent` | 币对/订单规则、价格保护、费率、余额、杠杆/保证金、平仓容量、客户端订单号与预留；`RuntimeOrderStateTransitions` 创建订单/冻结 |
 | 3 | [`CoreMatchingFlow.submitMatching`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java)、`CommandSlot`、`PendingMatchingRing` | 固定路由、准入门闩、池化对象生命周期；`MatchingPipelineProgress` 推进可继续命令 |
 | 3 | [`MatcherCommandPipeline`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.java)、[`DeterministicExchangeCoreAdapter`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.java) | 订单簿操作、撮合结果与分片证据 |
-| 4 | [`MatcherSettlementDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementDispatcher.java)、`MatcherSettlementEvent`、`RuntimeSpotMatchProcessor` / `RuntimeDerivativeMatchProcessor` | 同一事实直接交给对应账户所有者；现货扣增、衍生品持仓/盈亏、手续费和释放预留 |
+| 4 | [`TradingAccountRuntime`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java)、[`MatcherSettlementEvent`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementEvent.java)、`RuntimeSpotMatchProcessor` / `RuntimeDerivativeMatchProcessor` | 同一事实直接交给对应账户所有者；现货扣增、衍生品持仓/盈亏、手续费和释放预留 |
 | 5 | [`OrderedCommitCoordinator`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java)、`CommitPublication` | 证据连续性、结算完成、有序终态和水位；不重复执行账户资金计算 |
 | 6 | `CommandResultLedger`、`TradingRealtimeBoundary`、`ClusterServiceEgress` | 幂等终态、实时 outbox；回调线程发送响应 |
 
@@ -317,9 +317,9 @@ flowchart TD
     J --> K[按业务需要后续提交保险 / EXECUTE_ADL 命令]
 ```
 
-执行入口为 `MatchingCommandAdmission` / `CoreMatchingFlow`；跨分片撤单经 `CrossShardCancellationCoordinator` 保持既有顺序。账户入口为 [`LiquidationCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/command/LiquidationCommands.java) → [`RuntimeDerivativeLiquidationProcessor`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java)；确认经 `executeResolveLiquidation` → [`RuntimeLiquidationResolution`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java)。
+执行入口为 `MatchingCommandAdmission` / `CoreMatchingFlow`；跨分片撤单经 `CrossShardCancellationCoordinator` 保持既有顺序。账户入口为 [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [`RuntimeDerivativeLiquidationProcessor`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java)；确认经 `executeResolveLiquidation` → [`RuntimeLiquidationResolution`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java)。
 
-保险变更经 `InsuranceFundCommands` / `RuntimeInsuranceFundStateTransitions`；ADL 经 [`AdlCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/command/AdlCommands.java) / [`RuntimeAdlExecution`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java)。它们是独立复制命令，不是每次强平无条件自动执行的步骤。过期标记价、游标冲突和已结束计划按既有规则拒绝或跳过，不能重复扣减持仓。
+保险变更经 `InsuranceFundCommands` / `RuntimeInsuranceFundStateTransitions`；ADL 经 [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) / [`RuntimeAdlExecution`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java)。它们是独立复制命令，不是每次强平无条件自动执行的步骤。过期标记价、游标冲突和已结束计划按既有规则拒绝或跳过，不能重复扣减持仓。
 
 强平记录的 `COMPLETED` 表示本笔已确认亏空归零，部分 ADL 后盈利对手可保留持仓。`clearing PnL` 是已实现结算的现金对手项，不表示合约净头寸。
 
@@ -343,17 +343,17 @@ flowchart TD
 
 ### 余额、划转与账户设置
 
-`ADJUST_BALANCE` / `TRANSFER_OUT` / `TRANSFER_IN` / `COMPLETE_TRANSFER` → [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `BalanceTransferCommands` → `AccountControlTask` / `TransferRuntime` → 所属 Lane 与 System Ledger → 终态提交。不同产品账户通过显式划转连接，保留转出、转入、完成的幂等与恢复状态。
+`ADJUST_BALANCE` / `TRANSFER_OUT` / `TRANSFER_IN` / `COMPLETE_TRANSFER` → [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `AccountControlTask` / `TransferRuntime` → 所属 Lane 与 System Ledger → 终态提交。不同产品账户通过显式划转连接，保留转出、转入、完成的幂等与恢复状态。
 
 ```mermaid
 flowchart LR
-    A[1. 余额或划转复制命令] --> B[2. BalanceTransferCommands: 解码与业务校验]
+    A[1. 余额或划转复制命令] --> B[2. DirectCommandDispatcher: 解码与业务校验]
     B --> C[3. 所属账户 Lane 修改余额 / 划转状态]
     C --> D[4. System Ledger 资金变化与完成回执]
     D --> E[5. DirectCommandSlot 续接 → 终态提交 / 回包]
 ```
 
-杠杆、仓位模式、逐仓保证金、费率、币对维护分别走 `LeverageCommands`、`PositionCommands`、`FeePolicyCommands`、`InstrumentConfigurationCommands`。`DirectCommandSlot` 保留控制命令的异步续接，账户与账本工作完成后 Owner 才发布终态。
+杠杆、仓位模式、逐仓保证金、费率直接由 `DirectCommandDispatcher` 分发，币对维护走 `InstrumentConfigurationCommands`。`DirectCommandSlot` 保留控制命令的异步续接，账户与账本工作完成后 Owner 才发布终态。
 
 ## 实时、查询与完成边界
 

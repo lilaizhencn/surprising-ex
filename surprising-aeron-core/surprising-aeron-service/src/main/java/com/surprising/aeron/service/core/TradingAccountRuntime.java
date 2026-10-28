@@ -72,7 +72,6 @@ import com.surprising.aeron.service.risk.RiskScanRuntime;
 import com.surprising.aeron.service.risk.RiskSnapshotRuntime;
 import com.surprising.aeron.service.settlement.FundsPosting;
 import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
-import com.surprising.aeron.service.settlement.MatcherSettlementDispatcher;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
 import com.surprising.aeron.service.settlement.MatcherSettlementPlan;
 import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
@@ -110,17 +109,6 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 public final class TradingAccountRuntime implements AutoCloseable {
     /** Owner 冷查询或控制路径复用的杠杆查找探针，正式映射仍保存 CoreLeverageKey。 */
     private final LeverageLookup ownerLeverageLookup = new LeverageLookup();
-
-    /**
-     * 查杠杆时复用的可变探针，继承自独立定义的 {@link com.surprising.aeron.service.core.LeverageLookup} 保持完全向后兼容。
-     */
-    public static final class LeverageLookup extends com.surprising.aeron.service.core.LeverageLookup {
-    }
-
-    /**  撮合后结算的派发与完成收集入口，沿用各产品现有结算规则。 借出唯一撮合结算派发与收集入口。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final MatcherSettlementDispatcher settlements = new MatcherSettlementDispatcher(this);
 
     /**  Owner 维护的在途订单预留序号与用户计数，Lane 完成后再释放。 借出唯一待完成预留跟踪器，不建立第二套计数。 */
     @Accessors(fluent = true, chain = false)
@@ -175,14 +163,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private static final int EVENT_POOL_PREALLOCATE_COUNT = 512;
     /** 账户提交事件复用池，消费结束并发布清理后再归还；池空时允许新建。 */
     final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
-
-    /**
-     * 跨线程就绪提示，继承自独立定义的 {@link com.surprising.aeron.service.core.PaddedReadyMask} 保持完全向后兼容。
-     */
-    public static final class PaddedReadyMask extends com.surprising.aeron.service.core.PaddedReadyMask {
-        public PaddedReadyMask() { super(); }
-        public PaddedReadyMask(int bitCount) { super(bitCount); }
-    }
 
     /** 单笔下单准入事件池，输入和消费者都结束使用后才能归还。 */
     final java.util.ArrayDeque<PlaceAdmissionEvent> placeAdmissionEventPool =
@@ -642,10 +622,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 向原控制槽或资金校验槽请求逆向收尾。
+     * 向原控制槽或资金校验状态请求逆向收尾。
      */
     private boolean rollbackLedgerControl() {
-        if (ledgerControl == null) return controlFundsValidation.requestRollback();
+        if (ledgerControl == null) {
+            if (controlFundsValidated) {
+                rollbackLedgerPositions(controlPositionUndo);
+                controlFundsValidated = false;
+            }
+            return true;
+        }
         return ledgerControl.requestRollback();
     }
 
@@ -1484,7 +1470,8 @@ public final class TradingAccountRuntime implements AutoCloseable {
             throw new IllegalArgumentException("invalid account metadata commit");
         clearLaneUserScratch();
         addLaneUsers(userIds);
-        return dispatchLaneMutationFromScratch(coreSequence, orderIds, triggerIds, timestamp, position);
+        return dispatchLaneMutationFromScratch(coreSequence, orderIds, triggerIds, timestamp, position,
+                null, null, -1);
     }
 
     /**
@@ -1594,21 +1581,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      */
     LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence) {
-        return dispatchLaneMutationFromScratch(coreSequence, null, null, 0, 0);
-    }
-
-    /**
-     * 为普通元数据提交补上空的批次响应目标，进入统一派发。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param orderIds 本次需要在同一 Lane 提交任务中盖章的订单身份
-     * @param triggerIds 可空的待取消触发单身份集合
-     * @param timestamp 原复制日志业务时间，不用当前机器时间替代
-     * @param position 原复制日志位置，随同提交元数据交给账户任务
-     */
-    private LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence,
-            Iterable<Long> orderIds, Iterable<Long> triggerIds, long timestamp, long position) {
-        return dispatchLaneMutationFromScratch(coreSequence, orderIds, triggerIds, timestamp, position,
-                null, null, -1);
+        return dispatchLaneMutationFromScratch(coreSequence, null, null, 0, 0, null, null, -1);
     }
 
     /**
@@ -2237,7 +2210,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
      */
     public RuntimeTreasuryDelta collectMatcherSettlement(MatcherSettlementEvent event) {
-        return collectMatcherSettlement(event, null, null);
+        return collectMatcherSettlement(event, null, null, null, null);
     }
 
     /**
@@ -2278,7 +2251,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 该计划 Core 序号是否仍有 Owner 侧待预留索引，需要按原计划移除
         boolean ownerPending = pendingReservations.containsSequence(event.plan().coreSequence());
         for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < event.planCount(); index++) {
-            if (ownerPending) unindexMatcherPendingReservations(event.plan(index));
+            if (ownerPending) pendingReservations.unindexMatcherPendingReservations(event.plan(index));
             // Lane 不修改全局版本；全部结算成功后由 owner 合并一次触发终态变更。
             if (event.plan(index).completedTrigger() != null) revision = Math.incrementExact(revision);
         }
@@ -2373,25 +2346,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             long commitTimestamp, long commitClusterPosition,
             RuntimeIdentityRegistry identities) {
         return dispatchCancelBatch(coreSequence, userId, orderIds, commitTimestamp,
-                commitClusterPosition, identities, false);
-    }
-
-    /**
-     * 为批量撤单补上空的最终订单结果槽，进入统一派发。
-     * @param coreSequence 原命令或当前收集结果关联的 Core 序号
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param orderIds 同一用户本次批量撤销的非空订单号数组
-     * @param commitTimestamp 原提交业务时间，随账户变化保留
-     * @param commitClusterPosition 原提交复制日志位置，随账户变化保留
-     * @param identities 与本产品线配套的身份注册表
-     * @param commitLane 是否在该批撤单任务中推进账户 Lane 提交水位
-     */
-    public LaneCancelEvent dispatchCancelBatch(
-            long coreSequence, long userId, long[] orderIds,
-            long commitTimestamp, long commitClusterPosition,
-            RuntimeIdentityRegistry identities, boolean commitLane) {
-        return dispatchCancelBatch(coreSequence, userId, orderIds, commitTimestamp, commitClusterPosition,
-                identities, commitLane, null);
+                commitClusterPosition, identities, false, null);
     }
 
     /**
@@ -2618,14 +2573,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             if (lane.matcherSettlementChanges() == null) replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
             else updateOrderStatusInLane(lane, order.orderId(), order.status(), order.revision(), timestamp, clusterPosition);
         }
-    }
-
-    /**
-     * 让待预留跟踪器移除本计划对应的 Owner 侧索引，账户内预留完成由所属 Lane 负责。
-     * @param plan 本次撮合结算计划，订单身份与完成序号沿用原计划
-     */
-    void unindexMatcherPendingReservations(MatcherSettlementPlan plan) {
-        pendingReservations.unindexMatcherPendingReservations(plan);
     }
 
     /**
@@ -4550,29 +4497,19 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 单页划转路由，仅携带划转 ID、所属用户及账户掩码，不包含账户业务正文。record 直接保存传入数组，不自行复制、校验或限制页大小。
-     * @param ids 本页划转 ID 原始数组，record 直接借用
-     * @param users 与划转 ID 按相同下标对应的所属用户原始数组
-     * @param laneMask 本页涉及的账户 Lane 位集合，构造不额外校验
-     */
-    public record PendingTransferRoutes(long[] ids, long[] users, long laneMask) { }
-
-    /**
      * 向财库取得有限页的划转 ID、用户 ID 和 Lane 掩码，仅交接路由，不复制账户划转正文。
      * @param limit 本次向财库请求的最大分页条数，具体范围由财库入口检查
      */
-    public PendingTransferRoutes pendingTransferRoutes(int limit) {
+    public TreasuryRuntime.PendingTransferRoutes pendingTransferRoutes(int limit) {
         assertOwner();
-        // 财库给出的有限页路由，数组内只含身份和所属用户
-        TreasuryRuntime.PendingTransferRoutes routes = treasury.pendingTransferRoutes(limit, topology::accountLaneMask);
-        return new PendingTransferRoutes(routes.ids(), routes.users(), routes.laneMask());
+        return treasury.pendingTransferRoutes(limit, topology::accountLaneMask);
     }
 
     /**
      * 用该页最后一个划转 ID 推进财库分页边界，空页使用零。
      * @param page 已经读取的划转路由页，完成时使用最后一个 ID 推进页边界
      */
-    public void completePendingTransferPage(PendingTransferRoutes page) {
+    public void completePendingTransferPage(TreasuryRuntime.PendingTransferRoutes page) {
         assertOwner();
         treasury.completePendingTransferPage(page.ids().length == 0 ? 0 : page.ids()[page.ids().length - 1]);
     }
@@ -4585,7 +4522,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         if (accountLanesStarted()) throw new IllegalStateException("active transfer queries must run on Account Lanes");
         // 本次冷读取使用的路由页，读取结束后推进其最后 ID 边界
-        PendingTransferRoutes page = pendingTransferRoutes(limit);
+        TreasuryRuntime.PendingTransferRoutes page = pendingTransferRoutes(limit);
         // 本页逐项读取出的原划转引用列表，随后生成固定列表
         var values = new java.util.ArrayList<TransferFundsCommand>(page.ids().length);
         for (long /* 本轮正在恢复、读取或捕获的业务实体身份 */ id : page.ids()) values.add(pendingTransfer(id));
@@ -4935,7 +4872,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             // 该用户客户号到订单的原始映射，零表示没有对应订单
             Long2LongHashMap userClientOrders = lane.userClientOrders(userId);
             if (userClientOrders != null) userClientOrders.forEachLong((/* 当前客户号内部键，与订单反向索引一起维护 */ clientKey, /* 当前客户号、订单或预留对应的订单实体 ID */ orderId) -> {
-                removeClientOrderReverse(lane, orderId, clientKey);
+                lane.clientKeysByOrderId().remove(orderId, clientKey);
             });
             lane.removeUserValue(userId);
             lane.removeUser(userId);
@@ -6365,8 +6302,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
         return Math.subtractExact(revision, pendingReservations.totalPendingReservations());
     }
 
-    /** 无专用财务控制槽时复用的账本资金及持仓索引校验条目。 */
-    private final ControlFundsValidation controlFundsValidation = new ControlFundsValidation(this);
+    /** 无专用财务控制槽时执行校验汇总账户余额差额的复用累加器，校验通过后清空。 */
+    private final RuntimeFundsAccumulator controlValidationFunds = new RuntimeFundsAccumulator();
+    /** 应用控制持仓索引时保存的撤销信息，回滚则恢复，提交则清除。 */
+    private final RuntimeFactIndexes.PositionUndo controlPositionUndo = new RuntimeFactIndexes.PositionUndo();
+    /** 无专用财务控制槽时是否已完成本轮资金及持仓索引校验。 */
+    private boolean controlFundsValidated;
 
     /**
      * 活动财务控制已有专用槽时沿用其校验；否则仅在账户余额或持仓有变化时推进独立资金校验续步。返回通过表示已验证，财务范围关闭仍需后续请求。
@@ -6380,10 +6321,17 @@ public final class TradingAccountRuntime implements AutoCloseable {
         for (/* 正在汇总资金差额的余额补丁 Lane 下标 */ int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
             // 该 Lane 已完成的账户余额前后补丁，财务收尾前保持有效
             LaneBalancePatches patches = accountRollback.balancePatch(laneIndex);
-accountFundsChanged |= patches.size() != 0;
+            accountFundsChanged |= patches.size() != 0;
         }
         if (!accountFundsChanged && changedPositions.isEmpty()) return true;
-        return controlFundsValidation.poll(externalAdjustment);
+        if (!controlFundsValidated) {
+            appendControlAccountFunds(controlValidationFunds);
+            controlValidationFunds.requireConserved(externalAdjustment);
+            controlValidationFunds.clear();
+            applyLedgerControlPositions(controlPositionUndo);
+            controlFundsValidated = true;
+        }
+        return true;
     }
 
     /**
@@ -6394,16 +6342,8 @@ accountFundsChanged |= patches.size() != 0;
         for (/* 正在汇总资金差额的余额补丁 Lane 下标 */ int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
             // 该 Lane 已完成的账户余额前后补丁，财务收尾前保持有效
             LaneBalancePatches patches = accountRollback.balancePatch(laneIndex);
-appendBalanceFundsDelta(patches, target);
+            appendBalanceFundsDelta(patches, target);
         }
-    }
-
-    /**
-     * 仅冷阶段追加各账户余额及财库资金差额；活动账本存在时直接返回，避免重复维护同一资金账。
-     * @param accumulator 资金差额接收器，是否先清空由入口决定
-     */
-    public void appendFundsDelta(RuntimeFundsAccumulator accumulator) {
-        assertOwner();
     }
 
     /**
@@ -6484,7 +6424,10 @@ appendBalanceFundsDelta(patches, target);
             treasury.clearChangedKeys();
         }
         accountRollback.publishAndClearBalances();
-        controlFundsValidation.clear();
+        if (controlFundsValidated) {
+            controlPositionUndo.clear();
+            controlFundsValidated = false;
+        }
     }
 
     /**
@@ -7004,7 +6947,7 @@ appendBalanceFundsDelta(patches, target);
         boolean hadPrevious = previousOrderId != 0;
         userClientOrders.put(clientKey, orderId);
         if (hadPrevious && previousOrderId != orderId) {
-            removeClientOrderReverse(lane, previousOrderId, clientKey);
+            lane.clientKeysByOrderId().remove(previousOrderId, clientKey);
         }
         lane.clientKeysByOrderId().add(orderId, clientKey);
     }
@@ -7023,18 +6966,8 @@ appendBalanceFundsDelta(patches, target);
         long orderId = userClientOrders.get(clientKey);
         if (orderId == 0) return null;
         userClientOrders.remove(clientKey);
-        removeClientOrderReverse(lane, orderId, clientKey);
-        return orderId;
-    }
-
-    /**
-     * 只删除订单与客户号的反向关联，供正向索引更新配套调用。
-     * @param lane 明确所属的账户 Lane，沿用调用入口的所有权与完成边界
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param clientKey 客户订单号内部键，零表示没有客户号
-     */
-    static void removeClientOrderReverse(AccountLaneState lane, long orderId, long clientKey) {
         lane.clientKeysByOrderId().remove(orderId, clientKey);
+        return orderId;
     }
 
     /**
@@ -7090,38 +7023,10 @@ appendBalanceFundsDelta(patches, target);
                 && liquidation.status() != CoreLiquidationState.Status.CANCELED;
     }
 
-    /**
-     * 将已完成控制下单收据交给待预留跟踪器，在 Owner 观察任务完成后登记。
-     * @param order 本次安装、更新或交接的订单值
-     * @param coreSequence 原业务命令的 Core 序号
-     */
-    public void collectControlReservation(OrderRuntime order, long coreSequence) {
-        pendingReservations.collectControlReservation(order, coreSequence);
-    }
+    /** Owner 独占的结算事件复用池，只有消费者完成且变化已交出才入池。 */
+    private final java.util.ArrayDeque<MatcherSettlementEvent> matcherSettlementEventPool =
+            new java.util.ArrayDeque<>();
 
-    /**
-     * 通过唯一跟踪器登记用户订单及对应 Core 序号的待完成预留。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param coreSequence 原业务命令的 Core 序号
-     */
-    public void markPendingReservation(long userId, long orderId, long coreSequence) { pendingReservations.markPendingReservation(userId, orderId, coreSequence); }
-    /**
-     * 通过唯一跟踪器完成给定用户订单的该序号预留。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param coreSequence 原业务命令的 Core 序号
-     */
-    public void completePendingReservation(long userId, long orderId, long coreSequence) { pendingReservations.completePendingReservation(userId, orderId, coreSequence); }
-    /**
-     * 让唯一跟踪器完成指定 Core 序号的全部待预留。
-     * @param coreSequence 原业务命令的 Core 序号
-     */
-    public void completePendingReservations(long coreSequence) { pendingReservations.completePendingReservations(coreSequence); }
-    /**
-     * 查询唯一跟踪器是否还保留待完成预留。
-     */
-    public boolean hasPendingReservations() { return pendingReservations.hasPendingReservations(); }
     /**
      * 以同一业务序号和提交序号，把已准备单笔或批量订单交给直接结算准备入口。
      * @param sequence 当前直接结算使用的业务 Core 序号
@@ -7141,8 +7046,8 @@ appendBalanceFundsDelta(patches, target);
             OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
             RuntimeIdentityRegistry identities, long timestamp, long position, List<Long> cancellations,
             LaneOrderResultTarget target) {
-        return settlements.prepareDirect(sequence, sequence, laneMask, single, orders, count, commandId, shard,
-                identities, timestamp, position, cancellations, target);
+        return prepareDirectMatcherSettlement(sequence, sequence, laneMask, single, orders, count, commandId, shard,
+                identities, timestamp, position, cancellations, target, null);
     }
 
     /**
@@ -7162,8 +7067,27 @@ appendBalanceFundsDelta(patches, target);
             long sequence, long laneMask, PlaceAdmissionEvent admission,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, List<Long> cancellations, LaneOrderResultTarget target) {
-        return settlements.prepareDirectAdmission(sequence, laneMask, admission, commandId, shard,
-                identities, timestamp, position, cancellations, target);
+        assertOwner();
+        if (admission == null) throw new IllegalArgumentException("place admission is missing");
+        ResolvedPlaceOrder resolved = admission.matchingOrder();
+        ensureMatcherSettlementDispatchCapacity(laneMask);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(1);
+        CoreInstrument instrument = instrument(identities.instrumentId(resolved.symbolId()));
+        if (instrument == null || instrument != resolved.instrument()) {
+            throw new IllegalStateException("direct settlement instrument changed");
+        }
+        storage.instruments[0] = instrument;
+        storage.baseAssetIds[0] = identities.assetId(instrument.baseAsset());
+        storage.quoteAssetIds[0] = identities.assetId(instrument.quoteAsset());
+        storage.settleAssetIds[0] = identities.assetId(instrument.settleAsset());
+        storage.metadataSlots.put(resolved.symbolId(), 0);
+        event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
+                this, identities, 1, cancellations, target);
+        event.admissionRoute(admission.laneId());
+        event.admissionOrder(resolved, admission.userId());
+        return event;
     }
 
     /**
@@ -7186,8 +7110,52 @@ appendBalanceFundsDelta(patches, target);
             long laneMask, OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId,
             int shard, RuntimeIdentityRegistry identities, long timestamp, long position,
             List<Long> cancellations, LaneOrderResultTarget target) {
-        return settlements.prepareDirect(coreSequence, commitSequence, laneMask, single, orders, count,
-                commandId, shard, identities, timestamp, position, cancellations, target);
+        return prepareDirectMatcherSettlement(coreSequence, commitSequence, laneMask, single, orders, count,
+                commandId, shard, identities, timestamp, position, cancellations, target, null);
+    }
+
+    private MatcherSettlementEvent prepareDirectMatcherSettlement(long coreSequence, long commitSequence,
+            long laneMask, OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId,
+            int shard, RuntimeIdentityRegistry identities, long timestamp, long position,
+            List<Long> cancellations, LaneOrderResultTarget target,
+            com.surprising.aeron.service.order.command.ResolvedMatchingAdmission replacement) {
+        assertOwner();
+        if (count <= 0 || replacement == null && single == null && (orders == null || count > orders.length))
+            throw new IllegalArgumentException("direct settlement admission is missing");
+        ensureMatcherSettlementDispatchCapacity(laneMask);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(count);
+        if (replacement != null) {
+            if (count != 1) throw new IllegalStateException("replacement must have one admission slot");
+            var resolved = replacement.resolved();
+            single = storage.replacementOrder = OrderRuntime.prepareCommandOrder(storage.replacementOrder,
+                    productLine, replacement.userId(), resolved, commandId, resolved.symbolId(), timestamp, position);
+        }
+        for (int index = 0; index < count; index++) {
+            OrderRuntime order = single == null ? orders[index] : single;
+            if (order == null) throw new IllegalStateException("direct settlement order was not admitted");
+            storage.admittedOrders[index] = order;
+            int prior = storage.metadataSlots.get(order.symbolId());
+            if (prior < 0) {
+                CoreInstrument instrument = instrument(identities.instrumentId(order.symbolId()));
+                if (instrument == null || instrument != order.instrument())
+                    throw new IllegalStateException("direct settlement instrument changed");
+                storage.instruments[index] = instrument;
+                storage.baseAssetIds[index] = identities.assetId(instrument.baseAsset());
+                storage.quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
+                storage.settleAssetIds[index] = identities.assetId(instrument.settleAsset());
+                storage.metadataSlots.put(order.symbolId(), index);
+            } else {
+                storage.instruments[index] = storage.instruments[prior];
+                storage.baseAssetIds[index] = storage.baseAssetIds[prior];
+                storage.quoteAssetIds[index] = storage.quoteAssetIds[prior];
+                storage.settleAssetIds[index] = storage.settleAssetIds[prior];
+            }
+        }
+        event.prepareDirect(coreSequence, commitSequence, laneMask, timestamp, position, commandId, shard,
+                this, identities, count, cancellations, target);
+        return event;
     }
 
     /**
@@ -7208,8 +7176,12 @@ appendBalanceFundsDelta(patches, target);
             com.surprising.aeron.service.order.command.ResolvedMatchingAdmission admission,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, List<Long> cancellations, LaneOrderResultTarget resultTarget) {
-        return settlements.prepareDirectReplacement(sequence, commitSequence, laneMask, admission, commandId, shard,
-                identities, timestamp, position, cancellations, resultTarget);
+        assertOwner();
+        var resolved = admission.resolved();
+        MatcherSettlementEvent event = prepareDirectMatcherSettlement(sequence, commitSequence, laneMask, null, null, 1,
+                commandId, shard, identities, timestamp, position, cancellations, resultTarget, admission);
+        event.replacement(admission, identities.assetId(resolved.reservationAsset()));
+        return event;
     }
 
     /**
@@ -7245,8 +7217,17 @@ appendBalanceFundsDelta(patches, target);
     public MatcherSettlementEvent prepareDirectCancellation(long sequence, long userId, long orderId,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, LaneOrderResultTarget resultTarget) {
-        return settlements.prepareDirectCancellation(sequence, userId, orderId, commandId, shard,
-                identities, timestamp, position, resultTarget);
+        assertOwner();
+        if (userId <= 0 || orderId <= 0) throw new IllegalArgumentException("cancel order is missing");
+        long laneMask = topology.accountLaneMask(userId);
+        ensureMatcherSettlementDispatchCapacity(laneMask);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        event.batchStorage(1).cancellationOrderIds[0] = orderId;
+        event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
+                this, identities, 1, List.of(), resultTarget);
+        event.cancellation(userId);
+        return event;
     }
 
     /**
@@ -7266,23 +7247,70 @@ appendBalanceFundsDelta(patches, target);
     public MatcherSettlementEvent prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, long[] orders,
             int count, java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, LaneOrderResultTarget resultTarget) {
-        return settlements.prepareDirectCancelBatch(sequence, finalChunk, userId, orders, count, commandId, shard,
-                identities, timestamp, position, resultTarget);
+        assertOwner();
+        if (count <= 0 || count > orders.length) throw new IllegalArgumentException("invalid cancel chunk");
+        long mask = topology.accountLaneMask(userId);
+        ensureMatcherSettlementDispatchCapacity(mask);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        System.arraycopy(orders, 0, event.batchStorage(count).cancellationOrderIds, 0, count);
+        event.prepareDirect(sequence, finalChunk ? sequence : 0, mask, timestamp, position, commandId, shard,
+                this, identities, count, List.of(), resultTarget);
+        event.cancellation(userId);
+        return event;
     }
 
     /**
-     * 让结算派发器归还已完成并收集的事件资源，沿用其消费者完成检查。
-     * @param event 要收集或归还的原结算事件，沿用派发器生命周期检查
+     * 下单步骤 4.3：单 Matcher 发布方校验事件与实际路由，向每个 Lane 的分片 SPSC 队列投递一次。已投递不代表账户或财务结算完成。
+     * @param event 仍由当前命令租约持有的结算事件
      */
-    public void releaseMatcherSettlement(MatcherSettlementEvent event) { settlements.releaseMatcherSettlement(event); }
+    public void publishMatcherOwned(MatcherSettlementEvent event) {
+        if (event == null || event.runtime() != this || !event.direct()
+                || !event.dispatched() || !event.resultPrepared())
+            throw new IllegalStateException("invalid Matcher-owned settlement publication");
+        if (event.dispatched() && event.queuedLaneMask() != 0)
+            throw new IllegalStateException("Matcher settlement was already dispatched");
+        long lanes = event.routedLaneMask();
+        if (lanes == 0) throw new IllegalStateException("Matcher settlement has no routed Lane");
+        if (!accountLanesStarted()) return;
+        int shard = event.directShard();
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
+            event.markLaneQueued(laneId);
+            publishMatcherSettlement(laneId, shard, event);
+        }
+    }
+
     /**
-     * 让结算派发器丢弃尚可安全撤销的事件，沿用原生命周期检查。
-     * @param event 要收集或归还的原结算事件，沿用派发器生命周期检查
+     * Owner 清理已完成且已交出 changes 的事件并归还对象池；具体完成与租约校验由 event.clear 执行，空事件不处理。
+     * @param event 要收集或归还的原结算事件
      */
-    public void discardMatcherSettlement(MatcherSettlementEvent event) { settlements.discardMatcherSettlement(event); }
+    public void releaseMatcherSettlement(MatcherSettlementEvent event) {
+        assertOwner();
+        if (event == null) return;
+        event.clear();
+        matcherSettlementEventPool.addFirst(event);
+    }
+
     /**
-     * 使用空资金接收器收集批次撮合结算，沿用统一派发器。
-     * @param event 要收集或归还的原结算事件，沿用派发器生命周期检查
+     * Owner 丢弃已完成的拒绝等直达事件；若还持有 changes 先归还变化缓冲，再清理事件入池，未完成事件拒绝回收。
+     * @param event 要收集或归还的原结算事件
+     */
+    public void discardMatcherSettlement(MatcherSettlementEvent event) {
+        assertOwner();
+        if (event == null) return;
+        if (!event.complete()) throw new IllegalStateException("rejected direct settlement is incomplete");
+        if (event.hasChanges()) {
+            releaseMatcherSettlementChanges(event.takeChanges());
+        }
+        event.clear();
+        matcherSettlementEventPool.addFirst(event);
+    }
+
+    /**
+     * 使用空资金接收器收集批次撮合结算。
+     * @param event 要收集或归还的原结算事件
      * @param terminalOrderSink 可空的本批终态订单身份接收器
      */
     public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
@@ -7291,14 +7319,24 @@ appendBalanceFundsDelta(patches, target);
     }
 
     /**
-     * 把批次结算事件、可选资金及终态接收器交给唯一结算派发器收集。
-     * @param event 要收集或归还的原结算事件，沿用派发器生命周期检查
+     * 在批量账户作用域中等待本项结算完成，先把余额前后值按顺序接入批次回滚边界，再交既有收集入口处理变化。
+     * @param event 要收集或归还的原结算事件
      * @param funds 可空的本批资金差额接收器
      * @param terminalOrderSink 可空的本批终态订单身份接收器
      */
     public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
             MatcherSettlementEvent event, RuntimeFundsAccumulator funds, TerminalOrderSink terminalOrderSink) {
-        return settlements.collectOrderBatchMatcherSettlement(event, funds, terminalOrderSink);
+        assertOwner();
+        if (!orderBatchMutationScope() || !event.complete())
+            throw new IllegalStateException("batch item settlement is not ready to collect");
+        assertAccountLanesHealthy();
+        long lanes = event.requiredLaneMask();
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
+            accountRollback.balancePatch(laneId).mergeSequential(event.changes().balancePatches[laneId]);
+        }
+        return collectMatcherSettlement(event, event.hasLedgerSettlement() ? funds : null, terminalOrderSink);
     }
 
     /**

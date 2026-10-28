@@ -75,7 +75,7 @@ class CommittedOptionExerciseReplayTest {
                 replay.apply(CoreMessageCodec.encode(command),now,(sequence+1)*4096);
                 CoreTestCompletion.applyAsynchronously(reference,command,now,(sequence+1)*4096);
                 assertThat(replay.deliveryPage()).isNull();
-                assertThat(replay.businessHash()).isEqualTo(hash).isEqualTo(reference.snapshotBusinessStateHash());
+                assertThat(replay.businessHash()).isEqualTo(hash).isEqualTo(reference.stateHash());
             }
         }
     }
@@ -93,7 +93,7 @@ class CommittedOptionExerciseReplayTest {
         var command=new CoreMessage(CoreMessageHeader.command(type,new UUID(121,seq),ProductLine.OPTION,CommandSource.OPERATIONS,871,seq,user,now,seq),body);
         replay.apply(CoreMessageCodec.encode(command),now,seq*4096);
         CoreTestCompletion.applyAsynchronously(reference,command,now,seq*4096);
-        assertThat(replay.businessHash()).as("read-side extraction preserves Core trading state for "+type).isEqualTo(reference.snapshotBusinessStateHash());
+        assertThat(replay.businessHash()).as("read-side extraction preserves Core trading state for "+type).isEqualTo(reference.stateHash());
         return command;
     }
 }

@@ -644,14 +644,14 @@ class TradingAccountRuntimeTest {
         TradingAccountRuntime state = new TradingAccountRuntime();
         state.putUser(new UserRuntime(7));
         state.putReservation(CoreStateTestFixtures.reservation(11, 7, 3, 200));
-        state.markPendingReservation(7, 11, 4);
+        state.pendingReservations().markPendingReservation(7, 11, 4);
 
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
-                () -> state.completePendingReservation(7, 11, 5));
+                () -> state.pendingReservations().completePendingReservation(7, 11, 5));
         assertThat(state.pendingReservations.pendingReservationCount(7)).isEqualTo(1);
         assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isEqualTo(200);
 
-        state.completePendingReservation(7, 11, 4);
+        state.pendingReservations().completePendingReservation(7, 11, 4);
         assertThat(state.pendingReservations.pendingReservationCount(7)).isZero();
         assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isZero();
     }
@@ -666,10 +666,10 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
-        state.markPendingReservation(7, 11, 4);
+        state.pendingReservations().markPendingReservation(7, 11, 4);
         state.clearChangedKeys();
 
-        state.completePendingReservation(7, 11, 4);
+        state.pendingReservations().completePendingReservation(7, 11, 4);
 
         assertThat(state.orderIdByClient(7, 91)).isEqualTo(11);
     }
@@ -684,11 +684,11 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
-        state.markPendingReservation(7, 11, 4);
+        state.pendingReservations().markPendingReservation(7, 11, 4);
         state.removeClientOrder(7, 91);
         state.clearChangedKeys();
 
-        state.completePendingReservation(7, 11, 4);
+        state.pendingReservations().completePendingReservation(7, 11, 4);
 
         assertThat(state.orderIdByClient(7, 91)).isNull();
     }
@@ -709,8 +709,8 @@ class TradingAccountRuntimeTest {
         state.putClientOrder(7, 93, 12);
         state.removeClientOrder(7, 91);
         state.removeClientOrder(7, 94);
-        state.markPendingReservation(7, 11, 4);
-        state.completePendingReservation(7, 11, 4);
+        state.pendingReservations().markPendingReservation(7, 11, 4);
+        state.pendingReservations().completePendingReservation(7, 11, 4);
         assertThat(state.orderIdByClient(7, 91)).isNull();
         assertThat(state.orderIdByClient(7, 94)).isNull();
         assertThat(state.orderIdByClient(7, 92)).isEqualTo(12);
@@ -734,7 +734,7 @@ class TradingAccountRuntimeTest {
             for (/* 当前内部资产编号，注册身份场景由字典分配 */ int assetId = 1; assetId <= 10; assetId++) {
                 for (/* 当前用户、资产组合内十份预留的构造下标 */ int reservation = 0; reservation < 10; reservation++) {
                     state.putReservation(CoreStateTestFixtures.reservation(orderId, userId, assetId, assetId));
-                    state.markPendingReservation(userId, orderId, 1);
+                    state.pendingReservations().markPendingReservation(userId, orderId, 1);
                     orderId++;
                 }
             }
@@ -749,9 +749,9 @@ class TradingAccountRuntimeTest {
         }
 
         // 收到对应原序号完成后，所有 Lane 与全局 pending 计数都归零，业务预留正文不在这里删除。
-        state.completePendingReservations(1);
+        state.pendingReservations().completePendingReservations(1);
         assertThat(state.pendingReservations.pendingReservationCount()).isZero();
-        assertThat(state.hasPendingReservations()).isFalse();
+        assertThat(state.pendingReservations().hasPendingReservations()).isFalse();
         for (/* 本次内部用户 ID，部分用例按固定 Lane 路由寻找 */ long userId = 1; userId <= 100; userId++) {
             assertThat(state.pendingReservations.pendingReservationCount(userId)).isZero();
             for (/* 当前内部资产编号，注册身份场景由字典分配 */ int assetId = 1; assetId <= 10; assetId++) {
@@ -778,15 +778,15 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
-        state.markPendingReservation(7, 11, 4);
+        state.pendingReservations().markPendingReservation(7, 11, 4);
 
         // 先正确完成一次，再重复请求同一完成。
-        state.completePendingReservation(7, 11, 4);
+        state.pendingReservations().completePendingReservation(7, 11, 4);
         // 首次正确完成原预留后的修订，失败重试不能改变它
         long revisionAfterFirstCompletion = state.revision();
         // 首次正确完成原预留后复制的余额对照
         BalanceRuntime balanceAfterFirstCompletion = state.balance(7, 3);
-        assertThatThrownBy(() -> state.completePendingReservation(7, 11, 4))
+        assertThatThrownBy(() -> state.pendingReservations().completePendingReservation(7, 11, 4))
                 .isInstanceOf(IllegalStateException.class);
 
         // 检查失败重试没有改变已归零计数、原余额及修订；本例不额外断言 Lane 哈希。
@@ -810,12 +810,12 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
-        state.markPendingReservation(7, 11, 4);
+        state.pendingReservations().markPendingReservation(7, 11, 4);
 
         // 分别重复标记，以及用从未标记的原序号请求完成。
-        assertThatThrownBy(() -> state.markPendingReservation(7, 11, 4))
+        assertThatThrownBy(() -> state.pendingReservations().markPendingReservation(7, 11, 4))
                 .isInstanceOf(IllegalStateException.class);
-        assertThatThrownBy(() -> state.completePendingReservation(7, 11, 5))
+        assertThatThrownBy(() -> state.pendingReservations().completePendingReservation(7, 11, 5))
                 .isInstanceOf(IllegalStateException.class);
 
         // 两种失败都不能改变原 pending 数、金额及已冻结资金。
@@ -845,7 +845,7 @@ class TradingAccountRuntimeTest {
         // 同一原围栏捕获的全部账户 Lane 快照列表
         var snapshots = state.accountLaneSnapshots(1, global);
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, assetId, 200);
-        state.markPendingReservation(7, 11, 2);
+        state.pendingReservations().markPendingReservation(7, 11, 2);
 
         // 新增原 pending 后部分释放，再恢复此前 Lane 快照围栏。
         state.replaceReservation(state.reservation(11).release(50));
@@ -860,7 +860,7 @@ class TradingAccountRuntimeTest {
         assertThat(state.pendingReservations.pendingReservationCount()).isZero();
         assertThat(state.pendingReservations.pendingReservationCount(7)).isZero();
         assertThat(state.pendingReservations.pendingReservedUnits(7, assetId)).isZero();
-        assertThat(state.hasPendingReservations()).isFalse();
+        assertThat(state.pendingReservations().hasPendingReservations()).isFalse();
         assertThat(state.balance(7, assetId).availableUnits()).isEqualTo(800);
         assertThat(state.balance(7, assetId).lockedUnits()).isEqualTo(200);
     }
@@ -876,7 +876,7 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
-        state.markPendingReservation(7, 11, 4);
+        state.pendingReservations().markPendingReservation(7, 11, 4);
 
         // 先消费原预留一部分并更新冻结，再撤单释放剩余部分。
         state.replaceReservation(state.reservation(11).consume(50));
@@ -902,7 +902,7 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
-        state.markPendingReservation(7, 11, 4);
+        state.pendingReservations().markPendingReservation(7, 11, 4);
 
         // 尚未收到生命周期完成就尝试直接删除原预留。
         assertThatThrownBy(() -> state.removeReservation(11, 7)).isInstanceOf(IllegalStateException.class);
@@ -948,7 +948,7 @@ class TradingAccountRuntimeTest {
         TradingAccountRuntime state = new TradingAccountRuntime();
 
         // 全局原 pending 为零时尝试完成一个原订单。
-        assertThatThrownBy(() -> state.completePendingReservation(7, 11, 4))
+        assertThatThrownBy(() -> state.pendingReservations().completePendingReservation(7, 11, 4))
                 .isInstanceOf(IllegalStateException.class);
 
         // 拒绝后全局、用户及用户/资产计数仍为零。
@@ -977,8 +977,8 @@ class TradingAccountRuntimeTest {
         state.putBalance(new BalanceRuntime(laterUser, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, firstUser, 91, 5, 2, 3, 200);
         CoreStateTestFixtures.reserveOrder(state, 12, laterUser, 92, 5, 2, 3, 200);
-        state.markPendingReservation(firstUser, 11, 4);
-        state.markPendingReservation(laterUser, 12, 4);
+        state.pendingReservations().markPendingReservation(firstUser, 11, 4);
+        state.pendingReservations().markPendingReservation(laterUser, 12, 4);
         // 故障预检查前首 Lane 原预留正文
         ReservationRuntime firstReservation = state.reservation(11);
         // 故障预检查前首用户原独立余额对照
@@ -996,7 +996,7 @@ class TradingAccountRuntimeTest {
         AccountLaneTestAccess.reservations(accountLaneState(state, topology.accountLaneId(laterUser))).remove(12);
 
         // 故意删后 Lane 原正文，使批次预检查在该 Lane 失败。
-        assertThatThrownBy(() -> state.completePendingReservations(4)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> state.pendingReservations().completePendingReservations(4)).isInstanceOf(IllegalStateException.class);
 
         // 检查首 Lane 正文、资金与哈希及原 Owner 两套 pending 索引均未漂移。
         assertThat(state.reservation(11)).isEqualTo(firstReservation);

@@ -2210,7 +2210,7 @@ class CoreOrderedOrderBatchTest {
                     FatalMatchingDivergenceException.class);
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_201))).isNotNull();
             assertThat(runtime.revision()).isGreaterThan(revisionBefore);
-            assertThatThrownBy(state::snapshotBusinessStateHash)
+            assertThatThrownBy(state::stateHash)
                     .hasMessageContaining("unfinished reservation or patch work");
             assertThatThrownBy(() -> com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
                     state.snapshotTradingState()))

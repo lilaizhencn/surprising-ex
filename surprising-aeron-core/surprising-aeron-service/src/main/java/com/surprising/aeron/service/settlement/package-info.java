@@ -3,13 +3,13 @@
  *
  * <ol>
  *   <li>4.1：Owner 通过
- *       {@link com.surprising.aeron.service.settlement.MatcherSettlementDispatcher}
- *       的 prepareDirect 系列方法准备事件、命令输入和初始路由。</li>
+ *       {@link com.surprising.aeron.service.core.TradingAccountRuntime}
+ *       的 prepareDirectMatcherSettlement 系列方法准备事件、命令输入和初始路由。</li>
  *   <li>4.2：Matcher 通过
  *       {@link com.surprising.aeron.service.settlement.MatcherSettlementEvent}
  *       和 {@link com.surprising.aeron.service.settlement.MatcherSettlementPlan}
  *       整理成交、已接受的撤单和实际参与账户。</li>
- *   <li>4.3：Event.notifyDirectPublication 经 Dispatcher.publishMatcherOwned
+ *   <li>4.3：Event.notifyDirectPublication 经 TradingAccountRuntime.publishMatcherOwned
  *       直接投递各 Lane 的分片 SPSC 队列。</li>
  *   <li>4.4：Event.execute 选择 RuntimeSpotMatchProcessor 或
  *       RuntimeDerivativeMatchProcessor，衍生品金额由 RuntimeDerivativeFillCalculator

@@ -293,7 +293,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         // 账户已见准入发布上界，耗尽时刷新
         long cachedAdmissionProducerSeq = admissionProducerSequence.value;
         try (/* 实际工作线程取得的 CPU 亲和租约，线程退出时关闭 */ var affinity = configuration.accountLane(lane.laneId())) {
-            lane.bindOwner();
+            lane.assertOwner();
             started = true;
             // 本线程已经重新绑定过的最后交接轮次，防止重复绑定
             long reboundHandoff = 0;
@@ -308,7 +308,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                         Thread.onSpinWait();
                         continue;
                     }
-                    lane.bindOwner();
+                    lane.assertOwner();
                     reboundHandoff = completedHandoff;
                 }
                 // 先推进独立准入邮箱。普通队首尚在等 Matcher 或账本输入时，

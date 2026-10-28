@@ -338,7 +338,12 @@ public final class OrderBatchExecutor {
         long userId = pending.command().header().userId();
         // 本次任务固定使用的 Matcher 分片
         int shard = owner.matchingAdapter().matcherShardId(batch.preparedSymbols.getFirst());
-        batch.settlementEvent = preparePipelinedPlaceBatch(pending, batch, shard);
+        batch.settlementEvent = owner.runtimeState().prepareDirectMatcherSettlement(
+                pending.sequence(), owner.commits.validAccountLaneMask(),
+                null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
+                shard, owner.identities(), pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                pending.preMatchingCancellationOrderIds(), batch);
+        batch.settlementEvent.reserveMatcherPublication();
         batch.pipelinedPlaceBatchSubmission.prepare(this, pending, batch, userId, shard);
         owner.matcherPipeline().submit(shard, pending.sequence(), batch.pipelinedPlaceBatchSubmission, batch.settlementEvent);
         owner.pendingMatching().progressChanged();
@@ -454,8 +459,8 @@ public final class OrderBatchExecutor {
                 releaseBatchAmendAdmission(batch);
                 batch.itemAdmission = null;
                 if (!laneAdmissionFailure)
-                    requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
-                appendOrderBatchResult(batch, item, ResponseStatus.REJECTED,
+                    requireUnchangedRejectedBatchItem(pending, runtimeRevisionBefore, exception);
+                appendOrderBatchResult(item, ResponseStatus.REJECTED,
                         CoreResultCode.fromRejectionCode(exception.code()));
                 batch.nextIndex++;
             } catch (/* 当前输入、准入或应用错误，按所在阶段拒绝单项、放弃流水准备或报告恢复故障 */ ArithmeticException | IllegalArgumentException exception) {
@@ -464,8 +469,8 @@ public final class OrderBatchExecutor {
                 releaseBatchAmendAdmission(batch);
                 batch.itemAdmission = null;
                 if (!laneAdmissionFailure)
-                    requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
-                appendOrderBatchResult(batch, item, ResponseStatus.REJECTED,
+                    requireUnchangedRejectedBatchItem(pending, runtimeRevisionBefore, exception);
+                appendOrderBatchResult(item, ResponseStatus.REJECTED,
                         exception instanceof ArithmeticException
                                 ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
                 batch.nextIndex++;
@@ -545,7 +550,7 @@ public final class OrderBatchExecutor {
         var work = batch.placeReservation;
         // 账户已经冻结并交给本项的订单副本
         OrderRuntime admitted = work.admittedOrder();
-        owner.runtimeState().collectControlReservation(admitted, batch.sequence);
+        owner.runtimeState().pendingReservations().collectControlReservation(admitted, batch.sequence);
         // 所属账户已经准备好本项持有的固定副本，Owner 只绑定其引用。
         batch.items.get(batch.nextIndex).admittedOrder = admitted;
         batch.currentPreMatchingCancellationOrderIds = work.closeCapacityCancellations();
@@ -696,13 +701,23 @@ public final class OrderBatchExecutor {
             OrderRuntime admitted = item.admittedOrder;
             if (admitted == null) throw new IllegalStateException("batch item admission order is missing");
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = prepareBatchPlaceItem(pending, batch, admitted, shard);
+            direct = owner.runtimeState().prepareDirectMatcherSettlement(
+                    pending.sequence(), 0, owner.commits.validAccountLaneMask(), admitted, null, 1,
+                    pending.command().header().commandId(), shard, owner.identities(),
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), batch);
+            direct.reserveMatcherPublication();
             batch.itemSettlementEvent = direct;
         }
         if (batch.kind == OrderBatchKind.AMEND) {
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
-            direct = prepareBatchAmend(pending,
-                    java.util.Objects.requireNonNull(batch.replacementAdmission), shard);
+            direct = owner.runtimeState().prepareDirectReplacement(
+                    pending.sequence(), 0, owner.commits.validAccountLaneMask(),
+                    java.util.Objects.requireNonNull(batch.replacementAdmission),
+                    pending.command().header().commandId(), shard, owner.identities(),
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), null);
+            direct.reserveMatcherPublication();
             batch.itemSettlementEvent = direct;
             batch.items.get(batch.nextIndex).captureAdmittedOrder(direct.admittedOrder());
             if (owner.realtimeCapture() != null) batch.items.get(batch.nextIndex).realtimeTakerOrder = batch.items.get(batch.nextIndex).admittedOrder;
@@ -763,8 +778,11 @@ public final class OrderBatchExecutor {
         }
         pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
         // 当前任务预先借用的直达结算事件
-        var direct = prepareCancelBatch(
-                pending, batch, shard, finalChunk, end - start);
+        var direct = owner.runtimeState().prepareDirectCancelBatch(
+                pending.sequence(), finalChunk, pending.command().header().userId(),
+                batch.preparedCancellationOrderIds, end - start, pending.command().header().commandId(), shard,
+                owner.identities(), pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
+        direct.reserveMatcherPublication();
         batch.itemSettlementEvent = direct;
         batch.cancelBatchChunkSubmission.prepare(this, pending, batch, shard, start, chunkEnd, direct);
         owner.matcherPipeline().submit(shard, pending.sequence(), batch.cancelBatchChunkSubmission, direct);
@@ -912,7 +930,7 @@ public final class OrderBatchExecutor {
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         try {
             batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
-            if (batch.kind != OrderBatchKind.CANCEL) appendOrderBatchResult(batch, item, status, resultCode);
+            if (batch.kind != OrderBatchKind.CANCEL) appendOrderBatchResult(item, status, resultCode);
             releaseBatchAmendAdmission(batch);
             item.cancelSymbol = null;
             batch.nextIndex++;
@@ -988,13 +1006,12 @@ public final class OrderBatchExecutor {
 
     /**
      * 只把已经决定的状态和结果码写入该项，不编码整批或重新执行账户业务。
-     * @param batch 本条批量命令的复用上下文
      * @param item 本批当前单项输入与结果槽
      * @param status 本项已经决定的响应状态
      * @param resultCode 本项已经决定的结果码
      */
-    void appendOrderBatchResult(OrderBatchPending batch, OrderBatchItem item,
-                                        ResponseStatus status, CoreResultCode resultCode) {
+    void appendOrderBatchResult(OrderBatchItem item,
+                                ResponseStatus status, CoreResultCode resultCode) {
         item.status = status;
         item.resultCode = resultCode;
     }
@@ -1034,7 +1051,7 @@ public final class OrderBatchExecutor {
             }
             owner.commits.publication.request();
         }
-        owner.runtimeState().completePendingReservations(batch.sequence);
+        owner.runtimeState().pendingReservations().completePendingReservations(batch.sequence);
         if (!batch.laneCommitCompleted() || batch.preparedResponse == null) {
             if (batch.laneCommitEvent == null) {
                 owner.runtimeState().releaseOwnerLaneAccess();
@@ -1393,15 +1410,14 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 对尚未交账户处理的拒绝项检查全局修订未变；若已经变化则结束批次作用域并报告恢复故障。批次参数在当前实现中不读取。
-     * @param batch 沿用调用签名的批次引用，当前检查不读取
+     * 对尚未交账户处理的拒绝项检查全局修订未变；若已经变化则结束批次作用域并报告恢复故障。
      * @param pending 本批仍占用的命令槽
      * @param runtimeRevisionBefore 本项尚未交账户处理前保存的全局修订
      * @param exception 本项业务拒绝或输入异常，用作恢复故障原因
      */
-    void requireUnchangedRejectedBatchItem(OrderBatchPending batch, CommandSlot pending,
-                                                   long runtimeRevisionBefore,
-                                                   RuntimeException exception) {
+    void requireUnchangedRejectedBatchItem(CommandSlot pending,
+                                           long runtimeRevisionBefore,
+                                           RuntimeException exception) {
         if (owner.runtimeState().revision() != runtimeRevisionBefore) {
             owner.runtimeState().endOrderBatchMutationScope();
             throw owner.failMatching(pending, "order batch item mutated before rejection", exception);
@@ -1434,80 +1450,6 @@ public final class OrderBatchExecutor {
             }
             default -> throw new IllegalStateException("unsupported order batch kind");
         };
-    }
-
-    /**
-     * 为整批已准入订单准备带最终 Core 提交水位的直达结算事件，并保留 Matcher 发布租约；实际参与 Lane 随撮合事实确定。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
-     * @param shard 当前已确定的 Matcher 分片
-     */
-    private com.surprising.aeron.service.settlement.MatcherSettlementEvent preparePipelinedPlaceBatch(
-            CommandSlot pending, OrderBatchPending batch, int shard) {
-        // 当前任务预先借用的直达结算事件
-        com.surprising.aeron.service.settlement.MatcherSettlementEvent direct = owner.runtimeState().prepareDirectMatcherSettlement(
-                pending.sequence(), owner.commits.validAccountLaneMask(),
-                null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
-                shard, owner.identities(), pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                pending.preMatchingCancellationOrderIds(), batch);
-        direct.reserveMatcherPublication();
-        return direct;
-    }
-
-    /**
-     * 为顺序下单的当前准入项借直达事件，账户提交序号用零保留到整批最后，再取得 Matcher 发布租约。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
-     * @param admitted 当前项由账户提供的准入订单副本
-     * @param shard 当前已确定的 Matcher 分片
-     */
-    private com.surprising.aeron.service.settlement.MatcherSettlementEvent prepareBatchPlaceItem(
-            CommandSlot pending, OrderBatchPending batch, OrderRuntime admitted, int shard) {
-        // 当前任务预先借用的直达结算事件
-        com.surprising.aeron.service.settlement.MatcherSettlementEvent direct = owner.runtimeState().prepareDirectMatcherSettlement(
-                pending.sequence(), 0, owner.commits.validAccountLaneMask(), admitted, null, 1,
-                pending.command().header().commandId(), shard, owner.identities(),
-                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                pending.preMatchingCancellationOrderIds(), batch);
-        direct.reserveMatcherPublication();
-        return direct;
-    }
-
-    /**
-     * 为顺序改单的解析准入借直达事件，同样把最终账户提交留到批末，并取得 Matcher 发布租约。
-     * @param pending 本批仍占用的命令槽
-     * @param admission 已收齐的改单解析准入
-     * @param shard 当前已确定的 Matcher 分片
-     */
-    private com.surprising.aeron.service.settlement.MatcherSettlementEvent prepareBatchAmend(
-            CommandSlot pending, ResolvedMatchingAdmission admission, int shard) {
-        // 当前任务预先借用的直达结算事件
-        com.surprising.aeron.service.settlement.MatcherSettlementEvent direct = owner.runtimeState().prepareDirectReplacement(
-                pending.sequence(), 0, owner.commits.validAccountLaneMask(), admission,
-                pending.command().header().commandId(), shard, owner.identities(),
-                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                pending.preMatchingCancellationOrderIds(), null);
-        direct.reserveMatcherPublication();
-        return direct;
-    }
-
-    /**
-     * 用当前片段有效订单前缀准备直达撤单事件，只有最后实际片段推进最终账户水位，再保留 Matcher 发布租约。
-     * @param pending 本批仍占用的命令槽
-     * @param batch 本条批量命令的复用上下文
-     * @param shard 当前已确定的 Matcher 分片
-     * @param finalChunk 是否为最后实际撤单片段，决定能否推进最终账户水位
-     * @param count 撤单原语缓冲中本次有效项数
-     */
-    private com.surprising.aeron.service.settlement.MatcherSettlementEvent prepareCancelBatch(
-            CommandSlot pending, OrderBatchPending batch, int shard, boolean finalChunk, int count) {
-        // 当前任务预先借用的直达结算事件
-        com.surprising.aeron.service.settlement.MatcherSettlementEvent direct = owner.runtimeState().prepareDirectCancelBatch(
-                pending.sequence(), finalChunk, pending.command().header().userId(),
-                batch.preparedCancellationOrderIds, count, pending.command().header().commandId(), shard,
-                owner.identities(), pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
-        direct.reserveMatcherPublication();
-        return direct;
     }
 
     /**

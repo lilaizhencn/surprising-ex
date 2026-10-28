@@ -49,9 +49,23 @@
 - **单持仓场景极速直通**：在 `nextRiskPositionKey` 与 `nextRiskReservationId` 中增加单元素特化分支，常数时间直通返回；
 - **系统账本生命周期与控制命令保护**：严格管理 `systemLedgerStarted` 状态字段，保持未提交控制命令排他性断言与强平决议异常拦截。
 
+### 2.7 彻底根除无实际工作的多层对象转换与跨类/微型壳层转发
+- **消除无实际工作内容的多层对象/集合转换**：
+  - 删除 `TradingAccountRuntime.PendingTransferRoutes` 同构重复 Record，直接返回并消费 `TreasuryRuntime.PendingTransferRoutes`；
+  - 删除 `PendingReservationTracker` 中的 `PendingReservationCompletion`、`PendingReservationRef`、`PendingReservationBatchCompletion` 三个过渡 Record 及 3 层列表转换（`ArrayList` → `List.copyOf` → `ArrayList`），单项直接返回 `ReservationRuntime`，多项基于平铺 `long[] userIds` 与 `ReservationRuntime[] reservations` 一次预检并完成；
+  - 删除 `RuntimeLifecycleSettlement.OrderPage` 重复 Record 与 `InstrumentSettlementCommands.boxedOrderIds` 私有重复装箱逻辑，统一复用 `TradingCoreRuntime.LifecycleOrderChunk`，且仅在撤单阶段尚未完成时才查询活动订单页；
+  - 删除 `RuntimeOrderAdmission.AdmissionIdentity` 在查询预检路径中的打包即拆包中间层；
+- **消除跨类双向折返转发与 1:1 微型薄壳类**：
+  - 内联并删除 `MatcherSettlementDispatcher.java` 与 `ControlFundsValidation.java`，消除 `TradingAccountRuntime` 上的 10 个长参数跨类纯转发方法与双向回调；
+  - 将 6 个 30~70 行的微型命令转发薄壳类（`LeverageCommands`、`AdlCommands`、`PositionCommands`、`FeePolicyCommands`、`BalanceTransferCommands`、`LiquidationCommands`）内联入 `DirectCommandDispatcher.java` 并删除对应的 5 个空子包目录；
+- **消除向后兼容空壳子类与内部单行转发/套娃重载**：
+  - 删除 `TradingAccountRuntime.LeverageLookup` 与 `TradingAccountRuntime.PaddedReadyMask` 空壳子类，将顶层类声明为 `public final class`；
+  - 删除 `TradingAccountRuntime` 上的 6 个 `pendingReservations` 单行代理方法；
+  - 清理 `CoreMatchingFlow`、`OrderBatchExecutor`、`MatchingPipelineProgress`、`MatchingCommandAdmission`、`TradingCoreRuntime`、`TradingAccountRuntime`、`AccountLaneState` 中的同义单行转发（如 `submitMatchingInCommandScope`、`responseOrder`、`snapshotBusinessStateHash`、`currentBusinessStateHash`、`runtimeOrderSymbol`、`runtimeLiquidationSymbol`、`bindOwner`、`removeClientOrderReverse`）与套娃重载，并提取 `TradingCoreRuntime.acquireOwnerLaneAccess` 统一 4 处重复自旋等待模板。
+
 ---
 
-## 3. 全量回归与验证结果
+## 3. 回归与验证结果
 - **JDK 版本**：OpenJDK 27 (HotSpot)
-- **编译状态**：生产源码文件与测试源码文件编译 100% 成功；
-- **全量单元测试套件**：**1591 个用例全部通过，0 Errors, 0 Failures**。
+- **编译状态**：`surprising-aeron-service`（233 个生产文件 + 198 个测试文件）与 `surprising-aeron-benchmarks`（97 个生产文件 + 42 个测试文件）生产源码及测试源码编译 100% 成功；
+- **单元测试验证**：前期深度清理全量 1591 个用例通过；本轮多层转发与无意义对象转换清理完成 `TradingAccountRuntimeTest`（58 个测试）及 `bootstrap`/`config`/`support`/`order` 等 32 个测试类（共 180 个测试）验证通过，0 Errors, 0 Failures（按指令跳过剩余全量单元测试）。

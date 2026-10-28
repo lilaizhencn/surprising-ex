@@ -50,7 +50,7 @@ public class HotCommandSlotAllocationBenchmark {
     private long retiredSequence;
 
     @Setup public void setup() {
-        lane = new AccountLaneState(0, WINDOW); lane.bindOwner();
+        lane = new AccountLaneState(0, WINDOW); lane.assertOwner();
         matcher = new SynchronousMatchingEngine(ExchangeConfiguration.defaultBuilder()
                 .ordersProcessingCfg(OrdersProcessingConfiguration.builder()
                         .riskProcessingMode(OrdersProcessingConfiguration.RiskProcessingMode.MATCHING_ONLY)

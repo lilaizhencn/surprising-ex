@@ -1,5 +1,5 @@
 /**
- * 自动减仓的账户与账本执行；入口为 command.adl.AdlCommands，
+ * 自动减仓的账户与账本执行；入口为 {@link com.surprising.aeron.service.core.command.DirectCommandDispatcher}，
  * 续步为 {@link com.surprising.aeron.service.adl.RuntimeAdlExecution.AdlWork}。
  *
  * <ol>

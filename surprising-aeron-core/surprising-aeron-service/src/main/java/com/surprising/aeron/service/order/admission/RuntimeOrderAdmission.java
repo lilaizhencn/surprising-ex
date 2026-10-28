@@ -76,40 +76,6 @@ public final class RuntimeOrderAdmission {
     }
 
     /**
-     * 取得或登记币对稠密身份，查找已有客户端和持仓身份，并借用当前账本结算状态，供后续账户准入使用。
-     * @param runtime 所属交易运行时，提供 Lane 权限、规范币对及账本状态入口
-     * @param identities 当前产品运行时身份表，币对、客户标识和持仓键从这里准备
-     * @param userId 下单用户编号，账户与挂单都必须属于这个用户
-     * @param order 已经完成价格、费率和冻结资产决策的订单输入
-     */
-    public static AdmissionIdentity admissionIdentity(
-            TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-            long userId, ResolvedPlaceOrder order) {
-        if (runtime == null || identities == null || order == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid runtime order admission identity");
-        }
-        int symbolId = identities.symbolId(order.instrumentId());
-        return new AdmissionIdentity(identities.findClientKeyValue(userId, order.clientOrderId()),
-                symbolId,
-                identities.findPositionKeyValue(userId, order.instrument(), order.positionSide()),
-                runtime.treasury().settlementStatus(symbolId));
-    }
-
-    /**
-     * 使用已准备好的身份事实在显式 Lane 中检查普通订单，避免账户消费者重新组装这些输入。
-     */
-    public static long requiredReservationPrepared(
-            TradingAccountRuntime runtime, AccountLaneState lane, long userId, ResolvedPlaceOrder order,
-            long openInterestSteps, AdmissionOrderIndex activeOrders, AdmissionIdentity identity) {
-        if (runtime == null || order == null || activeOrders == null || identity == null || userId <= 0) {
-            throw new IllegalArgumentException("invalid prepared runtime order admission input");
-        }
-        return requiredReservation(runtime, lane, userId, order, openInterestSteps, activeOrders,
-                null, identity.clientKey(), identity.positionKey(),
-                identity.lifecycleSettled(), identity.fundingInProgress(), null);
-    }
-
-    /**
      * 直接使用已准备的 primitive 身份值和生命周期标记执行普通订单准入，不额外构造身份记录。
      */
     public static long requiredReservationPrepared(
@@ -151,13 +117,14 @@ public final class RuntimeOrderAdmission {
      * 预检只读取显式所属 Lane 和 Owner 捕获的币对配置；使用现有身份及挂单索引计算金额，不分配新身份、创建订单或冻结资金。
      */
     public static long requiredReservationForQuery(TradingAccountRuntime runtime, AccountLaneState lane, long userId,
-            ResolvedPlaceOrder order, long openInterestSteps, AdmissionIdentity identity) {
+            ResolvedPlaceOrder order, long openInterestSteps, int symbolId, long clientKey, long positionKey,
+            com.surprising.aeron.service.treasury.TreasuryRuntime.SettlementStatus settlementStatus) {
         if (lane == null || runtime.topology().accountLaneId(userId) != lane.laneId()
-                || order == null || identity == null)
+                || order == null || settlementStatus == null)
             throw new IllegalStateException("preflight query requires its owning Lane scope");
         return requiredReservation(runtime, lane, userId, order, openInterestSteps,
-                lane.admissionOrderIndex(identity.symbolId()), null, identity.clientKey(),
-                identity.positionKey(), identity.lifecycleSettled(), identity.fundingInProgress(), order.instrument());
+                lane.admissionOrderIndex(symbolId), null, clientKey,
+                positionKey, settlementStatus.lifecycleSettled(), settlementStatus.fundingInProgress(), order.instrument());
     }
 
     /**
@@ -420,16 +387,6 @@ public final class RuntimeOrderAdmission {
      */
     private static CoreStateRejectedException rejected(String code, String message) {
         return new CoreStateRejectedException(code, message);
-    }
-
-    /**
-     * 账户准入前已经准备好的身份值和借用的账本结算事实。
-     */
-    public record AdmissionIdentity(
-            long clientKey, int symbolId, long positionKey,
-            com.surprising.aeron.service.treasury.TreasuryRuntime.SettlementStatus settlementStatus) {
-        public boolean lifecycleSettled() { return settlementStatus.lifecycleSettled(); }
-        public boolean fundingInProgress() { return settlementStatus.fundingInProgress(); }
     }
 
     /**

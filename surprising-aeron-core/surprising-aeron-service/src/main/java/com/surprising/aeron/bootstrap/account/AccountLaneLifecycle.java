@@ -71,7 +71,7 @@ public final class AccountLaneLifecycle implements AutoCloseable {
                 return false;
             }
         }
-        for (AccountLaneState lane : lanes) lane.bindOwner();
+        for (AccountLaneState lane : lanes) lane.assertOwner();
         ownerHasAccess = true;
         return true;
     }

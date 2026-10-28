@@ -120,7 +120,7 @@ public class OrderAdmissionAllocationBenchmark {
         final OrderRuntime[] orders = new OrderRuntime[20];
 
         @Setup public void setup() {
-            lane = new AccountLaneState(0, 256); lane.bindOwner();
+            lane = new AccountLaneState(0, 256); lane.assertOwner();
             for (int user = 1; user <= users; user++) lane.registerUser(4L * user);
             var instruments = new CoreInstrument[symbols];
             for (int symbol = 0; symbol < symbols; symbol++) instruments[symbol] = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,

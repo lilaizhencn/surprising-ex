@@ -208,7 +208,7 @@ class SettlementLaneWorkerTest {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 while (!worker.handoffReady(epoch) && System.nanoTime() < deadline) Thread.yield();
                 assertThat(worker.handoffReady(epoch)).isTrue();
-                lane.bindOwner();
+                lane.assertOwner();
                 worker.submit(/* 当前真实任务收到的账户 Lane，恢复后核对其所有权 */ value -> { value.assertOwner(); resumed.countDown(); });
                 lane.assertOwner();
                 assertThat(resumed.getCount()).isOne();

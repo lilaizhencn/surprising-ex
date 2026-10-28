@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.settlement.command;
 
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation;
 import java.util.List;
 
@@ -27,11 +26,11 @@ public final class InstrumentSettlementCommands {
     public void applySettlementChangedIds(com.surprising.aeron.protocol.SettleInstrumentCommand command) {
         // 当前币对已有的生命周期结算进度，用来判断是否还处于撤单阶段。
         var progress = owner.lifecycleProgress(command.instrumentId());
-        // Matcher 索引按当前订单游标选出的路由页，不表示本方法已撤单。
-        TradingCoreRuntime.LifecycleOrderChunk chunk = owner.matchingFlow.lifecycleOrders(
-                0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
         if (progress == null || !progress.ordersComplete()) {
-            owner.resultBuilder.commandChangedOrderIds = boxedOrderIds(chunk.orders());
+            // Matcher 索引按当前订单游标选出的路由页，不表示本方法已撤单。
+            TradingCoreRuntime.LifecycleOrderChunk chunk = owner.matchingFlow.lifecycleOrders(
+                    0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
+            owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
             owner.resultBuilder.addChangedUsersFromOrders(chunk.orders());
             return;
         }
@@ -49,17 +48,5 @@ public final class InstrumentSettlementCommands {
         return RuntimeLifecycleSettlementContinuation.prepare(reuse, command,
                 owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()),
                 owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
-    }
-
-    /**
-     * 把撤单路由中的订单编号依次写入新原语数组，并交给只读 Long 列表持有；返回 List<Long> 接口，不为每一项长期保存单独的装箱对象。
-     * @param orders 按页顺序排列的撤单路由，空时返回空列表
-     */
-    private static List<Long> boxedOrderIds(List<CancellationOrder> orders) {
-        if (orders == null || orders.isEmpty()) return List.of();
-        // 刚分配并交给只读列表接管的订单编号原语数组。
-        long[] values = new long[orders.size()];
-        for (/* 当前订单路由在列表及编号数组中的共同下标。 */ int index = 0; index < values.length; index++) values[index] = orders.get(index).orderId();
-        return com.surprising.aeron.support.collection.ImmutableLongArrayList.takeOwnership(values);
     }
 }

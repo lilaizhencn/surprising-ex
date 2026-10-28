@@ -181,7 +181,8 @@ public final class MatchingCommandAdmission {
      */
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                    CoreMessage command) {
-        return newPendingMatching(sequence, operation, command, owner.fingerprints().of(command));
+        return owner.pendingMatching().acquire(sequence, operation, command, owner.fingerprints().of(command),
+                List.of(), owner.decodeMatchingCommand(command), null);
     }
 
     /**
@@ -193,7 +194,7 @@ public final class MatchingCommandAdmission {
      */
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint) {
-        return newPendingMatching(sequence, operation, command, fingerprint, List.of(),
+        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
                 owner.decodeMatchingCommand(command), null);
     }
 
@@ -208,27 +209,8 @@ public final class MatchingCommandAdmission {
     CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                    CoreMessage command, CommandFingerprint fingerprint,
                                    DecodedMatchingCommand decodedCommand) {
-        return newPendingMatching(sequence, operation, command, fingerprint, List.of(),
+        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, List.of(),
                 decodedCommand, null);
-    }
-
-    /**
-     * 把已有解码、准入和前置撤单交给命令槽，避免重复解码和搬运。
-     * @param sequence 当前原命令或新借槽的完整 Core 序号
-     * @param operation 当前撮合操作类别
-     * @param command 当前原始 Core 命令
-     * @param fingerprint 原命令完整指纹
-     * @param preMatchingCancellations 本轮已确定要先执行的撤单编号
-     * @param decodedCommand 已经解码的类型化命令输入
-     * @param admission 已解析的可空准入结果
-     */
-    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
-                                   CoreMessage command, CommandFingerprint fingerprint,
-                                   List<Long> preMatchingCancellations,
-                                   DecodedMatchingCommand decodedCommand,
-                                   ResolvedMatchingAdmission admission) {
-        return owner.pendingMatching().acquire(sequence, operation, command, fingerprint, preMatchingCancellations,
-                decodedCommand, admission);
     }
 
     /**
@@ -387,7 +369,7 @@ public final class MatchingCommandAdmission {
         owner.commits.publication.complete();
         // 当前新借、恢复或参与范围比较的命令槽
         CommandSlot pending = deferredPending == null
-                ? newPendingMatching(sequence, operation, message, effectiveFingerprint,
+                ? owner.pendingMatching().acquire(sequence, operation, message, effectiveFingerprint,
                         preMatchingCancellations, decodedCommand, admission)
                 : deferredPending.withPreMatchingCancellations(preMatchingCancellations)
                         .withAdmission(admission);
@@ -606,9 +588,10 @@ public final class MatchingCommandAdmission {
             }
             batchScopeUsers[batchScopeCount] = liquidation.userId();
             batchScopeSymbols[batchScopeCount++] = liquidationSymbol;
-            ensureLifecycleScopeAvailable(new LifecycleScope(false, liquidation.userId(),
-                    liquidationSymbol,
-                    action.liquidationId(), true, false));
+            ensureLifecycleScopeAvailable(liquidation.userId(), liquidationSymbol,
+                    new LifecycleScope(false, liquidation.userId(),
+                            liquidationSymbol,
+                            action.liquidationId(), true, false));
             batchChangedUsers.add(liquidation.userId());
             if (remaining > 0) {
                 // 按剩余预算取得的当前强平撤单页
@@ -671,19 +654,13 @@ public final class MatchingCommandAdmission {
     void rejectLifecycleOverlap(CoreMessage message, CommandSlot.Operation operation,
                                         DecodedMatchingCommand decodedCommand) {
         if (operation == CommandSlot.Operation.LIQUIDATION || operation == CommandSlot.Operation.SETTLEMENT) {
-            ensureLifecycleScopeAvailable(lifecycleScope(message, operation, decodedCommand));
+            // 本条生命周期命令解析出的完整冲突检查范围
+            LifecycleScope scope = lifecycleScope(message, operation, decodedCommand);
+            ensureLifecycleScopeAvailable(scope.userId(), scope.instrumentId(), scope);
         } else {
             ensureLifecycleScopeAvailable(message.header().userId(),
                     matchingSymbol(operation, decodedCommand), null);
         }
-    }
-
-    /**
-     * 把已有生命周期范围展开，交同一冲突检查入口。
-     * @param candidate 要检查的完整生命周期范围，普通订单原语入口传空
-     */
-    void ensureLifecycleScopeAvailable(LifecycleScope candidate) {
-        ensureLifecycleScopeAvailable(candidate.userId(), candidate.instrumentId(), candidate);
     }
 
     /**

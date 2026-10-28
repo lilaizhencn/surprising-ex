@@ -65,7 +65,7 @@ class CommittedDeliveryReplayTest {
             byte[] encoded = CoreMessageCodec.encode(message);
             replay.apply(encoded, now, sequence * 4096);
             CoreTestCompletion.applyAsynchronously(reference, message, now, sequence * 4096);
-            assertThat(replay.businessHash()).isEqualTo(reference.snapshotBusinessStateHash());
+            assertThat(replay.businessHash()).isEqualTo(reference.stateHash());
             assertThat(replay.deliveryPage().cashFlows()).containsExactly(new CommittedTradeReplay.DeliveryCashFlow(2,
                     line == ProductLine.LINEAR_DELIVERY ? "USDT" : "BTC", pnl, 100_000 + pnl));
             // 重复买方结算前回放业务哈希
@@ -74,7 +74,7 @@ class CommittedDeliveryReplayTest {
             CoreTestCompletion.applyAsynchronously(reference, message, now, (sequence + 1) * 4096);
             assertThat(replay.deliveryPage()).isNull();
             assertThat(replay.businessHash()).isEqualTo(hash);
-            assertThat(replay.businessHash()).isEqualTo(reference.snapshotBusinessStateHash());
+            assertThat(replay.businessHash()).isEqualTo(reference.stateHash());
         }
     }
 
@@ -140,7 +140,7 @@ class CommittedDeliveryReplayTest {
         var command = message(line, type, user, payload);
         replay.apply(CoreMessageCodec.encode(command), now, sequence * 4096);
         CoreTestCompletion.applyAsynchronously(reference, command, now, sequence * 4096);
-        assertThat(replay.businessHash()).as("replay cash observation preserves online trading state for " + type).isEqualTo(reference.snapshotBusinessStateHash());
+        assertThat(replay.businessHash()).as("replay cash observation preserves online trading state for " + type).isEqualTo(reference.stateHash());
         if (user > 0) assertThat(replay.commandResult().status()).as("fixture command " + type + " code=" + replay.commandResult().code()).isEqualTo(ResponseStatus.APPLIED);
     }
     /**

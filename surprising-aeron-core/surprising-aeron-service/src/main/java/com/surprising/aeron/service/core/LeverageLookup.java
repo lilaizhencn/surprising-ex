@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
  * 查杠杆时复用的可变探针，模拟正式杠杆键的哈希与字段比较；
  * 只在所属执行线程查找，不作为映射中的持久键。
  */
-public class LeverageLookup {
+public final class LeverageLookup {
     /** 本次杠杆查找的用户身份，下次 set 覆盖。 */
     long userId;
     /** 本次杠杆查找的外部标的 ID，clear 时释放引用。 */

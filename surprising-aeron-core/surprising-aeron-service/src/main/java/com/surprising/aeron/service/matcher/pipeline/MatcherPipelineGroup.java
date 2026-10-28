@@ -16,7 +16,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     /** Owner 现有命令槽环，Matcher 完成结果直接发布到其中，组内不另存一份业务结果表。 */
     private final CommandSlotRing contexts;
     /** Matcher 发布完成时置位、Owner 一次取清的就绪位图，用来筛选需要回收的分片。 */
-    private final com.surprising.aeron.service.core.TradingAccountRuntime.PaddedReadyMask completedShardMask;
+    private final com.surprising.aeron.service.core.PaddedReadyMask completedShardMask;
 
     /**
      * 校验正的二次幂分片数和非空命令槽环，为每个分片创建延迟启动的流水线；需要立即启动时依次启动全部独立 worker。
@@ -30,7 +30,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
             throw new IllegalArgumentException("matcher shard count must be a power of two");
         }
         this.contexts = java.util.Objects.requireNonNull(contexts, "matching sequence contexts");
-        completedShardMask = new com.surprising.aeron.service.core.TradingAccountRuntime.PaddedReadyMask(shardCount);
+        completedShardMask = new com.surprising.aeron.service.core.PaddedReadyMask(shardCount);
         shards = new MatcherCommandPipeline[shardCount];
         for (/* 当前操作的分片流水线，构造循环中则是分片下标。 */ int shard = 0; shard < shardCount; shard++) {
             int shardId = shard;
