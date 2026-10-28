@@ -126,7 +126,7 @@ class ControlOrderMetadataLeaseTest {
         var command = new PlaceOrderCommand(id, "1", CoreOrderSide.BUY, 100, 2, false, CoreMarginMode.CROSS,
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "control-" + id);
         return new ResolvedPlaceOrder(command, CoreStateTestFixtures.runtimeInstrument(), 5,
-                100, 100, 100, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
+                100, 100, 100, 0, 0, ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
 
     /**

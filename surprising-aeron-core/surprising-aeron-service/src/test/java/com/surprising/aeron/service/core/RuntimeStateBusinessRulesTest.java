@@ -866,7 +866,7 @@ class RuntimeStateBusinessRulesTest {
         // 意图所属的已有标的，供显式准入结果使用
         CoreInstrument instrument = state.instruments().get(intent.instrumentId());
         return new ResolvedPlaceOrder(intent, instrument, 0, intent.limitPriceTicks(), intent.limitPriceTicks(),
-                intent.limitPriceTicks(), kind, asset, makerFeeRatePpm, takerFeeRatePpm);
+                intent.limitPriceTicks(), 0, 0, kind, asset, makerFeeRatePpm, takerFeeRatePpm);
     }
 
     /**

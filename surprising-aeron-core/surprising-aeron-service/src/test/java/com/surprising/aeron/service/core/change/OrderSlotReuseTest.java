@@ -30,7 +30,7 @@ class OrderSlotReuseTest {
         // 用于构造已解析意图的限价下单业务命令。
         var order = new PlaceOrderCommand(id, "1", CoreOrderSide.BUY, 100, 10, false,
                 CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-" + id);
-        return new ResolvedPlaceOrder(order, CoreStateTestFixtures.runtimeInstrument(), 0, 100, 100, 100,
+        return new ResolvedPlaceOrder(order, CoreStateTestFixtures.runtimeInstrument(), 0, 100, 100, 100, 0, 0,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
     /**

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.*;
@@ -14,7 +16,6 @@ import com.surprising.aeron.service.core.DirectMatcherTestInputs;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
-import com.surprising.aeron.service.matcher.CoreMatchingOrder;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matcher.MatcherEventFixtures;
 import com.surprising.aeron.service.order.state.OrderRuntime;
@@ -379,11 +380,17 @@ class MatcherSettlementPlanTest {
     void nativeMatcherLimitsSharedMakerAcrossConsecutiveItemsBeforeLaneApplication() {
         try (var adapter = new DeterministicExchangeCoreAdapter()) {
             DirectMatcherTestInputs.placeDirect(adapter, 20,
-                    new CoreMatchingOrder(10, 1, CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 5, 0));
+                    DirectMatcherTestInputs.order(
+                            ProductLine.SPOT, 10, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC, 100, 5));
             var first = DirectMatcherTestInputs.placeDirect(adapter, 21,
-                    new CoreMatchingOrder(11, 1, CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 3, 0));
+                    DirectMatcherTestInputs.order(
+                            ProductLine.SPOT, 11, "1", CoreOrderSide.BUY, CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC, 100, 3));
             var second = DirectMatcherTestInputs.placeDirect(adapter, 22,
-                    new CoreMatchingOrder(12, 1, CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 3, 0));
+                    DirectMatcherTestInputs.order(
+                            ProductLine.SPOT, 12, "1", CoreOrderSide.BUY, CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC, 100, 3));
             assertThat(first.plan(0).tradeCount()).isOne();
             assertThat(second.plan(0).tradeCount()).isOne();
             assertThat(first.plan(0).matcherEvent(0).size()).isEqualTo(3);

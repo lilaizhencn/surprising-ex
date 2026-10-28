@@ -4,44 +4,47 @@ import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 订单值更新的单元测试，核对合并成交与提交元数据操作等价于分步操作，原前值不变，创建时间、累计费用和成交值高低位在后续更新中保留。
+ * 订单值更新的单元测试，核对取消与提交元数据的复制和原位更新，原前值不变，创建时间、累计费用和成交值高低位在后续更新中保留。
  */
 class OrderRuntimeTest {
     /**
-     * 比较一次生成成交及提交后状态与先成交再补元数据的结果，覆盖返佣和 -1 不更新时间分支，并核对原订单成交量、费用和时间未变。
-     */
-    @Test
-    void combinesFillAndCommitWithoutChangingRevisionFeesOrPriorSnapshot() {
-        // 已补初次时间位置的原订单前值，后状态操作不能改写它。
-        OrderRuntime before = CoreStateTestFixtures.order(11, 7, 5, 10).withCommitMetadata(100, 200);
-        // 先应用成交再补提交元数据的参照后状态。
-        OrderRuntime expected = before.withFill(3, 7, 4, CoreOrderStatus.OPEN, 2)
-                .withCommitMetadata(110, 210);
-        // 一次合并成交、费用和提交元数据生成的结果，应与参照相同。
-        OrderRuntime actual = before.withFill(3, 7, 4, CoreOrderStatus.OPEN, 2, 110, 210);
-        assertThat(actual).isEqualTo(expected);
-        assertThat(before.executedQuantitySteps()).isZero();
-        assertThat(before.cumulativeFeeUnits()).isZero();
-        assertThat(before.updatedAtEpochMillis()).isEqualTo(100);
-        assertThat(actual.withFill(10, 0, -1, CoreOrderStatus.FILLED, 3, 120, 220))
-                .isEqualTo(actual.withFill(10, 0, -1, CoreOrderStatus.FILLED, 3).withCommitMetadata(120, 220));
-        assertThat(before.withFill(3, 7, 4, CoreOrderStatus.OPEN, 2, -1, -1))
-                .isEqualTo(before.withFill(3, 7, 4, CoreOrderStatus.OPEN, 2));
-    }
-
-    /**
-     * 取消与提交元数据合并后应等同分步操作，原订单仍为 OPEN 且版本不变。
+     * 部分成交后的取消副本应与原位更新相同，原订单仍为 OPEN，费用和累计成交值保留。
      */
     @Test
     void combinesCancellationAndCommitAndPreservesTheOldOrder() {
         // 已补初次时间位置的原订单前值，后状态操作不能改写它。
         OrderRuntime before = CoreStateTestFixtures.order(11, 7, 5, 10).withCommitMetadata(100, 200);
-        assertThat(before.withStatus(CoreOrderStatus.CANCELED, 2, 110, 210))
-                .isEqualTo(before.withStatus(CoreOrderStatus.CANCELED, 2).withCommitMetadata(110, 210));
+        before.applyFillInPlace(3, 7, -1, CoreOrderStatus.OPEN, 1, -1, -1);
+        before.executionValue(1, -1);
+        var expected = before.snapshot();
+        expected.applyStatusInPlace(CoreOrderStatus.CANCELED, 2, 110, 210);
+        assertThat(before.withStatus(CoreOrderStatus.CANCELED, 2, 110, 210)).isEqualTo(expected);
         assertThat(before.status()).isEqualTo(CoreOrderStatus.OPEN);
         assertThat(before.revision()).isEqualTo(1);
+    }
+
+    @Test
+    void rejectsInvalidStatusMetadataWithoutChangingExecutionOrFees() {
+        var order = CoreStateTestFixtures.order(11, 7, 5, 10).withCommitMetadata(100, 200);
+        order.applyFillInPlace(3, 7, -1, CoreOrderStatus.OPEN, 2, 110, 210);
+        var before = order.snapshot();
+        assertThatThrownBy(() -> order.applyStatusInPlace(null, 3, 120, 220))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> order.applyStatusInPlace(CoreOrderStatus.CANCELED, 0, 120, 220))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> order.applyStatusInPlace(CoreOrderStatus.CANCELED, 3, 120, -1))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(order).isEqualTo(before);
+        var copied = order.withStatus(CoreOrderStatus.CANCELED, 3, -1, -1);
+        order.applyStatusInPlace(CoreOrderStatus.CANCELED, 3, -1, -1);
+        assertThat(order).isEqualTo(copied);
+        assertThat(order.executedQuantitySteps()).isEqualTo(3);
+        assertThat(order.cumulativeFeeUnits()).isEqualTo(-1);
+        assertThat(order.updatedAtEpochMillis()).isEqualTo(110);
+        assertThat(order.clusterPosition()).isEqualTo(210);
     }
 
     /**

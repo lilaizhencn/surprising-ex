@@ -1,10 +1,15 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.product.api.ProductLine;
+
+import com.surprising.aeron.service.core.DirectMatcherTestInputs;
+
+import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
-import com.surprising.aeron.service.matcher.CoreMatchingOrder;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matcher.pipeline.MatcherPipelineGroup;
 import java.util.ArrayList;
@@ -168,9 +173,9 @@ class MatcherPipelineGroupTest {
             // 确认第一个分片已进入阻塞命令的门闩。
             CountDownLatch firstStarted = new CountDownLatch(1);
             // 第一笔订单输入，路由拒绝测试中则是第一条命令槽。
-            CoreMatchingOrder first = order(1, firstSymbol);
+            ResolvedPlaceOrder first = order(1, firstSymbol);
             // 第二笔订单输入，路由拒绝测试中则是第二条命令槽。
-            CoreMatchingOrder second = order(2, secondSymbol);
+            ResolvedPlaceOrder second = order(2, secondSymbol);
 
             // 第一笔直接撮合使用的 UUID。
             var firstId = UUID.randomUUID();
@@ -272,9 +277,10 @@ class MatcherPipelineGroupTest {
      * @param orderId 人工下单的订单号
      * @param instrumentId 数字字符串品种编号
      */
-    private static CoreMatchingOrder order(long orderId, String instrumentId) {
-        return new CoreMatchingOrder(orderId, instrumentId, CoreOrderSide.BUY,
-                CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 1);
+    private static ResolvedPlaceOrder order(long orderId, String instrumentId) {
+        return DirectMatcherTestInputs.order(
+                ProductLine.SPOT, orderId, instrumentId, CoreOrderSide.BUY, CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC, 100, 1);
     }
 
     /**

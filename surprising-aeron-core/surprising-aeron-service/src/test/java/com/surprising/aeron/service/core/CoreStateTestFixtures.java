@@ -283,4 +283,16 @@ public final class CoreStateTestFixtures {
         }
     }
 
+    /** 为索引、准入和快照测试准备独立成交后值，不为生产保留冷复制入口。 */
+    public static OrderRuntime filledOrder(OrderRuntime order, long executed, long remaining, long feeUnits,
+            com.surprising.aeron.model.CoreOrderStatus status, long revision) {
+        return new OrderRuntime(order.orderId(), order.productLine(), order.userId(), order.symbolId(),
+                order.instrument(), order.side(), order.matchingPriceTicks(), order.quantitySteps(), executed,
+                remaining, order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(),
+                order.timeInForce(), order.postOnly(), order.clientOrderId(), order.commandId(),
+                order.makerFeeRatePpm(), order.takerFeeRatePpm(), Math.addExact(order.cumulativeFeeUnits(), feeUnits),
+                order.executedValueHigh(), order.executedValueLow(), order.createdAtEpochMillis(),
+                order.updatedAtEpochMillis(), order.clusterPosition(), status, revision);
+    }
+
 }

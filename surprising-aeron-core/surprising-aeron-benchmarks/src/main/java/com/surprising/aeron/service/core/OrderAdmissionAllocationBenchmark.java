@@ -56,7 +56,7 @@ public class OrderAdmissionAllocationBenchmark {
         var intent = new PlaceOrderCommand(11, "1", CoreOrderSide.BUY, 100, 1,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-11");
-        resolved = new ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100,
+        resolved = new ResolvedPlaceOrder(intent, instrument, 0, 100, 100, 100, 0, 0,
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
 

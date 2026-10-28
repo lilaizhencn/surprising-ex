@@ -39,8 +39,8 @@ class TradingStateSnapshotCodecTest {
                 CoreStateTestFixtures.instrument(ProductLine.SPOT, "1", "BTC", "USDT", "USDT")),
                 7, new BalanceAdjustmentCommand("USDT", 50_000));
         // 测试订单字段值，人工设置成交金额高低位并补提交元数据后作为构造输入。
-        var mutableOrder = CoreStateTestFixtures.order(11, 7, 5, 10)
-                .withFill(3, 7, 4, com.surprising.aeron.model.CoreOrderStatus.OPEN, 2);
+        var mutableOrder = CoreStateTestFixtures.filledOrder(CoreStateTestFixtures.order(11, 7, 5, 10),
+                3, 7, 4, com.surprising.aeron.model.CoreOrderStatus.OPEN, 2);
         mutableOrder.executionValue(1, -1);
         var runtimeOrder = mutableOrder.snapshot().withCommitMetadata(100, 200);
         // 人工构造的不可变订单，含指定成交金额高低位。

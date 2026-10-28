@@ -1,5 +1,9 @@
 package com.surprising.aeron.service.matcher;
 
+import com.surprising.aeron.service.core.DirectMatcherTestInputs;
+
+import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
+
 import static com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport.matcherSnapshot;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
 import com.surprising.aeron.model.CoreOrderState;
@@ -76,15 +80,15 @@ class DeterministicExchangeCoreAdapterTest {
     void depthQueriesDoNotDiscardRestingOrdersBeyondVisibleLevels() {
         try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
             for (/* 当前正在构造的价格档位下标。 */ int level = 0; level < 151; level++) {
-                assertThat(placeDirect(adapter, 11, new CoreMatchingOrder(1000 + level, "21",
-                        CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
-                        100_000 + level, 1)).accepted()).isTrue();
+                assertThat(placeDirect(adapter, 11, DirectMatcherTestInputs.order(
+                        ProductLine.SPOT, 1000 + level, "21", CoreOrderSide.SELL, CoreOrderType.LIMIT,
+                        CoreTimeInForce.GTC, 100_000 + level, 1)).accepted()).isTrue();
             }
             assertThat(adapter.orderBookLevels("21", 50)).hasSize(50);
             assertThat(adapter.orderBookLevels("21", 100)).hasSize(100);
             // 当前直接命令取得的撮合回执。
-            var result = placeDirect(adapter, 22, new CoreMatchingOrder(2000, "21",
-                    CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
+            var result = placeDirect(adapter, 22, DirectMatcherTestInputs.order(
+                    ProductLine.SPOT, 2000, "21", CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
                     100_150, 151));
             // 从回执事件中筛选出的 TRADE 列表。
             var trades = result.matcherEvents().stream()
@@ -102,21 +106,22 @@ class DeterministicExchangeCoreAdapterTest {
      * @param side 当前参数化的市价买入或卖出方向
      */
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.EnumSource(CoreOrderSide.class)
-    void linearMarketOrderCannotSweepBeyondOneBasisPoint(CoreOrderSide side) {
+    @org.junit.jupiter.params.provider.MethodSource("linearMarketSides")
+    void linearMarketOrderCannotSweepBeyondOneBasisPoint(ProductLine product, CoreOrderSide side) {
         try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
             // 当前参数是否买入，决定 Maker 方向和递进价格符号。
             boolean buy = side == CoreOrderSide.BUY;
             // 为市价单提供深度的反向 Maker 方向。
             CoreOrderSide makerSide = buy ? CoreOrderSide.SELL : CoreOrderSide.BUY;
             for (/* 当前正在构造的价格档位下标。 */ int level = 0; level < 3; level++) {
-                placeDirect(adapter, 11, new CoreMatchingOrder(101 + level, "21", makerSide,
-                        CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                placeDirect(adapter, 11, DirectMatcherTestInputs.order(
+                        product, 101 + level, "21", makerSide, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                         100_000 + (buy ? 1 : -1) * level * 10, 2));
             }
             // 本次待提交或用于前置 Core 元数据的订单。
-            var order = new CoreMatchingOrder(201, "21", side, CoreOrderType.MARKET,
-                    CoreTimeInForce.IOC, buy ? 110_000 : 90_000, 6, 100);
+            var order = DirectMatcherTestInputs.order(
+                    product, 201, "21", side, CoreOrderType.MARKET, CoreTimeInForce.IOC,
+                    buy ? 110_000 : 90_000, 6);
             // 当前直接命令取得的撮合回执。
             var result = placeDirect(adapter, 4, new java.util.UUID(22, 4), 1000, 22, order);
             // 从回执事件中筛选出的 TRADE 列表。
@@ -128,17 +133,26 @@ class DeterministicExchangeCoreAdapterTest {
         }
     }
 
+    private static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> linearMarketSides() {
+        return java.util.stream.Stream.of(ProductLine.LINEAR_PERPETUAL, ProductLine.LINEAR_DELIVERY)
+                .flatMap(product -> java.util.Arrays.stream(CoreOrderSide.values())
+                        .map(side -> org.junit.jupiter.params.provider.Arguments.of(product, side)));
+    }
+
     /**
      * 在九十九和一百两个卖价档前提交带窄滑点的市价买单，要求只成交九十九，舍入不能额外放宽一跳。
      */
-    @Test
-    void marketSlippageRoundingDoesNotAllowAnExtraTick() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "LINEAR_DELIVERY"})
+    void marketSlippageRoundingDoesNotAllowAnExtraTick(ProductLine product) {
         try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
-            placeDirect(adapter, 11, ask(101, 99));
-            placeDirect(adapter, 11, ask(102, 100));
+            placeDirect(adapter, 11, DirectMatcherTestInputs.order(
+                    product, 101, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 99, 2));
+            placeDirect(adapter, 11, DirectMatcherTestInputs.order(
+                    product, 102, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 2));
             // 当前直接命令取得的撮合回执。
-            var result = placeDirect(adapter, 22, new CoreMatchingOrder(201, "1", CoreOrderSide.BUY,
-                    CoreOrderType.MARKET, CoreTimeInForce.IOC, 110, 100, 100));
+            var result = placeDirect(adapter, 22, DirectMatcherTestInputs.order(
+                    product, 201, "1", CoreOrderSide.BUY, CoreOrderType.MARKET, CoreTimeInForce.IOC, 110, 100));
             assertThat(result.matcherEvents().stream()
                     .filter(/* 当前用于筛选 TRADE 类型的原生事件。 */ e -> e.eventType() == exchange.core2.core.common.MatcherEventType.TRADE))
                     .extracting(MatcherResult.MatcherEvent::price).containsExactly(99L);
@@ -152,11 +166,13 @@ class DeterministicExchangeCoreAdapterTest {
     void nativeCancellationPreservesEvidenceForPartialFillsAndRepeatedCancellation() {
         try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
             // 本次待提交或用于前置 Core 元数据的订单。
-            var order = new CoreMatchingOrder(901, "31", CoreOrderSide.BUY,
-                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 10);
+            var order = DirectMatcherTestInputs.order(
+                    ProductLine.SPOT, 901, "31", CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                    90, 10);
             placeDirect(adapter, 7, order);
-            placeDirect(adapter, 8, new CoreMatchingOrder(902, "31", CoreOrderSide.SELL,
-                    CoreOrderType.LIMIT, CoreTimeInForce.IOC, 90, 4));
+            placeDirect(adapter, 8, DirectMatcherTestInputs.order(
+                    ProductLine.SPOT, 902, "31", CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
+                    90, 4));
             // 首次成功撤销剩余六份数量的结果。
             var accepted = cancelDirect(adapter, 3, new java.util.UUID(7, 3), 3000, 7, 901, "31");
             assertThat(accepted.accepted()).isTrue();
@@ -207,7 +223,8 @@ class DeterministicExchangeCoreAdapterTest {
             MatchingResult first = null;
             for (/* 当前连续下单或发起异步查询的循环下标。 */ int i = 1; i <= 4; i++) {
                 // 本次待提交或用于前置 Core 元数据的订单。
-                var order = new CoreMatchingOrder(i, "21", i == 2 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
+                var order = DirectMatcherTestInputs.order(
+                        ProductLine.SPOT, i, "21", i == 2 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
                         CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1);
                 // 原命令 UUID，或构造控制分片前置订单时的普通订单编号。
                 var id = new java.util.UUID(7, i);
@@ -364,8 +381,9 @@ class DeterministicExchangeCoreAdapterTest {
             placeDirect(adapter, 11, ask(101, 100));
             placeDirect(adapter, 12, ask(102, 100));
             // 当前需要准备并直接执行的撮合订单。
-            var command = new CoreMatchingOrder(201, "1", CoreOrderSide.BUY,
-                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, 4);
+            var command = DirectMatcherTestInputs.order(
+                    ProductLine.SPOT, 201, "1", CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                    100, 4);
             // 当前直接命令取得的撮合回执。
             var result = placeDirect(adapter, 22, command);
             assertThat(result.matcherEvents()).extracting(MatcherResult.MatcherEvent::matchedOrderId)
@@ -624,7 +642,7 @@ class DeterministicExchangeCoreAdapterTest {
      * 构造默认订单一、币对一、两份数量的限价 GTC 买单。
      * @param priceTicks 测试订单价格
      */
-    private static CoreMatchingOrder bid(long priceTicks) {
+    private static ResolvedPlaceOrder bid(long priceTicks) {
         return bid(1, priceTicks);
     }
 
@@ -633,7 +651,7 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static CoreMatchingOrder bid(long orderId, long priceTicks) {
+    private static ResolvedPlaceOrder bid(long orderId, long priceTicks) {
         return bid(orderId, "1", priceTicks);
     }
 
@@ -643,8 +661,9 @@ class DeterministicExchangeCoreAdapterTest {
      * @param instrumentId 测试使用的永久币对十进制编号文本
      * @param priceTicks 测试订单价格
      */
-    private static CoreMatchingOrder bid(long orderId, String instrumentId, long priceTicks) {
-        return new CoreMatchingOrder(orderId, instrumentId, CoreOrderSide.BUY, CoreOrderType.LIMIT,
+    private static ResolvedPlaceOrder bid(long orderId, String instrumentId, long priceTicks) {
+        return DirectMatcherTestInputs.order(
+                ProductLine.SPOT, orderId, instrumentId, CoreOrderSide.BUY, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, priceTicks, 2);
     }
 
@@ -653,9 +672,10 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static CoreMatchingOrder ask(long orderId, long priceTicks) {
-        return new CoreMatchingOrder(orderId, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT,
-                CoreTimeInForce.GTC, priceTicks, 2);
+    private static ResolvedPlaceOrder ask(long orderId, long priceTicks) {
+        return DirectMatcherTestInputs.order(
+                ProductLine.SPOT, orderId, "1", CoreOrderSide.SELL, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                priceTicks, 2);
     }
 
     /**
@@ -663,9 +683,10 @@ class DeterministicExchangeCoreAdapterTest {
      * @param orderId 要构造的普通订单编号
      * @param priceTicks 测试订单价格
      */
-    private static CoreMatchingOrder postOnlyBid(long orderId, long priceTicks) {
-        return new CoreMatchingOrder(orderId, "1", CoreOrderSide.BUY, CoreOrderType.LIMIT,
-                CoreTimeInForce.GTX, priceTicks, 2);
+    private static ResolvedPlaceOrder postOnlyBid(long orderId, long priceTicks) {
+        return DirectMatcherTestInputs.order(
+                ProductLine.SPOT, orderId, "1", CoreOrderSide.BUY, CoreOrderType.LIMIT, CoreTimeInForce.GTX,
+                priceTicks, 2);
     }
 
     /**

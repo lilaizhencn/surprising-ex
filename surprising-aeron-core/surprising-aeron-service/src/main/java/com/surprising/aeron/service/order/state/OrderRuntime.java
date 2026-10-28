@@ -669,7 +669,7 @@ public final class OrderRuntime {
     }
 
     /**
-     * 保留当前成交与剩余数量，按零新增费用调用原位成交状态入口，只推进状态、版本及可选提交元数据。
+     * 保留成交数量和费用，直接推进状态、版本及可选提交元数据。
      * @param nextStatus 本次推进到的订单状态
      * @param nextRevision 本次推进到的正数订单版本
      * @param commitTimestamp 本次集群提交时间；不更新元数据的调用使用 -1
@@ -677,8 +677,17 @@ public final class OrderRuntime {
      */
     public void applyStatusInPlace(CoreOrderStatus nextStatus, long nextRevision,
                             long commitTimestamp, long commitPosition) {
-        applyFillInPlace(executedQuantitySteps, remainingQuantitySteps(), 0,
-                nextStatus, nextRevision, commitTimestamp, commitPosition);
+        if (nextStatus == null || nextRevision <= 0 || commitTimestamp < -1 || commitPosition < -1
+                || commitTimestamp >= 0 && commitPosition < 0) {
+            throw new IllegalArgumentException("invalid runtime order execution");
+        }
+        if (commitTimestamp >= 0) {
+            if (createdAtEpochMillis == 0) createdAtEpochMillis = commitTimestamp;
+            updatedAtEpochMillis = commitTimestamp;
+            clusterPosition = commitPosition;
+        }
+        status = nextStatus;
+        revision = nextRevision;
     }
 
     /**
@@ -705,65 +714,6 @@ public final class OrderRuntime {
     }
 
     /**
-     * 按新的累计成交量、剩余量、状态和版本创建后状态，沿用原费用、累计成交值和提交元数据。
-     * @param executed 更新后的累计已成交数量步数
-     * @param remaining 更新后的剩余数量步数，两者精确和必须等于原始数量
-     * @param nextStatus 本次推进到的订单状态
-     * @param nextRevision 本次推进到的正数订单版本
-     */
-    public OrderRuntime withExecution(long executed, long remaining, CoreOrderStatus nextStatus, long nextRevision) {
-        return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
-                matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly, marginMode, positionSide,
-                orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm,
-                takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow, createdAtEpochMillis, updatedAtEpochMillis,
-                clusterPosition, nextStatus, nextRevision);
-    }
-
-    /**
-     * 创建包含新增费用的成交后状态，不更新提交时间和位置。
-     * @param executed 更新后的累计已成交数量步数
-     * @param remaining 更新后的剩余数量步数，两者精确和必须等于原始数量
-     * @param feeUnits 本次新增加的手续费整数金额，负数可表示返佣
-     * @param nextStatus 本次推进到的订单状态
-     * @param nextRevision 本次推进到的正数订单版本
-     */
-    public OrderRuntime withFill(long executed, long remaining, long feeUnits,
-                                 CoreOrderStatus nextStatus, long nextRevision) {
-        return withFill(executed, remaining, feeUnits, nextStatus, nextRevision, -1, -1);
-    }
-
-    /**
-     * 一次创建成交、费用及可选提交元数据的后状态；负提交时间沿用原时间位置，初次有效提交可补创建时间。
-     * @param executed 更新后的累计已成交数量步数
-     * @param remaining 更新后的剩余数量步数，两者精确和必须等于原始数量
-     * @param feeUnits 本次新增加的手续费整数金额，负数可表示返佣
-     * @param nextStatus 本次推进到的订单状态
-     * @param nextRevision 本次推进到的正数订单版本
-     * @param commitTimestamp 本次集群提交时间；不更新元数据的调用使用 -1
-     * @param commitPosition 本次集群日志位置；不更新元数据的调用使用 -1
-     */
-    OrderRuntime withFill(long executed, long remaining, long feeUnits,
-                          CoreOrderStatus nextStatus, long nextRevision,
-                          long commitTimestamp, long commitPosition) {
-        return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
-                matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly,
-                marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
-                makerFeeRatePpm, takerFeeRatePpm, Math.addExact(cumulativeFeeUnits, feeUnits), executedValueHigh, executedValueLow,
-                createdAtEpochMillis == 0 && commitTimestamp >= 0 ? commitTimestamp : createdAtEpochMillis,
-                commitTimestamp < 0 ? updatedAtEpochMillis : commitTimestamp,
-                commitTimestamp < 0 ? clusterPosition : commitPosition, nextStatus, nextRevision);
-    }
-
-    /**
-     * 保留数量和费用，创建仅状态与版本变化的订单后状态。
-     * @param nextStatus 本次推进到的订单状态
-     * @param nextRevision 本次推进到的正数订单版本
-     */
-    public OrderRuntime withStatus(CoreOrderStatus nextStatus, long nextRevision) {
-        return withExecution(executedQuantitySteps, remainingQuantitySteps(), nextStatus, nextRevision);
-    }
-
-    /**
      * 保留数量和费用，在同一新值中更新状态版本及提交时间位置。
      * @param nextStatus 本次推进到的订单状态
      * @param nextRevision 本次推进到的正数订单版本
@@ -772,8 +722,13 @@ public final class OrderRuntime {
      */
     public OrderRuntime withStatus(CoreOrderStatus nextStatus, long nextRevision,
                             long commitTimestamp, long commitPosition) {
-        return withFill(executedQuantitySteps, remainingQuantitySteps(), 0, nextStatus, nextRevision,
-                commitTimestamp, commitPosition);
+        return new OrderRuntime(orderId, productLine, userId, symbolId, instrument, side,
+                matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps(), reduceOnly,
+                marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
+                makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, executedValueHigh, executedValueLow,
+                createdAtEpochMillis == 0 && commitTimestamp >= 0 ? commitTimestamp : createdAtEpochMillis,
+                commitTimestamp < 0 ? updatedAtEpochMillis : commitTimestamp,
+                commitTimestamp < 0 ? clusterPosition : commitPosition, nextStatus, nextRevision);
     }
 
     /**

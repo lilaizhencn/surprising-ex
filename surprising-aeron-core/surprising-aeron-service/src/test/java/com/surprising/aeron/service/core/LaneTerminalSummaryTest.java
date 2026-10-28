@@ -24,7 +24,7 @@ class LaneTerminalSummaryTest {
             // 当前构造、按奇偶选择 OPEN 或 CANCELED 的订单
             var order = CoreStateTestFixtures.order(id, 7, 5, 10);
             if ((id & 1) == 0) {
-                order = order.withStatus(CoreOrderStatus.CANCELED, 2);
+                order = order.withStatus(CoreOrderStatus.CANCELED, 2, -1, -1);
                 expected.add(id);
             }
             changes.putOrder(id, order);
@@ -62,7 +62,7 @@ class LaneTerminalSummaryTest {
         var open = CoreStateTestFixtures.order(11, 7, 5, 10);
         for (var /* 本轮把同一订单改成的 OPEN 或终态状态 */ status : new CoreOrderStatus[]{CoreOrderStatus.OPEN, CoreOrderStatus.FILLED,
                 CoreOrderStatus.OPEN, CoreOrderStatus.CANCELED, CoreOrderStatus.REJECTED}) {
-            changes.putOrder(11, open.withStatus(status, 2));
+            changes.putOrder(11, open.withStatus(status, 2, -1, -1));
             changes.preparePublication();
             retained.clear();
             changes.commitTerminalToOwner(state, 0, sink, null, null);
@@ -90,7 +90,7 @@ class LaneTerminalSummaryTest {
         var state = new TradingAccountRuntime();
         // 本测试反复准备发布和清空的 Lane 变化缓冲
         var changes = new LaneCommitDelta();
-        changes.putOrder(11, CoreStateTestFixtures.order(11, 7, 5, 10).withStatus(CoreOrderStatus.CANCELED, 2));
+        changes.putOrder(11, CoreStateTestFixtures.order(11, 7, 5, 10).withStatus(CoreOrderStatus.CANCELED, 2, -1, -1));
         changes.preparePublication();
         // 本轮终态回调记录的 ID 列表，每轮使用前清空
         var retained = new ArrayList<Long>();

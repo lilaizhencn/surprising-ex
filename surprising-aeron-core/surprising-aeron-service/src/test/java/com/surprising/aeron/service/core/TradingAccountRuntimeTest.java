@@ -1606,12 +1606,12 @@ class TradingAccountRuntimeTest {
         for (/* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ long id = 1; id <= 100; id++) {
             // 当前原准入或测试成员订单
             OrderRuntime order = lane.order(id);
-            lane.putOrder(order.withExecution(1, 1, CoreOrderStatus.OPEN, 2));
+            lane.putOrder(CoreStateTestFixtures.filledOrder(order, 1, 1, 0, CoreOrderStatus.OPEN, 2));
             assertThat(AccountLaneTestAccess.activeOrderIdsByUser(lane).get(7)).isSameAs(membership);
         }
         assertThat(membership.size()).isEqualTo(100);
         for (/* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ long id = 1; id <= 100; id++) {
-            lane.putOrder(lane.order(id).withStatus(CoreOrderStatus.CANCELED, 3));
+            lane.putOrder(lane.order(id).withStatus(CoreOrderStatus.CANCELED, 3, -1, -1));
         }
         assertThat(AccountLaneTestAccess.activeOrderIdsByUser(lane).get(7)).isSameAs(membership);
         assertThat(membership.size()).isZero();

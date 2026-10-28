@@ -266,6 +266,6 @@ public final class RuntimeDerivativeMatchFixture {
      * @param order 本笔需要成交或结束剩余量的订单引用
      */
     private static OrderRuntime terminal(OrderRuntime order) {
-        return order.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(order.revision()));
+        return order.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(order.revision()), -1, -1);
     }
 }

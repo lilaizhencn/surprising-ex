@@ -40,7 +40,7 @@ class LaneCloseCapacityTest {
         lane.putOrder(order(206, 7, 3, CorePositionSide.LONG, CoreOrderSide.SELL, true, 100, 40));
         lane.putOrder(order(207, 7, 3, CorePositionSide.NET, CoreOrderSide.BUY, true, 100, 40));
         lane.putOrder(order(208, 7, 3, CorePositionSide.NET, CoreOrderSide.SELL, true, 100, 40)
-                .withStatus(CoreOrderStatus.CANCELED, 41));
+                .withStatus(CoreOrderStatus.CANCELED, 41, -1, -1));
         lane.putOrder(order(209, 7, 3, CorePositionSide.NET, CoreOrderSide.SELL, true, 100, 40));
         lane.reservations.put(209, CoreStateTestFixtures.reservation(209, 7, 0, 100));
         lane.markPendingReservation(209, 1);

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.core.index;
 
+import com.surprising.aeron.service.core.CoreStateTestFixtures;
+
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
@@ -121,7 +123,7 @@ class ActiveOrderIndexTest {
             }
             // 根据当前终态从首订单派生的结束订单状态
             var terminal = status == CoreOrderStatus.FILLED
-                    ? orders[0].withFill(10, 0, 0, status, 2) : orders[0].withStatus(status, 2);
+                    ? CoreStateTestFixtures.filledOrder(orders[0], 10, 0, 0, status, 2) : orders[0].withStatus(status, 2, -1, -1);
             index.apply(1, terminal, identities);
             index.apply(1, terminal, identities);
             index.apply(1, null, identities);
@@ -202,10 +204,10 @@ class ActiveOrderIndexTest {
         assertThat(route.instrumentId()).isEqualTo("1");
         assertThat(java.util.Arrays.stream(route.getClass().getDeclaredFields()).map(/* 当前反射字段，检查其值或类型以确认路由不含订单正文 */ field -> field.getType().getName()))
                 .doesNotContain(com.surprising.aeron.service.order.state.OrderRuntime.class.getName());
-        index.apply(1, order.withFill(4, 6, 3, CoreOrderStatus.OPEN, 2), identities);
+        index.apply(1, CoreStateTestFixtures.filledOrder(order, 4, 6, 3, CoreOrderStatus.OPEN, 2), identities);
         assertThat(index.activeOrderRoute(1)).isSameAs(route);
         assertThat(index.page(7, "1", 0, 10).orderIds()).containsExactly(1L);
-        index.apply(1, order.withStatus(CoreOrderStatus.CANCELED, 3), identities);
+        index.apply(1, order.withStatus(CoreOrderStatus.CANCELED, 3, -1, -1), identities);
         assertThat(index.activeOrderRoute(1)).isNull();
         assertThat(index.page(7, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
     }
@@ -294,10 +296,10 @@ class ActiveOrderIndexTest {
             assertThat(summary.reduceOnlyQuantity()).isZero();
             assertThat(summary.marginModeCount()).isEqualTo(1);
             runtime.onLane(11L, lane -> {
-                var filled = runtime.order(7).withFill(3, 2, 0, CoreOrderStatus.OPEN, 2);
+                var filled = CoreStateTestFixtures.filledOrder(runtime.order(7), 3, 2, 0, CoreOrderStatus.OPEN, 2);
                 filled.executionValue(-1, 0); // 原夹具未提供累计成交额，保留同一哨兵。
                 runtime.replaceOrder(filled);
-                runtime.replaceOrder(runtime.order(8).withStatus(CoreOrderStatus.CANCELED, 2));
+                runtime.replaceOrder(runtime.order(8).withStatus(CoreOrderStatus.CANCELED, 2, -1, -1));
                 return null;
             });
             summary = laneOrders.inspect(11, "1", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);

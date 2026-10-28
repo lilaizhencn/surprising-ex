@@ -75,7 +75,7 @@ public final class RuntimeSpotMatchFixture {
         taker = runtime.order(takerOrderId);
         if (!taker.canceled() && (taker.timeInForce().immediate()
                 || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-            runtime.replaceOrder(taker.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(taker.revision())));
+            runtime.replaceOrder(taker.withStatus(CoreOrderStatus.CANCELED, Math.incrementExact(taker.revision()), -1, -1));
         }
         releaseTerminalReservation(runtime, takerOrderId);
         treasuryDelta.apply(runtime.treasury());

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.matcher;
 
+import com.surprising.product.api.ProductLine;
+
 import com.surprising.aeron.config.CoreConfiguration;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.config.LaneTopology;
@@ -411,27 +413,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 按独立撮合输入注册品种、记用户、计算市价保护边界，再把买卖方向与订单类型转换后写入调用方提供的原生槽。使用当前命令的 Cluster 时间，不处理资金。
-     * @param userId 请求或对账订单所属用户号
-     * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
-     */
-    private exchange.core2.core.common.MatcherResult placeNative(long userId, CoreMatchingOrder command, exchange.core2.core.common.MatcherResult target) {
-        // 当前品种的永久原生编号。
-        int symbolId = ensureSymbol(command.instrumentId());
-        recordUser(userId);
-        // 市价保护收紧后的原生撮合价格，限价单保留原价。
-        long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
-                command.matchingPriceTicks(), command.maxSlippagePpm());
-        return engine(symbolId).placeInto(target,
-                currentCommandScope().aeronTimestamp, command.orderId(), 0,
-                price, command.matchingPriceTicks(), command.quantitySteps(),
-                command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
-                orderType(command), symbolId, userId);
-    }
-
-    /**
-     * 直接读取已完成准入的订单输入，按产品线滑点规则计算市价边界并填入原生槽，避免重建 CoreMatchingOrder。
+     * 直接读取已完成准入的订单输入，按产品线滑点规则计算市价边界并填入原生槽。
      * @param userId 请求或对账订单所属用户号
      * @param command 只读撮合输入，必须遵守其冻结及使用期限
      * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
@@ -442,7 +424,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         recordUser(userId);
         // 市价保护收紧后的原生撮合价格，限价单保留原价。
         long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
-                command.matchingPriceTicks(), CoreMatchingOrder.slippagePpm(command.instrument().contractType().productLine()));
+                command.matchingPriceTicks(), slippagePpm(command.instrument().contractType().productLine()));
         return engine(symbolId).placeInto(target,
                 currentCommandScope().aeronTimestamp, command.orderId(), 0,
                 price, command.matchingPriceTicks(), command.quantitySteps(),
@@ -463,7 +445,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         recordUser(userId);
         // 市价保护收紧后的原生撮合价格，限价单保留原价。
         long price = protectedMarketPrice(symbolId, command.side(), command.orderType(),
-                command.matchingPriceTicks(), CoreMatchingOrder.slippagePpm(command.productLine()));
+                command.matchingPriceTicks(), slippagePpm(command.productLine()));
         return engine(symbolId).placeInto(target,
                 currentCommandScope().aeronTimestamp, command.orderId(), 0,
                 price, command.matchingPriceTicks(), command.remainingQuantitySteps(),
@@ -517,37 +499,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult placeDirect(
             int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
             long userId, ResolvedPlaceOrder command,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
-            throw new IllegalArgumentException("invalid direct matcher command");
-        validateCommandEvidence(coreSequence, commandIdMsb, commandIdLsb, command.orderId(), aeronTimestamp);
-        // 当前线程可使用的独占命令上下文。
-        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
-        try {
-            return publishNativeMatcherResult(shardId, coreSequence, commandIdMsb, commandIdLsb, command.orderId(), placeNative(userId, command, target.nativeResultSlot(0)), target);
-        } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
-            matcherFailure.compareAndSet(null, exception);
-            throw exception;
-        } finally {
-            scope.aeronTimestamp = 0;
-            scope.active = false;
-        }
-    }
-
-    /**
-     * 检查分片与独立撮合输入，进入同步作用域后撮合并发布证据；捕获运行异常并清理作用域，不在这里提交账户状态。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandIdMsb 逻辑命令 UUID 高六十四位
-     * @param commandIdLsb 逻辑命令 UUID 低六十四位
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
-     */
-    public exchange.core2.core.common.MatcherResult placeDirect(
-            int shardId, long coreSequence, long commandIdMsb, long commandIdLsb, long aeronTimestamp,
-            long userId, CoreMatchingOrder command,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null || target == null)
             throw new IllegalArgumentException("invalid direct matcher command");
@@ -1045,12 +996,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 : Math.max(originalBound, Math.subtractExact(best, distance));
     }
 
-    /**
-     * 从独立撮合输入取订单类型和有效期，交给统一原生类型转换。
-     * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     */
-    private static OrderType orderType(CoreMatchingOrder command) {
-        return orderType(command.orderType(), command.timeInForce());
+    /** U 本位永续和交割的市价单滑点上限为 100 ppm，其他产品沿用零值规则。 */
+    private static long slippagePpm(ProductLine product) {
+        return product == ProductLine.LINEAR_PERPETUAL || product == ProductLine.LINEAR_DELIVERY ? 100 : 0;
     }
 
     /**

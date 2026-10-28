@@ -82,7 +82,7 @@ class LaneAdmissionAggregateTest {
                 // 用户七合约三的原汇总对象，更新数量和元数据时应保持身份。
                 Object aggregate = symbols.get(3);
                 lane.putOrder(order.withCommitMetadata(10, 20));
-                lane.putOrder(order.withExecution(60, 40, CoreOrderStatus.OPEN, 2));
+                lane.putOrder(CoreStateTestFixtures.filledOrder(order, 60, 40, 0, CoreOrderStatus.OPEN, 2));
                 assertThat(users.get(7)).isSameAs(symbols);
                 assertThat(symbols.get(3)).isSameAs(aggregate);
                 // 这次 inspect 返回的复用汇总槽，只在下一次覆盖前断言。
@@ -93,7 +93,7 @@ class LaneAdmissionAggregateTest {
                 assertThat(symbols.get(3)).isSameAs(aggregate);
                 summary = index.inspect(7, "SYM", position, side, margin);
                 assertThat(reduce ? summary.reduceOnlyQuantity() : summary.pendingQuantity()).isEqualTo(100);
-                lane.putOrder(order.withStatus(CoreOrderStatus.CANCELED, 3));
+                lane.putOrder(order.withStatus(CoreOrderStatus.CANCELED, 3, -1, -1));
                 assertThat(users.get(7)).isNull();
                 summary = index.inspect(7, "SYM", position, side, margin);
                 assertThat(summary.pendingQuantity()).isZero();
@@ -114,14 +114,14 @@ class LaneAdmissionAggregateTest {
         var first = order(CoreOrderSide.BUY, CorePositionSide.NET, CoreMarginMode.CROSS, false);
         lane.putOrder(first);
         lane.putOrder(CoreStateTestFixtures.order(2, 7, 3, 50));
-        lane.putOrder(first.withExecution(60, 40, CoreOrderStatus.OPEN, 2));
+        lane.putOrder(CoreStateTestFixtures.filledOrder(first, 60, 40, 0, CoreOrderStatus.OPEN, 2));
         // 已经选择合约三的复用准入汇总视图。
         var index = lane.admissionOrderIndex(3);
         // 这次 inspect 返回的复用汇总槽，只在下一次覆盖前断言。
         var summary = index.inspect(7, "SYM", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
         assertThat(summary.pendingQuantity()).isEqualTo(90);
         assertThat(summary.marginModeCount()).isEqualTo(2);
-        lane.putOrder(first.withStatus(CoreOrderStatus.CANCELED, 3));
+        lane.putOrder(first.withStatus(CoreOrderStatus.CANCELED, 3, -1, -1));
         summary = index.inspect(7, "SYM", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.CROSS);
         assertThat(summary.pendingQuantity()).isEqualTo(50);
         assertThat(summary.marginModeCount()).isEqualTo(1);

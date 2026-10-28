@@ -90,7 +90,7 @@ class LaneEntityMembershipTest {
             state.clearChangedKeys();
             state.onLane(7L, /* 执行待回滚修改的 Lane 回调参数，本测试通过外层 state 发起操作，不读取此参数。 */ current -> {
                 state.replaceOrder(state.order(1).withStatus(
-                        com.surprising.aeron.model.CoreOrderStatus.CANCELED, 3));
+                        com.surprising.aeron.model.CoreOrderStatus.CANCELED, 3, -1, -1));
                 CoreStateTestFixtures.deleteReservation(state, 1, 7);
                 state.putOrder(CoreStateTestFixtures.order(3, 7, 1, 2));
                 state.putReservation(CoreStateTestFixtures.reservation(3, 7, 3, 5));
