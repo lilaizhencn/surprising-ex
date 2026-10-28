@@ -1,0 +1,20 @@
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ surprising-gateway ---
+[INFO] Not copying test resources
+[INFO]
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ surprising-gateway ---
+[INFO] Not compiling test sources
+[INFO]
+[INFO] --- surefire:3.5.6:test (default-test) @ surprising-gateway ---
+[INFO] Tests are skipped.
+[INFO]
+[INFO] --- jar:3.5.1:jar (default-jar) @ surprising-gateway ---
+[INFO] Building jar: /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT.jar
+[INFO]
+[INFO] --- spring-boot:4.1.2:repackage (repackage) @ surprising-gateway ---
+[INFO] Attaching repackaged archive /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar with classifier exec
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  38.500 s
+[INFO] Finished at: 2026-10-28T20:50:35+08:00
+[INFO] ------------------------------------------------------------------------

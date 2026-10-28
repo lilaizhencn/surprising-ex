@@ -38,6 +38,12 @@ public class CommittedOrderRepository {
                 + String.join(",", Collections.nCopies(ids.size(), "?")) + ")", Long.class, args.toArray());
     }
 
+    public com.surprising.aeron.protocol.CoreOrderStateView feeBaseline(ProductLine product, long orderId) {
+        return jdbc.query("SELECT raw_order_state FROM core_order_projection WHERE product_line=? AND order_id=?",
+                (r,n)->com.surprising.aeron.protocol.CoreStateQueryCodec.decodeOrderState(r.getBytes(1)),product.name(),orderId)
+                .stream().findFirst().orElse(null);
+    }
+
     public void persist(ProductLine product, Collection<OrderWrite> writes, long exportSequence) {
         jdbc.batchUpdate(UPSERT, writes, 512, (statement, write) -> {
             var order = write.order();

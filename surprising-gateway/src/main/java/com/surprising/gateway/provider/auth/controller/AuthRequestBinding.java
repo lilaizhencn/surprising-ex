@@ -15,7 +15,7 @@ public final class AuthRequestBinding {
         validatePassword(request.password());
         return new RegisterRequest(request.username() == null || request.username().isBlank()
                 ? null : normalizeUsername(request.username()), request.password(),
-                normalizeEmail(request.email()), normalizePhone(request.phone()));
+                normalizeEmail(request.email()), normalizePhone(request.phone()), request.inviteCode());
     }
 
     public static LoginRequest login(LoginRequest request) {

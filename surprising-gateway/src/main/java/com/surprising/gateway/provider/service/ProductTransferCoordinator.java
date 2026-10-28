@@ -56,6 +56,16 @@ public final class ProductTransferCoordinator {
                 throw new IllegalArgumentException("recipient is unavailable");
             }
         }
+        return executeCommittedTransfer(command);
+    }
+
+    /**
+     * Resume a durably accepted business transfer. The caller must have recorded and authorized
+     * the immutable intent before calling; HTTP requests continue through transfer(). Subsequent
+     * user-status changes must not strand a debit whose result was previously unknown.
+     */
+    public ProductTransferResult executeCommittedTransfer(ProductTransferCommand command) {
+        validate(command);
         Instant startedAt = Instant.now();
         ProductTransferOperationRequest operation = operation(command);
         ProductAccountAdjustment debit = accountClient.transferOut(

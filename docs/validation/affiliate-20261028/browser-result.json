@@ -1,0 +1,17 @@
+{
+  "browser": "Chrome",
+  "viewports": [
+    "1440x1000",
+    "390x844"
+  ],
+  "checks": [
+    "admin KOL activation",
+    "cooperation link creation",
+    "registration invitation autofill and acceptance",
+    "member management and share update",
+    "contribution drilldown and return",
+    "mobile no page overflow"
+  ],
+  "pageErrors": [],
+  "memberEmail": "affiliate-member-1793192425128@qa.test"
+}

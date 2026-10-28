@@ -256,6 +256,7 @@ final class CommittedTradeExporter {
                     var archiveReplay = new ArchiveReplay(aeron, archive, product)) {
                 long cursor = checkpoint.logPosition();
                 if (mode == ExportMode.LIVE) {
+                    orders.initializeFees(product, replay);
                     orders.initializeTriggers(product, replay, cursor);
                     orders.algos().initialize(product, replay, cursor);
                 }
@@ -292,6 +293,7 @@ final class CommittedTradeExporter {
                             batch.flush(replay.exportSequence());
                             orders.persistDelivery(replay.deliveryPage());
                         }
+                        if (mode == ExportMode.LIVE) batch.addFees(replay.tradeFeeObservations(changes));
                         batch.add(changes,
                                 replay.commandResult(), replay.exportSequence(), System.nanoTime(), replay.algoChanges(), replay.balanceFlow(), replay.liquidationChanges());
                     }
@@ -436,6 +438,7 @@ final class CommittedTradeExporter {
         private final ArrayList<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges = new ArrayList<>();
         private final ArrayList<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows = new ArrayList<>();
         private final ArrayList<LiquidationChange> liquidationChanges = new ArrayList<>();
+        private final ArrayList<com.surprising.aeron.protocol.CoreTradeFeeObservation> feeObservations = new ArrayList<>();
         private int messages;
         private long startedAt, flushedSequence = -1;
         private long maxDelayNanos = MAX_DELAY_NANOS;
@@ -451,6 +454,8 @@ final class CommittedTradeExporter {
             this.sink = sink;
             this.mode = mode;
         }
+
+        void addFees(List<com.surprising.aeron.protocol.CoreTradeFeeObservation> observations) { feeObservations.addAll(observations); }
 
         void catchUp(boolean behind) {
             maxDelayNanos = behind ? CATCH_UP_DELAY_NANOS : MAX_DELAY_NANOS;
@@ -507,12 +512,13 @@ final class CommittedTradeExporter {
                 else if (mode == ExportMode.STATISTICS_REPAIR) orders.statistics().repair(product,commandResults);
                 else if (mode == ExportMode.PORTFOLIO_REPAIR) orders.portfolio().persist(balanceFlows);
                 else {
-                    orders.persist(product, orderChanges, commandResults, sequence, algoChanges, liquidationChanges, balanceFlows);
+                    orders.persist(product, orderChanges, commandResults, sequence, algoChanges, liquidationChanges, balanceFlows, feeObservations);
                     sink.publish(trades);
                 }
                 // Neither the checkpoint nor this marker advances when either sink fails.
                 flushedSequence = sequence;
             }
+            feeObservations.clear();
             algoChanges.clear();
             liquidationChanges.clear();
             balanceFlows.clear();

@@ -14,11 +14,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
         "com.surprising.gateway.provider", "com.surprising.gateway.c2c",
         "com.surprising.websocket.provider",
         "com.surprising.instrument.provider",
-        "com.surprising.asset"
+        "com.surprising.asset", "com.surprising.affiliate"
 })
 @org.springframework.context.annotation.ComponentScan(basePackages = {
         "com.surprising.gateway.provider", "com.surprising.gateway.c2c", "com.surprising.websocket.provider",
-        "com.surprising.instrument.provider", "com.surprising.asset"
+        "com.surprising.instrument.provider", "com.surprising.asset", "com.surprising.affiliate"
 }, excludeFilters = @org.springframework.context.annotation.ComponentScan.Filter(
         type = org.springframework.context.annotation.FilterType.ASSIGNABLE_TYPE,
         classes = {com.surprising.websocket.provider.consumer.KafkaFanoutConsumer.class,

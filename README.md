@@ -1,5 +1,14 @@
 # Surprising EX
 
+## 邀请返佣与 KOL（2026-10-28）
+
+邀请、无限层级团队、贡献核算与结算放在 Gateway 的 `com.surprising.affiliate`，沿 MVC 分层。普通用户注册即有邀请码，顶层 KOL 由后台开通；合作下级接受邀请后可以继续拓展本分支。默认普通和顶层比例均为 20%，后台可改比例、自动结算和周期。
+
+业务消费 Realtime 独立 Archive 回放导出的已提交实际手续费，不向下单、撮合或在线结算添加推广状态。佣金按产品和资产分别记账，经现有账户划转从已备资预算账户发放，支持未知结果原身份恢复。
+
+部署迁移、完整分配规则、权限和 API 见 [设计文档](docs/affiliate-design.md)，实际命令与验证边界见 [验收记录](docs/validation/affiliate-20261028/README.md)。
+
+
 ## Project overview
 
 Surprising EX is a Java and Maven based exchange backend under active development. It provides order matching, accounts, risk management, market data, and APIs for six separate product lines:

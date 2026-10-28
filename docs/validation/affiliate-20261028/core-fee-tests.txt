@@ -1,0 +1,16 @@
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by net.openhft.chronicle.core.UnsafeMemory (file:/Users/atomex/.m2/repository/net/openhft/chronicle-core/2026.5/chronicle-core-2026.5.jar)
+WARNING: Please consider reporting this to the maintainers of class net.openhft.chronicle.core.UnsafeMemory
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+21:28:30.632 [core-matcher-0] ERROR net.openhft.chronicle.core.internal.ClassUtil -- Chronicle products may require command line arguments to be provided for Java 11 and above. See https://chronicle.software/chronicle-support-java-17
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.914 s -- in com.surprising.aeron.service.core.CommittedFeeObservationTest
+[INFO]
+[INFO] Results:
+[INFO]
+[INFO] Tests run: 2, Failures: 0, Errors: 0, Skipped: 0
+[INFO]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  5.306 s
+[INFO] Finished at: 2026-10-28T21:28:31+08:00
+[INFO] ------------------------------------------------------------------------

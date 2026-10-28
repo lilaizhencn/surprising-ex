@@ -33,6 +33,7 @@ import static com.surprising.realtime.provider.export.utils.CommittedCommandResu
 @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
         prefix = "surprising.trade-export", name = "enabled", havingValue = "true")
 public class CommittedOrderProjectionService {
+    private final CommittedFeeRepository fees;
     private final CommittedOrderRepository orderRows;
     private final CommittedExecutionRepository executionRows;
     private final CommittedTriggerRepository triggerRows;
@@ -68,7 +69,8 @@ public class CommittedOrderProjectionService {
             CommittedFundingPageRepository fundingPages,
             CommittedFundingPaymentRepository fundingPayments,
             CommittedFundingSettlementRepository fundingSettlements,
-            CommittedTradingStatisticsService statistics, CommittedPortfolioHistoryService portfolio, CommittedAlgoProjectionService algos) {
+            CommittedTradingStatisticsService statistics, CommittedPortfolioHistoryService portfolio, CommittedAlgoProjectionService algos, CommittedFeeRepository fees) {
+        this.fees = fees;
         this.transaction = transaction;
         this.statistics = statistics; this.portfolio = portfolio; this.algos = algos;
         this.orderRows = orderRows;
@@ -101,6 +103,14 @@ public class CommittedOrderProjectionService {
                         page.command().instrumentId(), reason, occurred));
             }
         });
+    }
+
+    public void initializeFees(ProductLine product, CommittedTradeReplay replay) {
+        var values = replay.retainedTradeFeeBaselines();
+        for (int from = 0; from < values.size(); from += 512) {
+            var page = values.subList(from, Math.min(values.size(), from + 512));
+            transaction.executeWithoutResult(tx -> page.forEach(value -> fees.baseline(product, value)));
+        }
     }
 
     public CommittedAlgoProjectionService algos() { return algos; }
@@ -246,6 +256,15 @@ public class CommittedOrderProjectionService {
                  List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges,
                  List<LiquidationChange> liquidationChanges,
                  List<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows) {
+        persist(product, orders, commandResults, exportSequence, algoChanges, liquidationChanges, balanceFlows, List.of());
+    }
+
+    public void persist(ProductLine product, List<RealtimeFrame> orders,
+                 List<CommittedCommandResult> commandResults, long exportSequence,
+                 List<com.surprising.aeron.protocol.CoreAlgoOrderView> algoChanges,
+                 List<LiquidationChange> liquidationChanges,
+                 List<CommittedTradeReplay.CommittedBalanceFlow> balanceFlows,
+                 List<com.surprising.aeron.protocol.CoreTradeFeeObservation> feeObservations) {
         if (product == null || exportSequence < 0) throw new IllegalArgumentException("invalid order projection batch");
         for (var flow : balanceFlows)
             if (flow.product() != product) throw new IllegalArgumentException("cross-product balance projection");
@@ -324,6 +343,7 @@ public class CommittedOrderProjectionService {
         if (!executions.isEmpty()) throw new IllegalArgumentException("incomplete execution pair");
         var fills = committedExecutions(product, orders);
         transaction.executeWithoutResult(status -> {
+            for (var fee : feeObservations) fees.observe(product, fee, orderRows.feeBaseline(product, fee.orderId()));
             statistics.persist(product,commandResults);
             algos.persist(product, algoChanges, exportSequence);
             liquidationRows.persist(product, liquidationChanges);

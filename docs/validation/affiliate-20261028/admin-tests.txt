@@ -1,0 +1,9 @@
+tests/custodyWithdrawals.test.ts:
+(pass) gateway withdrawal reads retain exact amounts and financial identity [0.32ms]
+(pass) malformed or duplicate withdrawal records cannot appear as an empty successful list [0.19ms]
+(pass) human review and retry actions follow the backend state transitions [0.15ms]
+
+ 139 pass
+ 0 fail
+ 356 expect() calls
+Ran 139 tests across 15 files. [995.00ms]

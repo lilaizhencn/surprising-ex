@@ -89,7 +89,7 @@ class PrimaryAuthenticationDatabaseTest {
         var jwt = mock(JwtTokenService.class);
         var verification = mock(LoginVerificationService.class);
         var auth = new AuthService(properties, persistence, mock(PasswordHasher.class), jwt,
-                mock(EmailVerificationService.class), verification, mock(GatewayUserAccessBlockRepository.class), new AuthClientMetadataBinding(properties));
+                mock(EmailVerificationService.class), verification, mock(GatewayUserAccessBlockRepository.class), new AuthClientMetadataBinding(properties), mock(com.surprising.affiliate.service.AffiliateService.class));
         when(persistence.user(1)).thenReturn(Optional.of(new AuthModels.AuthenticatedUser(
                 1, null, null, "NORMAL", List.of("USER"), Instant.now())));
         when(persistence.credential(1)).thenReturn(Optional.of(new GatewayUserRepository.UserCredential(

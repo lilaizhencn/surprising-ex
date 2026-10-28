@@ -1,0 +1,31 @@
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? 'playwright');
+import fs from 'node:fs/promises';
+const dir=new URL('.', import.meta.url).pathname;
+const browser=await chromium.launch({channel:'chrome',headless:true});
+const context=await browser.newContext({viewport:{width:390,height:844}});
+const page=await context.newPage();const errors=[];page.on('pageerror', e=>errors.push(e.message));
+await page.goto('http://127.0.0.1:5173/auth/login?redirect=%2Faffiliate');
+await page.locator('input[autocomplete=username]').fill('affiliate-owner@qa.test');
+await page.locator('input[autocomplete=current-password]').fill('AffiliateQA2026!');
+await page.locator('.auth-form button[type=submit]').click();
+await page.waitForURL('**/affiliate');await page.getByRole('heading',{name:'我的推广',exact:true}).waitFor();
+await context.setOffline(true);await page.getByRole('button',{name:'刷新',exact:true}).click();
+await page.getByRole('alert').waitFor();await page.screenshot({path:`${dir}/offline-mobile.png`,fullPage:true});
+await context.setOffline(false);await page.getByRole('button',{name:'刷新',exact:true}).click();
+await page.getByRole('alert').waitFor({state:'hidden'});
+const cdp=await context.newCDPSession(page);await cdp.send('HeapProfiler.enable');
+const samples=[];let reads=0;page.on('request',r=>{if(r.url().includes('/api/v1/affiliate/'))reads++});
+for(let i=0;i<18;i++){
+  await page.goto('http://127.0.0.1:5173/assets');
+  await page.goto('http://127.0.0.1:5173/affiliate');
+  await page.getByRole('heading',{name:'我的推广',exact:true}).waitFor();
+  if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw new Error('page overflow');
+  await cdp.send('HeapProfiler.collectGarbage');
+  const heap=await cdp.send('Runtime.getHeapUsage');samples.push({iteration:i+1,usedHeapBytes:heap.usedSize});
+  await page.waitForTimeout(10000);
+}
+await page.evaluate(()=>document.documentElement.setAttribute('data-theme','dark'));
+await page.screenshot({path:`${dir}/owner-mobile-dark.png`,fullPage:true});
+await fs.writeFile(`${dir}/stability-result.json`,JSON.stringify({durationSeconds:180,cycles:18,offlineRecovery:true,affiliateReads:reads,pageErrors:errors,heapSamples:samples},null,2));
+if(errors.length)throw new Error(errors.join('\n'));
+await browser.close();console.log('Repeated navigation and offline recovery passed');

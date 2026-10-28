@@ -1,0 +1,47 @@
+[INFO] surprising-price-api ............................... SUCCESS [  0.082 s]
+[INFO] surprising-price-consumer .......................... SUCCESS [  0.267 s]
+[INFO] surprising-realtime-api ............................ SUCCESS [  0.331 s]
+[INFO] surprising-derivatives-lifecycle-api ............... SUCCESS [  1.640 s]
+[INFO] surprising-realtime-provider ....................... SUCCESS [ 25.900 s]
+[INFO] surprising-gateway ................................. FAILURE [ 46.512 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  02:14 min
+[INFO] Finished at: 2026-10-28T20:56:04+08:00
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.1:testCompile (default-testCompile) on project surprising-gateway: Compilation failure: Compilation failure:
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/CoreTestCompletion.java:[65,53] cannot find symbol
+[ERROR]   symbol:   method placeAdmissionOutstanding(com.surprising.aeron.service.order.CommandSlot)
+[ERROR]   location: variable matchingFlow of type com.surprising.aeron.service.order.CoreMatchingFlow
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/CoreTestCompletion.java:[68,35] cannot find symbol
+[ERROR]   symbol:   method placeAdmissionOutstanding(com.surprising.aeron.service.order.CommandSlot)
+[ERROR]   location: variable matchingFlow of type com.surprising.aeron.service.order.CoreMatchingFlow
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[41,94] cannot find symbol
+[ERROR]   symbol:   method totalUnits(java.lang.String)
+[ERROR]   location: variable u of type com.surprising.aeron.service.account.CoreUserState
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[68,91] cannot find symbol
+[ERROR]   symbol:   method totalUnits(java.lang.String)
+[ERROR]   location: variable u of type com.surprising.aeron.service.account.CoreUserState
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[391,29] cannot find symbol
+[ERROR]   symbol:   method enterAsynchronousCommandScope()
+[ERROR]   location: class com.surprising.aeron.service.core.TradingAccountRuntime
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[422,33] cannot find symbol
+[ERROR]   symbol:   method exitAsynchronousCommandScope()
+[ERROR]   location: class com.surprising.aeron.service.core.TradingAccountRuntime
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[430,217] cannot find symbol
+[ERROR]   symbol:   method totalUnits(java.lang.String)
+[ERROR]   location: variable u of type com.surprising.aeron.service.account.CoreUserState
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductMoneyIntegrationTest.java:[134,97] cannot find symbol
+[ERROR]   symbol:   method totalUnits(java.lang.String)
+[ERROR]   location: variable user of type com.surprising.aeron.service.account.CoreUserState
+[ERROR] -> [Help 1]
+[ERROR]
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR]
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException
+[ERROR]
+[ERROR] After correcting the problems, you can resume the build with the command
+[ERROR]   mvn <args> -rf :surprising-gateway

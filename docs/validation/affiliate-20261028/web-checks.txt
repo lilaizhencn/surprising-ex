@@ -1,0 +1,20 @@
+
+> surprising-ex-web@0.1.0 typecheck
+> tsc -b --pretty false
+
+
+> surprising-ex-web@0.1.0 test
+> vitest run
+
+
+ RUN  v4.1.10 /Users/atomex/Desktop/surprising/surprising-ex-web
+
+
+ Test Files  65 passed (65)
+      Tests  550 passed (550)
+   Start at  20:48:07
+   Duration  6.93s (transform 13.12s, setup 0ms, import 43.48s, tests 5.53s, environment 16ms)
+
+
+✓ built in 483ms
+Lint: exit 0; 0 errors / warnings, 696 existing informational diagnostics.

@@ -44,6 +44,7 @@ public class AuthService {
 
 
 
+    private final com.surprising.affiliate.service.AffiliateService affiliates;
     private final GatewayProperties properties;
     private final AuthPersistenceService repository;
     private final PasswordHasher passwordHasher;
@@ -60,7 +61,9 @@ public class AuthService {
                        JwtTokenService jwtTokenService,
                        EmailVerificationService emailVerificationService,
                        LoginVerificationService loginVerification,
-                       GatewayUserAccessBlockRepository accessBlocks, CurrentAuthClient currentClient) {
+                       GatewayUserAccessBlockRepository accessBlocks, CurrentAuthClient currentClient,
+                       com.surprising.affiliate.service.AffiliateService affiliates) {
+        this.affiliates = affiliates;
         this.properties = properties;
         this.repository = repository;
         this.passwordHasher = passwordHasher;
@@ -93,6 +96,7 @@ public class AuthService {
         AuthenticatedUser user = phone == null
                 ? repository.createUser(username, email, passwordHash, now)
                 : repository.createUser(username, email, phone, passwordHash, now);
+        affiliates.register(user.userId(), request.inviteCode());
         repository.ensureDefaultRole(user.userId(), now);
         AuthenticatedUser withRoles = repository.user(user.userId()).orElse(user);
         if (email != null && properties.getSecurity().isRequireEmailVerification()) {

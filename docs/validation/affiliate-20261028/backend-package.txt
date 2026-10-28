@@ -1,0 +1,24 @@
+[INFO] --- spring-boot:4.1.2:repackage (repackage) @ surprising-gateway ---
+[INFO] Attaching repackaged archive /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/target/surprising-gateway-1.0.0-SNAPSHOT-exec.jar with classifier exec
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Summary for Surprising Parent 1.0.0-SNAPSHOT:
+[INFO]
+[INFO] Surprising Parent .................................. SUCCESS [  0.755 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  1.790 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.194 s]
+[INFO] surprising-aeron-client ............................ SUCCESS [  0.114 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [ 46.464 s]
+[INFO] surprising-trading-api ............................. SUCCESS [  0.076 s]
+[INFO] surprising-account-api ............................. SUCCESS [  0.045 s]
+[INFO] surprising-price-api ............................... SUCCESS [  0.048 s]
+[INFO] surprising-price-consumer .......................... SUCCESS [  0.163 s]
+[INFO] surprising-realtime-api ............................ SUCCESS [  0.152 s]
+[INFO] surprising-derivatives-lifecycle-api ............... SUCCESS [  0.766 s]
+[INFO] surprising-realtime-provider ....................... SUCCESS [  5.468 s]
+[INFO] surprising-gateway ................................. SUCCESS [ 15.302 s]
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  01:12 min
+[INFO] Finished at: 2026-10-28T21:26:24+08:00
+[INFO] ------------------------------------------------------------------------

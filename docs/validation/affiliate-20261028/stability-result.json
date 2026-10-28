@@ -1,0 +1,81 @@
+{
+  "durationSeconds": 180,
+  "cycles": 18,
+  "offlineRecovery": true,
+  "affiliateReads": 72,
+  "pageErrors": [],
+  "heapSamples": [
+    {
+      "iteration": 1,
+      "usedHeapBytes": 20457184
+    },
+    {
+      "iteration": 2,
+      "usedHeapBytes": 20198116
+    },
+    {
+      "iteration": 3,
+      "usedHeapBytes": 20234264
+    },
+    {
+      "iteration": 4,
+      "usedHeapBytes": 20219548
+    },
+    {
+      "iteration": 5,
+      "usedHeapBytes": 20218508
+    },
+    {
+      "iteration": 6,
+      "usedHeapBytes": 20232720
+    },
+    {
+      "iteration": 7,
+      "usedHeapBytes": 20221524
+    },
+    {
+      "iteration": 8,
+      "usedHeapBytes": 20213952
+    },
+    {
+      "iteration": 9,
+      "usedHeapBytes": 20210232
+    },
+    {
+      "iteration": 10,
+      "usedHeapBytes": 20225792
+    },
+    {
+      "iteration": 11,
+      "usedHeapBytes": 20338648
+    },
+    {
+      "iteration": 12,
+      "usedHeapBytes": 20232692
+    },
+    {
+      "iteration": 13,
+      "usedHeapBytes": 20213716
+    },
+    {
+      "iteration": 14,
+      "usedHeapBytes": 20213128
+    },
+    {
+      "iteration": 15,
+      "usedHeapBytes": 20230312
+    },
+    {
+      "iteration": 16,
+      "usedHeapBytes": 20231184
+    },
+    {
+      "iteration": 17,
+      "usedHeapBytes": 20231324
+    },
+    {
+      "iteration": 18,
+      "usedHeapBytes": 20213712
+    }
+  ]
+}

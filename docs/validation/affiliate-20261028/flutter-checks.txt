@@ -1,0 +1,9 @@
+Waiting for another flutter command to release the startup lock...
+Analyzing surprising-client...
+No issues found! (ran in 9.8s)
+
+01:11 +746 ~12: /Users/atomex/Desktop/surprising/surprising-client/test/account_risk_loading_test.dart: invalid account risk identity, freshness or units fail closed: {status: UNKNOWN}
+01:11 +747 ~12: /Users/atomex/Desktop/surprising/surprising-client/test/account_risk_loading_test.dart: option lifecycle states its contract type CALL without relying on symbol
+01:11 +748 ~12: /Users/atomex/Desktop/surprising/surprising-client/test/account_risk_loading_test.dart: option lifecycle states its contract type PUT without relying on symbol
+01:11 +749 ~12: /Users/atomex/Desktop/surprising/surprising-client/test/account_risk_loading_test.dart: option lifecycle states its contract type UNKNOWN without relying on symbol
+01:11 +750 ~12: All tests passed!

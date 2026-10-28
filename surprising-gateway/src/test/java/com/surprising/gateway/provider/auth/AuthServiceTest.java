@@ -56,7 +56,7 @@ class AuthServiceTest {
     private final LoginVerificationService loginVerification = mock(LoginVerificationService.class);
     private final GatewayUserAccessBlockRepository accessBlocks = mock(GatewayUserAccessBlockRepository.class);
     private final AuthService service = new AuthService(new GatewayProperties(), repository,
-            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties()));
+            passwordHasher, jwtTokenService, emailVerificationService, loginVerification, accessBlocks, new AuthClientMetadataBinding(new GatewayProperties()), mock(com.surprising.affiliate.service.AffiliateService.class));
 
     @Test
     void telegramLoginKeepsMfaRequiredForPasswordlessAccount() {

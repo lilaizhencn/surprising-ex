@@ -26,7 +26,7 @@ final class ProjectionTestFixtures {
                 new CommittedFundingPageRepository(jdbc),
                 new CommittedFundingPaymentRepository(jdbc),
                 new CommittedFundingSettlementRepository(jdbc),
-                statistics(jdbc, transaction), portfolio(jdbc, transaction), algos(jdbc, transaction));
+                statistics(jdbc, transaction), portfolio(jdbc, transaction), algos(jdbc, transaction), new CommittedFeeRepository(jdbc));
     }
     static CommittedTradingStatisticsService statistics(JdbcTemplate jdbc, TransactionTemplate transaction) {
         return new CommittedTradingStatisticsService(new StatisticsInitializationRepository(jdbc),

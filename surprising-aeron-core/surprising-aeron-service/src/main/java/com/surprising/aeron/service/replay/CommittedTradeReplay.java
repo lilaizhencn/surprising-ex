@@ -254,6 +254,52 @@ public final class CommittedTradeReplay implements AutoCloseable {
      */
     public long clusterTimestamp() { return state.currentClusterTimestamp(); }
 
+    /** Baseline existing retained orders once at exporter startup, before following new commands. */
+    public List<CoreTradeFeeObservation> retainedTradeFeeBaselines() {
+        var runtime = state.runtimeState();
+        boolean acquired = false;
+        try {
+            if (runtime.accountLanesStarted() && !runtime.ownerLaneAccess()) {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!runtime.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() >= deadline) throw new IllegalStateException("fee baseline read timed out");
+                    java.util.concurrent.locks.LockSupport.parkNanos(1000L);
+                }
+                acquired = true;
+            }
+            var result = new ArrayList<CoreTradeFeeObservation>();
+            for (var order : runtime.ordersForSnapshot().values()) {
+                result.add(new CoreTradeFeeObservation(order.orderId(), order.userId(), order.instrument().instrumentId(),
+                        state.productLine() == ProductLine.SPOT ? order.instrument().quoteAsset() : order.instrument().settleAsset(),
+                        order.cumulativeFeeUnits(), order.clusterPosition(), order.updatedAtEpochMillis()));
+            }
+            return List.copyOf(result);
+        } finally {
+            if (acquired) runtime.releaseOwnerLaneAccess();
+        }
+    }
+
+    /** Export worker only: observes authoritative cumulative fees after the original settlement. */
+    public List<CoreTradeFeeObservation> tradeFeeObservations(List<RealtimeFrame> changes) {
+        var latest = new LinkedHashMap<Long, CoreOrderStateView>();
+        for (var frame : changes) {
+            if (frame.kind() != RealtimeFrame.Kind.ORDER) continue;
+            var order = CoreStateQueryCodec.decodeOrderState(frame.payload());
+            if (order.executedQuantitySteps() == 0) continue;
+            var prior = latest.get(order.orderId());
+            if (prior == null || prior.revision() < order.revision()) latest.put(order.orderId(), order);
+        }
+        var result = new ArrayList<CoreTradeFeeObservation>();
+        for (var order : latest.values()) {
+            var instrument = state.runtimeState().instrument(order.instrumentId());
+            if (instrument == null) throw new IllegalStateException("committed fee instrument missing");
+            result.add(new CoreTradeFeeObservation(order.orderId(), order.userId(), order.instrumentId(),
+                    (state.productLine() == ProductLine.SPOT ? instrument.quoteAsset() : instrument.settleAsset()), order.cumulativeFeeUnits(), order.clusterPosition(), order.updatedAtEpochMillis()));
+        }
+        return List.copyOf(result);
+    }
+
+
     /**
      * 只为正用户的余额调整、划出和划入解析现金目标；转账端用户须与命令用户相同。参数解析失败不生成辅助目标，原命令仍交权威执行路径决定拒绝。
      * @param command 当前待解析或统计的命令，分页 record 中是对应的已解析业务命令
