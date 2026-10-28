@@ -1,6 +1,8 @@
 package com.surprising.affiliate.repository;
 
+import com.surprising.affiliate.config.AffiliateDatabase;
 import com.surprising.affiliate.model.AffiliateModels.*;
+import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -16,8 +18,8 @@ public class AffiliateRepository {
 
   private final JdbcTemplate jdbc;
 
-  public AffiliateRepository(JdbcTemplate jdbc) {
-    this.jdbc = jdbc;
+  public AffiliateRepository(AffiliateDatabase database) {
+    this.jdbc = database.jdbc();
   }
 
   public void lock() {
@@ -44,6 +46,12 @@ public class AffiliateRepository {
   }
 
   public Profile profile(long userId) {
+    return findProfile(userId).orElseThrow(() ->
+      new IllegalArgumentException("用户不存在")
+    );
+  }
+
+  public Optional<Profile> findProfile(long userId) {
     return jdbc
       .query(
         "SELECT * FROM affiliate_profiles WHERE user_id=?",
@@ -59,8 +67,7 @@ public class AffiliateRepository {
         userId
       )
       .stream()
-      .findFirst()
-      .orElseThrow(() -> new IllegalArgumentException("用户不存在"));
+      .findFirst();
   }
 
   public Optional<Long> codeOwner(String code) {
@@ -105,29 +112,13 @@ public class AffiliateRepository {
       "UPDATE affiliate_profiles SET next_settlement_at=LEAST(next_settlement_at,clock_timestamp()+(? * interval '1 hour'))",
       input.settlementHours()
     );
-  }
-
-  public Node node(long userId, Instant at) {
-    return jdbc
-      .query(
-        """
-        SELECT p.user_id,COALESCE(h.kol_enabled,FALSE) AS kol_enabled,h.rate_ppm
-        FROM affiliate_profiles p LEFT JOIN LATERAL
-          (SELECT kol_enabled,rate_ppm FROM affiliate_profile_history
-           WHERE user_id=p.user_id AND effective_at<=? ORDER BY effective_at DESC,version DESC LIMIT 1) h ON TRUE
-        WHERE p.user_id=? AND p.created_at<=?
-        """,
-        (r, n) ->
-          new Node(r.getLong(1), r.getBoolean(2), (Integer) r.getObject(3)),
-        Timestamp.from(at),
-        userId,
-        Timestamp.from(at)
-      )
-      .stream()
-      .findFirst()
-      .orElseThrow(() ->
-        new IllegalArgumentException("返佣用户在该时间尚未创建")
-      );
+    jdbc.update(
+      """
+      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN p.auto_settlement THEN GREATEST(p.next_settlement_at,g.first_fee_at+(?*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
+      FROM affiliate_profiles p WHERE p.user_id=g.beneficiary_id
+      """,
+      input.settlementHours()
+    );
   }
 
   public void configure(long userId, ProfileInput input, long actor) {
@@ -147,6 +138,15 @@ public class AffiliateRepository {
       input.ratePpm(),
       actor,
       input.reason()
+    );
+    jdbc.update(
+      """
+      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN ? THEN GREATEST(p.next_settlement_at,g.first_fee_at+(s.settlement_hours*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
+      FROM affiliate_profiles p CROSS JOIN LATERAL(SELECT settlement_hours FROM affiliate_settings ORDER BY version DESC LIMIT 1)s
+      WHERE p.user_id=g.beneficiary_id AND p.user_id=?
+      """,
+      input.autoSettlement(),
+      userId
     );
     audit(actor, "PROFILE", userId, input.reason());
   }
@@ -217,25 +217,94 @@ public class AffiliateRepository {
       .findFirst();
   }
 
-  public List<TeamTerm> teamPath(long user, Instant at) {
+  public List<PathNode> lineage(long user, Instant at, int limit) {
     return jdbc.query(
       """
-      WITH RECURSIVE path AS (
-        SELECT term_id,parent_id,child_id,share_ppm FROM affiliate_team_terms WHERE child_id=?
-          AND effective_from<=? AND (effective_until IS NULL OR effective_until>?)
-        UNION
-        SELECT t.term_id,t.parent_id,t.child_id,t.share_ppm FROM affiliate_team_terms t
-          JOIN path p ON t.child_id=p.parent_id WHERE t.effective_from<=?
+      WITH RECURSIVE path(user_id,term_id,parent_id,share_ppm) AS (
+        SELECT u.id,t.term_id,t.parent_id,t.share_ppm FROM (VALUES(CAST(? AS bigint))) u(id)
+        LEFT JOIN affiliate_team_terms t ON t.child_id=u.id AND t.effective_from<=?
           AND (t.effective_until IS NULL OR t.effective_until>?)
-      ) SELECT * FROM path
+        UNION
+        SELECT p.parent_id,t.term_id,t.parent_id,t.share_ppm FROM path p
+        LEFT JOIN affiliate_team_terms t ON t.child_id=p.parent_id AND t.effective_from<=?
+          AND (t.effective_until IS NULL OR t.effective_until>?) WHERE p.parent_id IS NOT NULL
+      ) SELECT p.*,u.user_id IS NOT NULL AS present,COALESCE(h.kol_enabled,FALSE) AS enabled,h.rate_ppm
+      FROM path p LEFT JOIN affiliate_profiles u ON u.user_id=p.user_id AND u.created_at<=?
+      LEFT JOIN LATERAL(SELECT kol_enabled,rate_ppm FROM affiliate_profile_history
+        WHERE user_id=p.user_id AND effective_at<=? ORDER BY effective_at DESC,version DESC LIMIT 1) h ON TRUE
+      LIMIT ?
       """,
-      (r, n) ->
-        new TeamTerm(r.getLong(1), r.getLong(2), r.getLong(3), r.getInt(4)),
+      (r, n) -> {
+        if (!r.getBoolean("present")) throw new IllegalStateException(
+          "团队历史资料不完整，核算已暂停"
+        );
+        long id = r.getLong("user_id");
+        Long term = (Long) r.getObject("term_id");
+        return new PathNode(
+          new Node(
+            id,
+            r.getBoolean("enabled"),
+            (Integer) r.getObject("rate_ppm")
+          ),
+          term == null
+            ? null
+            : new TeamTerm(
+                term,
+                r.getLong("parent_id"),
+                id,
+                r.getInt("share_ppm")
+              )
+        );
+      },
       user,
       Timestamp.from(at),
       Timestamp.from(at),
       Timestamp.from(at),
-      Timestamp.from(at)
+      Timestamp.from(at),
+      Timestamp.from(at),
+      Timestamp.from(at),
+      limit
+    );
+  }
+
+  /** Writers use the exclusive configuration lock; independent products may read concurrently. */
+  public void readLock() {
+    jdbc.queryForList("SELECT pg_advisory_xact_lock_shared(714280031)");
+  }
+
+  public boolean tryReadLock() {
+    return Boolean.TRUE.equals(
+      jdbc.queryForObject(
+        "SELECT pg_try_advisory_xact_lock_shared(714280031)",
+        Boolean.class
+      )
+    );
+  }
+
+  public boolean tryProductLock(String product) {
+    int key = ProductLine.valueOf(product).name().hashCode();
+    return Boolean.TRUE.equals(
+      jdbc.queryForObject(
+        "SELECT pg_try_advisory_xact_lock(714280032,?)",
+        Boolean.class,
+        key
+      )
+    );
+  }
+
+  public boolean trySettlementLock() {
+    return Boolean.TRUE.equals(
+      jdbc.queryForObject(
+        "SELECT pg_try_advisory_xact_lock(714280033)",
+        Boolean.class
+      )
+    );
+  }
+
+  public void productLock(String product) {
+    jdbc.queryForList(
+      "SELECT pg_advisory_xact_lock(714280032,?)",
+      ProductLine.valueOf(product).name().hashCode()
     );
   }
 
@@ -255,22 +324,6 @@ public class AffiliateRepository {
       actor
     );
     audit(actor, "TEAM_SHARE", child, "sharePpm=" + share);
-  }
-
-  public boolean teamParticipant(long user, Instant at) {
-    return Boolean.TRUE.equals(
-      jdbc.queryForObject(
-        """
-        SELECT EXISTS(SELECT 1 FROM affiliate_team_terms WHERE (parent_id=? OR child_id=?)
-          AND effective_from<=? AND (effective_until IS NULL OR effective_until>?))
-        """,
-        Boolean.class,
-        user,
-        user,
-        Timestamp.from(at),
-        Timestamp.from(at)
-      )
-    );
   }
 
   public Invitation invitation(String code) {
@@ -417,7 +470,7 @@ public class AffiliateRepository {
       """
       WITH RECURSIVE team(id) AS (
         SELECT user_id FROM affiliate_referrals WHERE inviter_id=?
-        UNION SELECT r.user_id FROM affiliate_referrals r JOIN team t ON r.inviter_id=t.id
+        UNION SELECT r.user_id FROM team t CROSS JOIN LATERAL(SELECT user_id FROM affiliate_referrals WHERE inviter_id=t.id OFFSET 0) r
       ) SELECT (SELECT count(*) FROM affiliate_referrals WHERE inviter_id=?)::text AS "directInviteCount",
         (SELECT count(*) FROM team)::text AS "teamInviteCount"
       """,
@@ -445,6 +498,14 @@ public class AffiliateRepository {
       user,
       actor,
       reason
+    );
+    jdbc.update(
+      """
+      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN p.auto_settlement THEN GREATEST(p.next_settlement_at,g.first_fee_at+(s.settlement_hours*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
+      FROM affiliate_profiles p CROSS JOIN LATERAL(SELECT settlement_hours FROM affiliate_settings ORDER BY version DESC LIMIT 1)s
+      WHERE p.user_id=g.beneficiary_id AND g.product_line=?
+      """,
+      product
     );
     audit(actor, "BUDGET", user, product + ": " + reason);
   }

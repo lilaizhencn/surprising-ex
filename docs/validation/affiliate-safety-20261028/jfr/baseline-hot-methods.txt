@@ -1,0 +1,30 @@
+
+                                           Java Methods that Execute the Most
+
+Method                                                                                                  Samples Percent
+------------------------------------------------------------------------------------------------------- ------- -------
+org.postgresql.core.Parser.parseJdbcSql(String, boolean, boolean, boolean, boolean, boolean, String[])        4   3.25%
+java.util.GregorianCalendar.computeFields(int, int)                                                           4   3.25%
+org.postgresql.jdbc.PgStatement.executeInternal(CachedQuery, ParameterList, int)                              3   2.44%
+org.postgresql.jdbc.PgStatement.<init>(PgConnection, int, int, int)                                           3   2.44%
+java.util.TimeZone.clone()                                                                                    2   1.63%
+org.postgresql.core.CommandCompleteParser.parse(String)                                                       2   1.63%
+java.util.HashMap.putVal(int, Object, Object, boolean, boolean)                                               2   1.63%
+java.util.Arrays.copyOf(byte[], int)                                                                          2   1.63%
+java.util.zip.ZipFile$Source.getEntryPos(String, boolean, ZipCoder)                                           2   1.63%
+com.surprising.affiliate.repository.AffiliateLedgerRepository.allocation(...)                                 2   1.63%
+org.postgresql.jdbc.PgPreparedStatement.getDefaultCalendar()                                                  2   1.63%
+java.lang.StringBuilder.toString()                                                                            2   1.63%
+org.springframework.core.annotation.TypeMappedAnnotation.createIfPossible(...)                                1   0.81%
+org.springframework.jdbc.core.RowMapperResultSetExtractor.extractData(ResultSet)                              1   0.81%
+java.lang.invoke.MethodHandles$Lookup.makeHiddenClassDefiner(String, byte[], ClassFileDumper, int)            1   0.81%
+jdk.internal.loader.URLClassPath.getResource(String)                                                          1   0.81%
+sun.nio.ch.NioSocketImpl.beginConnect(InetAddress, int)                                                       1   0.81%
+java.util.TimeZone.getDefaultRef()                                                                            1   0.81%
+java.util.TimeZone.getTimeZone(String, boolean)                                                               1   0.81%
+java.util.ArrayList.spliterator()                                                                             1   0.81%
+java.util.Arrays$ArrayItr.hasNext()                                                                           1   0.81%
+org.springframework.cglib.core.Block.<init>(CodeEmitter)                                                      1   0.81%
+java.util.stream.AbstractPipeline.evaluate(TerminalOp)                                                        1   0.81%
+sun.util.locale.LanguageTag.parseScript(StringTokenIterator, ParsePosition)                                   1   0.81%
+org.postgresql.core.v3.QueryExecutorImpl.sendOneQuery(SimpleQuery, SimpleParameterList, int, int, int)        1   0.81%

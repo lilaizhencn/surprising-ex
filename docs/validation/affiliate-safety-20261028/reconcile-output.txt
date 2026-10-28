@@ -1,0 +1,33 @@
+BEGIN
+SET
+ receipt_id | product_line | asset | pool_units | retained_units
+------------+--------------+-------+------------+----------------
+(0 rows)
+
+ payout_id | product_line | asset | status | amount_units | linked_units
+-----------+--------------+-------+--------+--------------+--------------
+(0 rows)
+
+ product_line | asset | payable_units | unsettled_units | in_flight_units | rejected_units | paid_units
+--------------+-------+---------------+-----------------+-----------------+----------------+------------
+(0 rows)
+
+   product_line    | checked_at | error | cluster_position | order_id | next_position | next_order | next_fee_at
+-------------------+------------+-------+------------------+----------+---------------+------------+-------------
+ INVERSE_DELIVERY  |            |       |                  |          |               |            |
+ INVERSE_PERPETUAL |            |       |                  |          |               |            |
+ LINEAR_DELIVERY   |            |       |                  |          |               |            |
+ LINEAR_PERPETUAL  |            |       |                  |          |               |            |
+ OPTION            |            |       |                  |          |               |            |
+ SPOT              |            |       |                  |          |               |            |
+(6 rows)
+
+ beneficiary_id | product_line | asset | first_fee_at | available_at | blocked | checked_at | auto_settlement | next_settlement_at | budget_user_id | budget_status | recipient_status
+----------------+--------------+-------+--------------+--------------+---------+------------+-----------------+--------------------+----------------+---------------+------------------
+(0 rows)
+
+ payout_id | beneficiary_id | budget_user_id | product_line | asset | amount_units | status | attempt_count | created_at | last_attempt_at | next_attempt_at | claimed_until | error
+-----------+----------------+----------------+--------------+-------+--------------+--------+---------------+------------+-----------------+-----------------+---------------+-------
+(0 rows)
+
+ROLLBACK

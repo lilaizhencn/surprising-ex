@@ -1,0 +1,30 @@
+
+                                           Java Methods that Execute the Most
+
+Method                                                                                                  Samples Percent
+------------------------------------------------------------------------------------------------------- ------- -------
+jdk.jfr.internal.settings.Throttler.sample(long)                                                              2   2.47%
+java.util.zip.ZipFile$Source.getEntryPos(String, boolean, ZipCoder)                                           2   2.47%
+org.postgresql.core.v3.QueryExecutorImpl.sendBind(SimpleQuery, SimpleParameterList, Portal, boolean)          2   2.47%
+java.util.Timer.schedule(TimerTask, long)                                                                     1   1.23%
+java.util.Collections$SingletonMap.values()                                                                   1   1.23%
+jdk.internal.classfile.impl.BufWriterImpl.writeIndex(int, PoolEntry)                                          1   1.23%
+java.util.ArrayDeque.peekFirst()                                                                              1   1.23%
+org.postgresql.core.Parser.parseJdbcSql(String, boolean, boolean, boolean, boolean, boolean, String[])        1   1.23%
+java.util.BitSet.set(int)                                                                                     1   1.23%
+java.util.concurrent.ConcurrentHashMap.putVal(Object, Object, boolean)                                        1   1.23%
+sun.util.locale.BaseLocale.hashCode()                                                                         1   1.23%
+org.springframework.jdbc.datasource.DataSourceTransactionManager.obtainDataSource()                           1   1.23%
+java.util.Arrays.copyOf(byte[], int)                                                                          1   1.23%
+java.math.BigInteger.implMulAdd(int[], int[], int, int, int)                                                  1   1.23%
+java.lang.StringCoding.encodeAsciiArray(char[], int, byte[], int, int)                                        1   1.23%
+org.postgresql.core.CachedQueryCreateAction.create(Object)                                                    1   1.23%
+jdk.internal.math.FloatingDecimal.parseFloat(String)                                                          1   1.23%
+org.postgresql.jdbc.PgResultSet.next()                                                                        1   1.23%
+org.postgresql.util.IntList.get(int)                                                                          1   1.23%
+jdk.jfr.internal.settings.Throttler.rotateWindow(long)                                                        1   1.23%
+jdk.internal.loader.URLClassPath.getLoader(int)                                                               1   1.23%
+java.lang.String.<init>(Charset, byte[], int, int)                                                            1   1.23%
+java.math.MutableBigInteger.<init>()                                                                          1   1.23%
+org.postgresql.hostchooser.GlobalHostStatusTracker.reportHostStatus(HostSpec, HostStatus)                     1   1.23%
+org.springframework.jdbc.core.JdbcTemplate.lambda$batchUpdate$0(...)                                          1   1.23%

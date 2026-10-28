@@ -3,6 +3,7 @@ package com.surprising.affiliate;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import com.surprising.affiliate.config.*;
 import com.surprising.affiliate.model.AffiliateModels.*;
 import com.surprising.affiliate.repository.*;
 import com.surprising.affiliate.service.*;
@@ -47,10 +48,12 @@ class AffiliatePostgresTest {
     admin = new JdbcTemplate(new DriverManagerDataSource(url, user, password));
     schema = "affiliate_" + UUID.randomUUID().toString().replace("-", "");
     admin.execute("CREATE SCHEMA " + schema);
-    var source = new DriverManagerDataSource(
-      url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema,
-      user,
-      password
+    var source = instrument(
+      new DriverManagerDataSource(
+        url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema,
+        user,
+        password
+      )
     );
     jdbc = new JdbcTemplate(source);
     manager = new DataSourceTransactionManager(source);
@@ -71,6 +74,16 @@ class AffiliatePostgresTest {
         Path.of("../deployment/migrations/20261028-affiliate.sql")
       )
     );
+    jdbc.execute(
+      Files.readString(
+        Path.of("../deployment/migrations/20261028-committed-trade-fees.sql")
+      )
+    );
+    jdbc.execute(
+      Files.readString(
+        Path.of("../deployment/migrations/20261028-affiliate-safety.sql")
+      )
+    );
     for (long id = 1; id <= 10; id++) jdbc.update(
       "INSERT INTO gateway_users(user_id) VALUES(?)",
       id
@@ -80,6 +93,9 @@ class AffiliatePostgresTest {
     context.registerBean(DataSourceTransactionManager.class, () -> manager);
     context.register(
       Transactions.class,
+      AffiliateProperties.class,
+      AffiliateDatabase.class,
+      AffiliateFeeSourceRepository.class,
       AffiliateRepository.class,
       AffiliateLedgerRepository.class,
       AffiliateService.class,
@@ -91,6 +107,28 @@ class AffiliatePostgresTest {
     ledger = context.getBean(AffiliateLedgerRepository.class);
     repository = context.getBean(AffiliateRepository.class);
     for (long id = 1; id <= 10; id++) service.register(id, null);
+  }
+
+  javax.sql.DataSource instrument(javax.sql.DataSource source) {
+    return source;
+  }
+
+  @Test
+  void fragmentedFeesPreserveEveryTeamLevelsCumulativeShare() {
+    kol(1);
+    partner(1, 2, 600000);
+    partner(2, 3, 500000);
+    service.accept(4, repository.profile(3).inviteCode());
+    for (int i = 1; i <= 100; i++) accrual.accrue(fee(i, 4, 1));
+    assertThat(
+      repository.summary(1, "").getFirst().get("retainedUnits")
+    ).isEqualTo("8");
+    assertThat(
+      repository.summary(2, "").getFirst().get("retainedUnits")
+    ).isEqualTo("6");
+    assertThat(
+      repository.summary(3, "").getFirst().get("retainedUnits")
+    ).isEqualTo("6");
   }
 
   @AfterEach
@@ -122,6 +160,33 @@ class AffiliatePostgresTest {
       "USDT",
       amount,
       repository.now()
+    );
+  }
+
+  Fee matureFee(long source, long user, long amount) {
+    jdbc.update(
+      "UPDATE affiliate_settings SET effective_at=effective_at-interval '3 days'"
+    );
+    jdbc.update(
+      "UPDATE affiliate_profiles SET created_at=created_at-interval '3 days'"
+    );
+    jdbc.update(
+      "UPDATE affiliate_profile_history SET effective_at=effective_at-interval '3 days'"
+    );
+    jdbc.update(
+      "UPDATE affiliate_referrals SET accepted_at=accepted_at-interval '3 days'"
+    );
+    jdbc.update(
+      "UPDATE affiliate_team_terms SET effective_from=effective_from-interval '3 days',effective_until=effective_until-interval '3 days'"
+    );
+    return new Fee(
+      source,
+      "LINEAR_PERPETUAL",
+      user,
+      42,
+      "USDT",
+      amount,
+      repository.now().minusSeconds(172800)
     );
   }
 
@@ -321,13 +386,19 @@ class AffiliatePostgresTest {
         order,
         java.sql.Timestamp.from(now)
       );
-    var source = new AffiliateFeeSourceRepository(jdbc);
-    var facts = source.read("LINEAR_PERPETUAL", new SourceCursor(0, 0));
+    var source = new AffiliateFeeSourceRepository(
+      context.getBean(AffiliateDatabase.class)
+    );
+    var facts = source.read("LINEAR_PERPETUAL", new SourceCursor(0, 0), 100);
     assertThat(facts).extracting(Fee::orderId).containsExactly(42L, 43L);
     facts.forEach(accrual::accrue);
     facts.forEach(accrual::accrue);
     assertThat(
-      source.read("LINEAR_PERPETUAL", ledger.sourcePosition("LINEAR_PERPETUAL"))
+      source.read(
+        "LINEAR_PERPETUAL",
+        ledger.sourcePosition("LINEAR_PERPETUAL"),
+        100
+      )
     ).isEmpty();
     assertThat(
       repository.summary(1, "").getFirst().get("retainedUnits")
@@ -352,16 +423,14 @@ class AffiliatePostgresTest {
       )
     ).isTrue();
     service.accept(2, repository.profile(1).inviteCode());
-    accrual.accrue(fee(1, 2, 10000));
-    jdbc.update(
-      "UPDATE affiliate_fee_receipts SET occurred_at=occurred_at-interval '2 hours'"
-    );
+    accrual.accrue(matureFee(1, 2, 10000));
     service.budget("LINEAR_PERPETUAL", 9, 10, "自动结算预算");
     var settlement = new AffiliateSettlementService(
       repository,
       ledger,
       mock(ProductTransferCoordinator.class),
-      manager
+      manager,
+      context.getBean(AffiliateProperties.class)
     );
     service.configure(1, new ProfileInput(false, false, null, "停止自动"), 10);
     jdbc.update(
@@ -432,7 +501,7 @@ class AffiliatePostgresTest {
   @Test
   void commissionsAndPayoutsKeepEachProductAndAssetSeparate() {
     service.accept(2, repository.profile(1).inviteCode());
-    var now = repository.now();
+    var now = matureFee(64, 2, 10000).occurredAt();
     accrual.accrue(new Fee(64, "SPOT", 2, 42, "USDT", 10000, now));
     accrual.accrue(new Fee(64, "LINEAR_PERPETUAL", 2, 42, "USDT", 10000, now));
     accrual.accrue(new Fee(64, "INVERSE_PERPETUAL", 2, 42, "BTC", 15000, now));
@@ -443,16 +512,14 @@ class AffiliatePostgresTest {
     assertThat(
       repository.summary(1, "SPOT").getFirst().get("retainedUnits")
     ).isEqualTo("2000");
-    jdbc.update(
-      "UPDATE affiliate_fee_receipts SET occurred_at=occurred_at-interval '2 days'"
-    );
     for (String line : List.of("SPOT", "LINEAR_PERPETUAL", "INVERSE_PERPETUAL"))
       service.budget(line, 9, 10, "分产品预算");
     var settlement = new AffiliateSettlementService(
       repository,
       ledger,
       mock(ProductTransferCoordinator.class),
-      manager
+      manager,
+      context.getBean(AffiliateProperties.class)
     );
     settlement.prepare(true, 10);
     assertThat(
@@ -485,10 +552,7 @@ class AffiliatePostgresTest {
   @Test
   void settlementReservesOnceAndUnknownFundsReuseTheSameIntentUntilPaid() {
     service.accept(2, repository.profile(1).inviteCode());
-    accrual.accrue(fee(1, 2, 10000));
-    jdbc.update(
-      "UPDATE affiliate_fee_receipts SET occurred_at=occurred_at-interval '2 days'"
-    );
+    accrual.accrue(matureFee(1, 2, 10000));
     new TransactionTemplate(manager).executeWithoutResult(tx ->
       repository.budget("LINEAR_PERPETUAL", 9, 10, "测试预算")
     );
@@ -508,7 +572,8 @@ class AffiliatePostgresTest {
       repository,
       ledger,
       transfers,
-      manager
+      manager,
+      context.getBean(AffiliateProperties.class)
     );
     settlement.prepare(true, 10);
     settlement.prepare(true, 10);
@@ -535,6 +600,9 @@ class AffiliatePostgresTest {
     })
       .when(transfers)
       .executeCommittedTransfer(any());
+    jdbc.update(
+      "UPDATE affiliate_payouts SET next_attempt_at='-infinity' WHERE status='UNKNOWN'"
+    );
     settlement.send();
     settlement.send();
     var capture = org.mockito.ArgumentCaptor.forClass(
@@ -552,26 +620,33 @@ class AffiliatePostgresTest {
   @Test
   void repeatedRejectedPayoutRetryCreatesOnlyOneReplacementAndCannotLoseItsTerminalState() {
     service.accept(2, repository.profile(1).inviteCode());
-    accrual.accrue(fee(1, 2, 10000));
-    jdbc.update(
-      "UPDATE affiliate_fee_receipts SET occurred_at=occurred_at-interval '2 days'"
-    );
+    accrual.accrue(matureFee(1, 2, 10000));
     service.budget("LINEAR_PERPETUAL", 9, 10, "测试预算");
     var settlement = new AffiliateSettlementService(
       repository,
       ledger,
       mock(ProductTransferCoordinator.class),
-      manager
+      manager,
+      context.getBean(AffiliateProperties.class)
     );
     settlement.prepare(true, 10);
     UUID id = jdbc.queryForObject(
       "SELECT payout_id FROM affiliate_payouts",
       UUID.class
     );
-    ledger.payoutResult(id, "REJECTED", "123", "预算不足，明确拒绝");
+    UUID token = UUID.randomUUID();
+    ledger.claimPayout(token, 120);
+    ledger.payoutResult(id, token, "REJECTED", "123", "预算不足，明确拒绝", 10);
     settlement.retry(id, 10);
     settlement.retry(id, 10);
-    ledger.payoutResult(id, "UNKNOWN", null, "迟到的响应不得覆盖终态");
+    ledger.payoutResult(
+      id,
+      token,
+      "UNKNOWN",
+      null,
+      "迟到的响应不得覆盖终态",
+      10
+    );
     assertThat(
       jdbc.queryForObject(
         "SELECT count(*) FROM affiliate_payouts",
@@ -601,10 +676,7 @@ class AffiliatePostgresTest {
   @Test
   void realCoreDebitsOnceAndCompletesAfterSnapshotRecoveryOfAnUnknownPayout() {
     service.accept(2, repository.profile(1).inviteCode());
-    accrual.accrue(fee(1, 2, 10000));
-    jdbc.update(
-      "UPDATE affiliate_fee_receipts SET occurred_at=occurred_at-interval '2 days'"
-    );
+    accrual.accrue(matureFee(1, 2, 10000));
     service.budget("LINEAR_PERPETUAL", 9, 10, "真实 Core 资金验收");
     try (var accounts = new ReplayAccounts()) {
       accounts.adjust(9, 10000);
@@ -613,7 +685,8 @@ class AffiliatePostgresTest {
         repository,
         ledger,
         new ProductTransferCoordinator(accounts, null),
-        manager
+        manager,
+        context.getBean(AffiliateProperties.class)
       );
       settlement.prepare(true, 10);
       settlement.send();
@@ -625,6 +698,9 @@ class AffiliatePostgresTest {
         )
       ).isEqualTo("UNKNOWN");
       accounts.restart();
+      jdbc.update(
+        "UPDATE affiliate_payouts SET next_attempt_at='-infinity' WHERE status='UNKNOWN'"
+      );
       settlement.send();
       settlement.send();
       assertThat(accounts.balances.get(9L)).isEqualTo(8000);

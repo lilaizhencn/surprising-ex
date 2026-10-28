@@ -738,3 +738,34 @@ JFR 配对单独运行同样参数，稳定窗 10.013152s，完成 2,890,867 项
 **饱和验收失败，Core饱和未确认，速度验收无效。** 10,000账户、256币对、batch20、全局256报文，4线程稳窗完成9,414,460单，观察156,907.667单/秒；8线程15,667.333单/秒；16线程预热因STALE_MARK_PRICE拒单失败。稳定窗均存在系统换页和CPU限频。完整五板块看板、命令和缺口见 [本轮报告](docs/validation/perpetual-saturation-20261028/REPORT.md) 与 [结果JSON](docs/validation/perpetual-saturation-20261028/summary.json)。
 
 内置资金/终态通过的各档单列保留；8线程独立10,000账户、持仓、冻结及原Archive快照重启审计通过，哈希a82caca13dbc7410一致。4线程主档附加工具/提前连接恢复的问题保留为未验证。独立JFR覆盖稳窗、DataLoss=0，热点主要落在等待轮询，未确认Core业务饱和；精确B/item、混合自愈、三节点和长稳未测。构建退出0、相关15项测试通过，不能替代性能门槛。归档及清理见报告与cleanup.json。
+
+## 2026-10-28 Gateway 返佣资金与深层关系专项（affiliate-safety-20261028）
+
+### 计划与判定
+
+当前 master，起点 `6b5b4b04d`，之后保留独立 Core 重构 `534aeea38`。执行前锁定[计划](docs/validation/affiliate-safety-20261028/plan.md)：JDK 27 / PostgreSQL 18.4，宽度 10000、深度 8/128/1024、全部分配比例 100%，各 3 笔预热与 20 笔实际费用提交；本轮只修改 Gateway 返佣旁路。数据源是 DriverManagerDataSource，闭环并发 1，不是实际交易发压。没有重跑旧版本。
+
+**部分验证；速度验收无效。** 资金、深链终止、资源限额和实际 SQL 计划通过；配对 JFR 全系统 swap-in +225 页，当前无 profiler +236 页，基线未采全系统换页，不能作为有效性能提升/容量结论。没有测单真实 Aeron 成员、单 Matcher、in-flight 256 的正式交易容量；不得从本轮数据换算订单 TPS。
+
+### 指标看板
+
+| 层次 | 指标 | 本轮 |
+| --- | --- | --- |
+| 业务交易 | 委托、成交对、撤改吞吐 | 未测，返佣旁路不产生交易报单 |
+| 综合/清算 | 全业务、分片记账吞吐 | 未测 |
+| 底座 | Aeron WAL 报文、带宽 | 未测 |
+| 返佣数据库 | 1024 层每费用 JDBC 准备调用 | 2059 → 15；不等于实际 SQL 执行或网络往返总次数 |
+| 返佣数据库 | 1024 层 JFR 下 p50 / p90 / 样本 p99=max | 前 2438.710 / 2644.568 / 2649.529ms；后 444.641 / 564.222 / 601.009ms；换页影响，仅作诊断 |
+| 返佣数据库 | 当前无 profiler 1024 层 p50 / p90 / 样本 p99=max | 342.157 / 418.807 / 455.554ms；20 样本，不代表生产尾延迟 |
+| 内存 | 1024 层主线程分配 | JFR 配对 3821415 → 2360792 B/笔；来自 ThreadMXBean，非零分配 |
+| 自愈 | 费用/应付/实际 Core 资金 | 各费用留存等于佣金池；未知扣款响应丢失后 snapshot 恢复不重复扣/入；明确拒绝补资后仅一张替代单支付 |
+
+浅层 8 节点新增累计舍入与安全索引成本：JFR 下 p50 41.949 → 50.769ms、分配 184535 → 191192 B/笔，未宣称所有深度都改善。应用分配与审计行数仍为 O(实际路径深度)，团队统计按需遍历去重，使用人数索引和查询门限；未引入平方规模闭包表。
+
+### 采样、正确性与边界
+
+JFR 64MiB 上限、profile、dumponexit=true，前后 DataLoss=0。summary/view、JVM 参数、哈希见[归档](docs/validation/affiliate-safety-20261028/jfr)，覆盖整个夹具/预热/测量进程，不把整体 GC/CPU 当作纯稳态。后一次 native 样本主要为 Net.poll，Java 样本含 PG bind/parse 和 batch，未确认 Core 饱和。完整深度指标、CPU、JDBC 计数定义与 VM 差值见[metrics.json](docs/validation/affiliate-safety-20261028/metrics.json)。没有精确 native 内存、长稳泄漏、缓存行、三节点或物理磁盘带宽证据。
+
+真实 PG 用例验证 4096 层 + 10000 名宽分支成员、损坏成环/历史重叠/超限拒绝、原游标完整恢复、整批舍入状态回滚、分页、并发产品隔离、有界结算、int64、租约 fencing、未知退避及不可变金额。新累计下拨回归先证实旧实现 20/0/0 失败，最终为 8/6/6，合计不变。Gateway/依赖主源构建通过；返佣与相关认证 123 项专项 0 failures/errors、2 个专用数据库条件跳过。完整 Gateway test 仍被三个既有 Core 旧 API 测试的编译错误阻塞，未修改它们掩盖失败。
+
+完整命令、SQL 计划、HTTP/浏览器错误恢复、迁移及未测范围见[报告](docs/validation/affiliate-safety-20261028/README.md)。没有发布生产。摘要归档后清理独立数据库、Vite、浏览器、原始 JFR 和临时工具，实际状态见[cleanup.json](docs/validation/affiliate-safety-20261028/cleanup.json)。

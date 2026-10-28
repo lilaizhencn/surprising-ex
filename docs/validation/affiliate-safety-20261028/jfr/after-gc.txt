@@ -1,0 +1,10 @@
+
+                              Garbage Collections
+
+Start    GC ID GC Name               Heap Before GC Heap After GC Longest Pause
+-------- ----- --------------------- -------------- ------------- -------------
+23:16:40     6 G1New                        17.9 MB       14.6 MB       2.45 ms
+23:16:40     7 G1New                        20.6 MB       15.8 MB       3.59 ms
+23:16:40     8 G1Old                        15.8 MB       15.8 MB       2.12 ms
+23:16:41     9 G1New                        53.8 MB       18.7 MB       7.23 ms
+23:16:59    10 G1New                        64.7 MB       19.1 MB       11.3 ms

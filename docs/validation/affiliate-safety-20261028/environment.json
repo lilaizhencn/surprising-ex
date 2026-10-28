@@ -1,0 +1,8 @@
+{
+  "java": "openjdk version \"27\" 2026-09-15\nOpenJDK Runtime Environment Corretto-27.0.0.33.1 (build 27+33-FR)\nOpenJDK 64-Bit Server VM Corretto-27.0.0.33.1 (build 27+33-FR, mixed mode, sharing)\n",
+  "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)\nMaven home: /usr/local/Cellar/maven/3.9.16/libexec\nJava version: 27, vendor: Amazon.com Inc., runtime: /Users/atomex/.sdkman/candidates/java/27.0.0-amzn\nDefault locale: zh_US_#Hans, platform encoding: UTF-8\nOS name: \"mac os x\", version: \"26.7.2\", arch: \"x86_64\", family: \"mac\"\n",
+  "postgres": "PostgreSQL 18.4 (Homebrew) on x86_64-apple-darwin23.6.0, compiled by Apple clang version 16.0.0 (clang-1600.0.26.6), 64-bit\n",
+  "hardware": "hw.model: MacBookPro16,1\nhw.memsize: 17179869184\nhw.physicalcpu: 8\nhw.logicalcpu: 16\n",
+  "git_head_for_final_verification": "534aeea38df1b1ba76bba9f5b107f705eba27faf",
+  "scope": "Only Affiliate Gateway side path, own migrations/tests/docs. No online Core modifications."
+}

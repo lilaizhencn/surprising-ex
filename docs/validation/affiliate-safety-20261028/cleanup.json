@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-28T15:58:39.877530+00:00",
+  "database": "surprising_affiliate_hardening_20261028",
+  "database_removed": true,
+  "owned_vite_pids": [
+    43185,
+    43197
+  ],
+  "owned_ports_listening": {
+    "5413": false,
+    "5414": false
+  },
+  "browser": "Every probe closed its Chrome instance in finally; no existing user browser was terminated",
+  "temporary_directory_removed": true,
+  "raw_jfr_removed": true,
+  "recording_hashes_and_summaries": "jfr/recordings.json",
+  "other_projects_resources": "untouched",
+  "production_migrated_or_deployed": false
+}

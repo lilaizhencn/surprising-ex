@@ -1,0 +1,13 @@
+
+                            Waiting or Executing Native Methods
+
+Method                                                                             Samples
+---------------------------------------------------------------------------------- -------
+sun.nio.ch.Net.poll(FileDescriptor, int, long)                                       1,251
+sun.nio.ch.SocketDispatcher.read0(FileDescriptor, long, int)                             7
+java.util.zip.Inflater.inflateBytesBytes(long, byte[], int, int, byte[], int, int)       4
+java.io.UnixFileSystem.getBooleanAttributes0(File)                                       1
+sun.nio.ch.Net.pollConnect(FileDescriptor, long)                                         1
+sun.nio.ch.Net.connect0(boolean, FileDescriptor, InetAddress, int)                       1
+sun.nio.ch.SocketDispatcher.write0(FileDescriptor, long, int)                            1
+java.io.UnixFileSystem.canonicalize0(String)                                             1

@@ -72,6 +72,12 @@ public final class AffiliateModels {
 
   public record Node(long userId, boolean kolEnabled, Integer ratePpm) {}
 
+  public record PathNode(Node node, TeamTerm parent) {}
+
+  public record TeamPath(Node root, List<TeamTerm> terms, boolean active) {}
+
+  public record BatchResult(int processed, boolean more, boolean busy) {}
+
   public record Allocation(
     long userId,
     long receivedUnits,

@@ -1,23 +1,39 @@
 package com.surprising.affiliate.service;
 
+import com.surprising.affiliate.config.AffiliateProperties;
 import com.surprising.affiliate.model.AffiliateModels.*;
 import com.surprising.affiliate.repository.AffiliateRepository;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.Semaphore;
+import java.util.function.Supplier;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AffiliateService {
 
   private final AffiliateRepository repository;
+  private final AffiliateProperties properties;
+  private final Semaphore reads;
 
-  public AffiliateService(AffiliateRepository repository) {
+  public AffiliateService(
+    AffiliateRepository repository,
+    AffiliateProperties properties
+  ) {
     this.repository = repository;
+    this.properties = properties;
+    this.reads = new Semaphore(properties.getConcurrentReads());
   }
 
   @Transactional
   public Profile register(long userId, String code) {
+    if (code == null || code.isBlank()) {
+      var existing = repository.findProfile(userId);
+      if (existing.isPresent()) return existing.get();
+    }
     repository.lock();
     repository.ensureProfile(
       userId,
@@ -32,6 +48,10 @@ public class AffiliateService {
   }
 
   public Invitation preview(String raw) {
+    return read(() -> previewRead(raw));
+  }
+
+  private Invitation previewRead(String raw) {
     String code = code(raw);
     var ordinary = repository.codeOwner(code);
     if (ordinary.isPresent()) return new Invitation(
@@ -197,39 +217,45 @@ public class AffiliateService {
     return subject;
   }
 
-  public boolean activeTeam(List<TeamTerm> path, Instant at) {
-    if (path.isEmpty()) return true;
-    if (
-      !repository.node(path.getFirst().parentId(), at).kolEnabled()
-    ) return false;
-    for (var edge : path)
-      if (!repository.node(edge.childId(), at).kolEnabled()) return false;
-    return true;
-  }
-
   public Map<String, Object> branchOverview(
     long viewer,
     long subject,
     String product
   ) {
-    requireVisible(viewer, subject);
-    var result = overview(subject, product);
-    if (viewer != subject) result.put("invitations", List.of());
-    return result;
+    return read(() -> {
+      requireVisible(viewer, subject);
+      var result = overviewRead(subject, product);
+      if (viewer != subject) result.put("invitations", List.of());
+      return result;
+    });
   }
 
   public Map<String, Object> overview(long user, String product) {
+    return read(() -> overviewRead(user, product));
+  }
+
+  private <T> T read(Supplier<T> query) {
+    if (!reads.tryAcquire()) throw new ResponseStatusException(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      "返佣查询繁忙，请稍后刷新"
+    );
+    try {
+      return query.get();
+    } finally {
+      reads.release();
+    }
+  }
+
+  private Map<String, Object> overviewRead(long user, String product) {
     var result = new LinkedHashMap<String, Object>();
     result.put("profile", repository.profile(user));
     result.put("settings", settings());
     result.put("counts", repository.counts(user).getFirst());
     result.put("balances", repository.summary(user, product));
     result.put("invitations", repository.invitations(user));
-    var currentPath = path(user, Instant.now());
-    long root = currentPath.isEmpty()
-      ? user
-      : currentPath.getFirst().parentId();
-    var rootNode = repository.node(root, Instant.now());
+    var currentTeam = team(user, Instant.now());
+    var currentPath = currentTeam.terms();
+    var rootNode = currentTeam.root();
     var currentSettings = settings();
     int rootRate =
       rootNode.ratePpm() != null
@@ -238,7 +264,7 @@ public class AffiliateService {
           ? currentSettings.kolRatePpm()
           : currentSettings.referralRatePpm();
     result.put("rootRatePpm", rootRate);
-    result.put("teamActive", activeTeam(currentPath, Instant.now()));
+    result.put("teamActive", currentTeam.active());
     result.put(
       "teamPath",
       currentPath
@@ -259,6 +285,14 @@ public class AffiliateService {
   }
 
   public Page<Map<String, Object>> members(
+    long viewer,
+    long subject,
+    long after
+  ) {
+    return read(() -> membersRead(viewer, subject, after));
+  }
+
+  private Page<Map<String, Object>> membersRead(
     long viewer,
     long subject,
     long after
@@ -288,29 +322,51 @@ public class AffiliateService {
   }
 
   public List<TeamTerm> path(long user, Instant at) {
+    return team(user, at).terms();
+  }
+
+  public TeamPath team(long user, Instant at) {
+    var rows = repository.lineage(user, at, properties.getMaxPathNodes() + 1);
+    if (
+      rows.size() > properties.getMaxPathNodes()
+    ) throw new IllegalStateException(
+      "团队路径超过本机安全处理上限，整笔核算已暂停，未截断分账"
+    );
+    var nodes = new HashMap<Long, PathNode>();
+    for (var row : rows)
+      if (
+        nodes.putIfAbsent(row.node().userId(), row) != null
+      ) throw new IllegalStateException("团队历史合作区间重叠，核算已暂停");
     var reverse = new ArrayList<TeamTerm>();
     var seen = new HashSet<Long>();
-    var terms = new HashMap<Long, TeamTerm>();
-    for (var edge : repository.teamPath(user, at))
-      terms.put(edge.childId(), edge);
+    boolean active = true;
     long current = user;
     while (true) {
       if (!seen.add(current)) throw new IllegalStateException(
-        "团队关系存在循环"
+        "团队关系存在循环，核算已暂停"
       );
-      var parent = terms.get(current);
-      if (parent == null) break;
-      reverse.add(parent);
-      current = parent.parentId();
+      var row = nodes.get(current);
+      if (row == null) throw new IllegalStateException(
+        "团队路径不完整，核算已暂停"
+      );
+      active &= row.node().kolEnabled();
+      if (row.parent() == null) {
+        Collections.reverse(reverse);
+        return new TeamPath(
+          row.node(),
+          List.copyOf(reverse),
+          reverse.isEmpty() || active
+        );
+      }
+      reverse.add(row.parent());
+      current = row.parent().parentId();
     }
-    Collections.reverse(reverse);
-    return List.copyOf(reverse);
   }
 
   private void requireKol(long user) {
     if (
       !repository.profile(user).kolEnabled() ||
-      !activeTeam(path(user, Instant.now()), Instant.now())
+      !team(user, Instant.now()).active()
     ) throw new IllegalArgumentException(
       "当前团队合作功能已停用，请联系平台或上级处理"
     );

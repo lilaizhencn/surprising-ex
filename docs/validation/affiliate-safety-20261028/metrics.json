@@ -1,0 +1,190 @@
+{
+  "interpretation": "Database side-path diagnostic only; wall latency comparison invalid for speed acceptance because system swap-in occurred. JDBC preparations are not server executions/network roundtrips.",
+  "depths": [
+    8,
+    128,
+    1024
+  ],
+  "width": 10000,
+  "warmup_fees": 3,
+  "measured_fees": 20,
+  "concurrent_inflight": 1,
+  "seed": 20261028,
+  "money_diff": 0,
+  "baseline_profile": [
+    {
+      "depth": 8,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 41.949,
+      "p90_ms": 55.157,
+      "p99_ms": 57.035,
+      "max_ms": 57.035,
+      "jdbc_statements_per_fee": 27.0,
+      "allocated_bytes_per_fee": 184535,
+      "thread_cpu_ms_per_fee": 7.548,
+      "overview_ms": 171.306,
+      "money_diff": 0
+    },
+    {
+      "depth": 128,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 341.605,
+      "p90_ms": 427.75,
+      "p99_ms": 482.795,
+      "max_ms": 482.795,
+      "jdbc_statements_per_fee": 267.0,
+      "allocated_bytes_per_fee": 646357,
+      "thread_cpu_ms_per_fee": 19.854,
+      "overview_ms": 584.221,
+      "money_diff": 0
+    },
+    {
+      "depth": 1024,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 2438.71,
+      "p90_ms": 2644.568,
+      "p99_ms": 2649.529,
+      "max_ms": 2649.529,
+      "jdbc_statements_per_fee": 2059.0,
+      "allocated_bytes_per_fee": 3821415,
+      "thread_cpu_ms_per_fee": 74.599,
+      "overview_ms": 1819.976,
+      "money_diff": 0
+    }
+  ],
+  "after_profile": [
+    {
+      "depth": 8,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 50.769,
+      "p90_ms": 69.797,
+      "p99_ms": 80.488,
+      "max_ms": 80.488,
+      "jdbc_statements_per_fee": 15.0,
+      "allocated_bytes_per_fee": 191192,
+      "thread_cpu_ms_per_fee": 7.759,
+      "overview_ms": 167.733,
+      "money_diff": 0
+    },
+    {
+      "depth": 128,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 96.844,
+      "p90_ms": 108.893,
+      "p99_ms": 171.068,
+      "max_ms": 171.068,
+      "jdbc_statements_per_fee": 15.0,
+      "allocated_bytes_per_fee": 465478,
+      "thread_cpu_ms_per_fee": 6.802,
+      "overview_ms": 220.915,
+      "money_diff": 0
+    },
+    {
+      "depth": 1024,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 444.641,
+      "p90_ms": 564.222,
+      "p99_ms": 601.009,
+      "max_ms": 601.009,
+      "jdbc_statements_per_fee": 15.0,
+      "allocated_bytes_per_fee": 2360792,
+      "thread_cpu_ms_per_fee": 13.201,
+      "overview_ms": 259.427,
+      "money_diff": 0
+    }
+  ],
+  "after_unprofiled": [
+    {
+      "depth": 8,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 52.911,
+      "p90_ms": 74.225,
+      "p99_ms": 80.622,
+      "max_ms": 80.622,
+      "jdbc_statements_per_fee": 15.0,
+      "allocated_bytes_per_fee": 188278,
+      "thread_cpu_ms_per_fee": 7.96,
+      "overview_ms": 203.041,
+      "money_diff": 0
+    },
+    {
+      "depth": 128,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 70.058,
+      "p90_ms": 91.702,
+      "p99_ms": 93.251,
+      "max_ms": 93.251,
+      "jdbc_statements_per_fee": 15.0,
+      "allocated_bytes_per_fee": 462428,
+      "thread_cpu_ms_per_fee": 6.177,
+      "overview_ms": 178.598,
+      "money_diff": 0
+    },
+    {
+      "depth": 1024,
+      "width": 10000,
+      "events": 20,
+      "p50_ms": 342.157,
+      "p90_ms": 418.807,
+      "p99_ms": 455.554,
+      "max_ms": 455.554,
+      "jdbc_statements_per_fee": 15.0,
+      "allocated_bytes_per_fee": 2392392,
+      "thread_cpu_ms_per_fee": 12.241,
+      "overview_ms": 119.878,
+      "money_diff": 0
+    }
+  ],
+  "global_vm": {
+    "after_profile": {
+      "page_size_bytes": 4096,
+      "before": {
+        "Pageins": 48244947,
+        "Pageouts": 941308,
+        "Swapins": 55294948,
+        "Swapouts": 58664546
+      },
+      "after": {
+        "Pageins": 48246710,
+        "Pageouts": 941308,
+        "Swapins": 55295173,
+        "Swapouts": 58664546
+      },
+      "delta": {
+        "Pageins": 1763,
+        "Pageouts": 0,
+        "Swapins": 225,
+        "Swapouts": 0
+      }
+    },
+    "after_unprofiled": {
+      "page_size_bytes": 4096,
+      "before": {
+        "Pageins": 48295108,
+        "Pageouts": 941308,
+        "Swapins": 55301953,
+        "Swapouts": 58664546
+      },
+      "after": {
+        "Pageins": 48296390,
+        "Pageouts": 941308,
+        "Swapins": 55302189,
+        "Swapouts": 58664546
+      },
+      "delta": {
+        "Pageins": 1282,
+        "Pageouts": 0,
+        "Swapins": 236,
+        "Swapouts": 0
+      }
+    }
+  }
+}

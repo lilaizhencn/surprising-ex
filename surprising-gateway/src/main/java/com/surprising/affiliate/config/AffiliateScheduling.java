@@ -1,29 +1,28 @@
 package com.surprising.affiliate.config;
 
-import com.surprising.affiliate.model.AffiliateModels.SourceCursor;
-import com.surprising.affiliate.repository.*;
+import com.surprising.affiliate.repository.AffiliateLedgerRepository;
 import com.surprising.affiliate.service.*;
 import com.surprising.product.api.ProductLine;
 import org.springframework.context.annotation.*;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
-/** One bounded worker per Gateway; database identities arbitrate concurrent instances. */
+/** Two fixed tasks: bounded accounting and independent money I/O. No task per member or fee. */
 @Configuration(proxyBeanMethods = false)
 public class AffiliateScheduling {
 
-  private final AffiliateFeeSourceRepository source;
   private final AffiliateLedgerRepository ledger;
   private final AffiliateAccrualService accrual;
   private final AffiliateSettlementService settlement;
+  private final long[] nextPoll = new long[ProductLine.values().length];
+  private final int[] failures = new int[ProductLine.values().length];
+  private int nextProduct;
 
   public AffiliateScheduling(
-    AffiliateFeeSourceRepository source,
     AffiliateLedgerRepository ledger,
     AffiliateAccrualService accrual,
     AffiliateSettlementService settlement
   ) {
-    this.source = source;
     this.ledger = ledger;
     this.accrual = accrual;
     this.settlement = settlement;
@@ -32,7 +31,7 @@ public class AffiliateScheduling {
   @Bean("affiliateScheduler")
   ThreadPoolTaskScheduler scheduler() {
     var scheduler = new ThreadPoolTaskScheduler();
-    scheduler.setPoolSize(1);
+    scheduler.setPoolSize(2);
     scheduler.setThreadNamePrefix("gateway-affiliate-");
     scheduler.setAwaitTerminationSeconds(5);
     return scheduler;
@@ -41,36 +40,63 @@ public class AffiliateScheduling {
   @Scheduled(
     scheduler = "affiliateScheduler",
     initialDelay = 15000,
-    fixedDelay = 10000
+    fixedDelay = 250
   )
-  public void run() {
-    for (var product : ProductLine.values()) {
-      var position = ledger.sourcePosition(product.name());
+  public void accrue() {
+    var products = ProductLine.values();
+    long now = System.nanoTime();
+    for (int scanned = 0; scanned < products.length; scanned++) {
+      int slot = nextProduct;
+      nextProduct = (nextProduct + 1) % products.length;
+      if (nextPoll[slot] != 0 && now - nextPoll[slot] < 0) continue;
+      var product = products[slot];
       try {
-        for (var fee : source.read(product.name(), position)) {
-          accrual.accrue(fee);
-          position = new SourceCursor(fee.clusterPosition(), fee.orderId());
-        }
-        ledger.sourcePosition(product.name(), position, null);
+        var result = accrual.accrueBatch(product.name());
+        failures[slot] = 0;
+        nextPoll[slot] =
+          System.nanoTime() + (result.more() ? 0 : 10_000_000_000L);
       } catch (RuntimeException failure) {
-        ledger.sourcePosition(
-          product.name(),
-          position,
-          "费用来源或核算不可用，保留原进度等待恢复"
-        );
+        failures[slot] = Math.min(6, failures[slot] + 1);
+        nextPoll[slot] =
+          System.nanoTime() +
+          Math.min(60, 1L << failures[slot]) * 1_000_000_000L;
+        try {
+          ledger.sourceError(
+            product.name(),
+            "核算已暂停并保留游标：来源、历史关系、处理上限或数据库需要核对"
+          );
+        } catch (RuntimeException unavailable) {
+          failure.addSuppressed(unavailable);
+        }
         org.slf4j.LoggerFactory.getLogger(getClass()).warn(
           "Affiliate accrual deferred product={}",
           product,
           failure
         );
       }
+      return;
     }
+  }
+
+  @Scheduled(
+    scheduler = "affiliateScheduler",
+    initialDelay = 15000,
+    fixedDelay = 1000
+  )
+  public void settle() {
     try {
       settlement.prepare(false, 0);
+    } catch (RuntimeException failure) {
+      org.slf4j.LoggerFactory.getLogger(getClass()).warn(
+        "Affiliate settlement preparation deferred",
+        failure
+      );
+    }
+    try {
       settlement.send();
     } catch (RuntimeException failure) {
       org.slf4j.LoggerFactory.getLogger(getClass()).warn(
-        "Affiliate settlement deferred",
+        "Affiliate committed payout delivery deferred",
         failure
       );
     }

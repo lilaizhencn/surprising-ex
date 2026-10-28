@@ -1,0 +1,89 @@
+Current reactor dependency install; exit 0
+[INFO] Surprising Parent .................................. SUCCESS [  0.455 s]
+[INFO] surprising-instrument-api .......................... SUCCESS [  0.831 s]
+[INFO] surprising-aeron-protocol .......................... SUCCESS [  0.104 s]
+[INFO] surprising-aeron-client ............................ SUCCESS [  0.072 s]
+[INFO] surprising-aeron-service ........................... SUCCESS [ 22.345 s]
+[INFO] surprising-trading-api ............................. SUCCESS [  0.042 s]
+[INFO] surprising-account-api ............................. SUCCESS [  0.036 s]
+[INFO] surprising-price-api ............................... SUCCESS [  0.030 s]
+[INFO] surprising-price-consumer .......................... SUCCESS [  0.053 s]
+[INFO] surprising-realtime-api ............................ SUCCESS [  0.072 s]
+[INFO] surprising-derivatives-lifecycle-api ............... SUCCESS [  0.473 s]
+[INFO] surprising-gateway ................................. SUCCESS [  7.386 s]
+[INFO] BUILD SUCCESS
+[INFO] Total time:  32.463 s
+[INFO] Finished at: 2026-10-28T23:27:20+08:00
+
+Final Gateway package; exit 0, tests skipped here
+[INFO] BUILD SUCCESS
+[INFO] Total time:  13.198 s
+[INFO] Finished at: 2026-10-28T23:32:56+08:00
+
+Fresh-source Affiliate + Auth selected execution; exit 0
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 18.94 s -- in com.surprising.affiliate.AffiliatePostgresTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.006 s -- in com.surprising.affiliate.CommissionAllocationTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 22.82 s -- in com.surprising.affiliate.AffiliateSafetyPostgresTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.400 s -- in com.surprising.affiliate.AffiliateResourceTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.937 s -- in com.surprising.affiliate.AffiliateHttpTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.106 s -- in com.surprising.affiliate.CommittedPayoutTransferTest
+[WARNING] Tests run: 2, Failures: 0, Errors: 0, Skipped: 2, Time elapsed: 0 s -- in com.surprising.gateway.provider.auth.PrimaryAuthenticationDatabaseTest
+[INFO] Tests run: 23, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.436 s -- in com.surprising.gateway.provider.auth.AuthServiceTest
+[INFO] Tests run: 27, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 13.07 s -- in com.surprising.gateway.provider.auth.AuthPagePostgresTest
+[INFO] Tests run: 18, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 8.040 s -- in com.surprising.gateway.provider.auth.AuthInputBoundaryPostgresTest
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.427 s -- in com.surprising.gateway.provider.auth.AuditLogPagePostgresTest
+[INFO] Tests run: 123, Failures: 0, Errors: 0, Skipped: 2
+[INFO] BUILD SUCCESS
+[INFO] Total time:  01:08 min
+[INFO] Finished at: 2026-10-28T23:47:03+08:00
+
+Normal Maven test; exit 1 at unrelated Core test compilation
+[ERROR] COMPILATION ERROR :
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/CoreTestCompletion.java:[65,53] cannot find symbol
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/CoreTestCompletion.java:[68,35] cannot find symbol
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[41,94] cannot find symbol
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[68,91] cannot find symbol
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[391,29] cannot find symbol
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[422,33] cannot find symbol
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[430,217] cannot find symbol
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductMoneyIntegrationTest.java:[134,97] cannot find symbol
+[INFO] BUILD FAILURE
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.1:testCompile (default-testCompile) on project surprising-gateway: Compilation failure: Compilation failure:
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/CoreTestCompletion.java:[65,53] cannot find symbol
+[ERROR]   symbol:   method placeAdmissionOutstanding(com.surprising.aeron.service.order.CommandSlot)
+[ERROR]   location: variable matchingFlow of type com.surprising.aeron.service.order.CoreMatchingFlow
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/CoreTestCompletion.java:[68,35] cannot find symbol
+[ERROR]   symbol:   method placeAdmissionOutstanding(com.surprising.aeron.service.order.CommandSlot)
+[ERROR]   location: variable matchingFlow of type com.surprising.aeron.service.order.CoreMatchingFlow
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[41,94] cannot find symbol
+[ERROR]   symbol:   method totalUnits(java.lang.String)
+[ERROR]   location: variable u of type com.surprising.aeron.service.account.CoreUserState
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[68,91] cannot find symbol
+[ERROR]   symbol:   method totalUnits(java.lang.String)
+[ERROR]   location: variable u of type com.surprising.aeron.service.account.CoreUserState
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[391,29] cannot find symbol
+[ERROR]   symbol:   method enterAsynchronousCommandScope()
+[ERROR]   location: class com.surprising.aeron.service.core.TradingAccountRuntime
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[422,33] cannot find symbol
+[ERROR]   symbol:   method exitAsynchronousCommandScope()
+[ERROR]   location: class com.surprising.aeron.service.core.TradingAccountRuntime
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/aeron/service/core/MaintenanceIntegrationTest.java:[430,217] cannot find symbol
+[ERROR]   symbol:   method totalUnits(java.lang.String)
+[ERROR]   location: variable u of type com.surprising.aeron.service.account.CoreUserState
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/gateway/provider/product/MultiProductMoneyIntegrationTest.java:[134,97] cannot find symbol
+
+New regression against pre-change implementation; expected failure
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 4.608 s <<< FAILURE! -- in com.surprising.affiliate.AffiliatePostgresTest
+expected: "8"
+ but was: "20"
+[ERROR] Failures:
+expected: "8"
+ but was: "20"
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+
+Strengthened all-bucket rollback regression; exit 0
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.927 s -- in com.surprising.affiliate.AffiliateSafetyPostgresTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Finished at: 2026-10-28T23:36:44+08:00

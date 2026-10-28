@@ -1,0 +1,20 @@
+
+JVM Information
+---------------
+
+PID: 90780
+
+VM Start: 22:41:08
+
+Name: OpenJDK 64-Bit Server VM
+
+Version: OpenJDK 64-Bit Server VM (27+33-FR) for bsd-amd64 JRE (27+33-FR), buil
+         t on 2026-08-05T02:11:49Z with clang Apple LLVM 15.0.0 (clang-1500.3.9
+         .4)
+
+VM Arguments: --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports
+              =java.base/jdk.internal.misc=ALL-UNNAMED -XX:StartFlightRecording
+              =filename=/tmp/surprising-affiliate-safety-20261028/baseline.jfr,
+              settings=profile,maxsize=64m,dumponexit=true
+
+Program Arguments: com.surprising.affiliate.AffiliateScaleProbe

@@ -1,0 +1,30 @@
+[
+  {
+    "kind": "web",
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "errorMessageShown": true,
+    "refreshRecovered": true,
+    "unboundedRetry": false,
+    "pageOverflow": false,
+    "affiliateRequests": 8,
+    "pageErrors": [],
+    "backend": "explicit HTTP fixtures; controller/DB/Core verified separately"
+  },
+  {
+    "kind": "admin",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "errorMessageShown": true,
+    "refreshRecovered": true,
+    "unboundedRetry": false,
+    "pageOverflow": false,
+    "affiliateRequests": 3,
+    "pageErrors": [],
+    "backend": "explicit HTTP fixtures; controller/DB/Core verified separately"
+  }
+]

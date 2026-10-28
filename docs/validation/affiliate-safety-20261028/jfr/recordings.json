@@ -1,0 +1,24 @@
+{
+  "baseline": {
+    "sha256": "a263d9689883c5b66f20a70d374319e861100212bef4c3cb2598e60cda4f3038",
+    "bytes": 1196949,
+    "settings": "profile",
+    "maxsize": "64m",
+    "dumponexit": true,
+    "raw": "removed after summaries and hash archived",
+    "main": "com.surprising.affiliate.AffiliateScaleProbe",
+    "jvm": "Corretto HotSpot 27+33-FR",
+    "stable_window_only": false
+  },
+  "after": {
+    "sha256": "1cfed691dedb94d19c02f49bed130cc628c401f94a559f26d392dab4c622253e",
+    "bytes": 1188935,
+    "settings": "profile",
+    "maxsize": "64m",
+    "dumponexit": true,
+    "raw": "removed after summaries and hash archived",
+    "main": "com.surprising.affiliate.AffiliateScaleProbe",
+    "jvm": "Corretto HotSpot 27+33-FR",
+    "stable_window_only": false
+  }
+}
