@@ -9,18 +9,14 @@ import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.core.*;
 import com.surprising.aeron.service.core.OwnerAccountReadGuard;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -42,7 +38,6 @@ class CoreLedgerQueryTest {
     void treasuryQueryReadsOriginalLedgerWithoutAccountHandoffAndConsumesResultOnce() throws Exception {
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCoreRuntime(LINE)) {
             core.activate();
-            assertThat(core.runtimeState().systemLedgerStarted()).isTrue();
             // 通过正常复制命令给 USDT 保险基金增加 250 的测试消息。
             var adjustment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_INSURANCE_FUND,
                     new UUID(936, 1), LINE, CommandSource.OPERATIONS, 936, 1, 0, 1, 1),
@@ -170,7 +165,6 @@ class CoreLedgerQueryTest {
                         Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {
             core.activate();
-            assertThat(core.runtimeState().systemLedgerStarted()).isTrue();
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
             long handoff = core.runtimeState().laneHandoffEpoch();
             try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
@@ -209,7 +203,6 @@ class CoreLedgerQueryTest {
                 CoreTreasuryState.ofSubledgers(fees, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {
             core.activate();
-            assertThat(core.runtimeState().systemLedgerStarted()).isTrue();
             // 本次查询消费到的最终响应，按场景核对成功、响应超限或页内容。
             var response = query(core, CoreMessageType.TREASURY_STATE_QUERY, new byte[0]);
             assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
@@ -226,7 +219,6 @@ class CoreLedgerQueryTest {
     void coldReadFailureDoesNotPoisonOriginalFinancialLedger() {
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = new TradingCoreRuntime(LINE)) {
             core.activate();
-            assertThat(core.runtimeState().systemLedgerStarted()).isTrue();
             assertThatThrownBy(() -> core.runtimeState().queryLedgerAtRest(/* 冷查询回调取得的账本，此处主动抛出异常来检查失败传播和后续查询可用性。 */ ledger -> {
                 throw new IllegalArgumentException("invalid cold query");
             })).isInstanceOf(IllegalArgumentException.class).hasMessage("invalid cold query");
@@ -272,7 +264,6 @@ class CoreLedgerQueryTest {
         var core = new TradingCoreRuntime(LINE);
         try {
             core.activate();
-            assertThat(core.runtimeState().systemLedgerStarted()).isTrue();
             // 已经构造的查询消息，用其命令 UUID 核对内部查询关联。
             var message = message(CoreMessageType.LIQUIDATION_WORK_QUERY,
                     CoreLiquidationWorkCodec.encodeQuery(new CoreLiquidationWorkView.Query(
@@ -280,7 +271,6 @@ class CoreLedgerQueryTest {
             assertThat(CoreTestCompletion.applyAsynchronously(core, message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             assertThat(core.bookQueries.hasPendingQuery(message.header().commandId())).isTrue();
         } finally { core.close(); }
-        assertThat(core.runtimeState().systemLedgerStarted()).isFalse();
         assertThat(core.bookQueries.hasPendingQueries()).isFalse();
     }
 
@@ -290,7 +280,7 @@ class CoreLedgerQueryTest {
      */
     private TradingCoreRuntime coreWithInitialState(TradingCoreState state) {
         return new TradingCoreRuntime(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
-                new TerminalStateRetention(), null, 0, Map.of(), Map.of(), null, null);
+                new TerminalStateRetention(), null, 0, Map.of(), Map.of());
     }
 
     /**

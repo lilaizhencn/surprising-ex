@@ -118,7 +118,6 @@ class CoreActiveLaneIngressTest {
                 assertThat(taker.positions()).singleElement().satisfies(/* 衍生品持仓检查中的单个用户持仓 */ position -> assertThat(position.signedQuantitySteps()).isEqualTo(2));
                 assertThat(maker.positions()).singleElement().satisfies(/* 衍生品持仓检查中的单个用户持仓 */ position -> assertThat(position.signedQuantitySteps()).isEqualTo(-2));
             }
-            assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             core.assertClusterCallbackComplete();
         } finally { release.countDown(); }
     }

@@ -6,7 +6,6 @@ import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.config.CoreRuntimeConfiguration;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
-import com.surprising.aeron.model.CoreOrderState;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
@@ -56,11 +55,9 @@ import com.surprising.aeron.service.result.SourceSequenceIndex;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.risk.RiskScanRuntime;
-import com.surprising.aeron.service.snapshot.CoreSnapshotImage;
 import com.surprising.aeron.service.snapshot.CoreSnapshotLifecycle;
 import com.surprising.aeron.service.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
-import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotWriter;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.product.api.ProductLine;
@@ -714,36 +711,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
             CoreRuntimeConfiguration configuration) {
         this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), new TerminalStateRetention(configuration.fundsIndexDirectory()), null,
-                0, Map.of(), Map.of(), null, null,
+                0, Map.of(), Map.of(),
                 java.util.Objects.requireNonNull(startupTopology, "startupTopology"), configuration);
     }
 
     /**
-     * 建立空的被动运行时，并允许注入 Matcher 快照捕获方式。
-     * @param productLine 必须明确隔离的所属产品线
-     * @param matcherSnapshotCapture 可空的 Matcher 捕获实现，空时采用默认快照捕获
-     */
-    public TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture) {
-        this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
-                TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), matcherSnapshotCapture, null);
-    }
-
-    /**
-     * 建立空的被动运行时，并允许分别注入 Matcher 捕获和分块快照编码方式。
-     * @param productLine 必须明确隔离的所属产品线
-     * @param matcherSnapshotCapture 可空的 Matcher 捕获实现，空时采用默认快照捕获
-     * @param snapshotEncoder 可空的分块编码实现，空时在调用线程编码后返回已完成结果
-     */
-    public TradingCoreRuntime(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture,
-                   SnapshotEncoder snapshotEncoder) {
-        this(productLine, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
-                TradingCoreState.empty(productLine), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), matcherSnapshotCapture, snapshotEncoder);
-    }
-
-    /**
-     * 根据初始或恢复状态装配账户、Matcher、索引、幂等表及快照协作对象，初始化水位后释放 Owner 绑定以便交接；此处不激活工作线程。默认快照编码在调用线程执行，再返回已完成的未来结果。
+     * 根据初始或恢复状态装配账户、Matcher、索引、幂等表及快照协作对象，初始化水位后释放 Owner 绑定以便交接；此处不激活工作线程。快照编码在 Owner 调用线程执行。
      * @param productLine 必须明确隔离的所属产品线
      * @param appliedCommandCount 初始或恢复的已受理 Core 序号
      * @param commandResults 按既有顺序恢复的近期命令收据
@@ -754,8 +727,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param projectionSequence 初始或恢复的已发布投影序号
      * @param restoredFeePolicies 恢复的费用政策映射，遍历顺序沿用输入
      * @param restoredPendingTransfers 恢复的待完成划转映射，遍历顺序沿用输入
-     * @param matcherSnapshotCapture 可空的 Matcher 捕获实现，空时采用默认快照捕获
-     * @param snapshotEncoder 可空的分块编码实现，空时在调用线程编码后返回已完成结果
      */
     public TradingCoreRuntime(
             ProductLine productLine,
@@ -767,12 +738,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> restoredFeePolicies,
-            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> restoredPendingTransfers,
-            MatcherSnapshotCapture matcherSnapshotCapture,
-            SnapshotEncoder snapshotEncoder) {
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> restoredPendingTransfers) {
         this(productLine, appliedCommandCount, commandResults, lastSourceSequences, snapshotState,
                 terminalRetention, matcherSnapshot, projectionSequence, restoredFeePolicies,
-                restoredPendingTransfers, matcherSnapshotCapture, snapshotEncoder,
+                restoredPendingTransfers,
                 matcherSnapshot == null
                         ? CoreConfiguration.standaloneLaneTopology()
                         : matcherSnapshot.topology(), CoreRuntimeConfiguration.standalone());
@@ -790,8 +759,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param projectionSequence 已恢复的投影水位
      * @param restoredFeePolicies 已恢复的费率配置
      * @param restoredPendingTransfers 已恢复的待完成划转
-     * @param matcherSnapshotCapture 可空的 Matcher 快照捕获函数
-     * @param snapshotEncoder 可空的分块编码函数
      * @param startupTopology 启动边界传入的拓扑，恢复时由快照中的拓扑决定
      */
     private TradingCoreRuntime(
@@ -805,8 +772,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
             long projectionSequence,
             Map<Long, com.surprising.aeron.model.CoreFeePolicyState> restoredFeePolicies,
             Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> restoredPendingTransfers,
-            MatcherSnapshotCapture matcherSnapshotCapture,
-            SnapshotEncoder snapshotEncoder,
             LaneTopology startupTopology, CoreRuntimeConfiguration configuration) {
         this.configuration = java.util.Objects.requireNonNull(configuration);
         this.responseArena = new ResponseArena(configuration);
@@ -842,14 +807,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 matchingAdapter.topology().matchingEngineCount(),
                 Math.min(matchingAdapter.topology().matcherWindowSize(),
                         matchingAdapter.topology().matchingCompletionCapacity()), false, pendingMatching.contexts());
-        snapshots.matcherSnapshotCapture(matcherSnapshotCapture == null
-                ? snapshots::captureMatcherSnapshot : matcherSnapshotCapture);
-        if (snapshotEncoder == null) {
-            snapshots.snapshotEncoder(/* 默认编码器收到的快照镜像，在本调用中同步编码 */ image -> CompletableFuture.completedFuture(
-                    SectionedCoreSnapshotWriter.encode(image, configuration.snapshot().maxBytes())));
-        } else {
-            snapshots.snapshotEncoder(snapshotEncoder);
-        }
         this.runtimeState.restoreFeePolicies(restoredFeePolicies);
         this.runtimeState.restorePendingTransfers(restoredPendingTransfers);
         commits.publication.initialize(snapshotState.revision(), projectionSequence);
@@ -904,7 +861,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return new TradingCoreRuntime(productLine, appliedCommandCount,
                 new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences),
                 snapshotState, terminalRetention, matcherSnapshot, projectionSequence,
-                feePolicies, pendingTransfers, null, null, matcherSnapshot.topology(), configuration);
+                feePolicies, pendingTransfers, matcherSnapshot.topology(), configuration);
     }
 
     /**
@@ -933,7 +890,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         currentClusterPosition = clusterPosition;
         assertHealthy();
         if (snapshots.inFlightMatcherSnapshot().get() != null
-                || snapshots.snapshotFence() != null && snapshots.snapshotFence().encodedSnapshot() == null) {
+                || snapshots.snapshotFence() != null) {
             throw new IllegalStateException("snapshot fence is active");
         }
         if (!pendingMatching.isEmpty()
@@ -1397,13 +1354,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
             runtimeState.releaseLaneCommit(directCommand.commitEvent());
             directCommand.clearCommitEvent();
         }
-        if (status == ResponseStatus.APPLIED && !runtimeState.pollControlFundsValidation(
-                message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE
-                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_OUT
-                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN
-                || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_INSURANCE_FUND)) {
-            directCommand.result(status, resultCode);
-            return null;
+        if (status == ResponseStatus.APPLIED) {
+            runtimeState.validateControlFunds(
+                    message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE
+                    || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_OUT
+                    || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TRANSFER_IN
+                    || message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ADJUST_INSURANCE_FUND);
         }
         directCommand.clearFinalizationPrepared();
         commits.publication.complete();
@@ -1761,7 +1717,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             bindOwner();
             terminalRetention.activate();
             runtimeState.startAccountLanes(affinity);
-            runtimeState.startSystemLedgerLane();
+            runtimeState.bindLedgerPositionOwner();
             matchingAdapter.activate();
             commits.publication.activate();
             activated = true;
@@ -1831,39 +1787,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 快照边界与 Matcher 捕获实现之间的契约，未来结果不等于必须创建线程。
-     */
-    public @FunctionalInterface
-    interface MatcherSnapshotCapture {
-        /**
-         * 按指定快照身份及提交边界捕获 Matcher 状态并返回未来结果；接口本身不承诺创建后台线程。
-         * @param snapshotId 本次快照身份，交给既有捕获和编码流程
-         * @param coreSequence 本次准备或快照固定的 Core 序号
-         * @param businessStateHash 本次快照固定的业务状态摘要
-         * @param state 本次快照固定的全局业务镜像
-         * @param activeOrders 与快照边界对应的活动订单内容
-         */
-        java.util.concurrent.CompletionStage<MatcherSnapshot> capture(
-                long snapshotId,
-                long coreSequence,
-                long businessStateHash,
-                TradingCoreState state,
-                Iterable<CoreOrderState> activeOrders);
-    }
-
-    /**
-     * 快照镜像到分块编码结果的契约，允许接入既有同步或异步编码实现。
-     */
-    public @FunctionalInterface
-    interface SnapshotEncoder {
-        /**
-         * 把已经组装的快照镜像编码为分块结果；具体同步或异步执行方式由注入实现决定。
-         * @param image 已经组装好的快照镜像，交给编码实现
-         */
-        CompletableFuture<SectionedCoreSnapshotCodec.SectionedSnapshot> encode(CoreSnapshotImage image);
-    }
-
-    /**
      * 尝试毒化 Matcher 并登记带命令序号的致命分歧；毒化本身失败时保留到异常因果中，返回登记的故障，由后续健康检查传播。
      * @param pending 当前借用的在途命令槽，完成或释放后不能继续使用
      * @param detail 此次致命分歧的具体诊断内容
@@ -1903,7 +1826,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 依次检查终态索引、撮合分歧、提交发布、账户 Lane、发布器和快照审计故障，发现已有故障立即传播。
+     * 依次检查终态索引、撮合分歧、提交发布、账户 Lane 和发布器故障，发现已有故障立即传播。
      */
     public void assertHealthy() {
         terminalRetention.assertHealthy();
@@ -1911,9 +1834,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (commitPublicationFailure != null) throw commitPublicationFailure;
         if (runtimeState != null) runtimeState.assertAccountLanesHealthy();
         commits.publication.assertHealthy();
-        // 后台快照审计已经记录的故障，健康检查负责传播
-        RuntimeException auditFailure = snapshots.snapshotAuditFailure().get();
-        if (auditFailure != null) throw auditFailure;
     }
 
     /**

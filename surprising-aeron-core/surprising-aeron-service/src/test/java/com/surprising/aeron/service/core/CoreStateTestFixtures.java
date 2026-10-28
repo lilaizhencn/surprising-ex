@@ -153,7 +153,7 @@ public final class CoreStateTestFixtures {
     public static void deleteRiskSnapshot(TradingAccountRuntime runtime, long key) {
         long userId = runtime.riskSnapshot(key).userId();
         runtime.onLane(userId, lane -> {
-            lane.removeRiskSnapshotValue(key);
+            com.surprising.aeron.service.account.AccountLaneTestAccess.removeRiskSnapshot(lane, key);
             runtime.publishRiskSnapshot(key, null);
             return null;
         });

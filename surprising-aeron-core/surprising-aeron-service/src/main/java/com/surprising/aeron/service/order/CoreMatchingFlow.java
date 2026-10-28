@@ -17,7 +17,6 @@ import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 /**
@@ -444,22 +443,6 @@ public final class CoreMatchingFlow {
     public boolean hasPendingMatchingRejection(long sequence) {
         return owner.pendingMatching().claimed(sequence)
                 && owner.pendingMatching().required(sequence).hasMatchingRejection();
-    }
-
-    /**
-     * 先要求 Owner 身份，再在各 Matcher 提交栅栏读取订单簿哈希；单分片直接读，多分片各自读后聚合。后续运行异常包装失败 Future，Owner 身份检查异常直接抛出。
-     */
-    public CompletableFuture<Integer> matchingStateHashAsync() {
-        owner.assertOwner();
-        try {
-            return owner.matchingAdapter().topology().matchingEngineCount() == 1
-                    ? owner.matcherPipeline().readAtSubmissionFence(0,
-                    owner.matchingAdapter()::orderBooksStateHash)
-                    : owner.matcherPipeline().readEachAsync(owner.matchingAdapter()::stateHashShard)
-                    .thenApply(owner.matchingAdapter()::aggregateBookHash);
-        } catch (/* 当前登记、准入或哈希读取的运行异常，按所在方法清理或转为失败结果。 */ RuntimeException failure) {
-            return CompletableFuture.failedFuture(failure);
-        }
     }
 
     /**

@@ -65,12 +65,10 @@ class CoreRuntimeConfigurationTest {
                     com.surprising.product.api.ProductLine.SPOT, configuration)) {
                 assertThat(restored.activated()).isFalse();
                 assertThat(restored.runtimeState().accountLanesStarted()).isFalse();
-                assertThat(restored.runtimeState().systemLedgerStarted()).isFalse();
                 restored.activate(TradingCpuAffinity.disabled());
                 assertThat(restored.configuration()).isSameAs(configuration);
                 assertThat(restored.activated()).isTrue();
                 assertThat(restored.runtimeState().accountLanesStarted()).isTrue();
-                assertThat(restored.runtimeState().systemLedgerStarted()).isTrue();
             }
         }
     }

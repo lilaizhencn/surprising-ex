@@ -64,7 +64,7 @@ class ParallelRiskScanTest {
                     new com.surprising.aeron.service.core.index.ActiveOrderIndex(source),
                     new AdlPositionIndex(source, ids)), ids);
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
             var work = new RiskScanCoordinator(budget, index, runtime, ids);
             for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; runtime.firstRiskIncompleteScan() != null; page++) {

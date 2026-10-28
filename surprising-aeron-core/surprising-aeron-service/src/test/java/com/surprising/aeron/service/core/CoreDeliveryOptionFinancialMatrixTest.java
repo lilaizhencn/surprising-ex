@@ -34,11 +34,9 @@ import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.aeron.service.account.CoreUserState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.ActiveOrderIndex;
-import com.surprising.aeron.service.core.index.AdlPositionIndex;
 import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.order.state.RuntimeTestStateTransitions;
 import com.surprising.aeron.service.query.state.*;
-import com.surprising.aeron.service.query.state.RuntimeRiskQueryService;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation;
 import com.surprising.aeron.service.snapshot.state.*;
@@ -167,7 +165,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 本次投影、业务辅助和物化共用的独立整数身份表
         var identities = new RuntimeIdentityRegistry();
         try (/* 本次直接业务或异步控制使用的运行时，按既有资源作用域或 finally 关闭 */ var runtime = RuntimeStateProjector.project(opening, identities)) {
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
             var work = RuntimeLifecycleSettlementContinuation.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID),
                     new ActiveOrderIndex(opening), runtime, identities);
@@ -200,7 +198,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
              /* 同一起点投影的冷运行时，和异步账本路径逐步比较 */ var cold = RuntimeStateProjector.project(opening, coldIdentities)) {
             // 从原状态建立的活跃订单索引，结算首段和补款重试复用
             var index = new ActiveOrderIndex(opening);
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 本段到期结算可轮询工作；任务完成不代表整体结算进度已经 complete
             var work = RuntimeLifecycleSettlementContinuation.prepare(null, command, List.of(USER_ID), index, runtime, identities);
             LedgerControlTestSupport.await(runtime, work::poll);

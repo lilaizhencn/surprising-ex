@@ -705,18 +705,6 @@ public final class OrderRuntime {
     }
 
     /**
-     * 复制订单后只修改累计成交值，原订单不变。
-     * @param high 累计成交值高 64 位，-1 表示未提供，不能小于 -1
-     * @param low 累计成交值低 64 位，保留原始位模式
-     */
-    public OrderRuntime withExecutionValue(long high, long low) {
-        // 按当前业务值复制的新可变订单，只在副本上设置累计成交值。
-        OrderRuntime copy = mutableCopy();
-        copy.executionValue(high, low);
-        return copy;
-    }
-
-    /**
      * 按新的累计成交量、剩余量、状态和版本创建后状态，沿用原费用、累计成交值和提交元数据。
      * @param executed 更新后的累计已成交数量步数
      * @param remaining 更新后的剩余数量步数，两者精确和必须等于原始数量

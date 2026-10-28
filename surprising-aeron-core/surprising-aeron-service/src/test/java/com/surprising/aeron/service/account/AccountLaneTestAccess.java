@@ -15,6 +15,7 @@ public final class AccountLaneTestAccess {
      * 不创建辅助类实例，测试使用静态入口。
      */
     private AccountLaneTestAccess() {}
+    public static void removeRiskSnapshot(AccountLaneState lane, long key) { lane.cold.riskSnapshots.remove(key); }
     /**
      * 返回 Lane 内实际用户表，供测试安装守卫或检查对象复用。
      * @param lane 测试已经受控取得的账户 Lane 状态

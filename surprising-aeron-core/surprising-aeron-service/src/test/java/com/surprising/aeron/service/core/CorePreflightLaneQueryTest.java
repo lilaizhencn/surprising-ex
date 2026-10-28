@@ -52,7 +52,7 @@ class CorePreflightLaneQueryTest {
                     var resolved = RuntimeOrderAdmission.resolve(cold, identities, 1, command, TIME);
                     // 冷运行时按产品规则算出的应预留金额，不在查询时真的冻结。
                     long reserved = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
-                            0, cold.admissionOrders(1, resolved.symbolId()));
+                            0, cold.onLane(1L, lane -> lane.admissionOrderIndex(resolved.symbolId())));
                     try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                         // 当前产品和方向的最终预检响应，应与冷规则资产及金额编码完全一致。
                         var response = query(core, 1, command);
@@ -124,7 +124,7 @@ class CorePreflightLaneQueryTest {
                 var resolved = RuntimeOrderAdmission.resolve(cold, identities, 1, valid, TIME);
                 // 冷运行时结合实际 OI 和挂单汇总算出的两步只减仓预留金额。
                 long expected = RuntimeOrderAdmission.requiredReservation(cold, identities, 1, resolved,
-                        new OpenInterestIndex(before).openInterestSteps("1"), cold.admissionOrders(1, resolved.symbolId()));
+                        new OpenInterestIndex(before).openInterestSteps("1"), cold.onLane(1L, lane -> lane.admissionOrderIndex(resolved.symbolId())));
                 try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                     assertThat(query(core, 1, place(304, CoreOrderSide.SELL, 110, 3, true, "close-oversized")).resultCode())
                             .isEqualTo(CoreResultCode.REDUCE_ONLY_CAPACITY_EXCEEDED);
@@ -156,7 +156,7 @@ class CorePreflightLaneQueryTest {
                 // 更新前冷配置解析的订单输入，用来计算旧预检编码。
                 var order = RuntimeOrderAdmission.resolve(cold, ids, 1, intent, TIME);
                 expected = CoreOrderPreflightCodec.encode(new CoreOrderPreflightView(order.reservationAsset(),
-                        RuntimeOrderAdmission.requiredReservation(cold, ids, 1, order, 0, cold.admissionOrders(1, order.symbolId()))));
+                        RuntimeOrderAdmission.requiredReservation(cold, ids, 1, order, 0, cold.onLane(1L, lane -> lane.admissionOrderIndex(order.symbolId())))));
             }
             // 确认阻塞任务已在用户所属 Lane 执行的门闩，避免尚未阻塞就发送查询。
             var entered = new CountDownLatch(1);

@@ -50,6 +50,7 @@ class RuntimeChangedIndexCommitTest {
                         CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), quantity,
                         quantity == 0 ? 0 : 100, Math.abs(quantity) * 100, 0, Math.abs(quantity) * 10));
                 runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
                 runtime.clearChangedKeys();
                 assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(Math.abs(quantity));
@@ -60,6 +61,7 @@ class RuntimeChangedIndexCommitTest {
             }
             runtime.removePosition(key, 7);
             runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
             assertThat(indexes.openInterest.totals()).isEmpty();
             assertThat(indexes.positionUsers.usersAfter("1", 0)).isEmpty();
@@ -92,6 +94,7 @@ class RuntimeChangedIndexCommitTest {
         IndexSet indexes = indexes(initial, identities);
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).containsExactly(11L);
@@ -105,9 +108,10 @@ class RuntimeChangedIndexCommitTest {
         runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 5));
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
 
-        assertThat(runtime.admissionOrders(7, symbolId).inspect(7, "1", CorePositionSide.NET,
+        assertThat(runtime.onLane(7L, lane -> lane.admissionOrderIndex(symbolId)).inspect(7, "1", CorePositionSide.NET,
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, CoreMarginMode.ISOLATED).pendingQuantity()).isEqualTo(5);
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(3);
 
@@ -116,6 +120,7 @@ class RuntimeChangedIndexCommitTest {
         runtime.removePosition(positionKey, 7);
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).isEmpty();
@@ -160,6 +165,7 @@ class RuntimeChangedIndexCommitTest {
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isEqualTo(risk);
@@ -172,6 +178,7 @@ class RuntimeChangedIndexCommitTest {
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
         runtime.clearCommittedChanges(identities);
 
@@ -210,6 +217,7 @@ class RuntimeChangedIndexCommitTest {
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1))).isEqualTo(planned);
@@ -224,6 +232,7 @@ class RuntimeChangedIndexCommitTest {
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1)).status())

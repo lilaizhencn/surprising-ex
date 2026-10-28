@@ -321,10 +321,4 @@ public final class MatcherSettlementChanges {
      * 返回按拓扑保留的余额缓冲列数，不表示本代活跃 Lane 数。
      */
     public int balancePatchCount() { return balancePatches.length; }
-    /**
-     * 借用指定 Lane 已准备的资金增量缓冲，不复制内容。
-     * @param index 所借用缓冲对应的 Lane 数组下标
-     */
-    public RuntimeFundsAccumulator laneFundsDelta(int index) { return laneFundsDeltas[index]; }
-
 }

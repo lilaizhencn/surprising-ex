@@ -23,6 +23,7 @@ class CommittedIndexVisitTest {
             assertThat(indexes.openInterest().totals()).isNotEmpty();
             state.orderChanges().put(11, null);
             state.positionChanges().put(21, null);
+            state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
             state.applyChangedIndexes();
             assertThat(indexes.activeOrders().page(7, "1", Long.MAX_VALUE, 10).orderIds()).isEmpty();
             assertThat(indexes.openInterest().totals()).isEmpty();
@@ -43,12 +44,14 @@ class CommittedIndexVisitTest {
             for (long key : new long[]{40, 43})
                 indexes.preparedPosition(key, new RuntimePositionIndexValue(7, "1", "USDT", CorePositionSide.NET, 5));
             for (int repeat = 0; repeat < 2; repeat++) {
+                state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
                 state.applyChangedIndexes();
                 assertThat(indexes.activeOrders().page(7, "1", Long.MAX_VALUE, 10).orderIds()).isEmpty();
                 assertThat(indexes.openInterest().totals()).isEmpty();
                 assertThat(indexes.positionUsers().higherUserId("1", 0)).isZero();
             }
             state.clearChangedKeys();
+            state.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
             state.applyChangedIndexes();
             assertThat(firstOrders.containsKey(999)).isTrue();
             assertThat(firstPositions.containsKey(998)).isTrue();

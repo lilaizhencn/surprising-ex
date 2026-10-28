@@ -7,12 +7,12 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 逐产品线验证空白运行时的 Core 与原生 Matcher 快照能够配对恢复，核对产品线、路由拓扑及订单簿哈希；没有注册品种、成交或资金变动场景。
+ * 逐产品线验证空白运行时的 Core 与原生 Matcher 快照能够配对恢复，核对产品线、路由拓扑及Matcher 引擎哈希；没有注册品种、成交或资金变动场景。
  */
 class CoreNativeSnapshotProductLineTest {
 
     /**
-     * 对 ProductLine 每个枚举值保存编号一百零一的空状态快照，关闭原运行时后检查清单并恢复，要求产品线不串用、路由拓扑及订单簿哈希相同。
+     * 对 ProductLine 每个枚举值保存编号一百零一的空状态快照，关闭原运行时后检查清单并恢复，要求产品线不串用、路由拓扑及Matcher 引擎哈希相同。
      * @param productLine 参数化测试当前覆盖的一条产品线
      */
     @ParameterizedTest
@@ -24,7 +24,7 @@ class CoreNativeSnapshotProductLineTest {
         int bookHash;
         try (/* 保存快照前的原运行时，资源退出时关闭。 */ TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
             snapshot = state.snapshot(101);
-            bookHash = state.matchingFlow.matchingStateHashAsync().join();
+            bookHash = TradingCoreRuntime.inspectSnapshot(state.productLine(), state.snapshot()).engineStateHash();
         }
 
         // 完整解析原快照得到的公开配对清单。
@@ -33,7 +33,7 @@ class CoreNativeSnapshotProductLineTest {
             assertThat(manifest.productLine()).isEqualTo(productLine);
             assertThat(restored.laneTopology()).isEqualTo(manifest.topology());
             assertThat(restored.productLine()).isEqualTo(productLine);
-            assertThat(restored.matchingFlow.matchingStateHashAsync().join()).isEqualTo(bookHash);
+            assertThat(TradingCoreRuntime.inspectSnapshot(restored.productLine(), restored.snapshot()).engineStateHash()).isEqualTo(bookHash);
         }
     }
 }

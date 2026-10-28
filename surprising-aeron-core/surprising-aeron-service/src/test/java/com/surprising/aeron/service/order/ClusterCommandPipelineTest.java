@@ -520,9 +520,9 @@ class ClusterCommandPipelineTest {
                 for (/* 当前需要核对客户身份已释放的子订单下标 */ int item = 0; item < (batch ? 20 : 1); item++) {
                     // 当前子订单由批次或普通前缀派生的客户号
                     String clientKey = (batch ? "batch-" : "order-") + (1000 + item);
-                    assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.identities().findClientKey(11, clientKey)))
+                    assertThat(AccountLaneQueryTestSupport.read(state.runtimeState(), 11, () -> state.identities().findClientKeyValue(11, clientKey)))
                             .as("Lane retires terminal client identity before Owner drains or publishes")
-                            .isNull();
+                            .isZero();
                 }
                 live.tick(); serial.apply(command);
                 assertThat(gate.join()).isTrue();

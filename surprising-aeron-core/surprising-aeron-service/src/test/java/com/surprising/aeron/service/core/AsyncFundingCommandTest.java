@@ -200,7 +200,7 @@ class AsyncFundingCommandTest {
                         try (var source = new TradingCoreRuntime(line, 0, new java.util.LinkedHashMap<>(),
                                 new java.util.LinkedHashMap<>(), noMark,
                                 new com.surprising.aeron.service.retention.TerminalStateRetention(), null, 0,
-                                java.util.Map.of(), java.util.Map.of(), null, null);
+                                java.util.Map.of(), java.util.Map.of());
                                 var withoutMark = TradingCoreRuntime.fromSnapshot(line, source.snapshot(101))) {
                             assertThat(withoutMark.runtimeState.markPrice(withoutMark.identities.symbolId("1"))).isNull();
                             applied(withoutMark, message(line, CoreMessageType.APPLY_FUNDING, 0,

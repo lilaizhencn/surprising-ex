@@ -257,17 +257,6 @@ public final class TreasuryRuntime {
     }
 
     /**
-     * 捕获本资产首次前值，再设置同一份保险亏空余额。
-     * @param assetId 需要读写或捕获的非负资产编号
-     * @param units 要设置的有符号余额，零值移除对应键
-     */
-    public void setDeficit(int assetId, long units) {
-        assertOwner();
-        captureAssetBefore(assetId);
-        setSigned(insuranceDeficits, assetId, units);
-    }
-
-    /**
      * 禁止订单批次内修改，检查币对及正结算编号，捕获首个资金费前值，再发布完成编号并清除该币对资金费进度，保留生命周期记录。
      * @param symbolId 稠密币对编号
      * @param settlementId 当前资金费或生命周期结算编号，完成入口要求正数

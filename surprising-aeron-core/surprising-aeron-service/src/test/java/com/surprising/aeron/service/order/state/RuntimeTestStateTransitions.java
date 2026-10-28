@@ -187,7 +187,7 @@ public final class RuntimeTestStateTransitions {
             ResolvedPlaceOrder resolved = RuntimeOrderAdmission.resolve(
                     runtime, identities, userId, command, decisionTimestamp);
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
-                    resolved, 0, runtime.admissionOrders(userId, identities.symbolId(resolved.instrumentId())));
+                    resolved, 0, runtime.onLane(userId, lane -> lane.admissionOrderIndex(identities.symbolId(resolved.instrumentId()))));
             runtime.placePreparedOrder(userId, resolved, commandId, required,
                     identities.clientKey(userId, resolved.clientOrderId()),
                     identities.symbolId(resolved.instrumentId()), identities.assetId(resolved.reservationAsset()));
@@ -204,7 +204,7 @@ public final class RuntimeTestStateTransitions {
         return mutate(before, (/* 只用于当前测试动作的冷可变运行时，统一投影后调用生产规则。 */ runtime, /* 该冷运行时本次操作独立使用的身份表，查询及金额计算都使用相同映射。 */ identities) -> {
             // 生产账户准入根据本单和原运行态挂单算出的应预留金额。
             long required = RuntimeOrderAdmission.requiredReservation(runtime, identities, userId,
-                    command, 0, runtime.admissionOrders(userId, identities.symbolId(command.instrumentId())));
+                    command, 0, runtime.onLane(userId, lane -> lane.admissionOrderIndex(identities.symbolId(command.instrumentId()))));
             runtime.placePreparedOrder(userId, command, UUID.randomUUID(), required,
                     identities.clientKey(userId, command.clientOrderId()),
                     identities.symbolId(command.instrumentId()), identities.assetId(command.reservationAsset()));
@@ -497,7 +497,7 @@ public final class RuntimeTestStateTransitions {
         try (var core = new TradingCoreRuntime(before.productLine(),
                 0, new LinkedHashMap<>(), new LinkedHashMap<>(), before,
                 new TerminalStateRetention(), null, 0,
-                Map.of(), Map.of(), null, null)) {
+                Map.of(), Map.of())) {
             var request = new CoreMessage(CoreMessageHeader.query(type, UUID.randomUUID(), before.productLine(),
                     CommandSource.OPERATIONS, 0, 0, userId, 0, 0), payload);
             var response = CoreTestCompletion.querySynchronously(core, request);

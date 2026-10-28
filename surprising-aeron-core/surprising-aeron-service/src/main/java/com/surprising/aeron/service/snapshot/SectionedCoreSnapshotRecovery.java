@@ -171,13 +171,6 @@ public final class SectionedCoreSnapshotRecovery {
     }
 
     /**
-     * 返回已完整接收并结束的段数；正在接收的已分配负载尚不计入，最终包含页尾。
-     */
-    public int ownedSectionCount() {
-        return sectionIndex;
-    }
-
-    /**
      * 收齐十二字节封套后检查魔数、当前版本、零保留位及段数范围，分配外层负载引用数组并将封套加入 CRC；不接受其他外层版本。
      */
     private void selectMode() {

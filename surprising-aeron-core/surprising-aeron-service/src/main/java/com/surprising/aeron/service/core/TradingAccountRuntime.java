@@ -76,7 +76,6 @@ import com.surprising.aeron.service.snapshot.state.AccountLaneSnapshot;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.aeron.support.collection.ImmutableLongArrayList;
@@ -531,17 +530,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public void recordFailure(Throwable problem) { laneLifecycle.recordFailure(problem); }
 
     /**
-     * 首次调用时将业务持仓索引绑定至当前 Owner 线程；已有账本时直接返回。
+     * 激活时将业务持仓索引绑定至当前 Owner 线程，保留冷恢复后的线程交接边界。
      */
-    public void startSystemLedgerLane() {
+    public void bindLedgerPositionOwner() {
         assertOwner();
-        systemLedgerStarted = true;
         if (factIndexes != null) factIndexes.bindBusinessOwner(Thread.currentThread());
     }
-
-    private boolean systemLedgerStarted;
-
-    public boolean systemLedgerStarted() { return systemLedgerStarted; }
 
     /**
      * 从账本拥有的事实索引读取准入所需持仓量；尚未绑定索引则报错，结果由各准入事件保存。
@@ -587,7 +581,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (command == null) throw new IllegalArgumentException("Ledger command is required");
         if (ledgerControl != null && ledgerControl != command)
             throw new IllegalStateException("another control command owns the Ledger financial scope");
-        command.submitted();
         ledgerControl = command;
         command.apply(treasury);
     }
@@ -1334,7 +1327,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     @Override
     public void close() {
-        systemLedgerStarted = false;
         laneLifecycle.close();
     }
 
@@ -2604,15 +2596,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 在用户所属 Lane 的有效范围中取得指定标的准入订单索引引用；返回引用不延长账户访问权限。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param symbolId 本产品线标的内部身份
-     */
-    public com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.AdmissionOrderIndex admissionOrders(long userId, int symbolId) {
-        return onLane(userId, /* 当前执行、检查或恢复的账户 Lane，借出引用不扩大访问权限 */ lane -> lane.admissionOrderIndex(symbolId));
-    }
-
-    /**
      * 账户已启动时，要求当前已有账户命令范围或 Owner 已取得交接访问权；不在此发起交接或等待。
      */
     private void requireAccountReadOwnership() {
@@ -2717,18 +2700,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 该用户在所属 Lane 的原资产余额映射，资产不存在时返回空
         IntObjectHashMap<BalanceRuntime> balances = lane.userBalances(userId);
         return balances == null ? null : balances.get(assetId);
-    }
-
-    /**
-     * 按正常账户读取规则取可用余额，不存在时返回 Long.MIN_VALUE 作为缺失标记，不能当作零余额。
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param assetId 本次读取或登记变化的资产内部身份
-     */
-    public long publishedAvailableBalance(long userId, int assetId) {
-        assertOwner();
-        // 本次读取的可空资产余额，缺失与零余额需要区分
-        BalanceRuntime balance = balance(userId, assetId);
-        return balance == null ? Long.MIN_VALUE : balance.availableUnits();
     }
 
     /**
@@ -5406,7 +5377,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 遍历直接及保留 Lane 变化缓冲，直接更新运行时绑定的事实索引。活动账本已负责持仓业务索引时跳过其重复应用；强平/触发单捕获故障单独记录，索引更新异常仍传播。
+     * 遍历直接及保留 Lane 变化缓冲，直接更新运行时绑定的事实索引。持仓业务索引已在资金校验阶段应用；强平/触发单捕获故障单独记录，索引更新异常仍传播。
      */
     public void applyChangedIndexes() {
         assertOwner();
@@ -5418,15 +5389,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             // 本轮正在处理或按用户路由选出的账户 Lane 编号
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
             applyChangedOrderIndexes(changedOrders.laneBuffer(laneId));
-        }
-        if (!systemLedgerStarted) {
-            applyChangedPositionIndexes(changedPositions.directBuffer());
-            remaining = changedPositions.retainedLaneMask();
-            while (remaining != 0) {
-                // 本轮正在处理或按用户路由选出的账户 Lane 编号
-                int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-                applyChangedPositionIndexes(changedPositions.laneBuffer(laneId));
-            }
         }
         for (/* 本轮有效强平后值，Lane 已完成交接。 */ int index = 0; index < changedLiquidations.size(); index++) {
             LiquidationRuntime value = changedLiquidations.valueAt(index);
@@ -5459,20 +5421,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private void applyChangedOrderIndexes(RuntimeChangeBuffer<OrderRuntime> orders) {
         for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < orders.size(); index++)
             factIndexes.activeOrders().apply(orders.keyAt(index), orders.valueAt(index), indexIdentities);
-    }
-
-    /**
-     * 有已准备持仓索引值时直接应用，否则转换当前持仓值；只遍历当前有效项。
-     * @param positions 当前持仓变化缓冲，包含删除项或已准备索引值
-     */
-    private void applyChangedPositionIndexes(RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions) {
-        for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < positions.size(); index++) {
-            // 当前持仓变化项的内部键，配套交出已准备索引或业务值
-            long key = positions.keyAt(index);
-            if (positions.hasPreparedAt(index))
-                factIndexes.preparedPosition(key, positions.preparedAt(index));
-            else factIndexes.applyPosition(key, positions.valueAt(index), indexIdentities);
-        }
     }
 
     /**
@@ -5568,12 +5516,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private boolean controlFundsValidated;
 
     /**
-     * 活动财务控制已有专用槽时沿用其校验；否则仅在账户余额或持仓有变化时推进独立资金校验续步。返回通过表示已验证，财务范围关闭仍需后续请求。
+     * 活动财务控制已有专用槽时沿用其校验；否则仅在账户余额或持仓有变化时同步校验。校验失败直接抛出，财务范围关闭仍需后续提交或回滚。
      * @param externalAdjustment 本命令是否允许外部资金增减，交给账本资金守恒检查
      */
-    public boolean pollControlFundsValidation(boolean externalAdjustment) {
+    public void validateControlFunds(boolean externalAdjustment) {
         assertOwner();
-        if (ledgerControl != null) return ledgerControl.validateFunds(externalAdjustment);
+        if (ledgerControl != null) {
+            ledgerControl.validateFunds(externalAdjustment);
+            return;
+        }
         // 各 Lane 是否存在余额补丁条目，不等同于每条补丁都有非零差额
         boolean accountFundsChanged = false;
         for (/* 正在汇总资金差额的余额补丁 Lane 下标 */ int laneIndex = 0; laneIndex < accountRollback.balancePatchCount(); laneIndex++) {
@@ -5581,7 +5532,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             LaneBalancePatches patches = accountRollback.balancePatch(laneIndex);
             accountFundsChanged |= patches.size() != 0;
         }
-        if (!accountFundsChanged && changedPositions.isEmpty()) return true;
+        if (!accountFundsChanged && changedPositions.isEmpty()) return;
         if (!controlFundsValidated) {
             appendControlAccountFunds(controlValidationFunds);
             controlValidationFunds.requireConserved(externalAdjustment);
@@ -5589,7 +5540,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             applyLedgerControlPositions(controlPositionUndo);
             controlFundsValidated = true;
         }
-        return true;
     }
 
     /**

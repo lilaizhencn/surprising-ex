@@ -74,7 +74,7 @@ class LedgerPositionPublicationTest {
             long key = ids.findPositionKeyValue(7, instrument, CorePositionSide.NET);
             // 标的一对应的内部稠密编号，用于 Treasury 暂存
             int symbol = ids.symbolId("1");
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             for (/* 本次控制删除、校验与回滚的轮次，共两轮 */ int round = 0; round < 2; round++) {
                 if (treasuryScope) {
                     // 可选的本次资金费暂存账本命令，初始化时绑定原运行时
@@ -88,14 +88,13 @@ class LedgerPositionPublicationTest {
                         @Override protected void applyLedger(TreasuryRuntime ledger) { ledger.setFundingSettlement(symbol, 9); }
                     };
                     runtime.dispatchLedgerCommand(command);
-                    LedgerControlTestSupport.await(runtime, command::complete);
                 }
                 runtime.dispatchControlLanes(runtime.topology().accountLaneMask(7), /* 本次删除持仓的实际账户 Lane，操作只改用户七持仓 */ lane -> {
                     runtime.removePosition(key, 7); return null;
                 });
                 LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
                 // 即使没有资金补丁，仅持仓变化的控制命令仍须完成账本校验。
-                LedgerControlTestSupport.awaitFunds(runtime, false);
+                runtime.validateControlFunds(false);
                 assertThat(adl.count()).isZero();
                 LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(1, 2 + round));
                 onLedger(runtime, () -> {
@@ -126,7 +125,7 @@ class LedgerPositionPublicationTest {
         var indexes = indexes(initial, ids, users, oi, adl);
         try (/* 自动关闭的交易运行时，按用例启动所需账户与账本工作资源 */ var runtime = RuntimeStateProjector.project(initial, ids)) {
             runtime.bindFactIndexes(indexes, ids);
-            runtime.startSystemLedgerLane();
+            runtime.bindLedgerPositionOwner();
             assertThat(oi.openInterestSteps("1")).isZero();
             assertThat(users.higherUserId("1", 0)).isZero();
             assertThat(adl.positions("USDT", 2)).isEmpty();

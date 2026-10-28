@@ -31,7 +31,6 @@ import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1485,17 +1484,11 @@ class CoreMatchingStateTest {
     }
 
     /**
-     * 请求异步 Matcher 状态哈希并最多自旋五秒，要求 future 已完成后读取其值，不把默认零当成未完成时的成功结果。
+     * 通过完整快照屏障取得并检查 Matcher 引擎哈希。
      * @param state 当前被测产品线的交易运行时
      */
     private static int awaitMatchingHash(TradingCoreRuntime state) {
-        // 原 Matcher 状态哈希的异步查询结果。
-        CompletableFuture<Integer> future = state.matchingFlow.matchingStateHashAsync();
-        // 当前辅助操作的纳秒截止点，准入十秒、账户结算及哈希等待五秒。
-        long deadline = System.nanoTime() + 5_000_000_000L;
-        while (!future.isDone() && System.nanoTime() < deadline) Thread.onSpinWait();
-        assertThat(future).isDone();
-        return future.getNow(0);
+        return TradingCoreRuntime.inspectSnapshot(state.productLine(), state.snapshot()).engineStateHash();
     }
 
     /**

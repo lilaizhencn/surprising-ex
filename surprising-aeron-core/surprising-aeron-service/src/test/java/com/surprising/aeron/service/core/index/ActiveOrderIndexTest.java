@@ -287,7 +287,7 @@ class ActiveOrderIndexTest {
         var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
         try (/* 投影出的冷交易运行时，结束时自动关闭 */ var runtime = com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.project(before, identities)) {
             // 账户 Lane 自己的订单准入索引，不是 Owner 轻量路由
-            var laneOrders = runtime.admissionOrders(11, identities.symbolId("1"));
+            var laneOrders = runtime.onLane(11L, lane -> lane.admissionOrderIndex(identities.symbolId("1")));
             // 对买入、净仓、逐仓条件查询所得的账户准入汇总
             var summary = laneOrders.inspect(11, "1", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);
             assertThat(summary.pendingQuantity()).isEqualTo(5);

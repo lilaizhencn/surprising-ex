@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -13,15 +12,16 @@ class CoreShutdownFailureTest {
     @Test
     void releasedFenceKeepsMatcherCaptureAliveAndRejectsAnotherCaptureUntilCompletion() throws Exception {
         var release = new CompletableFuture<Void>();
-        var captures = new java.util.concurrent.atomic.AtomicInteger();
         var core = new TradingCoreRuntime(ProductLine.SPOT);
         core.activate();
         try {
-            core.snapshots.matcherSnapshotCapture((id, sequence, hash, state, orders) -> {
-                captures.incrementAndGet();
-                return release.thenCompose(ignored -> core.snapshots.captureMatcherSnapshot(
-                        id, sequence, hash, state, orders));
+            var entered = new CompletableFuture<Void>();
+            var blockedRead = core.matcherPipeline().readAtSubmissionFence(0, () -> {
+                entered.complete(null);
+                release.join();
+                return true;
             });
+            entered.get(5, TimeUnit.SECONDS);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             core.snapshots.beginSnapshot(101, deadline);
             assertThat(core.snapshots.pollSnapshotSections(0, 0, System.nanoTime())).isNull();
@@ -51,7 +51,7 @@ class CoreShutdownFailureTest {
                 if (System.nanoTime() >= completionDeadline) throw new AssertionError("capture was not released");
                 Thread.onSpinWait();
             }
-            assertThat(captures).hasValue(1);
+            assertThat(blockedRead.get(5, TimeUnit.SECONDS)).isTrue();
             core.snapshots.beginSnapshot(102, System.nanoTime() + TimeUnit.SECONDS.toNanos(5));
         } finally {
             release.complete(null);
@@ -59,37 +59,26 @@ class CoreShutdownFailureTest {
         }
     }
 
-    @Test void snapshotCancelFailureStillStopsAccountAndLedgerAndPreservesLaneFailure() {
-        var first = new IllegalStateException("snapshot cancellation failed");
+    @Test void accountFailureStillStopsAllWorkers() {
         var laneFailure = new NoSuchMethodError("account worker failed");
-        var encoded = new CompletableFuture<SectionedCoreSnapshotCodec.SectionedSnapshot>() {
-            @Override public boolean cancel(boolean mayInterruptIfRunning) { throw first; }
-        };
         var core = new TradingCoreRuntime(ProductLine.SPOT);
         core.activate();
         var accounts = core.runtimeState();
         Thread[] workers = new Thread[accounts.laneCount()];
         for (int lane = 0; lane < workers.length; lane++) workers[lane] = accounts.accountWorkerThread(lane);
         try {
-            core.snapshots.snapshotEncoder(image -> encoded);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            core.snapshots.beginSnapshot(1, deadline);
-            while (core.snapshots.snapshotFence().encodedSnapshot() == null) {
-                if (System.nanoTime() >= deadline) throw new AssertionError("snapshot encoder did not start");
-                core.snapshots.pollSnapshotSections(0, 0, System.nanoTime());
-            }
             accounts.submitAccountCommand(0, lane -> { throw laneFailure; });
             while (AccountLaneTestAccess.failure(accounts).get() == null) {
                 if (System.nanoTime() >= deadline) throw new AssertionError("account failure was not published");
                 Thread.onSpinWait();
             }
-            assertThatThrownBy(core::close).isSameAs(first).hasSuppressedException(laneFailure);
+            assertThatThrownBy(core::close).isSameAs(laneFailure);
             assertThat(core.matcherPipeline().workersStopped()).isTrue();
             for (Thread worker : workers) assertThat(worker.isAlive()).isFalse();
         } finally {
-            // 断言意外失败时仍尝试清理本用例启动的所有线程。
-            org.assertj.core.api.Assertions.catchThrowable(core::close);
-            org.assertj.core.api.Assertions.catchThrowable(accounts::close);
+            catchThrowable(core::close);
+            catchThrowable(accounts::close);
         }
     }
 }

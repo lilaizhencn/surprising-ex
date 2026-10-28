@@ -220,7 +220,7 @@ public final class RuntimePerpetualFundingProcessor {
                 }
                 runtime.requireRevisionCapacity();
                 runtime.dispatchLedgerCommand(this);
-                requireLedgerPhaseComplete();
+                requireLedgerAccepted();
                 result = finishOwnerResult();
                 return true;
             }

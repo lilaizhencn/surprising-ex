@@ -20,7 +20,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import static com.surprising.aeron.service.core.DirectMatcherTestInputs.*;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -477,7 +476,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(beforeSnapshot.accepted()).isTrue();
             snapshot = matcherSnapshot(adapter,
                     91, 1, state.businessStateHash(), state, activeOrders(state));
-            bookHash = adapter.orderBooksStateHash();
+            bookHash = snapshot.engineStateHash();
         }
 
         // Matcher 清单编码字节，损坏测试只修改内存副本。
@@ -513,7 +512,7 @@ class DeterministicExchangeCoreAdapterTest {
 
         try (/* 从 Core 元数据和原生模块恢复的适配器，结束时关闭。 */ DeterministicExchangeCoreAdapter restored =
                      new DeterministicExchangeCoreAdapter(state, activeOrders(state), 1, decoded)) {
-            assertThat(restored.orderBooksStateHash()).isEqualTo(bookHash);
+            assertThat(matcherSnapshot(restored, 92, 1, state.businessStateHash(), state, activeOrders(state)).engineStateHash()).isEqualTo(bookHash);
             // 恢复后继续提交新买单得到的回执。
             var afterRestore = placeDirect(restored, 2, new java.util.UUID(0, 101), 1001, 8,
                     bid(101, instrumentId, 90));
@@ -522,35 +521,6 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(afterRestore.nativeMatcherSequence()).isGreaterThan(
                     snapshot.progress(afterRestore.nativeMatcherShardId()).matcherSequence());
         }
-    }
-
-    @Test
-    void shardSnapshotWaitsForPersistenceBeforeExport() throws Exception {
-        TradingCoreState state = stateWithOpenBid(100);
-        var persistEntered = new CompletableFuture<Void>();
-        var releasePersist = new CompletableFuture<Void>();
-        var persistSubmissions = new AtomicInteger();
-        var capture = CompletableFuture.supplyAsync(() -> {
-            try (var adapter = new DeterministicExchangeCoreAdapter(nativePersist -> {
-                persistSubmissions.incrementAndGet();
-                persistEntered.complete(null);
-                releasePersist.join();
-                return nativePersist.get();
-            })) {
-                assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
-                return matcherSnapshot(adapter, 94, 1, state.businessStateHash(), state, activeOrders(state));
-            }
-        });
-        try {
-            persistEntered.get(5, java.util.concurrent.TimeUnit.SECONDS);
-            assertThat(capture).isNotDone();
-        } finally {
-            releasePersist.complete(null);
-        }
-        MatcherSnapshot completed = capture.get(5, java.util.concurrent.TimeUnit.SECONDS);
-        assertThat(completed.snapshotId()).isEqualTo(94);
-        assertThat(completed.modules()).hasSize(completed.matchingEngineCount());
-        assertThat(persistSubmissions).hasValue(completed.matchingEngineCount());
     }
 
     /**

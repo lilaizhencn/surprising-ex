@@ -457,20 +457,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * Owner 为本次准入保留客户端身份引用，对外返回实际正键，不保留 Lane 准备结果的符号。
-     * @param userId 该身份所属用户
-     * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
-     */
-    public long prepareClientKey(long userId, String clientOrderId) {
-        assertOwner();
-        // 当前用户身份的确定性长整数键
-        long key = clientKeyOrZero(userId, clientOrderId);
-        if (key == 0) return 0;
-        clientTable(userId).prepare(key, userId, clientOrderId, true);
-        return key;
-    }
-
-    /**
      * 核对所属 Lane 后保留一次客户端身份；新分配返回负键，已有身份返回正键，零表示无客户端单号。
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
      * @param userId 该身份所属用户
@@ -496,19 +482,6 @@ public final class RuntimeIdentityRegistry {
     private static long clientKeyOrZero(long userId, String name) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         return name == null || name.isBlank() ? 0 : deterministicKey(userId, name);
-    }
-
-    /**
-     * Owner 校验输入后解码准备结果，撤销这次客户端身份保留；其余仍存活的引用不受影响。
-     * @param userId 该身份所属用户
-     * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
-     * @param preparedKey 本次客户端身份准备结果，负号表示新建，绝对值为实际键
-     */
-    public void rollbackPreparedClientKey(long userId, String clientOrderId, long preparedKey) {
-        assertOwner();
-        if (userId <= 0 || clientOrderId == null || preparedKey == 0)
-            throw new IllegalArgumentException("invalid prepared client key rollback");
-        clientTable(userId).rollback(clientKeyValue(preparedKey), userId, clientOrderId);
     }
 
     /**
@@ -562,17 +535,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * 查询现有客户端身份，把零结果转换成空值。
-     * @param userId 该身份所属用户
-     * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
-     */
-    public Long findClientKey(long userId, String clientOrderId) {
-        // 当前用户身份的确定性长整数键
-        long key = findClientKeyValue(userId, clientOrderId);
-        return key == 0 ? null : key;
-    }
-
-    /**
      * 读取用户现有身份表中的客户端键，空白或未命中为零；调用方须处于所属 Lane 或外部已建立的冷读边界。
      * @param userId 该身份所属用户
      * @param clientOrderId 用户原始客户端单号，空白单号按相应入口的零键规则处理
@@ -610,16 +572,6 @@ public final class RuntimeIdentityRegistry {
         // 当前用户所属 Lane 的客户端身份表
         LaneClientIdentities table = clientTable(userId);
         return table.name(clientKey, userId);
-    }
-
-    /**
-     * Owner 释放一份客户端身份引用，身份表负责只在最后一份引用释放后删除。
-     * @param userId 该身份所属用户
-     * @param clientKey 用户范围的实际客户端身份键，零表示未提供客户端单号
-     */
-    public void releaseClientKey(long userId, long clientKey) {
-        assertOwner();
-        clientTable(userId).release(clientKey, userId);
     }
 
     /**

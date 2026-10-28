@@ -132,7 +132,7 @@ class RuntimeTreasuryDeltaTest {
             switch (subledger) {
                 case FEE -> { treasury.setFee(2, Long.MAX_VALUE); delta.addFee(2, 1); }
                 case INSURANCE -> { treasury.setInsurance(2, Long.MAX_VALUE, 0); delta.addInsurance(2, 1); }
-                case DEFICIT -> { treasury.setDeficit(2, Long.MAX_VALUE); delta.addDeficit(2, 1); }
+                case DEFICIT -> { treasury.setInsurance(2, treasury.insurance(2), Long.MAX_VALUE); delta.addDeficit(2, 1); }
                 case FUNDING_RESIDUAL -> { treasury.setFundingResidual(2, Long.MAX_VALUE); delta.addFundingResidual(2, 1); }
                 case ROUNDING_RESIDUAL -> { treasury.setRoundingResidual(2, Long.MIN_VALUE); delta.addRoundingResidual(2, -1); }
                 case CLEARING_PNL -> { treasury.setClearingPnl(2, Long.MIN_VALUE); delta.addClearing(2, -1); }

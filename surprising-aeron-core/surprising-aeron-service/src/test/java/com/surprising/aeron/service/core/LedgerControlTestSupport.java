@@ -8,7 +8,7 @@ import java.util.function.BooleanSupplier;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 控制命令测试等待与结果物化辅助方法。await 和 awaitFunds 各有五秒截止点；commit 请求结束变化范围后按既有读取交接物化冷状态，其中取得账户访问权的循环没有单独截止点。
+ * 控制命令测试等待与结果物化辅助方法。账户 await 有五秒截止点；commit 请求结束变化范围后按既有读取交接物化冷状态，其中取得账户访问权的循环没有单独截止点。
  */
 public final class LedgerControlTestSupport {
     /**
@@ -27,28 +27,13 @@ public final class LedgerControlTestSupport {
     }
 
     /**
-     * 轮询控制资金验证完成，等待期间检查运行时健康并有五秒截止点；本方法本身不调用最终 clearChangedKeys。
-     * @param runtime 当前测试独占并推进控制命令的运行时
-     * @param external 是否允许外部资金调整，传给原守恒验证入口
-     */
-    public static void awaitFunds(TradingAccountRuntime runtime, boolean external) {
-        // 从单调时钟计算的本次五秒轮询截止点。
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (!runtime.pollControlFundsValidation(external)) {
-            runtime.assertAccountLanesHealthy();
-            if (System.nanoTime() >= deadline) throw new AssertionError("Ledger funds validation timed out");
-            Thread.onSpinWait();
-        }
-    }
-
-    /**
-     * 先等待资金验证，再清理运行时变化以请求提交关闭；需要时取得账户读取所有权后物化冷状态，finally 交回本次临时取得的访问权。
+     * 先同步验证资金，再清理运行时变化以请求提交关闭；需要时取得账户读取所有权后物化冷状态，finally 交回本次临时取得的访问权。
      * @param runtime 当前测试独占并推进控制命令的运行时
      * @param identities 冷状态物化使用的资产、币对及持仓身份字典
      * @param external 是否允许外部资金调整，传给原守恒验证入口
      */
     public static TradingCoreState commit(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, boolean external) {
-        awaitFunds(runtime, external);
+        runtime.validateControlFunds(external);
         runtime.clearChangedKeys();
         // 本次是否需要临时取得账户读取所有权，真正取得在后续轮询结束时完成。
         boolean acquired = runtime.accountLanesStarted() && !runtime.ownerLaneAccess();

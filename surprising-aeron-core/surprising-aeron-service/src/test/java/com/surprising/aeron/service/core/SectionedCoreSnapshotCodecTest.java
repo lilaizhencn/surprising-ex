@@ -32,7 +32,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -195,37 +194,6 @@ class SectionedCoreSnapshotCodecTest {
         assertThat(SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES).isEqualTo(Integer.MAX_VALUE - 8);
         assertThat(SectionedCoreSnapshotCodec.HARD_MAX_SECTION_BYTES).isLessThan(
                 SectionedCoreSnapshotCodec.HARD_MAX_SNAPSHOT_BYTES);
-    }
-
-    /** 剩余预算在 Matcher 编码前传入，不能等完整嵌套数组构造后才在总长度检查拒绝。 */
-    @Test
-    void writerPassesRemainingBudgetToMatcherBeforeEncoding() {
-        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
-            var image = new java.util.concurrent.atomic.AtomicReference<
-                    com.surprising.aeron.service.snapshot.CoreSnapshotImage>();
-            state.snapshots.snapshotEncoder(snapshotImage -> {
-                image.set(snapshotImage);
-                return java.util.concurrent.CompletableFuture.completedFuture(
-                        com.surprising.aeron.service.snapshot.SectionedCoreSnapshotWriter.encode(
-                                snapshotImage, state.configuration().snapshot().maxBytes()));
-            });
-            byte[] encoded = state.snapshot(19);
-            ByteBuffer buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
-            int sectionCount = buffer.getInt(8);
-            int encodedPrefixBytes = 0;
-            buffer.position(ENVELOPE_LENGTH);
-            for (int section = 0; section < 3; section++) {
-                buffer.getInt();
-                int length = buffer.getInt();
-                encodedPrefixBytes += length;
-                buffer.position(buffer.position() + length);
-            }
-            int budget = ENVELOPE_LENGTH + sectionCount * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
-                    + SectionedCoreSnapshotCodec.FOOTER_LENGTH + encodedPrefixBytes + 64;
-            assertThatThrownBy(() -> com.surprising.aeron.service.snapshot.SectionedCoreSnapshotWriter.encode(
-                    image.get(), budget)).isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("matcher snapshot exceeds maximum size");
-        }
     }
 
     /**
@@ -441,21 +409,11 @@ class SectionedCoreSnapshotCodecTest {
     }
 
     /**
-     * 注入固定预建 MatcherSnapshot，推进一条验证命令后轮询指定 Cluster 时间和位置的快照，核对清单版本、编号、水位、来源摘要、业务哈希与拓扑；捕获桩忽略传入参数，本方法没有单独检查 outbox 元数据。
+     * 使用真实 Matcher 捕获，推进一条验证命令后轮询指定 Cluster 时间和位置的快照，核对清单版本、编号、水位、来源摘要、业务哈希与拓扑；本方法没有单独检查 outbox 元数据。
      */
     @Test
     void pairedManifestExposesFencePositionSequencesHashesAndOutboxMetadata() {
-        // 真实原生订单簿捕获并与该测试 Core 元数据配对的快照。
-        MatcherSnapshot matcherSnapshot;
-        try (/* 本测试创建的真实同步订单簿适配器，资源退出时关闭。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            // 用于预建固定 MatcherSnapshot 的现货空状态。
-            TradingCoreState empty = TradingCoreState.empty(ProductLine.SPOT);
-            matcherSnapshot = matcherSnapshot(adapter,
-                    73, 1, empty.businessStateHash(), empty, List.of());
-        }
-        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT,
-                (/* 捕获接口传入的快照编号；本固定结果桩未读取它。 */ snapshotId, /* 捕获接口传入的 Core 水位；本固定结果桩未读取它。 */ coreSequence, /* 捕获接口传入的业务哈希；本固定结果桩未读取它。 */ businessStateHash, /* 捕获接口传入的冻结状态；本固定结果桩未读取它。 */ tradingState, /* 捕获接口传入的活动订单；本固定结果桩未读取它。 */ activeOrders) ->
-                        java.util.concurrent.CompletableFuture.completedFuture(matcherSnapshot))) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             // 推进已应用 Core 数量的一条 CONTINUE_RISK_SCAN 命令。
             CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.CONTINUE_RISK_SCAN,
                     UUID.fromString("00000000-0000-0000-0000-000000000073"), ProductLine.SPOT,
@@ -467,7 +425,8 @@ class SectionedCoreSnapshotCodecTest {
             // 本次清单快照轮询的五秒 nanoTime 截止点。
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (snapshot == null && System.nanoTime() < deadline) {
-                snapshot = state.snapshots.pollSnapshot(1_234, 5_678, System.nanoTime());
+                var sections = state.snapshots.pollSnapshotSections(1_234, 5_678, System.nanoTime());
+                if (sections != null) snapshot = sections.toByteArray();
                 if (snapshot == null) Thread.onSpinWait();
             }
             assertThat(snapshot).isNotNull();

@@ -29,12 +29,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
-import java.util.function.Supplier;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
@@ -89,9 +86,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
     /** 区分控制、业务和原生分片序号的证据账本，不是资金账本。 */
     private final MatcherEvidenceLedger matcherEvidence;
-    /** 接收真正持久化动作的函数，默认立即执行，测试可控制执行与完成时机。 */
-    private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
-            snapshotPersistence;
     /** 延迟恢复动作，整体激活完成后清空。 */
     private Runnable deferredActivation;
     /** 全体分片激活完成标记，用 volatile 向其他线程发布。 */
@@ -212,35 +206,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public DeterministicExchangeCoreAdapter(LaneTopology topology, boolean startImmediately,
             CoreRuntimeConfiguration configuration) {
-        this(topology, startImmediately, /* 实际持久化动作在调用线程直接执行。 */ submission -> submission.get(), configuration);
-    }
-
-    /**
-     * 立即创建空白订单簿，并注入快照执行函数，便于测试控制真实持久化动作的完成时机。
-     * @param snapshotPersistence 接收真实持久化动作并返回完成 Future 的非空函数
-     */
-    DeterministicExchangeCoreAdapter(
-            Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
-                    snapshotPersistence) {
-        this(CoreConfiguration.standaloneLaneTopology(), true, snapshotPersistence, CoreRuntimeConfiguration.standalone());
-    }
-
-    /**
-     * 接收拓扑、创建上下文和证据账本、保存非空快照函数；要求立即启动时同步构造全部引擎并标记已激活。
-     * @param topology 启动入口绑定并校验的不可变交易拓扑
-     * @param startImmediately 是否在构造时同步激活全部引擎
-     * @param snapshotPersistence 接收真实持久化动作并返回完成 Future 的非空函数
-     */
-    private DeterministicExchangeCoreAdapter(
-            LaneTopology topology,
-            boolean startImmediately,
-            Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
-                    snapshotPersistence, CoreRuntimeConfiguration configuration) {
         this.startupConfiguration = java.util.Objects.requireNonNull(configuration);
         this.topology = java.util.Objects.requireNonNull(topology, "topology");
         initializeCommandScopes();
         this.matcherEvidence = new MatcherEvidenceLedger(topology);
-        this.snapshotPersistence = java.util.Objects.requireNonNull(snapshotPersistence, "snapshotPersistence");
         if (startImmediately) {
             start();
             activationComplete = true;
@@ -304,7 +273,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence, MatcherSnapshot snapshot, boolean startImmediately,
             long expectedCoreBusinessStateHash, CoreRuntimeConfiguration configuration) {
         this.startupConfiguration = java.util.Objects.requireNonNull(configuration);
-        this.snapshotPersistence = /* 注入函数收到的真实持久化动作，默认立即调用。 */ submission -> submission.get();
         if (snapshot == null || activeOrders == null) {
             throw new IllegalArgumentException("matcher snapshot is required");
         }
@@ -400,16 +368,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (restoredSnapshot != null) {
             reconcileOpenOrdersShard(restoredActiveOrders, shardId, restoredCoreSequence,
                     restoredSnapshot.snapshotId(), "matcher restore");
-            // 当前冷态读取或汇总出的引擎与订单簿哈希。
-            StateHashes hashes = stateHashes(shardId);
+            // 当前冷态读取或汇总出的引擎哈希。
+            int engineHash = engineStateHash(shardId);
             restoredShardHashes[shardId] = new MatcherShardSnapshot(
-                    shardId, hashes.engineHash(), hashes.bookHash());
+                    shardId, engineHash);
         }
         if (activatedShardCount.incrementAndGet() == topology.matchingEngineCount()) {
             if (restoredSnapshot != null) {
-                // 当前冷态读取或汇总出的引擎与订单簿哈希。
-                StateHashes hashes = aggregateStateHashes(List.of(restoredShardHashes));
-                if (hashes.engineHash() != restoredSnapshot.engineStateHash()) {
+                // 当前冷态读取或汇总出的引擎哈希。
+                int engineHash = aggregateEngineStateHash(List.of(restoredShardHashes));
+                if (engineHash != restoredSnapshot.engineStateHash()) {
                     throw new FatalMatchingDivergenceException("matcher restore", restoredCoreSequence,
                             restoredSnapshot.snapshotId(), "restored exchange-core state hash mismatch");
                 }
@@ -430,14 +398,14 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private void activateRestoredMatcher(Iterable<CoreOrderState> activeOrders,
                                          long coreSequence, MatcherSnapshot snapshot) {
         start(snapshot);
-        reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
+        reconcileOpenOrders(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore");
         // 全部恢复订单对账后的汇总哈希，用来与快照比较。
-        StateHashes restoredHashes = currentStateHashes();
-        if (restoredHashes.engineHash() != snapshot.engineStateHash()) {
+        int restoredHash = currentEngineStateHash();
+        if (restoredHash != snapshot.engineStateHash()) {
             throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
                     snapshot.snapshotId(), "restored exchange-core state hash mismatch"
                             + " (expectedEngine=" + snapshot.engineStateHash()
-                            + ", actualEngine=" + restoredHashes.engineHash() + ')');
+                            + ", actualEngine=" + restoredHash + ')');
         }
     }
 
@@ -1277,14 +1245,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 在既有分片读取边界同步汇总订单簿哈希，不创建已经完成的 Future。
-     */
-    public int orderBooksStateHash() {
-        return currentStateHashes().bookHash();
-    }
-
-    /**
-     * 由所属分片线程先逐单对账并取哈希，再通过注入函数执行该分片原生快照并 join；只有持久化成功才返回分片哈希，join 本身没有设置超时。
+     * 由所属分片线程先逐单对账并取哈希，再同步持久化该分片原生快照；只有成功才返回分片哈希。
      * @param shardId 目标全局 Matcher 分片号
      * @param snapshotId 正的快照编号
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
@@ -1297,39 +1258,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             throw new IllegalArgumentException("invalid matcher shard snapshot request");
         }
         reconcileOpenOrdersShard(activeOrders, shardId, coreSequence, snapshotId, "matcher snapshot");
-        // 当前冷态读取或汇总出的引擎与订单簿哈希。
-        StateHashes hashes = stateHashes(shardId);
-        // 当前分片快照执行完成后的原生状态码，只有 SUCCESS 才返回哈希。
-        CommandResultCode result = snapshotPersistence.apply(() -> CompletableFuture.completedFuture(
-                engines[shardId].storeSnapshot(snapshotId, coreSequence, coreSequence)
-                        ? CommandResultCode.SUCCESS
-                        : CommandResultCode.STATE_PERSIST_MATCHING_ENGINE_FAILED)).join();
-        if (result != CommandResultCode.SUCCESS) {
+        // 当前冷态读取或汇总出的引擎哈希。
+        int engineHash = engineStateHash(shardId);
+        if (!engines[shardId].storeSnapshot(snapshotId, coreSequence, coreSequence)) {
             throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence, snapshotId,
-                    "exchange-core persist failed for shard " + shardId + ": " + result);
+                    "exchange-core persist failed for shard " + shardId);
         }
-        return new MatcherShardSnapshot(shardId, hashes.engineHash(), hashes.bookHash());
-    }
-
-    /**
-     * 校验分片范围后同步取该分片的引擎和订单簿哈希，返回带分片号的冷态结果。
-     * @param shardId 目标全局 Matcher 分片号
-     */
-    public MatcherShardSnapshot stateHashShard(int shardId) {
-        if (shardId < 0 || shardId >= topology.matchingEngineCount()) {
-            throw new IllegalArgumentException("matcher shard is outside configured topology");
-        }
-        // 当前冷态读取或汇总出的引擎与订单簿哈希。
-        StateHashes hashes = stateHashes(shardId);
-        return new MatcherShardSnapshot(shardId, hashes.engineHash(), hashes.bookHash());
-    }
-
-    /**
-     * 按输入分片顺序汇总哈希并返回订单簿部分，多分片输入要求分片号与列表位置一致。
-     * @param shards 各分片结果列表，顺序与完整性要求见方法说明
-     */
-    public int aggregateBookHash(List<MatcherShardSnapshot> shards) {
-        return aggregateStateHashes(shards).bookHash();
+        return new MatcherShardSnapshot(shardId, engineHash);
     }
 
     /**
@@ -1347,8 +1282,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 || shardSnapshots == null || shardSnapshots.size() != topology.matchingEngineCount()) {
             throw new IllegalArgumentException("incomplete matcher shard snapshot set");
         }
-        // 当前冷态读取或汇总出的引擎与订单簿哈希。
-        StateHashes hashes = aggregateStateHashes(shardSnapshots);
+        // 当前冷态读取或汇总出的引擎哈希。
+        int engineHash = aggregateEngineStateHash(shardSnapshots);
         try {
             // 从当前快照号导出的原生模块字节，构造后删除内存存储副本。
             List<InMemorySerializationProcessor.SerializedModule> modules =
@@ -1358,7 +1293,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             // 在冷态边界汇总并排序的已见用户集合。
             Set<Long> userSnapshot = snapshotUsers();
             return new MatcherSnapshot(state.productLine(), topology, snapshotId, coreSequence, matcherSequence,
-                    matcherEvidence.snapshot(), businessStateHash, hashes.engineHash(),
+                    matcherEvidence.snapshot(), businessStateHash, engineHash,
                     symbols, userSnapshot, modules);
         } finally {
             serializationProcessor.removeSnapshot(snapshotId);
@@ -1371,60 +1306,55 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 同步构建 Core OPEN 订单与所有原生活动订单的精确投影，拒绝终态、未登记品种、重复订单号和字段不一致，再用完成/失败 Future 返回；不自动切线程。
+     * 同步构建 Core OPEN 订单与所有原生活动订单的精确投影，拒绝终态、未登记品种、重复订单号和字段不一致，不匹配时直接抛出故障；不自动切线程。
      * @param activeOrders 同一冻结点的 Core 活动订单序列
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
      * @param snapshotId 正的快照编号
      * @param operation 对账操作名称或正在进行的快照对象，具体类型见签名
      */
-    private CompletableFuture<Void> reconcileOpenOrdersAsync(
+    private void reconcileOpenOrders(
             Iterable<CoreOrderState> activeOrders,
             long coreSequence,
             long snapshotId,
             String operation) {
-        try {
-            // 从冻结 Core 活动订单建立的精确投影，以订单号去重。
-            Map<Long, ReconciledOrder> expected = new HashMap<>();
-            for (CoreOrderState /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order : activeOrders) {
-                if (order.status() != com.surprising.aeron.model.CoreOrderStatus.OPEN) {
-                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                            "active-order index contains a terminal order");
-                }
-                // 当前品种的永久原生编号。
-                Integer symbolId = symbols.get(order.instrumentId());
-                if (symbolId == null) {
-                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                            "Core open order references an unregistered matcher instrumentId");
-                }
-                if (expected.put(order.orderId(), new ReconciledOrder(symbolId, order.orderId(), order.userId(),
-                        order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
-                        order.matchingPriceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
-                        order.matchingPriceTicks())) != null) {
-                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                            "active-order index contains duplicate order ID " + order.orderId());
-                }
-            }
-            // 从原生订单簿活动订单建立的精确投影，以订单号去重。
-            Map<Long, ReconciledOrder> actual = new HashMap<>();
-            for (SynchronousMatchingEngine /* 当前遍历或关闭的同步引擎实例。 */ matcher : engines) {
-                for (SynchronousMatchingEngine.OpenOrder /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order : matcher.openOrders()) {
-                    // 把一笔原生活动订单投影为可逐字段比较的值。
-                    ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
-                            order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
-                    if (actual.put(order.orderId(), reconciled) != null) {
-                        throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                                "exchange-core returned duplicate open order ID " + order.orderId());
-                    }
-                }
-            }
-            if (!expected.equals(actual)) {
+        // 从冻结 Core 活动订单建立的精确投影，以订单号去重。
+        Map<Long, ReconciledOrder> expected = new HashMap<>();
+        for (CoreOrderState /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order : activeOrders) {
+            if (order.status() != com.surprising.aeron.model.CoreOrderStatus.OPEN) {
                 throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                        "Core OPEN orders do not exactly match exchange-core open orders"
-                                + " (expected=" + expected.size() + ", actual=" + actual.size() + ')');
+                        "active-order index contains a terminal order");
             }
-            return CompletableFuture.completedFuture(null);
-        } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
-            return CompletableFuture.failedFuture(failure);
+            // 当前品种的永久原生编号。
+            Integer symbolId = symbols.get(order.instrumentId());
+            if (symbolId == null) {
+                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                        "Core open order references an unregistered matcher instrumentId");
+            }
+            if (expected.put(order.orderId(), new ReconciledOrder(symbolId, order.orderId(), order.userId(),
+                    order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
+                    order.matchingPriceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
+                    order.matchingPriceTicks())) != null) {
+                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                        "active-order index contains duplicate order ID " + order.orderId());
+            }
+        }
+        // 从原生订单簿活动订单建立的精确投影，以订单号去重。
+        Map<Long, ReconciledOrder> actual = new HashMap<>();
+        for (SynchronousMatchingEngine /* 当前遍历或关闭的同步引擎实例。 */ matcher : engines) {
+            for (SynchronousMatchingEngine.OpenOrder /* 当前遍历或读取到的订单，Core 与原生类型由所在循环声明区分。 */ order : matcher.openOrders()) {
+                // 把一笔原生活动订单投影为可逐字段比较的值。
+                ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
+                        order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
+                if (actual.put(order.orderId(), reconciled) != null) {
+                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                            "exchange-core returned duplicate open order ID " + order.orderId());
+                }
+            }
+        }
+        if (!expected.equals(actual)) {
+            throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                    "Core OPEN orders do not exactly match exchange-core open orders"
+                            + " (expected=" + expected.size() + ", actual=" + actual.size() + ')');
         }
     }
 
@@ -1479,59 +1409,48 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     /**
      * 在调用线程按分片号折叠哈希，不创建中间分片快照列表；调用方负责保持原生引擎读取边界。
      */
-    private StateHashes currentStateHashes() {
-        if (engines.length == 1) return stateHashes(0);
+    private int currentEngineStateHash() {
+        if (engines.length == 1) return engineStateHash(0);
         int engineHash = 1;
-        int bookHash = 0;
         for (int shardId = 0; shardId < engines.length; shardId++) {
-            StateHashes hashes = stateHashes(shardId);
-            engineHash = (engineHash * 31 + shardId) * 31 + hashes.engineHash();
-            bookHash = (bookHash * 31 + shardId) * 31 + hashes.bookHash();
+            engineHash = (engineHash * 31 + shardId) * 31 + engineStateHash(shardId);
         }
-        return new StateHashes(engineHash, bookHash);
+        return engineHash;
     }
 
     /**
-     * 按原生报告的迭代顺序折叠子模块类型、编号和数值为引擎哈希，订单簿子模块另算 bookHash；int 溢出按 Java 哈希运算保留，不是资金数值或密码摘要。
+     * 按原生报告的迭代顺序折叠子模块类型、编号和数值为引擎哈希；int 溢出按 Java 哈希运算保留，不是资金数值或密码摘要。
      * @param shardId 目标全局 Matcher 分片号
      */
-    private StateHashes stateHashes(int shardId) {
+    private int engineStateHash(int shardId) {
         // 原生引擎当前各子模块状态哈希报告。
         var report = engines[shardId].stateHashReport();
         // 顺序折叠出的引擎哈希，int 自然溢出属于哈希算法。
         int engineHash = 1;
-        // 只折叠订单簿子模块得到的 int 哈希。
-        int bookHash = 0;
         for (Map.Entry<exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleKey,
                 Integer> /* 当前子模块哈希或品种路由条目，具体类型见循环声明。 */ entry : report.getHashCodes().entrySet()) {
             engineHash = engineHash * 31 + entry.getKey().submodule.code;
             engineHash = engineHash * 31 + entry.getKey().moduleId;
             engineHash = engineHash * 31 + entry.getValue();
-            if (entry.getKey().submodule
-                    == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType
-                    .MATCHING_ORDER_BOOKS) bookHash = bookHash * 31 + entry.getValue();
         }
-        return new StateHashes(engineHash, bookHash);
+        return engineHash;
     }
 
     /**
-     * 单分片直接返回其两种哈希；多分片要求列表下标就是分片号再顺序折叠。单分片分支不额外核对该条的分片号，调用方保证集合完整。
+     * 单分片直接返回引擎哈希；多分片要求列表下标就是分片号再顺序折叠。单分片分支不额外核对该条的分片号，调用方保证集合完整。
      * @param shards 各分片结果列表，顺序与完整性要求见方法说明
      */
-    private static StateHashes aggregateStateHashes(List<MatcherShardSnapshot> shards) {
-        if (shards.size() == 1) return new StateHashes(shards.getFirst().engineHash(), shards.getFirst().bookHash());
+    private static int aggregateEngineStateHash(List<MatcherShardSnapshot> shards) {
+        if (shards.size() == 1) return shards.getFirst().engineHash();
         // 顺序折叠出的引擎哈希，int 自然溢出属于哈希算法。
         int engineHash = 1;
-        // 只折叠订单簿子模块得到的 int 哈希。
-        int bookHash = 0;
         for (/* 当前需要操作或汇总的 Matcher 分片号。 */ int shardId = 0; shardId < shards.size(); shardId++) {
             // 当前参与汇总的分片哈希或启动盘口结果。
             MatcherShardSnapshot shard = shards.get(shardId);
             if (shard.shardId() != shardId) throw new IllegalArgumentException("matcher shards are not ordered");
             engineHash = (engineHash * 31 + shardId) * 31 + shard.engineHash();
-            bookHash = (bookHash * 31 + shardId) * 31 + shard.bookHash();
         }
-        return new StateHashes(engineHash, bookHash);
+        return engineHash;
     }
 
     /**
@@ -1801,20 +1720,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 同一次读取或汇总得到的引擎哈希与订单簿哈希，都是 int 校验值。
-     * @param engineHash 原生子模块报告折叠出的 int 引擎哈希
-     * @param bookHash 订单簿部分折叠出的 int 哈希
-     */
-    private record StateHashes(int engineHash, int bookHash) {
-    }
-
-    /**
      * 一个分片已完成冷态快照或读取后的哈希结果，不携带模块字节。
      * @param shardId 目标全局 Matcher 分片号
      * @param engineHash 原生子模块报告折叠出的 int 引擎哈希
-     * @param bookHash 订单簿部分折叠出的 int 哈希
      */
-    public record MatcherShardSnapshot(int shardId, int engineHash, int bookHash) {
+    public record MatcherShardSnapshot(int shardId, int engineHash) {
         /**
          * 构造时只要求分片号非负，哈希值允许任意 int，拓扑上界由使用处检查。
          */

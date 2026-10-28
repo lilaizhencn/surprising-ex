@@ -35,23 +35,22 @@ class SystemLedgerControlTest {
             // 始终由本用例使用的原 Treasury 引用，账本运行中资产读写仍受线程约束。
             TreasuryRuntime original = runtime.treasury();
             original.setInsurance(asset, 25, 0); runtime.clearChangedKeys();
-            runtime.startSystemLedgerLane();
+            runtime.bindLedgerPositionOwner();
             assertThat(original.insurance(asset)).isEqualTo(25L);
-            assertThat(runtime.systemLedgerStarted()).isTrue();
             // 当前需要等待账本执行及范围关闭的控制任务。
             var work = InsuranceFundCommands.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 50));
             LedgerControlTestSupport.await(runtime, work);
             assertThat(work.getAsBoolean()).isTrue();
             assertThat(work.reusable()).isFalse();
             assertThatThrownBy(() -> runtime.treasuryForQuery(identities)).hasMessageContaining("committed control");
-            LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
+            runtime.validateControlFunds(true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 75L);
             assertThat(work.reusable()).isTrue();
             // 工厂为下一笔保险调整创建独立任务，原任务的财务范围此时已经关闭。
             var next = InsuranceFundCommands.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", -20));
             assertThat(next).isNotSameAs(work);
             LedgerControlTestSupport.await(runtime, next);
-            LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
+            runtime.validateControlFunds(true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 55L);
             assertThat(runtime.revision()).isEqualTo(2);
         }
@@ -65,11 +64,11 @@ class SystemLedgerControlTest {
         // 本用例共用的资产及币对运行时字典。
         var identities = new RuntimeIdentityRegistry();
         try (/* 由空永续冷状态投影并按需启动真实账户与账本线程的运行时，try 退出时关闭。 */ var runtime = RuntimeStateProjector.project(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities)) {
-            identities.assetId("USDT"); runtime.startSystemLedgerLane();
+            identities.assetId("USDT"); runtime.bindLedgerPositionOwner();
             // 当前需要等待账本执行及范围关闭的控制任务。
             var work = InsuranceFundCommands.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 7));
             LedgerControlTestSupport.await(runtime, work);
-            LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
+            runtime.validateControlFunds(true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 7L);
             assertThat(runtime.revision()).isEqualTo(1);
         }
@@ -86,7 +85,7 @@ class SystemLedgerControlTest {
             // 用例保险或费用对应的 USDT 稠密资产编号。
             int asset = identities.assetId("USDT");
             runtime.treasury().setInsurance(asset, Long.MAX_VALUE, 0); runtime.clearChangedKeys();
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             // 试图在长整数最大保险余额上增加一的溢出控制任务。
             var overflow = InsuranceFundCommands.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 1));
             assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, overflow)).isInstanceOf(ArithmeticException.class);
@@ -96,7 +95,7 @@ class SystemLedgerControlTest {
             var spend = InsuranceFundCommands.prepare(runtime, identities,
                     new AdjustInsuranceFundCommand("USDT", -Long.MAX_VALUE));
             LedgerControlTestSupport.await(runtime, spend);
-            LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
+            runtime.validateControlFunds(true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).isEmpty();
             // 零保险余额下尝试再扣一的业务拒绝任务。
             var rejected = InsuranceFundCommands.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", -1));
@@ -106,7 +105,7 @@ class SystemLedgerControlTest {
             // 拒绝及回滚后重新合法增加七单位保险的任务。
             var credit = InsuranceFundCommands.prepare(runtime, identities, new AdjustInsuranceFundCommand("USDT", 7));
             LedgerControlTestSupport.await(runtime, credit);
-            LedgerControlTestSupport.awaitFunds(runtime, true); runtime.clearChangedKeys();
+            runtime.validateControlFunds(true); runtime.clearChangedKeys();
             assertThat(runtime.treasuryForQuery(identities).insuranceBalances()).containsEntry("USDT", 7L);
             runtime.assertAccountLanesHealthy();
         }
@@ -123,7 +122,7 @@ class SystemLedgerControlTest {
             // 用例保险或费用对应的 USDT 稠密资产编号。
             int asset = identities.assetId("USDT");
             runtime.treasury().setInsurance(asset, 30, 0); runtime.clearChangedKeys();
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             /**
              * 测试局部保险预留任务，账本先暂扣保险但不结束范围，等待账户阶段结果。
              */
@@ -144,12 +143,17 @@ class SystemLedgerControlTest {
                 /**
                  * 借用父类检查账本当前执行阶段是否完成，不提前关闭财务范围。
                  */
-                boolean poll() { requireLedgerPhaseComplete(); return true; }
+                boolean poll() { requireLedgerAccepted(); return true; }
             }
             // 本用例局部类创建的未结束财务范围保险预留任务。
             var reservation = new InsuranceReservation(runtime);
             runtime.dispatchLedgerCommand(reservation);
-            LedgerControlTestSupport.await(runtime, reservation::poll);
+            assertThat(reservation.poll()).isTrue();
+            assertThat(reservation.reusable()).isFalse();
+            assertThatThrownBy(() -> runtime.validateControlFunds(false))
+                    .hasMessage("Ledger financial scope is incomplete");
+            assertThatThrownBy(reservation::commitScope)
+                    .hasMessage("Ledger financial scope is incomplete");
             runtime.dispatchControlLanes(1, /* 占位任务或故意拒绝的控制回调收到的入参，本测试不读取其业务内容。 */ ignored -> { throw new CoreStateRejectedException("ACCOUNT_REJECTED", "account settlement rejected"); });
             assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, runtime::pollControlLanes)).isInstanceOf(CoreStateRejectedException.class);
             LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(0, 1));
@@ -183,7 +187,7 @@ class SystemLedgerControlTest {
             // 操作前保留的资金费分页进度引用，回滚后应恢复同一记录。
             var progress = new TreasuryRuntime.FundingProgressRuntime(3, instrument, 1000, 1, 100);
             original.setFee(asset, 9); original.setFundingSettlement(symbol, 2); original.setFundingProgress(symbol, progress);
-            runtime.clearChangedKeys(); runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            runtime.clearChangedKeys(); runtime.startAccountLanes(); runtime.bindLedgerPositionOwner();
             /**
              * 测试局部费用及资金费标记更新任务，复用父类首值捕获和回滚协议。
              */
@@ -200,7 +204,7 @@ class SystemLedgerControlTest {
                 /**
                  * 仅检查本账本执行阶段正常完成，不替代范围关闭回执。
                  */
-                boolean poll() { requireLedgerPhaseComplete(); return true; }
+                boolean poll() { requireLedgerAccepted(); return true; }
             }
             // 当前需要等待账本执行及范围关闭的控制任务。
             var work = new FinancialWork(runtime);

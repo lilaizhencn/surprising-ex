@@ -1,5 +1,25 @@
 # aeron-service 代码导航
 
+本轮清理七组同步包装、重复状态和测试专用入口（2026-10-28）：
+
+| 删除范围 | 当前业务顺序与保留边界 |
+| --- | --- |
+| 同步账本的阶段完成位、提交标记、`ScopeClose` 内层类、资金校验伪等待 | Owner 同步记账并验证；错误立即抛出并保留故障。保险预留仍跨真实账户阶段保留作用域，提交/回滚后才允许复用 |
+| 快照编码 Future、回调故障槽、编码取消、注入接口及构造器参数 | 等待真实 Matcher 捕获 → 完整状态审计 → 同步分段编码；保留字节预算、捕获在途信号、超时与释放屏障 |
+| Matcher 持久化的 Function/Supplier/Future/join 链、恢复对账 Future | 在原 Matcher 所属线程直接持久化与对账，异常沿原故障边界传播 |
+| 虚构的账本启动位、冷态持仓索引补写分支 | 激活时只绑定业务索引 Owner；持仓索引由真实财务阶段更新，冷恢复从权威快照重建 |
+| 测试专用 Matcher 哈希查询链及专用订单簿哈希计算 | 测试使用真实快照清单，引擎哈希与快照格式不变 |
+| Owner 客户身份准备、撤销、释放及装箱查询接口 | 准入测试改走实际 Lane 身份操作；冷恢复、引用计数、碰撞和用户隔离语义保留 |
+| 零调用访问器和测试专用余额、准入、亏空、风险删除、成交额复制入口 | 测试通过现有权威状态与业务入口准备和检查数据，不在生产代码保留测试钩子 |
+
+测试保留实际账户等待与 Matcher 阻塞场景；取消只服务于已删除编码 Future 的测试，删除两项重复的“启动账本”批量用例。资金不守恒直接失败、保险预留未完成时拒绝提交/验证，以及实际 Matcher 捕获在屏障释放后仍阻止新命令，均由相关功能用例检查。
+
+验证结果：HotSpot JDK 27、Maven 3.9.16；生产源码净减少 **512 行**。最终 14 个相关模块干净构建成功，合并定向批次与单项复验共 **30 类、326 个不同用例通过**；未解决失败及跳过均为 0。未运行全量测试、压测、JMH/JFR 或真实集群联调。命令、逐类数量、测试迁移修正及未测范围见 [本轮验证记录](validation/synchronous-boundaries-cleanup-20261028.md)。
+
+以下保留历史清理记录；日期对应当时的实现，当前账本与快照边界以上述说明为准。
+
+上一轮记录（提交 `4edfd40fd`）：
+
 本轮继续清理八组冗余逻辑（2026-10-28）：
 
 | 删除范围 | 当前行为与保留边界 |
@@ -972,7 +992,7 @@ Lane结算通过已有 `RuntimePositionChangeBuffer` 交接冻结after-image，�
 
 ### 成交财务槽保留已用容量（2026-10-15）
 
-`MatcherSettlementEvent` 在所属命令退休并归还后继续保留已创建的 `RuntimeTreasuryDelta` 槽。下单最初只路由到一个账户Lane，Matcher发现其他成交方后扩展路由；参与Lane数缩小时不再重建数组或对象，增大时只补充新槽。Owner准备输入、Matcher发布事实之前清除槽内流水，账户Lane写入各自槽，原SystemLedgerLane在账户完成后按当前 `requiredLaneMask` 归并，数组容量不决定本次业务范围。没有新增账本、账户镜像、线程或回收阶段。
+`MatcherSettlementEvent` 在所属命令退休并归还后继续保留已创建的 `RuntimeTreasuryDelta` 槽。下单最初只路由到一个账户Lane，Matcher发现其他成交方后扩展路由；参与Lane数缩小时不再重建数组或对象，增大时只补充新槽。Owner准备输入、Matcher发布事实之前清除槽内流水，账户Lane写入各自槽，Owner 在账户完成后按当前 `requiredLaneMask` 归并，数组容量不决定本次业务范围。没有新增账本、账户镜像、线程或回收阶段。
 
 必要验证覆盖槽位扩容和收缩、无成交、未参与槽位排除、独立账户线程和Ledger费用结算、六产品线连续交易及未完成事件禁止回收，见 [财务槽容量验证](../../docs/validation/treasury-slot-capacity-20261015.json)。这只消除该分配源；完整Core百字节目标和Owner业务迁移仍需继续完成。按要求未验证Cluster快照/恢复或启动wallet，分配诊断结果仅保存在本地。
 
@@ -986,7 +1006,7 @@ Lane结算通过已有 `RuntimePositionChangeBuffer` 交接冻结after-image，�
 
 ### 准入交接账本事实与按需OI输入（2026-10-15）
 
-Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatus` 借出其已经发布的不可变 `SettlementStatus`。Owner准备普通下单、批量、改单、预检和触发子单时只传递该引用；`PlaceAdmissionEvent`、`CoreOrderDecisionResolver.Context` 和 `AdmissionIdentity` 不再由Owner提取或复制生命周期/资金费布尔值。账户Lane执行时读取捕获的事实，随后账本发布新进度或回滚也不会改变旧命令的输入。没有新状态镜像、队列、线程或逐单状态副本。
+Treasury 由 Owner 独占写入，`TreasuryRuntime.settlementStatus` 借出其已经发布的不可变 `SettlementStatus`。Owner准备普通下单、批量、改单、预检和触发子单时只传递该引用；`PlaceAdmissionEvent`、`CoreOrderDecisionResolver.Context` 和 `AdmissionIdentity` 不再由Owner提取或复制生命周期/资金费布尔值。账户Lane执行时读取捕获的事实，随后账本发布新进度或回滚也不会改变旧命令的输入。没有新状态镜像、队列、线程或逐单状态副本。
 
 `CoreInstrument.usesOpenInterestForUserLimit` 明确限额对市场OI的依赖：现货、比例为0或下限已经达到固定上限时无需全局OI输入。对应准入跳过全局查表及批内持仓扫描；Lane仍执行固定下限、持仓上限、风险档位和有效比例限额检查。80个必要用例覆盖固定下限拒绝、有效比例读取、下单/改单/批量/预检、捕获事实延迟执行、六产品线触发与资金费分页，见 [准入输入所有权验证](../../docs/validation/admission-input-ownership-20261015.json)。首次误选含快照用例及查询夹具错误均保留记录，最终仅执行已审查的必要方法。
 
@@ -997,7 +1017,7 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 
 `RuntimeFactIndexes` 的持仓用户、OI和ADL索引在Ledger激活后绑定该线程，Owner及Account Lane直接读写都会失败；停止Ledger后才允许冷路径物化和重建。正常成交在原 `MatcherSettlementEvent.TreasurySettlement` 中读取已有冻结持仓输出，应用索引后才发布完成。Owner的 `CommitPublication` 只继续维护订单等路由，跳过持仓业务索引。没有新增账户镜像、worker或逐持仓DTO。
 
-`SystemLedgerCommand.ScopeClose` 与仅账户控制的验证边界复用最小primitive前像数组，保留到Owner提交或拒绝；仅持仓变化也会验证并发布，不能因为没有余额流水而漏掉。强平批次内部继续扫描风险时，在同一财务scope内发布索引输入并保留同一回滚前值，不排到尚未请求关闭的队首后面。`LedgerPositionPublicationTest` 覆盖两种控制scope的重复回滚、可变ADL条目原位修改及线程边界。
+`SystemLedgerCommand` 的财务作用域与仅账户控制的验证边界复用最小primitive前像数组，保留到Owner提交或拒绝；仅持仓变化也会验证并发布，不能因为没有余额流水而漏掉。强平批次内部继续扫描风险时，在同一财务scope内发布索引输入并保留同一回滚前值，不排到尚未请求关闭的队首后面。`LedgerPositionPublicationTest` 覆盖两种控制scope的重复回滚、可变ADL条目原位修改及线程边界。
 
 普通下单/改单复用原准入槽作为Ledger输入请求，账户worker依据 `accountReady` 消费；等待输入时仍能处理先前成交，并保留准入FIFO。顺序批量、触发和预检消费命令自有的OI primitive。有效比例限额复用原控制命令边界保证全局及批内前缀，固定限额保留普通并行窗口，Owner不阻塞等Lane。原Owner待提交OI扫描及其旧基准已删除。
 
@@ -1207,7 +1227,7 @@ D1 补充审查：`ClusterServiceEgress.TransportSession` 仍实现 `ClientSessi
 
 `TradingCommandCodec` 使用已有有界内容缓存复用币对文本，移除大ID每次重建String的分支；无生产调用的 `InstrumentIds.canonicalString` 小ID缓存一并删除，VarHandle数值解码保留。产品API15项、协议249项、客户端66项，以及FUSED/PIPELINED各113项服务回归全部通过；覆盖大ID注册与快照恢复、六产品线快照、现货资产、永续/交割/期权财务矩阵、资金幂等及提交恢复。完整结果和未测范围见 [币对缓存修复验证](../../docs/validation/symbol-id-cache-fix-20261018.json)。按用户要求，本次不执行压测、JMH或JFR，不宣称吞吐或P99改善。
 
-`TradingCoreOwner` 在FUSED模式直接推进输入环队首，直到撮合、结算、确定性提交及回包交接完成；不创建 `ClusterCommandWindow` 或维护其依赖索引。解码在幂等/来源检查之后进入原准入异常处理，畸形载荷仍产生业务拒绝。`MatcherCommandPipeline.startInline` 不创建跨线程提交环或读请求队列，同步结果直接交给既有命令槽；只有控制调用需要保留一个本线程结果。PIPELINED保留Matcher、Account Lane与账本线程的原交接边界。
+`TradingCoreOwner` 在FUSED模式直接推进输入环队首，直到撮合、结算、确定性提交及回包交接完成；不创建 `ClusterCommandWindow` 或维护其依赖索引。解码在幂等/来源检查之后进入原准入异常处理，畸形载荷仍产生业务拒绝。`MatcherCommandPipeline.startInline` 不创建跨线程提交环或读请求队列，同步结果直接交给既有命令槽；只有控制调用需要保留一个本线程结果。PIPELINED 保留 Matcher 与 Account Lane 的线程交接；账本由 Owner 同步处理。
 
 FUSED的权威订单和冻结槽沿用Lane池，并受已提交序号的退休栅栏约束。Matcher的原生币对注册集合改为所属执行作用域的primitive集合。Lane就绪提示按Lane/分片间隔存放，各Lane回执计数放在自身 `LaneCommitDelta` 中；队列及事件完成位仍是完成事实，提示位不替代业务栅栏。直达结算仅允许发布已就绪事实，移除不可达的未就绪等待分支。
 

@@ -1222,7 +1222,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotHasPendingCommands()).isTrue();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeFatal);
-            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> identities.findClientKey(1001, "fatal-fourth"))).isNotNull();
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> identities.findClientKeyValue(1001, "fatal-fourth"))).isNotZero();
         }
     }
 
@@ -1569,22 +1569,10 @@ class CoreOrderedOrderBatchTest {
     }
 
     /**
-     * 检查顺序下单能在固定账户 Lane 使用前项卖出所得买入，沿用共同资金断言。
+     * 先成交卖单再挂买单，检查两项成功、账户所有权交接代数未变，以及双方可用、冻结、预留和订单终态。
      */
     @Test
-    void sequentialPlaceUsesEarlierFillProceedsOnPermanentLanes() throws Exception { sequentialPlaceProceeds(false); }
-
-    /**
-     * 对同一卖出再买入场景显式启动既有账本路径，检查回执没有把前项所得重复记入。
-     */
-    @Test
-    void sequentialPlaceLedgerReceiptDoesNotDuplicateEarlierProceeds() throws Exception { sequentialPlaceProceeds(true); }
-
-    /**
-     * 先成交卖单再挂买单，按参数显式启动账本，检查两项成功、账户所有权交接代数未变，以及双方可用、冻结、预留和订单终态。
-     * @param ledger 是否在场景中显式调用既有 System Ledger 启动入口；不保证为 false 时运行时没有账本
-     */
-    private void sequentialPlaceProceeds(boolean ledger) throws Exception {
+    void sequentialPlaceUsesEarlierFillProceedsOnPermanentLanes() throws Exception {
         try (/* 本场景独立 Core 运行时，资源结束或 finally 中关闭 */ var state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, "BTC", 1, 1);
@@ -1593,7 +1581,6 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             linearOrder(98_300, "proceeds-maker", CoreOrderSide.BUY, 1_000, 1)))), 1002));
             state.activate();
-            if (ledger) state.runtimeState().startSystemLedgerLane();
             // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
             long handoff = state.runtimeState().laneHandoffEpoch();
             // 当前已收到或由完成回调交出的 Core 响应
@@ -1617,22 +1604,10 @@ class CoreOrderedOrderBatchTest {
     }
 
     /**
-     * 对顺序下单安装账户表读取守卫，检查成功和拒绝都由所属账户处理，Owner 不直接探查。
-     */
-    @Test
-    void sequentialPlaceBatchAdmitsAndRejectsFromLanesWithoutOwnerAccountReads() throws Exception { sequentialPlaceOwnerGuard(false); }
-
-    /**
-     * 在相同顺序准入守卫场景显式启动账本，继续检查账户表隔离、拒单客户身份释放及资金结果。
-     */
-    @Test
-    void sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables() throws Exception { sequentialPlaceOwnerGuard(true); }
-
-    /**
      * 暂用两个账户 Lane，给订单、预留、用户、持仓和余额表安装只禁止 Owner get 的守卫；检查成功、资金拒绝、跨账户重复号及客户键清理，最后复制守卫中的新值回原表并还原全局配置。
-     * @param ledger 是否在场景中显式调用既有 System Ledger 启动入口；不保证为 false 时运行时没有账本
      */
-    private void sequentialPlaceOwnerGuard(boolean ledger) throws Exception {
+    @Test
+    void sequentialPlaceBatchAdmitsAndRejectsFromLanesWithoutOwnerAccountReads() throws Exception {
         // 进入场景前的全局账户 Lane 配置，finally 恢复
         String previous = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "2");
@@ -1644,7 +1619,6 @@ class CoreOrderedOrderBatchTest {
                     UUID.randomUUID(), 3, TradingOrderBatchCodec.encodePlaceOrderBatch(
                             new PlaceOrderBatchCommand(List.of(linearOrder(98_200, "other-account", CoreOrderSide.BUY, 2_000, 1)))), 1002));
             state.activate();
-            if (ledger) state.runtimeState().startSystemLedgerLane();
             // 当前运行时各账户 Lane 对象数组
             Object[] lanes = field(state.runtimeState(), "accountLanes");
             // 需要安装读取守卫的订单、预留、用户、持仓及余额表字段名
@@ -2132,7 +2106,7 @@ class CoreOrderedOrderBatchTest {
         assertThat(runtime.balance(1001, quoteAssetId).lockedUnits()).isGreaterThan(lockedBefore);
         assertThat(runtime.revision()).isGreaterThan(revisionBefore);
         assertThat(identities.positionCheckpoint()).isEqualTo(identityBefore);
-        assertThat(identities.findClientKey(1001, "close-first")).isNotNull();
+        assertThat(identities.findClientKeyValue(1001, "close-first")).isNotZero();
         assertThat(state.snapshotHasPendingCommands()).isFalse();
     }
 

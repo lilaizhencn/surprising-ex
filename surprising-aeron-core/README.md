@@ -159,11 +159,13 @@ java --enable-native-access=ALL-UNNAMED \
 
 多成员配置一致的产品线和成员列表、各自的 node-id；不同产品线使用各自布局。不要通过删除已有节点数据目录来代替恢复。
 
+快照先等待真实 Matcher 捕获，在 Owner 上审计并同步编码；没有编码 Future 或独立编码任务。持仓索引在财务阶段更新，发布阶段不重复更新冷态持仓。
+
 ## 线程与状态归属
 
-Cluster 服务线程直接轮询 Owner，账户与账本的完成事实仍由各自工作线程发布。
+Cluster 服务线程直接轮询 Owner；账户 Lane 和 Matcher 发布跨线程完成事实，财库更新与控制资金校验由 Owner 同步执行。
 外部 Owner 唤醒回调已删除；Matcher 构造时固定连接所属分片的就绪位，不再因未配置回调扫描全部分片。
-命令入口激活后只使用原异步查询路径，提交上下文不再搬运冷资金缓冲。
+命令入口激活后，账户与盘口查询沿真实线程边界交接，财库查询在 Owner 同步完成。提交上下文不搬运冷资金缓冲。
 恢复仍先装载完整冷状态；客户身份表在装载前一次绑定到对应账户运行时，不提供旧运行时迁移。
 
 | 执行者 | 启动入口 | 权威状态 / 交接与完成条件 |
@@ -173,7 +175,7 @@ Cluster 服务线程直接轮询 Owner，账户与账本的完成事实仍由各
 | Cluster Service agent | `ClusteredServiceContainer.launch` → `AeronTradingClusterService` | 内联推进 `TradingCoreOwner`；Session、解码槽、命令生命周期、回包与快照；彻底消除独立 Owner 线程与中间转发层 |
 | `core-matcher-<id>`，仅 PIPELINED | `MatcherPipelineGroup.start` → `MatcherCommandPipeline.start` | 分片订单簿与 Matcher 序号；接收确定性输入，发布撮合证据/结算事件 |
 | `core-account-lane-<id>`，仅 PIPELINED | `TradingAccountRuntime` → `AccountLaneLifecycle.start` → `SettlementLaneWorker` | 按 userId 路由的余额、冻结、持仓、订单和风险；同用户跨币对全仓状态在同一 Lane |
-| `core-system-ledger-lane`，两种模式均有 | `TradingAccountRuntime` → `AccountLaneLifecycle.startLedger` → `SystemLedgerLane` | 系统资金、Treasury 与持久化资金索引；完成回执参与业务完成条件 |
+| Owner 同步财务阶段，两种模式均有 | `TradingAccountRuntime.dispatchLedgerCommand` / `MatcherSettlementEvent.complete` | 独占 Treasury、业务持仓索引与持久化资金索引；账户完成后校验，保留提交/回滚前值 |
 | `realtime-aeron-sender`，可选 | `TradingRealtimeBoundary.start` → `AeronRealtimeSender` | 配置输出通道后启动；拥有 Publication，读取实时 outbox，不在交易 Owner 调用网络传输 |
 | `realtime-aeron-receiver`，可选 | 同上 → `AeronRealtimeReceiver` | 同时配置控制通道后启动；解码快照/盘口请求，经有界请求队列交给 Owner |
 
@@ -412,7 +414,7 @@ sequenceDiagram
 | 交易 1：输入与 Owner | `controller`、`support.ingress`、`service.core` | `AeronTradingClusterService`、`OwnerIngressRing`、`TradingCoreOwner`、`TradingCoreRuntime` |
 | 交易 2：业务准入 | `service.order`、`service.order.admission` | `MatchingCommandAdmission`、`CoreOrderDecisionResolver`、`RuntimeOrderAdmission` |
 | 交易 3：撮合交接 | `service.order`、`service.matcher.pipeline`、`service.matcher` | `CoreMatchingFlow`、`MatchingPipelineProgress`、`MatcherCommandPipeline`、`DeterministicExchangeCoreAdapter` |
-| 交易 4：账户与账本结算 | `service.settlement`、`service.account`、`service.treasury`、`bootstrap.account` | `MatcherSettlementEvent`、产品结算处理器、`AccountLaneState`、`SystemLedgerLane` |
+| 交易 4：账户与账本结算 | `service.settlement`、`service.account`、`service.treasury`、`bootstrap.account` | `MatcherSettlementEvent`、产品结算处理器、`AccountLaneState`、`SystemLedgerCommand`、`TreasuryRuntime` |
 | 交易 5：有序提交 | `service.order.commit`、`service.result` | `OrderedCommitCoordinator`、`CommitPublication`、`CommandResultLedger` |
 | 交易 6：输出 | `support.egress`、`service.realtime`、`service.realtime.state` | `ClusterServiceEgress`、`TradingRealtimeBoundary`、`RealtimeStateCapture` |
 | 特有业务 | `service.risk.command` / `service.liquidation.command` / `service.trigger.command` / `service.funding.command` / `service.settlement.command` 等 | 各业务 `*Commands`；复用既有执行边界 |

@@ -146,7 +146,6 @@ class CoreFinancialLedgerProductionTest {
             appliedWithGuard(core, CoreMessageType.EXECUTE_ADL, 0, TradingCommandCodec.encodeExecuteAdl(adl), TIME);
             assertThat(core.tradingState()).isEqualTo(expected);
             assertThat(core.tradingState().users().values()).allSatisfy(/* 本轮准备资金、成交或检查的测试用户 */ user -> assertThat(user.positions().values()).allSatisfy(/* 当前断言的持仓视图，要求数量为零 */ position -> assertThat(position.signedQuantitySteps()).isZero()));
-            assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             core.assertClusterCallbackComplete();
         }
     }
@@ -180,7 +179,6 @@ class CoreFinancialLedgerProductionTest {
             assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(expected);
             assertThat(core.tradingState().users().values()).allSatisfy(/* 本轮准备资金、成交或检查的测试用户 */ user -> assertThat(user.positions().values()).allSatisfy(/* 当前断言的持仓视图，要求数量为零 */ position -> assertThat(position.signedQuantitySteps()).isZero()));
-            assertThat(core.runtimeState.systemLedgerStarted()).isTrue();
             core.assertClusterCallbackComplete();
         }
     }

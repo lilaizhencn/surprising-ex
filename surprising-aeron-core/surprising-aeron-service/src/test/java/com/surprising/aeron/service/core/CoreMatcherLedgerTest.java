@@ -73,7 +73,6 @@ class CoreMatcherLedgerTest {
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("1", 100, 1, TIME), ProductLine.LINEAR_PERPETUAL));
             for (long /* 本轮测试用户，用于注入余额或最终核对其预留已清空。 */ user : new long[]{1001, 1002}) applied(state, CoreMessageType.ADJUST_BALANCE, user,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100_000)));
-            assertThat(state.runtimeState.systemLedgerStarted()).isTrue();
             assertThat(state.runtimeState.treasury().fee(state.identities.assetId("USDT"))).isZero();
             try (/* 测试期间禁止 Owner 越过账户读取边界的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {
                 applied(state, CoreMessageType.PLACE_ORDER, 1002, TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.SELL, 100, 3)));

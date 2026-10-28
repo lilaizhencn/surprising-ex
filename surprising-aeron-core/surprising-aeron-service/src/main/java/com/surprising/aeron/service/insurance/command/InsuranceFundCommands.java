@@ -50,7 +50,7 @@ public final class InsuranceFundCommands {
         @Override public boolean getAsBoolean() {
             if (!done) {
                 runtime.dispatchLedgerCommand(this);
-                requireLedgerPhaseComplete();
+                requireLedgerAccepted();
                 runtime.setMetadata(runtime.productLine(), nextRevision);
                 done = true;
             }

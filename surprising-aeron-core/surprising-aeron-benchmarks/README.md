@@ -60,7 +60,7 @@ CPU 汇总的 `jfr.coverage` 记录实际首末 CPU 事件及请求测量边界�
 
 ## Matcher 财务回执局部基准
 
-`MatcherTreasuryReceiptBenchmark.completeFinancialReceipt` 使用常驻 Account workers 和原 Treasury 的专属账本线程，测量复用事实投递、账户完成位、资金回执和槽位回收。每次无成交撤单事实只涉及一个账户 Lane，1/4 参数表示启动的 worker 数量；它不代表跨 Lane 成交吞吐，也不是 API 容量测试。Core 序号逐次增加，固定 native payload 仅作为不可变无成交夹具。
+`MatcherTreasuryReceiptBenchmark.completeFinancialReceipt` 使用常驻 Account workers，并由 Owner 同步处理原 Treasury，测量复用事实投递、账户完成位、资金回执和槽位回收。每次无成交撤单事实只涉及一个账户 Lane，1/4 参数表示启动的 worker 数量；它不代表跨 Lane 成交吞吐，也不是 API 容量测试。Core 序号逐次增加，固定 native payload 仅作为不可变无成交夹具。
 
 JDK 27/G1，1 fork/1 thread，3×1s 预热、5×1s 测量的独立 `-prof gc` 结果约 0.046–0.052B/technical stage op，GC 为 0；另一个 JFR fork覆盖实际财务槽方法，包含启动及预热，不是 Core 稳定窗口。实际跨 Lane 成交的非零手续费由 `MatcherTreasurySettlementTest` 核对。生产接线及全链路分配仍未完成，详见根 `PERFORMANCE_VALIDATION.md`。
 

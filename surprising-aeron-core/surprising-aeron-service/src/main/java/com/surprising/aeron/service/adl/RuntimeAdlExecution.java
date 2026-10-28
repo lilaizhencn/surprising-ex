@@ -168,7 +168,7 @@ public final class RuntimeAdlExecution {
                 runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
                 runtime.requireRevisionCapacity();
                 runtime.dispatchLedgerCommand(this);
-                requireLedgerPhaseComplete();
+                requireLedgerAccepted();
                 runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
                 phase = Phase.DONE;
                 liquidation = null;

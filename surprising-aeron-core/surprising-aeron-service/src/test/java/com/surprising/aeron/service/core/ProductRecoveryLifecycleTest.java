@@ -209,13 +209,13 @@ class ProductRecoveryLifecycleTest {
     }
 
     /**
-     * 同时核对交易业务哈希、异步取得的 Matcher 状态哈希及已提交核心序号；本方法不逐字段比对所有实体。
+     * 同时核对交易业务哈希、完整快照中的 Matcher 引擎哈希及已提交核心序号；本方法不逐字段比对所有实体。
      * @param expected 作为对照基准的运行时
      * @param actual 需要核对恢复一致性的运行时
      */
     private static void parity(TradingCoreRuntime expected, TradingCoreRuntime actual) {
         assertThat(actual.tradingState().businessStateHash()).isEqualTo(expected.tradingState().businessStateHash());
-        assertThat(actual.matchingFlow.matchingStateHashAsync().join()).isEqualTo(expected.matchingFlow.matchingStateHashAsync().join());
+        assertThat(TradingCoreRuntime.inspectSnapshot(actual.productLine(), actual.snapshot()).engineStateHash()).isEqualTo(TradingCoreRuntime.inspectSnapshot(expected.productLine(), expected.snapshot()).engineStateHash());
         assertThat(actual.committedCoreSequence()).isEqualTo(expected.committedCoreSequence());
     }
 

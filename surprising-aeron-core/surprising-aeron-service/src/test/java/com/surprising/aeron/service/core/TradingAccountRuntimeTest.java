@@ -96,7 +96,7 @@ class TradingAccountRuntimeTest {
             // 较早命令结束不应读取未来批次的变化后值，两个命令的回滚缓冲分开。
             state.clearChangedKeys();
             assertThat(state.pendingReservations.pendingReservationCount()).isEqualTo(1);
-            assertThat(state.publishedAvailableBalance(7, 3)).isEqualTo(1000);
+            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
         }
     }
 
@@ -115,7 +115,7 @@ class TradingAccountRuntimeTest {
             else state.accountRollback.captureBalanceBefore(7, 3);
             state.rollbackActiveCommand(0, 1);
             assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
-            assertThat(state.publishedAvailableBalance(7, 3)).isEqualTo(1000);
+            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
             state.clearChangedKeys();
         }
     }
@@ -374,7 +374,7 @@ class TradingAccountRuntimeTest {
         var state = new TradingAccountRuntime(topology);
         state.setMetadata(com.surprising.product.api.ProductLine.SPOT, 10);
         state.startAccountLanes();
-        state.startSystemLedgerLane();
+        state.bindLedgerPositionOwner();
         // 预先构造并由原故障探测传播的异常，跨线程测试中为发布原异常的原子槽
         var failure = new NoSuchMethodError("synthetic settlement linkage failure");
         try {
@@ -1051,8 +1051,8 @@ class TradingAccountRuntimeTest {
 
         assertThat(state.snapshotProjectionStateDirty()).isTrue();
         state.clearChangedKeys();
-        assertThat(state.publishedAvailableBalance(7, 3)).isEqualTo(1_000);
-        assertThat(state.publishedAvailableBalance(7, 4)).isEqualTo(2_000);
+        assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
+        assertThat(state.balance(7, 4).availableUnits()).isEqualTo(2_000);
         assertThat(state.snapshotProjectionStateDirty()).isFalse();
         state.markBalancesChanged();
         assertThat(state.snapshotProjectionStateDirty()).isTrue();

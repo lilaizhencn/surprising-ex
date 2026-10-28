@@ -269,7 +269,7 @@ class CoreAlgoLaneQueryTest {
      */
     private TradingCoreRuntime initial(TradingCoreState state) {
         return new TradingCoreRuntime(LINE, 0, new LinkedHashMap<>(), new LinkedHashMap<>(), state,
-                new TerminalStateRetention(), null, 0, Map.of(), Map.of(), null, null);
+                new TerminalStateRetention(), null, 0, Map.of(), Map.of());
     }
 
     /**

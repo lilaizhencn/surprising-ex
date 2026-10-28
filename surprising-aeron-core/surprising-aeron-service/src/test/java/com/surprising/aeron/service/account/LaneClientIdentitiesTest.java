@@ -84,21 +84,21 @@ class LaneClientIdentitiesTest {
     /** 首次装载前绑定一次；重复绑定被拒绝，原身份及引用次数保持。 */
     @Test void oneBindingKeepsLaneAuthorityAndRejectsRebindingWithoutChangingReferences() {
         var identities = new RuntimeIdentityRegistry();
-        assertThatThrownBy(() -> identities.prepareClientKey(7, "unbound"))
+        assertThatThrownBy(() -> identities.clientKey(7, "unbound"))
                 .isInstanceOf(IllegalStateException.class);
         try (var runtime = new TradingAccountRuntime(); var other = new TradingAccountRuntime()) {
             identities.bindClientLanes(runtime);
-            long first = identities.prepareClientKey(7, "first");
-            identities.prepareClientKey(7, "first");
+            long first = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(runtime.accountLane(runtime.accountLaneId(7)), 7, "first"));
+            RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(runtime.accountLane(runtime.accountLaneId(7)), 7, "first"));
             long second = identities.clientKey(8, "second");
             assertThatThrownBy(() -> identities.bindClientLanes(other)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> identities.bindClientLanes(runtime)).isInstanceOf(IllegalStateException.class);
             assertThat(identities.clientIdentityCount()).isEqualTo(2);
             assertThat(identities.findClientKeyValue(7, "first")).isEqualTo(first);
             assertThat(identities.findClientKeyValue(8, "second")).isEqualTo(second);
-            identities.releaseClientKey(7, first);
+            identities.releaseClientKeyInLane(runtime.accountLane(runtime.accountLaneId(7)), 7, first);
             assertThat(identities.clientOrderId(7, first)).isEqualTo("first");
-            identities.releaseClientKey(7, first);
+            identities.releaseClientKeyInLane(runtime.accountLane(runtime.accountLaneId(7)), 7, first);
             assertThat(identities.findClientKeyValue(7, "first")).isZero();
             assertThat(identities.clientOrderId(8, second)).isEqualTo("second");
             assertThat(identities.clientIdentityCount()).isOne();
@@ -114,12 +114,12 @@ class LaneClientIdentitiesTest {
         try (/* 当前测试使用的目标运行时，作用域结束关闭账户工作资源。 */ var runtime = new TradingAccountRuntime()) {
             identities.bindClientLanes(runtime);
             // 本轮需要准备、读取或释放的客户身份整数键。
-            long key = identities.prepareClientKey(7, "retained-name");
+            long key = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(runtime.accountLane(runtime.accountLaneId(7)), 7, "retained-name"));
             runtime.startAccountLanes();
             assertThatThrownBy(() -> identities.findClientKeyValue(7, "retained-name"))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("bound to another thread");
             assertThatThrownBy(() -> identities.clientOrderId(7, key)).isInstanceOf(IllegalStateException.class);
-            assertThatThrownBy(() -> identities.prepareClientKey(7, "foreign-write")).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(runtime.accountLane(runtime.accountLaneId(7)), 7, "foreign-write"))).isInstanceOf(IllegalStateException.class);
             // 查询边界返回并由测试保留的旧客户号文本，后续行复用不能改变它。
             String name = AccountLaneQueryTestSupport.read(runtime, 7, () -> identities.clientOrderId(7, key));
             runtime.dispatchControlLanes(runtime.topology().accountLaneMask(7), /* 控制回调提供的 Lane 编号，本用例通过 currentLaneCommandScope 取得实际 Lane，不读取此参数。 */ ignored -> {
@@ -162,7 +162,7 @@ class LaneClientIdentitiesTest {
             secondLane.clientIdentities.prepare(19, secondUser, "second-name", false);
             assertThat(identities.clientOrderId(firstUser, 19)).isEqualTo("first-name");
             assertThat(identities.clientOrderId(otherUser, 19)).isEqualTo("second-name");
-            identities.releaseClientKey(firstUser, 19);
+            identities.releaseClientKeyInLane(runtime.accountLane(runtime.accountLaneId(firstUser)), firstUser, 19);
             assertThat(identities.clientOrderId(otherUser, 19)).isEqualTo("second-name");
             assertThat(identities.clientIdentityCount()).isOne();
             assertThatThrownBy(() -> identities.prepareClientKeyInLane(

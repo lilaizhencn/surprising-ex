@@ -18,7 +18,6 @@ import com.surprising.aeron.service.order.CommandSlot;
 import com.surprising.aeron.service.order.OrderBatchPending;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.order.command.OrderBatchKind;
-import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.risk.RiskScanCoordinator;
 import com.surprising.aeron.service.settlement.MatcherSettlementEvent;
 import exchange.core2.core.common.MatcherEventType;
@@ -566,12 +565,7 @@ public final class OrderedCommitCoordinator {
                 || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
                 || pending.operation() == CommandSlot.Operation.SETTLEMENT)) {
             pending.controlAccountsCommitted(true);
-            if (!owner.runtimeState().pollControlFundsValidation(false)) {
-                pending.controlPending(true);
-                retainControlResponse(pending, matchingResult);
-                owner.suspendMatchingCommitContext(pending);
-                return null;
-            }
+            owner.runtimeState().validateControlFunds(false);
         }
         return finishTerminalMatching(pending, matchingResult);
     }

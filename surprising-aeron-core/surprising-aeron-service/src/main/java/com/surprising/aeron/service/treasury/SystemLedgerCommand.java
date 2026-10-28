@@ -5,68 +5,40 @@ import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.index.RuntimeFactIndexes;
 
 /**
- * 控制命令已有续步的账本交接边界。子类保存指令及结果，由当前 Owner 独占执行实际资金更新，
- * 阶段完成后直接执行验证、提交或回滚。Treasury 的首次写入前值一直保留到 ScopeClose 结束。
+ * Owner 同步执行控制命令的财库更新；保险预留可跨账户阶段保留同一财务作用域。
+ * Treasury 前值和持仓索引撤销信息一直保留到提交或回滚结束。
  */
 public abstract class SystemLedgerCommand {
-    /** 本控制命令的财库及账户资金核对缓冲，验证或回滚后清空，不是长期余额状态。 */
     private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
-    /** 本命令独占并复用的关闭任务，保留原前值及持仓索引撤销边界。 */
-    private final ScopeClose close = new ScopeClose();
-    /** 当前代所属运行时，提供账本投递、账户资金和完成通知。 */
+    private final RuntimeFactIndexes.PositionUndo positionUndo = new RuntimeFactIndexes.PositionUndo();
     protected TradingAccountRuntime runtime;
-    /** 当前执行阶段的完成标记，初始无任务时为 true。 */
-    private boolean completed = true;
-    /** 账本阶段捕获的业务、算术或参数拒绝，Owner 观察完成后读取。 */
+    /** 财务作用域关闭后才能重新初始化。 */
+    private boolean scopeClosed = true;
+    /** 记账拒绝由业务续步或最终验证传播，允许调用方先收齐账户阶段。 */
     private RuntimeException rejection;
-    /** 子类是否确认财务计算已经结束，允许验证或风险输入继续。 */
+    /** 保险预留尚待后续账户及最终记账阶段时为 false。 */
     private boolean scopeCompleted = true;
+    private boolean validated;
 
-    /**
-     * 只有当前执行阶段和关闭回执都完成才允许重新初始化，不把阶段完成当作用域前值已经释放。
-     */
-    public final boolean reusable() { return completed && close.completed; }
+    public final boolean reusable() { return scopeClosed; }
 
-    /**
-     * 要求旧代可复用且旧资金收据已消费，再保存所属运行时并初始化本轮拒绝、阶段完成及关闭请求标记；不在这里执行业务记账。
-     * @param runtime 本控制命令所属的交易运行时
-     */
     protected final void initializeLedgerCommand(TradingAccountRuntime runtime) {
         if (!reusable()) throw new IllegalStateException("Ledger still owns this command scope");
         if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds receipt was not consumed");
         this.runtime = runtime;
         rejection = null;
-        completed = scopeCompleted = true;
-        close.clear();
+        scopeCompleted = true;
+        validated = false;
     }
 
-    /**
-     * 在前一阶段完成时登记新阶段，并撤下阶段与关闭完成位。
-     */
-    public final void submitted() {
-        if (!completed) throw new IllegalStateException("Ledger command phase was submitted twice");
-        rejection = null;
-        completed = false;
-        close.completed = false;
-    }
-
-    /**
-     * 由业务子类在当前账本所有权内执行本阶段资金操作，可继续保留同一命令跨账户阶段的财务作用域。
-     * @param ledger 当前执行方独占的原系统财库
-     */
     protected abstract void applyLedger(TreasuryRuntime ledger);
 
-    /**
-     * 默认本阶段已经结束财务计算；保险预留等业务可覆盖为 false，在后续账户阶段后继续同一作用域。
-     */
     protected boolean financialScopeComplete() { return true; }
 
-    /**
-     * 执行子类记账，财务范围完成才捕获 Treasury 资金增量。业务拒绝、算术和参数异常会恢复财库前值并保存拒绝；
-     * 其他异常交外层故障边界。
-     * @param ledger 当前执行方独占的原系统财库
-     */
+    /** 同步记账；业务拒绝恢复财库前值，其他异常交外层故障边界。 */
     public final void apply(TreasuryRuntime ledger) {
+        rejection = null;
+        scopeClosed = false;
         try {
             applyLedger(ledger);
             scopeCompleted = financialScopeComplete();
@@ -78,112 +50,45 @@ public abstract class SystemLedgerCommand {
             rejection = failure;
             scopeCompleted = true;
         }
-
-        completed = true;
     }
 
-    /**
-     * 要求同步财务阶段已经结束，并传播本阶段保存的业务拒绝。
-     */
-    protected final void requireLedgerPhaseComplete() {
-        if (!completed) throw new IllegalStateException("Ledger command phase is incomplete");
+    protected final void requireLedgerAccepted() {
         if (rejection != null) throw rejection;
     }
 
-    /**
-     * 返回当前账本执行阶段完成位，不表示资金已验证或财务作用域已关闭。
-     */
-    public final boolean complete() { return completed; }
+    public final boolean allowsRiskInput() { return scopeCompleted; }
 
-    /**
-     * 仅当前阶段及财务计算都完成时允许继续风险输入估值，沿用强平批次原业务边界。
-     */
-    public final boolean allowsRiskInput() { return completed && scopeCompleted; }
+    public final void publishRiskPositionInputs() { runtime.applyLedgerControlPositions(positionUndo); }
 
-    /**
-     * 把本控制范围持仓变化应用到原账本派生索引，同时保留位置撤销信息；调用方遵守既有账本执行所有权。
-     */
-    public final void publishRiskPositionInputs() { runtime.applyLedgerControlPositions(close.positionUndo); }
-
-    /**
-     * 同步恢复财库及持仓索引；未完成的财务阶段不能回滚或复用。
-     */
     public final void rollbackScope() {
-        if (!completed) throw new IllegalStateException("Ledger command phase is incomplete");
-        close.apply(runtime.treasury(), true);
+        runtime.treasury().rollbackChangedValues();
+        funds.clear();
+        runtime.rollbackLedgerPositions(positionUndo);
+        runtime.treasury().clearChangedKeys();
+        scopeClosed = true;
     }
 
-    /**
-     * 要求阶段和财务计算完成，再执行提交关闭。
-     */
     public final void commitScope() {
-        if (!completed || !scopeCompleted)
-            throw new IllegalStateException("Ledger financial scope is incomplete");
-        close.apply(runtime.treasury(), false);
+        if (!scopeCompleted) throw new IllegalStateException("Ledger financial scope is incomplete");
+        positionUndo.clear();
+        runtime.treasury().clearChangedKeys();
+        scopeClosed = true;
     }
 
-    /**
-     * 阶段正常完成后，发布外部调整开关并就地执行资金验证；返回已完成验证的标记。
-     * @param externalAdjustment 本命令是否为外部资金调整，true 时按既有规则跳过逐资产合计为零检查
-     */
-    public final boolean validateFunds(boolean externalAdjustment) {
-        requireLedgerPhaseComplete();
-        if (!scopeCompleted) return false;
+    /** 同步核对资金并应用持仓索引；失败立即传播，同时保留运行时故障。 */
+    public final void validateFunds(boolean externalAdjustment) {
+        requireLedgerAccepted();
+        if (!scopeCompleted) throw new IllegalStateException("Ledger financial scope is incomplete");
+        if (validated) return;
         try {
-            close.validate(externalAdjustment);
-            return close.validated;
+            runtime.appendControlAccountFunds(funds);
+            funds.requireConserved(externalAdjustment);
+            funds.clear();
+            runtime.applyLedgerControlPositions(positionUndo);
+            validated = true;
         } catch (Throwable failure) {
-            return false;
-        }
-    }
-
-    /**
-     * 关闭任务。在 Owner 给出决定前保留同一财务范围前值，核对资金与应用持仓索引，之后按提交或回滚决定关闭。
-     */
-    private final class ScopeClose {
-        /** 本控制范围对账本持仓派生索引的撤销暂存，提交清除、回滚恢复。 */
-        private final RuntimeFactIndexes.PositionUndo positionUndo = new RuntimeFactIndexes.PositionUndo();
-        /** 关闭任务处理完前值及索引后的完成标记。 */
-        private boolean completed = true;
-        /** 资金守恒和持仓索引应用的验证完成标记。 */
-        private boolean validated;
-
-        void clear() {
-            validated = false;
-        }
-
-        /**
-         * 按请求合并账户资金、检查守恒、应用持仓索引并标记验证完成。
-         */
-        void validate(boolean externalAdjustment) {
-            if (!validated) {
-                try {
-                    runtime.appendControlAccountFunds(funds);
-                    funds.requireConserved(externalAdjustment);
-                    funds.clear();
-                    runtime.applyLedgerControlPositions(positionUndo);
-                    validated = true;
-                } catch (Throwable failure) {
-                    runtime.recordFailure(failure);
-                    throw failure;
-                }
-            }
-        }
-
-        /**
-         * 按决定恢复 Treasury 前值及持仓索引，或清除位置撤销暂存；清理财库变化键后标记关闭完成。
-         * @param ledger 当前执行方独占的原系统财库
-         */
-        public void apply(TreasuryRuntime ledger, boolean rollback) {
-            if (rollback) {
-                ledger.rollbackChangedValues();
-                funds.clear();
-                runtime.rollbackLedgerPositions(positionUndo);
-            } else {
-                positionUndo.clear();
-            }
-            ledger.clearChangedKeys();
-            completed = true;
+            runtime.recordFailure(failure);
+            throw failure;
         }
     }
 }

@@ -33,7 +33,6 @@ import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.service.matcher.pipeline.MatcherPipelineGroup;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.aeron.service.order.PipelineTestAccess;
-import com.surprising.aeron.service.snapshot.CoreSnapshotLifecycle;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.ClientSession;
@@ -107,7 +106,6 @@ class TradingCoreOwnerTest {
             var runtime = core.runtimeState;
             assertThat(core.laneTopology().accountLaneId(1))
                     .isNotEqualTo(core.laneTopology().accountLaneId(2));
-            assertThat(runtime.systemLedgerStarted()).isTrue();
             // 本轮要优先结算的首条原成交请求
             var first = command(line, CoreMessageType.PLACE_ORDER, 7, 1,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9001, "1", CoreOrderSide.BUY,
@@ -464,7 +462,6 @@ class TradingCoreOwnerTest {
             var core = service.state();
             // 当前真实账户与账本工作资源所在的原运行时
             var runtime = core.runtimeState;
-            assertThat(runtime.systemLedgerStarted()).isTrue();
             assertThat(core.laneTopology().accountLaneId(1)).isNotEqualTo(core.laneTopology().accountLaneId(2));
             // 本批原消息入队前已收到的响应数量
             int before = responses.size();
@@ -797,7 +794,7 @@ class TradingCoreOwnerTest {
     }
 
     /**
-     * 用显式纳秒参数检查空轮询健康检测的一毫秒分频：阈值前不检查，原命令执行立即抛已注入审计故障，达到阈值的空探测也抛同一异常；不是实测墙钟延迟上限。
+     * 用显式纳秒参数检查空轮询健康检测的一毫秒分频：阈值前不检查，原命令执行立即抛已注入提交发布故障，达到阈值的空探测也抛同一异常；不是实测墙钟延迟上限。
      */
     @Test
     void emptyPollingChecksSilentFailureWithinOneMillisecondAndCommandsNeverSkipHealth() throws Exception {
@@ -806,12 +803,7 @@ class TradingCoreOwnerTest {
         service.onStart(cluster(), null);
         // 本辅助当前原交易运行时
         var state = service.state();
-        // 仅供测试读取原内部字段的反射对象
-        var field = CoreSnapshotLifecycle.class.getDeclaredField("snapshotAuditFailure");
-        field.setAccessible(true);
-        // 快照审计原异步故障原子槽，测试结束清空
-        @SuppressWarnings("unchecked")
-        var failureSlot = (AtomicReference<RuntimeException>) field.get(state.snapshots);
+        var failure = new IllegalStateException("silent commit publication failure");
         try {
             assertThat(CoreTestCompletion.applyAsynchronously(state, timerInstrument()).status())
                     .isEqualTo(ResponseStatus.APPLIED);
@@ -819,13 +811,12 @@ class TradingCoreOwnerTest {
             long now = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
             assertThat(state.matchingProgress.hasNotifications(now)).isFalse();
             // 当前被注入或捕获的原测试故障，按所在异常边界处理
-            var failure = new IllegalStateException("silent snapshot audit failure");
-            failureSlot.set(failure);
+            state.commitPublicationFailure(failure);
             assertThat(state.matchingProgress.hasNotifications(now + 999_999)).isFalse();
             assertThatThrownBy(() -> state.apply(timerInstrument())).isSameAs(failure);
             assertThatThrownBy(() -> state.matchingProgress.hasNotifications(now + 1_000_000)).isSameAs(failure);
         } finally {
-            failureSlot.set(null);
+            state.commitPublicationFailure(null);
             service.onTerminate(null);
         }
     }

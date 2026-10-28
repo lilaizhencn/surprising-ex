@@ -104,7 +104,7 @@ class RuntimeIdentityRegistryTest {
             registry.prepareClientKeyInLane(lane, user, "客户-retired");
             long firstKey = RuntimeIdentityRegistry.clientKeyValue(first);
             registry.releaseClientKeyInLane(lane, user, firstKey);
-            assertThat(registry.findClientKey(user, "客户-retired")).isEqualTo(firstKey);
+            assertThat(registry.findClientKeyValue(user, "客户-retired")).isEqualTo(firstKey);
             registry.releaseClientKeyInLane(lane, user, firstKey);
             assertThat(registry.clientIdentityCount()).isZero();
             long recreated = registry.prepareClientKeyInLane(lane, user, "客户-retired");
@@ -126,10 +126,10 @@ class RuntimeIdentityRegistryTest {
             registry.bindClientLanes(runtime);
             long first = registry.clientKey(7, "客户-A");
             long second = registry.clientKey(8, "客户-B");
-            registry.releaseClientKey(8, first);
-            assertThat(registry.findClientKey(7, "客户-A")).isEqualTo(first);
-            registry.releaseClientKey(7, first);
-            assertThat(registry.findClientKey(7, "客户-A")).isNull();
+            registry.releaseClientKeyInLane(runtime.accountLane(runtime.accountLaneId(8)), 8, first);
+            assertThat(registry.findClientKeyValue(7, "客户-A")).isEqualTo(first);
+            registry.releaseClientKeyInLane(runtime.accountLane(runtime.accountLaneId(7)), 7, first);
+            assertThat(registry.findClientKeyValue(7, "客户-A")).isZero();
             assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
             runtime.startAccountLanes();
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.clientOrderId(8, second))
@@ -353,12 +353,12 @@ class RuntimeIdentityRegistryTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (var runtime = new TradingAccountRuntime()) {
             identities.bindClientLanes(runtime);
-            var first = identities.prepareClientKey(1001, "client-1");
-            var reused = identities.prepareClientKey(1001, "client-1");
-            identities.releaseClientKey(1001, first);
+            var first = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(runtime.accountLane(runtime.accountLaneId(1001)), 1001, "client-1"));
+            var reused = RuntimeIdentityRegistry.clientKeyValue(identities.prepareClientKeyInLane(runtime.accountLane(runtime.accountLaneId(1001)), 1001, "client-1"));
+            identities.releaseClientKeyInLane(runtime.accountLane(runtime.accountLaneId(1001)), 1001, first);
             assertThat(identities.clientIdentityCount()).isOne();
             assertThat(identities.clientOrderId(1001, reused)).isEqualTo("client-1");
-            identities.rollbackPreparedClientKey(1001, "client-1", reused);
+            identities.rollbackClientKeyInLane(runtime.accountLane(runtime.accountLaneId(1001)), 1001, "client-1", reused);
             assertThat(identities.clientIdentityCount()).isZero();
         }
     }
