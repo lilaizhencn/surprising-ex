@@ -1475,7 +1475,7 @@ class CoreMatchingStateTest {
         // 当前辅助操作的纳秒截止点，准入十秒、账户结算及哈希等待五秒。
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (completed == null && System.nanoTime() < deadline) {
-            completed = state.completeMatching(sequence, result, clusterTimestamp, clusterPosition);
+            completed = state.commits.completeMatching(sequence, result, clusterTimestamp, clusterPosition);
             if (completed == null) Thread.onSpinWait();
         }
         if (completed == null) throw new AssertionError("account lane settlement did not complete");

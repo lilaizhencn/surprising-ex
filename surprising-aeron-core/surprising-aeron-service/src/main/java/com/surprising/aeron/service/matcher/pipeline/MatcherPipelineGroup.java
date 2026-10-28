@@ -19,13 +19,12 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     private final com.surprising.aeron.service.core.PaddedReadyMask completedShardMask;
 
     /**
-     * 校验正的二次幂分片数和非空命令槽环，为每个分片创建延迟启动的流水线；需要立即启动时依次启动全部独立 worker。
+     * 校验正的二次幂分片数和非空命令槽环，为每个分片创建延迟启动的流水线，由启动边界显式启动独立 worker。
      * @param shardCount 正的二次幂分片数，上界还受就绪位图构造约束
      * @param capacityPerShard 每个独立 Matcher 环形队列的二次幂容量
-     * @param startImmediately 是否在构造时立即启动全部独立 worker
      * @param contexts 用于匹配 Core 序号与完成结果的现有命令槽环
      */
-    public MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately, CommandSlotRing contexts) {
+    public MatcherPipelineGroup(int shardCount, int capacityPerShard, CommandSlotRing contexts) {
         if (shardCount <= 0 || (shardCount & (shardCount - 1)) != 0) {
             throw new IllegalArgumentException("matcher shard count must be a power of two");
         }
@@ -34,18 +33,9 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         shards = new MatcherCommandPipeline[shardCount];
         for (/* 当前操作的分片流水线，构造循环中则是分片下标。 */ int shard = 0; shard < shardCount; shard++) {
             int shardId = shard;
-            shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false,
+            shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard,
                     () -> completedShardMask.setBit(shardId));
         }
-        if (startImmediately) start((IntConsumer) null);
-    }
-
-    /**
-     * 使用禁用 CPU 绑定的配置逐分片启动独立 worker。
-     * @param shardActivation 在分片拥有线程执行的可空订单簿激活动作
-     */
-    public void start(IntConsumer shardActivation) {
-        start(shardActivation, TradingCpuAffinity.disabled());
     }
 
     /**
@@ -61,16 +51,6 @@ public final class MatcherPipelineGroup implements AutoCloseable {
             shards[shardId].start(shardActivation == null ? null
                     : () -> shardActivation.accept(currentShardId), affinity);
         }
-    }
-
-    /**
-     * 不附带结算事件地提交目标分片的普通命令。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 需要提交或收集的正 Core 命令序号
-     * @param command 目标分片执行的业务或控制动作，具体形式由方法决定
-     */
-    public void submit(int shardId, long coreSequence, Supplier<?> command) {
-        submit(shardId, coreSequence, command, null);
     }
 
     /**
@@ -98,16 +78,6 @@ public final class MatcherPipelineGroup implements AutoCloseable {
             if (context.submittedMatcherShard() == shardId) context.releaseMatcherSubmission(shardId);
             throw failure;
         }
-    }
-
-    /**
-     * 对已占用的 Core 序号先回收就绪传输槽，再从它自己的 CommandSlot 取一次普通结果；无效或未占用序号返回空。
-     * @param coreSequence 需要提交或收集的正 Core 命令序号
-     */
-    public CoreMatchingResult poll(long coreSequence) {
-        if (coreSequence <= 0 || !contexts.claimed(coreSequence)) return null;
-        drainMatchingCompletions();
-        return contexts.required(coreSequence).takeMatchingCompletion();
     }
 
     /**
@@ -242,11 +212,11 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     }
 
     @Override
-    public void close() { close(null); }
+    public void close() { closeShards(null); }
 
     /**
-     * 依次关闭分片，并让各分片按其模式执行带分片号的关闭动作；捕获运行异常后继续关闭其余分片，最后抛首个并附带后续异常。
-     * @param action 关闭动作；closeShards 按分片执行，close 在全部分片后由调用线程执行一次
+     * 依次关闭分片，并让各分片按其模式执行带分片号的关闭动作；捕获异常后继续关闭其余分片，最后抛首个并附带后续异常。
+     * @param action 在对应分片 worker 上执行的可空关闭动作，未启动分片在当前线程执行
      */
     public void closeShards(IntConsumer action) {
         // 提交失败或关闭流程的首个运行异常，按所在方法释放路由或汇总后抛出。
@@ -263,31 +233,5 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         }
         if (failure instanceof Error error) throw error;
         if (failure instanceof RuntimeException runtime) throw runtime;
-    }
-
-    /**
-     * 依次关闭全部分片，再在当前调用线程执行一次外层动作；运行异常聚合后抛出，不把外层动作误当成每分片线程动作。
-     * @param action 关闭动作；closeShards 按分片执行，close 在全部分片后由调用线程执行一次
-     */
-    public void close(Runnable action) {
-        // 提交失败或关闭流程的首个运行异常，按所在方法释放路由或汇总后抛出。
-        RuntimeException failure = null;
-        for (MatcherCommandPipeline /* 当前操作的分片流水线，构造循环中则是分片下标。 */ shard : shards) {
-            try {
-                shard.close();
-            } catch (/* 当前分片关闭或最终动作的运行异常，附加到首个失败。 */ RuntimeException closeFailure) {
-                if (failure == null) failure = closeFailure;
-                else failure.addSuppressed(closeFailure);
-            }
-        }
-        if (action != null) {
-            try {
-                action.run();
-            } catch (/* 当前分片关闭或最终动作的运行异常，附加到首个失败。 */ RuntimeException closeFailure) {
-                if (failure == null) failure = closeFailure;
-                else failure.addSuppressed(closeFailure);
-            }
-        }
-        if (failure != null) throw failure;
     }
 }

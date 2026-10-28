@@ -25,7 +25,7 @@ public final class BenchmarkMatchingAwait {
         while (state.pendingMatching().contains(sequence) && System.nanoTime() < deadline) {
             state.matchingProgress.drainMatchingCompletions();
             if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
-            var result = state.takeMatchingResult(sequence);
+            var result = BenchmarkMatchingAwait.takeMatchingResult(state, sequence);
             if (result != null) return result;
             long remainingNanos = deadline - System.nanoTime();
             if (remainingNanos <= 0) break;
@@ -41,6 +41,22 @@ public final class BenchmarkMatchingAwait {
         }
         return null;
     }
+    /** 读取现有槽内事实，供测试/基准等待使用；不执行结算或提交。 */
+    public static com.surprising.aeron.service.matcher.MatchingResult takeMatchingResult(
+            TradingCoreRuntime owner, long sequence) {
+        if (owner.fatalFailure() != null) return null;
+        CommandSlot pending = owner.pendingMatching().get(sequence);
+        if (pending == null) return null;
+        if (pending.matchingResult() != null) return pending.matchingResult();
+        var direct = pending.settlementEvent();
+        if (direct == null && pending.orderBatch != null) {
+            direct = pending.orderBatch.itemSettlementEvent != null
+                    ? pending.orderBatch.itemSettlementEvent : pending.orderBatch.settlementEvent;
+        }
+        if (direct != null && direct.direct()) return direct.ready() ? direct.directResult() : null;
+        return pending.takeMatchingCompletion();
+    }
+
     private static boolean placeAdmissionOutstanding(CommandSlot pending) {
         var batch = pending.orderBatch;
         return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();

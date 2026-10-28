@@ -110,28 +110,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
     }
 
-    /**
-     * 创建分片零的指定容量队列并立即启动独立 Matcher 线程。
-     * @param requestedCapacity 正的二次幂队列容量
-     */
-    public MatcherCommandPipeline(int requestedCapacity) {
-        this(0, requestedCapacity, true);
-    }
-
-    /**
-     * 创建分片零的指定容量流水线，可推迟启动。
-     * @param requestedCapacity 正的二次幂队列容量
-     * @param startImmediately 是否在构造时立即启动独立 worker
-     */
-    public MatcherCommandPipeline(int requestedCapacity, boolean startImmediately) {
-        this(0, requestedCapacity, startImmediately);
-    }
-
-    public MatcherCommandPipeline(int workerId, int requestedCapacity, boolean startImmediately) {
-        this(workerId, requestedCapacity, startImmediately, null);
-    }
-
-    MatcherCommandPipeline(int workerId, int requestedCapacity, boolean startImmediately,
+    /** 装配指定分片的有界传输队列；由启动边界显式启动 worker。 */
+    public MatcherCommandPipeline(int workerId, int requestedCapacity,
             Runnable completionPublished) {
         this.completionPublished = completionPublished;
         if (requestedCapacity <= 0 || (requestedCapacity & (requestedCapacity - 1)) != 0) {
@@ -140,15 +120,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         this.workerId = workerId;
         this.requestedCapacity = requestedCapacity;
         mask = requestedCapacity - 1;
-        if (startImmediately) start(null);
-    }
-
-    /**
-     * 使用禁用 CPU 绑定的配置启动独立 Matcher 线程。
-     * @param action 启动或关闭时的可空动作，执行线程见方法说明
-     */
-    public void start(Runnable action) {
-        start(action, TradingCpuAffinity.disabled());
     }
 
     /**
@@ -159,9 +130,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     public synchronized void start(Runnable action,
             TradingCpuAffinity affinity) {
         if (worker != null) return;
-        if (started || startupFailure != null) {
-            throw new IllegalStateException("matcher pipeline cannot be restarted");
-        }
         backgroundReads = new OneToOneConcurrentArrayQueue<>(requestedCapacity);
         slots = new Slot[requestedCapacity];
         for (/* 正在预分配的传输槽下标。 */ int index = 0; index < requestedCapacity; index++) slots[index] = new Slot();
@@ -172,15 +140,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         worker = matcherWorker;
         matcherWorker.start();
         awaitStartup();
-    }
-
-    /**
-     * 提交一条正 Core 序号的普通命令，不附带结算事件。
-     * @param coreSequence 普通命令使用的正 Core 序号
-     * @param command 需要在 Matcher 拥有线程执行的非空函数
-     */
-    public void submit(long coreSequence, Supplier<?> command) {
-        submit(coreSequence, command, null);
     }
 
     /**
@@ -386,20 +345,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
      */
     public int completionDepth() {
         return Math.toIntExact(completedPosition.value - consumedPosition.value);
-    }
-
-    /**
-     * 返回占着传输窗口的提交数，即已提交减已回收。
-     */
-    public int inFlight() {
-        return Math.toIntExact(submittedPosition.value - consumedPosition.value);
-    }
-
-    /**
-     * 返回队列已发布的提交游标。
-     */
-    public long submittedPosition() {
-        return submittedPosition.value;
     }
 
     /**

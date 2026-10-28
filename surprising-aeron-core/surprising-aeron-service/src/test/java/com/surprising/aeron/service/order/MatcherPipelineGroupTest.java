@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
@@ -29,9 +30,10 @@ class MatcherPipelineGroupTest {
         var contexts = new CommandSlotRing(1);
         // 第一条命令占用的上下文，随后由同一对象承载第二条。
         var slot = contexts.claim(1);
-        try (/* 本测试使用的 Matcher 分片组。 */ var pipelines = new MatcherPipelineGroup(1, 2, true, contexts)) {
+        try (/* 本测试使用的 Matcher 分片组。 */ var pipelines = new MatcherPipelineGroup(1, 2, contexts)) {
+            pipelines.start(null, TradingCpuAffinity.disabled());
             pipelines.submit(0, 1,
-                    () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "FIRST"));
+                    () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "FIRST"), null);
             // 当前轮询的 nanoTime 截止点。
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (!slot.hasMatchingCompletion() && System.nanoTime() < deadline) Thread.onSpinWait();
@@ -49,13 +51,13 @@ class MatcherPipelineGroupTest {
             assertThat(reused.coreSequence()).isEqualTo(2);
             assertThat(reused.hasMatchingCompletion()).isFalse();
             pipelines.submit(0, 2,
-                    () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "SECOND"));
-            assertThat(await(pipelines, 2, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("SECOND");
+                    () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "SECOND"), null);
+            assertThat(await(pipelines, contexts, 2, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("SECOND");
         }
     }
 
     /**
-     * 阻塞一分片命令，连续空探查后放行，要求后来发布的普通完成仍被发现并收集；此构造未安装 completionSignal，覆盖的是未配置通知的探查路径。
+     * 阻塞一分片命令，连续空探查后放行，要求后来发布的普通完成仍被发现并收集。
      */
     @Test
     void emptyProbeDoesNotLoseALaterMatcherPublication() throws Exception {
@@ -63,13 +65,15 @@ class MatcherPipelineGroupTest {
         var entered = new CountDownLatch(1);
         // 放行探查测试中的阻塞命令，finally 防止遗漏释放。
         var release = new CountDownLatch(1);
-        try (/* 本测试使用的 Matcher 分片组。 */ var pipelines = pipelines(2, 4, true, 42)) {
+        var contexts = contexts(8, 42);
+        try (/* 本测试使用的 Matcher 分片组。 */ var pipelines = new MatcherPipelineGroup(2, 4, contexts)) {
+            pipelines.start(null, TradingCpuAffinity.disabled());
             try {
                 pipelines.submit(1, 42, () -> {
                     entered.countDown();
                     await(release);
                     return new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "OK");
-                });
+                }, null);
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 for (/* 放行前重复进行空探查的次数。 */ int i = 0; i < 4; i++) assertThat(pipelines.hasMatchingCompletions()).isFalse();
                 release.countDown();
@@ -77,7 +81,7 @@ class MatcherPipelineGroupTest {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!pipelines.hasMatchingCompletions() && System.nanoTime() < deadline) Thread.yield();
                 assertThat(pipelines.hasMatchingCompletions()).isTrue();
-                assertThat(await(pipelines, 42, TimeUnit.SECONDS.toNanos(5))).isNotNull();
+                assertThat(await(pipelines, contexts, 42, TimeUnit.SECONDS.toNanos(5))).isNotNull();
                 assertThat(pipelines.hasMatchingCompletions()).isFalse();
             } finally {
                 release.countDown();
@@ -86,22 +90,25 @@ class MatcherPipelineGroupTest {
     }
 
     /**
-     * 向两个分片各提交一条普通命令，实际通过遍历两个 Core 序号 poll 收集，再继续 drain 到提交与完成深度都为零；方法名不表示本测试完全未探查待处理序号。
+     * 向两个分片各提交一条普通命令，实际从两个 Core 命令槽收集，再继续 drain 到提交与完成深度都为零；方法名不表示本测试完全未探查待处理序号。
      */
     @Test
     void drainsCompletedShardHeadsWithoutProbingPendingSequences() {
         // 本测试使用的 Matcher 分片组。
-        MatcherPipelineGroup pipelines = pipelines(2, 4, true, 11, 12);
+        var contexts = contexts(8, 11, 12);
+        MatcherPipelineGroup pipelines = new MatcherPipelineGroup(2, 4, contexts);
         try {
-            pipelines.submit(0, 11, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "ONE"));
-            pipelines.submit(1, 12, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "TWO"));
+            pipelines.start(null, TradingCpuAffinity.disabled());
+            pipelines.submit(0, 11, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "ONE"), null);
+            pipelines.submit(1, 12, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "TWO"), null);
             // 已经收取的两个 Core 序号列表，用于检查结果集合。
             ArrayList<Long> completed = new ArrayList<>();
             // 当前轮询的 nanoTime 截止点。
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (completed.size() < 2 && System.nanoTime() < deadline) {
+                pipelines.drainMatchingCompletions();
                 for (long /* 当前轮询或预占槽位的 Core 序号。 */ sequence : new long[] {11, 12}) {
-                    if (!completed.contains(sequence) && pipelines.poll(sequence) != null) completed.add(sequence);
+                    if (!completed.contains(sequence) && contexts.required(sequence).takeMatchingCompletion() != null) completed.add(sequence);
                 }
                 Thread.onSpinWait();
             }
@@ -132,11 +139,12 @@ class MatcherPipelineGroupTest {
         // 延迟启动的真实同步撮合适配器，各分片由自己的 worker 激活。
         DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false);
         // 本测试使用的 Matcher 分片组。
-        MatcherPipelineGroup pipelines = pipelines(4, 16, false, 1, 2);
+        var contexts = contexts(64, 1, 2);
+        MatcherPipelineGroup pipelines = new MatcherPipelineGroup(4, 16, contexts);
         // 放行第一个订单簿分片的门闩，退出时也会释放。
         CountDownLatch releaseFirst = new CountDownLatch(1);
         try {
-            pipelines.start(adapter::activateShard);
+            pipelines.start(adapter::activateShard, TradingCpuAffinity.disabled());
             // 第一个数字品种字符串。
             String firstSymbol = "39";
             // 第一个品种映射到的全局 Matcher 分片。
@@ -229,40 +237,34 @@ class MatcherPipelineGroupTest {
         var first = contexts.claim(1);
         // 第二笔订单输入，路由拒绝测试中则是第二条命令槽。
         var second = contexts.claim(2);
-        try (/* 本测试使用的 Matcher 分片组。 */ var pipelines = new MatcherPipelineGroup(2, 1, true, contexts)) {
-            pipelines.submit(0, 1, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "ONE"));
+        try (/* 本测试使用的 Matcher 分片组。 */ var pipelines = new MatcherPipelineGroup(2, 1, contexts)) {
+            pipelines.start(null, TradingCpuAffinity.disabled());
+            pipelines.submit(0, 1, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "ONE"), null);
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> pipelines.submit(1, 1,
-                    () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "DUPLICATE")))
+                    () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "DUPLICATE"), null))
                     .isInstanceOf(IllegalStateException.class);
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> pipelines.submit(0, 2,
-                    () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "FULL")))
+                    () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "FULL"), null))
                     .isInstanceOf(java.util.concurrent.RejectedExecutionException.class);
             assertThat(second.submittedMatcherShard()).isEqualTo(-1);
-            assertThat(await(pipelines, 1, TimeUnit.SECONDS.toNanos(5))).isNotNull();
+            assertThat(await(pipelines, contexts, 1, TimeUnit.SECONDS.toNanos(5))).isNotNull();
             assertThat(first.submittedMatcherShard()).isEqualTo(-1);
-            pipelines.submit(1, 1, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "CONTINUATION"));
-            assertThat(await(pipelines, 1, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("CONTINUATION");
+            pipelines.submit(1, 1, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "CONTINUATION"), null);
+            assertThat(await(pipelines, contexts, 1, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("CONTINUATION");
             contexts.discard(1);
             // 复用后的命令槽对象，要求不再保留旧命令的路由和结果。
             var reused = contexts.claim(5);
             assertThat(reused.submittedMatcherShard()).isEqualTo(-1);
-            pipelines.submit(0, 5, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "REUSED"));
-            assertThat(await(pipelines, 5, TimeUnit.SECONDS.toNanos(5)).nativeCoreSequence()).isEqualTo(5);
+            pipelines.submit(0, 5, () -> new com.surprising.aeron.service.matcher.CoreMatchingResult(true, "REUSED"), null);
+            assertThat(await(pipelines, contexts, 5, TimeUnit.SECONDS.toNanos(5)).nativeCoreSequence()).isEqualTo(5);
         }
     }
 
-    /**
-     * 创建足够窗口的命令槽环并预先占用指定 Core 序号，再构造分片组，便于人工结果提交使用现有路由。
-     * @param shards 测试配置的分片数量
-     * @param capacity 每分片传输容量
-     * @param start 是否构造时立即启动 worker
-     * @param sequences 需要预先占用命令槽的 Core 序号序列
-     */
-    private static MatcherPipelineGroup pipelines(int shards, int capacity, boolean start, long... sequences) {
-        // Owner 命令槽环，用于验证结果直接发布和槽位复用。
-        var contexts = new CommandSlotRing(shards * capacity);
-        for (long /* 当前轮询或预占槽位的 Core 序号。 */ sequence : sequences) contexts.claim(sequence);
-        return new MatcherPipelineGroup(shards, capacity, start, contexts);
+    /** 预占测试命令的现有槽，结果仍由真实 Matcher 直接发布。 */
+    private static CommandSlotRing contexts(int capacity, long... sequences) {
+        var contexts = new CommandSlotRing(capacity);
+        for (long sequence : sequences) contexts.claim(sequence);
+        return contexts;
     }
 
     /**
@@ -288,18 +290,19 @@ class MatcherPipelineGroupTest {
         }
     }
     /**
-     * 在纳秒截止前自旋调用分片组 poll 收取指定 Core 结果，超时返回空。
+     * 在纳秒截止前回收传输槽并从命令槽收取指定 Core 结果，超时返回空。
      * @param pipeline 需要收集结果的分片组
      * @param sequence 需要收集的 Core 序号
      * @param timeout 纳秒自旋等待上限
      */
     private static com.surprising.aeron.service.matcher.CoreMatchingResult await(
-            MatcherPipelineGroup pipeline, long sequence, long timeout) {
+            MatcherPipelineGroup pipeline, CommandSlotRing contexts, long sequence, long timeout) {
         // 当前轮询的 nanoTime 截止点。
         long deadline = System.nanoTime() + timeout;
         do {
             // 从命令槽或组中收取的普通撮合回执。
-            var result = pipeline.poll(sequence);
+            pipeline.drainMatchingCompletions();
+            var result = contexts.required(sequence).takeMatchingCompletion();
             if (result != null) return result;
             Thread.onSpinWait();
         } while (System.nanoTime() < deadline);

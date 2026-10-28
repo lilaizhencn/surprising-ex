@@ -214,8 +214,6 @@ public final class CoreTestCompletion {
         CoreResponse requestedResponse = null;
         // 当前辅助阶段的 nanoTime 截止点，不覆盖内部所有嵌套等待。
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
-        // 保留的局部计数初值，当前方法没有读取或递增它。
-        int loop = 0;
         while (true) {
             owner.runtimeState().assertAccountLanesHealthy();
             owner.commits.advanceMatchingProgress(Long.MAX_VALUE);
@@ -308,21 +306,7 @@ public final class CoreTestCompletion {
                 state.batches().activateOrderBatch(head.orderBatch, head, true);
             state.matchingProgress.drainMatchingCompletions();
             if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
-            // 所请求序号的严格占用槽，读取现有事实或取普通完成。
-            CommandSlot context = state.pendingMatching().required(sequence);
-            // 当前完成回调或事实轮询取得的响应/撮合结果。
-            com.surprising.aeron.service.matcher.MatchingResult result = context.matchingResult();
-            if (result == null) result = context.takeMatchingCompletion();
-            if (result == null) {
-                // 当前仍在队中的请求槽，用于选择直达事件。
-                var active = state.pendingMatching().get(sequence);
-                // 普通或批次当前持有的结算事件，direct 且 ready 才可取事实。
-                var event = active.settlementEvent();
-                if (event == null && active.orderBatch != null)
-                    event = active.orderBatch.itemSettlementEvent != null
-                            ? active.orderBatch.itemSettlementEvent : active.orderBatch.settlementEvent;
-                if (event != null && event.direct() && event.ready()) result = event.directResult();
-            }
+            var result = takeMatchingResult(state, sequence);
             if (result != null) return result;
             // 距当前撮合等待截止点的剩余纳秒数。
             long remainingNanos = deadline - System.nanoTime();
@@ -339,6 +323,22 @@ public final class CoreTestCompletion {
         }
         return null;
     }
+    /** 读取现有槽内事实，供测试/基准等待使用；不执行结算或提交。 */
+    public static com.surprising.aeron.service.matcher.MatchingResult takeMatchingResult(
+            TradingCoreRuntime owner, long sequence) {
+        if (owner.fatalFailure() != null) return null;
+        CommandSlot pending = owner.pendingMatching().get(sequence);
+        if (pending == null) return null;
+        if (pending.matchingResult() != null) return pending.matchingResult();
+        var direct = pending.settlementEvent();
+        if (direct == null && pending.orderBatch != null) {
+            direct = pending.orderBatch.itemSettlementEvent != null
+                    ? pending.orderBatch.itemSettlementEvent : pending.orderBatch.settlementEvent;
+        }
+        if (direct != null && direct.direct()) return direct.ready() ? direct.directResult() : null;
+        return pending.takeMatchingCompletion();
+    }
+
     private static boolean placeAdmissionOutstanding(CommandSlot pending) {
         var batch = pending.orderBatch;
         return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();

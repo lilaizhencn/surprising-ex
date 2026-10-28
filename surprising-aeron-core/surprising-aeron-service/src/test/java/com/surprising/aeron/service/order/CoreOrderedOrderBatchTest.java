@@ -660,7 +660,7 @@ class CoreOrderedOrderBatchTest {
             // 实际 Matcher 分片工作队列数组
             var shards = (MatcherCommandPipeline[]) shardsField.get(group);
             // 撤单批次前分片零的提交位置，用差值检查合并片段数
-            long submittedBefore = shards[0].submittedPosition();
+            long submittedBefore = field(field(shards[0], "submittedPosition"), "value");
             // 含自有、重复或缺失订单的待测撤单命令
             CoreMessage cancel = command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
@@ -685,7 +685,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(items.get(1).resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
             assertThat(items.get(3).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
             assertThat(items).extracting(CoreOrderBatchResult.Item::index).containsExactly(0, 1, 2, 3, 4, 5);
-            assertThat(shards[0].submittedPosition() - submittedBefore).isEqualTo(2);
+            long submittedAfter = field(field(shards[0], "submittedPosition"), "value");
+            assertThat(submittedAfter - submittedBefore).isEqualTo(2);
             assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.tradingState().users().get(1001L).balances()).isEqualTo(before);
             assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
@@ -773,7 +774,7 @@ class CoreOrderedOrderBatchTest {
             long laterSequence = state.matchingSequence(laterId);
             // 当前批次先取得的 Matcher 事实
             var first = awaitMatching(state, batchSequence);
-            assertThat(state.completeMatching(batchSequence, first, 2_000, 3)).isNull();
+            assertThat(state.commits.completeMatching(batchSequence, first, 2_000, 3)).isNull();
             // 同一前置批次推进到下一项后取得的 Matcher 事实
             var second = awaitMatching(state, batchSequence);
 
@@ -1130,7 +1131,7 @@ class CoreOrderedOrderBatchTest {
             // 当前顺序批次第一项已经取得的 Matcher 事实
             var firstResult = awaitMatching(state, sequence);
             // 第一次尝试推进首项时的可空整批响应，仍有后项时应为空
-            CoreResponse firstCompletion = state.completeMatching(sequence, firstResult, 2_000, 3);
+            CoreResponse firstCompletion = state.commits.completeMatching(sequence, firstResult, 2_000, 3);
             assertThat(firstCompletion).isNull();
             // 本轮已完成响应、序号列表或最后取得的终态，具体角色见所在方法
             CoreResponse completed = drainBatchAfterFirst(state, batch, sequence);
@@ -1176,7 +1177,7 @@ class CoreOrderedOrderBatchTest {
             while (activeBatch.nextIndex == 0) {
                 assertThat(System.nanoTime()).isLessThan(firstDeadline);
                 state.commits.advanceMatchingProgress(fatalSequence);
-                assertThat(state.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
+                assertThat(state.commits.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
                 Thread.onSpinWait();
             }
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(11_004))).isNotNull();
@@ -1199,14 +1200,14 @@ class CoreOrderedOrderBatchTest {
                 assertThat(System.nanoTime()).isLessThan(deadline);
                 state.commits.advanceMatchingProgress(fatalSequence);
                 divergence = org.assertj.core.api.Assertions.catchThrowable(
-                        () -> state.completeMatching(fatalSequence, fatal, 3_000, 5));
+                        () -> state.commits.completeMatching(fatalSequence, fatal, 3_000, 5));
                 Thread.onSpinWait();
             }
             assertThat(divergence).isInstanceOf(
                     FatalMatchingDivergenceException.class);
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
                     .isSameAs(divergence);
-            assertThat(state.takeMatchingResult(fatalSequence)).isNull();
+            assertThat(CoreTestCompletion.takeMatchingResult(state, fatalSequence)).isNull();
             assertThat(claimedContext.hasMatchingCompletion()).isFalse();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(11_004))).isNotNull();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(11_004))).isNotNull();
@@ -2092,7 +2093,7 @@ class CoreOrderedOrderBatchTest {
         while (activeBatch.nextIndex == 0) {
             assertThat(System.nanoTime()).isLessThan(firstDeadline);
             state.commits.advanceMatchingProgress(sequence);
-            assertThat(state.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
+            assertThat(state.commits.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
             Thread.onSpinWait();
         }
         assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_001))).isNotNull();
@@ -2269,7 +2270,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(15_302))).isNull();
             assertThat(state.realtimeExportSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
-            assertThat(state.takeMatchingResult(sequence)).isNull();
+            assertThat(CoreTestCompletion.takeMatchingResult(state, sequence)).isNull();
             assertThatThrownBy(() -> state.apply(command(ProductLine.LINEAR_PERPETUAL,
                     CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 5,
                     com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1)), 1001))).isSameAs(divergence);
@@ -2305,7 +2306,7 @@ class CoreOrderedOrderBatchTest {
                 assertThat(System.nanoTime()).isLessThan(firstDeadline);
                 // 账本派发尚在追赶时保留同一撮合事实，像正常完成推进入口一样继续尝试。
                 state.commits.advanceMatchingProgress(sequence);
-                assertThat(state.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
+                assertThat(state.commits.completeMatching(sequence, firstResult, 2_000, 3)).isNull();
                 Thread.onSpinWait();
             }
             // 首项完成后复制的分片序号，供故障边界作不倒退比较
@@ -2320,7 +2321,7 @@ class CoreOrderedOrderBatchTest {
                 assertThat(System.nanoTime()).isLessThan(deadline);
                 state.commits.advanceMatchingProgress(sequence);
                 divergence = org.assertj.core.api.Assertions.catchThrowable(() ->
-                        state.completeMatching(sequence, failedResult, 2_001, 4));
+                        state.commits.completeMatching(sequence, failedResult, 2_001, 4));
                 Thread.onSpinWait();
             }
             assertThat(divergence).isInstanceOf(
@@ -2338,7 +2339,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.snapshotHasPendingCommands()).isFalse();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(fatalMatcherSequences);
-            assertThat(state.takeMatchingResult(sequence)).isNull();
+            assertThat(CoreTestCompletion.takeMatchingResult(state, sequence)).isNull();
         }
     }
 
@@ -2486,7 +2487,7 @@ class CoreOrderedOrderBatchTest {
         // 本段等待的 nanoTime 截止点，超时会停止轮询并断言
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (completed == null && System.nanoTime() < deadline) {
-            completed = state.completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
+            completed = state.commits.completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
             if (completed == null) Thread.onSpinWait();
         }
         if (completed == null) throw new AssertionError("account lane settlement did not complete");
@@ -2521,7 +2522,7 @@ class CoreOrderedOrderBatchTest {
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches().activateOrderBatch(head.orderBatch, head, true);
             state.matchingProgress.drainMatchingCompletions();
-            matching = state.takeMatchingResult(sequence);
+            matching = CoreTestCompletion.takeMatchingResult(state, sequence);
             if (matching == null) Thread.onSpinWait();
         }
         assertThat(matching).isNotNull();

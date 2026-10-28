@@ -13,7 +13,6 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
-import com.surprising.aeron.service.matcher.MatchingResult;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import java.util.ArrayList;
 import java.util.List;
@@ -234,7 +233,7 @@ public final class CoreMatchingFlow {
                 return;
             }
             owner.matcherPipeline().submit(shardId < 0 ? matcherShard(pending) : shardId,
-                    pending.sequence(), prepareMatchingCommand(pending, null));
+                    pending.sequence(), prepareMatchingCommand(pending, null), null);
             pending.matchingSubmitted();
             owner.matchingProgress.submissionCompleted(pending);
             return;
@@ -291,26 +290,6 @@ public final class CoreMatchingFlow {
         }
         owner.pendingMatching().required(sequence).publishMatchingCompletion(result);
         owner.pendingMatching().progressChanged();
-    }
-
-    /**
-     * 故障或命令已不在队列时返回空；优先取已绑定事实，再取就绪直达事件，否则消费普通完成引用。直达 ready 仅表示可取撮合事实，不表示所有账户已结算完。
-     * @param sequence 当前命令的完整 Core 序号
-     */
-    public MatchingResult takeMatchingResult(long sequence) {
-        if (owner.fatalFailure() != null || !owner.pendingMatching().contains(sequence)) return null;
-        // 当前新建、查询或收据收集中的命令槽。
-        CommandSlot pending = owner.pendingMatching().get(sequence);
-        if (pending == null) return null;
-        if (pending.matchingResult() != null) return pending.matchingResult();
-        // 当前命令或批次保留的直达结算事件。
-        var direct = pending.settlementEvent();
-        if (direct == null && pending.orderBatch != null) {
-            direct = pending.orderBatch.itemSettlementEvent != null
-                    ? pending.orderBatch.itemSettlementEvent : pending.orderBatch.settlementEvent;
-        }
-        if (direct != null && direct.direct()) return direct.ready() ? direct.directResult() : null;
-        return pending.takeMatchingCompletion();
     }
 
     /**

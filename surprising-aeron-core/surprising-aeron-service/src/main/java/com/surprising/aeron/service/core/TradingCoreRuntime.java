@@ -795,7 +795,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.matcherPipeline = new MatcherPipelineGroup(
                 matchingAdapter.topology().matchingEngineCount(),
                 Math.min(matchingAdapter.topology().matcherWindowSize(),
-                        matchingAdapter.topology().matchingCompletionCapacity()), false, pendingMatching.contexts());
+                        matchingAdapter.topology().matchingCompletionCapacity()), pendingMatching.contexts());
         this.runtimeState.restoreFeePolicies(restoredFeePolicies);
         this.runtimeState.restorePendingTransfers(restoredPendingTransfers);
         commits.publication.initialize(snapshotState.revision(), projectionSequence);
@@ -1494,13 +1494,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return rejected(resultCode);
     }
 
-    /**
-     * 按 Core 序号取走已完成的撮合终态；尚未可取时由既有完成存储返回空。
-     * @param sequence 本次业务对应的 Core 序号
-     */
-    public com.surprising.aeron.service.matcher.MatchingResult takeMatchingResult(long sequence) {
-        return matchingFlow.takeMatchingResult(sequence);
-    }
     /**
      * 判断在途撮合期间是否可继续处理该请求：允许撮合命令和不建立业务读栅栏的运行指标查询。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
@@ -2567,17 +2560,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param snapshotId 本次快照身份，交给既有捕获和编码流程
      */
     public byte[] snapshot(long snapshotId) { return snapshots.snapshot(snapshotId); }
-
-    /**
-     * 把该 Core 序号的撮合结果和原日志时间、位置交给有序提交处理。
-     * @param sequence 本次业务对应的 Core 序号
-     * @param matchingResult 对应 Core 序号的确定性撮合结果
-     * @param clusterTimestamp 本命令原复制日志业务时间
-     * @param clusterPosition 本命令原复制日志位置
-     */
-    public CoreResponse completeMatching(long sequence,
-                                  com.surprising.aeron.service.matcher.MatchingResult matchingResult,
-                                  long clusterTimestamp, long clusterPosition) { return commits.completeMatching(sequence, matchingResult, clusterTimestamp, clusterPosition); }
 
     /** Owner 上的跨 Matcher 分片撤单推进器：逐项派发、等待证据并保留原顺序，完整结果再交给已有结算路径。 构造约定：固定所属运行时；后续队列仅由其 Owner 推进。 参数 owner：拥有本跨分片撤单推进器的运行时 */
     @RequiredArgsConstructor(access = AccessLevel.PACKAGE)

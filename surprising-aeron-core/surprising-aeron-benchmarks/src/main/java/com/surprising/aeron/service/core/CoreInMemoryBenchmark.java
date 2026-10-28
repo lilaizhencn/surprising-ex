@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.core;
 
+import com.surprising.aeron.service.order.BenchmarkMatchingAwait;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -93,13 +94,13 @@ public final class CoreInMemoryBenchmark {
             com.surprising.aeron.service.matcher.MatchingResult matching = null;
             long deadline = System.nanoTime() + 30_000_000_000L;
             while (matching == null && System.nanoTime() < deadline) {
-                matching = state.takeMatchingResult(sequence);
+                matching = BenchmarkMatchingAwait.takeMatchingResult(state, sequence);
                 if (matching == null) Thread.onSpinWait();
             }
             if (matching == null) throw new IllegalStateException("benchmark matching timed out");
             CoreResponse completed = null;
             while (completed == null && System.nanoTime() < deadline) {
-                completed = state.completeMatching(
+                completed = state.commits.completeMatching(
                         sequence, matching, message.header().submittedAtEpochMillis(), sequence);
                 if (completed == null) Thread.onSpinWait();
             }

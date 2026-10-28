@@ -1393,7 +1393,7 @@ public final class LinearPerpetualBenchmarkSupport {
                 MatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, pending.sequence);
                 if (matching == null) continue;
                 nativeMatchingResult = matching.resultCode();
-                pending.response = state.completeMatching(pending.sequence, matching,
+                pending.response = state.commits.completeMatching(pending.sequence, matching,
                         pending.command.header().submittedAtEpochMillis(),
                         pending.command.header().correlationId());
                 matchingCompleted = pending.response != null

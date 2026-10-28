@@ -1185,7 +1185,7 @@ class ClusterCommandPipelineTest {
                 CoreMessage next = live.place(disjointUser(11), disjointSymbol("1"),
                         disjointOrder(8000), 80, 1, CoreOrderSide.BUY);
                 // 第一次尝试完成前命令时直接得到的可空终态，非空时不再向退休槽取结果
-                CoreResponse firstResponse = state.completeMatching(sequence, matching, timestamp, 0);
+                CoreResponse firstResponse = state.commits.completeMatching(sequence, matching, timestamp, 0);
                 if (firstResponse != null) {
                     assertThat(firstResponse.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                     assertThat(state.pendingMatching().get(sequence)).isNull();
@@ -1736,7 +1736,7 @@ class ClusterCommandPipelineTest {
             // 账户已就绪时这次完成调用可能直接返回终态。
             // 保留该响应，不能再向已经退休的槽要求第二份结果。
             // 完成调用可能直接返回的终态响应，已有值就保留，避免再次等已退休槽
-            var receipt = state.completeMatching(sequence, result, timestamp, 0);
+            var receipt = state.commits.completeMatching(sequence, result, timestamp, 0);
             if (receipt == null) receipt = CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0);
             assertThat(receipt.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             serial.apply(command);
@@ -2283,7 +2283,7 @@ class ClusterCommandPipelineTest {
                     && System.nanoTime() < deadline) Thread.onSpinWait();
             assertThat(event.complete()).isTrue();
             // Matcher/Lane 已完成，但 owner 尚未收取拒单；直接进入有序提交。
-            var response = state.completeMatching(sequence, event.directResult(), timestamp, 0);
+            var response = state.commits.completeMatching(sequence, event.directResult(), timestamp, 0);
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(state.commits.publication.deferred()).isFalse();
             serial.apply(first);

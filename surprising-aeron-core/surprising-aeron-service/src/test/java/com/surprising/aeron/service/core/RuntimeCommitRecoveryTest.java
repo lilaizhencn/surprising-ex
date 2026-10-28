@@ -894,7 +894,7 @@ class RuntimeCommitRecoveryTest {
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
             state.matchingProgress.drainMatchingCompletions();
-            matching = state.takeMatchingResult(sequence);
+            matching = CoreTestCompletion.takeMatchingResult(state, sequence);
             if (matching == null) Thread.onSpinWait();
         }
         assertThat(matching).as("matching completion for " + command.header().messageType()).isNotNull();
@@ -902,7 +902,7 @@ class RuntimeCommitRecoveryTest {
         CoreResponse completed = null;
         deadline = System.nanoTime() + 5_000_000_000L;
         while (completed == null && System.nanoTime() < deadline) {
-            completed = state.completeMatching(sequence, matching,
+            completed = state.commits.completeMatching(sequence, matching,
                     command.header().submittedAtEpochMillis(), command.header().sourceSequence());
             if (completed == null) Thread.onSpinWait();
         }
@@ -1042,7 +1042,7 @@ class RuntimeCommitRecoveryTest {
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
             state.matchingProgress.drainMatchingCompletions();
-            matching = state.takeMatchingResult(sequence);
+            matching = CoreTestCompletion.takeMatchingResult(state, sequence);
             if (matching == null) Thread.onSpinWait();
         }
         assertThat(matching).isNotNull();

@@ -151,7 +151,7 @@ public final class CorePerpetualEndToEndBenchmark {
         CoreResponse completed = null;
         long completionDeadline = System.nanoTime() + 30_000_000_000L;
         while (completed == null && System.nanoTime() < completionDeadline) {
-            completed = state.completeMatching(sequence, matching, 1_000L, sequences.clusterPosition++);
+            completed = state.commits.completeMatching(sequence, matching, 1_000L, sequences.clusterPosition++);
             if (completed == null) Thread.onSpinWait();
         }
         if (completed == null || completed.status() != ResponseStatus.APPLIED) {

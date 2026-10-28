@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -222,7 +223,8 @@ class MatcherSettlementPlanTest {
     @Test
     void settlementPublicationFailureReachesOwnerInsteadOfLeavingDeadMatcher() {
         try (/* 本用例独占并在退出时关闭的交易运行时，保存订单、拓扑及结算池。 */ var runtime = new TradingAccountRuntime();
-             /* 用例实际启动并自动关闭的 Matcher 管线，用于检查故障传播。 */ var pipeline = new com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline(256)) {
+             /* 用例实际启动并自动关闭的 Matcher 管线，用于检查故障传播。 */ var pipeline = new com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline(0, 256, null)) {
+            pipeline.start(null, TradingCpuAffinity.disabled());
             // 当前需要预约、发布、收集并回收的撮合结算事件。
             var event = new MatcherSettlementEvent();
             event.batchStorage(1);
@@ -245,7 +247,7 @@ class MatcherSettlementPlanTest {
                 }
                 throw new AssertionError("Owner was not notified of publication failure");
             }).isInstanceOf(IllegalStateException.class).hasMessage("settlement publication failed");
-            assertThatThrownBy(() -> pipeline.submit(2, () -> new CoreMatchingResult(true, "SUCCESS")))
+            assertThatThrownBy(() -> pipeline.submit(2, () -> new CoreMatchingResult(true, "SUCCESS"), null))
                     .isInstanceOf(IllegalStateException.class).hasMessage("settlement publication failed");
         }
     }

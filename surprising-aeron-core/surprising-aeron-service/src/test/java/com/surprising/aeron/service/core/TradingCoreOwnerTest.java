@@ -1502,7 +1502,7 @@ class TradingCoreOwnerTest {
             var matcherFailure = new com.surprising.aeron.service.matcher.CoreMatchingResult(
                     false, "EXCHANGE_CORE_FAILURE");
             // 原提交边界检测出的致命撮合分歧，之后快照继续抛同一故障
-            Throwable fatal = catchThrowable(() -> state.completeMatching(sequence, matcherFailure, 2_000, 3));
+            Throwable fatal = catchThrowable(() -> state.commits.completeMatching(sequence, matcherFailure, 2_000, 3));
 
             assertThat(fatal).isInstanceOf(
                     FatalMatchingDivergenceException.class);
@@ -1855,7 +1855,7 @@ class TradingCoreOwnerTest {
         // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (result == null && System.nanoTime() < deadline) {
-            result = state.takeMatchingResult(sequence);
+            result = CoreTestCompletion.takeMatchingResult(state, sequence);
             if (result == null) Thread.onSpinWait();
         }
         return result;
