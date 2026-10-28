@@ -17,7 +17,6 @@ import lombok.Getter;
 import lombok.experimental.Accessors;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.LongHashSet;
-import org.eclipse.collections.api.iterator.LongIterator;
 
 /**
  * Owner 持有的活跃订单路由索引，只收录 OPEN 订单的订单号、用户和标的，不持有账户 Lane 的权威订单正文。按用户和标的维护成员集合，供撤单路由及查询使用；路由对象和查询暂存均不能跨索引修改长期借用。
@@ -32,18 +31,6 @@ public final class ActiveOrderIndex {
     private static final int INITIAL_USER_INDEX_CAPACITY = 64;
     /** 新成员桶初始容量八，便于短生命周期桶复用。 */
     private static final int INITIAL_SYMBOL_INDEX_CAPACITY = 8;
-    /** 没有交集时复用的无状态空游标。 */
-    private static final LongIterator EMPTY_ITERATOR = /* 无状态空游标或本次交集独占的游标实现；分别由相邻字段或方法说明消费边界。 */ new LongIterator() {
-        /**
-         * 空迭代器始终没有下一条。
-         */
-        public boolean hasNext() { return false; }
-        /**
-         * 空迭代器取值明确抛出耗尽异常。
-         */
-        public long next() { throw new java.util.NoSuchElementException(); }
-    };
-
     // 成员表采用后移删除，避免有界订单周转留下墓碑；
     // 每次查询使用独立迭代器，嵌套读取不覆盖彼此游标。
     /** 用户到 OPEN 订单号成员集合，Owner 更新。 */
@@ -118,15 +105,6 @@ public final class ActiveOrderIndex {
      * @param state 只在冷边界用于重建的已提交状态
      */
     public ActiveOrderIndex(TradingCoreState state) {
-        this(state, null);
-    }
-
-    /**
-     * 从冷状态重建路由；此构造器不使用传入身份表，因为冷订单已有标的文本。
-     * @param state 只在冷边界用于重建的已提交状态
-     * @param identities 内部编号到永久标的文本的身份表；冷构造器不读取此参数
-     */
-    public ActiveOrderIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
         rebuild(state);
     }
 
@@ -154,94 +132,6 @@ public final class ActiveOrderIndex {
      */
     public IndexedOrder activeOrderRoute(long orderId) {
         return ordersById.get(orderId);
-    }
-
-    /**
-     * 读取活跃订单的标的文本，没有该路由则返回空。
-     * @param orderId 需要定位或更新的订单号
-     */
-    public String activeOrderSymbol(long orderId) {
-        // 查到或从池借出的轻量订单路由
-        IndexedOrder entry = ordersById.get(orderId);
-        return entry == null ? null : entry.instrumentId;
-    }
-
-    /**
-     * 按用户和标的取较小成员桶逐项检查另一桶，返回无序 primitive 交集游标。每次游标独立，可嵌套查询，但必须在修改索引前消费完。
-     * @param userId 用户 ID；page 中零表示不按用户筛选
-     * @param instrumentId 永久数字标的文本；page 中空白或空值表示不按标的筛选
-     */
-    public LongIterator matchingIds(long userId, String instrumentId) {
-        // 用户维度的原成员桶
-        LongHashSet userIds = idsByUser.get(userId);
-        // 标的维度的原成员桶
-        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
-        if (userIds == null || symbolIds == null) return EMPTY_ITERATOR;
-        // 选中扫描的较小成员桶；分页无筛选时为空并遍历全订单表
-        LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
-        // 另一个成员桶，用包含判断完成交集，未筛另一维时为空
-        LongHashSet filter = source == userIds ? symbolIds : userIds;
-        // 当前交集调用独占的源桶迭代器
-        var sourceIterator = source.iterator();
-        return /* 无状态空游标或本次交集独占的游标实现；分别由相邻字段或方法说明消费边界。 */ new LongIterator() {
-            /** 此交集游标是否已缓存下一条命中。 */
-            private boolean ready;
-            /** 此交集游标缓存的下一条订单号，ready 为真时可读。 */
-            private long next;
-            /**
-             * 在私有源游标中找下一条同时属于另一桶的订单，缓存一次命中；重复探测不跳过结果。
-             */
-            public boolean hasNext() {
-                while (!ready && sourceIterator.hasNext()) {
-                    // 源桶中待检查是否也属于另一桶的订单号
-                    long candidate = sourceIterator.nextValue();
-                    if (filter.contains(candidate)) {
-                        next = candidate;
-                        ready = true;
-                    }
-                }
-                return ready;
-            }
-            /**
-             * 取走缓存命中并清就绪标志，耗尽时抛异常。
-             */
-            public long next() {
-                if (!hasNext()) throw new java.util.NoSuchElementException();
-                ready = false;
-                return next;
-            }
-        };
-    }
-
-    /**
-     * 物化用户和标的交集为独立 long 数组，缩到实际命中长度后升序排序；不是借用成员桶的视图。
-     * @param userId 用户 ID；page 中零表示不按用户筛选
-     * @param instrumentId 永久数字标的文本；page 中空白或空值表示不按标的筛选
-     */
-    public long[] sortedIds(long userId, String instrumentId) {
-        // 用户维度的原成员桶
-        LongHashSet userIds = idsByUser.get(userId);
-        // 标的维度的原成员桶
-        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
-        if (userIds == null || symbolIds == null) return new long[0];
-        // 选中扫描的较小成员桶；分页无筛选时为空并遍历全订单表
-        LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
-        // 另一个成员桶，用包含判断完成交集，未筛另一维时为空
-        LongHashSet filter = source == userIds ? symbolIds : userIds;
-        // 交集物化的 primitive 结果数组，最后缩容并排序
-        long[] values = new long[source.size()];
-        // 交集实际命中数或分页小顶堆当前有效长度
-        int size = 0;
-        // 本次调用独占的成员桶游标
-        var iterator = source.iterator();
-        while (iterator.hasNext()) {
-            // 当前候选或当前页中要输出的订单号
-            long orderId = iterator.nextValue();
-            if (filter.contains(orderId)) values[size++] = orderId;
-        }
-        if (size != values.length) values = java.util.Arrays.copyOf(values, size);
-        java.util.Arrays.sort(values);
-        return values;
     }
 
     /**

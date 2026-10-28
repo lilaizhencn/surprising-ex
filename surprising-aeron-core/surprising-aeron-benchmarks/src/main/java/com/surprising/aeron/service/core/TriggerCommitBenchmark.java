@@ -57,7 +57,7 @@ public class TriggerCommitBenchmark {
                 new AlgoOrderIndex(initial),
                 new LiquidationIndex(initial),
                 new CancelAllAfterIndex(initial),
-                new ActiveOrderIndex(initial, identities),
+                new ActiveOrderIndex(initial),
                 new AdlPositionIndex(initial, identities)), identities);
         instrument = CoreInstrument.from(ProductLine.SPOT,
                 new RegisterInstrumentCommand(

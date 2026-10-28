@@ -492,8 +492,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
      */
     private static long commandSequence(Command command) {
         if (command instanceof MatcherSettlementEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event) return event.coreSequence();
-        if (command instanceof com.surprising.aeron.service.order.state.LaneCancelEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
-            return event.coreSequence();
         if (command instanceof com.surprising.aeron.service.core.change.LaneCommitEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)
             return event.coreSequence();
         if (command instanceof com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent /* 已按具体任务类型匹配到的事件，读取其就绪条件或 Core 序号 */ event)

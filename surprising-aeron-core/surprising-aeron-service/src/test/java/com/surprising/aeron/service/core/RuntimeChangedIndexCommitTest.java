@@ -239,7 +239,7 @@ class RuntimeChangedIndexCommitTest {
         // 由初始冷状态构造的延时全撤索引
         CancelAllAfterIndex timers = new CancelAllAfterIndex(state);
         // 由初始冷状态构造的活跃订单路由
-        ActiveOrderIndex activeOrders = new ActiveOrderIndex(state, identities);
+        ActiveOrderIndex activeOrders = new ActiveOrderIndex(state);
         // 由初始冷状态构造的 ADL 持仓索引
         AdlPositionIndex adlPositions = new AdlPositionIndex(state, identities);
         return new IndexSet(positionUsers, openInterest, activeOrders, liquidations,

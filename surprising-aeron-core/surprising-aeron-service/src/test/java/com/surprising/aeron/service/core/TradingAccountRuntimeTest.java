@@ -17,7 +17,6 @@ import com.surprising.aeron.service.order.admission.PendingReservationTracker;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.state.LaneCancelEvent;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
@@ -1172,7 +1171,7 @@ class TradingAccountRuntimeTest {
         state.startAccountLanes();
         try {
             // 本次原 Lane 阶段调用返回的实际参与位图
-            var apply = state.stageLaneMutation(1, java.util.List.of(7L));
+            var apply = stageLaneMutation(state, 1, java.util.List.of(7L));
             assertThat(apply).isEqualTo(1L << LaneTopology.characterization().accountLaneId(7));
             state.readFence(7, 1);
 
@@ -1205,7 +1204,7 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(userInLastLane));
         state.startAccountLanes();
         try {
-            state.stageLaneMutation(1, java.util.List.of(userInLastLane));
+            stageLaneMutation(state, 1, java.util.List.of(userInLastLane));
             state.readFenceAll(1);
             assertThat(laneValues(state, 0).committedSequence()).isEqualTo(1);
         } finally {
@@ -1230,7 +1229,7 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(laneOneUser));
         state.startAccountLanes();
         try {
-            state.stageLaneMutation(1, java.util.List.of(laneZeroUser, laneOneUser));
+            stageLaneMutation(state, 1, java.util.List.of(laneZeroUser, laneOneUser));
 
             assertThat(laneValues(state, 0).appliedSequence()).isEqualTo(1);
             assertThat(laneValues(state, 1).appliedSequence()).isEqualTo(1);
@@ -1261,7 +1260,7 @@ class TradingAccountRuntimeTest {
         }
         state.clearChangedKeys();
         // 本轮原阶段返回的实际 Lane 完成位图
-        long committedLaneMask = state.stageLaneMutation(1, users);
+        long committedLaneMask = stageLaneMutation(state, 1, users);
 
         assertThat(committedLaneMask).isEqualTo(topology.accountLaneCount() == 64 ? -1L : (1L << topology.accountLaneCount()) - 1);
         for (/* 当前要派发、反射或读取的原账户 Lane 下标 */ int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
@@ -1269,7 +1268,7 @@ class TradingAccountRuntimeTest {
             assertThat(laneValues(state, laneId).committedSequence()).isEqualTo(1);
         }
         state.clearChangedKeys();
-        assertThat(state.stageLaneMutation(2, java.util.List.of())).isZero();
+        assertThat(stageLaneMutation(state, 2, java.util.List.of())).isZero();
     }
 
     /**
@@ -1318,16 +1317,16 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(laneOneUser));
         state.startAccountLanes();
         try {
-            state.stageLaneMutation(2, java.util.List.of(laneZeroUser));
+            stageLaneMutation(state, 2, java.util.List.of(laneZeroUser));
             state.clearChangedKeys();
-            state.stageLaneMutation(1, java.util.List.of(laneOneUser));
+            stageLaneMutation(state, 1, java.util.List.of(laneOneUser));
             state.clearChangedKeys();
             // 较早原序号组合应用失败前各 Lane 数字对照
             LaneValues[] beforeFailure = laneValues(state);
             // 较早原序号失败前全局修订
             long revisionBeforeFailure = state.revision();
 
-            assertThatThrownBy(() -> state.stageLaneMutation(
+            assertThatThrownBy(() -> stageLaneMutation(state,
                     1, java.util.List.of(laneZeroUser, laneOneUser)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("out of order");
@@ -1368,8 +1367,8 @@ class TradingAccountRuntimeTest {
         state.putUser(new UserRuntime(userId));
         state.startAccountLanes();
         try {
-            state.stageLaneMutation(1, java.util.List.of(userId));
-            state.stageLaneMutation(2, java.util.List.of(userId));
+            stageLaneMutation(state, 1, java.util.List.of(userId));
+            stageLaneMutation(state, 2, java.util.List.of(userId));
 
             // 连续原序号一、二执行后的零号 Lane 数字对照
             LaneValues applied = laneValues(state, 0);
@@ -1416,106 +1415,6 @@ class TradingAccountRuntimeTest {
     }
 
     /**
-     * 普通或批撤由真实账户 Lane 执行，收回并归还事件后显式取得 Owner 读取权检查原资金全释放、订单/预留消失，再归还所有权。
-     * @param batch 是否按原批次回执登记/撤销预留，撤单用例中选择批撤
-     */
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void cancellationReturnsBorrowedOwnershipAndRunsOnTheLane(boolean batch) throws Exception {
-        // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
-        TradingAccountRuntime state = new TradingAccountRuntime(LaneTopology.productionDefault());
-        // 本用例原资产、标的、客户端和持仓身份字典
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        identities.bindClientLanes(state);
-        // 当前创建或核对的原订单业务号
-        // 本次内部用户 ID，部分用例按固定 Lane 路由寻找
-        long userId = 1, orderId = 10_000;
-        state.putUser(new UserRuntime(userId));
-        state.putBalance(new BalanceRuntime(userId, 3, 2, 0));
-        CoreStateTestFixtures.reserveOrder(state, orderId, userId, identities.clientKey(userId, "cancel"), 5, 1, 3, 1);
-        state.clearChangedKeys();
-        state.startAccountLanes();
-        try {
-            // 当前原普通或批次撤单事件，完成后收回并归还
-            LaneCancelEvent event = batch
-                    ? state.dispatchCancelBatch(1, userId, new long[]{orderId}, 1, 1, identities)
-                    : state.dispatchCancel(1, userId, orderId, 1, 1, identities);
-            while (!event.complete()) Thread.onSpinWait();
-            assertThat(event.complete()).isTrue();
-            state.collectCancel(event, null, null);
-            state.releaseCancel(event);
-            state.acquireOwnerLaneAccess();
-            try {
-                assertThat(state.balance(userId, 3).availableUnits()).isEqualTo(2);
-                assertThat(state.balance(userId, 3).lockedUnits()).isZero();
-                assertThat(state.order(orderId)).isNull();
-                assertThat(state.reservation(orderId)).isNull();
-            } finally {
-                state.releaseOwnerLaneAccess();
-            }
-        } finally {
-            state.close();
-        }
-    }
-
-    /**
-     * 先创建二百五十六用户原冻结单，再先派完全部撤单、后逐一收集归还；取得读取权后检查余额恢复、正文清除及客户端身份表为空，不逐条同步派发等待。
-     */
-    @Test
-    void keepsTwoHundredFiftySixLaneOwnedCancellationsInFlightWithoutOwnerWaits() {
-        // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
-        // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
-        TradingAccountRuntime state = new TradingAccountRuntime(topology);
-        // 本用例原资产、标的、客户端和持仓身份字典
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        identities.bindClientLanes(state);
-        // 先派发后收集的二百五十六个原 Lane 撤单事件
-        LaneCancelEvent[] cancellations = new LaneCancelEvent[256];
-        for (/* 当前数组或订单循环下标 */ int index = 0; index < cancellations.length; index++) {
-            // 本次内部用户 ID，部分用例按固定 Lane 路由寻找
-            long userId = index + 1L;
-            // 当前创建或核对的原订单业务号
-            long orderId = 10_000L + index;
-            // 当前用户原客户端单号对应的实际正键
-            long clientKey = identities.clientKey(userId, "cancel-" + index);
-            state.putUser(new UserRuntime(userId));
-            state.putBalance(new BalanceRuntime(userId, 3, 2, 0));
-            CoreStateTestFixtures.reserveOrder(state, orderId, userId, clientKey, 5, 1, 3, 1);
-        }
-        state.clearChangedKeys();
-        state.startAccountLanes();
-        try {
-            for (/* 当前数组或订单循环下标 */ int index = 0; index < cancellations.length; index++) {
-                cancellations[index] = state.dispatchCancel(
-                        index + 1L, index + 1L, 10_000L + index, 1_000L + index, index + 1L,
-                        identities);
-            }
-            for (/* 当前数组或订单循环下标 */ int index = 0; index < cancellations.length; index++) {
-                // 当前原普通或批次撤单事件，完成后收回并归还
-                LaneCancelEvent event = cancellations[index];
-                while (!event.complete()) Thread.onSpinWait();
-                state.collectCancel(event, null, null);
-                state.releaseCancel(event);
-            }
-            state.acquireOwnerLaneAccess();
-            try {
-                for (/* 当前数组或订单循环下标 */ int index = 0; index < cancellations.length; index++) {
-                    assertThat(state.balance(index + 1L, 3).availableUnits()).isEqualTo(2);
-                    assertThat(state.balance(index + 1L, 3).lockedUnits()).isZero();
-                    assertThat(state.order(10_000L + index)).isNull();
-                    assertThat(state.reservation(10_000L + index)).isNull();
-                }
-            } finally {
-                state.releaseOwnerLaneAccess();
-            }
-            assertThat(identities.clientIdentityCount()).isZero();
-        } finally {
-            state.close();
-        }
-    }
-
-    /**
      * 故意把零号 Lane 用户放进一号快照，恢复整组之前必须检查路由拒绝，先前零号 Lane 的水位与本地状态哈希不被部分回退。
      */
     @Test
@@ -1533,7 +1432,7 @@ class TradingAccountRuntimeTest {
         // 固定路由到零号 Lane 的原用户
         long laneZeroUser = userForLane(topology, 0);
         state.putUser(new UserRuntime(laneZeroUser));
-        state.stageLaneMutation(2, java.util.List.of(laneZeroUser));
+        stageLaneMutation(state, 2, java.util.List.of(laneZeroUser));
         // 坏快照组恢复前零号 Lane 原数字对照
         LaneValues beforeRestore = laneValues(state, 0);
 
@@ -1892,6 +1791,19 @@ class TradingAccountRuntimeTest {
                 scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                 scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
                 scan.triggerOcoCursor(), revision, scan.laneProgress());
+    }
+
+    private static long stageLaneMutation(TradingAccountRuntime state, long sequence, Iterable<Long> users) {
+        var event = state.dispatchLaneMutation(sequence, users);
+        if (event == null) return 0;
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        while (!state.laneCommitComplete(event)) {
+            if (System.nanoTime() - deadline >= 0) throw new AssertionError("Lane commit timed out");
+            Thread.onSpinWait();
+        }
+        long mask = event.requiredLaneMask();
+        state.releaseLaneCommit(event);
+        return mask;
     }
 
 }

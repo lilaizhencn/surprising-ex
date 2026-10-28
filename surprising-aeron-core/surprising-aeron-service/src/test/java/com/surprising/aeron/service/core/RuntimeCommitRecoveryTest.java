@@ -1417,7 +1417,7 @@ class RuntimeCommitRecoveryTest {
                 Map.entry("timer", indexSnapshot(
                         new com.surprising.aeron.service.core.index.CancelAllAfterIndex(core))),
                 Map.entry("active-order", indexSnapshot(
-                        new com.surprising.aeron.service.core.index.ActiveOrderIndex(core, identities))),
+                        new com.surprising.aeron.service.core.index.ActiveOrderIndex(core))),
                 Map.entry("adl-position", indexSnapshot(
                         new com.surprising.aeron.service.core.index.AdlPositionIndex(core, identities))));
         assertThat(allIndexSnapshots(state)).isEqualTo(rebuilt);

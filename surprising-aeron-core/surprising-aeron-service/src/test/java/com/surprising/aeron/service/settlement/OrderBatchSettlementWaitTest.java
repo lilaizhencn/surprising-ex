@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.change.LaneCommitEvent;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,43 +25,6 @@ class OrderBatchSettlementWaitTest {
             assertThatThrownBy(() -> runtime.releaseMatcherSettlement(event))
                     .hasMessageContaining("cannot recycle an incomplete");
             runtime.endOrderBatchMutationScope();
-        }
-    }
-
-    /**
-     * 使用已过期等待截止点，检查超时不清除原 Core 序号或伪造完成位，未完成事件不能回收。
-     */
-    @Test
-    void laneCommitTimeoutPreservesUnfinishedSequenceAndCannotRecycle() {
-        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingAccountRuntime()) {
-            // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
-            var event = incompleteLaneCommit(runtime);
-            assertThatThrownBy(() -> runtime.awaitLaneCommit(event, System.nanoTime() - 1))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("timed out");
-            assertThat(event.coreSequence()).isEqualTo(1);
-            assertThat(event.completedLaneMask()).isZero();
-            assertThatThrownBy(() -> runtime.releaseLaneCommit(event))
-                    .hasMessageContaining("incomplete Account Lane commit");
-        }
-    }
-
-    /**
-     * 预先设置当前线程中断，检查等待抛出中断故障、保留标记且事件未完成；finally 只为避免影响其他测试而清除标记。
-     */
-    @Test
-    void laneCommitInterruptionDoesNotClearInterruptOrClaimCompletion() {
-        try (/* 用例独占并自动关闭的运行时，用于批量作用域或等待入口。 */ var runtime = new TradingAccountRuntime()) {
-            // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
-            var event = incompleteLaneCommit(runtime);
-            Thread.currentThread().interrupt();
-            try {
-                assertThatThrownBy(() -> runtime.awaitLaneCommit(event, System.nanoTime() + 30_000_000_000L))
-                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("interrupted");
-                assertThat(Thread.currentThread().isInterrupted()).isTrue();
-                assertThat(event.complete()).isFalse();
-            } finally {
-                Thread.interrupted();
-            }
         }
     }
 
@@ -153,17 +115,6 @@ class OrderBatchSettlementWaitTest {
         assertThat(event.complete()).isFalse();
         longs.setRelease(slots, 0, 1L);
         assertThat(event.complete()).isTrue();
-    }
-
-    /**
-     * 构造只有一个必需 Lane、尚未执行及提交的账户变更事件，供超时和中断等待检查。
-     * @param runtime 给账户变更事件提供拓扑及通知边界的测试运行时
-     */
-    private static LaneCommitEvent incompleteLaneCommit(TradingAccountRuntime runtime) {
-        return new LaneCommitEvent(1).prepare(1, 1,
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] {
-                    new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList()
-                }, runtime);
     }
 
     /**

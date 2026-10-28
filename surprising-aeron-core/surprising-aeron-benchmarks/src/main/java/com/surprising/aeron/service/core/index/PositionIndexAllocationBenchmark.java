@@ -45,7 +45,7 @@ public class PositionIndexAllocationBenchmark {
         adl = new AdlPositionIndex(state, identities);
         indexes = new RuntimeFactIndexes(new PositionUserIndex(state), openInterest,
                 new TriggerOrderIndex(state), new AlgoOrderIndex(state), new LiquidationIndex(state),
-                new CancelAllAfterIndex(state), new ActiveOrderIndex(state, identities), adl);
+                new CancelAllAfterIndex(state), new ActiveOrderIndex(state), adl);
     }
 
     @Benchmark @OperationsPerInvocation(256)

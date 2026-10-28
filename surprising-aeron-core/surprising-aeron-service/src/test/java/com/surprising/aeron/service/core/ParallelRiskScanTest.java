@@ -61,7 +61,7 @@ class ParallelRiskScanTest {
                     new com.surprising.aeron.service.core.index.AlgoOrderIndex(source),
                     new com.surprising.aeron.service.core.index.LiquidationIndex(source),
                     new com.surprising.aeron.service.core.index.CancelAllAfterIndex(source),
-                    new com.surprising.aeron.service.core.index.ActiveOrderIndex(source, ids),
+                    new com.surprising.aeron.service.core.index.ActiveOrderIndex(source),
                     new AdlPositionIndex(source, ids)), ids);
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
             runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();

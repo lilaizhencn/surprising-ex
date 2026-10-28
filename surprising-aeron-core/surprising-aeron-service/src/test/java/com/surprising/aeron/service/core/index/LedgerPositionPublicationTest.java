@@ -196,7 +196,7 @@ class LedgerPositionPublicationTest {
     private static RuntimeFactIndexes indexes(TradingCoreState initial, RuntimeIdentityRegistry ids,
             PositionUserIndex users, OpenInterestIndex oi, AdlPositionIndex adl) {
         return new RuntimeFactIndexes(users, oi, new TriggerOrderIndex(initial), new AlgoOrderIndex(initial),
-                new LiquidationIndex(initial), new CancelAllAfterIndex(initial), new ActiveOrderIndex(initial, ids), adl);
+                new LiquidationIndex(initial), new CancelAllAfterIndex(initial), new ActiveOrderIndex(initial), adl);
     }
 
     /**

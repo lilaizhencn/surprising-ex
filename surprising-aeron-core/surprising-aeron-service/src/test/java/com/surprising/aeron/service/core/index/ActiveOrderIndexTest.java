@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 检查 Owner 活跃订单路由、成员桶回收、独立交集游标和排他分页。账户准入汇总用例另外检查 Lane 自己的订单索引，不把该资金/风险职责归给 Owner 轻量路由；循环及反射断言属于正确性检查，不是性能压测。
+ * 检查 Owner 活跃订单路由、成员桶回收、用户标的交集和排他分页。账户准入汇总用例另外检查 Lane 自己的订单索引，不把该资金/风险职责归给 Owner 轻量路由；循环及反射断言属于正确性检查，不是性能压测。
  */
 class ActiveOrderIndexTest {
 
@@ -34,7 +34,7 @@ class ActiveOrderIndexTest {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
         var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
         // 本用例 Owner 活跃订单路由索引
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 用户七标的一的常驻 OPEN 订单，用作桶复用隔离对照
         var held = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY,
                 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
@@ -48,7 +48,7 @@ class ActiveOrderIndexTest {
             var order = new CoreOrderState(id, ProductLine.SPOT, user, "2", CoreOrderSide.SELL,
                     100, 1, 0, false, CoreOrderStatus.OPEN, 1);
             index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(order, identities, otherInstrument), identities);
-            assertThat(index.sortedIds(user, "2")).containsExactly(id);
+            assertThat(index.page(user, "2", 0, 10).orderIds()).containsExactly(id);
             index.apply(id, null, identities);
             index.apply(id, null, identities);
             assertThat(index.sortedIdsDescending(user)).isEmpty();
@@ -67,7 +67,7 @@ class ActiveOrderIndexTest {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
         var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
         // 本用例 Owner 活跃订单路由索引
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 本轮订单转运行时使用的现货合约
         var instrument = instrument("1");
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1; id <= 4_097; id++) {
@@ -109,7 +109,7 @@ class ActiveOrderIndexTest {
             // 本用例原始身份表，用于冷订单转运行时及反向标的查询
             var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
             // 本用例 Owner 活跃订单路由索引
-            var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+            var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
             // 本用例订单集合，终态测试为运行时数组，冷重建测试为按订单号映射
             var orders = new com.surprising.aeron.service.order.state.OrderRuntime[3];
             for (/* 当前构造三份对照订单的数组下标 */ int i = 0; i < orders.length; i++) {
@@ -140,14 +140,14 @@ class ActiveOrderIndexTest {
     }
 
     /**
-     * 保持三十二个活单滑动周转到四千零九十六号，用反射检查总表存储数组仍复用；在交集游标内嵌套排序及分页，验证游标互不覆盖。
+     * 保持三十二个活单滑动周转到四千零九十六号，用反射检查总表存储数组仍复用；检查用户标的交集及分页结果。
      */
     @Test
     void boundedTurnoverKeepsStorageAndIndependentQueryCursors() throws Exception {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
         var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
         // 本用例 Owner 活跃订单路由索引
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 反射取得活跃订单反向总表的字段
         var mapField = ActiveOrderIndex.class.getDeclaredField("ordersById");
         mapField.setAccessible(true);
@@ -172,16 +172,9 @@ class ActiveOrderIndexTest {
                     order, identities, instrument(order.instrumentId())), identities);
         }
         assertThat(valuesField.get(entries)).isSameAs(storage);
-        // 外层未排序交集游标，嵌套只读查询不能改写其位置
-        var cursor = index.matchingIds(7, "1");
-        // 游标实际返回的订单号集合，用于与预期或排序结果对照
-        var actual = new java.util.HashSet<Long>();
-        while (cursor.hasNext()) {
-            actual.add(cursor.next());
-            assertThat(index.sortedIds(7, "1")).hasSize(32);
-            assertThat(index.page(0, null, 0, 16).orderIds()).hasSize(16);
-        }
-        assertThat(actual).hasSize(32).allMatch(/* 当前构造、删除或遍历的订单号 */ id -> id > 4064 && id <= 4096);
+        var actual = index.page(7, "1", 0, 32).orderIds();
+        assertThat(actual).hasSize(32).allMatch(id -> id > 4064 && id <= 4096);
+        assertThat(index.page(0, null, 0, 16).orderIds()).hasSize(16);
         assertThat(index.count()).isEqualTo(32);
         for (/* 当前构造、删除或遍历的订单号 */ long id = 4065; id <= 4096; id++) index.apply(id, null, identities);
         assertThat(index.count()).isZero();
@@ -197,7 +190,7 @@ class ActiveOrderIndexTest {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
         var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
         // 本用例 Owner 活跃订单路由索引
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 尚未部分成交的原始 OPEN 冷订单
         var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
         // 当前构造、转为运行时或更新的测试订单
@@ -225,7 +218,7 @@ class ActiveOrderIndexTest {
         // 本用例原始身份表，用于冷订单转运行时及反向标的查询
         var identities = new com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry();
         // 本用例 Owner 活跃订单路由索引
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
         // 首次原订单、第一份交集游标或第一页结果，按各用例对应角色使用
         var first = new CoreOrderState(1, ProductLine.SPOT, 7, "1", CoreOrderSide.BUY, 90, 10, 0, false, CoreOrderStatus.OPEN, 1);
         // 替换用冷订单、另一对照订单或第二页结果
@@ -237,7 +230,6 @@ class ActiveOrderIndexTest {
                 second, identities, instrument(second.instrumentId()));
         index.apply(1, replacement, identities);
         assertThat(index.activeOrderRoute(1).userId()).isEqualTo(8);
-        assertThat(index.activeOrderSymbol(1)).isEqualTo("2");
         assertThat(index.sortedIdsDescending(7)).isEmpty();
         assertThat(index.sortedIdsDescending("1")).isEmpty();
         assertThat(index.sortedIdsDescending(8)).containsExactly(1L);
@@ -245,10 +237,10 @@ class ActiveOrderIndexTest {
     }
 
     /**
-     * 十二个订单按用户和标的分组，对有、无命中条件比较两个独立游标与排序结果；重复 hasNext 不跳项，耗尽 next 抛异常。
+     * 十二个订单按用户和标的分组，用原订单数据核对有、无命中时的交集分页。
      */
     @Test
-    void primitiveIntersectionIsIndependentAndMatchesBothIndexDirections() {
+    void pageMatchesUserAndInstrumentIntersection() {
         // 本用例订单集合，终态测试为运行时数组，冷重建测试为按订单号映射
         Map<Long, CoreOrderState> orders = new HashMap<>();
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1; id <= 12; id++) {
@@ -267,23 +259,10 @@ class ActiveOrderIndexTest {
         var index = new ActiveOrderIndex(state);
         for (long /* 当前订单或交集查询的用户 ID */ user : new long[]{11, 12, 99}) {
             for (String /* 当前分组、合约构造或交集查询使用的永久数字标的文本 */ instrumentId : new String[]{"1", "2", "24"}) {
-                // 首次原订单、第一份交集游标或第一页结果，按各用例对应角色使用
-                var first = index.matchingIds(user, instrumentId);
-                // 与首个交集迭代器同时存在的第二个独立游标
-                var nested = index.matchingIds(user, instrumentId);
-                // 游标实际返回的订单号集合，用于与预期或排序结果对照
-                var actual = new java.util.TreeSet<Long>();
-                while (first.hasNext()) {
-                    assertThat(first.hasNext()).isTrue();
-                    // 当前构造、删除或遍历的订单号
-                    long id = first.next();
-                    actual.add(id);
-                    assertThat(nested.next()).isEqualTo(id);
-                }
-                assertThat(nested.hasNext()).isFalse();
-                assertThat(actual).containsExactlyElementsOf(java.util.Arrays.stream(index.sortedIds(user, instrumentId)).boxed().toList());
-                org.assertj.core.api.Assertions.assertThatThrownBy(first::next)
-                        .isInstanceOf(java.util.NoSuchElementException.class);
+                var expected = orders.values().stream()
+                        .filter(order -> order.userId() == user && order.instrumentId().equals(instrumentId))
+                        .map(CoreOrderState::orderId).sorted(java.util.Comparator.reverseOrder()).toList();
+                assertThat(index.page(user, instrumentId, 0, 32).orderIds()).containsExactlyElementsOf(expected);
             }
         }
     }

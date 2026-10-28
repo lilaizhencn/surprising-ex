@@ -168,7 +168,7 @@ public final class RuntimeStateProjector {
         // 倒计时撤单的可重建索引。
         CancelAllAfterIndex cancelAllAfterIndex = new CancelAllAfterIndex(source);
         // 活动订单路由的可重建索引。
-        ActiveOrderIndex activeOrderIndex = new ActiveOrderIndex(source, identities);
+        ActiveOrderIndex activeOrderIndex = new ActiveOrderIndex(source);
         // 供自动减仓查找持仓候选的可重建索引。
         AdlPositionIndex adlPositionIndex = new AdlPositionIndex(source, identities);
         // 各索引已在构造时完成恢复，组合后直接绑定原运行时。

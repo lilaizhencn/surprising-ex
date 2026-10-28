@@ -136,56 +136,6 @@ public final class RuntimeFundsAccumulator {
     public boolean isEmpty() { return size == 0; }
 
     /**
-     * 在双方独占且目标为空时交换所有原语数组并移交有效长度，源接回目标空存储；源为空时不交换，不重新合并金额或改变当前前缀顺序。
-     * @param target 不同于当前源且由调用方独占的目标缓冲，空目标入口还要求其有效长度为零
-     */
-    public void transferToEmpty(RuntimeFundsAccumulator target) {
-        if (target == null || target == this || target.size != 0) {
-            throw new IllegalArgumentException("funds transfer requires a distinct empty target");
-        }
-        if (size == 0) return;
-        // 交换期间暂存的目标资产列，源随后接管该空存储。
-        int[] assets = target.assetIds; target.assetIds = assetIds; assetIds = assets;
-        // 交换期间暂存的目标所有者类别列。
-        byte[] owners = target.ownerKinds; target.ownerKinds = ownerKinds; ownerKinds = owners;
-        // 交换期间暂存的目标所有者编号列。
-        long[] ids = target.ownerIds; target.ownerIds = ownerIds; ownerIds = ids;
-        // 交换期间暂存的目标子账类别列。
-        byte[] ledgers = target.subledgers; target.subledgers = subledgers; subledgers = ledgers;
-        // 交换期间暂存的目标金额列。
-        long[] amounts = target.units; target.units = units; units = amounts;
-        target.size = size;
-        size = 0;
-    }
-
-    /**
-     * 目标为空就交换存储；目标已有批次前缀时先检查所有同键金额溢出并准备容量，再合并并清源。金额预检失败不消费源，也不改变目标有效资金项。
-     * @param target 不同于当前源且由调用方独占的目标缓冲，空目标入口还要求其有效长度为零
-     */
-    public void transferTo(RuntimeFundsAccumulator target) {
-        if (target == null || target == this)
-            throw new IllegalArgumentException("funds transfer requires a distinct target");
-        if (target.size == 0) {
-            transferToEmpty(target);
-            return;
-        }
-        for (/* 合并预检中当前源缓冲有效项下标。 */ int source = 0; source < size; source++) {
-            for (/* 合并预检中当前目标缓冲已有项下标。 */ int existing = 0; existing < target.size; existing++) {
-                if (assetIds[source] == target.assetIds[existing]
-                        && ownerKinds[source] == target.ownerKinds[existing]
-                        && ownerIds[source] == target.ownerIds[existing]
-                        && subledgers[source] == target.subledgers[existing]) {
-                    Math.addExact(units[source], target.units[existing]);
-                    break;
-                }
-            }
-        }
-        target.ensureCapacity(Math.addExact(target.size, size));
-        target.add(this);
-        clear();
-    }
-
-    /**
      * 移除指定有效项并用最后一项填洞，不保持原始插入顺序；调用方提供有效下标。
      * @param index 待移除项的有效下标
      */

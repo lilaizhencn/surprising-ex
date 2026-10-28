@@ -78,7 +78,7 @@ class TriggerOrderIndexTest {
                     new com.surprising.aeron.service.core.index.AlgoOrderIndex(initial),
                     new com.surprising.aeron.service.core.index.LiquidationIndex(initial),
                     new com.surprising.aeron.service.core.index.CancelAllAfterIndex(initial),
-                    new com.surprising.aeron.service.core.index.ActiveOrderIndex(initial, identities),
+                    new com.surprising.aeron.service.core.index.ActiveOrderIndex(initial),
                     new AdlPositionIndex(initial, identities)), identities);
             runtime.setMetadata(ProductLine.SPOT, 10);
             runtime.clearChangedKeys();

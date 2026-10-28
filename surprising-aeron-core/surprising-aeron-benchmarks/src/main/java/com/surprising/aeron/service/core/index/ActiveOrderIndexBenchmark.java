@@ -34,7 +34,7 @@ public class ActiveOrderIndexBenchmark {
 
     @Setup public void setup() {
         identities = new RuntimeIdentityRegistry();
-        index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), identities);
+        index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
         var instruments = new CoreInstrument[symbols];
         for (int i = 0; i < symbols; i++) instruments[i] = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
                 new RegisterInstrumentCommand(

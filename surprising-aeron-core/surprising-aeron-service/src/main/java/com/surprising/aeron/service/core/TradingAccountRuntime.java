@@ -56,7 +56,6 @@ import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent;
 import com.surprising.aeron.service.order.admission.PlaceBatchAdmissionEvent.PlaceBatchIntentSource;
 import com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
-import com.surprising.aeron.service.order.state.LaneCancelEvent;
 import com.surprising.aeron.service.order.state.LaneOrderResultTarget;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
@@ -116,8 +115,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /** 未完成资金划转的容量上限，沿用财库定义。 */
     public static final int MAX_PENDING_TRANSFERS = TreasuryRuntime.MAX_PENDING_TRANSFERS;
-    /** 显式同步等待账户提交的 30 秒纳秒预算。 */
-    static final long LANE_COMMIT_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     /** 变化身份缓冲触发压缩的数量阈值，固定为 512。 */
     static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
 
@@ -290,8 +287,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private final int[] freeMatcherSettlementChangeSlots;
     /** 空闲槽号栈当前条数，借出递减、归还递增。 */
     private int freeMatcherSettlementChangeCount;
-    /** 账户撤单事件复用池，消费者结束后才可回收。 */
-    final java.util.ArrayDeque<LaneCancelEvent> laneCancelEventPool = new java.util.ArrayDeque<>(EVENT_POOL_INITIAL_CAPACITY);
 
     /** 本运行时唯一 Owner 线程，其他线程只在所属 Lane 或账本范围内操作权威状态。 */
     volatile Thread owner;
@@ -367,7 +362,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             placeAdmissionEventPool.addFirst(new PlaceAdmissionEvent());
             replacementAdmissionEventPool.addFirst(new ReplacementAdmissionEvent());
             placeBatchAdmissionEventPool.addFirst(new PlaceBatchAdmissionEvent());
-            laneCancelEventPool.addFirst(new LaneCancelEvent());
         }
     }
 
@@ -1382,24 +1376,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean workersStopped() { return laneLifecycle.workersStopped(); }
 
     /**
-     * 校验序号及用户集合，按 Lane 收集正用户身份后同步等待提交，返回实际提交掩码。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
-     */
-    public long stageLaneMutation(long coreSequence, Iterable<Long> userIds) {
-        assertOwner();
-        if (coreSequence <= 0 || userIds == null) {
-            throw new IllegalArgumentException("invalid lane apply");
-        }
-        clearLaneUserScratch();
-        for (Long /* 本轮读出的用户身份，按对应入口过滤或路由 */ userId : userIds) {
-            if (userId == null || userId <= 0) continue;
-            addLaneUser(userId.longValue());
-        }
-        return stageLaneMutationFromScratch(coreSequence);
-    }
-
-    /**
      * 从原始用户数组收集目标 Lane，派发提交事件并交给调用方后续收集。
      * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
@@ -1522,46 +1498,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 当前按拓扑选中或从掩码取出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
         laneUserScratch[laneId].add(userId);
-    }
-
-    /**
-     * 派发临时列表对应提交，有事件则按 30 秒预算同步等待、保存掩码并归还事件；没有目标 Lane 返回零。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     */
-    long stageLaneMutationFromScratch(long coreSequence) {
-        // 本次借用的准入或账户提交事件，仍被消费者引用时不能回收
-        LaneCommitEvent event = dispatchLaneMutationFromScratch(coreSequence);
-        if (event == null) return 0;
-        awaitLaneCommit(event, System.nanoTime() + LANE_COMMIT_TIMEOUT_NANOS);
-        // 本轮实际涉及的账户 Lane 位集合
-        long laneMask = event.requiredLaneMask();
-        releaseLaneCommit(event);
-        return laneMask;
-    }
-
-    /**
-     * 显式异步范围内不允许等待尚未完成的事件；其他调用按分频检查健康、中断和截止时间，先自旋再让出 CPU，超时作为运行故障抛出，不提前回收未完成事件。
-     * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
-     * @param deadlineNanos 单调纳秒时钟上的显式等待截止时间
-     */
-    public void awaitLaneCommit(LaneCommitEvent event, long deadlineNanos) {
-        if (asynchronousCommandScope && !event.complete())
-            throw new org.agrona.concurrent.AgentTerminationException(
-                    new IllegalStateException("asynchronous command cannot await Lane commit"));
-        // 同步等待循环次数，用于分频健康与时钟检查，以及选择自旋或让出 CPU
-        int idle = 0;
-        while (!event.complete()) {
-            if ((idle++ & 1_023) == 0) {
-                assertAccountLanesHealthy();
-                if (Thread.currentThread().isInterrupted() || System.nanoTime() - deadlineNanos >= 0) {
-                    // 等待中断或超时属于运行故障，不能回收仍在执行的事件或发布未完成提交。
-                    throw new IllegalStateException("Account Lane commit interrupted or timed out");
-                }
-            }
-            if (idle <= configuration.laneCompletionSpins()) Thread.onSpinWait();
-            else Thread.yield();
-        }
-        assertAccountLanesHealthy();
     }
 
     /**
@@ -2280,163 +2216,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         } finally {
             releaseMatcherSettlementChanges(changes);
         }
-    }
-
-    /**
-     * 为用户所属 Lane 借出撤单事件和专用变化槽，准备原提交元数据后在冷阶段执行或投递工作邮箱；投递阶段失败时丢弃事件并归还资源，不把该清理保证扩大到此前的准备步骤。
-     * @param coreSequence 原命令或当前收集结果关联的 Core 序号
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param orderId 本次需要读取、登记或撤销的订单实体 ID
-     * @param commitTimestamp 原提交业务时间，随账户变化保留
-     * @param commitClusterPosition 原提交复制日志位置，随账户变化保留
-     * @param identities 与本产品线配套的身份注册表
-     */
-    public LaneCancelEvent dispatchCancel(
-            long coreSequence, long userId, long orderId, long commitTimestamp, long commitClusterPosition,
-            RuntimeIdentityRegistry identities) {
-        assertOwner();
-        // 本轮按用户路由或从掩码选出的账户 Lane 编号
-        int laneId = topology.accountLaneId(userId);
-        // 本次撮合或撤单的变化容器，按当前分支借出、取走或读取
-        MatcherSettlementChanges changes = acquireMatcherSettlementChanges(1L << laneId);
-        // 为本次账户撤单借出的事件，消费者结束前保留它及专用变化槽
-        LaneCancelEvent event = laneCancelEventPool.pollFirst();
-        if (event == null) event = new LaneCancelEvent();
-        event.prepare(coreSequence, userId, orderId, commitTimestamp, commitClusterPosition,
-                laneId, this, identities, changes);
-        try {
-            if (!accountLanesStarted()) {
-                event.execute(accountLanes[laneId]);
-            } else {
-                releaseOwnerLaneAccess();
-                laneLifecycle.worker(laneId).submit(event);
-            }
-        } catch (/* 撤单投递或内联执行失败，丢弃事件并归还本次变化槽后继续抛出 */ RuntimeException | Error failure) {
-            event.discard();
-            releaseMatcherSettlementChanges(changes);
-            laneCancelEventPool.addFirst(event);
-            throw failure;
-        }
-        return event;
-    }
-
-    /**
-     * 使用默认的不推进 Lane 提交选项派发批量账户撤单。
-     * @param coreSequence 原命令或当前收集结果关联的 Core 序号
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param orderIds 同一用户本次批量撤销的非空订单号数组
-     * @param commitTimestamp 原提交业务时间，随账户变化保留
-     * @param commitClusterPosition 原提交复制日志位置，随账户变化保留
-     * @param identities 与本产品线配套的身份注册表
-     */
-    public LaneCancelEvent dispatchCancelBatch(
-            long coreSequence, long userId, long[] orderIds,
-            long commitTimestamp, long commitClusterPosition,
-            RuntimeIdentityRegistry identities) {
-        return dispatchCancelBatch(coreSequence, userId, orderIds, commitTimestamp,
-                commitClusterPosition, identities, false, null);
-    }
-
-    /**
-     * 要求批量订单非空，先检查目标邮箱容量，再准备同用户撤单事件、变化槽、提交选项和可选响应目标；冷阶段执行或交给账户线程，投递阶段失败归还事件及变化槽。
-     * @param coreSequence 原命令或当前收集结果关联的 Core 序号
-     * @param userId 业务所属用户身份，按本产品线固定拓扑路由
-     * @param orderIds 同一用户本次批量撤销的非空订单号数组
-     * @param commitTimestamp 原提交业务时间，随账户变化保留
-     * @param commitClusterPosition 原提交复制日志位置，随账户变化保留
-     * @param identities 与本产品线配套的身份注册表
-     * @param commitLane 是否在该批撤单任务中推进账户 Lane 提交水位
-     * @param resultTarget 可空的最终订单结果接收槽，沿用原批次响应边界
-     */
-    public LaneCancelEvent dispatchCancelBatch(
-            long coreSequence, long userId, long[] orderIds,
-            long commitTimestamp, long commitClusterPosition,
-            RuntimeIdentityRegistry identities, boolean commitLane, LaneOrderResultTarget resultTarget) {
-        assertOwner();
-        if (orderIds == null || orderIds.length == 0) {
-            throw new IllegalStateException("cancel batch requires orders");
-        }
-        // 本轮按用户路由或从掩码选出的账户 Lane 编号
-        int laneId = topology.accountLaneId(userId);
-        ensureLaneWorkerCapacity(1L << laneId);
-        // 本次撮合或撤单的变化容器，按当前分支借出、取走或读取
-        MatcherSettlementChanges changes = acquireMatcherSettlementChanges(1L << laneId);
-        // 为本次账户撤单借出的事件，消费者结束前保留它及专用变化槽
-        LaneCancelEvent event = laneCancelEventPool.pollFirst();
-        if (event == null) event = new LaneCancelEvent();
-        event.prepare(coreSequence, userId, orderIds, orderIds.length,
-                commitTimestamp, commitClusterPosition, laneId, commitLane, this, identities, changes);
-        event.resultTarget(resultTarget);
-        try {
-            if (!accountLanesStarted()) {
-                event.execute(accountLanes[laneId]);
-            } else {
-                releaseOwnerLaneAccess();
-                laneLifecycle.worker(laneId).submit(event);
-            }
-        } catch (/* 撤单投递或内联执行失败，丢弃事件并归还本次变化槽后继续抛出 */ RuntimeException | Error failure) {
-            event.discard();
-            releaseMatcherSettlementChanges(changes);
-            laneCancelEventPool.addFirst(event);
-            throw failure;
-        }
-        return event;
-    }
-
-    /**
-     * 不附加额外响应身份集合，进入统一账户撤单收集入口。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
-     * @param fundsAccumulator 可空的资金变化接收器，按实际账本或 Lane 交接来源累计
-     * @param terminalOrderSink 可空终态身份接收器，接收完本序号后调用结束钩子
-     */
-    public void collectCancel(LaneCancelEvent event, RuntimeFundsAccumulator fundsAccumulator,
-                              TerminalOrderSink terminalOrderSink) {
-        collectCancel(event, fundsAccumulator, terminalOrderSink, null, null);
-    }
-
-    /**
-     * 要求撤单事件已经完成，一次遍历交接终态身份、可用余额及可选资金变化，结束本序号的终态收集；变化槽在 finally 归还，事件另行释放。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
-     * @param fundsAccumulator 可空的资金变化接收器，按实际账本或 Lane 交接来源累计
-     * @param terminalOrderSink 可空终态身份接收器，接收完本序号后调用结束钩子
-     * @param changedUsers 可空的响应用户变化身份集合，随同 Lane 遍历填充
-     * @param changedOrders 可空的响应订单变化身份集合，随同 Lane 遍历填充
-     */
-    public void collectCancel(LaneCancelEvent event, RuntimeFundsAccumulator fundsAccumulator,
-                              TerminalOrderSink terminalOrderSink,
-                              com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
-                              com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
-        assertOwner();
-        if (event == null || !event.complete()) throw new IllegalStateException("cancel event is incomplete");
-        // 本轮按用户路由或从掩码选出的账户 Lane 编号
-        int laneId = event.laneId();
-        // 本次撮合或撤单的变化容器，按当前分支借出、取走或读取
-        MatcherSettlementChanges changes = event.takeChanges();
-        try {
-            changes.laneDelta(laneId).commitTerminalToOwner(this, laneId, terminalOrderSink, changedUsers, changedOrders);
-            // 撤单后该 Lane 的余额补丁，用于发布解冻后的可用余额变化
-            LaneBalancePatches balances = changes.balancePatch(laneId);
-            for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < balances.size(); index++) {
-                balances.publishAvailableAt(this, index);
-                if (changedUsers != null) changedUsers.add(balances.userId(index));
-                markBalancesChanged();
-            }
-            if (terminalOrderSink != null) terminalOrderSink.completeSequence();
-            if (fundsAccumulator != null) changes.appendFundsDelta(event.requiredLaneMask(), fundsAccumulator);
-        } finally {
-            releaseMatcherSettlementChanges(changes);
-        }
-    }
-
-    /**
-     * 在调用方已经完成撤单收集后清空事件并放回池，空事件视为调用错误。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
-     */
-    public void releaseCancel(LaneCancelEvent event) {
-        assertOwner();
-        if (event == null) throw new IllegalArgumentException("cancel event is required");
-        event.clear();
-        laneCancelEventPool.addFirst(event);
     }
 
     /**
