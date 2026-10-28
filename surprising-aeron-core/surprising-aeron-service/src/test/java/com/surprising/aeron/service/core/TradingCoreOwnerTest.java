@@ -129,19 +129,19 @@ class TradingCoreOwnerTest {
             assertThat(service.pendingCommandCount()).isZero();
             // 相关原命令完成后取得的已提交冷状态，供资金与订单断言
             var state = core.tradingState();
-            assertThat(state.order(9000).remainingQuantitySteps()).isEqualTo(4);
-            assertThat(state.order(9001)).isNull();
-            assertThat(state.order(9002)).isNull();
+            assertThat(state.orders().get(9000L).remainingQuantitySteps()).isEqualTo(4);
+            assertThat(state.orders().get(9001L)).isNull();
+            assertThat(state.orders().get(9002L)).isNull();
             assertThat(core.terminalTradeCount).isEqualTo(2);
             // 已提交用户 USDT 总额，和原财库费用一起核对守恒
-            long funds = state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> user.totalUnits("USDT")).sum();
+            long funds = state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> CoreStateTestFixtures.totalUnits(user, "USDT")).sum();
             assertThat(funds + state.treasuryState().feeBalances().getOrDefault("USDT", 0L)).isEqualTo(20_000);
             if (line == ProductLine.SPOT) {
-                assertThat(state.user(1).totalUnits("BTC")).isEqualTo(6);
-                assertThat(state.user(2).totalUnits("BTC")).isEqualTo(4);
+                assertThat(CoreStateTestFixtures.totalUnits(state.users().get(1L), "BTC")).isEqualTo(6);
+                assertThat(CoreStateTestFixtures.totalUnits(state.users().get(2L), "BTC")).isEqualTo(4);
             } else {
-                assertThat(state.user(1).positions().get("1").signedQuantitySteps()).isEqualTo(6);
-                assertThat(state.user(2).positions().get("1").signedQuantitySteps()).isEqualTo(-6);
+                assertThat(state.users().get(1L).positions().get("1").signedQuantitySteps()).isEqualTo(6);
+                assertThat(state.users().get(2L).positions().get("1").signedQuantitySteps()).isEqualTo(-6);
             }
         } finally { service.onTerminate(null); }
     }
@@ -230,16 +230,16 @@ class TradingCoreOwnerTest {
             // 账本原子观测值或冷状态读出的原 USDT 费用总额
             long fees = state.treasuryState().feeBalances().getOrDefault("USDT", 0L);
             // 已提交用户 USDT 总额，和原财库费用一起核对守恒
-            long funds = state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> user.totalUnits("USDT")).sum();
+            long funds = state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> CoreStateTestFixtures.totalUnits(user, "USDT")).sum();
             assertThat(fees).isEqualTo(4L * itemsPerCommand);
             assertThat(funds + fees).isEqualTo(40_000);
             assertThat(core.terminalTradeCount).isEqualTo(2L * itemsPerCommand);
             for (int /* 当前主动买入用户一或三 */ taker : new int[]{1, 3}) {
-                assertThat(state.user(taker).reservations()).isEmpty();
-                for (/* 当前原批次子项的下标 */ int item = 0; item < itemsPerCommand; item++) assertThat(state.order(9300 + taker * 10 + item)).isNull();
-                assertThat(state.order(9200 + taker + 1).remainingQuantitySteps()).isEqualTo(10 - itemsPerCommand);
-                if (line == ProductLine.SPOT) assertThat(state.user(taker).totalUnits("BTC")).isEqualTo(itemsPerCommand);
-                else assertThat(state.user(taker).positions().get(Integer.toString((taker + 1) / 2)).signedQuantitySteps())
+                assertThat(state.users().get((long) (taker)).reservations()).isEmpty();
+                for (/* 当前原批次子项的下标 */ int item = 0; item < itemsPerCommand; item++) assertThat(state.orders().get((long) (9300 + taker * 10 + item))).isNull();
+                assertThat(state.orders().get((long) (9200 + taker + 1)).remainingQuantitySteps()).isEqualTo(10 - itemsPerCommand);
+                if (line == ProductLine.SPOT) assertThat(CoreStateTestFixtures.totalUnits(state.users().get((long) (taker)), "BTC")).isEqualTo(itemsPerCommand);
+                else assertThat(state.users().get((long) (taker)).positions().get(Integer.toString((taker + 1) / 2)).signedQuantitySteps())
                         .isEqualTo(itemsPerCommand);
             }
         } finally { service.onTerminate(null); }
@@ -292,7 +292,7 @@ class TradingCoreOwnerTest {
             var state = core.tradingState();
             assertThat(state.treasuryState().feeBalances()).containsEntry("USDT", 4L);
             assertThat(state.treasuryState().insuranceBalances()).containsEntry("USDT", 25L);
-            assertThat(state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> user.totalUnits("USDT")).sum() + 4 + 25)
+            assertThat(state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> CoreStateTestFixtures.totalUnits(user, "USDT")).sum() + 4 + 25)
                     .isEqualTo(40_025);
             assertThat(service.pendingCommandCount()).isZero();
         } finally { service.onTerminate(null); }
@@ -481,33 +481,33 @@ class TradingCoreOwnerTest {
             assertThat(service.pendingCommandCount()).isZero();
             // 相关原命令完成后取得的已提交冷状态，供资金与订单断言
             var state = core.tradingState();
-            assertThat(state.user(1).reservations()).isEmpty();
-            assertThat(state.user(1).balances().get("USDT").lockedUnits()).isEqualTo(
+            assertThat(state.users().get(1L).reservations()).isEmpty();
+            assertThat(state.users().get(1L).balances().get("USDT").lockedUnits()).isEqualTo(
                     line == ProductLine.SPOT || type == CoreMessageType.CANCEL_ORDER_BATCH ? 0 : 200);
-            assertThat(state.order(9800)).isNull();
+            assertThat(state.orders().get(9800L)).isNull();
             for (/* 当前原批次子项的下标 */ int item = 0; item < 20; item++) {
-                assertThat(state.order(10_000 + item)).isNull();
-                assertThat(state.order(11_000 + item)).isNull();
+                assertThat(state.orders().get((long) (10_000 + item))).isNull();
+                assertThat(state.orders().get((long) (11_000 + item))).isNull();
             }
             // 账本原子观测值或冷状态读出的原 USDT 费用总额
             long fees = state.treasuryState().feeBalances().getOrDefault("USDT", 0L);
             // 已提交用户 USDT 总额，和原财库费用一起核对守恒
-            long funds = state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> user.totalUnits("USDT")).sum();
+            long funds = state.users().values().stream().mapToLong(/* 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图 */ user -> CoreStateTestFixtures.totalUnits(user, "USDT")).sum();
             assertThat(funds + fees).isEqualTo(20_000);
             if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
                 assertThat(fees).isZero();
                 assertThat(core.terminalTradeCount).isZero();
-                assertThat(state.order(9900).remainingQuantitySteps()).isEqualTo(20);
+                assertThat(state.orders().get(9900L).remainingQuantitySteps()).isEqualTo(20);
             } else {
                 assertThat(fees).isEqualTo(40);
                 assertThat(core.terminalTradeCount).isEqualTo(20);
-                assertThat(state.order(9900)).isNull();
+                assertThat(state.orders().get(9900L)).isNull();
                 if (line == ProductLine.SPOT) {
-                    assertThat(state.user(1).totalUnits("BTC")).isEqualTo(20);
-                    assertThat(state.user(2).totalUnits("BTC")).isZero();
+                    assertThat(CoreStateTestFixtures.totalUnits(state.users().get(1L), "BTC")).isEqualTo(20);
+                    assertThat(CoreStateTestFixtures.totalUnits(state.users().get(2L), "BTC")).isZero();
                 } else {
-                    assertThat(state.user(1).positions().get("1").signedQuantitySteps()).isEqualTo(20);
-                    assertThat(state.user(2).positions().get("1").signedQuantitySteps()).isEqualTo(-20);
+                    assertThat(state.users().get(1L).positions().get("1").signedQuantitySteps()).isEqualTo(20);
+                    assertThat(state.users().get(2L).positions().get("1").signedQuantitySteps()).isEqualTo(-20);
                 }
             }
         } finally { service.onTerminate(null); }
@@ -926,7 +926,7 @@ class TradingCoreOwnerTest {
             assertThat(service.state().realtimeSnapshotPending()).isFalse();
             // 实时读取自身也会占用 Lane 邮箱工作，
             // 要等它完成后再检查完整围栏状态，不能只等交易响应。
-            assertThat(service.state().tradingState().user(1001).balances().get("USDT").lockedUnits())
+            assertThat(service.state().tradingState().users().get(1001L).balances().get("USDT").lockedUnits())
                     .isEqualTo(2_000);
             snapshotFrames.addAll(drainRealtime(outbox));
             assertThat(snapshotFrames).anySatisfy(/* 当前断言的实时协议帧 */ frame -> {
@@ -1055,7 +1055,7 @@ class TradingCoreOwnerTest {
                                     CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
                                     CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                                     false, "replay-" + orderId))));
-                    assertThat(service.state().tradingState().order(orderId).updatedAtEpochMillis()).isEqualTo(1234);
+                    assertThat(service.state().tradingState().orders().get(orderId).updatedAtEpochMillis()).isEqualTo(1234);
                     replayWithoutSession(service, command(CoreMessageType.CANCEL_ORDER, 3 + cycle * 2, 1001,
                             TradingCommandCodec.encodeCancelOrder(new com.surprising.aeron.protocol.CancelOrderCommand(orderId))));
                     if (role == Cluster.Role.FOLLOWER) Thread.yield();
@@ -1905,8 +1905,8 @@ class TradingCoreOwnerTest {
      */
     private static long testBalance(TradingCoreRuntime state, long userId) {
         // 原用户 ID，或实时用户帧解码/冷状态查得的原账户视图
-        var user = state.tradingState().user(userId);
-        return user == null ? 0 : user.totalUnits("USDT");
+        var user = state.tradingState().users().get(userId);
+        return user == null ? 0 : CoreStateTestFixtures.totalUnits(user, "USDT");
     }
 
     private static byte[] encodeAlgo(com.surprising.aeron.protocol.CoreAlgoOrderView value, long appendedChild) {

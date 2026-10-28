@@ -44,13 +44,13 @@ public record CoreTreasuryState(
                 || lifecycleProgress == null) {
             throw new IllegalArgumentException("invalid treasury state");
         }
-        feeBalances = normalized(feeBalances, true);
-        insuranceBalances = normalized(insuranceBalances, true);
-        insuranceDeficits = normalized(insuranceDeficits, true);
-        liquidationFeeBalances = normalized(liquidationFeeBalances, true);
-        fundingResidualBalances = normalized(fundingResidualBalances, true);
-        roundingResidualBalances = normalized(roundingResidualBalances, true);
-        clearingPnlBalances = normalized(clearingPnlBalances, true);
+        feeBalances = normalized(feeBalances);
+        insuranceBalances = normalized(insuranceBalances);
+        insuranceDeficits = normalized(insuranceDeficits);
+        liquidationFeeBalances = normalized(liquidationFeeBalances);
+        fundingResidualBalances = normalized(fundingResidualBalances);
+        roundingResidualBalances = normalized(roundingResidualBalances);
+        clearingPnlBalances = normalized(clearingPnlBalances);
         fundingSettlements = markers(fundingSettlements);
         lifecycleSettlements = markers(lifecycleSettlements);
         fundingProgress = progresses(fundingProgress);
@@ -58,138 +58,25 @@ public record CoreTreasuryState(
     }
 
     /**
-     * 从费用、保险、亏空及完成编号构造冷账本，资金费和生命周期进度默认空。
-     * @param feeBalances 按规范资产名保存的有符号手续费余额
-     * @param insuranceBalances 保险基金有符号余额
-     * @param insuranceDeficits 保险亏空有符号余额
-     * @param fundingSettlements 业务币对到最近完成资金费编号的状态 Map
-     * @param lifecycleSettlements 业务币对到最近完成交割或行权编号的状态 Map
-     */
-    public CoreTreasuryState(Map<String, Long> feeBalances,
-                             Map<String, Long> insuranceBalances,
-                             Map<String, Long> insuranceDeficits,
-                             Map<String, Long> fundingSettlements,
-                             Map<String, Long> lifecycleSettlements) {
-        this(feeBalances, insuranceBalances, insuranceDeficits, fundingSettlements, lifecycleSettlements,
-                Map.of(), Map.of());
-    }
-
-    /**
-     * 在基础资金及完成编号上带入资金费进度，生命周期进度默认空。
-     * @param feeBalances 按规范资产名保存的有符号手续费余额
-     * @param insuranceBalances 保险基金有符号余额
-     * @param insuranceDeficits 保险亏空有符号余额
-     * @param fundingSettlements 业务币对到最近完成资金费编号的状态 Map
-     * @param lifecycleSettlements 业务币对到最近完成交割或行权编号的状态 Map
-     * @param fundingProgress 业务币对到当前资金费分页进度的状态 Map
-     */
-    public CoreTreasuryState(Map<String, Long> feeBalances,
-                             Map<String, Long> insuranceBalances,
-                             Map<String, Long> insuranceDeficits,
-                             Map<String, Long> fundingSettlements,
-                             Map<String, Long> lifecycleSettlements,
-                             Map<String, FundingProgress> fundingProgress) {
-        this(feeBalances, insuranceBalances, insuranceDeficits, fundingSettlements, lifecycleSettlements,
-                fundingProgress, Map.of());
-    }
-
-    /**
-     * 带入基础资金和两类进度，其余四个独立系统子账默认空，委托完整 record 构造。
-     * @param feeBalances 按规范资产名保存的有符号手续费余额
-     * @param insuranceBalances 保险基金有符号余额
-     * @param insuranceDeficits 保险亏空有符号余额
-     * @param fundingSettlements 业务币对到最近完成资金费编号的状态 Map
-     * @param lifecycleSettlements 业务币对到最近完成交割或行权编号的状态 Map
-     * @param fundingProgress 业务币对到当前资金费分页进度的状态 Map
-     * @param lifecycleProgress 业务币对到当前生命周期分页进度的状态 Map
-     */
-    public CoreTreasuryState(Map<String, Long> feeBalances,
-                             Map<String, Long> insuranceBalances,
-                             Map<String, Long> insuranceDeficits,
-                             Map<String, Long> fundingSettlements,
-                             Map<String, Long> lifecycleSettlements,
-                             Map<String, FundingProgress> fundingProgress,
-                             Map<String, LifecycleProgress> lifecycleProgress) {
-        this(feeBalances, insuranceBalances, insuranceDeficits,
-                Map.of(), Map.of(), Map.of(), Map.of(),
-                fundingSettlements, lifecycleSettlements, fundingProgress, lifecycleProgress);
-    }
-
-    /**
-     * 由七类系统资产余额构造冷账本，两类完成编号及进行中进度均为空。
-     * @param feeBalances 按规范资产名保存的有符号手续费余额
-     * @param insuranceBalances 保险基金有符号余额
-     * @param liquidationFeeBalances 独立强平费余额
-     * @param fundingResidualBalances 资金费残差余额
-     * @param roundingResidualBalances 舍入残差余额
-     * @param clearingPnlBalances 系统清算盈亏余额
-     * @param deficitBalances 保险亏空余额的别名输入
-     */
-    public static CoreTreasuryState ofSubledgers(
-            Map<String, Long> feeBalances,
-            Map<String, Long> insuranceBalances,
-            Map<String, Long> liquidationFeeBalances,
-            Map<String, Long> fundingResidualBalances,
-            Map<String, Long> roundingResidualBalances,
-            Map<String, Long> clearingPnlBalances,
-            Map<String, Long> deficitBalances) {
-        return new CoreTreasuryState(feeBalances, insuranceBalances, deficitBalances,
-                liquidationFeeBalances, fundingResidualBalances, roundingResidualBalances, clearingPnlBalances,
-                Map.of(), Map.of(), Map.of(), Map.of());
-    }
-
-    /**
      * 创建七类资金、完成编号和进度均为空的冷账本值。
      */
     public static CoreTreasuryState empty() {
-        return ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
-    }
-
-    /**
-     * 校验并规范化业务币对名称后读取资金费进度，缺失返回空。
-     * @param instrumentId 需要读写的业务币对名称
-     */
-    public FundingProgress fundingProgress(String instrumentId) {
-        return fundingProgress.get(OrderReservation.requireInstrumentId(instrumentId));
-    }
-
-    /**
-     * 校验业务币对名称后读取生命周期进度，缺失返回空。
-     * @param instrumentId 需要读写的业务币对名称
-     */
-    public LifecycleProgress lifecycleProgress(String instrumentId) {
-        return lifecycleProgress.get(OrderReservation.requireInstrumentId(instrumentId));
-    }
-
-    /**
-     * 读取该币对最近完成的资金费编号，缺失为零。
-     * @param instrumentId 需要读写的业务币对名称
-     */
-    public long fundingSettlement(String instrumentId) {
-        return fundingSettlements.getOrDefault(OrderReservation.requireInstrumentId(instrumentId), 0L);
-    }
-
-    /**
-     * 读取该币对最近完成的生命周期编号，缺失为零。
-     * @param instrumentId 需要读写的业务币对名称
-     */
-    public long lifecycleSettlement(String instrumentId) {
-        return lifecycleSettlements.getOrDefault(OrderReservation.requireInstrumentId(instrumentId), 0L);
+        return new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     /**
      * 冻结资产金额 Map：已冻结 Map 复用可信边界，其他 Map 规范化全部非零资产并拒绝非零重复规范键。
      * @param source 本次需要规范化并冻结的完整状态 Map
-     * @param signed 是否允许负金额，当前七类资金列按 true 处理
      */
-    private static Map<String, Long> normalized(Map<String, Long> source, boolean signed) {
+    private static Map<String, Long> normalized(Map<String, Long> source) {
         if (StateMapSupport.isFrozen(source)) return source;
         // 本次建立的用于全量规范化的有序 Map。
         Map<String, Long> result = new TreeMap<>();
         source.forEach((/* 普通金额 Map 当前回调输入的原资产名称。 */ asset, /* 普通金额 Map 当前回调输入的可空金额。 */ units) -> {
             // 本条金额使用的规范资产名称。
             String normalizedAsset = AssetBalance.normalizeAsset(asset);
-            if (units == null || (!signed && units < 0)) {
+            if (units == null) {
                 throw new IllegalArgumentException("invalid treasury units");
             }
             if (units != 0 && result.put(normalizedAsset, units) != null) {

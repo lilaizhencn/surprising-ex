@@ -88,7 +88,7 @@ class CoreMatcherLedgerTest {
             // 全部待测命令完成后导出的业务状态视图。
             var trading = state.tradingState();
             assertThat(trading.treasuryState().feeBalances()).containsEntry("USDT", 6L);
-            assertThat(trading.users().values().stream().mapToLong(/* 正在合计其 USDT 可用与冻结总额的用户业务值。 */ u -> u.totalUnits("USDT")).sum()).isEqualTo(199_994);
+            assertThat(trading.users().values().stream().mapToLong(/* 正在合计其 USDT 可用与冻结总额的用户业务值。 */ u -> CoreStateTestFixtures.totalUnits(u, "USDT")).sum()).isEqualTo(199_994);
             assertThat(trading.orders()).isEmpty();
             assertThat(trading.users().values()).allSatisfy(/* 本轮测试用户，用于注入余额或最终核对其预留已清空。 */ user -> assertThat(user.reservations()).isEmpty());
             state.assertClusterCallbackComplete();
@@ -119,7 +119,7 @@ class CoreMatcherLedgerTest {
             // 全部待测命令完成后导出的业务状态视图。
             var trading = state.tradingState();
             assertThat(trading.orders()).containsOnlyKeys(2L);
-            assertThat(trading.users().get(1001L).totalUnits("USDT")).isEqualTo(100_000);
+            assertThat(CoreStateTestFixtures.totalUnits(trading.users().get(1001L), "USDT")).isEqualTo(100_000);
             assertThat(trading.users().get(1001L).positions()).isEmpty();
             assertThat(trading.treasuryState().feeBalances().getOrDefault("USDT", 0L)).isZero();
             state.assertClusterCallbackComplete();

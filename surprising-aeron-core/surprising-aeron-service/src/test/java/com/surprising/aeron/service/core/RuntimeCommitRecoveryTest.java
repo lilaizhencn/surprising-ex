@@ -128,13 +128,13 @@ class RuntimeCommitRecoveryTest {
                 assertParity(restored, original, restoredReplay, originalReplay);
                 assertThat(restoredReplay.responses().getFirst().appliedCommandCount())
                         .isEqualTo(restored.appliedCommandCount());
-                assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(500);
+                assertThat(CoreStateTestFixtures.totalUnits(restored.tradingState().users().get(1001L), "USDT")).isEqualTo(500);
                 assertThat(restored.feePolicies()).containsEntry(feePolicy.policyId(), feePolicy);
                 assertThat(restored.pendingTransfers()).containsEntry(transfer.transferId(), transfer);
                 try (/* 再次从恢复运行时快照构造的第三份运行时 */ TradingCoreRuntime recoveredAgain = TradingCoreRuntime.fromSnapshot(
                         ProductLine.LINEAR_PERPETUAL, restored.snapshot(704))) {
                     assertThat(recoveredAgain.stateHash()).isEqualTo(restored.stateHash());
-                    assertThat(recoveredAgain.tradingState().user(1001).totalUnits("USDT")).isEqualTo(500);
+                    assertThat(CoreStateTestFixtures.totalUnits(recoveredAgain.tradingState().users().get(1001L), "USDT")).isEqualTo(500);
                     assertThat(recoveredAgain.feePolicies()).containsEntry(feePolicy.policyId(), feePolicy);
                     assertThat(recoveredAgain.pendingTransfers()).containsEntry(transfer.transferId(), transfer);
                 }
@@ -176,10 +176,10 @@ class RuntimeCommitRecoveryTest {
                 // 第一恢复运行时相同部分成交阶段响应清单
                 ReplayResult restoredPartial = replay(firstRestore, partialFill);
                 assertParity(firstRestore, uninterrupted, restoredPartial, uninterruptedPartial);
-                assertThat(uninterrupted.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.OPEN);
-                assertThat(uninterrupted.tradingState().order(101).executedQuantitySteps()).isEqualTo(4);
-                assertThat(uninterrupted.tradingState().order(101).remainingQuantitySteps()).isEqualTo(6);
-                assertThat(uninterrupted.tradingState().user(11).balances().get("USDT").lockedUnits())
+                assertThat(uninterrupted.tradingState().orders().get(101L).status()).isEqualTo(CoreOrderStatus.OPEN);
+                assertThat(uninterrupted.tradingState().orders().get(101L).executedQuantitySteps()).isEqualTo(4);
+                assertThat(uninterrupted.tradingState().orders().get(101L).remainingQuantitySteps()).isEqualTo(6);
+                assertThat(uninterrupted.tradingState().users().get(11L).balances().get("USDT").lockedUnits())
                         .isPositive();
                 // 原运行时中段成交、撤单及资金费响应
                 ReplayResult uninterruptedMiddle = replay(uninterrupted, middle);
@@ -214,11 +214,11 @@ class RuntimeCommitRecoveryTest {
                     ReplayResult secondRestoreTail = replay(secondRestore, tail);
                     assertParity(firstRestore, uninterrupted, firstRestoreTail, uninterruptedTail);
                     assertParity(secondRestore, uninterrupted, secondRestoreTail, uninterruptedTail);
-                    assertThat(uninterrupted.tradingState().user(11).positions().get("1")
+                    assertThat(uninterrupted.tradingState().users().get(11L).positions().get("1")
                             .signedQuantitySteps()).isZero();
-                    assertThat(uninterrupted.tradingState().user(22).positions().get("1")
+                    assertThat(uninterrupted.tradingState().users().get(22L).positions().get("1")
                             .signedQuantitySteps()).isZero();
-                    assertThat(uninterrupted.tradingState().user(33).positions().get("1")
+                    assertThat(uninterrupted.tradingState().users().get(33L).positions().get("1")
                             .signedQuantitySteps()).isZero();
                     assertThat(uninterrupted.tradingState().orders()).isEmpty();
                     assertThat(uninterrupted.tradingState().users().values()).allSatisfy(/* 当前资金守恒或全部释放断言中的冷用户 */ user -> {
@@ -357,13 +357,13 @@ class RuntimeCommitRecoveryTest {
                 assertThat(item.executions()).hasSize(1);
                 assertThat(item.order()).isNull();
             });
-            assertThat(recovered.state().tradingState().user(1001).balances().get("USDT").lockedUnits()).isPositive();
-            assertThat(recovered.state().tradingState().user(1001).reservations()).isEmpty();
-            assertThat(recovered.state().tradingState().user(2001).balances().get("USDT").lockedUnits()).isPositive();
-            assertThat(recovered.state().tradingState().user(2001).reservations()).isEmpty();
-            assertThat(recovered.state().tradingState().user(1001).positions().get("1").signedQuantitySteps())
+            assertThat(recovered.state().tradingState().users().get(1001L).balances().get("USDT").lockedUnits()).isPositive();
+            assertThat(recovered.state().tradingState().users().get(1001L).reservations()).isEmpty();
+            assertThat(recovered.state().tradingState().users().get(2001L).balances().get("USDT").lockedUnits()).isPositive();
+            assertThat(recovered.state().tradingState().users().get(2001L).reservations()).isEmpty();
+            assertThat(recovered.state().tradingState().users().get(1001L).positions().get("1").signedQuantitySteps())
                     .isEqualTo(2);
-            assertThat(recovered.state().tradingState().user(2001).positions().get("1").signedQuantitySteps())
+            assertThat(recovered.state().tradingState().users().get(2001L).positions().get("1").signedQuantitySteps())
                     .isEqualTo(-2);
             assertThat(recovered.state().tradingState().orders()).isEmpty();
             assertThat(recovered.state().tradingState().clientOrderIndex()).isEmpty();
@@ -618,7 +618,7 @@ class RuntimeCommitRecoveryTest {
                     assertThat(deficit(uninterrupted.state())).isZero();
                     assertThat(liquidation(uninterrupted.state(), planned.liquidationId()).status())
                             .isEqualTo(CoreLiquidationState.Status.COMPLETED);
-                    assertThat(uninterrupted.state().tradingState().user(2).positions().get("1")
+                    assertThat(uninterrupted.state().tradingState().users().get(2L).positions().get("1")
                             .signedQuantitySteps()).isZero();
                     assertThat(economicEquityUsdt(uninterrupted.state())).isEqualTo(beforeAdlEconomic);
 

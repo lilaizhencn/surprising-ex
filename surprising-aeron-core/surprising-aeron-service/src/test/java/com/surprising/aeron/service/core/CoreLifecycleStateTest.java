@@ -68,8 +68,8 @@ class CoreLifecycleStateTest {
                 new ApplyFundingCommand(91, "1", 10_000));
 
         assertThat(total(funded, "USDT")).isEqualTo(totalBefore);
-        assertThat(funded.user(1).totalUnits("USDT")).isEqualTo(990);
-        assertThat(funded.user(2).totalUnits("USDT")).isEqualTo(1_010);
+        assertThat(CoreStateTestFixtures.totalUnits(funded.users().get(1L), "USDT")).isEqualTo(990);
+        assertThat(CoreStateTestFixtures.totalUnits(funded.users().get(2L), "USDT")).isEqualTo(1_010);
         assertThat(funded.treasuryState().insuranceBalances()).isEmpty();
         assertThatThrownBy(() -> reducer.applyFunding(funded,
                 new ApplyFundingCommand(91, "1", 10_000)))
@@ -104,9 +104,9 @@ class CoreLifecycleStateTest {
         assertThat(application.payments()).extracting(/* 当前正在提取用户、持仓方向或有符号金额的资金费明细。 */ payment -> payment.amountUnits())
                 .containsExactly(-10L, 10L);
         assertThat(application.payments().stream().mapToLong(/* 当前正在提取用户、持仓方向或有符号金额的资金费明细。 */ payment -> payment.amountUnits()).sum()).isZero();
-        assertThat(application.state().user(1).totalUnits("USDT") - state.user(1).totalUnits("USDT"))
+        assertThat(CoreStateTestFixtures.totalUnits(application.state().users().get(1L), "USDT") - CoreStateTestFixtures.totalUnits(state.users().get(1L), "USDT"))
                 .isEqualTo(-10);
-        assertThat(application.state().user(2).totalUnits("USDT") - state.user(2).totalUnits("USDT"))
+        assertThat(CoreStateTestFixtures.totalUnits(application.state().users().get(2L), "USDT") - CoreStateTestFixtures.totalUnits(state.users().get(2L), "USDT"))
                 .isEqualTo(10);
     }
 
@@ -119,7 +119,7 @@ class CoreLifecycleStateTest {
         TradingCoreState base = stateWithUser(ProductLine.LINEAR_PERPETUAL,
                 ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 0);
         // 显式覆盖前取得的用户原状态和修订号。
-        CoreUserState current = base.user(1);
+        CoreUserState current = base.users().get(1L);
         // 测试构造的同币对 LONG 和 SHORT 两腿持仓表。
         Map<String, CorePositionState> hedgedPositions = new TreeMap<>();
         hedgedPositions.put("1:LONG", new CorePositionState("1", "USDT",
@@ -137,7 +137,7 @@ class CoreLifecycleStateTest {
         users.put(1L, hedgedUser);
         // 已经装入同用户多空两腿并应用标记价的前置状态。
         TradingCoreState hedged = new TradingCoreState(base.productLine(), base.revision() + 1, users,
-                base.orders(), base.instruments(), base.riskState(), base.treasuryState());
+                base.orders(), base.instruments(), base.riskState(), base.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         hedged = reducer.applyMarkPrice(hedged, new ApplyMarkPriceCommand("1", 100, 1,
                 1_700_000_000_000L));
 
@@ -150,7 +150,7 @@ class CoreLifecycleStateTest {
                 .containsExactlyInAnyOrder(
                         org.assertj.core.groups.Tuple.tuple(com.surprising.aeron.protocol.CorePositionSide.LONG, -10L),
                         org.assertj.core.groups.Tuple.tuple(com.surprising.aeron.protocol.CorePositionSide.SHORT, 10L));
-        assertThat(netZero.state().user(1)).isEqualTo(hedged.user(1));
+        assertThat(netZero.state().users().get(1L)).isEqualTo(hedged.users().get(1L));
 
         // 应付十但当前总可用只有五的测试前置状态。
         TradingCoreState lowCash = stateWithUser(ProductLine.LINEAR_PERPETUAL,
@@ -163,7 +163,7 @@ class CoreLifecycleStateTest {
 
         assertThat(capped.payments()).singleElement().satisfies(/* 当前正在提取用户、持仓方向或有符号金额的资金费明细。 */ payment ->
                 assertThat(payment.amountUnits()).isEqualTo(-5));
-        assertThat(capped.state().user(1).totalUnits("USDT")).isZero();
+        assertThat(CoreStateTestFixtures.totalUnits(capped.state().users().get(1L), "USDT")).isZero();
         assertThat(capped.state().treasuryState().insuranceBalances()).doesNotContainKey("USDT");
         assertThat(capped.state().treasuryState().fundingResidualBalances()).containsEntry("USDT", 5L);
     }
@@ -187,7 +187,7 @@ class CoreLifecycleStateTest {
 
         assertThat(first.progress().complete()).isFalse();
         assertThat(first.progress().nextCursorUserId()).isEqualTo(1);
-        assertThat(first.state().treasuryState().fundingProgress("1")).isNotNull();
+        assertThat(first.state().treasuryState().fundingProgress().get("1")).isNotNull();
         assertThat(first.state().treasuryState().fundingSettlements()).doesNotContainKey("1");
         // 当前状态经内存快照编码再解码得到的只读恢复值。
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
@@ -199,7 +199,7 @@ class CoreLifecycleStateTest {
                 new ApplyFundingCommand(95, "1", 10_000, 1, 1), List.of(1L, 2L));
 
         assertThat(second.progress().complete()).isTrue();
-        assertThat(second.state().treasuryState().fundingProgress("1")).isNull();
+        assertThat(second.state().treasuryState().fundingProgress().get("1")).isNull();
         assertThat(second.state().treasuryState().fundingSettlements()).containsEntry("1", 95L);
         assertThat(second.payments()).extracting(/* 当前正在提取用户、持仓方向或有符号金额的资金费明细。 */ payment -> payment.userId()).containsExactly(2L);
     }
@@ -345,8 +345,8 @@ class CoreLifecycleStateTest {
                 new SettleInstrumentCommand(72, "1", 120));
 
         assertThat(total(exercised, "USDT")).isEqualTo(optionBefore);
-        assertThat(exercised.user(1).totalUnits("USDT")).isEqualTo(1_040);
-        assertThat(exercised.user(2).totalUnits("USDT")).isEqualTo(960);
+        assertThat(CoreStateTestFixtures.totalUnits(exercised.users().get(1L), "USDT")).isEqualTo(1_040);
+        assertThat(CoreStateTestFixtures.totalUnits(exercised.users().get(2L), "USDT")).isEqualTo(960);
         assertThat(exercised.users().values()).allSatisfy(/* 当前断言或合计余额、持仓的用户业务值。 */ user ->
                 assertThat(user.positions().get("1").signedQuantitySteps()).isZero());
     }
@@ -412,7 +412,7 @@ class CoreLifecycleStateTest {
 
         assertThat(first.progress().complete()).isFalse();
         assertThat(first.progress().nextCursorUserId()).isEqualTo(1);
-        assertThat(first.state().treasuryState().lifecycleProgress("1")).isNotNull();
+        assertThat(first.state().treasuryState().lifecycleProgress().get("1")).isNotNull();
         // 当前状态经内存快照编码再解码得到的只读恢复值。
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(first.state()), ProductLine.LINEAR_DELIVERY);
@@ -423,7 +423,7 @@ class CoreLifecycleStateTest {
                 new SettleInstrumentCommand(96, "1", 120, 1, 1), List.of(1L, 2L));
 
         assertThat(second.progress().complete()).isTrue();
-        assertThat(second.state().treasuryState().lifecycleProgress("1")).isNull();
+        assertThat(second.state().treasuryState().lifecycleProgress().get("1")).isNull();
         assertThat(second.state().treasuryState().lifecycleSettlements()).containsEntry("1", 96L);
         assertThat(second.state().users().values()).allSatisfy(/* 当前断言或合计余额、持仓的用户业务值。 */ user ->
                 assertThat(user.positions().get("1").signedQuantitySteps()).isZero());
@@ -450,8 +450,8 @@ class CoreLifecycleStateTest {
         assertThat(first.progress().complete()).isFalse();
         assertThat(first.progress().ordersComplete()).isFalse();
         assertThat(first.progress().nextCursorOrderId()).isEqualTo(102);
-        assertThat(first.state().order(102).status()).isEqualTo(CoreOrderStatus.CANCELED);
-        assertThat(first.state().order(101).status()).isEqualTo(CoreOrderStatus.OPEN);
+        assertThat(first.state().orders().get(102L).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        assertThat(first.state().orders().get(101L).status()).isEqualTo(CoreOrderStatus.OPEN);
 
         // 使用第一页面游标处理后续页的结果。
         RuntimeTestStateTransitions.SettlementApplication second = reducer.settleInstrumentWithProgress(first.state(),
@@ -459,7 +459,7 @@ class CoreLifecycleStateTest {
                 List.of(1L, 2L));
 
         assertThat(second.progress().complete()).isTrue();
-        assertThat(second.state().order(102).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        assertThat(second.state().orders().get(102L).status()).isEqualTo(CoreOrderStatus.CANCELED);
         assertThat(second.state().treasuryState().lifecycleSettlements()).containsEntry("1", 97L);
     }
 
@@ -481,7 +481,7 @@ class CoreLifecycleStateTest {
         TradingCoreState liquidated = reducer.executeLiquidation(state,
                 new ExecuteLiquidationCommand(1, 1, 1, 0));
 
-        assertThat(liquidated.user(1).positions().get("1").signedQuantitySteps()).isZero();
+        assertThat(liquidated.users().get(1L).positions().get("1").signedQuantitySteps()).isZero();
         assertThat(liquidated.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.INSURANCE_REQUIRED);
         // 当前强平记录尚需覆盖的亏空金额。
@@ -496,7 +496,7 @@ class CoreLifecycleStateTest {
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, deficit));
         assertThat(resolved.treasuryState().insuranceBalances()).containsEntry("USDT", 100L);
         assertThat(resolved.treasuryState().insuranceDeficits().getOrDefault("USDT", 0L)).isZero();
-        assertThat(resolved.user(1).totalUnits("USDT")).isZero();
+        assertThat(CoreStateTestFixtures.totalUnits(resolved.users().get(1L), "USDT")).isZero();
         assertThat(resolved.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
     }
@@ -577,7 +577,7 @@ class CoreLifecycleStateTest {
 
         assertThat(recovered.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.CANCELED);
-        assertThat(recovered.user(1).positions().get("1").signedQuantitySteps()).isEqualTo(10);
+        assertThat(recovered.users().get(1L).positions().get("1").signedQuantitySteps()).isEqualTo(10);
     }
 
     /**
@@ -604,7 +604,7 @@ class CoreLifecycleStateTest {
         assertThat(result.liquidationFeeRatePpm()).isEqualTo(100_000);
         assertThat(result.liquidationFeeUnits()).isEqualTo(80);
         assertThat(liquidated.treasuryState().insuranceBalances()).containsEntry("USDT", 180L);
-        assertThat(liquidated.user(1).totalUnits("USDT")).isZero();
+        assertThat(CoreStateTestFixtures.totalUnits(liquidated.users().get(1L), "USDT")).isZero();
         assertThat(total(liquidated, "USDT")).isEqualTo(before);
         assertThat(reducer.riskSnapshots(liquidated, 1)).isEmpty();
         // 当前状态经内存快照编码再解码得到的只读恢复值。
@@ -792,7 +792,7 @@ class CoreLifecycleStateTest {
         TradingCoreState resolved = reducer.executeAdl(state, command);
         RuntimeStateParityChecker.assertMatches(resolved, identities, runtimeResolved);
 
-        assertThat(resolved.user(2).positions().get("1").signedQuantitySteps()).isEqualTo(-5);
+        assertThat(resolved.users().get(2L).positions().get("1").signedQuantitySteps()).isEqualTo(-5);
         assertThat(resolved.riskState().liquidations().get(1L).deficitUnits()).isZero();
         assertThat(resolved.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
@@ -916,22 +916,22 @@ class CoreLifecycleStateTest {
         TradingCoreState funded = reducer.adjustBalance(state, userId,
                 new BalanceAdjustmentCommand("USDT", wallet));
         // 显式覆盖前取得的用户原状态和修订号。
-        CoreUserState current = funded.user(userId);
+        CoreUserState current = funded.users().get(userId);
         // 复制原用户余额后，显式覆盖 USDT 可用和冻结额的测试表。
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put("USDT", new AssetBalance("USDT", wallet - margin, margin));
         // 复制原用户持仓后，显式覆盖币对一净持仓的测试表。
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
-        positions.put("1", new CorePositionState("1", "USDT", quantity,
+        positions.put("1", new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, quantity,
                 entryPrice, Math.multiplyExact(Math.absExact(quantity), entryPrice), 0, margin));
         // 用指定钱包和持仓数据新构造的用户业务值。
         CoreUserState user = new CoreUserState(funded.productLine(), userId, current.revision() + 1,
-                balances, current.reservations(), positions);
+                balances, current.reservations(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 复制旧用户表后替换当前用户的测试集合。
         Map<Long, CoreUserState> users = new TreeMap<>(funded.users());
         users.put(userId, user);
         return new TradingCoreState(funded.productLine(), funded.revision() + 1, users, funded.orders(),
-                funded.instruments(), funded.riskState(), funded.treasuryState());
+                funded.instruments(), funded.riskState(), funded.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 
     /**
@@ -949,7 +949,7 @@ class CoreLifecycleStateTest {
      */
     private static long total(TradingCoreState state, String asset) {
         // 按资产累计的全部用户可用与冻结总额，stream 内部使用普通 long 求和。
-        long users = state.users().values().stream().mapToLong(/* 当前断言或合计余额、持仓的用户业务值。 */ user -> user.totalUnits(asset)).sum();
+        long users = state.users().values().stream().mapToLong(/* 当前断言或合计余额、持仓的用户业务值。 */ user -> CoreStateTestFixtures.totalUnits(user, asset)).sum();
         // 指定资产的财库手续费余额。
         long fee = state.treasuryState().feeBalances().getOrDefault(asset, 0L);
         // 指定资产的财库保险余额。

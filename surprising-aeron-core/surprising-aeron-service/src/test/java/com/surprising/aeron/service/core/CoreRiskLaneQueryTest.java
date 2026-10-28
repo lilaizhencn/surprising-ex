@@ -243,8 +243,8 @@ class CoreRiskLaneQueryTest {
             users.put(user, user(line, user, Map.of("1", position(line, "1", 1, CoreMarginMode.CROSS, 10))));
         // 包含超限用户数的根状态，用来验证限制按所有 Lane 的合计计算。
         var state = new TradingCoreState(line, 0, users, Map.of(), Map.of("1", instrument),
-                new CoreRiskState(Map.of("1", new CoreMarkPriceState("1", 80, 1, TIME)), Map.of(), Map.of(), Map.of(), 1),
-                CoreTreasuryState.empty());
+                new CoreRiskState(Map.of("1", new CoreMarkPriceState("1", 80, 1, TIME)), Map.of(), Map.of(), Map.of(), 1, CoreRiskState.defaultScanControl(), 0),
+                CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 从本用例状态初始化的交易运行时，测试结束时自动关闭账户 Lane 等资源。 */ var core = initial(state)) {
             core.activate();
             try (/* 临时禁止 Owner 越界读取账户表的哨兵，离开作用域时恢复原表。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
@@ -286,7 +286,7 @@ class CoreRiskLaneQueryTest {
         var second = user(line, 7, Map.of("1", position(line, "1", 15, CoreMarginMode.CROSS, 200),
                 "2", position(line, "2", -3, CoreMarginMode.ISOLATED, 60)));
         return new TradingCoreState(line, 0, Map.of(1L, first, 7L, second), Map.of(), instruments,
-                new CoreRiskState(prices, Map.of(), Map.of(), Map.of(), 1), CoreTreasuryState.empty());
+                new CoreRiskState(prices, Map.of(), Map.of(), Map.of(), 1, CoreRiskState.defaultScanControl(), 0), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 
     /**
@@ -330,7 +330,7 @@ class CoreRiskLaneQueryTest {
         // 本用户所有持仓保证金之和，作为冻结余额，避免初始资金被重复使用。
         long locked = positions.values().stream().mapToLong(CorePositionState::positionMarginUnits).sum();
         return new CoreUserState(line, id, 0, Map.of(asset(line), new AssetBalance(asset(line), 10_000 - locked, locked)),
-                Map.of(), positions);
+                Map.of(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
     }
 
     /**

@@ -116,7 +116,7 @@ class AsyncFundingCommandTest {
             assertThat(state.runtimeState.treasury().incompleteFundingCount()).isZero();
             long payment = type.isInverse() ? 1 : 10;
             for (long user = 1; user <= 8; user++) {
-                assertThat(state.tradingState().users().get(user).totalUnits(asset))
+                assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(user), asset))
                         .isEqualTo(100_000 + (user % 2 == 1 ? payment : -payment));
             }
             applied(state, message(line, CoreMessageType.APPLY_MARK_PRICE, 0,
@@ -270,7 +270,7 @@ class AsyncFundingCommandTest {
         var state = runtime.tradingState();
         // 按本测试明确列出的用户和财库子账精确累计的总额。
         long total = 0;
-        for (var /* 合计其可用与冻结总额的用户状态。 */ user : state.users().values()) total = Math.addExact(total, user.totalUnits(asset));
+        for (var /* 合计其可用与冻结总额的用户状态。 */ user : state.users().values()) total = Math.addExact(total, CoreStateTestFixtures.totalUnits(user, asset));
         // 当前测试状态的财库视图。
         var treasury = state.treasuryState();
         total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));

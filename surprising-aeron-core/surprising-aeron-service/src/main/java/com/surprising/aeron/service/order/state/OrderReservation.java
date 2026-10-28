@@ -56,8 +56,11 @@ public final class OrderReservation {
     public OrderReservation(long orderId, String instrumentId, ReservationKind kind,
                             String asset, long reservedUnits, long releasedUnits, long consumedUnits,
                             long orderQuantitySteps) {
-        validateAmounts(orderId, kind, reservedUnits, releasedUnits, consumedUnits,
-                orderQuantitySteps);
+        if (orderId <= 0 || kind == null || reservedUnits <= 0
+                || releasedUnits < 0 || consumedUnits < 0
+                || Math.addExact(releasedUnits, consumedUnits) > reservedUnits || orderQuantitySteps <= 0) {
+            throw new IllegalArgumentException("invalid order reservation");
+        }
         this.orderId = orderId;
         this.instrumentId = requireInstrumentId(instrumentId);
         this.kind = kind;
@@ -66,25 +69,6 @@ public final class OrderReservation {
         this.releasedUnits = releasedUnits;
         this.consumedUnits = consumedUnits;
         this.orderQuantitySteps = orderQuantitySteps;
-    }
-
-    /**
-     * 要求订单与数量为正、冻结类别存在、总额为正且累计释放和消耗非负；两者精确和不能超过总额。
-     * @param orderId 这份冻结对应的正数订单编号
-     * @param kind 现货资产或衍生品保证金的冻结类别
-     * @param reservedUnits 本记录的冻结总额上限，不是当前剩余额度
-     * @param releasedUnits 已经从冻结中释放的累计金额
-     * @param consumedUnits 已经因成交等业务消耗的累计冻结金额
-     * @param orderQuantitySteps 建立冻结时的订单数量步数基数，不随剩余额度变化
-     */
-    private static void validateAmounts(long orderId, ReservationKind kind,
-                                        long reservedUnits, long releasedUnits, long consumedUnits,
-                                        long orderQuantitySteps) {
-        if (orderId <= 0 || kind == null || reservedUnits <= 0
-                || releasedUnits < 0 || consumedUnits < 0
-                || Math.addExact(releasedUnits, consumedUnits) > reservedUnits || orderQuantitySteps <= 0) {
-            throw new IllegalArgumentException("invalid order reservation");
-        }
     }
 
     /**
@@ -126,26 +110,6 @@ public final class OrderReservation {
                 + ", kind=" + kind + ", asset=" + asset
                 + ", reservedUnits=" + reservedUnits + ", releasedUnits=" + releasedUnits
                 + ", consumedUnits=" + consumedUnits + ", orderQuantitySteps=" + orderQuantitySteps + "]";
-    }
-
-    /**
-     * 创建尚未释放或消耗的新冻结记录，两项累计量从 0 开始。
-     * @param orderId 这份冻结对应的正数订单编号
-     * @param instrumentId 已经校验的永久币对编号文本
-     * @param kind 现货资产或衍生品保证金的冻结类别
-     * @param asset 已经规范化的冻结资产代码
-     * @param reservedUnits 本记录的冻结总额上限，不是当前剩余额度
-     * @param orderQuantitySteps 建立冻结时的订单数量步数基数，不随剩余额度变化
-     */
-    public static OrderReservation create(
-            long orderId,
-            String instrumentId,
-            ReservationKind kind,
-            String asset,
-            long reservedUnits,
-            long orderQuantitySteps) {
-        return new OrderReservation(orderId, instrumentId, kind, asset,
-                reservedUnits, 0, 0, orderQuantitySteps);
     }
 
     /**

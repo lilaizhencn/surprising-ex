@@ -63,11 +63,11 @@ class ReplacementAdmissionEventTest {
         // 原用户 7 的账户前值，含 800 可用、100 冻结及原订单保证金预留。
         var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, 100)),
-                Map.of(11L, OrderReservation.create(11, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 1)),
-                Map.of());
+                Map.of(11L, new OrderReservation(11, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 0, 0, 1)),
+                Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 把原用户、订单和币对组合的冷业务状态，投影后再启动账户 Lane。
         var before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1, Map.of(7L, user),
-                Map.of(11L, order), Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(11L, order), Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 该测试运行时的身份表，准入事件与决策上下文共用它。
         var identities = new RuntimeIdentityRegistry();
         try (/* 从原业务状态投影并启动账户 worker 的测试运行时，结束时关闭。 */ var runtime = RuntimeStateProjector.project(before, identities)) {

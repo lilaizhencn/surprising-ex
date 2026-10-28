@@ -12,9 +12,7 @@ class CoreTreasuryStateTest {
     /** 规范化完整快照的资产名称并移除零额，不混入其他子账。 */
     @Test
     void normalizesAssetsAndDropsZeroBalances() {
-        CoreTreasuryState treasury = CoreTreasuryState.ofSubledgers(
-                Map.of(" usdt ", 5L, "BTC", 0L), Map.of(), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of());
+        CoreTreasuryState treasury = new CoreTreasuryState(Map.of(" usdt ", 5L, "BTC", 0L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
 
         assertThat(treasury.feeBalances()).containsExactlyEntriesOf(Map.of("USDT", 5L));
         assertThat(treasury.insuranceBalances()).isEmpty();
@@ -27,10 +25,7 @@ class CoreTreasuryStateTest {
     @Test
     void keepsAllSevenSubledgersIndependent() {
         // 含七个独立正负金额子账的冷账本测试值。
-        CoreTreasuryState treasury = CoreTreasuryState.ofSubledgers(
-                Map.of("USDT", -1L), Map.of("USDT", 2L), Map.of("USDT", 3L),
-                Map.of("USDT", -4L), Map.of("USDT", 5L), Map.of("USDT", -6L),
-                Map.of("USDT", 7L));
+        CoreTreasuryState treasury = new CoreTreasuryState(Map.of("USDT", -1L), Map.of("USDT", 2L), Map.of("USDT", 7L), Map.of("USDT", 3L), Map.of("USDT", -4L), Map.of("USDT", 5L), Map.of("USDT", -6L), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
 
         assertThat(treasury.feeBalances()).containsEntry("USDT", -1L);
         assertThat(treasury.insuranceBalances()).containsEntry("USDT", 2L);

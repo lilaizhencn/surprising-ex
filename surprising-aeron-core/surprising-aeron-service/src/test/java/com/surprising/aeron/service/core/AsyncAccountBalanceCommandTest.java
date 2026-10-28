@@ -54,8 +54,8 @@ class AsyncAccountBalanceCommandTest {
                                 TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(8200))))
                         .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(restoredSource.pendingTransfers()).isEmpty();
-                assertThat(restoredSource.tradingState().user(11).totalUnits("USDT")).isEqualTo(70);
-                assertThat(restoredTarget.tradingState().user(22).totalUnits("USDT")).isEqualTo(30);
+                assertThat(CoreStateTestFixtures.totalUnits(restoredSource.tradingState().users().get(11L), "USDT")).isEqualTo(70);
+                assertThat(CoreStateTestFixtures.totalUnits(restoredTarget.tradingState().users().get(22L), "USDT")).isEqualTo(30);
             }
         }
     }
@@ -85,7 +85,7 @@ class AsyncAccountBalanceCommandTest {
             assertThat(CoreTestCompletion.applyAsynchronously(source, out).status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(CoreTestCompletion.applyAsynchronously(source,
                     command(product, CoreMessageType.TRANSFER_OUT, 3, payload)).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(source.tradingState().user(11).totalUnits("USDT")).isEqualTo(70);
+            assertThat(CoreStateTestFixtures.totalUnits(source.tradingState().users().get(11L), "USDT")).isEqualTo(70);
             try (/* 源账户恢复实例，保留一条待完成划转 */ var recovered = TradingCoreRuntime.fromSnapshot(product, source.snapshot(100))) {
                 assertThat(recovered.pendingTransfers()).hasSize(1);
                 // 正确目标用户的转入请求，恢复后重发沿用同一 UUID
@@ -96,8 +96,8 @@ class AsyncAccountBalanceCommandTest {
                 try (/* 目标产品恢复实例，用于核对已入账重试不再增加资金 */ var restoredTarget = TradingCoreRuntime.fromSnapshot(targetProduct, target.snapshot(101))) {
                     assertThat(CoreTestCompletion.applyAsynchronously(restoredTarget, in).status())
                             .isEqualTo(ResponseStatus.DUPLICATE);
-                    assertThat(recovered.tradingState().user(11).totalUnits("USDT")
-                            + restoredTarget.tradingState().user(11).totalUnits("USDT")).isEqualTo(100);
+                    assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(11L), "USDT")
+                            + CoreStateTestFixtures.totalUnits(restoredTarget.tradingState().users().get(11L), "USDT")).isEqualTo(100);
                     // 沿用划转身份但把金额改为31的冲突参数
                     var changedTransfer = new TransferFundsCommand(7001, product, targetProduct,
                             product.accountTypeCode(), targetProduct.accountTypeCode(), "USDT", 31,
@@ -107,22 +107,22 @@ class AsyncAccountBalanceCommandTest {
                             TradingCommandCodec.encodeTransferFunds(changedTransfer));
                     assertThat(CoreTestCompletion.applyAsynchronously(restoredTarget, conflict).resultCode())
                             .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
-                    assertThat(restoredTarget.tradingState().user(11).totalUnits("USDT")).isEqualTo(30);
+                    assertThat(CoreStateTestFixtures.totalUnits(restoredTarget.tradingState().users().get(11L), "USDT")).isEqualTo(30);
                 }
                 assertThat(CoreTestCompletion.applyAsynchronously(recovered,
                         command(product, CoreMessageType.COMPLETE_TRANSFER, 4,
                                 TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(7001))))
                         .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(recovered.pendingTransfers()).isEmpty();
-                assertThat(recovered.tradingState().user(11).totalUnits("USDT")
-                        + target.tradingState().user(11).totalUnits("USDT")).isEqualTo(100);
+                assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(11L), "USDT")
+                        + CoreStateTestFixtures.totalUnits(target.tradingState().users().get(11L), "USDT")).isEqualTo(100);
                 // 试图从剩余70中转出71的新划转
                 var tooMuch = new TransferFundsCommand(7002, product, targetProduct, product.accountTypeCode(),
                         targetProduct.accountTypeCode(), "USDT", 71, "insufficient-transfer", "", 11L, 11L);
                 assertThat(CoreTestCompletion.applyAsynchronously(recovered,
                         command(product, CoreMessageType.TRANSFER_OUT, 5, TradingCommandCodec.encodeTransferFunds(tooMuch)))
                         .resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-                assertThat(recovered.tradingState().user(11).totalUnits("USDT")).isEqualTo(70);
+                assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(11L), "USDT")).isEqualTo(70);
                 assertThat(recovered.pendingTransfers()).isEmpty();
             }
         }
@@ -160,13 +160,13 @@ class AsyncAccountBalanceCommandTest {
                             TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(8100)));
                     assertThat(CoreTestCompletion.applyAsynchronously(recoveredAgain, complete).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                     assertThat(recoveredAgain.pendingTransfers()).isEmpty();
-                    assertThat(recoveredAgain.tradingState().user(11).totalUnits("USDT")).isEqualTo(70);
-                    assertThat(recoveredAgain.tradingState().user(22).totalUnits("USDT")).isEqualTo(30);
+                    assertThat(CoreStateTestFixtures.totalUnits(recoveredAgain.tradingState().users().get(11L), "USDT")).isEqualTo(70);
+                    assertThat(CoreStateTestFixtures.totalUnits(recoveredAgain.tradingState().users().get(22L), "USDT")).isEqualTo(30);
                     // 沿用原划转正文但请求用户仍为11的错误转入
                     var wrongRecipient = command(product, CoreMessageType.TRANSFER_IN, 5, payload);
                     assertThat(CoreTestCompletion.applyAsynchronously(recoveredAgain, wrongRecipient).resultCode())
                             .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
-                    assertThat(recoveredAgain.tradingState().user(11).totalUnits("USDT")).isEqualTo(70);
+                    assertThat(CoreStateTestFixtures.totalUnits(recoveredAgain.tradingState().users().get(11L), "USDT")).isEqualTo(70);
                 }
             }
         }
@@ -215,7 +215,7 @@ class AsyncAccountBalanceCommandTest {
                 // 反射取得首实例 ownerLaneAccess 标记，断言该轮没有借用账户所有权
                 assertThat(state.runtimeState.ownerLaneAccess()).isFalse();
             }
-            assertThat(state.tradingState().user(user).balances().get("USDT").availableUnits()).isEqualTo(80);
+            assertThat(state.tradingState().users().get(user).balances().get("USDT").availableUnits()).isEqualTo(80);
             assertThat(state.tradingState().businessStateHash()).isEqualTo(serial.tradingState().businessStateHash());
             try (/* 当前快照恢复实例，检查原状态与重试 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());

@@ -130,7 +130,7 @@ class MatcherTreasurySettlementTest {
         var before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(takerUser, user(takerUser, taker), makerUser, user(makerUser, maker)),
                 Map.of(11L, taker, 12L, maker), Map.of("1", instrument),
-                CoreRiskState.empty(), CoreTreasuryState.empty());
+                CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 把业务币对、资产及持仓转为运行时编号的字典。
         var identities = new RuntimeIdentityRegistry();
         try (/* 由冷状态投影得到并在用例退出时关闭的交易运行时。 */ var runtime = RuntimeStateProjector.project(before, identities)) {
@@ -246,8 +246,8 @@ class MatcherTreasurySettlementTest {
     private static CoreUserState user(long userId, CoreOrderState order) {
         return new CoreUserState(ProductLine.LINEAR_PERPETUAL, userId, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, 100)),
-                Map.of(order.orderId(), OrderReservation.create(order.orderId(), "1",
-                        ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 1)), Map.of());
+                Map.of(order.orderId(), new OrderReservation(order.orderId(), "1",
+                        ReservationKind.DERIVATIVE_MARGIN, "USDT", 100, 0, 0, 1)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
     }
 
     /**

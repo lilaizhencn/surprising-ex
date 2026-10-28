@@ -30,23 +30,23 @@ class PositionUserIndexTest {
         // 初始唯一有持仓的用户记录，分别用于用户成员或空头总量重建测试。
         CoreUserState positioned = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0,
                 Map.of("USDT", new AssetBalance("USDT", 0, 10)), Map.of(), Map.of("1", new CorePositionState(
-                        "1", "USDT", 1, 100, 100, 0, 10)), CorePositionMode.ONE_WAY);
+                        "1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10)), CorePositionMode.ONE_WAY);
         // 重建前包含唯一有仓用户的用户映射。
         Map<Long, CoreUserState> beforeUsers = new TreeMap<>();
         beforeUsers.put(1L, positioned);
         // 初始业务状态，用于构造需要检查的持仓用户或未平仓量索引。
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1, beforeUsers,
-                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
         PositionUserIndex index = new PositionUserIndex(before);
         assertThat(index.usersAfter("1", 0)).containsExactly(1L);
 
         // 原用户映射的变更视图，把唯一有仓用户替换为无持仓用户。
         Map<Long, CoreUserState> afterUsers = new TreeMap<>(before.users());
-        afterUsers.put(1L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 1));
+        afterUsers.put(1L, new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
         // 移除目标用户持仓后的业务状态，重建后旧合约应没有有效成员或非零总量。
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, afterUsers,
-                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         index.rebuild(after);
 
         assertThat(index.usersAfter("1", 0)).isEmpty();
@@ -60,14 +60,14 @@ class PositionUserIndexTest {
         // 初始唯一有持仓的用户记录，分别用于用户成员或空头总量重建测试。
         CoreUserState positioned = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0,
                 Map.of("USDT", new AssetBalance("USDT", 0, 10)), Map.of(), Map.of("1",
-                        new CorePositionState("1", "USDT", -2, 100, 200, 0, 10)),
+                        new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, -2, 100, 200, 0, 10)),
                 CorePositionMode.ONE_WAY);
         // 重建前包含唯一有仓用户的用户映射。
         Map<Long, CoreUserState> beforeUsers = new TreeMap<>();
         beforeUsers.put(1L, positioned);
         // 初始业务状态，用于构造需要检查的持仓用户或未平仓量索引。
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1, beforeUsers,
-                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
         OpenInterestIndex index = new OpenInterestIndex(before);
         assertThat(index.totals()).containsExactly(org.assertj.core.api.Assertions.entry(
@@ -77,10 +77,10 @@ class PositionUserIndexTest {
 
         // 原用户映射的变更视图，把唯一有仓用户替换为无持仓用户。
         Map<Long, CoreUserState> afterUsers = new TreeMap<>(before.users());
-        afterUsers.put(1L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 1));
+        afterUsers.put(1L, new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
         // 移除目标用户持仓后的业务状态，重建后旧合约应没有有效成员或非零总量。
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, afterUsers,
-                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         index.rebuild(after);
 
         assertThat(index.totals()).isEmpty();
@@ -93,12 +93,12 @@ class PositionUserIndexTest {
     @Test
     void returnsTheNextUserWithoutScanningBeforeTheCursor() {
         // 可被多个测试用户共用的业务持仓记录，保证每用户都生成同合约路由。
-        CorePositionState position = new CorePositionState("1", "USDT", 1, 100, 100, 0, 10);
+        CorePositionState position = new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10);
         // 包含本用例多个用户和持仓记录的完整业务状态。
         TradingCoreState state = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(2L, positionedUser(2, position), 7L, positionedUser(7, position),
                         11L, positionedUser(11, position)),
-                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 生产默认账户 Lane 拓扑，索引分组和期望用户筛选必须一致。
         LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
@@ -127,16 +127,16 @@ class PositionUserIndexTest {
     @Test
     void riskQueryUsersUseMembershipAndEnforceGlobalAndUserScanBounds() {
         // 可被多个测试用户共用的业务持仓记录，保证每用户都生成同合约路由。
-        var position = new CorePositionState("1", "USDT", 1, 100, 100, 0, 10);
+        var position = new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10);
         // 合约 2 的零数量持仓仍是一份记录，必须计入查询规模。
-        var flat = new CorePositionState("2", "USDT", 0, 0, 0, 0, 0);
+        var flat = new CorePositionState("2", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 0, 0, 0, 0, 0);
         // 用户 1 的两份持仓记录，一份有仓、一份空仓，用来区分记录数与非空仓数。
         var first = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 1, 0,
-                Map.of("USDT", new AssetBalance("USDT", 0, 10)), Map.of(), Map.of("1", position, "2", flat));
+                Map.of("USDT", new AssetBalance("USDT", 0, 10)), Map.of(), Map.of("1", position, "2", flat), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 包含本用例多个用户和持仓记录的完整业务状态。
         var state = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 0,
                 Map.of(1L, first, 7L, positionedUser(7, position)), Map.of(), Map.of(),
-                CoreRiskState.empty(), CoreTreasuryState.empty());
+                CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
         var index = new PositionUserIndex(state);
         // 最多允许三份持仓记录的全局风险路由结果，用户编号去重并排序。
@@ -158,6 +158,6 @@ class PositionUserIndexTest {
     private static CoreUserState positionedUser(long userId, CorePositionState position) {
         return new CoreUserState(ProductLine.LINEAR_PERPETUAL, userId, 0,
                 Map.of("USDT", new AssetBalance("USDT", 0, position.positionMarginUnits())), Map.of(),
-                Map.of(position.key(), position));
+                Map.of(position.key(), position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
     }
 }

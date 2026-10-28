@@ -69,12 +69,12 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState canceled = reducer.cancelOrder(placed, 101, new CancelOrderCommand(1));
 
         assertBalance(placed, "USDT", 9_900, 100);
-        assertThat(placed.user(101).totalUnits("USDT")).isEqualTo(10_000);
-        assertThat(placed.user(101).reservations().get(1L).remainingUnits()).isEqualTo(100);
-        assertThat(placed.order(1).status()).isEqualTo(CoreOrderStatus.OPEN);
+        assertThat(CoreStateTestFixtures.totalUnits(placed.users().get(101L), "USDT")).isEqualTo(10_000);
+        assertThat(placed.users().get(101L).reservations().get(1L).remainingUnits()).isEqualTo(100);
+        assertThat(placed.orders().get(1L).status()).isEqualTo(CoreOrderStatus.OPEN);
         assertBalance(canceled, "USDT", 10_000, 0);
-        assertThat(canceled.user(101).reservations().get(1L).remainingUnits()).isZero();
-        assertThat(canceled.order(1).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        assertThat(canceled.users().get(101L).reservations().get(1L).remainingUnits()).isZero();
+        assertThat(canceled.orders().get(1L).status()).isEqualTo(CoreOrderStatus.CANCELED);
     }
 
     /**
@@ -113,9 +113,9 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState placed = reducer.placeOrder(funded, 101,
                 order(10 + productLine.ordinal(), CoreOrderSide.BUY));
 
-        assertThat(placed.user(101).totalUnits(settleAsset)).isEqualTo(10_000);
-        assertThat(placed.user(101).balances().get(settleAsset).lockedUnits()).isPositive();
-        assertThat(placed.user(101).balances().get(settleAsset).lockedUnits()).isLessThan(2_000);
+        assertThat(CoreStateTestFixtures.totalUnits(placed.users().get(101L), settleAsset)).isEqualTo(10_000);
+        assertThat(placed.users().get(101L).balances().get(settleAsset).lockedUnits()).isPositive();
+        assertThat(placed.users().get(101L).balances().get(settleAsset).lockedUnits()).isLessThan(2_000);
         // 本用例需要拒绝的委托意图，错误预留类型或资产另由 resolved 显式附加
         PlaceOrderCommand invalid = order(100 + productLine.ordinal(), CoreOrderSide.BUY);
         assertThatThrownBy(() -> reducer.placeOrder(funded, 101,
@@ -229,10 +229,10 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
                 List.of(trade(2, 202, 10, 10, true, true)));
 
-        assertThat(matched.user(101).totalUnits("USDT")).isEqualTo(890);
-        assertThat(matched.user(101).totalUnits("BTC")).isEqualTo(10);
-        assertThat(matched.user(202).totalUnits("BTC")).isZero();
-        assertThat(matched.user(202).totalUnits("USDT")).isEqualTo(105);
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(101L), "USDT")).isEqualTo(890);
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(101L), "BTC")).isEqualTo(10);
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(202L), "BTC")).isZero();
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(202L), "USDT")).isEqualTo(105);
         assertThat(matched.treasuryState().feeBalances()).containsEntry("USDT", 5L);
     }
 
@@ -253,10 +253,10 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
                 List.of(trade(2, 202, 10, 10, true, true)));
 
-        assertThat(matched.user(101).totalUnits("USDT")).isEqualTo(980);
-        assertThat(matched.user(202).totalUnits("USDT")).isEqualTo(1_010);
-        assertThat(matched.user(101).positions().get("1").positionMarginUnits()).isEqualTo(10);
-        assertThat(matched.user(202).positions().get("1").positionMarginUnits()).isEqualTo(10);
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(101L), "USDT")).isEqualTo(980);
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(202L), "USDT")).isEqualTo(1_010);
+        assertThat(matched.users().get(101L).positions().get("1").positionMarginUnits()).isEqualTo(10);
+        assertThat(matched.users().get(202L).positions().get("1").positionMarginUnits()).isEqualTo(10);
         assertThat(matched.treasuryState().feeBalances()).containsEntry("USDT", 10L);
     }
 
@@ -279,10 +279,10 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
                 List.of(trade(2, 202, 20, 10, true, true)));
 
-        assertThat(matched.order(1).status()).isEqualTo(CoreOrderStatus.FILLED);
-        assertThat(matched.user(101).positions().get("1").positionMarginUnits()).isEqualTo(11);
-        assertThat(matched.user(101).balances().get("USDT")).isEqualTo(new AssetBalance("USDT", 989, 11));
-        assertThat(matched.user(101).totalUnits("USDT") + matched.user(202).totalUnits("USDT"))
+        assertThat(matched.orders().get(1L).status()).isEqualTo(CoreOrderStatus.FILLED);
+        assertThat(matched.users().get(101L).positions().get("1").positionMarginUnits()).isEqualTo(11);
+        assertThat(matched.users().get(101L).balances().get("USDT")).isEqualTo(new AssetBalance("USDT", 989, 11));
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(101L), "USDT") + CoreStateTestFixtures.totalUnits(matched.users().get(202L), "USDT"))
                 .isEqualTo(2_000);
     }
 
@@ -308,9 +308,9 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState matched = reducer.applyMatches(state, 1, "BTC", "USDT",
                 List.of(trade(3, 202, 10, 10, true, true)));
 
-        assertThat(matched.order(1).status()).isEqualTo(CoreOrderStatus.FILLED);
-        assertThat(matched.user(202).positions().get("1").positionMarginUnits()).isEqualTo(10);
-        assertThat(matched.user(101).totalUnits("USDT") + matched.user(202).totalUnits("USDT"))
+        assertThat(matched.orders().get(1L).status()).isEqualTo(CoreOrderStatus.FILLED);
+        assertThat(matched.users().get(202L).positions().get("1").positionMarginUnits()).isEqualTo(10);
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(101L), "USDT") + CoreStateTestFixtures.totalUnits(matched.users().get(202L), "USDT"))
                 .isEqualTo(2_000);
     }
 
@@ -342,10 +342,10 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState matched = reducer.applyMatches(state, 4, "BTC", "USDT",
                 List.of(trade(3, 202, 20, 10, true, true)));
 
-        assertThat(matched.user(202).positions().get("1").signedQuantitySteps()).isEqualTo(-20);
-        assertThat(matched.user(202).positions().get("1").positionMarginUnits()).isEqualTo(30);
-        assertThat(matched.user(101).totalUnits("USDT") + matched.user(202).totalUnits("USDT")
-                + matched.user(303).totalUnits("USDT")).isEqualTo(3_000);
+        assertThat(matched.users().get(202L).positions().get("1").signedQuantitySteps()).isEqualTo(-20);
+        assertThat(matched.users().get(202L).positions().get("1").positionMarginUnits()).isEqualTo(30);
+        assertThat(CoreStateTestFixtures.totalUnits(matched.users().get(101L), "USDT") + CoreStateTestFixtures.totalUnits(matched.users().get(202L), "USDT")
+                + CoreStateTestFixtures.totalUnits(matched.users().get(303L), "USDT")).isEqualTo(3_000);
     }
 
     /**
@@ -375,12 +375,12 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState withAdd = reducer.placeOrder(withMaker, 101,
                 new PlaceOrderCommand(4, "1", CoreOrderSide.BUY, 10, 20, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
 
-        assertThat(withAdd.user(101).balances().get("USDT").lockedUnits()).isEqualTo(60);
+        assertThat(withAdd.users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(60);
         // 应用本用例显式成交事件后的冷状态，供费用、持仓及守恒断言
         TradingCoreState matched = reducer.applyMatches(withAdd, 4, "BTC", "USDT",
                 List.of(trade(3, 202, 10, 20, true, true)));
-        assertThat(matched.user(101).positions().get("1").positionMarginUnits()).isEqualTo(60);
-        assertThat(matched.user(101).balances().get("USDT").lockedUnits()).isEqualTo(60);
+        assertThat(matched.users().get(101L).positions().get("1").positionMarginUnits()).isEqualTo(60);
+        assertThat(matched.users().get(101L).balances().get("USDT").lockedUnits()).isEqualTo(60);
     }
 
     /**
@@ -462,7 +462,7 @@ class RuntimeStateBusinessRulesTest {
         assertThatThrownBy(() -> reducer.adjustBalance(maximum, 101,
                 new BalanceAdjustmentCommand("USDT", 1)))
                 .isInstanceOf(ArithmeticException.class);
-        assertThat(maximum.user(101).totalUnits("USDT")).isEqualTo(Long.MAX_VALUE);
+        assertThat(CoreStateTestFixtures.totalUnits(maximum.users().get(101L), "USDT")).isEqualTo(Long.MAX_VALUE);
     }
 
     /**
@@ -496,8 +496,8 @@ class RuntimeStateBusinessRulesTest {
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = reducer.placeOrder(hedge, 101, openLong);
 
-        assertThat(placed.user(101).positionMode()).isEqualTo(CorePositionMode.HEDGE);
-        assertThat(placed.order(91).positionSide()).isEqualTo(CorePositionSide.LONG);
+        assertThat(placed.users().get(101L).positionMode()).isEqualTo(CorePositionMode.HEDGE);
+        assertThat(placed.orders().get(91L).positionSide()).isEqualTo(CorePositionSide.LONG);
         assertThatThrownBy(() -> reducer.updatePositionMode(placed, 101,
                 new UpdatePositionModeCommand(CorePositionMode.ONE_WAY)))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -516,7 +516,7 @@ class RuntimeStateBusinessRulesTest {
         // 本用例已经给用户一百零一注资的冷状态，后续转换不能改写它
         TradingCoreState funded = funded(product, asset, 10_000);
         // 手工建立逐仓持仓前的原用户状态
-        CoreUserState current = funded.user(101);
+        CoreUserState current = funded.users().get(101L);
         // 复制的资产表，将一千从可用改为锁定以匹配手工持仓
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put(asset, new AssetBalance(asset, 9_000, 1_000));
@@ -532,7 +532,7 @@ class RuntimeStateBusinessRulesTest {
         // 带手工逐仓持仓及对应锁定余额的完整冷状态
         TradingCoreState withPosition = new TradingCoreState(funded.productLine(), funded.revision() + 1,
                 users, funded.orders(), funded.instruments(), funded.riskState(),
-                funded.treasuryState());
+                funded.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
 
         // 追加逐仓保证金五百后的预期冷状态
         TradingCoreState added = reducer.adjustPositionMargin(withPosition, 101,
@@ -541,10 +541,10 @@ class RuntimeStateBusinessRulesTest {
         TradingCoreState removed = reducer.adjustPositionMargin(added, 101,
                 new AdjustPositionMarginCommand("1", CorePositionSide.NET, -300));
 
-        assertThat(added.user(101).totalUnits(asset)).isEqualTo(10_000);
-        assertThat(added.user(101).positions().get("1").positionMarginUnits()).isEqualTo(1_500);
+        assertThat(CoreStateTestFixtures.totalUnits(added.users().get(101L), asset)).isEqualTo(10_000);
+        assertThat(added.users().get(101L).positions().get("1").positionMarginUnits()).isEqualTo(1_500);
         assertBalance(removed, asset, 8_800, 1_200);
-        assertThat(removed.user(101).positions().get("1").positionMarginUnits()).isEqualTo(1_200);
+        assertThat(removed.users().get(101L).positions().get("1").positionMarginUnits()).isEqualTo(1_200);
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(removed),
                 product)).isEqualTo(removed);
 
@@ -592,7 +592,7 @@ class RuntimeStateBusinessRulesTest {
 
         // 本用例接受委托后的冷状态，保留订单和预留事实供断言
         TradingCoreState placed = reducer.placeOrder(leveraged, 101, order);
-        assertThat(placed.user(101).reservations().get(301L).reservedUnits()).isEqualTo(20);
+        assertThat(placed.users().get(101L).reservations().get(301L).reservedUnits()).isEqualTo(20);
         assertThat(leveraged.leverages()).containsEntry(
                 new CoreLeverageKey(101, "1", CoreMarginMode.CROSS), 5_000_000L);
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(leveraged),
@@ -618,12 +618,12 @@ class RuntimeStateBusinessRulesTest {
                 .hasMessageContaining("open orders or positions exist");
         // 冷转换降低杠杆后的完整预期状态，用来比较快照和账户 Lane 结果
         TradingCoreState expected = reducer.updateLeverage(before, 101, command);
-        assertThat(expected.user(101).totalUnits(asset)).isEqualTo(before.user(101).totalUnits(asset));
-        assertThat(expected.user(202)).isEqualTo(before.user(202));
-        assertThat(expected.user(101).positions().get("1").positionMarginUnits())
-                .isGreaterThan(before.user(101).positions().get("1").positionMarginUnits());
-        assertThat(expected.user(101).balances().get(asset).lockedUnits())
-                .isEqualTo(expected.user(101).positions().get("1").positionMarginUnits());
+        assertThat(CoreStateTestFixtures.totalUnits(expected.users().get(101L), asset)).isEqualTo(CoreStateTestFixtures.totalUnits(before.users().get(101L), asset));
+        assertThat(expected.users().get(202L)).isEqualTo(before.users().get(202L));
+        assertThat(expected.users().get(101L).positions().get("1").positionMarginUnits())
+                .isGreaterThan(before.users().get(101L).positions().get("1").positionMarginUnits());
+        assertThat(expected.users().get(101L).balances().get(asset).lockedUnits())
+                .isEqualTo(expected.users().get(101L).positions().get("1").positionMarginUnits());
         assertThat(reducer.updateLeverage(expected, 101, command)).isEqualTo(expected);
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(expected), line)).isEqualTo(expected);
         // 本次运行时投影独用的整数身份表
@@ -650,7 +650,7 @@ class RuntimeStateBusinessRulesTest {
         // 杠杆重计前的完整冷状态，失败时必须原样保留
         TradingCoreState before = leveragePosition(ProductLine.LINEAR_PERPETUAL);
         before = reducer.adjustBalance(before, 101, new BalanceAdjustmentCommand("USDT",
-                -before.user(101).balances().get("USDT").availableUnits()));
+                -before.users().get(101L).balances().get("USDT").availableUnits()));
         // 本次运行时投影独用的整数身份表
         var identities = new RuntimeIdentityRegistry();
         try (/* 从用例原状态投影的运行时，直接业务或账户控制任务在其中执行，作用域结束关闭 */ var runtime = RuntimeStateProjector.project(before, identities)) {
@@ -929,7 +929,7 @@ class RuntimeStateBusinessRulesTest {
             long available,
             long locked) {
         // 用户一百零一该资产的余额，用于分别核对可用和锁定
-        AssetBalance balance = state.user(101).balances().get(asset);
+        AssetBalance balance = state.users().get(101L).balances().get(asset);
         assertThat(balance.availableUnits()).isEqualTo(available);
         assertThat(balance.lockedUnits()).isEqualTo(locked);
     }

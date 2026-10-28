@@ -45,8 +45,7 @@ class CoreValueValidationTest {
     @Test
     void preservesCanonicalInstrumentIdAndNormalizesAsset() {
         // 使用小写带空白资产名创建的预留，供规范化断言
-        OrderReservation reservation = OrderReservation.create(
-                1, "1", ReservationKind.SPOT_ASSET, " usdt ", 100, 1);
+        OrderReservation reservation = new OrderReservation(1, "1", ReservationKind.SPOT_ASSET, " usdt ", 100, 0, 0, 1);
 
         assertThat(reservation.instrumentId()).isEqualTo("1");
         assertThat(reservation.asset()).isEqualTo("USDT");
@@ -57,14 +56,11 @@ class CoreValueValidationTest {
      */
     @Test
     void rejectsNamesAndInvalidInstrumentIds() {
-        assertThatThrownBy(() -> OrderReservation.create(
-                1, "-BTC", ReservationKind.SPOT_ASSET, "USDT", 100, 1))
+        assertThatThrownBy(() -> new OrderReservation(1, "-BTC", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> OrderReservation.create(
-                1, "A", ReservationKind.SPOT_ASSET, "USDT", 100, 1))
+        assertThatThrownBy(() -> new OrderReservation(1, "A", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> OrderReservation.create(
-                1, "BTC.USDT", ReservationKind.SPOT_ASSET, "USDT", 100, 1))
+        assertThatThrownBy(() -> new OrderReservation(1, "BTC.USDT", ReservationKind.SPOT_ASSET, "USDT", 100, 0, 0, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

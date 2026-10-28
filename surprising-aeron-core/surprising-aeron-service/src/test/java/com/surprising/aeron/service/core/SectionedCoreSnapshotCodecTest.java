@@ -540,11 +540,11 @@ class SectionedCoreSnapshotCodecTest {
         CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "1",
                 CoreOrderSide.BUY, 100, 2, 0, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order),
+                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(1L, order),
                 Map.of("1", CoreInstrument.from(ProductLine.SPOT,
                         new RegisterInstrumentCommand(
                                 "1", "BTC", "USDT", "USDT", 1, 1, 1, null, 0, 0, 0, -1, 0))),
-                CoreRiskState.empty(), CoreTreasuryState.empty());
+                CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 
     /**

@@ -220,7 +220,7 @@ class CoreMaintenanceTest {
         String asset = ContractType.valueOf(line.contractTypeCode()).isInverse()?"BTC":"USDT";
         // 本次查询得到的财库状态，用于合计各结算资产余额
         var t = state.tradingState().treasuryState();
-        return state.tradingState().users().values().stream().mapToLong(/* 参与结算资产总额合计的用户 */ u -> u.totalUnits(asset)).sum()
+        return state.tradingState().users().values().stream().mapToLong(/* 参与结算资产总额合计的用户 */ u -> CoreStateTestFixtures.totalUnits(u, asset)).sum()
                 + t.feeBalances().getOrDefault(asset,0L)+t.insuranceBalances().getOrDefault(asset,0L)
                 + t.clearingPnlBalances().getOrDefault(asset,0L)+t.roundingResidualBalances().getOrDefault(asset,0L);
     }

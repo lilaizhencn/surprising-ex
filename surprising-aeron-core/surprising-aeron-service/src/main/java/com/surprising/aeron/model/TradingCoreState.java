@@ -82,68 +82,6 @@ public record TradingCoreState(
     }
 
     /**
-     * 构造基础冷状态，杠杆及条件任务为空，从给定订单推导客户端单号索引。
-     * @param productLine 本状态唯一所属产品线
-     * @param revision 本状态非负业务修订
-     * @param users 按用户 ID 保存的冷用户正文
-     * @param orders 按订单号保存的冷订单正文，可包含保留终态
-     * @param instruments 按永久数字标的文本保存的合约配置
-     * @param riskState 标记价、风险快照、强平及扫描的冷状态
-     * @param treasuryState 系统财库余额、资金费及到期结算进度
-     */
-    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
-                            CoreTreasuryState treasuryState) {
-        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
-                Map.of(), Map.of(), Map.of(), deriveClientOrderIndex(orders), Map.of());
-    }
-
-    /**
-     * 构造带杠杆及算法单的冷状态，其余条件任务为空，推导客户端单号索引。
-     * @param productLine 本状态唯一所属产品线
-     * @param revision 本状态非负业务修订
-     * @param users 按用户 ID 保存的冷用户正文
-     * @param orders 按订单号保存的冷订单正文，可包含保留终态
-     * @param instruments 按永久数字标的文本保存的合约配置
-     * @param riskState 标记价、风险快照、强平及扫描的冷状态
-     * @param treasuryState 系统财库余额、资金费及到期结算进度
-     * @param leverages 按用户、标的及保证金模式保存的杠杆值
-     * @param algoOrders 按算法 ID 保存的条件算法状态
-     */
-    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
-                            CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
-                            Map<Long, CoreAlgoOrderState> algoOrders) {
-        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
-                leverages, algoOrders, Map.of(), deriveClientOrderIndex(orders), Map.of());
-    }
-
-    /**
-     * 构造带算法单和全撤计时器的冷状态，触发单为空，推导客户端单号索引。
-     * @param productLine 本状态唯一所属产品线
-     * @param revision 本状态非负业务修订
-     * @param users 按用户 ID 保存的冷用户正文
-     * @param orders 按订单号保存的冷订单正文，可包含保留终态
-     * @param instruments 按永久数字标的文本保存的合约配置
-     * @param riskState 标记价、风险快照、强平及扫描的冷状态
-     * @param treasuryState 系统财库余额、资金费及到期结算进度
-     * @param leverages 按用户、标的及保证金模式保存的杠杆值
-     * @param algoOrders 按算法 ID 保存的条件算法状态
-     * @param cancelAllAfterTimers 按用户与范围键保存的全撤计时器
-     */
-    public TradingCoreState(ProductLine productLine, long revision, Map<Long, CoreUserState> users,
-                            Map<Long, CoreOrderState> orders,
-                            Map<String, CoreInstrument> instruments, CoreRiskState riskState,
-                            CoreTreasuryState treasuryState, Map<CoreLeverageKey, Long> leverages,
-                            Map<Long, CoreAlgoOrderState> algoOrders,
-                            Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers) {
-        this(productLine, revision, users, orders, instruments, riskState, treasuryState,
-                leverages, algoOrders, cancelAllAfterTimers, deriveClientOrderIndex(orders), Map.of());
-    }
-
-    /**
      * 构造带全部条件任务的冷状态，从订单推导客户端单号索引，再交主构造检查。
      * @param productLine 本状态唯一所属产品线
      * @param revision 本状态非负业务修订
@@ -174,23 +112,8 @@ public record TradingCoreState(
      */
     public static TradingCoreState empty(ProductLine productLine) {
         return new TradingCoreState(productLine, 0, Map.of(), Map.of(),
-                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-    }
-
-    /**
-     * 按用户 ID 查冷状态用户，未知返回空。
-     * @param userId 待读取、验证或排序的用户 ID
-     */
-    public CoreUserState user(long userId) {
-        return users.get(userId);
-    }
-
-    /**
-     * 按订单 ID 查冷状态正文，未知返回空。
-     * @param orderId 待读取、验证或盖提交元数据的订单号
-     */
-    public CoreOrderState order(long orderId) {
-        return orders.get(orderId);
+                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(),
+                Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     /**
@@ -457,38 +380,6 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, progress.nextCursorUserId());
         }
         return hash;
-    }
-
-    /**
-     * 未知用户返回零；混合该用户账户正文及按用户有序的杠杆字段，不包含全局订单表中的订单正文。
-     * @param userId 待读取、验证或排序的用户 ID
-     */
-    public long userStateHash(long userId) {
-        // 当前冷用户值或校验回调参数，删除项为空时跳过
-        CoreUserState user = users.get(userId);
-        if (user == null) return 0;
-        // 按既定业务字段顺序不断混合的哈希累计值
-        long hash = hashUser(CoreStateHash.start(), user);
-        for (Map.Entry<CoreLeverageKey, Long> /* 当前杠杆或财库分类表中的业务键值对，按该表字段顺序混合 */ entry : leverages.entrySet()) {
-            // 有序杠杆项所属用户，用于跳过前部及在越过目标后停止
-            long entryUserId = entry.getKey().userId();
-            if (entryUserId < userId) continue;
-            if (entryUserId > userId) break;
-            hash = CoreStateHash.mix(hash, entry.getKey().instrumentId());
-            hash = CoreStateHash.mix(hash, entry.getKey().marginMode().wireCode());
-            hash = CoreStateHash.mix(hash, entry.getValue());
-        }
-        return hash;
-    }
-
-    /**
-     * 未知订单返回零，存在时混合该订单完整业务及提交字段；单项查询不因订单终态而跳过。
-     * @param orderId 待读取、验证或盖提交元数据的订单号
-     */
-    public long orderStateHash(long orderId) {
-        // 当前校验、比较提交元数据、派生客户端索引或混合哈希的冷订单
-        CoreOrderState order = orders.get(orderId);
-        return order == null ? 0 : hashOrder(CoreStateHash.start(), order);
     }
 
     /**

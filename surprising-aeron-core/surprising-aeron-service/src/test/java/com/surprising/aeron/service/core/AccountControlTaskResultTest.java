@@ -29,9 +29,9 @@ class AccountControlTaskResultTest {
         var position = new CorePositionState("1", "USDT", CoreMarginMode.ISOLATED, CorePositionSide.NET,
                 10, 100, 1000, 0, 100);
         var user = new CoreUserState(product, 7, 1, Map.of("USDT", new AssetBalance("USDT", 900, 100)),
-                Map.of(), Map.of("1", position));
+                Map.of(), Map.of("1", position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         var initial = new TradingCoreState(product, 1, Map.of(7L, user), Map.of(), Map.of("1", instrument),
-                CoreRiskState.empty(), CoreTreasuryState.empty());
+                CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         var ids = new RuntimeIdentityRegistry();
         for (int i = 0; i < 256; i++) ids.assetId("ASSET" + i);
         try (var runtime = RuntimeStateProjector.project(initial, ids,

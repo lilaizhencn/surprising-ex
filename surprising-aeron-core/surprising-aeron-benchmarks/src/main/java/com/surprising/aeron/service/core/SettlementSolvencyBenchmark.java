@@ -47,13 +47,13 @@ public class SettlementSolvencyBenchmark {
             for (long user = 1000; user < 1256; user++) {
                 h.adjust(user, asset, 1_000_000);
                 order(h, user, CoreOrderSide.SELL, 1, marginMode);
-                long available = h.state().tradingState().user(user).balances().get(asset).availableUnits();
+                long available = h.state().tradingState().users().get(user).balances().get(asset).availableUnits();
                 h.adjust(user, asset, -available);
             }
             var state = h.state().tradingState();
-            deficit = loss - state.user(1000).positions().get("41").positionMarginUnits();
+            deficit = loss - state.users().get(1000L).positions().get("41").positionMarginUnits();
             if (deficit <= 0) throw new IllegalStateException("fixture must be insolvent");
-            makerOpening = state.user(999).totalUnits(asset);
+            makerOpening = LinearPerpetualBenchmarkSupport.totalUnits(state.users().get(999L), asset);
             if ("MAINTENANCE".equals(settlementTrigger)) {
                 h.execute(h.command(CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,CommandSource.OPERATIONS,0,
                         CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("41",0,
@@ -92,8 +92,8 @@ public class SettlementSolvencyBenchmark {
         if (paused.complete() || paused.processedUsers() != 0 || paused.nextCursorUserId() != 0
                 || paused.requiredInsuranceUnits() != deficit * 15)
             throw new IllegalStateException("unfunded page did not pause atomically");
-        if (recover && (harness.state().tradingState().user(999).totalUnits(asset) != makerOpening
-                || harness.state().tradingState().user(1000).positions().get("41").signedQuantitySteps() != -1))
+        if (recover && (LinearPerpetualBenchmarkSupport.totalUnits(harness.state().tradingState().users().get(999L), asset) != makerOpening
+                || harness.state().tradingState().users().get(1000L).positions().get("41").signedQuantitySteps() != -1))
             throw new IllegalStateException("unfunded page mutated balances or positions");
         long partialInsurance = 0;
         if (recover) {
@@ -102,12 +102,12 @@ public class SettlementSolvencyBenchmark {
                     TradingCommandCodec.encodeAdjustInsuranceFund(new AdjustInsuranceFundCommand(asset, partialInsurance))));
             if (page(0).requiredInsuranceUnits() != deficit * 15
                     || harness.state().tradingState().treasuryState().insuranceBalances().get(asset) != partialInsurance
-                    || harness.state().tradingState().user(999).totalUnits(asset) != makerOpening)
+                    || LinearPerpetualBenchmarkSupport.totalUnits(harness.state().tradingState().users().get(999L), asset) != makerOpening)
                 throw new IllegalStateException("partially funded page consumed cash");
             var checkpoint = harness.snapshotTemplate(4);
             harness.close();
             harness = LinearPerpetualBenchmarkSupport.Harness.restore(checkpoint);
-            if (harness.state().tradingState().treasuryState().lifecycleProgress("41").requiredInsuranceUnits()
+            if (harness.state().tradingState().treasuryState().lifecycleProgress().get("41").requiredInsuranceUnits()
                     != deficit * 15) throw new IllegalStateException("lost settlement debt on recovery");
             if (page(0).requiredInsuranceUnits() != deficit * 15)
                 throw new IllegalStateException("retry changed required insurance");
@@ -142,8 +142,8 @@ public class SettlementSolvencyBenchmark {
                         || user.positions().values().stream().anyMatch(p -> p.signedQuantitySteps() != 0))
                     throw new IllegalStateException("non-terminal settlement state");
                 long expected = user.userId() == 999 ? makerOpening + loss * 256 : 0;
-                if (user.totalUnits(asset) != expected) throw new IllegalStateException("wrong settlement cash: " + user);
-                total = Math.addExact(total, user.totalUnits(asset));
+                if (LinearPerpetualBenchmarkSupport.totalUnits(user, asset) != expected) throw new IllegalStateException("wrong settlement cash: " + user);
+                total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
             }
             if (total != makerOpening + loss * 256 || !state.treasuryState().insuranceBalances().isEmpty()
                     || !state.treasuryState().clearingPnlBalances().isEmpty()

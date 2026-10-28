@@ -52,19 +52,19 @@ class TradingStateSnapshotCodecTest {
                 100, 100, 200, com.surprising.aeron.model.CoreOrderStatus.OPEN, 2);
         // 当前待编码或直接测试构造契约的交易状态。
         var state = new TradingCoreState(empty.productLine(), 2, empty.users(), Map.of(11L, order),
-                empty.instruments(), empty.riskState(), empty.treasuryState());
+                empty.instruments(), empty.riskState(), empty.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 当前格式往返解码后的交易状态。
         var restored = TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(state), ProductLine.SPOT);
-        assertThat(restored.order(11).executedValueHigh()).isEqualTo(1);
-        assertThat(restored.order(11).executedValueLow()).isEqualTo(-1);
+        assertThat(restored.orders().get(11L).executedValueHigh()).isEqualTo(1);
+        assertThat(restored.orders().get(11L).executedValueLow()).isEqualTo(-1);
         assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
     }
 
     /**
-     * 通过测试转换器建立期权品种、余额、标记价与 GTX 买单，往返后比较完整状态、业务哈希、用户哈希和订单哈希。
+     * 通过测试转换器建立期权品种、余额、标记价与 GTX 买单，往返后比较完整状态和业务哈希。
      */
     @Test
-    void roundTripPreservesBusinessAndEntityHashes() {
+    void roundTripPreservesBusinessStateAndHash() {
         // 测试用同步状态转换器，建立输入而不是另写一套快照编解码。
         RuntimeTestStateTransitions reducer = new RuntimeTestStateTransitions();
         // 当前待编码或直接测试构造契约的交易状态。
@@ -83,8 +83,6 @@ class TradingStateSnapshotCodecTest {
 
         assertThat(restored).isEqualTo(state);
         assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
-        assertThat(restored.userStateHash(7)).isEqualTo(state.userStateHash(7));
-        assertThat(restored.orderStateHash(71)).isEqualTo(state.orderStateHash(71));
     }
 
     /**
@@ -103,7 +101,7 @@ class TradingStateSnapshotCodecTest {
         // 包含标记价与指定续扫任务的风险状态。
         CoreRiskState risk = new CoreRiskState(
                 Map.of("1", new CoreMarkPriceState("1", 70_000, 7, 1_000)),
-                Map.of(), Map.of(), Map.of("1", scan), 1);
+                Map.of(), Map.of(), Map.of("1", scan), 1, CoreRiskState.defaultScanControl(), 0);
         // 当前待编码或直接测试构造契约的交易状态。
         TradingCoreState state = new TradingCoreState(empty.productLine(), empty.revision(), empty.users(),
                 empty.orders(), empty.instruments(), risk, empty.treasuryState(),

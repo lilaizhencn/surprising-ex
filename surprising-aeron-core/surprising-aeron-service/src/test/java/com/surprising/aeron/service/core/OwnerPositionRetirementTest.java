@@ -99,8 +99,8 @@ class OwnerPositionRetirementTest {
                             java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                     0, 0, 0, -1, 0));
             // 包含测试合约的初始业务状态
-            var initial = new TradingCoreState(line, 0, Map.of(7L, CoreUserState.empty(line, 7)), Map.of(),
-                    Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+            var initial = new TradingCoreState(line, 0, Map.of(7L, new CoreUserState(line, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(),
+                    Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
             runtime = RuntimeStateProjector.project(initial, identities);
             // 合约注册后的稠密符号编号
             // 结算资产对应的稠密资产编号

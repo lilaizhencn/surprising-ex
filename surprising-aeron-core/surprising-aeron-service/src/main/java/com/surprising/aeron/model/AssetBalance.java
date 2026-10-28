@@ -1,10 +1,9 @@
 package com.surprising.aeron.model;
 
-import com.surprising.aeron.exception.CoreStateRejectedException;
 import java.util.Locale;
 
 /**
- * 一名用户某种资产的可用金额和冻结金额，用于冷状态导出、恢复与核对；冻结操作返回新记录并检查整数溢出。
+ * 一名用户某种资产的可用金额和冻结金额，用于冷状态导出、恢复与核对；金额变化由账户运行时执行。
  * @param asset 资产代码，去掉两端空格并统一为大写字母和数字
  * @param availableUnits 当前可以继续使用的金额，单位为该资产最小整数单位
  * @param lockedUnits 已冻结、暂时不能再次使用的金额，单位为该资产最小整数单位
@@ -19,25 +18,6 @@ public record AssetBalance(String asset, long availableUnits, long lockedUnits) 
         if (availableUnits < 0 || lockedUnits < 0) {
             throw new IllegalArgumentException("balance units must not be negative");
         }
-    }
-
-    /**
-     * 把可用和冻结相加，得到这份资产余额总额；不包含其他资产或未实现盈亏。
-     */
-    public long totalUnits() {
-        return Math.addExact(availableUnits, lockedUnits);
-    }
-
-    /**
-     * 把指定金额从可用余额转入冻结余额，用于订单等需要预占资金的业务，总额保持不变。
-     * @param units 本次操作的正数金额，单位为资产最小整数单位
-     */
-    public AssetBalance reserve(long units) {
-        requirePositive(units);
-        if (availableUnits < units) {
-            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "available balance is insufficient");
-        }
-        return new AssetBalance(asset, Math.subtractExact(availableUnits, units), Math.addExact(lockedUnits, units));
     }
 
     /**
@@ -80,13 +60,4 @@ public record AssetBalance(String asset, long availableUnits, long lockedUnits) 
         return true;
     }
 
-    /**
-     * 要求本次冻结、释放或收支金额大于 0，避免负金额反转业务方向。
-     * @param units 本次操作的正数金额，单位为资产最小整数单位
-     */
-    private static void requirePositive(long units) {
-        if (units <= 0) {
-            throw new IllegalArgumentException("units must be positive");
-        }
-    }
 }

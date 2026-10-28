@@ -75,7 +75,7 @@ class CoreRiskStateTest {
         TradingCoreState state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
-        state = withPosition(state, new CorePositionState("1", "USDT", 10, 100, 1_000, 0, 100));
+        state = withPosition(state, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, 100, 1_000, 0, 100));
         state = reducer.updateRiskScanControl(state, new UpdateRiskScanControlCommand(
                 1, "Paused scan", false, 1_000, 500, "admin", "maintenance"), 2_000);
 
@@ -84,7 +84,7 @@ class CoreRiskStateTest {
                 new ApplyMarkPriceCommand("1", 80, 1, 2_001));
 
         assertThat(marked.riskState().snapshots()).isEmpty();
-        assertThat(marked.riskState().scan().riskComplete()).isTrue();
+        assertThat(marked.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)).isTrue();
         assertThat(marked.riskState().scanControl().version()).isEqualTo(2);
     }
 
@@ -108,7 +108,7 @@ class CoreRiskStateTest {
         TradingCoreState state = reducer.registerInstrument(TradingCoreState.empty(productLine),
                 instrument(contractType, settleScale));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
-        state = withPosition(state, new CorePositionState("1", "USDT", 10, entryPrice, Math.multiplyExact(entryPrice, 10), 0, 100));
+        state = withPosition(state, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, entryPrice, Math.multiplyExact(entryPrice, 10), 0, 100));
 
         // 这次下跌行情的统一命令，状态转换和运行时模拟都应用同一份输入。
         ApplyMarkPriceCommand markCommand = new ApplyMarkPriceCommand(
@@ -126,7 +126,7 @@ class CoreRiskStateTest {
         assertThat(risk.status()).isEqualTo(CoreRiskStatus.LIQUIDATION);
         assertThat(marked.riskState().liquidations()).hasSize(1);
         assertThat(marked.riskState().liquidations().get(1L).closeQuantitySteps()).isEqualTo(10);
-        assertThat(marked.riskState().scan().complete()).isTrue();
+        assertThat(marked.riskState().scans().values().stream().allMatch(scanState -> scanState.riskComplete() && scanState.triggerComplete())).isTrue();
 
         // 将本次检查点编码成快照后再解码的状态，用来核对恢复结果。
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
@@ -156,20 +156,20 @@ class CoreRiskStateTest {
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
         for (/* 批量构造或遍历风险账户时的用户编号，每个编号对应一份独立账户状态。 */ long userId = 1; userId <= 1_300; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
-            state = withPosition(state, userId, new CorePositionState("1", "USDT", 1, 100, 100, 0, 10));
+            state = withPosition(state, userId, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10));
         }
 
         // 应用新价格后只完成首批工作量的状态，必须仍有后续扫描。
         TradingCoreState firstBatch = reducer.applyMarkPrice(state,
                 new ApplyMarkPriceCommand("1", 80, 1, 1_700_000_000_000L));
-        assertThat(firstBatch.riskState().scan().complete()).isFalse();
+        assertThat(firstBatch.riskState().scans().values().stream().allMatch(scanState -> scanState.riskComplete() && scanState.triggerComplete())).isFalse();
         assertThat(firstBatch.riskState().snapshots()).hasSizeLessThanOrEqualTo(
                 firstBatch.riskState().scanControl().scanBatchSize());
         assertThat(firstBatch.riskState().snapshots()).isNotEmpty();
 
         // 把首批状态继续扫描到结束后的结果，应有全部 1300 份风险估值。
         TradingCoreState completed = continueRiskScans(firstBatch);
-        assertThat(completed.riskState().scan().complete()).isTrue();
+        assertThat(completed.riskState().scans().values().stream().allMatch(scanState -> scanState.riskComplete() && scanState.triggerComplete())).isTrue();
         // 本地测试配置的 Lane 分配规则，用来独立算出最终游标应落在哪个用户。
         LaneTopology topology = CoreConfiguration.standaloneLaneTopology();
         // 属于最后一个账户 Lane 的最大用户编号，作为最终用户游标的期望值。
@@ -179,9 +179,9 @@ class CoreRiskStateTest {
                 expectedLastUserId = userId;
             }
         }
-        assertThat(completed.riskState().scan().accountLaneId())
+        assertThat(completed.riskState().scans().get("1").accountLaneId())
                 .isEqualTo(topology.accountLaneCount() - 1);
-        assertThat(completed.riskState().scan().laneProgress().get(topology.accountLaneCount() - 1).lastUserId())
+        assertThat(completed.riskState().scans().get("1").laneProgress().get(topology.accountLaneCount() - 1).lastUserId())
                 .isEqualTo(expectedLastUserId);
         assertThat(completed.riskState().snapshots()).hasSize(1_300);
     }
@@ -196,12 +196,12 @@ class CoreRiskStateTest {
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
         for (/* 批量构造或遍历风险账户时的用户编号，每个编号对应一份独立账户状态。 */ long userId = 1; userId <= 260; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
-            state = withPosition(state, userId, new CorePositionState("1", "USDT", 1, 100, 100, 0, 10));
+            state = withPosition(state, userId, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10));
         }
         // 首批标记价处理后仍有未完成用户的状态，作为快照检查点。
         TradingCoreState partial = reducer.applyMarkPrice(state,
                 new ApplyMarkPriceCommand("1", 80, 1, 1_700_000_000_000L));
-        assertThat(partial.riskState().scan().riskComplete()).isFalse();
+        assertThat(partial.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)).isFalse();
         // 将本次检查点编码成快照后再解码的状态，用来核对恢复结果。
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(partial), ProductLine.LINEAR_PERPETUAL);
@@ -225,7 +225,7 @@ class CoreRiskStateTest {
         TradingCoreState state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
-        state = withPosition(state, new CorePositionState("1", "USDT", 10, 100, 1_000, 0, 100));
+        state = withPosition(state, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, 100, 1_000, 0, 100));
         // 测试使用的字符串编号与运行时整数编号映射，投影和一致性比对必须共用它。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
@@ -294,7 +294,7 @@ class CoreRiskStateTest {
         var state = reducer.registerInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument("1"));
         state = reducer.registerInstrument(state, instrument("2"));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
-        state = withPosition(state, new CorePositionState("2", "USDT", 10, 100, 1000, 0, 100));
+        state = withPosition(state, new CorePositionState("2", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, 100, 1000, 0, 100));
         // 本用例的币对、资产和持仓身份映射，用来读取运行时状态。
         var ids = new RuntimeIdentityRegistry();
         // 由测试状态投影出的可变运行时状态，接受标记价和分批风险处理。
@@ -324,7 +324,7 @@ class CoreRiskStateTest {
         state = reducer.registerInstrument(state, instrument("4"));
         state = reducer.registerInstrument(state, instrument("2"));
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
-        state = withPosition(state, new CorePositionState("2", "USDT", 10, 100, 1000, 0, 100));
+        state = withPosition(state, new CorePositionState("2", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, 100, 1000, 0, 100));
         // 风险扫描前的资金哈希，处理结束后必须相同。
         long funds = FundsStateHash.compute(state);
         // 本用例的币对、资产和持仓身份映射，用来读取运行时状态。
@@ -368,13 +368,13 @@ class CoreRiskStateTest {
         TradingCoreState state = reducer.registerInstrument(
                 TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), command);
         state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
-        state = withPosition(state, new CorePositionState("1", "USDT", 10, 10, 100, 0, 100));
+        state = withPosition(state, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, 10, 100, 0, 100));
 
         // 测试状态转换应用本次标记价后得到的状态，用来检查估值和强平计划。
         TradingCoreState marked = reducer.applyMarkPrice(state,
                 new ApplyMarkPriceCommand("1", 100, 1, 1_700_000_000_000L));
 
-        assertThat(marked.riskState().scan().complete()).isTrue();
+        assertThat(marked.riskState().scans().values().stream().allMatch(scanState -> scanState.riskComplete() && scanState.triggerComplete())).isTrue();
         assertThat(marked.riskState().snapshots()).containsKey("7:1");
     }
 
@@ -389,8 +389,8 @@ class CoreRiskStateTest {
         state = reducer.registerInstrument(state, instrument("2"));
         for (/* 批量构造或遍历风险账户时的用户编号，每个编号对应一份独立账户状态。 */ long userId = 1; userId <= 1_300; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 200));
-            state = withPosition(state, userId, new CorePositionState("1", "USDT", 1, 100, 100, 0, 10));
-            state = withPosition(state, userId, new CorePositionState("2", "USDT", 1, 100, 100, 0, 10));
+            state = withPosition(state, userId, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10));
+            state = withPosition(state, userId, new CorePositionState("2", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10));
         }
 
         state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("1", 80, 1,
@@ -399,10 +399,10 @@ class CoreRiskStateTest {
                 1_700_000_000_000L));
 
         assertThat(state.riskState().scans()).containsOnlyKeys("1", "2");
-        assertThat(state.riskState().scans().get("1").complete()).isFalse();
-        assertThat(state.riskState().scans().get("2").complete()).isFalse();
+        assertThat((state.riskState().scans().get("1").riskComplete() && state.riskState().scans().get("1").triggerComplete())).isFalse();
+        assertThat((state.riskState().scans().get("2").riskComplete() && state.riskState().scans().get("2").triggerComplete())).isFalse();
         state = continueRiskScans(state);
-        assertThat(state.riskState().scans().values()).allMatch(CoreRiskState.RiskScan::complete);
+        assertThat(state.riskState().scans().values()).allMatch(scanState -> scanState.riskComplete() && scanState.triggerComplete());
     }
 
     /**
@@ -415,7 +415,7 @@ class CoreRiskStateTest {
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
         for (/* 批量构造或遍历风险账户时的用户编号，每个编号对应一份独立账户状态。 */ long userId = 1; userId <= 1_300; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
-            state = withPosition(state, userId, new CorePositionState("1", "USDT", 1, 100, 100, 0, 10));
+            state = withPosition(state, userId, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10));
         }
         state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("1", 90, 1,
                 1_700_000_000_000L));
@@ -427,9 +427,9 @@ class CoreRiskStateTest {
         CoreRiskState.RiskScan restarted = state.riskState().scans().get("1");
         assertThat(restarted.priceSequence()).isEqualTo(2);
         assertThat(restarted.laneProgress().get(restarted.accountLaneId()).lastUserId()).isPositive();
-        assertThat(restarted.complete()).isFalse();
+        assertThat((restarted.riskComplete() && restarted.triggerComplete())).isFalse();
         state = continueRiskScans(state);
-        assertThat(state.riskState().scans().get("1").complete()).isTrue();
+        assertThat((state.riskState().scans().get("1").riskComplete() && state.riskState().scans().get("1").triggerComplete())).isTrue();
         assertThat(state.riskState().snapshots().values())
                 .allMatch(/* 最终逐个检查的风险快照，价格序号必须全部更新为 2。 */ snapshot -> snapshot.priceSequence() == 2);
     }
@@ -500,7 +500,7 @@ class CoreRiskStateTest {
         // 把新行情和手工扫描游标装入的风险状态，其余风险与强平事实沿用原值。
         CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
                 state.riskState().liquidations(), Map.of("1", scan),
-                state.riskState().nextLiquidationId());
+                state.riskState().nextLiquidationId(), CoreRiskState.defaultScanControl(), 0);
         // 包含新风险状态的根状态，分批与大批量两个计算路径都从这里出发。
         TradingCoreState pending = new TradingCoreState(state.productLine(), state.revision() + 1,
                 state.users(), state.orders(), state.instruments(), risk,
@@ -509,25 +509,25 @@ class CoreRiskStateTest {
 
         // 只推进一个工作项的状态，应保存正在处理的用户和持仓游标。
         TradingCoreState firstPage = reducer.continueRiskScan(pending, 1);
-        var scanProgress = firstPage.riskState().scan();
+        var scanProgress = firstPage.riskState().scans().get("1");
         var laneProgress = scanProgress.laneProgress().get(scanProgress.accountLaneId());
         assertThat(laneProgress.userId()).isEqualTo(7);
         assertThat(laneProgress.positionCursor()).isEqualTo("1");
-        assertThat(firstPage.riskState().scan().triggerComplete()).isFalse();
+        assertThat(firstPage.riskState().scans().get("1").triggerComplete()).isFalse();
         // 将本次检查点编码成快照后再解码的状态，用来核对恢复结果。
         TradingCoreState restored = TradingStateSnapshotCodec.decode(
                 TradingStateSnapshotCodec.encode(firstPage), ProductLine.LINEAR_PERPETUAL);
-        assertThat(restored.riskState().scan()).isEqualTo(firstPage.riskState().scan());
+        assertThat(restored.riskState().scans().get("1")).isEqualTo(firstPage.riskState().scans().get("1"));
         assertThat(restored.businessStateHash()).isEqualTo(firstPage.businessStateHash());
 
         // 从快照恢复后反复按一个工作项推进的状态。
         TradingCoreState paged = restored;
-        for (/* 限制分批继续次数的循环计数，防止游标不推进时测试无限运行。 */ int page = 0; page < 10 && !paged.riskState().scan().riskComplete(); page++) {
+        for (/* 限制分批继续次数的循环计数，防止游标不推进时测试无限运行。 */ int page = 0; page < 10 && !paged.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete); page++) {
             paged = reducer.continueRiskScan(paged, 1);
         }
         // 从相同起点一次给足 4096 项预算的结果，作为分批算法的参照。
         TradingCoreState unpaged = reducer.continueRiskScan(pending, 4_096);
-        assertThat(paged.riskState().scan().riskComplete()).isTrue();
+        assertThat(paged.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)).isTrue();
         assertThat(paged.riskState().snapshots()).isEqualTo(unpaged.riskState().snapshots());
         assertThat(paged.riskState().liquidations()).isEqualTo(unpaged.riskState().liquidations());
     }
@@ -542,7 +542,7 @@ class CoreRiskStateTest {
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
         for (/* 批量构造或遍历风险账户时的用户编号，每个编号对应一份独立账户状态。 */ long userId = 1; userId <= 260; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
-            state = withPosition(state, userId, new CorePositionState("1", "USDT", 1, 100, 100, 0, 10));
+            state = withPosition(state, userId, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10));
         }
         // 统一用于两条处理路径的标记价下跌命令。
         ApplyMarkPriceCommand command = new ApplyMarkPriceCommand("1", 80, 1,
@@ -560,7 +560,7 @@ class CoreRiskStateTest {
                     .isEqualTo(first);
             RuntimeStateParityChecker.assertMatches(first, identities, runtime);
 
-            while (!first.riskState().scan().riskComplete()) {
+            while (!first.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)) {
                 // 本批继续扫描开始前的参照状态，状态转换和运行时都从同一业务进度推进。
                 TradingCoreState before = first;
                 first = reducer.continueRiskScan(before, 64);
@@ -584,7 +584,7 @@ class CoreRiskStateTest {
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
         for (/* 批量构造或遍历风险账户时的用户编号，每个编号对应一份独立账户状态。 */ long userId = 1; userId <= 32; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
-            state = withPosition(state, userId, new CorePositionState("1", "USDT", 10, 100, 1_000, 0, 100));
+            state = withPosition(state, userId, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 10, 100, 1_000, 0, 100));
         }
         // 同时让这批用户产生强平风险的标记价命令。
         ApplyMarkPriceCommand command = new ApplyMarkPriceCommand("1", 80, 1,
@@ -599,7 +599,7 @@ class CoreRiskStateTest {
         try {
             RuntimeTestStateTransitions.applyRiskMarkPrice(state, command, runtime, identities);
             RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
-            while (!authoritative.riskState().scan().riskComplete()) {
+            while (!authoritative.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)) {
                 // 本批继续扫描开始前的参照状态，状态转换和运行时都从同一业务进度推进。
                 TradingCoreState before = authoritative;
                 authoritative = reducer.continueRiskScan(before, 7);
@@ -623,7 +623,7 @@ class CoreRiskStateTest {
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
         for (/* 批量构造或遍历风险账户时的用户编号，每个编号对应一份独立账户状态。 */ long userId = 1; userId <= 260; userId++) {
             state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
-            state = withPosition(state, userId, new CorePositionState("1", "USDT", 1, 100, 100, 0, 10));
+            state = withPosition(state, userId, new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 1, 100, 100, 0, 10));
         }
         state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("1", 90, 1,
                 1_700_000_000_000L));
@@ -638,9 +638,9 @@ class CoreRiskStateTest {
         TradingAccountRuntime runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
                 state, latest, identities);
         RuntimeStateParityChecker.assertMatches(after, identities, runtime);
-        assertThat(after.riskState().scan().scanStartPriceSequence()).isEqualTo(1);
-        assertThat(after.riskState().scan().priceSequence()).isEqualTo(2);
-        assertThat(after.riskState().scan().riskComplete()).isFalse();
+        assertThat(after.riskState().scans().get("1").scanStartPriceSequence()).isEqualTo(1);
+        assertThat(after.riskState().scans().get("1").priceSequence()).isEqualTo(2);
+        assertThat(after.riskState().scans().values().stream().allMatch(com.surprising.aeron.model.CoreRiskState.RiskScan::riskComplete)).isFalse();
     }
 
     /**
@@ -648,7 +648,7 @@ class CoreRiskStateTest {
      * @param state 要继续扫描或加入持仓的不可变测试状态
      */
     private TradingCoreState continueRiskScans(TradingCoreState state) {
-        for (/* 已尝试推进的批次数量，到一万批就停止并交给测试断言判断。 */ int page = 0; page < 10_000 && state.riskState().scans().values().stream().anyMatch(scan -> !scan.complete()); page++) {
+        for (/* 已尝试推进的批次数量，到一万批就停止并交给测试断言判断。 */ int page = 0; page < 10_000 && state.riskState().scans().values().stream().anyMatch(scan -> !(scan.riskComplete() && scan.triggerComplete())); page++) {
             state = reducer.continueRiskScan(state, 64);
         }
         return state;
@@ -701,7 +701,7 @@ class CoreRiskStateTest {
             long userId,
             CorePositionState position) {
         // 加入测试持仓前的用户记录，余额和已有冻结、持仓都从它复制。
-        CoreUserState current = state.user(userId);
+        CoreUserState current = state.users().get(userId);
         // 该用户的余额映射副本，将持仓保证金从可用转到冻结后装回新用户。
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         // 保证金资产原有的余额，新增持仓只调整这项资产的可用与冻结部分。
@@ -714,11 +714,11 @@ class CoreRiskStateTest {
         positions.put(position.key(), position);
         // 包含新余额和持仓、修订号已增加的用户记录。
         CoreUserState user = new CoreUserState(state.productLine(), userId, current.revision() + 1,
-                balances, current.reservations(), positions);
+                balances, current.reservations(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 根状态的用户映射副本，只替换本次需要加入持仓的用户。
         Map<Long, CoreUserState> users = new TreeMap<>(state.users());
         users.put(userId, user);
         return new TradingCoreState(state.productLine(), state.revision() + 1, users, state.orders(),
-                state.instruments(), state.riskState(), state.treasuryState());
+                state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 }

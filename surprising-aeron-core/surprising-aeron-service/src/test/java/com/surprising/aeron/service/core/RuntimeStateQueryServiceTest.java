@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core;
 
 import com.surprising.aeron.model.CoreLeverageKey;
 import com.surprising.aeron.model.CoreOrderStatus;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
@@ -18,7 +17,6 @@ import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.query.state.*;
 import com.surprising.aeron.service.query.state.RuntimeStateQueryService;
-import com.surprising.aeron.service.snapshot.state.RuntimeStateMaterializer;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -30,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RuntimeStateQueryServiceTest {
 
     /**
-     * 直接准备用户余额、冻结、持仓、杠杆和订单索引，查询后核对实体条数、用户及订单哈希与物化快照相同，客户端标识查询也应命中同一订单。
+     * 直接准备用户余额、冻结、持仓、杠杆和订单索引，查询后核对实体条数，并用清理前固定夹具的哈希常量核对字段顺序，客户端标识查询也应命中同一订单。
      */
     @Test
     void buildsUserOrderAndClientQueriesFromRuntimeIndexes() {
@@ -65,8 +63,6 @@ class RuntimeStateQueryServiceTest {
                 1_000, 1_000, 9, CoreOrderStatus.OPEN, 1));
         runtime.putClientOrder(1001, clientKey, 71);
 
-        // 把同一运行时完整物化得到的业务状态，用它独立核对用户与订单状态哈希。
-        TradingCoreState snapshot = RuntimeStateMaterializer.materialize(runtime, identities);
         // 在该用户所属 Lane 内组装的完整用户查询结果。
         var user = RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false);
         // 按 Core 订单编号 71 直接查询的订单结果。
@@ -76,7 +72,7 @@ class RuntimeStateQueryServiceTest {
 
         assertThat(user.found()).isTrue();
         assertThat(RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, true)
-                .stateHash()).isEqualTo(snapshot.userStateHash(1001));
+                .stateHash()).isEqualTo(4_392_142_050_606_229_068L);
         assertThat(user.stateHash()).isZero();
         assertThat(user.view().balances()).hasSize(1);
         assertThat(user.view().reservations()).hasSize(1);
@@ -84,7 +80,7 @@ class RuntimeStateQueryServiceTest {
         assertThat(user.view().leverages()).hasSize(1);
         assertThat(order.found()).isTrue();
         var orderHash = RuntimeStateQueryService.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, true);
-        assertThat(orderHash.stateHash()).isEqualTo(snapshot.orderStateHash(71));
+        assertThat(orderHash.stateHash()).isEqualTo(2_473_578_025_272_220_416L);
         assertThat(orderHash.view()).isNull();
         assertThat(order.stateHash()).isZero();
         assertThat(clientOrder).isEqualTo(order);

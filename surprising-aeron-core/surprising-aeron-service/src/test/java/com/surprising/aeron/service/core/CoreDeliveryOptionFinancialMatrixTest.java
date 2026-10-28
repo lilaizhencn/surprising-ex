@@ -297,8 +297,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState settled = reducer.settleInstrument(matched,
                 new SettleInstrumentCommand(401, option.instrumentId(), option.settlementPriceTicks()));
 
-        assertThat(settled.user(USER_ID).totalUnits(option.settleAsset())).isEqualTo(WALLET - 20 + 40);
-        assertThat(settled.user(MAKER_ID).totalUnits(option.settleAsset())).isEqualTo(WALLET + 20 - 40);
+        assertThat(CoreStateTestFixtures.totalUnits(settled.users().get(USER_ID), option.settleAsset())).isEqualTo(WALLET - 20 + 40);
+        assertThat(CoreStateTestFixtures.totalUnits(settled.users().get(MAKER_ID), option.settleAsset())).isEqualTo(WALLET + 20 - 40);
         assertThat(settled.treasuryState().feeBalances()).doesNotContainKey(option.settleAsset());
         assertThat(settled.treasuryState().lifecycleSettlements()).containsEntry(option.instrumentId(), 401L);
         assertThat(reducer.settleInstrument(settled,
@@ -365,7 +365,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                     List.of(USER_ID, MAKER_ID));
 
             assertThat(second.progress().complete()).isTrue();
-            assertThat(second.state().treasuryState().lifecycleProgress(variant.instrumentId())).isNull();
+            assertThat(second.state().treasuryState().lifecycleProgress().get(variant.instrumentId())).isNull();
             assertFlatAndReleased(second.state(), variant);
         }
     }
@@ -401,7 +401,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                     List.of(USER_ID, MAKER_ID));
 
             assertThat(second.progress().complete()).isTrue();
-            assertThat(second.state().treasuryState().lifecycleProgress(variant.instrumentId())).isNull();
+            assertThat(second.state().treasuryState().lifecycleProgress().get(variant.instrumentId())).isNull();
             assertFlatAndReleased(second.state(), variant);
         }
     }
@@ -433,7 +433,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         state = reducer.placeOrder(state, USER_ID, deliveryOrder(701, cross, crossSymbol));
 
         // 逐仓结算前的用户值，供余额、全仓持仓及预留不变断言
-        CoreUserState beforeUser = state.user(USER_ID);
+        CoreUserState beforeUser = state.users().get(USER_ID);
         // 逐仓结算前的 USDT 余额，包含自由资金和各类锁定
         AssetBalance beforeBalance = beforeUser.balances().get("USDT");
         // 逐仓结算前保留的另一个全仓持仓，不得被改写
@@ -441,7 +441,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 结算前保存的未成交订单预留，供隔离或释放断言
         OrderReservation beforeReservation = beforeUser.reservations().get(701L);
         // 用户总额扣除目标逐仓保证金后的全仓可用抵押口径，应保持一百八十
-        long beforeCrossCollateral = beforeBalance.totalUnits()
+        long beforeCrossCollateral = CoreStateTestFixtures.totalUnits(beforeBalance)
                 - beforeUser.positions().get(isolatedSymbol).positionMarginUnits();
         assertThat(beforeBalance.availableUnits()).isEqualTo(130);
         assertThat(beforeBalance.lockedUnits()).isEqualTo(70);
@@ -455,22 +455,22 @@ class CoreDeliveryOptionFinancialMatrixTest {
         var command = new SettleInstrumentCommand(407, isolatedSymbol, 100);
         // 保险不足时结束本段但保持目标用户未结算的状态
         TradingCoreState paused = reducer.settleInstrument(state, command);
-        assertThat(paused.user(USER_ID).balances()).isEqualTo(beforeUser.balances());
-        assertThat(paused.user(USER_ID).positions()).isEqualTo(beforeUser.positions());
-        assertThat(paused.treasuryState().lifecycleProgress(isolatedSymbol).requiredInsuranceUnits()).isEqualTo(20);
+        assertThat(paused.users().get(USER_ID).balances()).isEqualTo(beforeUser.balances());
+        assertThat(paused.users().get(USER_ID).positions()).isEqualTo(beforeUser.positions());
+        assertThat(paused.treasuryState().lifecycleProgress().get(isolatedSymbol).requiredInsuranceUnits()).isEqualTo(20);
         state = reducer.adjustInsuranceFund(paused, new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 20));
         // 本次到期结算完成后的冷状态，供持仓释放和资金守恒断言
         TradingCoreState settled = reducer.settleInstrument(state, command);
 
         // 保险补足并结算后用户值，核对其他持仓和挂单保留
-        CoreUserState afterUser = settled.user(USER_ID);
+        CoreUserState afterUser = settled.users().get(USER_ID);
         // 逐仓亏损结算后 USDT 余额，自由资金应保持原值
         AssetBalance afterBalance = afterUser.balances().get("USDT");
         assertThat(afterUser.positions().get(crossSymbol)).isEqualTo(beforeCrossPosition);
         assertThat(afterUser.reservations().get(701L)).isEqualTo(beforeReservation);
-        assertThat(settled.order(701).status()).isEqualTo(CoreOrderStatus.OPEN);
+        assertThat(settled.orders().get(701L).status()).isEqualTo(CoreOrderStatus.OPEN);
         assertThat(afterBalance.availableUnits()).isEqualTo(beforeBalance.availableUnits());
-        assertThat(afterBalance.totalUnits() - afterUser.positions().get(isolatedSymbol).positionMarginUnits())
+        assertThat(CoreStateTestFixtures.totalUnits(afterBalance) - afterUser.positions().get(isolatedSymbol).positionMarginUnits())
                 .isEqualTo(beforeCrossCollateral);
         assertThat(afterBalance.lockedUnits()).isEqualTo(50);
         assertThat(afterUser.positions().get(isolatedSymbol).signedQuantitySteps()).isZero();
@@ -504,12 +504,12 @@ class CoreDeliveryOptionFinancialMatrixTest {
                     Map.of(longPosition.key(), longPosition, shortPosition.key(), shortPosition),
                     com.surprising.aeron.protocol.CorePositionMode.HEDGE);
             state = new TradingCoreState(state.productLine(), 3, Map.of(USER_ID, user), Map.of(),
-                    state.instruments(), state.riskState(), state.treasuryState());
+                    state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
             // 本次到期结算完成后的冷状态，供持仓释放和资金守恒断言
             var settled = reducer.settleInstrument(state, new SettleInstrumentCommand(900, instrumentId, 200));
-            assertThat(settled.user(USER_ID).totalUnits("USDT")).isEqualTo(20);
-            assertThat(settled.user(USER_ID).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(settled.treasuryState().lifecycleSettlement(instrumentId)).isEqualTo(900);
+            assertThat(CoreStateTestFixtures.totalUnits(settled.users().get(USER_ID), "USDT")).isEqualTo(20);
+            assertThat(settled.users().get(USER_ID).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(settled.treasuryState().lifecycleSettlements().getOrDefault(instrumentId, 0L)).isEqualTo(900);
             assertThat(settled.treasuryState().clearingPnlBalances()).isEmpty();
         }
     }
@@ -525,7 +525,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState state = fundedState(delivery, USER_ID, WALLET);
         state = reducer.placeOrder(state, USER_ID, deliveryOrder(702, delivery, delivery.instrumentId()));
         // 结算前保存的未成交订单预留，供隔离或释放断言
-        OrderReservation beforeReservation = state.user(USER_ID).reservations().get(702L);
+        OrderReservation beforeReservation = state.users().get(USER_ID).reservations().get(702L);
         // 外部补保险或结算前的用户与财库总额基线
         long beforeTotal = total(state, delivery.settleAsset());
 
@@ -534,12 +534,12 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 new SettleInstrumentCommand(411, delivery.instrumentId(), delivery.settlementPriceTicks()));
 
         // 到期撤单后的预留，原总量不变、剩余零、全部记为已释放
-        OrderReservation afterReservation = settled.user(USER_ID).reservations().get(702L);
-        assertThat(settled.order(702).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        OrderReservation afterReservation = settled.users().get(USER_ID).reservations().get(702L);
+        assertThat(settled.orders().get(702L).status()).isEqualTo(CoreOrderStatus.CANCELED);
         assertThat(afterReservation.reservedUnits()).isEqualTo(beforeReservation.reservedUnits());
         assertThat(afterReservation.remainingUnits()).isZero();
         assertThat(afterReservation.releasedUnits()).isEqualTo(beforeReservation.reservedUnits());
-        assertThat(settled.user(USER_ID).balances().get(delivery.settleAsset()).lockedUnits()).isZero();
+        assertThat(settled.users().get(USER_ID).balances().get(delivery.settleAsset()).lockedUnits()).isZero();
         assertThat(total(settled, delivery.settleAsset())).isEqualTo(beforeTotal);
     }
 
@@ -571,9 +571,9 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState settled = reducer.settleInstrument(state,
                 new SettleInstrumentCommand(501, option.instrumentId(), option.settlementPriceTicks()));
 
-        assertThat(settled.order(501).status()).isEqualTo(CoreOrderStatus.CANCELED);
-        assertThat(settled.user(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isZero();
-        assertThat(settled.user(MAKER_ID).positions()).isEmpty();
+        assertThat(settled.orders().get(501L).status()).isEqualTo(CoreOrderStatus.CANCELED);
+        assertThat(settled.users().get(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isZero();
+        assertThat(settled.users().get(MAKER_ID).positions()).isEmpty();
         assertThat(total(settled, option.settleAsset())).isEqualTo(before);
     }
 
@@ -626,7 +626,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState marked = reducer.applyMarkPrice(opening, mark);
         assertThat(marked.riskState().liquidations().values())
                 .extracting(CoreLiquidationState::instrumentId).containsExactly(shortSymbol);
-        assertThat(marked.user(USER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isEqualTo(1);
+        assertThat(marked.users().get(USER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isEqualTo(1);
         assertThat(total(marked, option.settleAsset())).isEqualTo(100);
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -709,7 +709,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 plan.liquidationId(), 2, 3_000, 0);
         // 卖方持仓已归零且记录三千九百八十亏空的冷状态
         TradingCoreState liquidated = reducer.executeLiquidation(marked, liquidation);
-        assertThat(liquidated.user(MAKER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isZero();
+        assertThat(liquidated.users().get(MAKER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isZero();
         assertThat(liquidated.riskState().liquidations().get(plan.liquidationId()).deficitUnits())
                 .isEqualTo(3_980);
         assertThat(total(liquidated, option.settleAsset())).isEqualTo(2 * WALLET);
@@ -735,8 +735,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 .containsExactly(USER_ID);
         // ADL 补足亏空后的状态，买方仍剩一份、总现金保持四千
         TradingCoreState completed = reducer.executeAdl(insured, adl);
-        assertThat(completed.user(USER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isEqualTo(1);
-        assertThat(completed.user(USER_ID).totalUnits(option.settleAsset())).isEqualTo(3_020);
+        assertThat(completed.users().get(USER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isEqualTo(1);
+        assertThat(CoreStateTestFixtures.totalUnits(completed.users().get(USER_ID), option.settleAsset())).isEqualTo(3_020);
         assertThat(completed.riskState().liquidations().get(plan.liquidationId()).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
         assertThat(total(completed, option.settleAsset())).isEqualTo(2 * WALLET);
@@ -756,9 +756,9 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 本场景依配置、注资、持仓、挂单或结算顺序推进的冷状态
         TradingCoreState state = optionFundingState(option);
         state = reducer.placeOrder(state, MAKER_ID, optionOrder(301, option, CoreOrderSide.SELL));
-        assertThat(state.user(MAKER_ID).reservations().get(301L).remainingUnits()).isEqualTo(20);
+        assertThat(state.users().get(MAKER_ID).reservations().get(301L).remainingUnits()).isEqualTo(20);
         state = reducer.placeOrder(state, USER_ID, optionOrder(302, option, CoreOrderSide.BUY));
-        assertThat(state.user(USER_ID).reservations().get(302L).remainingUnits()).isEqualTo(20);
+        assertThat(state.users().get(USER_ID).reservations().get(302L).remainingUnits()).isEqualTo(20);
 
         // 买卖双方开仓意图已接受、显式成交尚未应用的冷状态
         TradingCoreState beforeMatch = state;
@@ -769,10 +769,10 @@ class CoreDeliveryOptionFinancialMatrixTest {
         TradingCoreState matched = reducer.applyMatches(
                 beforeMatch, 302, option.baseAsset(), option.quoteAsset(), matches);
         // 开仓成交后的卖方期权空头，用来检查保证金四十
-        CorePositionState shortPosition = matched.user(MAKER_ID).positions().get(option.instrumentId());
+        CorePositionState shortPosition = matched.users().get(MAKER_ID).positions().get(option.instrumentId());
         assertThat(shortPosition.positionMarginUnits()).isEqualTo(40);
-        assertThat(matched.user(MAKER_ID).balances().get(option.settleAsset()).availableUnits()).isEqualTo(1_980);
-        assertThat(matched.user(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isEqualTo(40);
+        assertThat(matched.users().get(MAKER_ID).balances().get(option.settleAsset()).availableUnits()).isEqualTo(1_980);
+        assertThat(matched.users().get(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isEqualTo(40);
 
         // 本次投影、业务辅助和物化共用的独立整数身份表
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -787,13 +787,13 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "");
         // 双方只减仓平仓单陆续接受、尚未成交的状态
         TradingCoreState closing = reducer.placeOrder(matched, MAKER_ID, buyClose);
-        assertThat(closing.user(MAKER_ID).reservations().get(303L).remainingUnits()).isOne();
+        assertThat(closing.users().get(MAKER_ID).reservations().get(303L).remainingUnits()).isOne();
         // 买方平多的只减仓卖单，数量二、价格十
         PlaceOrderCommand sellClose = new PlaceOrderCommand(304, option.instrumentId(),
                 CoreOrderSide.SELL, PREMIUM_PRICE, QUANTITY, true, option.marginMode(),
                 CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "");
         closing = reducer.placeOrder(closing, USER_ID, sellClose);
-        assertThat(closing.user(USER_ID).reservations().get(304L).remainingUnits()).isOne();
+        assertThat(closing.users().get(USER_ID).reservations().get(304L).remainingUnits()).isOne();
         // 本次测试显式提供的两份平仓成交事件
         List<MatcherEvent> closeMatches =
                 List.of(trade(304, USER_ID, PREMIUM_PRICE, QUANTITY, true, true));
@@ -802,10 +802,10 @@ class CoreDeliveryOptionFinancialMatrixTest {
         // 平仓显式成交完成后的冷状态，双方数量零且现金回到默认钱包
         TradingCoreState closed = reducer.applyMatches(
                 beforeClose, 303, option.baseAsset(), option.quoteAsset(), closeMatches);
-        assertThat(closed.user(MAKER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isZero();
-        assertThat(closed.user(USER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isZero();
-        assertThat(closed.user(MAKER_ID).totalUnits(option.settleAsset())).isEqualTo(WALLET);
-        assertThat(closed.user(USER_ID).totalUnits(option.settleAsset())).isEqualTo(WALLET);
+        assertThat(closed.users().get(MAKER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isZero();
+        assertThat(closed.users().get(USER_ID).positions().get(option.instrumentId()).signedQuantitySteps()).isZero();
+        assertThat(CoreStateTestFixtures.totalUnits(closed.users().get(MAKER_ID), option.settleAsset())).isEqualTo(WALLET);
+        assertThat(CoreStateTestFixtures.totalUnits(closed.users().get(USER_ID), option.settleAsset())).isEqualTo(WALLET);
         assertThat(total(closed, option.settleAsset())).isEqualTo(2 * WALLET);
 
         // 平仓成交对照单独投影使用的身份表
@@ -1005,10 +1005,11 @@ class CoreDeliveryOptionFinancialMatrixTest {
     private TradingCoreState addPosition(TradingCoreState state, long userId, String instrumentId, long quantity,
                                          long entryPrice, long positionMargin, Variant variant) {
         // 手工加入持仓前的原用户值
-        CoreUserState current = state.user(userId);
+        CoreUserState current = state.users().get(userId);
         // 该用户结算资产的余额，保证金为正时先从可用移到锁定
         AssetBalance balance = current.balances().get(variant.settleAsset());
-        if (positionMargin > 0) balance = balance.reserve(positionMargin);
+        if (positionMargin > 0) balance = new AssetBalance(balance.asset(), Math.subtractExact(balance.availableUnits(), positionMargin),
+                Math.addExact(balance.lockedUnits(), positionMargin));
         // 复制的余额表，只替换新增持仓所用结算资产
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put(variant.settleAsset(), balance);
@@ -1025,7 +1026,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         Map<Long, CoreUserState> users = new TreeMap<>(state.users());
         users.put(userId, next);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.instruments(), state.riskState(), state.treasuryState());
+                state.orders(), state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 
     /**
@@ -1149,8 +1150,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             }
             assertThat(user.balances().get(variant.settleAsset()).lockedUnits()).as(variant.key()).isZero();
         });
-        assertThat(state.treasuryState().lifecycleSettlements()).containsEntry(variant.instrumentId(),
-                state.treasuryState().lifecycleSettlement(variant.instrumentId()));
+        assertThat(state.treasuryState().lifecycleSettlements()).containsKey(variant.instrumentId());
     }
 
     /**
@@ -1211,7 +1211,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
      * @param userId 需要注资、建立持仓或统计金额的用户
      */
     private long userValue(TradingCoreState state, Variant variant, long userId) {
-        return state.user(userId) == null ? 0 : state.user(userId).totalUnits(variant.settleAsset());
+        return state.users().get(userId) == null ? 0 : CoreStateTestFixtures.totalUnits(state.users().get(userId), variant.settleAsset());
     }
 
     /**
@@ -1240,7 +1240,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
      */
     private long total(TradingCoreState state, String asset) {
         // 指定资产全部用户现金的 stream.sum 合计，尚未合入财库余额
-        long users = state.users().values().stream().mapToLong(/* 当前需要构造或检查持仓、锁定或合计资金的用户值 */ user -> user.totalUnits(asset)).sum();
+        long users = state.users().values().stream().mapToLong(/* 当前需要构造或检查持仓、锁定或合计资金的用户值 */ user -> CoreStateTestFixtures.totalUnits(user, asset)).sum();
         // 本次总额统计读到的财库分量
         CoreTreasuryState treasury = state.treasuryState();
         // 逐项合入手续费、保险、强平费、资金费残差、舍入及清算余额的累计总额，最后减保险亏空

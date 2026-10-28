@@ -134,14 +134,14 @@ class CoreLifecycleWorkTest {
         // 包含固定标记价及三条强平待办的风险状态。
         CoreRiskState risk = new CoreRiskState(
                 Map.of("1", new CoreMarkPriceState("1", 60_000, 9, 1_000)),
-                Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4);
+                Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4, CoreRiskState.defaultScanControl(), 0);
         // 保存预设资金费用户游标和到期撤单游标的财库状态。
-        CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
+        CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), Map.of(), Map.of(),
                 Map.of("1", new CoreTreasuryState.FundingProgress(11, 100, 41, 60_000)),
                 Map.of("1", new CoreTreasuryState.LifecycleProgress(12, 60_000, false, 91, 0, 0)));
         // 用上述币对、风险及财库组装的旧交易状态，供恢复入口投影。
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(), Map.of(), Map.of("1", instrument), risk, treasury);
+                Map.of(), Map.of(), Map.of("1", instrument), risk, treasury, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         return TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0,
                 Map.of(), Map.of(), trading);
     }

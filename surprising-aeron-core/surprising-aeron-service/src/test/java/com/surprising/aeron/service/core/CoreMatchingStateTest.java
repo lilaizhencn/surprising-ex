@@ -69,8 +69,8 @@ class CoreMatchingStateTest {
             apply(state, 4, 11, CoreMessageType.AMEND_ORDER,
                     TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(101, 102, "maker-refreshed",
                             100L, quantity, CoreTimeInForce.GTX, true)));
-            assertThat(state.tradingState().order(102).remainingQuantitySteps()).isEqualTo(quantity);
-            assertThat(state.tradingState().user(11).balances().get("USDT").lockedUnits())
+            assertThat(state.tradingState().orders().get(102L).remainingQuantitySteps()).isEqualTo(quantity);
+            assertThat(state.tradingState().users().get(11L).balances().get("USDT").lockedUnits())
                     // 本样例准入按价格带上界一百零一及十倍杠杆计算预留。
                     .isEqualTo(quantity * 101 / 10);
             // 大额市价开仓完成后的响应。
@@ -78,8 +78,8 @@ class CoreMatchingStateTest {
                     place(201, CoreOrderSide.BUY, 0, quantity, ReservationKind.DERIVATIVE_MARGIN, "USDT", notional,
                             CoreOrderType.MARKET, CoreTimeInForce.IOC, 101, false));
             assertThat(orderIn(filled, 201).status()).isEqualTo("FILLED");
-            assertThat(state.tradingState().user(11).positions().get("1").signedQuantitySteps()).isEqualTo(-quantity);
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(quantity);
+            assertThat(state.tradingState().users().get(11L).positions().get("1").signedQuantitySteps()).isEqualTo(-quantity);
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(quantity);
             assertThat(total(state, "USDT")).isEqualTo(capital * 2);
             // 调整杠杆前保存的内存快照字节。
             byte[] beforeLeverage = state.snapshot();
@@ -88,8 +88,8 @@ class CoreMatchingStateTest {
                     new com.surprising.aeron.protocol.UpdateLeverageCommand("1",
                             com.surprising.aeron.protocol.CoreMarginMode.CROSS, 5_000_000, true));
             apply(state, 6, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
-            assertThat(state.tradingState().user(11).positions().get("1").positionMarginUnits()).isEqualTo(capital);
-            assertThat(state.tradingState().user(11).balances().get("USDT").availableUnits()).isZero();
+            assertThat(state.tradingState().users().get(11L).positions().get("1").positionMarginUnits()).isEqualTo(capital);
+            assertThat(state.tradingState().users().get(11L).balances().get("USDT").availableUnits()).isZero();
             assertThat(total(state, "USDT")).isEqualTo(capital * 2);
             try (/* 从调整前快照恢复、重放同一杠杆命令的对照实例。 */ var replay = TradingCoreRuntime.fromSnapshot(product, beforeLeverage)) {
                 apply(replay, 6, 11, CoreMessageType.UPDATE_LEVERAGE, leverage);
@@ -126,7 +126,7 @@ class CoreMatchingStateTest {
                     place(201, CoreOrderSide.BUY, 0, 3, ReservationKind.DERIVATIVE_MARGIN, "USDT", 303,
                             CoreOrderType.MARKET, CoreTimeInForce.IOC, 101, false));
             assertThat(orderIn(result, 201).executedQuantitySteps()).isEqualTo(1);
-            assertThat(state.tradingState().order(102).remainingQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().orders().get(102L).remainingQuantitySteps()).isEqualTo(2);
             assertThat(total(state, "USDT")).isEqualTo(before);
             try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
@@ -266,7 +266,7 @@ class CoreMatchingStateTest {
             CoreResponse completed = drainMatching(state, pending, crossing);
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
 
-            assertThat(state.tradingState().order(202)).isNull();
+            assertThat(state.tradingState().orders().get(202L)).isNull();
             assertThat(state.terminalRetention().containsOrder(202, 9, "client-202")).isTrue();
             // 终态客户编号尚保留时尝试复用该编号的新订单命令。
             CoreMessage duplicateClientId = message(state, 5, 9, CoreMessageType.PLACE_ORDER,
@@ -276,9 +276,9 @@ class CoreMatchingStateTest {
                             com.surprising.aeron.protocol.CorePositionSide.NET,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "client-202")));
             assertThat(submit(state, duplicateClientId).status()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(state.tradingState().user(9).balances().get("USDT").availableUnits()).isEqualTo(300);
-            assertThat(state.tradingState().user(9).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(state.tradingState().user(9).totalUnits("BTC")).isEqualTo(2);
+            assertThat(state.tradingState().users().get(9L).balances().get("USDT").availableUnits()).isEqualTo(300);
+            assertThat(state.tradingState().users().get(9L).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(9L), "BTC")).isEqualTo(2);
             // 挂单用户按当前拓扑路由到的账户 Lane。
             int makerLane = state.runtimeState.topology().accountLaneId(7);
             // 主动用户按当前拓扑路由到的另一账户 Lane。
@@ -319,9 +319,9 @@ class CoreMatchingStateTest {
             CoreResponse completed = drainMatching(state, pending, crossingPostOnly);
             assertThat(completed.status()).isEqualTo(ResponseStatus.REJECTED);
 
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.REJECTED);
-            assertThat(state.tradingState().user(22).balances().get("USDT").availableUnits()).isEqualTo(500);
-            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().orders().get(202L).status()).isEqualTo(CoreOrderStatus.REJECTED);
+            assertThat(state.tradingState().users().get(22L).balances().get("USDT").availableUnits()).isEqualTo(500);
+            assertThat(state.tradingState().users().get(22L).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.tradingState().orders().values())
                     .filteredOn(/* 当前用于状态筛选、订单编号查找或结果断言的业务订单值。 */ order -> order.status() == CoreOrderStatus.OPEN)
                     .extracting(CoreOrderState::orderId)
@@ -351,8 +351,8 @@ class CoreMatchingStateTest {
             assertThat(orderIn(completed, 202).status()).isEqualTo("OPEN");
             assertThat(orderIn(completed, 202).remainingQuantitySteps()).isEqualTo(2);
             assertThat(result.executions()).isEmpty();
-            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isEqualTo(200);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().users().get(22L).balances().get("USDT").lockedUnits()).isEqualTo(200);
+            assertThat(state.tradingState().orders().get(202L).status()).isEqualTo(CoreOrderStatus.OPEN);
         }
     }
 
@@ -377,8 +377,8 @@ class CoreMatchingStateTest {
             // 本现货回执保留成交保护边界；市价 IOC 在成交或撤量后不会继续挂簿。
             assertThat(orderIn(receipt4, 202).priceTicks()).isEqualTo(100);
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
-            assertThat(state.tradingState().order(202)).isNull();
-            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().orders().get(202L)).isNull();
+            assertThat(state.tradingState().users().get(22L).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.tradingState().orders().values())
                     .noneMatch(/* 当前用于状态筛选、订单编号查找或结果断言的业务订单值。 */ order -> order.status() == CoreOrderStatus.OPEN);
         }
@@ -403,18 +403,18 @@ class CoreMatchingStateTest {
             CoreResponse receipt4 = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 3, ReservationKind.SPOT_ASSET, "USDT", 300));
 
-            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(101).remainingQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().orders().get(101L).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().orders().get(101L).remainingQuantitySteps()).isEqualTo(2);
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
-            assertThat(state.tradingState().order(202)).isNull();
-            assertThat(state.tradingState().user(11).totalUnits("BTC")).isEqualTo(7);
-            assertThat(state.tradingState().user(11).totalUnits("USDT")).isEqualTo(300);
-            assertThat(state.tradingState().user(22).totalUnits("BTC")).isEqualTo(3);
-            assertThat(state.tradingState().user(22).totalUnits("USDT")).isEqualTo(700);
-            assertThat(state.tradingState().user(11).totalUnits("BTC")
-                    + state.tradingState().user(22).totalUnits("BTC")).isEqualTo(10);
-            assertThat(state.tradingState().user(11).totalUnits("USDT")
-                    + state.tradingState().user(22).totalUnits("USDT")).isEqualTo(1_000);
+            assertThat(state.tradingState().orders().get(202L)).isNull();
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(11L), "BTC")).isEqualTo(7);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(11L), "USDT")).isEqualTo(300);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(22L), "BTC")).isEqualTo(3);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(22L), "USDT")).isEqualTo(700);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(11L), "BTC")
+                    + CoreStateTestFixtures.totalUnits(state.tradingState().users().get(22L), "BTC")).isEqualTo(10);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(11L), "USDT")
+                    + CoreStateTestFixtures.totalUnits(state.tradingState().users().get(22L), "USDT")).isEqualTo(1_000);
             // 成功成交后原生订单簿的哈希。
             int matchedBookHash = awaitMatchingHash(state);
             assertThat(matchedBookHash).isNotEqualTo(restingBookHash).isNotZero();
@@ -425,7 +425,7 @@ class CoreMatchingStateTest {
                 apply(restored, 5, 22, CoreMessageType.PLACE_ORDER,
                         place(203, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
                 assertThat(restored.terminalRetention().containsOrder(101, 11, "")).isTrue();
-                assertThat(restored.tradingState().order(101)).isNull();
+                assertThat(restored.tradingState().orders().get(101L)).isNull();
                 assertThat(restored.tradingState().orders().values())
                         .noneMatch(/* 当前用于状态筛选、订单编号查找或结果断言的业务订单值。 */ order -> order.status() == CoreOrderStatus.OPEN);
             }
@@ -468,21 +468,21 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.BUY, 100, 3, reservationKind, buyerAsset,
                             productLine == ProductLine.SPOT ? 300 : 1_000));
 
-            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(state.tradingState().orders().get(101L)).isNull();
             assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(202).executedQuantitySteps()).isZero();
+            assertThat(state.tradingState().orders().get(202L).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().orders().get(202L).executedQuantitySteps()).isZero();
             if (productLine == ProductLine.SPOT) {
-                assertThat(state.tradingState().user(11).balances().get("BTC").availableUnits()).isEqualTo(10);
-                assertThat(state.tradingState().user(11).balances().get("BTC").lockedUnits()).isZero();
-                assertThat(state.tradingState().user(11).balances().get("USDT").availableUnits()).isEqualTo(700);
-                assertThat(state.tradingState().user(11).balances().get("USDT").lockedUnits()).isEqualTo(300);
+                assertThat(state.tradingState().users().get(11L).balances().get("BTC").availableUnits()).isEqualTo(10);
+                assertThat(state.tradingState().users().get(11L).balances().get("BTC").lockedUnits()).isZero();
+                assertThat(state.tradingState().users().get(11L).balances().get("USDT").availableUnits()).isEqualTo(700);
+                assertThat(state.tradingState().users().get(11L).balances().get("USDT").lockedUnits()).isEqualTo(300);
             } else {
                 // 当前衍生品用户在结算资产上的可用及冻结余额。
-                var balance = state.tradingState().user(11).balances().get(buyerAsset);
+                var balance = state.tradingState().users().get(11L).balances().get(buyerAsset);
                 assertThat(balance.lockedUnits()).isPositive();
                 assertThat(Math.addExact(balance.availableUnits(), balance.lockedUnits())).isEqualTo(20_000);
-                assertThat(state.tradingState().user(11).positions()).isEmpty();
+                assertThat(state.tradingState().users().get(11L).positions()).isEmpty();
             }
         }
     }
@@ -511,12 +511,12 @@ class CoreMatchingStateTest {
                     .allMatch(/* 当前用于状态筛选、订单编号查找或结果断言的业务订单值。 */ order -> order.status() == CoreOrderStatus.FILLED);
             assertThat(state.tradingState().orders().values())
                     .noneMatch(/* 当前用于状态筛选、订单编号查找或结果断言的业务订单值。 */ order -> order.status() == CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().user(11).positions().get("1").signedQuantitySteps())
+            assertThat(state.tradingState().users().get(11L).positions().get("1").signedQuantitySteps())
                     .isEqualTo(-2);
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps())
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps())
                     .isEqualTo(2);
-            assertThat(state.tradingState().user(11).balances().get(settleAsset).lockedUnits()).isPositive();
-            assertThat(state.tradingState().user(22).balances().get(settleAsset).lockedUnits()).isPositive();
+            assertThat(state.tradingState().users().get(11L).balances().get(settleAsset).lockedUnits()).isPositive();
+            assertThat(state.tradingState().users().get(22L).balances().get(settleAsset).lockedUnits()).isPositive();
         }
     }
 
@@ -557,14 +557,14 @@ class CoreMatchingStateTest {
                     taker.header().submittedAtEpochMillis(), taker.header().sourceSequence());
             assertThat(completed).isNotNull();
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().user(99).positions()).isNotEmpty();
+            assertThat(state.tradingState().users().get(99L).positions()).isNotEmpty();
             for (/* 本场景八个挂单用户中的当前用户编号。 */ long makerId = 11; makerId < 19; makerId++) {
-                assertThat(state.tradingState().user(makerId).positions()).isNotEmpty();
+                assertThat(state.tradingState().users().get(makerId).positions()).isNotEmpty();
             }
-            assertThat(state.tradingState().user(99).positions().get("1").signedQuantitySteps())
+            assertThat(state.tradingState().users().get(99L).positions().get("1").signedQuantitySteps())
                     .isEqualTo(8);
             for (/* 本场景八个挂单用户中的当前用户编号。 */ long makerId = 11; makerId < 19; makerId++) {
-                assertThat(state.tradingState().user(makerId).positions().get("1").signedQuantitySteps())
+                assertThat(state.tradingState().users().get(makerId).positions().get("1").signedQuantitySteps())
                         .isEqualTo(-1);
             }
             assertThat(total(state, "USDT")).isEqualTo(18_000);
@@ -589,13 +589,13 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
 
             assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
-            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(state.tradingState().orders().get(101L)).isNull();
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
-            assertThat(state.tradingState().order(202)).isNull();
-            assertThat(state.tradingState().user(11).positions().get("1").signedQuantitySteps()).isEqualTo(-2);
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(2);
-            assertThat(state.tradingState().user(11).totalUnits("USDT")).isEqualTo(1_200);
-            assertThat(state.tradingState().user(22).totalUnits("USDT")).isEqualTo(800);
+            assertThat(state.tradingState().orders().get(202L)).isNull();
+            assertThat(state.tradingState().users().get(11L).positions().get("1").signedQuantitySteps()).isEqualTo(-2);
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(2);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(11L), "USDT")).isEqualTo(1_200);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(22L), "USDT")).isEqualTo(800);
         }
     }
 
@@ -629,13 +629,13 @@ class CoreMatchingStateTest {
                     place(302, CoreOrderSide.SELL, 110, 3,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 40));
 
-            assertThat(state.tradingState().user(11).positions().get("1").signedQuantitySteps()).isEqualTo(1);
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(-1);
-            assertThat(state.tradingState().user(11).positions().get("1").entryPriceTicks()).isEqualTo(110);
-            assertThat(state.tradingState().user(22).positions().get("1").entryPriceTicks()).isEqualTo(110);
+            assertThat(state.tradingState().users().get(11L).positions().get("1").signedQuantitySteps()).isEqualTo(1);
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(-1);
+            assertThat(state.tradingState().users().get(11L).positions().get("1").entryPriceTicks()).isEqualTo(110);
+            assertThat(state.tradingState().users().get(22L).positions().get("1").entryPriceTicks()).isEqualTo(110);
             // 当前样例已合计的单资产资金量。
-            long total = state.tradingState().user(11).totalUnits("USDT")
-                    + state.tradingState().user(22).totalUnits("USDT")
+            long total = CoreStateTestFixtures.totalUnits(state.tradingState().users().get(11L), "USDT")
+                    + CoreStateTestFixtures.totalUnits(state.tradingState().users().get(22L), "USDT")
                     + state.tradingState().treasuryState().insuranceBalances().getOrDefault("USDT", 0L);
             assertThat(total).isEqualTo(4_000);
         }
@@ -666,9 +666,9 @@ class CoreMatchingStateTest {
             CoreResponse response = drainMatching(state, submit(state, close), close);
 
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().user(22).reservations().get(203L).reservedUnits()).isGreaterThan(1);
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps())
+            assertThat(state.tradingState().orders().get(203L).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().users().get(22L).reservations().get(203L).reservedUnits()).isGreaterThan(1);
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps())
                     .isEqualTo(2);
         }
     }
@@ -706,12 +706,12 @@ class CoreMatchingStateTest {
                     : drainMatching(state, submit(state, close), close);
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
 
-            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().orders().get(203L).status()).isEqualTo(CoreOrderStatus.OPEN);
             assertThat(state.terminalRetention().containsOrder(204, 22, "")).isTrue();
-            assertThat(state.tradingState().order(204)).isNull();
-            assertThat(state.tradingState().order(205).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(2);
-            assertThat(state.tradingState().user(22).reservations()).doesNotContainKey(204L);
+            assertThat(state.tradingState().orders().get(204L)).isNull();
+            assertThat(state.tradingState().orders().get(205L).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().users().get(22L).reservations()).doesNotContainKey(204L);
             // 随后 IOC 买入两份的回执，用来核对旧只减仓与新平仓挂单均已结束。
             CoreResponse receipt8 = apply(state, 8, 11, CoreMessageType.PLACE_ORDER,
                     placeWithFees(301, CoreOrderSide.BUY, 130, 2, false,
@@ -720,12 +720,12 @@ class CoreMatchingStateTest {
             assertThat(orderIn(receipt8, 301).status()).isEqualTo("FILLED");
             assertThat(orderIn(receipt8, 301).executedQuantitySteps()).isEqualTo(2);
             assertThat(state.terminalRetention().containsOrder(203, 22, "")).isTrue();
-            assertThat(state.tradingState().order(203)).isNull();
+            assertThat(state.tradingState().orders().get(203L)).isNull();
             assertThat(state.terminalRetention().containsOrder(204, 22, "")).isTrue();
-            assertThat(state.tradingState().order(204)).isNull();
+            assertThat(state.tradingState().orders().get(204L)).isNull();
             assertThat(state.terminalRetention().containsOrder(205, 22, "")).isTrue();
-            assertThat(state.tradingState().order(205)).isNull();
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isZero();
+            assertThat(state.tradingState().orders().get(205L)).isNull();
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isZero();
         }
     }
 
@@ -747,7 +747,7 @@ class CoreMatchingStateTest {
                     place(203, CoreOrderSide.SELL, 110, 2, true,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
             // 拒绝准入之前保存的用户余额表参照。
-            var balances = state.tradingState().user(22).balances();
+            var balances = state.tradingState().users().get(22L).balances();
             // 当前准入、自动撤单或 GTX 失败场景的待测请求。
             var request = message(state, 6, 22, CoreMessageType.PLACE_ORDER,
                     place(204, CoreOrderSide.SELL, 130, 1_000_000, false,
@@ -756,10 +756,10 @@ class CoreMatchingStateTest {
             var rejected = CoreTestCompletion.applyAsynchronously(state, request);
             assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-            assertThat(state.tradingState().order(203).remainingQuantitySteps()).isEqualTo(2);
-            assertThat(state.tradingState().order(204)).isNull();
-            assertThat(state.tradingState().user(22).balances()).isEqualTo(balances);
-            assertThat(state.tradingState().user(22).reservations()).containsKey(203L).doesNotContainKey(204L);
+            assertThat(state.tradingState().orders().get(203L).remainingQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().orders().get(204L)).isNull();
+            assertThat(state.tradingState().users().get(22L).balances()).isEqualTo(balances);
+            assertThat(state.tradingState().users().get(22L).reservations()).containsKey(203L).doesNotContainKey(204L);
             assertThat(total(state, "USDT")).isEqualTo(4_000);
             // 原命令 UUID 与载荷再次发送时返回的重复响应。
             var duplicate = CoreTestCompletion.applyAsynchronously(state, request);
@@ -797,11 +797,11 @@ class CoreMatchingStateTest {
             var response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, request)
                     : drainMatching(state, submit(state, request), request);
             assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().order(203)).isNull();
-            assertThat(state.tradingState().order(301)).isNull();
-            assertThat(state.tradingState().order(204).executedQuantitySteps()).isZero();
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(2);
-            assertThat(state.tradingState().user(22).reservations()).doesNotContainKeys(203L, 301L).containsKey(204L);
+            assertThat(state.tradingState().orders().get(203L)).isNull();
+            assertThat(state.tradingState().orders().get(301L)).isNull();
+            assertThat(state.tradingState().orders().get(204L).executedQuantitySteps()).isZero();
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().users().get(22L).reservations()).doesNotContainKeys(203L, 301L).containsKey(204L);
             assertThat(total(state, "USDT")).isEqualTo(4_000);
             assertThat(state.fatalFailure).isNull();
         }
@@ -835,11 +835,11 @@ class CoreMatchingStateTest {
             var rejected = CoreTestCompletion.applyAsynchronously(state, request);
             assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
-            assertThat(state.tradingState().order(203)).isNull();
-            assertThat(state.tradingState().order(204).status()).isEqualTo(CoreOrderStatus.REJECTED);
-            assertThat(state.tradingState().order(301).remainingQuantitySteps()).isEqualTo(1);
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isEqualTo(2);
-            assertThat(state.tradingState().user(22).reservations()).doesNotContainKeys(203L, 204L);
+            assertThat(state.tradingState().orders().get(203L)).isNull();
+            assertThat(state.tradingState().orders().get(204L).status()).isEqualTo(CoreOrderStatus.REJECTED);
+            assertThat(state.tradingState().orders().get(301L).remainingQuantitySteps()).isEqualTo(1);
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().users().get(22L).reservations()).doesNotContainKeys(203L, 204L);
             assertThat(total(state, "USDT")).isEqualTo(4_000);
             assertThat(state.fatalFailure).isNull();
         }
@@ -864,14 +864,14 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.SELL, 110, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
             apply(state, 6, 11, CoreMessageType.PLACE_ORDER,
                     place(400, CoreOrderSide.BUY, 105, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
-            assertThat(state.tradingState().order(101)).isNull();
-            assertThat(state.tradingState().order(303)).isNull();
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(400).executedQuantitySteps()).isZero();
-            assertThat(state.tradingState().user(11).reservations()).doesNotContainKeys(101L, 303L);
+            assertThat(state.tradingState().orders().get(101L)).isNull();
+            assertThat(state.tradingState().orders().get(303L)).isNull();
+            assertThat(state.tradingState().orders().get(202L).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().orders().get(400L).executedQuantitySteps()).isZero();
+            assertThat(state.tradingState().users().get(11L).reservations()).doesNotContainKeys(101L, 303L);
             for (long /* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user : new long[]{11, 22}) {
-                assertThat(state.tradingState().user(user).balances().get("USDT").totalUnits()).isEqualTo(2_000);
-                assertThat(state.tradingState().user(user).positions()).isEmpty();
+                assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(user).balances().get("USDT"))).isEqualTo(2_000);
+                assertThat(state.tradingState().users().get(user).positions()).isEmpty();
             }
             try (/* 从当前内存快照恢复、在作用域结束时关闭的运行时。 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
@@ -904,12 +904,12 @@ class CoreMatchingStateTest {
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false, 0, 100_000));
 
             assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
-            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(state.tradingState().orders().get(101L)).isNull();
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
-            assertThat(state.tradingState().order(202)).isNull();
-            assertThat(state.tradingState().user(11).positions().get("1").signedQuantitySteps())
+            assertThat(state.tradingState().orders().get(202L)).isNull();
+            assertThat(state.tradingState().users().get(11L).positions().get("1").signedQuantitySteps())
                     .isEqualTo(-2);
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps())
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps())
                     .isEqualTo(2);
             assertThat(state.tradingState().treasuryState().feeBalances()).containsEntry("USDT", 10L);
             assertThat(total(state, "USDT")).isEqualTo(fundsBefore);
@@ -952,10 +952,10 @@ class CoreMatchingStateTest {
 
             assertThat(orderIn(receipt7, 204).status()).isEqualTo("FILLED");
             assertThat(orderIn(receipt7, 204).executedQuantitySteps()).isEqualTo(1);
-            assertThat(state.tradingState().order(204)).isNull();
-            assertThat(state.tradingState().user(22).positions().get("1").signedQuantitySteps()).isZero();
-            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(state.tradingState().user(22).reservations()).doesNotContainKey(204L);
+            assertThat(state.tradingState().orders().get(204L)).isNull();
+            assertThat(state.tradingState().users().get(22L).positions().get("1").signedQuantitySteps()).isZero();
+            assertThat(state.tradingState().users().get(22L).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().users().get(22L).reservations()).doesNotContainKey(204L);
             assertThat(total(state, "USDT")).isEqualTo(fundsBeforeClose);
         }
     }
@@ -1007,9 +1007,9 @@ class CoreMatchingStateTest {
                             100, false, 100_000, 200_000));
 
             assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
-            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(state.tradingState().orders().get(101L)).isNull();
             assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
-            assertThat(state.tradingState().order(202)).isNull();
+            assertThat(state.tradingState().orders().get(202L)).isNull();
             assertThat(state.tradingState().treasuryState().feeBalances().getOrDefault(settlementAsset, 0L))
                     .isGreaterThan(feeBefore);
             assertThat(total(state, settlementAsset)).isEqualTo(fundsBefore);
@@ -1045,8 +1045,8 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().treasuryState().feeBalances()).containsEntry("USDT", 60L);
             assertThat(total(state, "USDT")).isEqualTo(240);
             assertThat(total(state, "BTC")).isEqualTo(2);
-            assertThat(state.tradingState().user(11).totalUnits("USDT")).isEqualTo(180);
-            assertThat(state.tradingState().user(22).totalUnits("USDT")).isZero();
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(11L), "USDT")).isEqualTo(180);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(22L), "USDT")).isZero();
         }
     }
 
@@ -1078,8 +1078,8 @@ class CoreMatchingStateTest {
             CoreResponse completed = drainMatching(state, pending, crossingPostOnly);
 
             assertThat(completed.status()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.REJECTED);
-            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(state.tradingState().orders().get(202L).status()).isEqualTo(CoreOrderStatus.REJECTED);
+            assertThat(state.tradingState().users().get(22L).balances().get("USDT").lockedUnits()).isZero();
             assertThat(total(state, "USDT")).isEqualTo(fundsBefore);
         }
     }
@@ -1105,9 +1105,9 @@ class CoreMatchingStateTest {
 
             assertThat(state.tradingState().orders().values())
                     .noneMatch(/* 当前用于状态筛选、订单编号查找或结果断言的业务订单值。 */ order -> order.status() == CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(101)).isNull();
-            assertThat(state.tradingState().order(202)).isNull();
-            assertThat(state.tradingState().order(203)).isNull();
+            assertThat(state.tradingState().orders().get(101L)).isNull();
+            assertThat(state.tradingState().orders().get(202L)).isNull();
+            assertThat(state.tradingState().orders().get(203L)).isNull();
             assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
             assertThat(state.terminalRetention().containsOrder(202, 22, "")).isTrue();
             assertThat(state.terminalRetention().containsOrder(203, 22, "")).isTrue();
@@ -1180,9 +1180,9 @@ class CoreMatchingStateTest {
                 assertThat(orderIn(receipt7, 202).status()).isEqualTo("FILLED");
                 assertThat(orderIn(receipt7, 202).executedQuantitySteps()).isEqualTo(4);
                 assertThat(restored.terminalRetention().containsOrder(101, 11, "")).isTrue();
-                assertThat(restored.tradingState().order(101)).isNull();
-                assertThat(restored.tradingState().order(102).status()).isEqualTo(CoreOrderStatus.OPEN);
-                assertThat(restored.tradingState().order(102).remainingQuantitySteps()).isEqualTo(5);
+                assertThat(restored.tradingState().orders().get(101L)).isNull();
+                assertThat(restored.tradingState().orders().get(102L).status()).isEqualTo(CoreOrderStatus.OPEN);
+                assertThat(restored.tradingState().orders().get(102L).remainingQuantitySteps()).isEqualTo(5);
             }
         }
     }
@@ -1208,11 +1208,11 @@ class CoreMatchingStateTest {
 
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(TradingCommandCodec.decodeAmendOrder(amend.payload()).replacementOrderId()).isEqualTo(203);
-            assertThat(state.tradingState().order(202)).isNull();
+            assertThat(state.tradingState().orders().get(202L)).isNull();
             assertThat(state.terminalRetention().containsOrder(202, 22, "")).isTrue();
-            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(203).priceTicks()).isEqualTo(110);
-            assertThat(state.tradingState().order(203).clientOrderId()).isEqualTo("amended");
+            assertThat(state.tradingState().orders().get(203L).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().orders().get(203L).priceTicks()).isEqualTo(110);
+            assertThat(state.tradingState().orders().get(203L).clientOrderId()).isEqualTo("amended");
         }
     }
 
@@ -1528,7 +1528,7 @@ class CoreMatchingStateTest {
     private static long total(TradingCoreRuntime state, String asset) {
         // 按单一资产从所有用户累计的余额总量，stream 普通 long 求和不精确检查溢出。
         long users = state.tradingState().users().values().stream()
-                .mapToLong(/* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user -> user.totalUnits(asset)).sum();
+                .mapToLong(/* 当前初始化资产、核对资金或参与总额合计的用户编号/业务值。 */ user -> CoreStateTestFixtures.totalUnits(user, asset)).sum();
         // 完成后用于合计七类财库金额及亏空的业务状态视图。
         var treasury = state.tradingState().treasuryState();
         // 当前样例已合计的单资产资金量。

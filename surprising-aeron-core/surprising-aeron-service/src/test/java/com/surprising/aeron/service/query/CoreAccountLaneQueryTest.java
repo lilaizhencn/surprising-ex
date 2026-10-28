@@ -128,8 +128,8 @@ class CoreAccountLaneQueryTest {
         var order = new CoreOrderState(991, LINE, 7, "1", CoreOrderSide.SELL, 100, 1, 0,
                 true, CoreOrderStatus.CANCELED, 2);
         // 包含已撤订单、对应用户和币对的最小业务状态。
-        var state = new TradingCoreState(LINE, 0, Map.of(7L, CoreUserState.empty(LINE, 7)),
-                Map.of(991L, order), Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+        var state = new TradingCoreState(LINE, 0, Map.of(7L, new CoreUserState(LINE, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+                Map.of(991L, order), Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = initial(state)) {
             core.activate();
             assertThat(core.activeOrderIndex().activeOrderRoute(991)).isNull();
@@ -177,10 +177,10 @@ class CoreAccountLaneQueryTest {
         for (/* 构造不同资产名称的下标，循环包含上限位置以确保比允许数量多一项。 */ int index = 0; index <= RuntimeStateQueryService.MAX_USER_QUERY_ENTITIES; index++)
             balances.put("ASSET" + index, new AssetBalance("ASSET" + index, 1, 0));
         // 拥有超限余额条数的用户 1，完整详情应被拒绝。
-        var user = new CoreUserState(LINE, 1, 0, balances, Map.of(), Map.of());
+        var user = new CoreUserState(LINE, 1, 0, balances, Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 同时包含超限用户 1 和空用户 7 的状态，用后者确认失败只影响单次查询。
-        var state = new TradingCoreState(LINE, 0, Map.of(1L, user, 7L, CoreUserState.empty(LINE, 7)),
-                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+        var state = new TradingCoreState(LINE, 0, Map.of(1L, user, 7L, new CoreUserState(LINE, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+                Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = initial(state)) {
             core.activate();
             try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {

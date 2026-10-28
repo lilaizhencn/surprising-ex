@@ -205,7 +205,7 @@ public final class DerivativeMixedWorkload {
             private void executeHeavyWork(Harness target, Template source, int index) {
                 String instrumentId = source.symbols().get(index);
                 var scan = target.state().tradingState().riskState().scans().get(instrumentId);
-                if (scan != null && !scan.complete()) {
+                if (scan != null && !(scan.riskComplete() && scan.triggerComplete())) {
                     target.execute(target.command(CoreMessageType.CONTINUE_RISK_SCAN,
                             CommandSource.OPERATIONS, 0,
                             TradingCommandCodec.encodeContinueRiskScan(
@@ -224,7 +224,7 @@ public final class DerivativeMixedWorkload {
                                             target.nextCommandTimestamp()), source.productLine())));
                 }
                 if (!source.productLine().isFundingProduct()) return;
-                if (target.state().tradingState().treasuryState().fundingSettlement(instrumentId)
+                if (target.state().tradingState().treasuryState().fundingSettlements().getOrDefault(instrumentId, 0L)
                         == fundingIds[index]) {
                     fundingIds[index] += source.symbols().size();
                     fundingCursors[index] = 0;
@@ -264,7 +264,7 @@ public final class DerivativeMixedWorkload {
                         DerivativeMixedWorkload::requireNonNegative));
                 latestLifecycleOrders.forEach(orderId -> {
                     var order = state.orders().get(orderId);
-                    var reservation = order == null ? null : state.user(order.userId()).reservations().get(orderId);
+                    var reservation = order == null ? null : state.users().get(order.userId()).reservations().get(orderId);
                     if (order != null && (order.status() == CoreOrderStatus.OPEN
                             || reservation == null || reservation.remainingUnits() != 0)) {
                         throw new IllegalStateException("derivative lifecycle order is not terminal: " + orderId);
@@ -365,7 +365,7 @@ public final class DerivativeMixedWorkload {
 
     private static long totalFunds(TradingCoreState state, String asset) {
         long total = 0;
-        for (var user : state.users().values()) total = Math.addExact(total, user.totalUnits(asset));
+        for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
         CoreTreasuryState treasury = state.treasuryState();
         for (Map<String, Long> ledger : List.of(treasury.feeBalances(), treasury.insuranceBalances(),
                 treasury.liquidationFeeBalances(), treasury.fundingResidualBalances(),

@@ -195,13 +195,13 @@ class RuntimeTreasuryDeltaTest {
         // 空账本加七种单列变化状态的业务哈希集合，重复值会使构造失败。
         Set<Long> hashes = Set.of(
                 state(empty, 1).businessStateHash(),
-                state(CoreTreasuryState.ofSubledgers(Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of()), 1).businessStateHash(),
-                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of()), 1).businessStateHash(),
-                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L)), 1).businessStateHash(),
-                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of()), 1).businessStateHash(),
-                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of()), 1).businessStateHash(),
-                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of()), 1).businessStateHash(),
-                state(CoreTreasuryState.ofSubledgers(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of()), 1).businessStateHash());
+                state(new CoreTreasuryState(Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), 1).businessStateHash(),
+                state(new CoreTreasuryState(Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), 1).businessStateHash(),
+                state(new CoreTreasuryState(Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), 1).businessStateHash(),
+                state(new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), 1).businessStateHash(),
+                state(new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), 1).businessStateHash(),
+                state(new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), 1).businessStateHash(),
+                state(new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of("USDT", 1L), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), 1).businessStateHash());
 
         assertThat(hashes).hasSize(8);
     }
@@ -212,10 +212,7 @@ class RuntimeTreasuryDeltaTest {
     @Test
     void projectsEveryTreasurySubledgerWithoutDroppingFunds() {
         // 含七个独立正负金额子账的冷账本输入。
-        CoreTreasuryState treasury = CoreTreasuryState.ofSubledgers(
-                Map.of("USDT", 1L), Map.of("USDT", 2L), Map.of("USDT", 3L),
-                Map.of("USDT", -4L), Map.of("USDT", 5L), Map.of("USDT", -6L),
-                Map.of("USDT", 7L));
+        CoreTreasuryState treasury = new CoreTreasuryState(Map.of("USDT", 1L), Map.of("USDT", 2L), Map.of("USDT", 7L), Map.of("USDT", 3L), Map.of("USDT", -4L), Map.of("USDT", 5L), Map.of("USDT", -6L), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 七子账投影用例中预期完整冷核心状态。
         TradingCoreState expected = state(treasury, 1);
         // 当前冷运行时投影共用的资产和币对身份字典。
@@ -241,7 +238,7 @@ class RuntimeTreasuryDeltaTest {
         CoreTreasuryState beforeTreasury = new CoreTreasuryState(
                 Map.of("USDT", 100L, "BTC", 200L),
                 Map.of("USDT", 50L),
-                Map.of(),
+                Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
                 Map.of("1", 7L),
                 Map.of("2", 3L),
                 Map.of("1", new CoreTreasuryState.FundingProgress(7, 10_000, 11, 60_000)),
@@ -251,7 +248,7 @@ class RuntimeTreasuryDeltaTest {
 
         // 按同样预期变化生成的冷账本结果，允许保险有符号余额。
         CoreTreasuryState afterTreasury = new CoreTreasuryState(
-                Map.of("BTC", 200L), Map.of("USDT", -50L), Map.of(),
+                Map.of("BTC", 200L), Map.of("USDT", -50L), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(),
                 Map.of("1", 8L), Map.of("2", 4L), Map.of(), Map.of());
         // 手工运行时最终结果应物化得到的完整冷核心状态。
         TradingCoreState after = state(afterTreasury, 2);
@@ -319,7 +316,7 @@ class RuntimeTreasuryDeltaTest {
         CoreInstrument eth = instrument("2", "ETH");
         return new TradingCoreState(ProductLine.LINEAR_PERPETUAL, revision,
                 Map.of(), Map.of(), Map.of(btc.instrumentId(), btc, eth.instrumentId(), eth),
-                CoreRiskState.empty(), treasury);
+                CoreRiskState.empty(), treasury, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 
     /**

@@ -145,7 +145,7 @@ public class LifecyclePaginationBenchmark {
                 if (productLine.isFundingProduct()) {
                     long expectedFunds = user.userId() == 999 ? 1_000_002_560L : 999_990L;
                     long expectedQuantity = user.userId() == 999 ? -256 : 1;
-                    if (user.totalUnits(asset) != expectedFunds
+                    if (LinearPerpetualBenchmarkSupport.totalUnits(user, asset) != expectedFunds
                             || user.positions().get("43").signedQuantitySteps() != expectedQuantity)
                         throw new IllegalStateException("funding price cut or position differs: " + user);
                     continue;
@@ -168,7 +168,7 @@ public class LifecyclePaginationBenchmark {
 
     private long totalFunds(com.surprising.aeron.model.TradingCoreState state) {
         long total = 0;
-        for (var user : state.users().values()) total = Math.addExact(total, user.totalUnits(asset));
+        for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
         var treasury = state.treasuryState();
         total = Math.addExact(total, treasury.feeBalances().getOrDefault(asset, 0L));
         total = Math.addExact(total, treasury.clearingPnlBalances().getOrDefault(asset, 0L));

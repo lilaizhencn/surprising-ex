@@ -76,11 +76,11 @@ class SnapshotFieldEvolutionTest {
     @Test
     void fundingProgressStoresOnlySettlementRateCursorAndFixedPrice() {
         var progress = new CoreTreasuryState.FundingProgress(11, 100, 41, 60_000);
-        var treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of("1", progress));
+        var treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), Map.of(), Map.of(),
+                Map.of("1", progress), java.util.Map.of());
         var empty = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         var state = new TradingCoreState(empty.productLine(), 0, empty.users(), empty.orders(),
-                empty.instruments(), empty.riskState(), treasury);
+                empty.instruments(), empty.riskState(), treasury, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         byte[] encoded = TradingStateSnapshotCodec.encode(state);
         assertThat(ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN).getInt()).isEqualTo(56);
         var root = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, Integer.BYTES, encoded.length));
@@ -95,7 +95,7 @@ class SnapshotFieldEvolutionTest {
         assertThat(split(saved)).extracting(SnapshotFieldEvolutionTest::id)
                 .containsExactlyInAnyOrder(1, 2, 4, 6);
         var restored = TradingStateSnapshotCodec.decode(encoded, state.productLine());
-        assertThat(restored.treasuryState().fundingProgress("1")).isEqualTo(progress);
+        assertThat(restored.treasuryState().fundingProgress().get("1")).isEqualTo(progress);
         assertThat(restored).isEqualTo(state);
         assertThat(restored.businessStateHash()).isEqualTo(state.businessStateHash());
     }
@@ -110,10 +110,10 @@ class SnapshotFieldEvolutionTest {
         // 本用例固定最近成交价为零的币对标记价记录。
         var mark = new com.surprising.aeron.model.CoreMarkPriceState("1", 100, 0, 0, 1, 1000, 0);
         // 仅含这条标记价、没有其他风险记录的状态。
-        var risk = new com.surprising.aeron.model.CoreRiskState(Map.of("1", mark), Map.of(), Map.of(), Map.of(), 1);
+        var risk = new com.surprising.aeron.model.CoreRiskState(Map.of("1", mark), Map.of(), Map.of(), Map.of(), 1, com.surprising.aeron.model.CoreRiskState.defaultScanControl(), 0);
         // 当前字段演进用例要编码并在变换后恢复的原业务状态。
         var state = new TradingCoreState(empty.productLine(), 0, empty.users(), empty.orders(),
-                empty.instruments(), risk, empty.treasuryState());
+                empty.instruments(), risk, empty.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 当前编码器生成的带版本头快照字节。
         byte[] encoded = TradingStateSnapshotCodec.encode(state);
         // 依次进入根风险、标记价表、正文条目，最终移除标记价最近成交价字段七。
@@ -158,9 +158,9 @@ class SnapshotFieldEvolutionTest {
             var mark = new com.surprising.aeron.model.CoreMarkPriceState("1", 100, 99,
                     runtimeMark.forwardPriceTicks(), 1, 1_000, 97);
             var riskState = new com.surprising.aeron.model.CoreRiskState(Map.of("1", mark), Map.of(),
-                    Map.of(), Map.of(), 1, empty.riskState().scanControl());
+                    Map.of(), Map.of(), 1, empty.riskState().scanControl(), 0);
             var state = new TradingCoreState(line, 0, empty.users(), empty.orders(),
-                    Map.of("1", instrument), riskState, empty.treasuryState());
+                    Map.of("1", instrument), riskState, empty.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
             byte[] encoded = TradingStateSnapshotCodec.encode(state);
             var root = new SnapshotFields.Reader(Arrays.copyOfRange(encoded, 4, encoded.length));
             var entries = new SnapshotFields.Reader(root.bytes(5)).list(1, bytes -> bytes);
@@ -215,7 +215,7 @@ class SnapshotFieldEvolutionTest {
                     com.surprising.aeron.protocol.CoreOrderSide.BUY, 100, 10, 3, false,
                     com.surprising.aeron.model.CoreOrderStatus.CANCELED, 1);
             var state = new TradingCoreState(line, 1, empty.users(), Map.of(11L, order),
-                    empty.instruments(), empty.riskState(), empty.treasuryState());
+                    empty.instruments(), empty.riskState(), empty.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
             byte[] encoded = TradingStateSnapshotCodec.encode(state);
             byte[] rootBytes = Arrays.copyOfRange(encoded, 4, encoded.length);
             var root = new SnapshotFields.Reader(rootBytes);
@@ -252,15 +252,15 @@ class SnapshotFieldEvolutionTest {
                     com.surprising.aeron.service.core.CoreStateTestFixtures.instrument(line, "1", "BTC", quote,
                             com.surprising.aeron.service.core.CoreStateTestFixtures.settleAsset(line)));
             var user = new com.surprising.aeron.service.account.CoreUserState(
-                    line, 7, 0, Map.of(), Map.of(), Map.of());
+                    line, 7, 0, Map.of(), Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
             var empty = TradingCoreState.empty(line);
             for (long ratio : ratios) {
                 var risk = new com.surprising.aeron.model.CoreRiskSnapshot(7, "1",
                         com.surprising.aeron.protocol.CorePositionSide.NET, 9, 1_000, 20, 100, ratio);
                 var riskState = new com.surprising.aeron.model.CoreRiskState(Map.of(), Map.of(risk.key(), risk),
-                        Map.of(), Map.of(), 1, empty.riskState().scanControl());
+                        Map.of(), Map.of(), 1, empty.riskState().scanControl(), 0);
                 var state = new TradingCoreState(line, 0, Map.of(7L, user), Map.of(), Map.of("1", instrument),
-                        riskState, empty.treasuryState());
+                        riskState, empty.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
                 byte[] encoded = TradingStateSnapshotCodec.encode(state);
                 byte[] rootBytes = Arrays.copyOfRange(encoded, 4, encoded.length);
                 var root = new SnapshotFields.Reader(rootBytes);

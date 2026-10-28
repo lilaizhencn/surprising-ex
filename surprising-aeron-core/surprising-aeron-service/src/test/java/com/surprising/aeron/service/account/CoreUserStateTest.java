@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.account;
 
+import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CorePositionState;
 import com.surprising.aeron.protocol.CoreMarginMode;
@@ -59,7 +60,7 @@ class CoreUserStateTest {
         assertThat(reserved.reservations().get(11L).remainingUnits()).isEqualTo(300);
         assertThat(released.reservations().get(11L).remainingUnits()).isZero();
         assertThat(removed.reservations()).isEmpty();
-        assertThat(removed.totalUnits("USDT")).isEqualTo(1_000);
+        assertThat(CoreStateTestFixtures.totalUnits(removed, "USDT")).isEqualTo(1_000);
     }
 
     /**
@@ -157,7 +158,7 @@ class CoreUserStateTest {
         CoreUserState settled = new CoreUserState(reserved.productLine(), reserved.userId(), 2, settledBalances, settledOrders, reserved.positions(),
                 reserved.positionMode());
 
-        assertThat(settled.totalUnits("USDT")).isEqualTo(1_000);
+        assertThat(CoreStateTestFixtures.totalUnits(settled, "USDT")).isEqualTo(1_000);
         assertThat(settled.balances().get("USDT").lockedUnits()).isZero();
         assertThat(settled.reservations().get(11L).remainingUnits()).isZero();
     }
@@ -180,6 +181,36 @@ class CoreUserStateTest {
         assertThat(decoded.hashCode()).isEqualTo(original.hashCode());
     }
 
+    @Test
+    void rejectsOverflowWhileAccumulatingLocks() {
+        assertThatThrownBy(() -> new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+                Map.of("USDT", new AssetBalance("USDT", 0, Long.MAX_VALUE)),
+                Map.of(11L, reservation(11, Long.MAX_VALUE), 12L, reservation(12, 1)),
+                Map.of(), CorePositionMode.ONE_WAY))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
+    @Test
+    void rejectsMissingAssetForPositiveOrderOrPositionLocks() {
+        assertThatThrownBy(() -> new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+                Map.of(), Map.of(11L, reservation(11, 1)), Map.of(), CorePositionMode.ONE_WAY))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("asset=USDT");
+        assertThatThrownBy(() -> new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+                Map.of(), Map.of(), Map.of("1", position(1)), CorePositionMode.ONE_WAY))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("asset=USDT");
+    }
+
+    @Test
+    void zeroRemainingLocksDoNotRequireAnAssetBalance() {
+        var released = new OrderReservation(11, "1", ReservationKind.DERIVATIVE_MARGIN,
+                "USDT", 1, 1, 0, 1);
+        var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 0,
+                Map.of(), Map.of(11L, released), Map.of("1", position(0)), CorePositionMode.ONE_WAY);
+        assertThat(user.balances()).isEmpty();
+        assertThat(user.reservations().get(11L).remainingUnits()).isZero();
+        assertThat(user.positions().get("1").positionMarginUnits()).isZero();
+    }
+
     /**
      * 创建只有 USDT 余额的 U 本位永续测试用户，预留与持仓初始为空。
      * @param availableUnits 初始 USDT 可用整数金额
@@ -197,8 +228,8 @@ class CoreUserStateTest {
      * @param units 测试预留总金额
      */
     private static OrderReservation reservation(long orderId, long units) {
-        return OrderReservation.create(orderId, "1", ReservationKind.DERIVATIVE_MARGIN,
-                "USDT", units, 1);
+        return new OrderReservation(orderId, "1", ReservationKind.DERIVATIVE_MARGIN,
+                "USDT", units, 0, 0, 1);
     }
 
     /**

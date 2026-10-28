@@ -35,15 +35,15 @@ class CoreRuntimeBalanceSurfaceTest {
                     CommandSource.OPERATIONS, 9, 1, 1001, 1_000, 1),
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 0)));
             assertThat(apply(state, initialize).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().user(1001)).isNotNull();
-            assertThat(state.tradingState().user(1001).totalUnits("USDT")).isZero();
+            assertThat(state.tradingState().users().get(1001L)).isNotNull();
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1001L), "USDT")).isZero();
             assertThat(apply(state, initialize).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().user(1001).totalUnits("USDT")).isZero();
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1001L), "USDT")).isZero();
             snapshot = state.snapshot(101);
         }
         try (/* 完整快照恢复后的运行时 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, snapshot)) {
-            assertThat(restored.tradingState().user(1001)).isNotNull();
-            assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isZero();
+            assertThat(restored.tradingState().users().get(1001L)).isNotNull();
+            assertThat(CoreStateTestFixtures.totalUnits(restored.tradingState().users().get(1001L), "USDT")).isZero();
             // 恢复后增加10000的余额命令
             CoreMessage fund = new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), product,
@@ -56,7 +56,7 @@ class CoreRuntimeBalanceSurfaceTest {
                     CommandSource.OPERATIONS, 9, 3, 1001, 3_000, 3),
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 0)));
             assertThat(apply(restored, repeatZero).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+            assertThat(CoreStateTestFixtures.totalUnits(restored.tradingState().users().get(1001L), "USDT")).isEqualTo(10_000);
         }
     }
 
@@ -73,7 +73,7 @@ class CoreRuntimeBalanceSurfaceTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)));
 
             assertThat(apply(state, command).status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1001L), "USDT")).isEqualTo(10_000);
             assertThat(state.tradingState().revision()).isEqualTo(1);
             assertThat(state.tradingState()).isSameAs(state.tradingState());
         }
@@ -100,7 +100,7 @@ class CoreRuntimeBalanceSurfaceTest {
             Thread coreThread = new Thread(() -> {
                 try {
                     status.set(apply(state, command).status());
-                    balance.set(state.tradingState().user(1001).totalUnits("USDT"));
+                    balance.set(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1001L), "USDT"));
                 } catch (/* 该线程业务执行或查询捕获的原故障 */ Throwable throwable) {
                     failure.set(throwable);
                 } finally {

@@ -65,7 +65,7 @@ class CoreProductLineArchitectureContractTest {
                 TradingCoreState state = TradingCoreState.empty(target);
                 CoreInstrument instrument = CoreInstrument.from(foreign, instrument(foreign));
                 TradingCoreState mixed = new TradingCoreState(target, 0, state.users(), state.orders(),
-                        java.util.Map.of(instrument.instrumentId(), instrument), state.riskState(), state.treasuryState());
+                        java.util.Map.of(instrument.instrumentId(), instrument), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
                 long hash = mixed.businessStateHash();
                 assertThatThrownBy(() -> com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(mixed))
                         .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)

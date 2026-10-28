@@ -118,11 +118,11 @@ class CommittedPortfolioSnapshotTest {
                 type.isOption() ? 100 : 0));
         // 现货为空，其余含两单位多仓、入场价一百及入场值二百的持仓表。
         var positions = type == ContractType.SPOT ? Map.<String, CorePositionState>of()
-                : Map.of("604", new CorePositionState("604", settleAsset, 2, 100, 200, 0, 0));
+                : Map.of("604", new CorePositionState("604", settleAsset, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 2, 100, 200, 0, 0));
         // 用户七的权益结果，要求完整且资产 Map 不可修改。
-        var user = new CoreUserState(type.productLine(), 7, 1, Map.of(settleAsset, new AssetBalance(settleAsset, available, locked)), Map.of(), positions);
+        var user = new CoreUserState(type.productLine(), 7, 1, Map.of(settleAsset, new AssetBalance(settleAsset, available, locked)), Map.of(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 包含标记价、指数和远期价均为一百三十的合成风险状态。
-        var risk = new CoreRiskState(Map.of("604", new CoreMarkPriceState("604", 130, 130, 130, 1, markTime)), Map.of(), Map.of(), Map.of(), 1);
-        return new TradingCoreState(type.productLine(), 1, Map.of(7L, user), Map.of(), Map.of("604", instrument), risk, CoreTreasuryState.empty());
+        var risk = new CoreRiskState(Map.of("604", new CoreMarkPriceState("604", 130, 130, 130, 1, markTime)), Map.of(), Map.of(), Map.of(), 1, CoreRiskState.defaultScanControl(), 0);
+        return new TradingCoreState(type.productLine(), 1, Map.of(7L, user), Map.of(), Map.of("604", instrument), risk, CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 }

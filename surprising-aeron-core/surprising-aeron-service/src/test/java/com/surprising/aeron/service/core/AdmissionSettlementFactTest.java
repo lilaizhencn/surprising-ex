@@ -52,13 +52,13 @@ class AdmissionSettlementFactTest {
                         0, 0, 0, -1, 0));
         // 用户七初始一万 USDT、无持仓和订单的冷状态
         var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
-                Map.of("USDT", new AssetBalance("USDT", 10_000, 0)), Map.of(), Map.of());
+                Map.of("USDT", new AssetBalance("USDT", 10_000, 0)), Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 原资产、标的及持仓身份表
         var ids = new RuntimeIdentityRegistry();
         // 允许被阻塞的账户 Lane 继续消费准入的门闩，所有退出路径都会放行
         var release = new CountDownLatch(1);
         try (/* 由本用例冷状态投影的运行时，启动真实账户工作资源 */ var runtime = RuntimeStateProjector.project(new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
-                Map.of(7L, user), Map.of(), Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty()), ids)) {
+                Map.of(7L, user), Map.of(), Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), ids)) {
             // USDT 的内部资产编号
             // 永久标的一的内部稠密编号
             int symbol = ids.symbolId("1"), asset = ids.assetId("USDT");

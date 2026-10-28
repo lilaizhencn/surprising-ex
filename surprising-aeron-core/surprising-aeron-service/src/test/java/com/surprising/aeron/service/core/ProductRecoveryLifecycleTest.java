@@ -54,7 +54,7 @@ class ProductRecoveryLifecycleTest {
                     TradingCommandCodec.encodePlaceOrder(order(102, CoreOrderSide.BUY, 100, 4)));
             // 首次部分成交命令的原响应字节参照。
             CoreResponse partialResult = apply(live, partial);
-            assertThat(live.tradingState().order(101).executedQuantitySteps()).isEqualTo(4);
+            assertThat(live.tradingState().orders().get(101L).executedQuantitySteps()).isEqualTo(4);
             // 首份快照前预置的待触发止损单。
             var trigger = new CoreTriggerOrderStateView(501, product, 22, "recovery-trigger", "", "1",
                     product == ProductLine.SPOT ? CoreOrderSide.BUY : CoreOrderSide.SELL,
@@ -107,16 +107,16 @@ class ProductRecoveryLifecycleTest {
                     }
                 }
                 assertThat(recovered.tradingState().orders()).isEmpty();
-                assertThat(recovered.tradingState().user(11).reservations()).isEmpty();
-                assertThat(recovered.tradingState().user(22).reservations()).isEmpty();
+                assertThat(recovered.tradingState().users().get(11L).reservations()).isEmpty();
+                assertThat(recovered.tradingState().users().get(22L).reservations()).isEmpty();
                 if (product == ProductLine.SPOT) {
-                    assertThat(recovered.tradingState().user(11).totalUnits("BTC")).isEqualTo(10);
-                    assertThat(recovered.tradingState().user(22).totalUnits("BTC")).isEqualTo(10);
-                    assertThat(recovered.tradingState().user(11).totalUnits("USDT")).isEqualTo(1_000);
-                    assertThat(recovered.tradingState().user(22).totalUnits("USDT")).isEqualTo(19_000);
+                    assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(11L), "BTC")).isEqualTo(10);
+                    assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(22L), "BTC")).isEqualTo(10);
+                    assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(11L), "USDT")).isEqualTo(1_000);
+                    assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(22L), "USDT")).isEqualTo(19_000);
                 } else {
-                    assertThat(recovered.tradingState().user(11).totalUnits(asset)
-                            + recovered.tradingState().user(22).totalUnits(asset)).isEqualTo(40_000);
+                    assertThat(CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(11L), asset)
+                            + CoreStateTestFixtures.totalUnits(recovered.tradingState().users().get(22L), asset)).isEqualTo(40_000);
                 }
                 // 编号五百零二、价格一百二十的 OCO 止盈腿。
                 var takeProfit = new CoreTriggerOrderStateView(502, product, 22, "recovery-take-profit", "recovery-oco", "1",
@@ -187,8 +187,8 @@ class ProductRecoveryLifecycleTest {
                         apply(afterTriggered, close);
                         parity(live, afterTriggered);
                         assertThat(afterTriggered.tradingState().orders()).isEmpty();
-                        assertThat(afterTriggered.tradingState().user(11).reservations()).isEmpty();
-                        assertThat(afterTriggered.tradingState().user(22).reservations()).isEmpty();
+                        assertThat(afterTriggered.tradingState().users().get(11L).reservations()).isEmpty();
+                        assertThat(afterTriggered.tradingState().users().get(22L).reservations()).isEmpty();
                     }
                 }
             }

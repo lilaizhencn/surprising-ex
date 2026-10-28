@@ -25,21 +25,6 @@ public record CoreRiskState(
         /** 最近一次标记价格变更的状态序号，用于使跨币对累计估值失效。 */ long marketRevision) {
 
     /**
-     * 创建包含扫描控制配置的风险状态，市场修订号从 0 开始。
-     * @param markPrices 按币对编号保存的行情状态，构造时冻结并排序，供恢复和状态查看使用
-     * @param snapshots 按用户、币对及持仓腿组合键保存的风险估值记录
-     * @param liquidations 按强平编号保存的强平流程记录
-     * @param scans 按币对编号保存的风险及条件单扫描进度，可从记录的游标继续
-     * @param nextLiquidationId 下一次新建强平计划时使用的编号，初始值为 1
-     * @param scanControl 控制风险扫描是否启用、调度间隔和每批工作量的配置
-     */
-    public CoreRiskState(Map<String, CoreMarkPriceState> markPrices, Map<String, CoreRiskSnapshot> snapshots,
-                         Map<Long, CoreLiquidationState> liquidations, Map<String, RiskScan> scans,
-                         long nextLiquidationId, CoreRiskScanControlView scanControl) {
-        this(markPrices, snapshots, liquidations, scans, nextLiquidationId, scanControl, 0);
-    }
-
-    /**
      * 要求各类状态映射和扫描配置完整，编号与修订号有效，再冻结排序所有映射，防止外部后续修改影响这份记录。
      */
     public CoreRiskState {
@@ -47,33 +32,17 @@ public record CoreRiskState(
                 || marketRevision < 0 || nextLiquidationId <= 0 || scanControl == null) {
             throw new IllegalArgumentException("invalid risk state");
         }
-        markPrices = immutableSorted(markPrices);
-        snapshots = immutableSorted(snapshots);
-        liquidations = immutableSorted(liquidations);
-        scans = immutableSorted(scans);
+        markPrices = StateMapSupport.freezeSorted(markPrices);
+        snapshots = StateMapSupport.freezeSorted(snapshots);
+        liquidations = StateMapSupport.freezeSorted(liquidations);
+        scans = StateMapSupport.freezeSorted(scans);
     }
 
     /**
      * 创建没有行情、估值、强平和扫描任务的初始风险状态，强平编号从 1 开始。
      */
     public static CoreRiskState empty() {
-        return new CoreRiskState(Map.of(), Map.of(), Map.of(), Map.of(), 1, defaultScanControl());
-    }
-
-    /**
-     * 创建使用默认扫描控制配置的风险状态，市场修订号从 0 开始。
-     * @param markPrices 按币对编号保存的行情状态，构造时冻结并排序，供恢复和状态查看使用
-     * @param snapshots 按用户、币对及持仓腿组合键保存的风险估值记录
-     * @param liquidations 按强平编号保存的强平流程记录
-     * @param scans 按币对编号保存的风险及条件单扫描进度，可从记录的游标继续
-     * @param nextLiquidationId 下一次新建强平计划时使用的编号，初始值为 1
-     */
-    public CoreRiskState(Map<String, CoreMarkPriceState> markPrices,
-                         Map<String, CoreRiskSnapshot> snapshots,
-                         Map<Long, CoreLiquidationState> liquidations,
-                         Map<String, RiskScan> scans,
-                         long nextLiquidationId) {
-        this(markPrices, snapshots, liquidations, scans, nextLiquidationId, defaultScanControl());
+        return new CoreRiskState(Map.of(), Map.of(), Map.of(), Map.of(), 1, defaultScanControl(), 0);
     }
 
     /**
@@ -82,34 +51,6 @@ public record CoreRiskState(
     public static CoreRiskScanControlView defaultScanControl() {
         return new CoreRiskScanControlView(1, "Aeron risk scan control", true, 25L, 64,
                 "system", "default", 0);
-    }
-
-    /**
-     * 优先返回按映射顺序找到的未完成扫描；都完成时返回第一份，完全没有扫描时返回空闲游标。
-     */
-    public RiskScan scan() {
-        // 映射中的第一份扫描，所有扫描都完成时仍可用它作为代表。
-        RiskScan first = null;
-        for (RiskScan /* 当前检查的币对扫描，账户风险和条件单都结束才算完成。 */ value : scans.values()) {
-            if (!value.complete()) {
-                return value;
-            }
-            if (first == null) {
-                first = value;
-            }
-        }
-        return first != null ? first : RiskScan.idle();
-    }
-
-    /**
-     * 按统一状态映射规则冻结并排序，具体的复制和排序由 StateMapSupport 承担。
-     * @param <K> 状态映射的键类型，排序和冻结规则沿用 StateMapSupport
-     * @param <V> 状态映射保存的业务记录类型
-     * @param values 需要冻结并按状态规则排序的映射
-     */
-    @SuppressWarnings("unchecked")
-    private static <K, V> Map<K, V> immutableSorted(Map<K, V> values) {
-        return StateMapSupport.freezeSorted(values);
     }
 
     /**
@@ -136,12 +77,5 @@ public record CoreRiskState(
             instrumentId = instrumentId == null || instrumentId.isBlank() ? "-" : instrumentId;
         }
 
-        public boolean complete() {
-            return riskComplete && triggerComplete;
-        }
-
-        static RiskScan idle() {
-            return new RiskScan("-", 0, 0, 0, true, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of());
-        }
     }
 }

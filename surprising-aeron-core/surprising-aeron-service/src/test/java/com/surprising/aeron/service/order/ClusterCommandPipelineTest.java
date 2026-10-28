@@ -608,7 +608,7 @@ class ClusterCommandPipelineTest {
             var probe = live.place(11, firstSymbol, 900, 80, 1, CoreOrderSide.BUY);
             live.apply(probe); serial.apply(probe);
             // 真实探测订单被冻结的资产最小单位数量
-            long required = live.service.state().tradingState().user(11).balances().get(asset).lockedUnits();
+            long required = live.service.state().tradingState().users().get(11L).balances().get(asset).lockedUnits();
             assertThat(required).isPositive();
             // 撤掉资金探测单以释放其预留的消息
             var cancelProbe = live.cancel(11, 900);
@@ -645,7 +645,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).hasSize(2);
             assertThat(live.responses.getFirst().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(live.service.state().tradingState().user(11).balances().get(asset).availableUnits()).isZero();
+            assertThat(live.service.state().tradingState().users().get(11L).balances().get(asset).availableUnits()).isZero();
             assertThat(live.hash()).isEqualTo(serial.hash());
             // 取消 A 的订单后 B 可以使用释放的资金；快照恢复也必须保留这份共享余额。
             var cancel = live.cancel(11, 1000);
@@ -656,7 +656,7 @@ class ClusterCommandPipelineTest {
                 live.apply(retry); serial.apply(retry);
                 assertThat(CoreTestCompletion.applyAsynchronously(restored, retry, retry.header().submittedAtEpochMillis(), 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash()).isEqualTo(serial.hash());
-                assertThat(restored.tradingState().user(11).balances().get(asset).lockedUnits()).isEqualTo(required);
+                assertThat(restored.tradingState().users().get(11L).balances().get(asset).lockedUnits()).isEqualTo(required);
             }
         } finally {
             release.countDown();
@@ -698,7 +698,7 @@ class ClusterCommandPipelineTest {
             int instrumentId = symbols.get("1");
             live.service.state().matcherPipeline().readAtSubmissionFence(shardId, () -> registered.add(instrumentId)).join();
             // 故障注入前的请求账户全部余额，拒单后应完全恢复
-            var before = live.service.state().tradingState().user(11).balances();
+            var before = live.service.state().tradingState().users().get(11L).balances();
             // 需要触发原生拒绝的原始下单消息
             var request = live.place(11, "1", 1000, 80, 1, CoreOrderSide.BUY);
             try { live.apply(request); }
@@ -706,8 +706,8 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).hasSize(1);
             assertThat(live.responses.getFirst().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(live.responses.getFirst().resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
-            assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(before);
-            assertThat(live.service.state().tradingState().user(11).reservations()).isEmpty();
+            assertThat(live.service.state().tradingState().users().get(11L).balances()).isEqualTo(before);
+            assertThat(live.service.state().tradingState().users().get(11L).reservations()).isEmpty();
             assertThat(live.service.state().pendingMatching().size()).isZero();
             // Owner 是否持有账户访问权的反射字段
             assertThat(live.service.state().runtimeState().ownerLaneAccess()).isFalse();
@@ -762,7 +762,7 @@ class ClusterCommandPipelineTest {
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             }
             // 增减逐仓保证金前导出的用户状态，最后余额及持仓应回到它的值
-            var before = live.service.state().tradingState().user(11);
+            var before = live.service.state().tradingState().users().get(11L);
             for (long /* 本轮逐仓保证金调整量，含可恢复小额和拒绝极值 */ units : new long[]{10, -10, Long.MAX_VALUE, -Long.MAX_VALUE}) {
                 // 本轮保证金或杠杆设置的原命令
                 var change = live.message(CoreMessageType.ADJUST_POSITION_MARGIN, 11,
@@ -771,8 +771,8 @@ class ClusterCommandPipelineTest {
                 assertThat(live.responses.getLast().commandStatus())
                         .isEqualTo(Math.abs(units) == 10 ? ResponseStatus.APPLIED : ResponseStatus.REJECTED);
             }
-            assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(before.balances());
-            assertThat(live.service.state().tradingState().user(11).positions()).isEqualTo(before.positions());
+            assertThat(live.service.state().tradingState().users().get(11L).balances()).isEqualTo(before.balances());
+            assertThat(live.service.state().tradingState().users().get(11L).positions()).isEqualTo(before.positions());
             assertThat(live.hash()).isEqualTo(serial.hash());
             if (recovery) {
                 try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
@@ -792,14 +792,14 @@ class ClusterCommandPipelineTest {
         try (/* 接收交错或并发在途输入的测试 Fixture，退出资源作用域时关闭 */ Fixture live = new Fixture(product)) {
             live.setup();
             // 切换仓位模式前的账户余额，重复设置或拒绝不应改变
-            var balances = live.service.state().tradingState().user(11).balances();
+            var balances = live.service.state().tradingState().users().get(11L).balances();
             for (var /* 本轮要设置的双向或单向持仓模式 */ mode : new CorePositionMode[]{CorePositionMode.HEDGE, CorePositionMode.HEDGE,
                     CorePositionMode.ONE_WAY}) {
                 live.apply(live.message(CoreMessageType.UPDATE_POSITION_MODE, 11,
                         TradingCommandCodec.encodeUpdatePositionMode(new UpdatePositionModeCommand(mode))));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                assertThat(live.service.state().tradingState().user(11).positionMode()).isEqualTo(mode);
-                assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(balances);
+                assertThat(live.service.state().tradingState().users().get(11L).positionMode()).isEqualTo(mode);
+                assertThat(live.service.state().tradingState().users().get(11L).balances()).isEqualTo(balances);
             }
             live.apply(live.place(11, "1", 19002, 80, 1, CoreOrderSide.BUY));
             // 活动订单阻止模式切换之前的业务哈希
@@ -812,8 +812,8 @@ class ClusterCommandPipelineTest {
             live.apply(live.message(CoreMessageType.UPDATE_POSITION_MODE, 11,
                     TradingCommandCodec.encodeUpdatePositionMode(new UpdatePositionModeCommand(CorePositionMode.HEDGE))));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(live.service.state().tradingState().user(11).positionMode()).isEqualTo(CorePositionMode.HEDGE);
-            assertThat(live.service.state().tradingState().user(11).balances()).isEqualTo(balances);
+            assertThat(live.service.state().tradingState().users().get(11L).positionMode()).isEqualTo(CorePositionMode.HEDGE);
+            assertThat(live.service.state().tradingState().users().get(11L).balances()).isEqualTo(balances);
         }
     }
 
@@ -1034,7 +1034,7 @@ class ClusterCommandPipelineTest {
             // 当前 Fixture 内的实际 Core 运行时
             var state = live.service.state();
             // 交易动作开始前该账户全部资产余额，用于检查下撤单后恢复
-            var beforeBalances = state.tradingState().user(11).balances();
+            var beforeBalances = state.tradingState().users().get(11L).balances();
             // 账户所有权交接代数的反射字段
             // 本轮交易动作开始前的账户交接代数
             long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
@@ -1055,7 +1055,7 @@ class ClusterCommandPipelineTest {
             live.apply(live.cancel(11, 999_999));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(before);
-            assertThat(state.tradingState().user(11).balances()).isEqualTo(beforeBalances);
+            assertThat(state.tradingState().users().get(11L).balances()).isEqualTo(beforeBalances);
             try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
@@ -1248,7 +1248,7 @@ class ClusterCommandPipelineTest {
             live.apply(live.message(CoreMessageType.UPSERT_FEE_POLICY, 0,
                     TradingCommandCodec.encodeUpsertFeePolicy(new com.surprising.aeron.protocol.UpsertFeePolicyCommand(
                             99001, 1, user, "1", -25, 75, 0, true, TIME, 0))));
-            var balancesBefore = live.service.state().tradingState().user(user).balances();
+            var balancesBefore = live.service.state().tradingState().users().get(user).balances();
             live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                     CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
             var terminal = CoreTestCompletion.triggerState(live.service.state(), user, 9001);
@@ -1263,7 +1263,7 @@ class ClusterCommandPipelineTest {
             }
             live.apply(live.cancel(user, child.orderId()));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(live.service.state().tradingState().user(user).balances()).isEqualTo(balancesBefore);
+            assertThat(live.service.state().tradingState().users().get(user).balances()).isEqualTo(balancesBefore);
         }
     }
 
@@ -2049,8 +2049,8 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).isEmpty();
             live.tick(); serial.apply(sellA); serial.apply(sellB);
             assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.service.state().tradingState().order(100).executedQuantitySteps()).isZero();
-            assertThat(live.service.state().tradingState().order(200).executedQuantitySteps()).isZero();
+            assertThat(live.service.state().tradingState().orders().get(100L).executedQuantitySteps()).isZero();
+            assertThat(live.service.state().tradingState().orders().get(200L).executedQuantitySteps()).isZero();
         }
     }
     /** 测试固定业务时间基准，原消息通常使用它加来源序号。 */
@@ -2182,9 +2182,9 @@ class ClusterCommandPipelineTest {
             replay.send(first); replay.send(second); replay.tick();
             assertThat(live.responses).hasSize(2).allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(live.hash()).isEqualTo(serial.hash()).isEqualTo(replay.hash());
-            assertThat(live.service.state().tradingState().order(101).createdAtEpochMillis())
+            assertThat(live.service.state().tradingState().orders().get(101L).createdAtEpochMillis())
                     .isEqualTo(first.header().submittedAtEpochMillis());
-            assertThat(live.service.state().tradingState().order(disjointOrder(101)).createdAtEpochMillis())
+            assertThat(live.service.state().tradingState().orders().get(disjointOrder(101)).createdAtEpochMillis())
                     .isEqualTo(second.header().submittedAtEpochMillis());
             assertThat(live.service.commandWindowHighWaterMark()).isEqualTo(2);
             // 第一条活动订单的撤单消息
@@ -2242,7 +2242,7 @@ class ClusterCommandPipelineTest {
             assertThat(f.responses.get(0).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(f.responses.get(1).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             // 当前请求账户的报价资产可用和冻结余额
-            var balance = f.service.state().tradingState().user(11).balances().get("USDT");
+            var balance = f.service.state().tradingState().users().get(11L).balances().get("USDT");
             assertThat(balance.lockedUnits()).isEqualTo(80);
             assertThat(balance.availableUnits()).isEqualTo(20);
         }
@@ -2495,8 +2495,8 @@ class ClusterCommandPipelineTest {
             // 持续Owner按命令建立确定性提交边界，两条命令各有一组完整推送。
             assertThat(begin).isEqualTo(2); assertThat(end).isEqualTo(2);
             assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.service.state().tradingState().order(201).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
-            assertThat(live.service.state().tradingState().order(202).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
+            assertThat(live.service.state().tradingState().orders().get(201L).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
+            assertThat(live.service.state().tradingState().orders().get(202L).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
             try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
@@ -2527,7 +2527,7 @@ class ClusterCommandPipelineTest {
                     // 会让只挂单新替换单被拒的对手卖单消息
                     var maker = live.place(disjointUser(11), "1", 201, 100, 1, CoreOrderSide.SELL);
                     live.apply(maker); serial.apply(maker);
-                    assertThat(live.service.state().tradingState().order(201)).isNotNull();
+                    assertThat(live.service.state().tradingState().orders().get(201L)).isNotNull();
                 }
                 // 当前 Fixture 内的实际 Core 运行时
                 var state = live.service.state();
@@ -2589,8 +2589,8 @@ class ClusterCommandPipelineTest {
                 assertThat(status).as("batch=%s rejected=%s", batch, rejected)
                         .isEqualTo(rejected ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
                 assertThat(live.hash()).isEqualTo(serial.hash());
-                assertThat(state.tradingState().order(101)).isNull();
-                if (rejected) assertThat(state.tradingState().order(102)).isNull();
+                assertThat(state.tradingState().orders().get(101L)).isNull();
+                if (rejected) assertThat(state.tradingState().orders().get(102L)).isNull();
                 try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
@@ -2656,7 +2656,7 @@ class ClusterCommandPipelineTest {
             assertThat(gate.join()).isOne();
             live.tick(); serial.apply(cancel);
             assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.service.state().tradingState().order(101)).isNull();
+            assertThat(live.service.state().tradingState().orders().get(101L)).isNull();
         }
     }
 
@@ -2713,7 +2713,7 @@ class ClusterCommandPipelineTest {
             assertThat(gate.join()).isOne();
             live.tick(); serial.apply(cancel);
             assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.service.state().tradingState().order(101)).isNull();
+            assertThat(live.service.state().tradingState().orders().get(101L)).isNull();
         }
     }
 
@@ -2740,7 +2740,7 @@ class ClusterCommandPipelineTest {
             CoreMessage cancel = f.cancel(11, 101); f.send(cancel);
             f.apply(f.message(CoreMessageType.ADJUST_BALANCE, 11, com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 1))));
             assertThat(f.service.commandWindowSize()).isZero();
-            assertThat(f.service.state().tradingState().user(11).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(f.service.state().tradingState().users().get(11L).balances().get("USDT").lockedUnits()).isZero();
         }
     }
 

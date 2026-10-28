@@ -429,8 +429,7 @@ public final class LinearPerpetualMixedWorkload {
 
                 LiquidationRuntime adlRequired = liquidation(target, liquidationId);
                 int liquidationSymbolIndex = source.liquidationSymbolIndex();
-                var makerPosition = target.state().tradingState()
-                        .user(source.positionMakers().get(liquidationSymbolIndex)).positions()
+                var makerPosition = target.state().tradingState().users().get(source.positionMakers().get(liquidationSymbolIndex)).positions()
                         .get(source.symbols().get(liquidationSymbolIndex));
                 if (makerPosition == null) throw new IllegalStateException("ADL maker position is missing");
                 long profitPerStep = Math.subtractExact(makerPosition.entryPriceTicks(), LIQUIDATION_MARK);
@@ -549,15 +548,15 @@ public final class LinearPerpetualMixedWorkload {
                 if (!lossLifecycleCompleted
                         || liquidation != null && (liquidation.status() != CoreLiquidationState.Status.COMPLETED
                         || liquidation.deficitUnits() != 0)
-                        || completeHeavyCycles && !state.riskState().scan().complete()) {
+                        || completeHeavyCycles && !state.riskState().scans().values().stream().allMatch(scanState -> scanState.riskComplete() && scanState.triggerComplete())) {
                     throw new IllegalStateException("mixed workload lifecycle did not complete");
                 }
                 for (int index = 0; index < template.symbols().size(); index++) {
                     if (!fundingTouched[index]) continue;
                     String instrumentId = template.symbols().get(index);
-                    var progress = state.treasuryState().fundingProgress(instrumentId);
+                    var progress = state.treasuryState().fundingProgress().get(instrumentId);
                     long expectedSettlementId = fundingSettlementIds[index];
-                    boolean fundingAdvanced = state.treasuryState().fundingSettlement(instrumentId)
+                    boolean fundingAdvanced = state.treasuryState().fundingSettlements().getOrDefault(instrumentId, 0L)
                             == expectedSettlementId
                             || !completeHeavyCycles && progress != null
                             && progress.settlementId() == expectedSettlementId;
@@ -825,7 +824,7 @@ public final class LinearPerpetualMixedWorkload {
         Set<Integer> openOrderCounts = new HashSet<>();
         for (int index = 0; index < retailUsers.size(); index++) {
             long userId = retailUsers.get(index);
-            var positions = state.user(userId).positions();
+            var positions = state.users().get(userId).positions();
             positions.values().stream()
                     .mapToLong(position -> Math.absExact(position.signedQuantitySteps()))
                     .forEach(positionSizes::add);
@@ -847,7 +846,7 @@ public final class LinearPerpetualMixedWorkload {
 
     public static long totalFunds(TradingCoreState state) {
         long total = 0;
-        for (var user : state.users().values()) total = Math.addExact(total, user.totalUnits(SETTLE_ASSET));
+        for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, SETTLE_ASSET));
         CoreTreasuryState treasury = state.treasuryState();
         total = addLedger(total, treasury.feeBalances());
         total = addLedger(total, treasury.insuranceBalances());

@@ -145,7 +145,7 @@ class CoreCommandFingerprintTest {
      */
     private static long testBalance(TradingCoreRuntime state, long userId) {
         // 从已提交测试状态取得的可空用户，用于核对 USDT 总额
-        var user = state.tradingState().user(userId);
-        return user == null ? 0 : user.totalUnits("USDT");
+        var user = state.tradingState().users().get(userId);
+        return user == null ? 0 : CoreStateTestFixtures.totalUnits(user, "USDT");
     }
 }

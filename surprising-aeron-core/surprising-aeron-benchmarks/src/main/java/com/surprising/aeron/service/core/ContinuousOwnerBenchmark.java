@@ -187,8 +187,8 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
         }
         try (var restored = TradingCoreRuntime.fromSnapshot(productLine, service.captureSnapshot())) {
             for (int i = 0; i < 256; i++) {
-                var order = restored.tradingState().order(orders[i]);
-                var balance = restored.tradingState().user(1000 + i).balances().get(asset);
+                var order = restored.tradingState().orders().get(orders[i]);
+                var balance = restored.tradingState().users().get((long) (1000 + i)).balances().get(asset);
                 if (order == null || order.status() != com.surprising.aeron.model.CoreOrderStatus.OPEN
                         || balance.availableUnits() + balance.lockedUnits() != 20000)
                     throw new IllegalStateException("snapshot omitted an in-flight order");
@@ -245,7 +245,7 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
                 if (!restoredState.orders().isEmpty())
                     throw new IllegalStateException("canceled batch items remained in restored active orders");
                 for (int i = 0; i < 256; i++) {
-                    var user = restoredState.user(1000 + i);
+                    var user = restoredState.users().get((long) (1000 + i));
                     var balance = user.balances().get(asset);
                     if (balance.availableUnits() != 20000 || balance.lockedUnits() != 0)
                         throw new IllegalStateException("funds or reservations differ after snapshot restore");

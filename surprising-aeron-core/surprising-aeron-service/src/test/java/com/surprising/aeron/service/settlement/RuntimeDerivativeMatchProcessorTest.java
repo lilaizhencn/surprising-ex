@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.settlement;
 
+import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
@@ -60,7 +61,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100)),
                 Map.of(11L, taker, 12L, maker), Map.of(instrument.instrumentId(), instrument),
-                CoreRiskState.empty(), CoreTreasuryState.empty());
+                CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 用例直接构造的 Matcher 成交事实列表，不通过真实订单簿。
         List<MatcherEvent> matches = List.of(trade(12, 8, 100, 1, true, true));
         // 冷状态测试推进器给出的期望结果，其资金规则仍调用生产计算器。
@@ -93,7 +94,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 200), 8L, user(8, maker, 100)),
                 Map.of(11L, taker, 12L, maker),
-                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 当前投影对照使用的资产、合约及持仓身份字典。
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         // 由冷状态投影得到或辅助转换返回的内存交易运行时。
@@ -118,12 +119,12 @@ class RuntimeDerivativeMatchProcessorTest {
         // 当前成交的相反方向对手冷订单。
         CoreOrderState maker = order(12, 8, CoreOrderSide.SELL, 1);
         // 不参与本次成交的用户九十九的初始冷状态。
-        CoreUserState unrelated = CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 99);
+        CoreUserState unrelated = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 99, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 包含用户、订单、币对及系统账本的操作前冷状态。
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 100), 8L, user(8, maker, 100), 99L, unrelated),
                 Map.of(11L, taker, 12L, maker), Map.of(instrument.instrumentId(), instrument),
-                CoreRiskState.empty(), CoreTreasuryState.empty());
+                CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 用例直接构造的 Matcher 成交事实列表，不通过真实订单簿。
         List<MatcherEvent> matches = List.of(trade(12, 8, 100, 1, true, true));
         // 冷状态测试推进器给出的期望结果，其资金规则仍调用生产计算器。
@@ -156,7 +157,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 200), 8L, user(8, makerOne, 100), 9L, user(9, makerTwo, 100)),
                 Map.of(11L, taker, 12L, makerOne, 13L, makerTwo),
-                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 用例直接构造的 Matcher 成交事实列表，不通过真实订单簿。
         List<MatcherEvent> matches = List.of(
                 trade(12, 8, 100, 1, true, false),
@@ -210,7 +211,7 @@ class RuntimeDerivativeMatchProcessorTest {
         // 包含用户、订单、币对及系统账本的操作前冷状态。
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, user(7, taker, 200)), Map.of(11L, taker),
-                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 冷状态测试推进器应用成交后的参照状态。
         TradingCoreState after = new RuntimeTestStateTransitions().applyMatches(before, 11, "BTC", "USDT", List.of());
         // 当前投影对照使用的资产、合约及持仓身份字典。
@@ -253,46 +254,46 @@ class RuntimeDerivativeMatchProcessorTest {
         // 上述独立场景应用指定成交价后的结果，用例只断言主动订单全部成交。
         TradingCoreState protectedFill = reducer.applyMatches(invalidOpen, 22, "BTC", "USDT",
                 List.of(trade(21, 8, 773_332, 1, true, true)));
-        assertThat(protectedFill.order(22).status()).isEqualTo(CoreOrderStatus.FILLED);
+        assertThat(protectedFill.orders().get(22L).status()).isEqualTo(CoreOrderStatus.FILLED);
 
         state = reducer.placeOrder(state, 8, limitOrder(12, CoreOrderSide.SELL, 773_333, false));
         state = reducer.placeOrder(state, 7, open);
         state = reducer.applyMatches(state, 11, "BTC", "USDT",
                 List.of(trade(12, 8, 773_333, 1, true, true)));
-        assertThat(state.user(7).balances().get("USDT"))
+        assertThat(state.users().get(7L).balances().get("USDT"))
                 .isEqualTo(new AssetBalance("USDT", 918_800_035_000L, 77_333_300_000L));
 
         state = reducer.placeOrder(state, 8, limitOrder(13, CoreOrderSide.BUY, 773_332, true));
         state = reducer.placeOrder(state, 7, marketOrder(14, CoreOrderSide.SELL, true, 773_022));
-        assertThat(state.user(7).reservations().get(14L).remainingUnits()).isEqualTo(3_903_765_000L);
+        assertThat(state.users().get(7L).reservations().get(14L).remainingUnits()).isEqualTo(3_903_765_000L);
 
         // 已经开仓并为相反方向订单完成准入的平仓前状态。
         TradingCoreState readyToClose = state;
         // 按指定较低成交价完成平仓的独立结果，用来核对持仓归零。
         TradingCoreState boundaryFill = reducer.applyMatches(readyToClose, 14, "BTC", "USDT",
                 List.of(trade(13, 8, 773_022, 1, true, true)));
-        assertThat(boundaryFill.user(7).positions().get("1").signedQuantitySteps()).isZero();
+        assertThat(boundaryFill.users().get(7L).positions().get("1").signedQuantitySteps()).isZero();
 
         // 平仓卖出取得更高实际成交价的一项成交列表。
         List<MatcherEvent> betterFill = List.of(trade(13, 8, 773_332, 1, true, true));
         // 平仓前用户七可用余额，另一场景把它全部扣除以检查释放保证金补费。
-        long availableBeforeClose = readyToClose.user(7).balances().get("USDT").availableUnits();
+        long availableBeforeClose = readyToClose.users().get(7L).balances().get("USDT").availableUnits();
         // 可用余额先归零后，使用平仓释放保证金完成费用支付的结果状态。
         TradingCoreState marginFundedClose = reducer.adjustBalance(readyToClose, 7,
                 new BalanceAdjustmentCommand("USDT", Math.negateExact(availableBeforeClose)));
         marginFundedClose = reducer.applyMatches(marginFundedClose, 14, "BTC", "USDT", betterFill);
-        assertThat(marginFundedClose.user(7).balances().get("USDT"))
+        assertThat(marginFundedClose.users().get(7L).balances().get("USDT"))
                 .isEqualTo(new AssetBalance("USDT", 77_360_405_000L, 0));
 
         // 正常可用余额场景按改善成交价完成平仓的结果，包含费用和资金守恒断言。
         TradingCoreState closed = reducer.applyMatches(readyToClose, 14, "BTC", "USDT", betterFill);
-        assertThat(closed.user(7).positions().get("1").signedQuantitySteps()).isZero();
-        assertThat(closed.user(7).reservations().get(14L).reservedUnits()).isEqualTo(3_903_765_000L);
-        assertThat(closed.user(7).reservations().get(14L).remainingUnits()).isZero();
-        assertThat(closed.user(7).balances().get("USDT"))
+        assertThat(closed.users().get(7L).positions().get("1").signedQuantitySteps()).isZero();
+        assertThat(closed.users().get(7L).reservations().get(14L).reservedUnits()).isEqualTo(3_903_765_000L);
+        assertThat(closed.users().get(7L).reservations().get(14L).remainingUnits()).isZero();
+        assertThat(closed.users().get(7L).balances().get("USDT"))
                 .isEqualTo(new AssetBalance("USDT", 992_256_675_000L, 0));
         assertThat(closed.treasuryState().feeBalances()).containsEntry("USDT", 7_733_325_000L);
-        assertThat(closed.user(7).totalUnits("USDT") + closed.user(8).totalUnits("USDT")
+        assertThat(CoreStateTestFixtures.totalUnits(closed.users().get(7L), "USDT") + CoreStateTestFixtures.totalUnits(closed.users().get(8L), "USDT")
                 + closed.treasuryState().feeBalances().get("USDT")).isEqualTo(3_000_000_000_000L);
 
         // 当前投影对照使用的资产、合约及持仓身份字典。
@@ -316,17 +317,17 @@ class RuntimeDerivativeMatchProcessorTest {
         // 当前成交的相反方向对手冷订单。
         CoreOrderState maker = order(12, 8, CoreOrderSide.BUY, quantity);
         // 测试起点已有的两单位多仓、均价一百且保证金二十的冷持仓。
-        CorePositionState position = new CorePositionState("1", "USDT", 2, 100, 200, 0, 20);
+        CorePositionState position = new CorePositionState("1", "USDT", com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, 2, 100, 200, 0, 20);
         // 已有多仓并持有本次主动卖出预留的用户七冷状态。
         CoreUserState takerUser = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, 20 + takerReservation)),
-                Map.of(11L, OrderReservation.create(11, "1",
-                        ReservationKind.DERIVATIVE_MARGIN, "USDT", takerReservation, quantity)),
-                Map.of(position.key(), position));
+                Map.of(11L, new OrderReservation(11, "1",
+                        ReservationKind.DERIVATIVE_MARGIN, "USDT", takerReservation, 0, 0, quantity)),
+                Map.of(position.key(), position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 包含用户、订单、币对及系统账本的操作前冷状态。
         TradingCoreState before = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(7L, takerUser, 8L, user(8, maker, 300)), Map.of(11L, taker, 12L, maker),
-                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of(instrument.instrumentId(), instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 用例直接构造的 Matcher 成交事实列表，不通过真实订单簿。
         List<MatcherEvent> matches = List.of(trade(12, 8, 120, quantity, true, true));
         // 冷状态测试推进器应用成交后的参照状态。
@@ -357,12 +358,12 @@ class RuntimeDerivativeMatchProcessorTest {
      */
     private static CoreUserState user(long userId, CoreOrderState order, long reservedUnits) {
         // 给测试订单建立的衍生品保证金预留。
-        OrderReservation reservation = OrderReservation.create(order.orderId(), order.instrumentId(),
-                ReservationKind.DERIVATIVE_MARGIN, "USDT", reservedUnits,
+        OrderReservation reservation = new OrderReservation(order.orderId(), order.instrumentId(),
+                ReservationKind.DERIVATIVE_MARGIN, "USDT", reservedUnits, 0, 0,
                 order.quantitySteps());
         return new CoreUserState(ProductLine.LINEAR_PERPETUAL, userId, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, reservedUnits)),
-                Map.of(order.orderId(), reservation), Map.of());
+                Map.of(order.orderId(), reservation), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
     }
 
     /**

@@ -163,7 +163,7 @@ class TriggerOrderIndexTest {
         var initial = trigger(901, 7, 100);
         // 手工装入本用例触发状态的冷状态，供投影或索引重建
         var state = new TradingCoreState(ProductLine.SPOT, 0,
-                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), Map.of(),
+                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), Map.of(901L, initial));
         try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = RuntimeStateProjector.project(state, new RuntimeIdentityRegistry())) {
             runtime.startAccountLanes();
@@ -211,7 +211,7 @@ class TriggerOrderIndexTest {
         }
         // 手工装入本用例触发状态的冷状态，供投影或索引重建
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 0,
-                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), Map.of(),
+                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
         // 本用例独立的触发派生索引，由空状态或手工候选状态创建
         TriggerOrderIndex index = new TriggerOrderIndex(state);
@@ -270,7 +270,7 @@ class TriggerOrderIndexTest {
         triggers.put(304L, trailing(304, CoreOrderSide.BUY, 0, 100_000, 0, 100, 1_000));
         // 手工装入本用例触发状态的冷状态，供投影或索引重建
         TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 0,
-                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), Map.of(),
+                Map.of(7L, new CoreUserState(ProductLine.SPOT, 7, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)), Map.of(), Map.of(),
                 CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
         // 本用例独立的触发派生索引，由空状态或手工候选状态创建
         TriggerOrderIndex index = new TriggerOrderIndex(state);

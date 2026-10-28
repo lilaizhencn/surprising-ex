@@ -82,11 +82,11 @@ class SharedProductLineSnapshotContractTest {
             long orderId = 10_000L + productLine.ordinal();
             assertApplied(applyTerminal(original, gateway(productLine, 2, USER_ID, CoreMessageType.PLACE_ORDER,
                     TradingCommandCodec.encodePlaceOrder(place(orderId)))));
-            assertThat(original.tradingState().user(USER_ID).balances().get(settleAsset(productLine)).lockedUnits())
+            assertThat(original.tradingState().users().get(USER_ID).balances().get(settleAsset(productLine)).lockedUnits())
                     .as("%s reservation", productLine).isPositive();
             assertApplied(applyTerminal(original, gateway(productLine, 3, USER_ID, CoreMessageType.CANCEL_ORDER,
                     TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)))));
-            assertThat(original.tradingState().user(USER_ID).balances().get(settleAsset(productLine)).lockedUnits())
+            assertThat(original.tradingState().users().get(USER_ID).balances().get(settleAsset(productLine)).lockedUnits())
                     .as("%s cancellation releases reservation", productLine).isZero();
             assertThat(economicAssetUnits(original, settleAsset(productLine))).isEqualTo(economicBeforeOrder);
 

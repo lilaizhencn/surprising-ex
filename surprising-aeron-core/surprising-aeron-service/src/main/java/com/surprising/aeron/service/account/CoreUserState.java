@@ -68,7 +68,7 @@ public final class CoreUserState {
             throw new IllegalArgumentException("invalid user state");
         }
         validateEntries(balances, reservations, positions);
-        validateLocks(balances, calculateExplainedLocks(reservations, positions));
+        validateLocks(balances, reservations, positions);
         this.productLine = productLine;
         this.userId = userId;
         this.revision = revision;
@@ -76,44 +76,6 @@ public final class CoreUserState {
         this.reservations = StateMapSupport.freezeSorted(reservations);
         this.positions = StateMapSupport.freezeSorted(positions);
         this.positionMode = positionMode;
-    }
-
-    /**
-     * 未显式指定模式时采用单向持仓，其余走完整构造和锁定额校验。
-     * @param productLine 完整用户业务状态所属的独立产品线
-     * @param userId 该状态对应的正数用户编号
-     * @param revision 用户业务版本，允许初始值为零
-     * @param balances 按资产代码保存的冻结有序余额映射，属于业务快照而非在线 Lane 表
-     * @param reservations 按订单编号保存的冻结有序预留记录映射
-     * @param positions 按持仓业务键保存的冻结有序持仓映射
-     */
-    public CoreUserState(ProductLine productLine,
-                         long userId,
-                         long revision,
-                         Map<String, AssetBalance> balances,
-                         Map<Long, OrderReservation> reservations,
-                         Map<String, CorePositionState> positions) {
-        this(productLine, userId, revision, balances, reservations, positions, CorePositionMode.ONE_WAY);
-    }
-
-    /**
-     * 创建指定产品用户的零版本空状态，默认单向持仓，没有余额、订单冻结或持仓。
-     * @param productLine 完整用户业务状态所属的独立产品线
-     * @param userId 该状态对应的正数用户编号
-     */
-    public static CoreUserState empty(ProductLine productLine, long userId) {
-        return new CoreUserState(productLine, userId, 0, Map.of(), Map.of(), Map.of(),
-                CorePositionMode.ONE_WAY);
-    }
-
-    /**
-     * 规范化资产代码并读取可用加锁定总额，没有该资产余额就返回 0。
-     * @param asset 要查询或核对的资产代码，金额更新和总额查询会先规范化
-     */
-    public long totalUnits(String asset) {
-        // 当前核对或查询的资产余额，缺失资产总额为零，但正数可解释锁定不能缺余额。
-        AssetBalance balance = balances.get(AssetBalance.normalizeAsset(asset));
-        return balance == null ? 0 : balance.totalUnits();
     }
 
     /** 检查完整快照中余额、预留和持仓的键与业务身份一致。 */
@@ -137,62 +99,26 @@ public final class CoreUserState {
         });
     }
 
-    /** 核对所有订单剩余预留和持仓保证金，不得超过对应资产冻结余额。 */
-    private static void validateLocks(Map<String, AssetBalance> balances, Map<String, Long> explainedLocks) {
-        for (String asset : explainedLocks.keySet()) validateLock(balances, explainedLocks, asset);
-    }
-
-    /**
-     * 可解释锁定不能为负；正数时要求资产余额存在且其锁定额足够，允许锁定额大于当前可解释部分，不要求两者相等。
-     * @param balances 按资产代码保存的冻结有序余额映射，属于业务快照而非在线 Lane 表
-     * @param explainedLocks 校验用派生金额：各资产订单剩余冻结加持仓保证金，随本快照更新，不是可再次支出的余额
-     * @param asset 要查询或核对的资产代码，金额更新和总额查询会先规范化
-     */
-    private static void validateLock(Map<String, AssetBalance> balances,
-                                     Map<String, Long> explainedLocks,
-                                     String asset) {
-        // 当前资产可解释锁定总额，默认零，不能超过真实余额锁定额。
-        long units = explainedLocks.getOrDefault(asset, 0L);
-        // 当前核对或查询的资产余额，缺失资产总额为零，但正数可解释锁定不能缺余额。
-        AssetBalance balance = balances.get(asset);
-        if (units < 0 || (units > 0 && (balance == null || units > balance.lockedUnits()))) {
-            throw new IllegalStateException("reservation locks exceed balance asset=" + asset);
-        }
-    }
-
-    /**
-     * 从订单剩余预留及持仓保证金按资产累加派生锁定额；没有来源或来源全空返回空映射，非空映射继续交构造入口冻结。
-     * @param reservations 按订单编号保存的冻结有序预留记录映射
-     * @param positions 按持仓业务键保存的冻结有序持仓映射
-     */
-    private static Map<String, Long> calculateExplainedLocks(Map<Long, OrderReservation> reservations,
-                                                              Map<String, CorePositionState> positions) {
-        if (reservations == null || positions == null || (reservations.isEmpty() && positions.isEmpty())) {
-            return Map.of();
-        }
-        // 完整构造时临时累计的按资产派生锁定额，完成后交给状态冻结。
-        Map<String, Long> result = new HashMap<>();
-        reservations.values().forEach(/* 当前预留记录，身份校验看订单编号，派生金额计算看其剩余冻结。 */ reservation ->
-                adjustExplainedLock(result, reservation.asset(), reservation.remainingUnits()));
-        positions.values().forEach(/* 当前持仓记录，身份校验看持仓键，派生金额计算看保证金资产和金额。 */ position ->
-                adjustExplainedLock(result, position.marginAsset(), position.positionMarginUnits()));
-        return result.isEmpty() ? Map.of() : result;
-    }
-
-    /**
-     * 规范化资产代码并精确累加正负变化，结果不能为负，归零删除该项，否则写入新值。
-     * @param locks 需要应用本次资产变化的派生锁定额映射
-     * @param asset 要查询或核对的资产代码，金额更新和总额查询会先规范化
-     * @param delta 该资产应增加或减少的可解释锁定额，单位与余额相同
-     */
-    private static void adjustExplainedLock(Map<String, Long> locks, String asset, long delta) {
-        // 本次金额变化采用的规范资产代码，防止大小写或空白形成不同键。
-        String normalizedAsset = AssetBalance.normalizeAsset(asset);
-        // 原派生锁定额加本次变化的精确结果，负数报错，零值移除。
-        long next = Math.addExact(locks.getOrDefault(normalizedAsset, 0L), delta);
-        if (next < 0) throw new IllegalStateException("negative explained lock asset=" + normalizedAsset);
-        if (next == 0) locks.remove(normalizedAsset);
-        else locks.put(normalizedAsset, next);
+    /** 从已校验的不可变预留和持仓精确汇总锁定额，再核对真实冻结余额。 */
+    private static void validateLocks(Map<String, AssetBalance> balances,
+                                      Map<Long, OrderReservation> reservations,
+                                      Map<String, CorePositionState> positions) {
+        if (reservations.isEmpty() && positions.isEmpty()) return;
+        Map<String, Long> locks = new HashMap<>();
+        reservations.values().forEach(reservation -> {
+            long units = reservation.remainingUnits();
+            if (units != 0) locks.merge(reservation.asset(), units, Math::addExact);
+        });
+        positions.values().forEach(position -> {
+            long units = position.positionMarginUnits();
+            if (units != 0) locks.merge(position.marginAsset(), units, Math::addExact);
+        });
+        locks.forEach((asset, units) -> {
+            AssetBalance balance = balances.get(asset);
+            if (balance == null || units > balance.lockedUnits()) {
+                throw new IllegalStateException("reservation locks exceed balance asset=" + asset);
+            }
+        });
     }
 
     /**

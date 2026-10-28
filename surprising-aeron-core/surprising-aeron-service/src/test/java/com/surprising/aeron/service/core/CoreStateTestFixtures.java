@@ -31,6 +31,16 @@ public final class CoreStateTestFixtures {
                     com.surprising.aeron.config.LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4096, 4096, 4096);
 
 
+    /** 核对冷用户的资产总额，缺失资产按零计；不执行余额变更。 */
+    public static long totalUnits(com.surprising.aeron.service.account.CoreUserState user, String asset) {
+        var balance = user.balances().get(com.surprising.aeron.model.AssetBalance.normalizeAsset(asset));
+        return balance == null ? 0 : totalUnits(balance);
+    }
+
+    public static long totalUnits(com.surprising.aeron.model.AssetBalance balance) {
+        return Math.addExact(balance.availableUnits(), balance.lockedUnits());
+    }
+
     /** 类加载时创建并在本辅助中共享的正向永续标的一，所有测试订单借用该原对象。 */
     private static final CoreInstrument RUNTIME_INSTRUMENT = CoreInstrument.from(
             ProductLine.LINEAR_PERPETUAL,

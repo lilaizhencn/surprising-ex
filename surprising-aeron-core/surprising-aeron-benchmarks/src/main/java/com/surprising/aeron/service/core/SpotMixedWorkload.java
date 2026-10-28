@@ -233,7 +233,7 @@ public final class SpotMixedWorkload {
                 });
                 for (long orderId : latestLifecycleOrders) {
                     var order = state.orders().get(orderId);
-                    var reservation = order == null ? null : state.user(order.userId()).reservations().get(orderId);
+                    var reservation = order == null ? null : state.users().get(order.userId()).reservations().get(orderId);
                     if (order != null && (order.status() == CoreOrderStatus.OPEN
                             || reservation == null || reservation.remainingUnits() != 0)) {
                         throw new IllegalStateException("spot lifecycle order is not terminal: orderId=" + orderId
@@ -357,7 +357,7 @@ public final class SpotMixedWorkload {
         Map<String, Long> totals = new LinkedHashMap<>();
         for (String asset : assets) {
             long total = 0;
-            for (var user : state.users().values()) total = Math.addExact(total, user.totalUnits(asset));
+            for (var user : state.users().values()) total = Math.addExact(total, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
             CoreTreasuryState treasury = state.treasuryState();
             total = addLedger(total, treasury.feeBalances(), asset);
             total = addLedger(total, treasury.insuranceBalances(), asset);

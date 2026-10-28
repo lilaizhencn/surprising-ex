@@ -48,15 +48,15 @@ class CoreOptionPremiumFeeFundingTest {
             place(runtime, 101, 4, CoreOrderSide.SELL, 0, CoreOrderType.MARKET, true);
             // 平仓结束后用于核对金额和终态的交易业务视图。
             var state = runtime.tradingState();
-            assertThat(state.user(101).totalUnits("USDT")).isEqualTo(WALLET - 300_000);
-            assertThat(state.user(202).totalUnits("USDT")).isEqualTo(WALLET + 160_000);
+            assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "USDT")).isEqualTo(WALLET - 300_000);
+            assertThat(CoreStateTestFixtures.totalUnits(state.users().get(202L), "USDT")).isEqualTo(WALLET + 160_000);
             assertThat(state.treasuryState().feeBalances().get("USDT")).isEqualTo(140_000);
             for (long /* 当前初始化钱包或核对终态的用户编号。 */ user : List.of(101L, 202L)) {
-                assertThat(state.user(user).balances().get("USDT").lockedUnits()).isZero();
-                assertThat(state.user(user).reservations()).isEmpty();
-                assertThat(state.user(user).positions().values()).allMatch(/* 当前用户的一条持仓，断言其数量为零。 */ position -> position.signedQuantitySteps() == 0);
+                assertThat(state.users().get(user).balances().get("USDT").lockedUnits()).isZero();
+                assertThat(state.users().get(user).reservations()).isEmpty();
+                assertThat(state.users().get(user).positions().values()).allMatch(/* 当前用户的一条持仓，断言其数量为零。 */ position -> position.signedQuantitySteps() == 0);
             }
-            assertThat(state.user(101).totalUnits("USDT") + state.user(202).totalUnits("USDT")
+            assertThat(CoreStateTestFixtures.totalUnits(state.users().get(101L), "USDT") + CoreStateTestFixtures.totalUnits(state.users().get(202L), "USDT")
                     + state.treasuryState().feeBalances().get("USDT")).isEqualTo(2 * WALLET);
         } finally { if (runtime != original) runtime.close(); original.close(); }
     }

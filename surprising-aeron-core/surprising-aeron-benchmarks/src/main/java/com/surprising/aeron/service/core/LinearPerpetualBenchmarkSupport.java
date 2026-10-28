@@ -68,6 +68,16 @@ public final class LinearPerpetualBenchmarkSupport {
     private LinearPerpetualBenchmarkSupport() {
     }
 
+    /** 核对冷用户的资产总额，缺失资产按零计；不执行余额变更。 */
+    public static long totalUnits(com.surprising.aeron.service.account.CoreUserState user, String asset) {
+        var balance = user.balances().get(com.surprising.aeron.model.AssetBalance.normalizeAsset(asset));
+        return balance == null ? 0 : totalUnits(balance);
+    }
+
+    public static long totalUnits(com.surprising.aeron.model.AssetBalance balance) {
+        return Math.addExact(balance.availableUnits(), balance.lockedUnits());
+    }
+
     public interface Scenario extends AutoCloseable {
         public long run();
 
@@ -731,7 +741,7 @@ public final class LinearPerpetualBenchmarkSupport {
         harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand(SYMBOL, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS), harness.productLine())));
-        while (!harness.state.tradingState().riskState().scan().complete()) {
+        while (!harness.state.tradingState().riskState().scans().values().stream().allMatch(scanState -> scanState.riskComplete() && scanState.triggerComplete())) {
             int maxUsers = harness.state.tradingState().riskState().scanControl().scanBatchSize();
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(maxUsers))));
@@ -856,7 +866,7 @@ public final class LinearPerpetualBenchmarkSupport {
                         .thenComparingLong(CoreLiquidationWorkView.Resolution::liquidationId))
                 .orElseThrow();
         long adlUser = usersAcrossLanes(accountLanes, liquidationUsers + 1, 20_000).getFirst();
-        var adlPosition = harness.state.tradingState().user(adlUser).positions().get(SYMBOL);
+        var adlPosition = harness.state.tradingState().users().get(adlUser).positions().get(SYMBOL);
         long residual = Math.subtractExact(
                 harness.state.tradingState().riskState().liquidations().get(resolution.liquidationId()).deficitUnits(),
                 resolution.recommendedCoveredUnits());
@@ -961,15 +971,15 @@ public final class LinearPerpetualBenchmarkSupport {
             public void verify() {
                 var state = harness.state().tradingState();
                 long filled = Math.min(makerQuantity, takerQuantity);
-                var makerPosition = state.user(maker).positions().get(SYMBOL);
-                var takerPosition = state.user(taker).positions().get(SYMBOL);
+                var makerPosition = state.users().get(maker).positions().get(SYMBOL);
+                var takerPosition = state.users().get(taker).positions().get(SYMBOL);
                 if (makerPosition == null || takerPosition == null
                         || makerPosition.signedQuantitySteps() != -filled
                         || takerPosition.signedQuantitySteps() != filled)
                     throw new IllegalStateException("cross-lane fill produced incorrect positions");
                 long balances = 0;
                 for (long userId : users) {
-                    var balance = state.user(userId).balances().get(SETTLE_ASSET);
+                    var balance = state.users().get(userId).balances().get(SETTLE_ASSET);
                     if (balance == null || balance.availableUnits() < 0 || balance.lockedUnits() < 0)
                         throw new IllegalStateException("cross-lane fill produced invalid balances");
                     balances = Math.addExact(balances,
@@ -1007,10 +1017,10 @@ public final class LinearPerpetualBenchmarkSupport {
 
     private static void verifyLiquidationState(Harness harness, long liquidatedUserId, long shortUserId) {
         var state = harness.state.tradingState();
-        var liquidated = state.user(liquidatedUserId);
+        var liquidated = state.users().get(liquidatedUserId);
         var liquidatedBalance = liquidated.balances().get(SETTLE_ASSET);
         var liquidatedPosition = liquidated.positions().get(SYMBOL);
-        var shortUser = state.user(shortUserId);
+        var shortUser = state.users().get(shortUserId);
         var shortBalance = shortUser.balances().get(SETTLE_ASSET);
         var shortPosition = shortUser.positions().get(SYMBOL);
         long insurance = state.treasuryState().insuranceBalances().getOrDefault(SETTLE_ASSET, 0L);

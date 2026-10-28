@@ -88,7 +88,7 @@ class CoreLiquidationLaneCheckTest {
             assertThat(after.treasuryState().insuranceDeficits().get("USDT")).isEqualTo(1_760);
             assertThat(after.treasuryState().clearingPnlBalances().get("USDT")).isEqualTo(1_760);
             for (long userId : new long[]{1, 7}) {
-                assertThat(after.users().get(userId).totalUnits("USDT")).isZero();
+                assertThat(CoreStateTestFixtures.totalUnits(after.users().get(userId), "USDT")).isZero();
                 assertThat(after.users().get(userId).positions().values())
                         .allSatisfy(position -> assertThat(position.signedQuantitySteps()).isZero());
             }
@@ -336,7 +336,7 @@ class CoreLiquidationLaneCheckTest {
         // 当前用于资金守恒汇总的业务状态。
         var state = core.tradingState();
         // 先累加所有用户余额，再加入保险和清算余额、扣除亏空的资金检查总额。
-        long total = state.users().values().stream().mapToLong(/* 当前准备或撤销挂单的测试用户，资金守恒汇总时表示当前累计的账户。 */ user -> user.totalUnits("USDT")).sum();
+        long total = state.users().values().stream().mapToLong(/* 当前准备或撤销挂单的测试用户，资金守恒汇总时表示当前累计的账户。 */ user -> CoreStateTestFixtures.totalUnits(user, "USDT")).sum();
         total = Math.addExact(total, state.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
         total = Math.addExact(total, state.treasuryState().clearingPnlBalances().getOrDefault("USDT", 0L));
         return Math.subtractExact(total, state.treasuryState().insuranceDeficits().getOrDefault("USDT", 0L));

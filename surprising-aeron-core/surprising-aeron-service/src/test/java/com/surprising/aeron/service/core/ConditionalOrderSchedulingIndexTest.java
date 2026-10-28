@@ -81,7 +81,7 @@ class ConditionalOrderSchedulingIndexTest {
         var state = new TradingCoreState(ProductLine.SPOT, 0, java.util.Map.of(), java.util.Map.of(),
                 java.util.Map.of(), com.surprising.aeron.model.CoreRiskState.empty(),
                 com.surprising.aeron.service.treasury.CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(),
-                java.util.Map.of(claimed.key(), claimed));
+                java.util.Map.of(claimed.key(), claimed), java.util.Map.of());
         var recovered = com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.decode(
                 com.surprising.aeron.service.snapshot.state.TradingStateSnapshotCodec.encode(state), ProductLine.SPOT);
         var index = new CancelAllAfterIndex(recovered);

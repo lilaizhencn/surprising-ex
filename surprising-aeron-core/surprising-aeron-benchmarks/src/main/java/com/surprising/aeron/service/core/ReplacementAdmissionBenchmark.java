@@ -61,8 +61,8 @@ public class ReplacementAdmissionBenchmark {
             long user = i + 1, original = 1_000 + user;
             users.put(user, new CoreUserState(product, user, 1,
                     Map.of("USDT", new AssetBalance("USDT", 800, 100)),
-                    Map.of(original, OrderReservation.create(original, "1", product == ProductLine.SPOT ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
-                            "USDT", 100, 1)), Map.of()));
+                    Map.of(original, new OrderReservation(original, "1", product == ProductLine.SPOT ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN,
+                            "USDT", 100, 0, 0, 1)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
             orders.put(original, new CoreOrderState(original, product, user, "1",
                     CoreOrderSide.BUY, 100, 1, 0, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "original", new UUID(1, user),
@@ -73,7 +73,7 @@ public class ReplacementAdmissionBenchmark {
         identities = new RuntimeIdentityRegistry();
         // Initialize the fixture once; there is no snapshot or restore operation in measurement.
         runtime = RuntimeStateProjector.project(new TradingCoreState(product, 1,
-                users, orders, Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty()),
+                users, orders, Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()),
                 identities, new LaneTopology(1, laneCount, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, WINDOW, WINDOW, WINDOW));
         decision = new RuntimeOrderAdmission.Context(instrument, identities.symbolId("1"),
                 new MarkPriceRuntime(identities.symbolId("1"), instrument, 100, 1, 1_000),

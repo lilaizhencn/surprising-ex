@@ -47,10 +47,10 @@ class PlaceLaneDecisionTest {
                         0, 0, 0, -1, 0));
         // 用户七一万 USDT 可用余额、无订单持仓的冷状态
         var user = new CoreUserState(ProductLine.LINEAR_PERPETUAL, 7, 1,
-                Map.of("USDT", new AssetBalance("USDT", 10_000, 0)), Map.of(), Map.of());
+                Map.of("USDT", new AssetBalance("USDT", 10_000, 0)), Map.of(), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 原用户和合约组成的本产品线冷状态
         var state = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1, Map.of(7L, user), Map.of(),
-                Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty());
+                Map.of("1", instrument), CoreRiskState.empty(), CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 原资产、标的和客户端身份表
         var identities = new RuntimeIdentityRegistry();
         try (/* 从冷状态投影的测试运行时，结束自动关闭 */ var runtime = RuntimeStateProjector.project(state, identities)) {

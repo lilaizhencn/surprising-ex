@@ -208,10 +208,10 @@ class CoreAlgoLaneQueryTest {
                 201L, order(201, 7, 10, 4, CoreOrderStatus.OPEN));
         // 用户 1 的账户，保留订单 103 的十单位保证金冻结。
         var first = new CoreUserState(LINE, 1, 0, Map.of("USDT", new AssetBalance("USDT", 990, 10)),
-                Map.of(103L, OrderReservation.create(103, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 10, 5)), Map.of());
+                Map.of(103L, new OrderReservation(103, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 10, 0, 0, 5)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 用户 7 的账户，保留订单 201 的六十单位保证金冻结。
         var second = new CoreUserState(LINE, 7, 0, Map.of("USDT", new AssetBalance("USDT", 940, 60)),
-                Map.of(201L, OrderReservation.create(201, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 60, 10)), Map.of());
+                Map.of(201L, new OrderReservation(201, "1", ReservationKind.DERIVATIVE_MARGIN, "USDT", 60, 0, 0, 10)), Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 每父单9,000个扫描项均在单单上限内；两个Lane合起来超过全局16,384扫描项。
         var firstChildren = oversized ? Collections.nCopies(9000, 102L) : List.of(102L, 103L, 104L);
         // 父单 502 的子单引用；超限分支重复订单 201，用来增加扫描项。
@@ -221,7 +221,7 @@ class CoreAlgoLaneQueryTest {
                 502L, algo(502, 7, "1", TIME + 500, secondChildren),
                 503L, algo(503, 1, "2", TIME + 1000, List.of()));
         return new TradingCoreState(LINE, 0, Map.of(1L, first, 7L, second), orders,
-                Map.of("1", instrument1, "2", instrument("2")), CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), algos);
+                Map.of("1", instrument1, "2", instrument("2")), CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), algos, java.util.Map.of(), java.util.Map.of());
     }
 
     /**

@@ -116,8 +116,8 @@ class CrossShardCancellationTest {
                         state.matchingSequence(batch.header().commandId()), TIME, batch.header().sourceSequence());
                 assertThat(terminal.status()).isEqualTo(ResponseStatus.APPLIED);
             }
-            assertThat(state.tradingState().order(1003).status()).isEqualTo(com.surprising.aeron.model.CoreOrderStatus.CANCELED);
-            assertThat(state.tradingState().order(2003).status()).isEqualTo(com.surprising.aeron.model.CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().orders().get(1003L).status()).isEqualTo(com.surprising.aeron.model.CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().orders().get(2003L).status()).isEqualTo(com.surprising.aeron.model.CoreOrderStatus.CANCELED);
             if (recovery) try (/* 从批次执行前快照恢复的独立运行时，重放后比较哈希与用户状态。 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 applied(restored, batch);
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());

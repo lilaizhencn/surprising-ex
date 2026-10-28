@@ -547,7 +547,7 @@ class CorePerpetualFinancialMatrixTest {
         ExecuteLiquidationCommand command = new ExecuteLiquidationCommand(
                 1, planned.triggerPriceSequence(), 90, 0, 701, 10);
         // 本例显式提供的已撤订单状态清单，用于生成真实业务所需的撤单路由
-        List<CoreOrderState> canceled = List.of(ordered.order(701));
+        List<CoreOrderState> canceled = List.of(ordered.orders().get(701L));
         // 本段撤单并推进下一游标后的冷路径预期状态
         TradingCoreState expected = reducer.advanceLiquidationCancellation(ordered, command, canceled, 702);
         // 本次运行时投影独用的整数身份表，物化与对照使用同一份
@@ -599,7 +599,7 @@ class CorePerpetualFinancialMatrixTest {
             long expectedFee = variant.type().isInverse() ? 20 : 21;
             // 两笔卖单被接受时需要锁定的总金额期望
             long expectedLocked = variant.type().isInverse() ? 40 : 44;
-            assertThat(placed.user(USER_ID).balances().get(variant.settleAsset()).lockedUnits())
+            assertThat(placed.users().get(USER_ID).balances().get(variant.settleAsset()).lockedUnits())
                     .isEqualTo(expectedLocked);
 
             placed = reducer.placeOrder(placed, MAKER_ID,
@@ -613,12 +613,12 @@ class CorePerpetualFinancialMatrixTest {
             TradingCoreState ending = reducer.applyMatches(afterFirstFill, 804, variant.baseAsset(),
                     variant.quoteAsset(), List.of(trade(802, USER_ID, 101, 1, true, true)));
 
-            assertThat(ending.user(USER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-2);
-            assertThat(ending.user(USER_ID).positions().get(SYMBOL).positionMarginUnits())
+            assertThat(ending.users().get(USER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-2);
+            assertThat(ending.users().get(USER_ID).positions().get(SYMBOL).positionMarginUnits())
                     .isEqualTo(expectedMargin);
-            assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset()))
+            assertThat(CoreStateTestFixtures.totalUnits(ending.users().get(USER_ID), variant.settleAsset()))
                     .isEqualTo(DEFAULT_WALLET - expectedFee);
-            assertThat(ending.user(MAKER_ID).totalUnits(variant.settleAsset()))
+            assertThat(CoreStateTestFixtures.totalUnits(ending.users().get(MAKER_ID), variant.settleAsset()))
                     .isEqualTo(DEFAULT_WALLET - expectedFee);
             assertThat(ending.treasuryState().feeBalances())
                     .containsEntry(variant.settleAsset(), Math.multiplyExact(expectedFee, 2));
@@ -668,10 +668,10 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState reversed = match(variant, opened, 3, 4, CoreOrderSide.SELL,
                 CoreOrderSide.BUY, 15);
 
-        assertThat(reversed.user(USER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-5);
-        assertThat(reversed.user(MAKER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(5);
-        assertThat(reversed.user(USER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(50);
-        assertThat(reversed.user(MAKER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(50);
+        assertThat(reversed.users().get(USER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-5);
+        assertThat(reversed.users().get(MAKER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(5);
+        assertThat(reversed.users().get(USER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(50);
+        assertThat(reversed.users().get(MAKER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(50);
         return row(variant, "OPEN_CLOSE_REVERSAL", opening, reversed, List.of(MAKER_ID), false, false,
                 funds(1_000, 1_000, 0, 0, 0, 0, 0, 0, 1_000, 1_000, 0, 0));
     }
@@ -693,8 +693,8 @@ class CorePerpetualFinancialMatrixTest {
         var instrument = second.instruments().get(SYMBOL);
         assertThat(CoreContractMath.riskBracket(instrument, 1_900))
                 .isSameAs(instrument.riskLimitBrackets().get(1));
-        assertThat(second.user(USER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(380);
-        assertThat(second.user(MAKER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(380);
+        assertThat(second.users().get(USER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(380);
+        assertThat(second.users().get(MAKER_ID).positions().get(SYMBOL).positionMarginUnits()).isEqualTo(380);
         return row(variant, "TIER_CHANGE", opening, second, List.of(MAKER_ID), false, false,
                 funds(1_000, 1_000, 0, 0, 0, 0, 0, 0, 1_000, 1_000, 0, 0));
     }
@@ -860,7 +860,7 @@ class CorePerpetualFinancialMatrixTest {
         // 本场景已执行或确认后的强平状态，用于检查亏空、费用和后续阶段
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         // 本场景主用户强平后的持仓，或溢出构造前需要保留其他字段的原持仓
-        CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
+        CorePositionState position = ending.users().get(USER_ID).positions().get(SYMBOL);
         if (partial) {
             // 本次强平按正反向公式独立列出的已实现盈亏期望
             long realizedPnl = linearOrInverse(variant, -150, -214);
@@ -884,7 +884,7 @@ class CorePerpetualFinancialMatrixTest {
             assertThat(result.status()).isEqualTo(isolated
                     ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED);
             assertThat(result.liquidationFeeUnits()).isEqualTo(liquidationFee);
-            assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(userEnding);
+            assertThat(CoreStateTestFixtures.totalUnits(ending.users().get(USER_ID), variant.settleAsset())).isEqualTo(userEnding);
             assertThat(ending.treasuryState().feeBalances()).doesNotContainKey(variant.settleAsset());
             assertThat(ending.treasuryState().insuranceBalances())
                     .containsEntry(variant.settleAsset(), insurance);
@@ -951,7 +951,7 @@ class CorePerpetualFinancialMatrixTest {
         // 按正负资金费或强平模式独立列出的期末用户金额
         long userEnding = isolated ? 250 : linearOrInverse(variant, 50, 99);
         // 本场景主用户强平后的持仓，或溢出构造前需要保留其他字段的原持仓
-        CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
+        CorePositionState position = ending.users().get(USER_ID).positions().get(SYMBOL);
         // 本场景已执行或确认后的强平状态，用于检查亏空、费用和后续阶段
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         assertThat(funding.payments()).extracting(/* 本次依次检查金额的资金费支付事实 */ payment -> payment.amountUnits())
@@ -966,8 +966,8 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(result.status()).isEqualTo(isolated
                 ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED);
         assertThat(result.liquidationFeeUnits()).isEqualTo(liquidationFee);
-        assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(userEnding);
-        assertThat(ending.user(MAKER_ID).totalUnits(variant.settleAsset())).isEqualTo(400);
+        assertThat(CoreStateTestFixtures.totalUnits(ending.users().get(USER_ID), variant.settleAsset())).isEqualTo(userEnding);
+        assertThat(CoreStateTestFixtures.totalUnits(ending.users().get(MAKER_ID), variant.settleAsset())).isEqualTo(400);
         assertThat(ending.treasuryState().feeBalances()).doesNotContainKey(variant.settleAsset());
         assertThat(ending.treasuryState().insuranceBalances())
                 .containsEntry(variant.settleAsset(), insurance);
@@ -1016,7 +1016,7 @@ class CorePerpetualFinancialMatrixTest {
                 new ExecuteLiquidationCommand(1, plan.triggerPriceSequence(), markPrice, 0));
 
         // 本场景主用户强平后的持仓，或溢出构造前需要保留其他字段的原持仓
-        CorePositionState position = ending.user(USER_ID).positions().get(SYMBOL);
+        CorePositionState position = ending.users().get(USER_ID).positions().get(SYMBOL);
         // 本场景已执行或确认后的强平状态，用于检查亏空、费用和后续阶段
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         assertThat(position.signedQuantitySteps()).isEqualTo(expectedQuantity);
@@ -1027,7 +1027,7 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(result.deficitUnits()).isEqualTo(expectedDeficit);
         assertThat(result.status()).isEqualTo(expectedDeficit == 0
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.INSURANCE_REQUIRED);
-        assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(expectedUser);
+        assertThat(CoreStateTestFixtures.totalUnits(ending.users().get(USER_ID), variant.settleAsset())).isEqualTo(expectedUser);
         assertThat(ending.treasuryState().insuranceBalances())
                 .containsEntry(variant.settleAsset(), expectedInsurance);
         assertThat(expectedUser + expectedInsurance - 101).isZero();
@@ -1050,7 +1050,7 @@ class CorePerpetualFinancialMatrixTest {
         // 应用本场景标记价和风险扫描后的冷状态，保留价格序列和强平计划
         TradingCoreState marked = mark(opening, variant, 50, 1);
         // 本场景主用户强平后的持仓，或溢出构造前需要保留其他字段的原持仓
-        CorePositionState position = marked.user(USER_ID).positions().get(SYMBOL);
+        CorePositionState position = marked.users().get(USER_ID).positions().get(SYMBOL);
         // 手工把原持仓入场价值换成 long 最大值后的冷状态，故意触发后续乘算溢出
         TradingCoreState overflow = replacePosition(marked, USER_ID,
                 new CorePositionState(SYMBOL, variant.settleAsset(), variant.marginMode(), CorePositionSide.NET,
@@ -1112,7 +1112,7 @@ class CorePerpetualFinancialMatrixTest {
         long expectedDeficit = isolated ? linearOrInverse(variant, 0, 11) : 0;
         assertThat(result.liquidationFeeUnits()).isEqualTo(expectedFee);
         assertThat(result.deficitUnits()).isEqualTo(expectedDeficit);
-        assertThat(ending.user(USER_ID).totalUnits(variant.settleAsset())).isEqualTo(expectedUser);
+        assertThat(CoreStateTestFixtures.totalUnits(ending.users().get(USER_ID), variant.settleAsset())).isEqualTo(expectedUser);
         assertThat(ending.treasuryState().insuranceBalances())
                 .containsEntry(variant.settleAsset(), expectedInsurance);
         return row(variant, "LIQUIDATION_FEE_CAP", opening, ending, List.of(), false, false,
@@ -1259,11 +1259,11 @@ class CorePerpetualFinancialMatrixTest {
         long targetCashFlow = linearOrInverse(variant, 130, 850);
         // 目标做市用户期末现金加未实现盈亏的经济价值期望，另计额外保险覆盖
         long targetEndingEconomic = linearOrInverse(variant, 2_125, 51_600) + extraInsuranceCoverage;
-        assertThat(ending.user(MAKER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-5);
+        assertThat(ending.users().get(MAKER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-5);
         assertThat(ending.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
         assertThat(ending.riskState().liquidations().get(1L).deficitUnits()).isZero();
-        assertThat(ending.user(MAKER_ID).totalUnits(variant.settleAsset()))
+        assertThat(CoreStateTestFixtures.totalUnits(ending.users().get(MAKER_ID), variant.settleAsset()))
                 .isEqualTo(linearOrInverse(variant, 1_130, 1_850) + extraInsuranceCoverage);
         return row(variant, "ADL_COVERAGE", beforeAdl, ending, List.of(MAKER_ID), true, true,
                 funds(0, linearOrInverse(variant, 2_990, 100_500), 0, -residual,
@@ -1359,7 +1359,7 @@ class CorePerpetualFinancialMatrixTest {
                 new ExecuteLiquidationCommand(1, liquidationSequence(marked), 90, 0));
 
         // 当前需要检查抵押隔离或统计资金的主用户状态
-        CoreUserState user = ending.user(USER_ID);
+        CoreUserState user = ending.users().get(USER_ID);
         assertThat(user.positions().get(SYMBOL).marginMode()).isEqualTo(variant.marginMode());
         assertThat(user.balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
         assertThat(user.positions().get("2").marginMode()).isEqualTo(CoreMarginMode.CROSS);
@@ -1388,8 +1388,8 @@ class CorePerpetualFinancialMatrixTest {
                 50, CoreMarginMode.ISOLATED);
         opening = addPosition(opening, variant, USER_ID, "2", 1, ENTRY_PRICE,
                 75, CoreMarginMode.CROSS);
-        assertThat(opening.user(USER_ID).balances().get(variant.settleAsset()).availableUnits()).isEqualTo(50);
-        assertThat(opening.user(USER_ID).balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
+        assertThat(opening.users().get(USER_ID).balances().get(variant.settleAsset()).availableUnits()).isEqualTo(50);
+        assertThat(opening.users().get(USER_ID).balances().get(variant.settleAsset()).lockedUnits()).isEqualTo(125);
         // 给附加全仓标的二设置价格后的状态，用于抵押隔离估值
         TradingCoreState markedEth = reducer.applyMarkPrice(opening,
                 new ApplyMarkPriceCommand("2", ENTRY_PRICE, 1, 1_700_000_000_000L));
@@ -1401,7 +1401,7 @@ class CorePerpetualFinancialMatrixTest {
                 new ExecuteLiquidationCommand(1, liquidationSequence(marked), 90, 0));
 
         // 当前需要检查抵押隔离或统计资金的主用户状态
-        CoreUserState user = ending.user(USER_ID);
+        CoreUserState user = ending.users().get(USER_ID);
         // 本场景已执行或确认后的强平状态，用于检查亏空、费用和后续阶段
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
         assertThat(user.balances().get(variant.settleAsset()).availableUnits()).isEqualTo(50);
@@ -1612,12 +1612,13 @@ class CorePerpetualFinancialMatrixTest {
     private TradingCoreState addPosition(TradingCoreState state, Variant variant, long userId, String instrumentId,
                                          long quantity, long entryPrice, long margin, CoreMarginMode marginMode) {
         // 需要新增手工持仓的原用户状态
-        CoreUserState current = state.user(userId);
+        CoreUserState current = state.users().get(userId);
         // 用户该结算资产的原余额，不存在时临时以零余额作为起点
         AssetBalance currentBalance = current.balances().getOrDefault(variant.settleAsset(),
                 new AssetBalance(variant.settleAsset(), 0, 0));
         // 从原可用金额冻结指定保证金后的新余额
-        AssetBalance nextBalance = currentBalance.reserve(margin);
+        AssetBalance nextBalance = new AssetBalance(currentBalance.asset(),
+                Math.subtractExact(currentBalance.availableUnits(), margin), Math.addExact(currentBalance.lockedUnits(), margin));
         // 复制的余额表，只替换需要冻结保证金的资产
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put(variant.settleAsset(), nextBalance);
@@ -1634,7 +1635,7 @@ class CorePerpetualFinancialMatrixTest {
         Map<Long, CoreUserState> users = new TreeMap<>(state.users());
         users.put(userId, nextUser);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.instruments(), state.riskState(), state.treasuryState());
+                state.orders(), state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 
     /**
@@ -1733,9 +1734,9 @@ class CorePerpetualFinancialMatrixTest {
         liquidations.put(liquidation.liquidationId(), liquidation);
         // 替换强平表后重新组合的风险状态，其余原分量保留
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
-                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId());
+                liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(), CoreRiskState.defaultScanControl(), 0);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(),
-                state.orders(), state.instruments(), risk, state.treasuryState());
+                state.orders(), state.instruments(), risk, state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 
     /**
@@ -1746,7 +1747,7 @@ class CorePerpetualFinancialMatrixTest {
      */
     private TradingCoreState replacePosition(TradingCoreState state, long userId, CorePositionState position) {
         // 需要替换单个持仓的原用户状态
-        CoreUserState current = state.user(userId);
+        CoreUserState current = state.users().get(userId);
         // 复制的用户持仓表，插入本次手工构造或替换的持仓
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());
         positions.put(position.key(), position);
@@ -1758,7 +1759,7 @@ class CorePerpetualFinancialMatrixTest {
         Map<Long, CoreUserState> users = new TreeMap<>(state.users());
         users.put(userId, nextUser);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), users,
-                state.orders(), state.instruments(), state.riskState(), state.treasuryState());
+                state.orders(), state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
     }
 
     /**
@@ -1873,10 +1874,10 @@ class CorePerpetualFinancialMatrixTest {
      */
     private long userValue(Row row, TradingCoreState state, long userId) {
         // 当前需要检查抵押隔离或统计资金的主用户状态
-        CoreUserState user = state.user(userId);
+        CoreUserState user = state.users().get(userId);
         if (user == null) return 0;
         // 当前用户结算资产总现金，economic 行在后面继续加未实现盈亏
-        long value = user.totalUnits(row.variant().settleAsset());
+        long value = CoreStateTestFixtures.totalUnits(user, row.variant().settleAsset());
         if (!row.economic()) return value;
         for (CorePositionState /* 当前需要计入未实现盈亏的非零结算资产持仓 */ position : user.positions().values()) {
             if (position.signedQuantitySteps() == 0 || !position.marginAsset().equals(row.variant().settleAsset())) {

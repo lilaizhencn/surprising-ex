@@ -1,5 +1,6 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.protocol.CoreInstrumentRiskLimits;
 
 import com.surprising.aeron.exception.FatalMatchingDivergenceException;
@@ -84,8 +85,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(TradingOrderBatchCodec.decodeResult(result.data()).items().getFirst().resultCode())
                     .isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
             state.assertClusterCallbackComplete();
-            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
-            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(10_000);
+            assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
+            assertThat(state.tradingState().users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(10_000);
             assertThat(state.snapshot()).isNotEmpty();
         }
     }
@@ -106,8 +107,8 @@ class CoreOrderedOrderBatchTest {
                     command(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 3,
                             TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(86_101))))
                     .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
-            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits())
+            assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
+            assertThat(state.tradingState().users().get(1001L).balances().get("USDT").availableUnits())
                     .isEqualTo(10_000);
         }
     }
@@ -136,10 +137,10 @@ class CoreOrderedOrderBatchTest {
             assertThat(items.get(0).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(items.get(1).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(items.get(2).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
-            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
-            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(10_000);
-            assertThat(state.tradingState().order(86_001)).isNull();
-            assertThat(state.tradingState().order(86_002)).isNull();
+            assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
+            assertThat(state.tradingState().users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(10_000);
+            assertThat(state.tradingState().orders().get(86_001L)).isNull();
+            assertThat(state.tradingState().orders().get(86_002L)).isNull();
             assertThat(state.apply(cancel).data()).isEqualTo(result.data());
             try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
@@ -181,9 +182,9 @@ class CoreOrderedOrderBatchTest {
             assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(item.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
             assertThat(item.executions()).isEmpty();
-            assertThat(state.tradingState().order(85_001)).isNotNull();
-            assertThat(state.tradingState().order(85_000)).isNotNull();
-            assertThat(state.tradingState().order(85_002)).isNull();
+            assertThat(state.tradingState().orders().get(85_001L)).isNotNull();
+            assertThat(state.tradingState().orders().get(85_000L)).isNotNull();
+            assertThat(state.tradingState().orders().get(85_002L)).isNull();
 
             handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
             // 降价后能够复用原冻结资金的改单消息
@@ -197,16 +198,16 @@ class CoreOrderedOrderBatchTest {
             if (asynchronous) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState()))
                     .as("amend preflight and reservation stay on the permanent Lane").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(applied, 1)).isEqualTo(-1);
-            assertThat(state.tradingState().order(85_001)).isNull();
+            assertThat(state.tradingState().orders().get(85_001L)).isNull();
             // 当前要检查的资产可用与冻结余额
-            var balance = state.tradingState().user(1001).balances().get("USDT");
+            var balance = state.tradingState().users().get(1001L).balances().get("USDT");
             assertThat(balance.availableUnits()).isEqualTo(100);
             assertThat(balance.lockedUnits()).isEqualTo(900);
             drainBatch(state, command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 7,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
                             new CancelOrderCommand(85_003))))));
-            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(1_000);
-            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
+            assertThat(state.tradingState().users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(1_000);
+            assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
             try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
@@ -286,13 +287,13 @@ class CoreOrderedOrderBatchTest {
                 assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 1)).isEqualTo(-1);
                 // 完成阶段导出的业务状态，供余额、预留及订单断言读取
                 var trading = restored.tradingState();
-                assertThat(trading.user(1001).balances().get("BTC").availableUnits()).isEqualTo(2);
-                assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isEqualTo(8_900);
-                assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_100);
-                assertThat(trading.user(1002).balances().get("BTC").totalUnits()).isZero();
+                assertThat(trading.users().get(1001L).balances().get("BTC").availableUnits()).isEqualTo(2);
+                assertThat(trading.users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(8_900);
+                assertThat(trading.users().get(1002L).balances().get("USDT").availableUnits()).isEqualTo(1_100);
+                assertThat(CoreStateTestFixtures.totalUnits(trading.users().get(1002L).balances().get("BTC"))).isZero();
                 for (long /* 当前需要核对资产或订单的参与账户用户编号 */ user : new long[]{1001, 1002}) {
-                    assertThat(trading.user(user).reservations()).isEmpty();
-                    assertThat(trading.user(user).balances().values()).allSatisfy(/* 当前要检查的资产可用与冻结余额 */ balance ->
+                    assertThat(trading.users().get(user).reservations()).isEmpty();
+                    assertThat(trading.users().get(user).balances().values()).allSatisfy(/* 当前要检查的资产可用与冻结余额 */ balance ->
                             assertThat(balance.lockedUnits()).isZero());
                 }
                 assertThat(trading.orders()).isEmpty();
@@ -366,15 +367,15 @@ class CoreOrderedOrderBatchTest {
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 4)).isEqualTo(-1);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
             var trading = state.tradingState();
-            assertThat(trading.user(1001).balances().get("BTC").availableUnits()).isEqualTo(4);
-            assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isEqualTo(6_000);
-            assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(4_000);
+            assertThat(trading.users().get(1001L).balances().get("BTC").availableUnits()).isEqualTo(4);
+            assertThat(trading.users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(6_000);
+            assertThat(trading.users().get(1002L).balances().get("USDT").availableUnits()).isEqualTo(4_000);
             for (long /* 当前需要核对资产或订单的参与账户用户编号 */ user : new long[]{1001, 1002}) {
-                assertThat(trading.user(user).reservations()).isEmpty();
-                assertThat(trading.user(user).balances().values()).allSatisfy(/* 当前要检查的资产可用与冻结余额 */ balance ->
+                assertThat(trading.users().get(user).reservations()).isEmpty();
+                assertThat(trading.users().get(user).balances().values()).allSatisfy(/* 当前要检查的资产可用与冻结余额 */ balance ->
                         assertThat(balance.lockedUnits()).isZero());
             }
-            for (/* 当前正在检查是否已退休的订单编号 */ long orderId = 82_000; orderId <= 82_004; orderId++) assertThat(trading.order(orderId)).isNull();
+            for (/* 当前正在检查是否已退休的订单编号 */ long orderId = 82_000; orderId <= 82_004; orderId++) assertThat(trading.orders().get(orderId)).isNull();
             if (recovery) try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
             }
@@ -416,13 +417,13 @@ class CoreOrderedOrderBatchTest {
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
             var trading = state.tradingState();
-            assertThat(trading.order(83_000)).isNull();
-            assertThat(trading.order(83_001)).isNull();
-            assertThat(trading.order(83_002).remainingQuantitySteps()).isOne();
-            assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
-            assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isZero();
-            assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_000);
-            assertThat(trading.user(1002).balances().get("BTC").availableUnits()).isOne();
+            assertThat(trading.orders().get(83_000L)).isNull();
+            assertThat(trading.orders().get(83_001L)).isNull();
+            assertThat(trading.orders().get(83_002L).remainingQuantitySteps()).isOne();
+            assertThat(trading.users().get(1001L).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
+            assertThat(trading.users().get(1001L).balances().get("USDT").availableUnits()).isZero();
+            assertThat(trading.users().get(1002L).balances().get("USDT").availableUnits()).isEqualTo(1_000);
+            assertThat(trading.users().get(1002L).balances().get("BTC").availableUnits()).isOne();
             try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
             }
@@ -480,10 +481,10 @@ class CoreOrderedOrderBatchTest {
                         .isEqualTo(-1);
                 // 完成阶段导出的业务状态，供余额、预留及订单断言读取
                 var trading = restored.tradingState();
-                assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isEqualTo(8_100);
-                assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(900);
-                assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_000);
-                assertThat(trading.user(1001).balances().get("BTC").availableUnits()).isOne();
+                assertThat(trading.users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(8_100);
+                assertThat(trading.users().get(1001L).balances().get("USDT").lockedUnits()).isEqualTo(900);
+                assertThat(trading.users().get(1002L).balances().get("USDT").availableUnits()).isEqualTo(1_000);
+                assertThat(trading.users().get(1001L).balances().get("BTC").availableUnits()).isOne();
             }
         }
     }
@@ -517,8 +518,8 @@ class CoreOrderedOrderBatchTest {
                 drainBatch(state, command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 4 + cycle * 3L,
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
                                 new CancelOrderCommand(id), new CancelOrderCommand(id + 1), new CancelOrderCommand(id + 2))))));
-                assertThat(state.tradingState().user(1001).reservations()).isEmpty();
-                assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(1_000_000);
+                assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
+                assertThat(state.tradingState().users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(1_000_000);
             }
         }
     }
@@ -568,7 +569,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(TradingOrderBatchCodec.decodeResult(
                     state.commandResults().get(commands.get(2).header().commandId()).responseData()).items())
                     .allSatisfy(/* 当前批量结果的一项，读取其状态、结果码、订单或成交明细 */ item -> assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED));
-            for (/* 当前轮测试订单编号起点，用相邻编号避免跨轮冲突 */ long id = 82_001; id <= 82_005; id++) assertThat(state.tradingState().order(id)).isNotNull();
+            for (/* 当前轮测试订单编号起点，用相邻编号避免跨轮冲突 */ long id = 82_001; id <= 82_005; id++) assertThat(state.tradingState().orders().get(id)).isNotNull();
             try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
@@ -739,7 +740,7 @@ class CoreOrderedOrderBatchTest {
                     command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 11,
                             TradingCommandCodec.encodePlaceOrder(place(19_009, "after-async-chunk", 1_000))))
                     .commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits())
+            assertThat(state.tradingState().users().get(1001L).balances().get("USDT").availableUnits())
                     .isEqualTo(99_000);
         }
     }
@@ -985,15 +986,15 @@ class CoreOrderedOrderBatchTest {
             assertThat(items.getFirst().executions()).hasSize(1);
             assertThat(items.get(1).executions()).isEmpty();
             assertThat(state.tradingState().orders().keySet()).containsExactly(10_503L);
-            assertThat(state.tradingState().user(1001).totalUnits("BTC")).isEqualTo(1_000);
-            assertThat(state.tradingState().user(1002).totalUnits("BTC")).isEqualTo(1_000);
-            assertThat(state.tradingState().user(1001).totalUnits("USDT")
-                    + state.tradingState().user(1002).totalUnits("USDT")
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1001L), "BTC")).isEqualTo(1_000);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1002L), "BTC")).isEqualTo(1_000);
+            assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1001L), "USDT")
+                    + CoreStateTestFixtures.totalUnits(state.tradingState().users().get(1002L), "USDT")
                     + state.tradingState().treasuryState().feeBalances().getOrDefault("USDT", 0L))
                     .isEqualTo(2_000_000);
-            assertThat(state.tradingState().user(1001).balances().get("USDT").lockedUnits()).isEqualTo(90_000);
-            assertThat(state.tradingState().user(1001).reservations()).containsOnlyKeys(10_503L);
-            assertThat(state.tradingState().user(1002).reservations()).isEmpty();
+            assertThat(state.tradingState().users().get(1001L).balances().get("USDT").lockedUnits()).isEqualTo(90_000);
+            assertThat(state.tradingState().users().get(1001L).reservations()).containsOnlyKeys(10_503L);
+            assertThat(state.tradingState().users().get(1002L).reservations()).isEmpty();
             // 成功批次后的业务状态哈希，重复和恢复均须保持
             long businessHash = state.tradingState().businessStateHash();
             // 用相同原命令再次请求得到的重复响应
@@ -1068,9 +1069,9 @@ class CoreOrderedOrderBatchTest {
             assertThat(result.items().get(1).resultCode())
                     .isEqualTo(CoreResultCode.POSITION_NOTIONAL_LIMIT_EXCEEDED);
             // 当前要检查的资产可用与冻结余额
-            var balance = state.tradingState().user(1001).balances().get("USDT");
+            var balance = state.tradingState().users().get(1001L).balances().get("USDT");
             assertThat(Math.addExact(balance.availableUnits(), balance.lockedUnits())).isEqualTo(1_000_000);
-            assertThat(state.tradingState().user(1001).reservations()).containsOnlyKeys(10_601L);
+            assertThat(state.tradingState().users().get(1001L).reservations()).containsOnlyKeys(10_601L);
         }
     }
 
@@ -1093,9 +1094,9 @@ class CoreOrderedOrderBatchTest {
                     .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
             assertThat(result.items().get(1).resultCode()).isEqualTo(CoreResultCode.DUPLICATE_CLIENT_ORDER_ID);
             // 完成后导出的请求用户状态，检查其预留和总资金
-            var user = state.tradingState().user(1001);
+            var user = state.tradingState().users().get(1001L);
             assertThat(user.reservations()).containsOnlyKeys(19_001L);
-            assertThat(user.balances().get("USDT").totalUnits()).isEqualTo(1_000_000);
+            assertThat(CoreStateTestFixtures.totalUnits(user.balances().get("USDT"))).isEqualTo(1_000_000);
             assertThat(state.pendingMatching().size()).isZero();
             // 当前成功业务状态的恢复快照字节
             byte[] snapshot = state.snapshot();
@@ -1140,9 +1141,9 @@ class CoreOrderedOrderBatchTest {
             assertThat(result.items()).extracting(CoreOrderBatchResult.Item::status)
                     .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED, ResponseStatus.APPLIED);
             assertThat(result.items().get(1).resultCode()).isEqualTo(CoreResultCode.DUPLICATE_ORDER_ID);
-            assertThat(state.tradingState().order(11_001).status())
+            assertThat(state.tradingState().orders().get(11_001L).status())
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(11_003).status())
+            assertThat(state.tradingState().orders().get(11_003L).status())
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
 
             // 随后要注入致命事实的原批次 UUID
@@ -1342,8 +1343,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(amended.items()).extracting(CoreOrderBatchResult.Item::status)
                     .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
             assertThat(amended.items().get(1).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
-            assertThat(state.tradingState().order(12_001)).isNull();
-            assertThat(state.tradingState().order(12_002).status())
+            assertThat(state.tradingState().orders().get(12_001L)).isNull();
+            assertThat(state.tradingState().orders().get(12_002L).status())
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
 
             // 含自有、重复或缺失订单的待测撤单命令
@@ -1355,8 +1356,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(canceled.items()).extracting(CoreOrderBatchResult.Item::status)
                     .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
             assertThat(canceled.items().get(1).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
-            assertThat(state.tradingState().order(12_002)).isNull();
-            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
+            assertThat(state.tradingState().orders().get(12_002L)).isNull();
+            assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
         }
     }
 
@@ -1489,11 +1490,11 @@ class CoreOrderedOrderBatchTest {
             var item = TradingOrderBatchCodec.decodeResult(response.data()).items().getFirst();
             assertThat(item.resultCode()).isEqualTo(CoreResultCode.DUPLICATE_ORDER_ID);
             assertThat(item.executions()).isEmpty();
-            assertThat(state.tradingState().order(13_211).userId()).isEqualTo(1001);
-            assertThat(state.tradingState().order(13_212).userId()).isEqualTo(1002);
+            assertThat(state.tradingState().orders().get(13_211L).userId()).isEqualTo(1001);
+            assertThat(state.tradingState().orders().get(13_212L).userId()).isEqualTo(1002);
             for (long /* 当前需要核对资产或订单的参与账户用户编号 */ user : new long[]{1001, 1002}) {
                 // 当前要检查的资产可用与冻结余额
-                var balance = state.tradingState().user(user).balances().get("USDT");
+                var balance = state.tradingState().users().get(user).balances().get("USDT");
                 assertThat(balance.availableUnits()).isEqualTo(9_000);
                 assertThat(balance.lockedUnits()).isEqualTo(1_000);
             }
@@ -1563,7 +1564,7 @@ class CoreOrderedOrderBatchTest {
                 }
             }
             // 当前要检查的资产可用与冻结余额
-            var balance = state.tradingState().user(1001).balances().get("USDT");
+            var balance = state.tradingState().users().get(1001L).balances().get("USDT");
             assertThat(balance.availableUnits()).isEqualTo(200);
             assertThat(balance.lockedUnits()).isEqualTo(800);
         }
@@ -1593,14 +1594,14 @@ class CoreOrderedOrderBatchTest {
             assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(handoff);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
             var trading = state.tradingState();
-            assertThat(trading.order(98_300)).isNull();
-            assertThat(trading.order(98_301)).isNull();
-            assertThat(trading.order(98_302).remainingQuantitySteps()).isOne();
-            assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isZero();
-            assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
-            assertThat(trading.user(1001).reservations()).containsOnlyKeys(98_302L);
-            assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_000);
-            assertThat(trading.user(1002).balances().get("BTC").availableUnits()).isOne();
+            assertThat(trading.orders().get(98_300L)).isNull();
+            assertThat(trading.orders().get(98_301L)).isNull();
+            assertThat(trading.orders().get(98_302L).remainingQuantitySteps()).isOne();
+            assertThat(trading.users().get(1001L).balances().get("USDT").availableUnits()).isZero();
+            assertThat(trading.users().get(1001L).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
+            assertThat(trading.users().get(1001L).reservations()).containsOnlyKeys(98_302L);
+            assertThat(trading.users().get(1002L).balances().get("USDT").availableUnits()).isEqualTo(1_000);
+            assertThat(trading.users().get(1002L).balances().get("BTC").availableUnits()).isOne();
         }
     }
 
@@ -1690,10 +1691,10 @@ class CoreOrderedOrderBatchTest {
             }
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
             var trading = state.tradingState();
-            assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isZero();
-            assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
-            assertThat(trading.user(1001).reservations()).containsOnlyKeys(98_201L, 98_203L);
-            assertThat(trading.order(98_200).userId()).isEqualTo(1002);
+            assertThat(trading.users().get(1001L).balances().get("USDT").availableUnits()).isZero();
+            assertThat(trading.users().get(1001L).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
+            assertThat(trading.users().get(1001L).reservations()).containsOnlyKeys(98_201L, 98_203L);
+            assertThat(trading.orders().get(98_200L).userId()).isEqualTo(1002);
             // 账户线程完成拒绝客户号查询后回传的两项键值 Future
             var clientKeys = new java.util.concurrent.CompletableFuture<long[]>();
             // 当前运行时账户工作线程数组
@@ -1807,9 +1808,9 @@ class CoreOrderedOrderBatchTest {
                     table.set(accountLane, original[index]);
                 }
             }
-            assertThat(state.tradingState().user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
-            assertThat(state.tradingState().order(13_201)).isNotNull();
-            assertThat(state.tradingState().order(13_202)).isNull();
+            assertThat(state.tradingState().users().get(1001L).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
+            assertThat(state.tradingState().orders().get(13_201L)).isNotNull();
+            assertThat(state.tradingState().orders().get(13_202L)).isNull();
         }
     }
 
@@ -1992,9 +1993,9 @@ class CoreOrderedOrderBatchTest {
                             new CancelOrderCommand(13_101)))), 1001));
             assertThat(TradingOrderBatchCodec.decodeResult(response.data()).items().getFirst().status())
                     .isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
-            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(100_000);
-            assertThat(state.tradingState().order(13_102).status())
+            assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
+            assertThat(state.tradingState().users().get(1001L).balances().get("USDT").availableUnits()).isEqualTo(100_000);
+            assertThat(state.tradingState().orders().get(13_102L).status())
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
         }
     }
@@ -2042,9 +2043,9 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
             assertThat(state.pendingMatching().size()).isZero();
             assertThat(state.commandResults()).doesNotContainKey(commandId);
-            assertThat(state.tradingState().order(13_001).status())
+            assertThat(state.tradingState().orders().get(13_001L).status())
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(13_002).status())
+            assertThat(state.tradingState().orders().get(13_002L).status())
                     .isEqualTo(com.surprising.aeron.model.CoreOrderStatus.OPEN);
         }
     }
@@ -2424,11 +2425,11 @@ class CoreOrderedOrderBatchTest {
                     .containsExactly(CoreResultCode.MATCHING_REJECTED, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
             assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(handoff);
             // 两种拒绝全部完成后导出的请求用户状态
-            var user = state.tradingState().user(1001);
+            var user = state.tradingState().users().get(1001L);
             assertThat(user.reservations()).isEmpty();
             assertThat(user.balances().get("BTC").availableUnits()).isOne();
             assertThat(user.balances().get("BTC").lockedUnits()).isZero();
-            assertThat(state.tradingState().order(97_000)).isNotNull();
+            assertThat(state.tradingState().orders().get(97_000L)).isNotNull();
             if (recovery) try (/* 由场景保存的快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }

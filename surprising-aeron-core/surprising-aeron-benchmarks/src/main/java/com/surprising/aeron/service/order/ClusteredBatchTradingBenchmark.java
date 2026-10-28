@@ -1145,7 +1145,7 @@ public class ClusteredBatchTradingBenchmark {
                         throw new IllegalStateException("cancel did not restore user funds");
                     }
                     var base = state.users().get(1_000L + user).balances().get("BTC");
-                    if (productLine == ProductLine.SPOT && base != null && base.totalUnits() != 0) {
+                    if (productLine == ProductLine.SPOT && base != null && LinearPerpetualBenchmarkSupport.totalUnits(base) != 0) {
                         throw new IllegalStateException("user BTC conservation mismatch");
                     }
                     if (!state.users().get(1_000L + user).reservations().isEmpty()
@@ -1154,14 +1154,14 @@ public class ClusteredBatchTradingBenchmark {
                     }
                 }
                 var maker = state.users().get(1_256L);
-                if (maker.balances().get(settleAsset).totalUnits() != BALANCE || maker.positions().values().stream().anyMatch(Workload::nonFlat)
+                if (LinearPerpetualBenchmarkSupport.totalUnits(maker.balances().get(settleAsset)) != BALANCE || maker.positions().values().stream().anyMatch(Workload::nonFlat)
                         || maker.reservations().size() != 1) throw new IllegalStateException("maker funds mismatch");
-                if (productLine == ProductLine.SPOT && maker.balances().get("BTC").totalUnits() != makerBaseBalance) {
+                if (productLine == ProductLine.SPOT && LinearPerpetualBenchmarkSupport.totalUnits(maker.balances().get("BTC")) != makerBaseBalance) {
                     throw new IllegalStateException("maker BTC conservation mismatch");
                 }
                 if (state.triggerOrders().values().stream().anyMatch(t -> t.status().open()))
                     throw new IllegalStateException("open trigger retained after cancel");
-                if (state.orders().size() != 1 || state.order(1) == null) {
+                if (state.orders().size() != 1 || state.orders().get(1L) == null) {
                     throw new IllegalStateException("terminal order retention mismatch");
                 }
                 if (state.clientOrderIndex().size() != 1

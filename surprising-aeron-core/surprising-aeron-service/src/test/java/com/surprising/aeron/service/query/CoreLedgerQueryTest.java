@@ -91,12 +91,12 @@ class CoreLedgerQueryTest {
         cursors.set(0, new com.surprising.aeron.model.RiskLaneProgress(999, false, 0, 0, "-", 0, 0, 0, 0, 0));
         // 含五个用户、当前标记价、强平计划和风险扫描游标的完整参照状态。
         var state = new TradingCoreState(LINE, 0,
-                Map.of(1001L, CoreUserState.empty(LINE, 1001), 1002L, CoreUserState.empty(LINE, 1002),
-                        1003L, CoreUserState.empty(LINE, 1003), 1004L, CoreUserState.empty(LINE, 1004),
-                        1005L, CoreUserState.empty(LINE, 1005)),
+                Map.of(1001L, new CoreUserState(LINE, 1001, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1002L, new CoreUserState(LINE, 1002, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
+                        1003L, new CoreUserState(LINE, 1003, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1004L, new CoreUserState(LINE, 1004, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY),
+                        1005L, new CoreUserState(LINE, 1005, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
                 Map.of(), Map.of("1", instrument), new CoreRiskState(
-                Map.of("1", new CoreMarkPriceState("1", 100, 1, 1)), Map.of(), liquidations, Map.of("1", new CoreRiskState.RiskScan("1", 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors)), 6),
-                CoreTreasuryState.empty());
+                Map.of("1", new CoreMarkPriceState("1", 100, 1, 1)), Map.of(), liquidations, Map.of("1", new CoreRiskState.RiskScan("1", 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors)), 6, CoreRiskState.defaultScanControl(), 0),
+                CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (var core = coreWithInitialState(state)) {
             core.activate();
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
@@ -159,10 +159,9 @@ class CoreLedgerQueryTest {
         var second = new CoreLiquidationState(2, 1002, "1", 1, 1, 30, CoreLiquidationState.Status.INSURANCE_REQUIRED);
         // 两笔总缺口 100 的保险请求和 25 单位基金余额，分页不能只按页内请求分配。
         var state = new TradingCoreState(LINE, 0,
-                Map.of(1001L, CoreUserState.empty(LINE, 1001), 1002L, CoreUserState.empty(LINE, 1002)),
-                Map.of(), Map.of("1", instrument), new CoreRiskState(Map.of(), Map.of(), Map.of(1L, first, 2L, second), Map.of(), 3),
-                CoreTreasuryState.ofSubledgers(Map.of(), Map.of("USDT", 25L),
-                        Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
+                Map.of(1001L, new CoreUserState(LINE, 1001, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY), 1002L, new CoreUserState(LINE, 1002, 0, java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY)),
+                Map.of(), Map.of("1", instrument), new CoreRiskState(Map.of(), Map.of(), Map.of(1L, first, 2L, second), Map.of(), 3, CoreRiskState.defaultScanControl(), 0),
+                new CoreTreasuryState(Map.of(), Map.of("USDT", 25L), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {
             core.activate();
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
@@ -200,7 +199,7 @@ class CoreLedgerQueryTest {
         for (/* 生成不同资产名称的下标，每个资产都放一单位手续费。 */ int asset = 0; asset < 10_001; asset++) fees.put("ASSET" + asset, 1L);
         // 只含超大手续费资产集合的财库状态，不需要账户持仓即可触发财库查询上限。
         var state = new TradingCoreState(LINE, 0, Map.of(), Map.of(), Map.of(), CoreRiskState.empty(),
-                CoreTreasuryState.ofSubledgers(fees, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of()));
+                new CoreTreasuryState(fees, Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of()), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {
             core.activate();
             // 本次查询消费到的最终响应，按场景核对成功、响应超限或页内容。

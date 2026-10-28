@@ -89,7 +89,7 @@ public class DerivativeRiskBoundaryBenchmark {
                 harness.adjust(user, asset, 10_000);
                 order(user, "27", CoreOrderSide.BUY, 1, CoreTimeInForce.IOC);
                 order(user, "28", CoreOrderSide.SELL, 10, CoreTimeInForce.IOC);
-                long available = harness.state().tradingState().user(user).balances().get(asset).availableUnits();
+                long available = harness.state().tradingState().users().get(user).balances().get(asset).availableUnits();
                 if (available > 0) harness.adjust(user, asset, -available);
             }
             // Keep maker liquidity present throughout the measurement window.
@@ -146,7 +146,7 @@ public class DerivativeRiskBoundaryBenchmark {
 
         private long funds(TradingCoreState state) {
             long result = 0;
-            for (var user : state.users().values()) result = Math.addExact(result, user.totalUnits(asset));
+            for (var user : state.users().values()) result = Math.addExact(result, LinearPerpetualBenchmarkSupport.totalUnits(user, asset));
             var treasury = state.treasuryState();
             for (Map<String, Long> ledger : java.util.List.of(treasury.feeBalances(), treasury.insuranceBalances(),
                     treasury.liquidationFeeBalances(), treasury.fundingResidualBalances(),
@@ -177,7 +177,7 @@ public class DerivativeRiskBoundaryBenchmark {
                     }
                 }
                 for (long user = 1000; user < 1256; user++) {
-                    var account = state.user(user);
+                    var account = state.users().get(user);
                     if (account.positions().get("27").signedQuantitySteps() != 1
                             || account.positions().get("28").signedQuantitySteps() != -10
                             || account.balances().get(asset).availableUnits() < 0

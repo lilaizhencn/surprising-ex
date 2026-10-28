@@ -143,7 +143,7 @@ class ParallelRiskScanTest {
             run(runtime, ids, index, TOPOLOGY.accountLaneCount());
             // 只完成首批工作量的检查点，每条 Lane 都应留下进行中的用户。
             var partial = RuntimeStateMaterializer.materialize(runtime, ids);
-            assertThat(partial.riskState().scan().laneProgress()).hasSize(TOPOLOGY.accountLaneCount())
+            assertThat(partial.riskState().scans().get(SYMBOL).laneProgress()).hasSize(TOPOLOGY.accountLaneCount())
                     .allMatch(/* 逐条检查的 Lane 进度，应保留未完成用户及对应的组合累计金额。 */ cursor -> cursor.userId() > 0 && !cursor.complete());
             // 把扫描检查点编码成快照再恢复的业务状态。
             var restoredState = TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(partial),
@@ -207,10 +207,10 @@ class ParallelRiskScanTest {
             positions.put("2", new CorePositionState("2", "USDT", CoreMarginMode.CROSS,
                     CorePositionSide.NET, 1, 100, 100, 0, 0));
             users.put(user.userId(), new CoreUserState(source.productLine(), user.userId(), user.revision() + 1,
-                    user.balances(), user.reservations(), positions));
+                    user.balances(), user.reservations(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
         }
         source = new TradingCoreState(source.productLine(), source.revision() + 1, users, source.orders(),
-                source.instruments(), source.riskState(), source.treasuryState());
+                source.instruments(), source.riskState(), source.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
         var ids = new RuntimeIdentityRegistry();
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
@@ -268,10 +268,10 @@ class ParallelRiskScanTest {
             positions.put("2", new CorePositionState("2", "USDT", CoreMarginMode.CROSS,
                     CorePositionSide.NET, 1, 100, 100, 0, 0));
             users.put(user.userId(), new CoreUserState(source.productLine(), user.userId(), user.revision() + 1,
-                    user.balances(), user.reservations(), positions));
+                    user.balances(), user.reservations(), positions, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
         }
         source = new TradingCoreState(source.productLine(), source.revision() + 1, users, source.orders(),
-                source.instruments(), source.riskState(), source.treasuryState());
+                source.instruments(), source.riskState(), source.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 当前运行时投影使用的身份映射，后续索引与物化检查都共用它。
         var ids = new RuntimeIdentityRegistry();
         try (/* 由初始业务状态投影的测试运行时，离开作用域时关闭相关线程和资源。 */ var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
@@ -398,12 +398,12 @@ class ParallelRiskScanTest {
             // 需要加入第二币对持仓或替换一个用户的业务账户映射副本。
             var users = new TreeMap<>(state.users());
             // 当前遍历或替换的测试账户，保留其其他余额、冻结和持仓。
-            var user = state.user(userId);
+            var user = state.users().get(userId);
             users.put(userId, new CoreUserState(state.productLine(), userId, user.revision() + 1,
                     Map.of("USDT", new AssetBalance("USDT", 0, 100)), user.reservations(),
-                    Map.of(position.key(), position)));
+                    Map.of(position.key(), position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
             state = new TradingCoreState(state.productLine(), state.revision() + 1, users, state.orders(),
-                    state.instruments(), state.riskState(), state.treasuryState());
+                    state.instruments(), state.riskState(), state.treasuryState(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         }
         return state;
     }

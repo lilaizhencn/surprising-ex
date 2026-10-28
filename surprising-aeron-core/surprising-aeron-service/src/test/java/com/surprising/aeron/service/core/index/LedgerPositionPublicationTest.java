@@ -54,11 +54,11 @@ class LedgerPositionPublicationTest {
         // 带可用九百、冻结一百及唯一净仓的用户七冷状态
         var user = new CoreUserState(product, 7, 1,
                 java.util.Map.of("USDT", new com.surprising.aeron.model.AssetBalance("USDT", 900, 100)),
-                java.util.Map.of(), java.util.Map.of("1", position));
+                java.util.Map.of(), java.util.Map.of("1", position), com.surprising.aeron.protocol.CorePositionMode.ONE_WAY);
         // 用于投影运行时的原始产品线冷状态
         var initial = new TradingCoreState(product, 1, java.util.Map.of(7L, user), java.util.Map.of(),
                 java.util.Map.of("1", instrument), com.surprising.aeron.model.CoreRiskState.empty(),
-                CoreTreasuryState.empty());
+                CoreTreasuryState.empty(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of(), java.util.Map.of());
         // 本用例资产、标的和持仓的原身份表
         var ids = new RuntimeIdentityRegistry();
         // 本用例真实账本接管的持仓用户索引

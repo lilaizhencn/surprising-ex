@@ -30,6 +30,8 @@
 
 撮合事实等待由本模块的 `BenchmarkMatchingAwait` 读取已有命令槽；完成撮合直接调用有序提交器。生产 Runtime 不保留基准专用的结果读取或完成转发接口。
 
+冷状态夹具直接读取 `users/orders` 的 Long 键映射，金额合计由本源集的核对辅助完成；数据构造明确传入模式、进度及各子账。规模脚本的 Probe/Soak 入口均指向当前 `service.core` 包，本轮仅核对入口和 Shell 语法，没有执行这些场景。
+
 ## 结果要求
 
 核对 offered、accepted、terminal、unfinished 和账户资金、冻结、持仓、终态及恢复。JMH fork 失败、缺少资金核对或录制窗口截断都不能记为通过。
