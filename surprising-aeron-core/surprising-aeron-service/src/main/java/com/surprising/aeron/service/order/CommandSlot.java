@@ -960,8 +960,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     private boolean commitContextActive;
     /** 挂起上下文中是否需要发布快照变化。 */
     private boolean commitSnapshotDirty;
-    /** 挂起变化是否只有临时快照内容。 */
-    private boolean commitSnapshotProvisionalOnly;
     /** 首次记录的可空撮合拒绝结果码。 */
     private CoreResultCode matchingRejection;
 
@@ -1017,10 +1015,9 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      * 当前没有挂起上下文时，把 Owner 结果构建器的 primitive 用户/订单变更缓冲与本槽空缓冲交换，并转交资金累加器及快照标记，供续步让出执行后恢复；不物化 boxed 列表。
      * @param resultBuilder Owner 当前使用的结果与变更集合构建器
      * @param snapshotDirty 挂起时保存的快照是否有待发布变化
-     * @param snapshotProvisionalOnly 挂起时变化是否仅含临时快照
      */
     public void suspendCommitContext(CommandResultBuilder resultBuilder,
-                              boolean snapshotDirty, boolean snapshotProvisionalOnly) {
+                              boolean snapshotDirty) {
         if (resultBuilder == null || commitContextActive) {
             throw new IllegalStateException("invalid suspended sequence commit context");
         }
@@ -1033,7 +1030,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         resultBuilder.changedUserIds(reusableUserIds);
         resultBuilder.changedOrderIds(reusableOrderIds);
         commitSnapshotDirty = snapshotDirty;
-        commitSnapshotProvisionalOnly = snapshotProvisionalOnly;
         commitContextActive = true;
     }
 
@@ -1067,11 +1063,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     public boolean commitSnapshotDirty() { requireCommit(); return commitSnapshotDirty; }
     /**
-     * 要求上下文活跃后返回是否只有临时快照变化。
-     */
-    public boolean commitSnapshotProvisionalOnly() { requireCommit(); return commitSnapshotProvisionalOnly; }
-
-    /**
      * 要求上下文活跃，清掉变更集合、资金和快照标记，再标记不再挂起；缓冲对象留待复用。
      */
     public void clearCommitContext() {
@@ -1079,7 +1070,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         commitChangedUserIds.clear();
         commitChangedOrderIds.clear();
         commitSnapshotDirty = false;
-        commitSnapshotProvisionalOnly = false;
         commitContextActive = false;
     }
 
@@ -1209,7 +1199,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         commitChangedUserIds.clear();
         commitChangedOrderIds.clear();
         commitSnapshotDirty = false;
-        commitSnapshotProvisionalOnly = false;
         commitContextActive = false;
         matchingRejection = null;
         clearPlaceReferences();

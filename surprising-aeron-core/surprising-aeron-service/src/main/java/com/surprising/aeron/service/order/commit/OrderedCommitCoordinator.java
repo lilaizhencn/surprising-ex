@@ -1146,28 +1146,10 @@ public final class OrderedCommitCoordinator {
         return pending.hasMatchingCompletion() || pending.matchingResult() != null;
     }
 
-    /**
-     * 消耗直达就绪位和各 Lane 通知游标，只要有变化就增加一次调度修订；业务结算事实仍留在事件，由队首提交收集。
-     */
+    /** 消费直达就绪位并增加一次调度修订，业务结算事实由队首从原事件收集。 */
     public void drainMatcherSettlementCompletions() {
-        // 本轮是否消费过任何结算就绪提示，用于只增加一次调度修订
-        boolean changed = owner.runtimeState().takeDirectMatcherSettlementReadyLaneMask() != 0;
-        // 仍需排空通知游标的账户 Lane 位图
-        long readyLaneMask = owner.runtimeState().takeMatcherSettlementReadyLaneMask();
-        while (readyLaneMask != 0) {
-            // 当前就绪位对应的账户 Lane 编号
-            int laneId = Long.numberOfTrailingZeros(readyLaneMask);
-            readyLaneMask &= readyLaneMask - 1;
-            // 当前命令完整 Core 序号
-            long sequence;
-            while ((sequence = owner.runtimeState().pollMatcherSettlementReady(laneId)) != 0) {
-                // 完成事实保存在事件内；Owner 在此只消费通知游标，队首提交才收集业务结果。
-                changed = true;
-            }
-        }
-        // 直达事件没有完成队列游标。
-        // 增加一次调度修订即可提示队首重试，不必按 Lane 重复通知。
-        if (changed) owner.pendingMatching().progressChanged();
+        if (owner.runtimeState().takeDirectMatcherSettlementReadyLaneMask() != 0)
+            owner.pendingMatching().progressChanged();
     }
 
     /**

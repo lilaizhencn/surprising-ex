@@ -140,17 +140,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
     private final PaddedReadyMask accountAdmissionReadyShards;
     /** 各账户 Lane 的准入完成序号队列，用于唤醒精确命令槽。 */
     final LaneSequenceQueue[] placeAdmissionReadyQueues;
-    /** 各账户 Lane 到 Owner 的普通结算完成序号队列。 */
-    final LaneSequenceQueue[] matcherSettlementReadyQueues;
 
     /** Owner 采样到的账户队列高水位，不保证捕获每一次入队峰值。 */
     final int[] accountLaneQueueHighWaterMarks;
     /** 每条 Lane 独立发布的提交序号槽，用 volatile 和前后填充隔开写入。 */
     final PaddedCommittedSequenceSlot[] publishedLaneCommittedSlots;
-    /** Owner 从既有 Lane 回执收集的已发布持仓数量，不复制持仓对象。 */
-    private final int[] publishedLanePositionCounts;
-    /** Owner 汇总的已发布持仓数量观测值。 */
-    private int publishedPositions;
     /** 每条 Lane 已派发的提交水位，与已完成水位一起防止乱序重复派发。 */
     final long[] dispatchedLaneCommitSequences;
     /** 各事件池 ArrayDeque 的初始容纳预算，固定为 1024，不是硬容量上限。 */
@@ -318,7 +312,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         if (topology == null) throw new IllegalArgumentException("lane topology is required");
         this.topology = topology;
         accountAdmissionReadyShards = new PaddedReadyMask(topology.matchingEngineCount());
-        settlementReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
         directSettlementReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
         placeAdmissionReadyLanes = new PaddedReadyMask(topology.accountLaneCount());
         this.accountLanes = new AccountLaneState[topology.accountLaneCount()];
@@ -341,18 +334,15 @@ public final class TradingAccountRuntime implements AutoCloseable {
         this.laneLifecycle = new AccountLaneLifecycle(accountLanes, topology,
                 this::assertOwner);
         this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
-        this.matcherSettlementReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
         this.publishedLaneCommittedSlots = new PaddedCommittedSequenceSlot[topology.accountLaneCount()];
         for (/* 当前预建对象或工作线程数组的下标 */ int i = 0; i < topology.accountLaneCount(); i++) {
             this.publishedLaneCommittedSlots[i] = new PaddedCommittedSequenceSlot();
         }
-        this.publishedLanePositionCounts = new int[topology.accountLaneCount()];
         this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (/* 当前按拓扑选中或从掩码取出的账户 Lane 编号 */ int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity(), configuration.laneInitialEntities());
             placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
-            matcherSettlementReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             publishLaneCommittedSequence(accountLanes[laneId]);
             laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
             laneDeltas[laneId] = new LaneCommitDelta();
@@ -1760,12 +1750,11 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 在该批次有序提交时才接入账户回滚前值，移交准入标记、可用余额变化和可选资金变化；账户实体仍归 Lane，不重放用户、订单和预留发布缓冲。取得变化槽后无论正常或抛错都归还它。
+     * 在该批次有序提交时才接入账户回滚前值，移交准入标记及可用余额变化；账户实体仍归 Lane，不重放用户、订单和预留发布缓冲。取得变化槽后无论正常或抛错都归还它。
      * @param event 本次借用的准入或提交事件，归还前由调用方满足其完成与收集条件
-     * @param fundsAccumulator 可空的资金变化接收器，只追加本批实际产生的变化
      */
     public void collectPlaceBatchAdmission(
-            PlaceBatchAdmissionEvent event, RuntimeFundsAccumulator fundsAccumulator) {
+            PlaceBatchAdmissionEvent event) {
         assertOwner();
         if (event == null || !event.complete() || event.rejection() != null) {
             throw new IllegalStateException("place batch admission is not collectable");
@@ -1790,7 +1779,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 if (changedUsers != null) changedUsers.add(balances.userId(index));
                 markBalancesChanged();
             }
-            if (fundsAccumulator != null) changes.appendFundsDelta(1L << laneId, fundsAccumulator);
         } finally {
             releaseMatcherSettlementChanges(changes);
         }
@@ -1862,44 +1850,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
     }
 
-    /** Owner 当前仍预期收到普通结算序号的 Lane 掩码。 */
-    private long expectedSettlementLanes;
-    /** 普通结算序号队列对应的就绪提示，完成事实仍在队列。 */
-    private final PaddedReadyMask settlementReadyLanes;
     /** 直接 Matcher 到账户结算的唤醒提示，原事件完成数组保存实际结果。 */
     private final PaddedReadyMask directSettlementReadyLanes;
     /** 单笔下单准入序号队列对应的就绪提示。 */
     private final PaddedReadyMask placeAdmissionReadyLanes;
-    /** 每条账户 Lane 尚待消费的普通结算数量，固定预留 64 个位置。 */
-    private final int[] expectedSettlements = new int[64];
-    /**
-     * 在 Owner 上消费一条预期结算计数；减到零时清该 Lane 的预期位和就绪提示，禁止消费不存在的预期。
-     * @param laneId 账户 Lane 的零起始编号
-     */
-    public void releaseSettlementExpectation(int laneId) {
-        assertOwner();
-        if (expectedSettlements[laneId] <= 0) throw new IllegalStateException("unexpected settlement completion");
-        if (--expectedSettlements[laneId] == 0) {
-            // 该 Lane 预期计数刚降到零时需要清除的位
-            long bit = 1L << laneId;
-            expectedSettlementLanes &= ~bit;
-            settlementReadyLanes.clearBit(laneId);
-        }
-    }
-    /**
-     * 在 Owner 上为给定 Lane 掩码累计预期结算数量，调用方保证掩码属于本拓扑。
-     * @param lanes 已经判定属于本拓扑的预期结算 Lane 位集合
-     */
-    public void expectMatcherSettlement(long lanes) {
-        assertOwner();
-        expectedSettlementLanes |= lanes;
-        while (lanes != 0) {
-            // 当前从预期掩码取出的账户 Lane 下标，用于累计待收集数量
-            int lane = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
-            expectedSettlements[lane]++;
-        }
-    }
-
     /**
      * 先发布准入完成的 Core 序号，再设置 Lane 唤醒提示；新观察到置位时通知 Owner。
      * @param laneId 账户 Lane 的零起始编号
@@ -1964,21 +1918,10 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 探测预期 Lane 中的普通结算提示或直接结算提示，真实完成事实仍从队列或事件读取。
+     * 探测直接结算提示，真实完成事实仍从原事件读取。
      */
     public boolean hasSettlementNotifications() {
-        return (settlementReadyLanes.get() & expectedSettlementLanes) != 0
-                || directSettlementReadyLanes.get() != 0;
-    }
-
-    /**
-     * 先向 Lane 完成队列发布序号，再置就绪提示并按需唤醒 Owner。
-     * @param laneId 账户 Lane 的零起始编号
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     */
-    public void publishMatcherSettlementReady(int laneId, long coreSequence) {
-        matcherSettlementReadyQueues[laneId].publish(coreSequence);
-        settlementReadyLanes.setBit(laneId);
+        return directSettlementReadyLanes.get() != 0;
     }
 
     /**
@@ -1994,61 +1937,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public long takeDirectMatcherSettlementReadyLaneMask() {
         return directSettlementReadyLanes.getAndClear();
-    }
-
-    /**
-     * 在 Owner 上只收集当前预期 Lane 的提示，先清提示再核对其队列是否真的有待消费序号。
-     */
-    public long takeMatcherSettlementReadyLaneMask() {
-        assertOwner();
-        return takeReadyLaneMask(settlementReadyLanes, matcherSettlementReadyQueues, expectedSettlementLanes);
-    }
-
-    /**
-     * 在 Owner 上从指定 Lane 完成队列取序号，取到非零序号后同时减少该 Lane 预期结算数量。
-     * @param laneId 账户 Lane 的零起始编号
-     */
-    public long pollMatcherSettlementReady(int laneId) {
-        assertOwner();
-        if (laneId < 0 || laneId >= matcherSettlementReadyQueues.length) {
-            throw new IllegalArgumentException("invalid Account Lane id");
-        }
-        // 本次从完成队列取出的 Core 序号，零表示没有结果
-        long sequence = matcherSettlementReadyQueues[laneId].poll();
-        if (sequence != 0) releaseSettlementExpectation(laneId);
-        return sequence;
-    }
-
-    /**
-     * 从提示中选出预期 Lane，先清这些提示再探测完成队列；只返回实际有待消费序号的 Lane。
-     * @param ready 需要采样并清除的就绪提示数组
-     * @param queues 按账户 Lane 编号排列的完成序号队列
-     * @param expected 本轮允许探测的 Lane 位集合
-     */
-    private static long takeReadyLaneMask(PaddedReadyMask ready,
-                                         LaneSequenceQueue[] queues, long expected) {
-        // 就绪提示与本轮预期 Lane 相交得到的候选集合，清位后仍需核对队列
-        long signalled = ready.get() & expected;
-        if (signalled == 0) return 0;
-        // 先清位再消费。清位之后的发布留下新位；之前的发布已经可从队列读取。
-        ready.clearBits(signalled);
-        return readyLaneMask(queues, signalled);
-    }
-
-    /**
-     * 逐个探测给定掩码内的完成队列，合成非空队列掩码，不消费序号。
-     * @param queues 按账户 Lane 编号排列的完成序号队列
-     * @param expected 本轮允许探测的 Lane 位集合
-     */
-    static long readyLaneMask(LaneSequenceQueue[] queues, long expected) {
-        // 当前已确认队列非空的 Lane 位集合，只探测不消费序号
-        long mask = 0;
-        while (expected != 0) {
-            // 当前按拓扑选中或从掩码取出的账户 Lane 编号
-            int laneId = Long.numberOfTrailingZeros(expected); expected &= expected - 1;
-            if (queues[laneId].hasPending()) mask |= 1L << laneId;
-        }
-        return mask;
     }
 
     /**
@@ -2080,7 +1968,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
         assertOwner();
         if (event == null) return;
         if (ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
-        if (!event.hasLedgerSettlement()) event.submitTreasurySettlement(treasury);
+        if (!event.hasLedgerSettlement()) event.submitTreasurySettlement();
     }
 
     /**
@@ -2090,7 +1978,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean pollMatcherFinancialSettlement(MatcherSettlementEvent event) {
         if (event == null) return true;
         dispatchMatcherFinancialSettlement(event);
-        event.tryAdvanceLedgerSettlement(treasury);
         return event.complete();
     }
 
@@ -3446,30 +3333,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 严格绑定或核对 Owner 后，读取从 Lane 回执汇总的持仓数量。
-     */
-    public int publishedPositionCount() {
-        bindOwner();
-        return publishedPositions;
-    }
-
-    /**
-     * 严格核对 Owner，校验 Lane 与非负数量，再按新旧差额精确更新全局持仓计数；不复制持仓明细。
-     * @param laneId 需要更新数量回执的账户 Lane 编号
-     * @param count 该 Lane 最新发布的非负持仓记录数量
-     */
-    public void publishLanePositionCount(int laneId, int count) {
-        bindOwner();
-        if (laneId < 0 || laneId >= publishedLanePositionCounts.length || count < 0)
-            throw new IllegalArgumentException("invalid Lane position count receipt");
-        // 按当前 Lane 新旧数量差精确计算的全局持仓计数
-        int total = Math.addExact(publishedPositions,
-                Math.subtractExact(count, publishedLanePositionCounts[laneId]));
-        publishedLanePositionCounts[laneId] = count;
-        publishedPositions = total;
-    }
-
-    /**
      * 在整体 complete 标记尚未结束的扫描中，选择标的内部身份最小的一条。
      */
     public RiskScanRuntime firstIncompleteRiskScan() {
@@ -4685,26 +4548,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             changedOrder(orderId, null);
             markUserChanged(previous.userId());
         }
-    }
-
-    /**
-     * 有活动订单路由时直接在路由用户 Lane 查询预留；没有路由时才逐 Lane 查找。
-     * @param orderId 本次操作关联的订单实体 ID
-     */
-    private ReservationRuntime findReservation(long orderId) {
-        if (factIndexes != null) {
-            // 已有活动订单路由，提供应查询的所属用户
-            var route = factIndexes.activeOrders().activeOrderRoute(orderId);
-            if (route != null) {
-                return onLane(route.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.reservation(orderId));
-            }
-        }
-        for (AccountLaneState /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane : accountLanes) {
-            // 当前 Lane 查到的可空预留，存在时结束逐 Lane 查找
-            ReservationRuntime res = onLane(lane.laneId(), /* 本轮进入的明确账户 Lane，仅用于读取其预留 */ l -> l.reservation(orderId));
-            if (res != null) return res;
-        }
-        return null;
     }
 
     /**
@@ -6843,47 +6686,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         com.surprising.aeron.service.order.state.OrderRuntime receipt = laneDelta(lane.laneId()).orders().get(command.orderId());
         if (receipt == null) throw new IllegalStateException("trigger admission receipt is missing");
         return receipt.copyIntoCommandSlot(null);
-    }
-
-    /**
-     * 按变更用户派发原账户任务，各 Lane 遍历稳定的命令编号集合，只给存在且元数据不同的订单补提交时间位置；至少一个 Lane 修改过就返回 true。
-     * @param timestamp 需要补写的非负集群业务毫秒时间
-     * @param clusterPosition 本次命令确定的集群日志位置
-     * @param changedOrderIds 命令独有且可重复遍历的变更订单编号集合
-     * @param changedUserIds 用来选择目标账户 Lane 的变更用户编号集合
-     */
-    public boolean stampChangedOrders(long timestamp, long clusterPosition,
-                                     Iterable<Long> changedOrderIds, Iterable<Long> changedUserIds) {
-        if (changedOrderIds == null || changedUserIds == null || timestamp < 0 || clusterPosition < 0) {
-            throw new IllegalArgumentException("invalid lane-batched runtime order commit metadata");
-        }
-        assertOwner();
-        if (changedOrderIds instanceof java.util.Collection<?> orders && orders.isEmpty()) return false;
-        boolean hasCandidates = false;
-        for (Long orderId : changedOrderIds) hasCandidates |= orderId != null;
-        if (!hasCandidates) return false;
-        long selectedLanes = 0;
-        for (Long userId : changedUserIds)
-            if (userId != null && userId > 0) selectedLanes |= topology.accountLaneMask(userId);
-        boolean changed = false;
-        while (selectedLanes != 0) {
-            int laneId = Long.numberOfTrailingZeros(selectedLanes);
-            selectedLanes &= selectedLanes - 1;
-            changed |= onLane(laneId, lane -> {
-                boolean laneChanged = false;
-                for (Long orderId : changedOrderIds) {
-                    if (orderId == null) continue;
-                    OrderRuntime order = order(orderId);
-                    if (order == null || (order.updatedAtEpochMillis() == timestamp
-                            && order.clusterPosition() == clusterPosition)) continue;
-                    replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
-                    laneChanged = true;
-                }
-                lane.recordSettlementOperation();
-                return laneChanged;
-            });
-        }
-        return changed;
     }
 
     /**

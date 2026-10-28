@@ -42,22 +42,20 @@ class CommandSlotRingTest {
         var builder = new CommandResultBuilder(null);
         builder.changedUserIds().add(11L);
         builder.changedOrderIds().add(101L);
-        first.suspendCommitContext(builder, true, false);
+        first.suspendCommitContext(builder, true);
         builder.changedUserIds().add(22L);
         builder.changedOrderIds().add(202L);
-        second.suspendCommitContext(builder, false, true);
+        second.suspendCommitContext(builder, false);
         first.restoreCommitContext(builder);
         assertThat(builder.changedUserIds()).containsExactly(11L);
         assertThat(builder.changedOrderIds()).containsExactly(101L);
         assertThat(first.commitSnapshotDirty()).isTrue();
-        assertThat(first.commitSnapshotProvisionalOnly()).isFalse();
         first.clearCommitContext();
         ring.discard(1);
         second.restoreCommitContext(builder);
         assertThat(builder.changedUserIds()).containsExactly(22L);
         assertThat(builder.changedOrderIds()).containsExactly(202L);
         assertThat(second.commitSnapshotDirty()).isFalse();
-        assertThat(second.commitSnapshotProvisionalOnly()).isTrue();
         second.clearCommitContext();
         ring.discard(2);
         assertThat(builder.changedUserIds()).containsExactly(22L);
@@ -196,13 +194,12 @@ class CommandSlotRingTest {
         CommandResultBuilder builder = new CommandResultBuilder(null);
         builder.changedUserIds().add(7L);
         builder.changedOrderIds().add(11L);
-        context.suspendCommitContext(builder, true, false);
+        context.suspendCommitContext(builder, true);
 
         assertThat(context.hasCommitContext()).isTrue();
         assertThat(context.commitChangedUserIds()).containsExactly(7L);
         assertThat(context.commitChangedOrderIds()).containsExactly(11L);
         assertThat(context.commitSnapshotDirty()).isTrue();
-        assertThat(context.commitSnapshotProvisionalOnly()).isFalse();
         context.clearCommitContext();
         assertThat(context.hasCommitContext()).isFalse();
 
@@ -226,7 +223,7 @@ class CommandSlotRingTest {
         PrimitiveLongChangeSet userBuffer = suspended.changedUserIds();
         // 原订单变更缓冲的对象引用。
         PrimitiveLongChangeSet orderBuffer = suspended.changedOrderIds();
-        context.suspendCommitContext(suspended, false, false);
+        context.suspendCommitContext(suspended, false);
         // 挂起后交给原构建器的备用用户缓冲。
         PrimitiveLongChangeSet suspendedReusableUserIds = suspended.changedUserIds();
         // 挂起后交给原构建器的备用订单缓冲。

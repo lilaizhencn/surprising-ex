@@ -69,7 +69,7 @@ class CommandSlotTest {
             CoreMessage command = command(1);
             var pending = new CommandSlot().initialize(1, CommandSlot.Operation.PLACE, command,
                     CommandFingerprint.of(command), List.of(), DecodedMatchingCommand.decode(command), null);
-            pending.suspendCommitContext(builder, false, false);
+            pending.suspendCommitContext(builder, false);
             builder.commandChangedUserIds = List.of();
             builder.commandChangedOrderIds = List.of();
             builder.resetChangeAccumulators();

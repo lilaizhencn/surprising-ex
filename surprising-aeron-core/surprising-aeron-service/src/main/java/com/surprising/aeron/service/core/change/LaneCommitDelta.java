@@ -30,8 +30,6 @@ public final class LaneCommitDelta {
     @Accessors(fluent = true, chain = false)
     @Getter
     private int terminalOrderCount;
-    /** 本边界 Lane 持仓记录条数，-1 表示未采集或已发布，包含表中保留的零仓位记录。 */
-    private int positionCount = -1;
     /**
      *  Lane 独立写入并在完成位之后交给 Owner 的待准入完成数。
      * 返回该 Lane 本收据记录的已完成待准入数量。
@@ -246,12 +244,11 @@ public final class LaneCommitDelta {
     }
 
     /**
-     * 要求所属 Lane 线程，捕获此收据边界的持仓记录数；对风险删除项保存此时持仓是否也不存在的证明，供后续身份回收。
+     * 要求所属 Lane 线程，对风险删除项保存此时持仓是否也不存在的证明，供后续身份回收。
      * @param lane 实际拥有这些账户状态、负责捕获或接收回收对象的 Lane
      */
     public void preparePositionRetirement(AccountLaneState lane) {
         lane.assertOwner();
-        positionCount = lane.positionCount();
         for (/* 当前正在消费的收据连续有效槽。 */ int index = 0; index < riskSnapshots.size(); index++) {
             if (riskSnapshots.valueAt(index) != null) continue;
             // 当前风险变化对应的运行时持仓键。
@@ -274,7 +271,7 @@ public final class LaneCommitDelta {
     /**
      * 收集本方法覆盖的用户及订单变化键，清理相关业务缓冲，并更新风险持仓身份集合；不等同于完整收据发布或 clear，触发变化和终态身份另有边界。
      * @param laneId 接口保留的 Lane 编号，本方法实现不读取此参数
-     * @param state 接收本边界发布变化及计数的 Owner 运行时
+     * @param state 接收本边界发布变化的 Owner 运行时
      * @param changedUsers 可选的本命令变化用户键集合，不需要时为 null
      * @param changedOrders 可选的本命令变化订单键集合，不需要时为 null
      */
@@ -314,8 +311,8 @@ public final class LaneCommitDelta {
     }
 
     /**
-     * 先发布触发及关闭计数，要求终态准备完成，再收集持仓计数、用户及预留元数据和终态身份，传递强平风险变化，最后接管订单与持仓物理缓冲。
-     * @param state 接收本边界发布变化及计数的 Owner 运行时
+     * 先发布触发及关闭计数，要求终态准备完成，再收集用户及预留元数据和终态身份，传递强平风险变化，最后接管订单与持仓物理缓冲。
+     * @param state 接收本边界发布变化的 Owner 运行时
      * @param laneId 当前收据实际所属的账户 Lane 编号
      * @param terminalOrderSink 可选的终态身份批量消费者，读取本收据已保存的原语身份列
      * @param changedUsers 可选的本命令变化用户键集合，不需要时为 null
@@ -331,7 +328,6 @@ public final class LaneCommitDelta {
             closedTriggerCount = 0;
         }
         if (!publicationPrepared) throw new IllegalStateException("Lane terminal publication is not prepared");
-        publishPositionCountToOwner(state, laneId);
         publishPreparedToOwner(state, changedUsers, changedOrders);
         if (terminalOrderSink != null && terminalOrderCount != 0)
             terminalOrderSink.acceptBatch(this);
@@ -354,7 +350,7 @@ public final class LaneCommitDelta {
 
     /**
      * 记录用户及预留输出和可选变化键，清理已消费的用户预留及路由移除集合，并解除准备标记；订单持仓仍留待后续接管。
-     * @param state 接收本边界发布变化及计数的 Owner 运行时
+     * @param state 接收本边界发布变化的 Owner 运行时
      * @param changedUsers 可选的本命令变化用户键集合，不需要时为 null
      * @param changedOrders 可选的本命令变化订单键集合，不需要时为 null
      */
@@ -405,15 +401,14 @@ public final class LaneCommitDelta {
     }
 
     /**
-     * 把已准备的批量准入变化、触发及本边界持仓数交给 Owner，并接管订单和持仓缓冲；部分源列仍由外层释放时 clear，本方法不自行冻结活引用。
-     * @param state 接收本边界发布变化及计数的 Owner 运行时
+     * 把已准备的批量准入变化和触发变化交给 Owner，并接管订单和持仓缓冲；部分源列仍由外层释放时 clear，本方法不自行冻结活引用。
+     * @param state 接收本边界发布变化的 Owner 运行时
      * @param laneId 当前收据实际所属的账户 Lane 编号
      */
     public void commitBatchAdmissionToOwner(TradingAccountRuntime state, int laneId) {
         if (state == null || laneId < 0 || laneId >= state.accountLaneCount()) {
             throw new IllegalArgumentException("invalid batch admission owner handoff");
         }
-        publishPositionCountToOwner(state, laneId);
         publishTriggersToOwner(state);
         if (closedTriggerCount != 0) {
             state.restoreRevision(Math.addExact(state.revision(), closedTriggerCount));
@@ -454,7 +449,7 @@ public final class LaneCommitDelta {
 
     /**
      * 把算法与触发变化交入 Owner 变化集合，再清空源列，保持原命令顺序。
-     * @param state 接收本边界发布变化及计数的 Owner 运行时
+     * @param state 接收本边界发布变化的 Owner 运行时
      */
     public void publishTriggersToOwner(TradingAccountRuntime state) {
         if (algos != null) algos.drainTo(state.changedAlgoOrders()::put);
@@ -466,12 +461,11 @@ public final class LaneCommitDelta {
     }
 
     /**
-     * 收集控制任务的本边界计数、用户及预留元数据，接管已冻结的订单持仓变化并传递强平风险后值；剩余源列生命周期由外层 clear 管理。
-     * @param state 接收本边界发布变化及计数的 Owner 运行时
+     * 收集控制任务的用户及预留元数据，接管已冻结的订单持仓变化并传递强平风险后值；剩余源列生命周期由外层 clear 管理。
+     * @param state 接收本边界发布变化的 Owner 运行时
      * @param laneId 当前收据实际所属的账户 Lane 编号
      */
     public void recordControlChanges(TradingAccountRuntime state, int laneId) {
-        publishPositionCountToOwner(state, laneId);
         for (/* 当前正在消费的收据连续有效槽。 */ int index = 0; index < users.size(); index++) {
             state.changedUser(users.keyAt(index));
             state.captureUserMetadata(users.valueAt(index));
@@ -490,22 +484,10 @@ public final class LaneCommitDelta {
     }
 
     /**
-     * 仅在已采集计数时向 Owner 发布此 Lane 的边界条数，并重设为 -1，避免同收据再次发布旧计数。
-     * @param state 接收本边界发布变化及计数的 Owner 运行时
-     * @param laneId 当前收据实际所属的账户 Lane 编号
-     */
-    private void publishPositionCountToOwner(TradingAccountRuntime state, int laneId) {
-        if (positionCount < 0) return;
-        state.publishLanePositionCount(laneId, positionCount);
-        positionCount = -1;
-    }
-
-    /**
      * 重置计数、终态身份和变化列，释放有效引用并保留容量；待回收订单只是解除引用，不会自动调用 returnRetiredOrders。
      */
     public void clear() {
         completedPending = 0;
-        positionCount = -1;
         closedTriggerCount = 0;
         java.util.Arrays.fill(retiredOrders, 0, retiredOrderCount, null);
         retiredOrderCount = 0;

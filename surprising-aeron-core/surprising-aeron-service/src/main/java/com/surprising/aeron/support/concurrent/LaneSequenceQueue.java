@@ -67,7 +67,7 @@ public final class LaneSequenceQueue {
     /**
      * Owner 优先使用已见发布上界，耗尽后刷新，仅读取门禁不消费序号。
      */
-    public boolean hasPending() {
+    private boolean hasPending() {
         if (consumerCursor < observedProducer) return true;
         observedProducer = producerSequence.value;
         return consumerCursor < observedProducer;

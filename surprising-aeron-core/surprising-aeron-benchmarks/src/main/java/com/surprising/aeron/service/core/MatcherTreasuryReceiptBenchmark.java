@@ -60,7 +60,7 @@ public class MatcherTreasuryReceiptBenchmark {
     @Benchmark public long completeFinancialReceipt() {
         long currentSequence = ++sequence;
         var event = runtime.prepareDirectCancellation(currentSequence, original.userId(), original.orderId(), commandId, 0, identities, 10, 20);
-        event.submitTreasurySettlement(runtime.treasury());
+        event.submitTreasurySettlement();
         event.reserveMatcherPublication();
         event.beginMatcherPublication();
         // Matcher payload is a retained no-trade fixture; the Core proof/commit sequence

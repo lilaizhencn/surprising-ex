@@ -21,10 +21,6 @@ public final class CommitPublication {
     @Accessors(fluent = true, chain = false)
     @Getter
     private boolean dirty;
-    /**  是否只有准入临时变化，正式请求后不再降级。 返回本批次是否仅有准入临时投影，不能作为已提交终态发布。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private boolean provisionalOnly;
     /** 当前是否正在 publish 中，防止重入。 */
     private boolean active;
     /**  独立的已发布序号，正常发布成功后推进。 返回最近一次正常发布的独立序号，不等同于 Core 命令序号。 */
@@ -52,7 +48,7 @@ public final class CommitPublication {
      * @param publishedSequence 要恢复的非负发布序号
      */
     public void initialize(long runtimePatchRevision, long publishedSequence) {
-        if (deferred || dirty || provisionalOnly || active) {
+        if (deferred || dirty || active) {
             throw new IllegalStateException("cannot initialize an active commit publication");
         }
         if (publishedSequence < 0) throw new IllegalArgumentException("initial commit sequence is negative");
@@ -82,51 +78,40 @@ public final class CommitPublication {
     public void close() { closed = true; }
 
     /**
-     * 积累模式只记脏并升级为正式发布；未积累时立即进入一次发布。
+     * 积累模式只记脏；未积累时立即进入一次发布。
      */
     public void request() {
         if (deferred) {
             dirty = true;
-            provisionalOnly = false;
             return;
         }
         publish();
     }
 
     /**
-     * 拒绝重复开始积累，然后开启命令发布批次并清空脏及临时标记；不冻结业务状态。
+     * 拒绝重复开始积累，然后开启命令发布批次并清空待发布标记；不冻结业务状态。
      */
     public void begin() {
         if (deferred) throw new IllegalStateException("snapshot projection batch is already active");
         deferred = true;
         dirty = false;
-        provisionalOnly = false;
     }
 
-    /**
-     * 先取出并清理本批标记；只有临时变化就清除变化键，正式变化则发布，没有变化则结束。这里不要求调用前一定处于积累模式。
-     */
+    /** 清理本批标记；本批请求过发布时更新索引及实时变化。 */
     public void complete() {
-        // 清理标记前记住的本批是否有变化
         boolean changed = dirty;
-        // 清理标记前记住的本批是否仅临时变化
-        boolean provisional = provisionalOnly;
         clearBatchState();
-        if (changed && provisional) owner.runtimeState().clearChangedKeys();
-        else if (changed) publish();
+        if (changed) publish();
     }
 
-
     /**
-     * 拒绝在已有积累或发布执行中覆盖标记，再恢复调用方保存的脏及临时状态。
+     * 拒绝在已有积累或发布执行中覆盖标记，再恢复调用方保存的待发布状态。
      * @param dirty 被挂起命令保存的待发布标记
-     * @param provisionalOnly 被挂起命令保存的仅临时投影标记
      */
-    public void restore(boolean dirty, boolean provisionalOnly) {
+    public void restore(boolean dirty) {
         if (deferred || active) throw new IllegalStateException("another commit publication is active");
         deferred = true;
         this.dirty = dirty;
-        this.provisionalOnly = provisionalOnly;
     }
 
     /**
@@ -162,11 +147,10 @@ public final class CommitPublication {
     }
 
     /**
-     * 清空积累、脏及临时三项标记，不改变发布水位、生命周期或账户状态。
+     * 清空积累及待发布标记，不改变发布水位、生命周期或账户状态。
      */
     public void clearBatchState() {
         deferred = false;
         dirty = false;
-        provisionalOnly = false;
     }
 }

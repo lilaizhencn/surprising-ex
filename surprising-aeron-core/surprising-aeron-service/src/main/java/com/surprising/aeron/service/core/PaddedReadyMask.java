@@ -18,13 +18,6 @@ public final class PaddedReadyMask {
     private final int bitCount;
 
     /**
-     * 建立最多 64 位的就绪提示数组，每位单独留出缓存行间隔。
-     */
-    public PaddedReadyMask() {
-        this(Long.SIZE);
-    }
-
-    /**
      * 要求位数在 1 至 64 之间，按每位固定间隔分配原始数组。
      * @param bitCount 支持的就绪位数，必须在 1 至 64 之间
      */
@@ -52,26 +45,6 @@ public final class PaddedReadyMask {
         if ((long) CELLS.getAcquire(cells, offset) != 0) return false;
         CELLS.setRelease(cells, offset, 1L);
         return true;
-    }
-
-    /**
-     * 校验位下标后，以 release 清除该位提示。
-     * @param bitIndex 本提示数组内的零起始位下标
-     */
-    public void clearBit(int bitIndex) {
-        CELLS.setRelease(cells, offset(bitIndex), 0L);
-    }
-
-    /**
-     * 逐个清除给定掩码对应的提示；调用方保证掩码只包含本拓扑内的位，此处不逐位做范围校验。
-     * @param bitsToClear 调用方保证属于本拓扑的待清除提示位集合
-     */
-    public void clearBits(long bitsToClear) {
-        while (bitsToClear != 0) {
-            int bit = Long.numberOfTrailingZeros(bitsToClear);
-            bitsToClear &= bitsToClear - 1;
-            CELLS.setRelease(cells, bit * STRIDE, 0L);
-        }
     }
 
     /**

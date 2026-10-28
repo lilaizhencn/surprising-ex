@@ -1,5 +1,60 @@
 # aeron-service 代码导航
 
+本轮继续清理八组冗余逻辑（2026-10-28）：
+
+| 删除范围 | 当前行为与保留边界 |
+| --- | --- |
+| 无生产者的普通结算序号队列、预期计数及提示清除分支 | 只消费真实直达完成提示；事件完成位仍是结算依据，准入序号队列保留 |
+| `FundsIndexWork` 及资金预检查、写入等待、发布完成标记 | Owner 同步查询长期身份；账户处理、资金校验和发布完成后同步保存身份，再记录终态 |
+| `prepareMatching` 空发布批次、不可达回滚与订单盖戳链 | 准入负责校验和派发；账户前值、最终元数据和回滚由真实 Lane/提交边界处理 |
+| 始终为假的 `provisionalOnly` 及命令槽副本 | 提交上下文只保存真实待发布标记 |
+| Owner 持仓计数副本及对应测试/基准 | 删除没有业务消费者的计数；持仓权威表、业务索引和身份退休证明保留 |
+| 撮合财务的重复等待扫描与三个推进分支 | `MatcherSettlementEvent.complete()` 等齐 Lane 后统一核对资金；无成交不改写财库及持仓索引 |
+| 强平账户已收集标记及跨轮次修订增量字段 | 等账户完成后一次收集、同步应用账本并提交修订；完成标记防止重复执行 |
+| 悬空 `findReservation`、恒为空的批量资金收集参数和伴随失效工具接口 | 删除无调用入口；账户回滚、余额变化和实际准入队列保持 |
+
+资金索引在 Core 激活时绑定 Owner，冷导入仍可在启动线程完成。长期资金 UUID/指纹优先于来源序号判重；索引故障仍使 Core 失败，不能转为业务拒绝。写入发生在账户及发布完成后，失败不代表余额已经回滚。复用撮合事件只有登记本代财务槽后才能收集；旧代槽对象不会自动执行新代财务。
+
+验证环境：HotSpot JDK 27（Corretto 27+33-FR）、Maven 3.9.16，执行前磁盘可用 199 GiB。本轮 service 生产源码净减少 622 行；包含测试和基准源码的 Java 总净减少 926 行。未新增生产类或兼容层。
+
+验证结果：14 个相关依赖模块干净构建成功，24 个测试类中选定的 253 个用例通过（0 失败、0 错误、0 跳过）；撮合财务测试删除旧门闩并修正名称/说明后，再单独验证 2 个用例通过，不重复计入总数。覆盖六产品线的资金幂等、冻结释放、成交与手续费、批量及自成交前缀、强平、持仓索引退休、拒绝回滚、快照恢复与日志续接。新增核对冷导入线程向 Owner 移交索引、活动阶段拒绝外部线程读写，以及事件复用后先完成账户、再登记财务的边界。
+
+首轮 36 个相关用例通过后，继续清理通知工具时一次编译发现 `LaneSequenceQueue.poll()` 仍需内部探测方法；已保留实现并改为私有，随后重新执行下面的完整干净构建。删除的 `FundsIndexWork`、计数测试及其 JMH 生成类型均无旧 `.class` 残留，`git diff --check` 通过。CodeGraph 工具本轮不可用，删除依据来自源码调用点与编译验证。
+
+<details>
+<summary>本轮实际验证命令（仓库根目录，成功命令退出码均为 0）</summary>
+
+```bash
+java -version
+mvn -version
+df -h .
+
+# 第一阶段：直接受影响的 36 个用例。
+mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean test \
+  -Dtest=CoreFundsLedgerIndexTest,CommandSlotTest,CommandSlotRingTest,MatchingNotificationProbeTest,OrderBatchSettlementWaitTest,MatcherTreasurySettlementTest,LedgerPositionPublicationTest \
+  -Dsurefire.failIfNoSpecifiedTests=false
+
+# 修正内部探测调用后：相关业务与恢复的 253 个用例。
+mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean test \
+  '-Dtest=CoreFundsLedgerIndexTest,FundsCommandIndexTest,TerminalStateRetentionTest,CommandSlotTest,CommandSlotRingTest,MatchingNotificationProbeTest,LaneSequenceQueueTest,OrderBatchSettlementWaitTest,MatcherTreasurySettlementTest,MatcherSettlementPlanTest,LedgerPositionPublicationTest,OwnerPositionRetirementTest,ControlOrderMetadataLeaseTest,CoreActiveLaneIngressTest,CoreLiquidationLaneCheckTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,CoreSelfTradePrefixTest,RuntimeCommitRecoveryTest,ProductRecoveryLifecycleTest,TradingCoreOwnerTest#terminalPreparationFailureRollsBackOnLaneAndRetainsRejection,TradingAccountRuntimeTest#commitEventStampsOnLanesPublishesOnOwnerAndClearsReusedMetadata+asynchronousRollbackRestoresReservedFundsAndBothReservationIndexes,CoreOrderedOrderBatchTest#cancelBatchCommitsInItsSettlementTaskAndKeepsDuplicateAndSnapshotResults+spotAmendReusesLockedFundsAndRejectsUnaffordableIncreaseBeforeMatching+spotPipelinedBatchSettlesSharedMakerOncePerLaneAndReclaimsEveryTerminal+spotBatchPreservesEarlierFillProceedsForLaterItemAdmission+deferredAllRejectedBatchStillPublishesItsTerminalBetweenAdjacentBatches+sequentialPlaceLedgerReceiptDoesNotDuplicateEarlierProceeds+sequentialPlaceLedgerKeepsOwnerOffAccountAndFinancialTables+sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutLaneHandoff,ClusterCommandPipelineTest#matcherPublishesOrdinaryAndBatchFillsToLanesWithoutOwnerDrainingResults+nativeRejectionReleasesFundsInTheAccountLane+deferredIngressPreservesDependentBatchOrderAndSnapshot+independentSettlementsDispatchAheadWithoutPublishingTheSuffix' \
+  -Dsurefire.failIfNoSpecifiedTests=false
+
+# 撮合财务测试最终清理后，单独补验 2 个用例。
+mvn -pl surprising-aeron-core/surprising-aeron-service -am test \
+  -Dtest=MatcherTreasurySettlementTest -Dsurefire.failIfNoSpecifiedTests=false
+
+git diff --check
+```
+
+</details>
+
+只执行上述相关功能用例；benchmarks 模块仅编译。按要求未运行全量测试、压测、JMH/JFR，也未启动完整服务集群或做前后端联调；协议、快照格式及前端接口没有改动。不据本轮结果声明性能提升。验证摘要已归档，收尾删除本轮临时脚本和日志，保留 Maven 测试报告。
+
+
+---
+
+以下保留上一轮清理记录（提交 `6f667e6be`）：
+
 本轮继续删除八组冗余路径：测试专用的七个 Runtime 变更入口、现货终态释放的冷路径、已完成结算之后的空财库差额返回/批次合并链、通用索引观察接口、同步查询的 Future 包装、同步账本回滚的等待状态及异步模式标记、提交前空遍历、重复生命周期现金公式入口。
 
 实际顺序是：账户 Lane 应用撮合事实 → Owner 等账户完成并同步执行财务校验 → 单次收集账户结果 → 直接更新已绑定的事实索引 → 发布终态。保留资金守恒、余额前值、持仓索引撤销、账户等待、事件租约和对象复用约束；协议与快照格式不变。测试以真实索引删除、Lane 释放和财务作用域回滚验证行为，删除专为旧 API 和空遍历注入异常的用例。
@@ -483,7 +538,7 @@ flowchart LR
 | 阅读步骤 | 类与方法 | 输入、交接与结束条件 |
 | --- | --- | --- |
 | 2.1 决定现在做还是延后 | [`MatchingCommandAdmission.beginMatching / deferMatching`](src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java) | 有尚未结束的批次且不允许独立准入时，保存原序号、解码输入、来源与日志时间，之后再做业务准入 |
-| 2.2 检查并派发准入 | `MatchingCommandAdmission.prepareMatching` → `dispatchPlaceAdmission` / `dispatchReplacementAdmission` | 检查身份、归属、产品规则和生命周期冲突；账户工作由所属 Lane 执行。已知业务错误按当前命令边界拒绝或回滚，不能跨其他在途账户命令回滚 |
+| 2.2 检查并派发准入 | `MatchingCommandAdmission.prepareMatching` → `dispatchPlaceAdmission` / `dispatchReplacementAdmission` | 检查身份、归属、产品规则和生命周期冲突；账户工作由所属 Lane 执行。Owner 准入校验错误直接拒绝，账户前值与回滚由 Lane 准入及后续提交边界管理 |
 | 2.3 登记在途命令 | `prepareMatching` → `CoreMatchingFlow.putPendingMatching` | 把解码输入及准入事件放入 `CommandSlot`，固定分片及原业务时间；释放 Owner 事实作用域和账户访问权，再交出撮合输入 |
 | 3.1 交给 Matcher | [`CoreMatchingFlow.submitMatching`](src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java) | 按分片提交顺序派发；普通 PLACE 可先把带准入门闩的任务交出，账户准入成功后 Matcher 才能执行 |
 | 3.2 推进异步工作 | [`MatchingPipelineProgress.progressPlaceBatchAdmissions / submitDeferredMatchingAfterBatch`](src/main/java/com/surprising/aeron/service/order/MatchingPipelineProgress.java) | Owner 消费就绪提示并重试可推进项；准入事件和命令槽仍保存事实，就绪位只用于调度 |
@@ -501,7 +556,7 @@ flowchart LR
 | 4.3 发布给账户 | `MatcherSettlementEvent.notifyDirectPublication` → `TradingAccountRuntime.publishMatcherOwned` | PIPELINED 由 Matcher 直接写各 Lane 的分片 SPSC 队列；FUSED 在当前线程内联执行 |
 | 4.4 应用账户变化 | `MatcherSettlementEvent.execute / applyPlan` → [`RuntimeSpotMatchProcessor.applyLane`](src/main/java/com/surprising/aeron/service/settlement/RuntimeSpotMatchProcessor.java) 或 [`RuntimeDerivativeMatchProcessor.applyLane`](src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeMatchProcessor.java) | 各账户所有者只写自己的订单、预留、余额与持仓；衍生品成交计算由 [`RuntimeDerivativeFillCalculator`](src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeFillCalculator.java) 承担 |
 | 4.4 收尾与回执 | [`MatcherSettlementChanges.prepareLaneTerminal`](src/main/java/com/surprising/aeron/service/settlement/MatcherSettlementChanges.java) → `MatcherSettlementEvent.publishCompletion` | 所属 Lane 整理用户修订、终态身份、持仓及余额资金增量，然后发布自己的完成位 |
-| 4.5 财务完成 | `MatcherSettlementEvent.submitTreasurySettlement` → `TreasurySettlement` / [`SystemLedgerLane`](src/main/java/com/surprising/aeron/service/treasury/SystemLedgerLane.java) | Owner 尝试投递财务槽；账本等账户回执到齐后应用 Treasury 差额、校验资金守恒并更新持仓索引 |
+| 4.5 财务完成 | `MatcherSettlementEvent.submitTreasurySettlement / complete` → `TreasurySettlement` | Owner 登记财务槽并等齐账户回执，再同步应用 Treasury 差额、校验资金守恒并更新持仓索引 |
 | 4.6 交回提交 | [`TradingAccountRuntime.collectMatcherSettlement`](src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java) → `OrderedCommitCoordinator` | Owner 等发布、账户和已登记的财务工作完成后，收集变更与终态身份，再按命令顺序提交；事件归还对象池前还须交出变更缓冲 |
 
 ```mermaid
@@ -512,8 +567,8 @@ flowchart TD
     D --> A[4.4 所属账户: 产品结算 / Changes 收尾]
     A --> C[各 Lane 发布完成位]
     D --> R[全部投递结束: 解除发布租约]
-    R --> Q[4.5 Owner 尝试投递财务槽]
-    Q --> W[Ledger 等待账户回执]
+    R --> Q[4.5 Owner 登记财务槽]
+    Q --> W[complete 等待全部账户回执]
     C --> W
     W --> L[Treasury 差额 / 资金守恒 / 持仓索引]
     L --> F[财务完成位]
@@ -522,10 +577,7 @@ flowchart TD
     R --> K
 ```
 
-图展开 PIPELINED 中需要账本处理的成交。财务槽可以在账户尚未完成时先入队；
-队列满则 Owner 保留原槽重试。无成交时可在账户完成后就地核对资金增量；
-FUSED 还可在账本队列为空且事实就绪时，通过 `SystemLedgerLane.tryApplyInline`
-交接账本所有权并内联应用，不要求每个命令都发生一次账本线程切换。
+图展开 PIPELINED 的账户完成与 Owner 财务处理边界。财务槽可在账户未完成时登记；后续通过同一个 `complete()` 推进，不重复扫描账户完成位。FUSED 沿原执行边界内联账户工作，财务阶段同样由 Owner 同步执行。
 
 三个条件分别看：`readyForLane()` 只要求结果已经发布；`ready()` 还要求 Matcher 已结束发布过程；
 `complete()` 再检查所有实际路由 Lane，以及已登记的财务槽是否完成。
@@ -602,7 +654,7 @@ flowchart TD
 修改路由算法或这些参数的含义时，须同步评估快照版本和恢复约束。
 
 终态订单身份从已提交 Lane 回执经 `TerminalStateRetention.accept / acceptBatch` 写入墓碑，
-`completeSequence` 在本序号接收完成后裁剪保留窗口；资金命令指纹仍由 `FundsIndexWork` 交给 Ledger 管理。
+`completeSequence` 在本序号接收完成后裁剪保留窗口；资金命令指纹由 Owner 同步访问 `TerminalStateRetention` 的长期索引。
 候选表按现有快照格式读写并参与订单编号占用检查，不提供独立的导出确认后清理入口。
 
 ## 包结构：入口、配置、启动与业务服务
@@ -735,13 +787,7 @@ HotSpot JDK 27 下 `CommittedFundingReplayTest` 覆盖 U 本位及币本位永�
 
 ## Matcher 结果与账户结算交接
 
-`publishedPositionCount()` 只读取 Owner 已提交的持仓记录计数，不再扫描 Lane 权威表或申请账户读取栅栏。
-所属 Lane 在既有 `LaneCommitDelta.preparePositionRetirement` 中记录当前表大小；Owner 收集控制、批量准入、
-成交终态回执时，以每 Lane 上一次计数的差值更新总数。每个回执保存自己的命令边界，Lane 后续命令
-不能改变较早回执的计数；回收时清空标记。初始化及命令回滚也通过相同交接更新。
-计数沿用持仓记录数语义，包含权威表保留的零仓位记录，不代表未平仓量。
-这只增加固定长度的 Owner 计数元数据，没有持仓对象副本；按 ID 查找等其他迁移仍需继续。
-功能范围见 [验证清单](../../docs/validation/published-position-count-20261015.json)。
+没有业务消费者的 Owner 持仓计数副本已删除。`LaneCommitDelta.preparePositionRetirement` 仍由所属 Lane 捕获“风险条目已删除且持仓确已不存在”的证明，供 Owner 退休身份；账户持仓表与真实 OI、风险等业务索引不变。
 
 用户、订单及 clientOrderId 内部查询由 `CoreQueryService.AccountQuery` 将已选定的
 `AccountLaneState` 传入 `RuntimeStateQueryService`。投影中的用户、余额、预留、持仓、杠杆与订单读取
@@ -776,13 +822,11 @@ Owner仍有部分权威业务读取及Treasury写入，因此 pending reservatio
 
 触发单、批次最终响应/元数据及 Treasury 写入尚未全部迁移。局部性能采集计划见 `../../../performance-artifacts/lane-parallel-20261010T144735Z/lane-close-validation-plan.json`；结果按时间追加到根目录 `PERFORMANCE_VALIDATION.md`。本轮仍排除快照、恢复和 wallet 场景。
 
-### Matcher 财务回执的线程交接
+### Matcher 财务回执与事件复用
 
-`MatcherSettlementEvent` 保留一个可复用的财务槽。Owner 将其投递给 `SystemLedgerLane`；队列满则保留该槽重试，即使账户已完成也不允许收集。账本的 readiness 只 acquire 读取各账户完成位，不修改 Owner 的完成缓存，不调用账户结算。Maker 和 Taker 由各自 Account Lane 独立推进。
+Maker 和 Taker 由各自 Account Lane 独立推进。`submitTreasurySettlement()` 只登记本代财务槽并调用统一的 `complete()`；Owner acquire 读取并缓存账户完成位，全部路由 Lane 完成后才应用 Treasury 差额、核对资金守恒及更新持仓索引。无成交仍核对账户资金增量，不执行财库及持仓索引写入。
 
-两侧完成后，账本在原 `TreasuryRuntime` 上应用手续费等原语 delta，将账户和财库的资金变化放入槽内缓冲并校验守恒。发布财务完成前捕获通知目标，此后不再访问事件；Owner acquire 完成后交换原语缓冲，再收集路由及终态结果。重复收集、非空目标、提前回收均受校验；非空目标拒绝不会消费回执。
-
-新增财务槽承担跨线程所有权和回收边界，既不复制账户状态，也不新增全局资金镜像。该路径已用跨 Lane 实际手续费和满队列/复用用例独立验证，但 `TradingAccountRuntime` 尚未启用生产 `SystemLedgerLane`。剩余资金费、保险、强平和提交/查询路径完成迁移后才可启用；当前仍不可宣称 Owner 已退出资金写入。记录见 `../../docs/validation/matcher-ledger-receipt-20261011.json`。
+财务槽保留资金核对缓冲与本代登记/完成状态，事件归还时检查工作完成和缓冲清空。复用前清除旧代标记；未登记的新代只允许等待账户，禁止收集。登记时清除 Owner 的完成缓存，确保本代财务核对不能被账户阶段的缓存跳过。重复登记、重复收集及提前回收继续拒绝。
 
 
 ### 2026-10-11 普通改单准入由所属 Lane 判断
@@ -1059,13 +1103,13 @@ Treasury仍由原SystemLedgerLane独占写入，`TreasuryRuntime.settlementStatu
 167 个必要用例通过，新增用例验证算术溢出不改写用户或失败收据，后续命令不会沿用失败收据；同时覆盖六产品线、独立输出、实际 worker、成交及资金/风险路径，见 [Lane 修订回调验证](../../docs/validation/lane-revision-visitor-20261015.json)。本次运行时分配复验受宿主降频影响，尚未验收其动态成本；不据此宣称零分配或完整 Core 达标。未执行快照/恢复、wallet 或真实节点压测，数值记录仅留本地。
 
 
-### 资金幂等索引 I/O 归属 SystemLedgerLane（2026-10-15）
+### 资金幂等索引由 Owner 同步读写（2026-10-28）
 
-资金命令先检查现有内存结果，未命中时由 `DirectCommandSlot` 把完整命令 UUID 的保留身份查询送入既有 SystemLedgerLane 邮箱。Ledger 查询 RocksDB，Owner 只检查完成状态；重复或冲突仍先于 sourceSequence 校验处理。新命令沿原账户及资金流水执行，完成发布与资金守恒检查后，由同一 Ledger 写入幂等身份；只有写入完成才推进已应用计数和来源序号并返回终态。队列满时保留原请求，索引故障仍使 Core 失败，不伪装成业务拒绝。
+命令先检查近期响应和在途 UUID，未命中时由 `TradingCoreRuntime.applyCommandIngress` 同步查询长期资金身份，再检查来源序号。重复及指纹冲突不进入账户工作。新命令沿真实账户 Lane 处理、资金守恒与发布流程执行；`finishResponseAfterFundsRetention` 同步保存长期身份，写入成功后才推进应用计数、来源序号和终态响应。
 
-`FundsCommandIndex` 继续保留全历史资金幂等和原磁盘格式，活跃读写绑定到 Ledger，Owner 直接 get/put 会失败。原单个 DirectCommandSlot 复用 I/O 请求，完成写入先发布结果再唤醒 Owner；没有增加线程、队列或账户镜像。冷构造、序列化及关闭边界保持原职责。
+`TerminalStateRetention.activate` 在冷导入结束后绑定当前 Owner；`FundsCommandIndex` 保留线程归属检查、全历史资金身份、磁盘/快照格式与故障状态。删除 `FundsIndexWork`、预检查占槽和伪等待状态。活动 I/O 由 Owner 执行，其他线程 get/put 拒绝。冷构造、快照序列化和关闭沿原生命周期执行。
 
-177 个唯一必要用例通过，最后 16 个重叠用例验证完成通知的收尾修改，见 [资金索引 Ledger 验证](../../docs/validation/funds-index-ledger-20261015.json)。覆盖六产品线、结果缓存淘汰后的重复与冲突、四类资金命令、邮箱满、数据库故障及连续请求复用。没有执行快照/恢复、wallet 或真实节点压测。完整 Owner 迁移、显式 Lane 参数、锁归因和完整 Core 分配目标继续处理，不据功能测试宣称性能达标。
+本轮验证及未测范围见本文开头；2026-10-15 的 Ledger 邮箱验证仅作为历史记录，不能用于说明当前实现。
 
 
 ### 准入与成交结算显式传递 Account Lane（2026-10-15）

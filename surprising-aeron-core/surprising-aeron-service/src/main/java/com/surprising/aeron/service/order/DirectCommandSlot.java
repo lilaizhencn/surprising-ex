@@ -17,7 +17,6 @@ import com.surprising.aeron.service.adl.RuntimeAdlExecution;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor;
 import com.surprising.aeron.service.liquidation.RuntimeLiquidationResolution;
-import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.risk.RiskScanCoordinator;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
 import java.util.Objects;
@@ -87,19 +86,6 @@ public final class DirectCommandSlot {
     @Accessors(fluent = true, chain = false)
     @Getter
     private boolean finalizationPrepared;
-    /**  本条命令的发布是否已完成。 返回本条命令的发布工作是否已标记完成。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private boolean publicationComplete;
-    /**
-     * fundsPreflight：当前占槽是否仅用于资金身份前置查重。
-     * fundsRetainPrepared：本条资金身份写入是否已准备，避免轮询时重复准备。
-     */
-    private boolean fundsPreflight, fundsRetainPrepared;
-    /** 查重通过后用于校验的来源已接收序号。 */
-    private long fundsLastSourceSequence;
-    /** 资金终态身份查询或写入的固定可复用工作槽。 */
-    private final TerminalStateRetention.FundsIndexWork fundsIndexWork = new TerminalStateRetention.FundsIndexWork();
 
     /** 资金费完成收集续步。 */
     private final FundingControlContinuation fundingControl = new FundingControlContinuation();
@@ -188,10 +174,6 @@ public final class DirectCommandSlot {
         this.resultCode = resultCode;
     }
     /**
-     * 记下发布已经完成，后续轮询继续其他收尾。
-     */
-    public void markPublicationComplete() { publicationComplete = true; }
-    /**
      * 记下本条命令的收尾材料已经准备。
      */
     public void markFinalizationPrepared() { finalizationPrepared = true; }
@@ -200,59 +182,6 @@ public final class DirectCommandSlot {
      */
     public void clearFinalizationPrepared() { finalizationPrepared = false; }
 
-    /**
-     * 先以零业务检查点占槽，再按命令 UUID 查询资金终态身份；精确查重通过前不取得业务作用域或账户前值。
-     * @param message 资金查重所针对的原命令
-     * @param fingerprint 完整原命令的指纹
-     * @param sourceKey 已确认的来源类型与实例键
-     * @param timestamp 固定的 Cluster 业务时间
-     * @param position 固定的复制日志位置
-     * @param lastSourceSequence 该来源最近已接收的命令序号
-     * @param retention 资金终态身份保留入口
-     */
-    public void beginFundsCheck(CoreMessage message, CommandFingerprint fingerprint,
-            TradingCoreRuntime.SourceKey sourceKey, long timestamp, long position, long lastSourceSequence,
-            TerminalStateRetention retention) {
-        // 精确资金身份查重通过前，不取得业务作用域或账户前值。
-        initialize(message, fingerprint, sourceKey, timestamp, position, 0, 0, 0);
-        fundsPreflight = true;
-        fundsLastSourceSequence = lastSourceSequence;
-        fundsIndexWork.prepareLookup(retention, message.header().commandIdMsb(), message.header().commandIdLsb());
-    }
-
-    /**
-     * 第一次准备资金命令身份写入，之后只轮询账本工作；返回真表示此项写入完成，不在此再次修改余额。
-     */
-    public boolean retainFundsOnLedger() {
-        if (!fundsRetainPrepared) {
-            fundsIndexWork.prepareWrite(owner.terminalRetention(), command.header().commandIdMsb(),
-                    command.header().commandIdLsb(), fingerprint);
-            fundsRetainPrepared = true;
-        }
-        return fundsIndexWork.poll(owner);
-    }
-
-    /**
-     * 等资金身份查询完成，优先判断历史重放或指纹冲突，再检查来源序号；先保存当前输入并清槽，随后返回已有响应或用原输入真正执行业务。
-     */
-    private CoreResponse pollFundsCheck() {
-        if (!fundsIndexWork.poll(owner)) return null;
-        // 资金身份查询或来源序号检查给出的可空既有响应
-        CoreResponse replay = owner.fundsReplayResponse(fingerprint, fundsIndexWork.retained());
-        if (replay == null) replay = owner.checkSourceSequence(command, fundsLastSourceSequence);
-        // 清槽前保存的原命令，查重通过后继续执行
-        CoreMessage checkedCommand = command;
-        // 清槽前保存的完整指纹
-        CommandFingerprint checkedFingerprint = fingerprint;
-        // 清槽前保存的来源键
-        TradingCoreRuntime.SourceKey checkedSource = sourceKey;
-        // 清槽前保存的业务时间
-        // 清槽前保存的日志位置
-        long timestamp = commitFenceTimestamp, position = commitFenceClusterPosition;
-        clear();
-        return replay != null ? replay : owner.applyDirectCommand(
-                checkedCommand, timestamp, position, checkedSource, checkedFingerprint);
-    }
     /**
      * 只解除本槽对提交事件的引用，事件回收由原调用方负责。
      */
@@ -483,7 +412,6 @@ public final class DirectCommandSlot {
     public CoreResponse poll() {
         owner.assertOwner();
         if (!active) throw new IllegalStateException("no pending direct command");
-        if (fundsPreflight) return pollFundsCheck();
         if (status == null) {
             try {
                 if (!controlWork.getAsBoolean()) return null;
@@ -526,7 +454,6 @@ public final class DirectCommandSlot {
         riskScanControl.clear();
         accountControl.clear();
         triggerControl.clear();
-        fundsIndexWork.clear();
         active = false;
         command = null;
         fingerprint = null;
@@ -537,8 +464,6 @@ public final class DirectCommandSlot {
         resultCode = null;
         commitEvent = null;
         finalizationPrepared = false;
-        publicationComplete = fundsPreflight = fundsRetainPrepared = false;
-        fundsLastSourceSequence = 0;
         commitFenceTimestamp = commitFenceClusterPosition = 0;
     }
 

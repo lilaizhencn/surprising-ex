@@ -1,5 +1,7 @@
 # Aeron 本机压测诊断
 
+2026-10-28 随生产冗余清理删除 `OwnerPublicationBenchmark.publishAndReadPositionCount` 及其专用测试；该计数已无业务消费者。`MatcherTreasuryReceiptBenchmark` 使用事件自身运行时的财库，财务入口不再重复传参。本轮仅编译受影响基准源码，不执行 JMH、JFR 或压测；功能验证记录见 [service README](../surprising-aeron-service/README.md)。
+
 ## 七项运行路径简化后的夹具约束（2026-10-26）
 
 `ReplySlotAllocationBenchmark` 按出口实际发送次数检查完成性，响应在回调内编码，背压才排队保存字节。

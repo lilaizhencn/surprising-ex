@@ -23,7 +23,6 @@ import com.surprising.aeron.service.order.state.OrderReservation;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.snapshot.state.RuntimeStateProjector;
 import com.surprising.aeron.service.treasury.CoreTreasuryState;
-import com.surprising.aeron.service.treasury.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
@@ -33,13 +32,12 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import static com.surprising.aeron.service.matcher.MatcherEventFixtures.trade;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 结算事件财务槽的回归用例。一项通过反射核对容量保留和活跃槽范围，另一项用真实独立账户 Lane 及原 Treasury 的账本线程验证手续费、满队列、完成与回收交接，不是完整 Cluster 压测。
+ * 结算事件财务槽的回归用例。一项通过反射核对容量保留和活跃槽范围，另一项用真实独立账户 Lane 验证 Owner 等齐回执后应用手续费，以及完成与回收边界。
  */
 class MatcherTreasurySettlementTest {
     /**
@@ -107,10 +105,10 @@ class MatcherTreasurySettlementTest {
     }
 
     /**
-     * 实际阻塞 maker 与账本队首，让 taker 独立完成；检查满队列保留、提前回收及重复收集拒绝、原财库手续费为二，以及账本处理后续工作时原财务槽可安全复用。
+     * 实际阻塞 maker，让 taker 独立完成；检查提前回收及重复收集拒绝、原财库手续费为二，以及复用事件先收齐账户后才登记财务的边界。
      */
     @Test
-    void independentAccountWritersThenOriginalLedgerSettleFeesBeforeOwnerCollects() throws Exception {
+    void ownerSettlesFeesAfterIndependentAccountWritersAndReusesFinancialSlot() throws Exception {
         // 生产默认账户 Lane 拓扑，用于挑选跨 Lane 用户。
         var topology = LaneTopology.productionDefault();
         // 固定 maker 用户编号。
@@ -146,10 +144,8 @@ class MatcherTreasurySettlementTest {
             // 本次待准备、投递和收集的可复用撮合结算事件。
             var event = runtime.prepareDirectMatcherSettlement(1, laneMask, originalTaker, null, 1,
                     commandId, 0, identities, 10, 20, List.of(), null);
-            // 始终由本用例复用的原 Treasury 对象，所有权由系统账本线程交接。
+            // 由 Owner 使用的原 Treasury 对象。
             TreasuryRuntime original = runtime.treasury();
-            // 账本工作线程意外故障的原子接收槽。
-            var failure = new AtomicReference<Throwable>();
             runtime.startAccountLanes();
             // maker 账户所属 Lane 编号。
             // 主动账户所属 Lane 编号。
@@ -158,11 +154,6 @@ class MatcherTreasurySettlementTest {
             var makerParked = new CountDownLatch(1);
             // 放行 maker Lane 继续账户结算的门闩。
             var releaseMaker = new CountDownLatch(1);
-            // 由主动账户线程完成通知触发的门闩，用于证明 taker 不必等待 maker。
-            // 系统账本进入完成后的唤醒回调时通知主线程的门闩。
-            var financialSignalling = new CountDownLatch(1);
-            // 延迟旧代账本完成通知返回，供主线程先复用事件的门闩。
-            var releaseFinancialSignal = new CountDownLatch(1);
             runtime.submitAccountCommand(makerLane, /* 阻塞任务收到的 maker 账户 Lane，本任务只等门闩而不读账户。 */ lane -> {
                 makerParked.countDown();
                 await(releaseMaker);
@@ -180,7 +171,7 @@ class MatcherTreasurySettlementTest {
                         new MatcherResult.MarketData(List.of(), List.of(), 0, 0)),
                         1, 1, 2, 11, 1, 0);
                 event.completeMatcherPublication();
-                event.submitTreasurySettlement(original);
+                event.submitTreasurySettlement();
                 try {
                     long takerDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                     while ((event.completedLaneMask() & (1L << takerLane)) == 0) {
@@ -194,12 +185,12 @@ class MatcherTreasurySettlementTest {
                 } finally { releaseMaker.countDown(); }
                 // 等待两个账户 Lane 都完成的有界单调时间截止点。
                 long accountDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-                while (!event.accountLanesCompleteForLedger()) {
+                while (event.completedLaneMask() != event.routedLaneMask()) {
                     runtime.assertAccountLanesHealthy();
                     if (System.nanoTime() >= accountDeadline) throw new AssertionError("accounts timed out");
                     Thread.onSpinWait();
                 }
-                assertThatThrownBy(() -> event.submitTreasurySettlement(original))
+                assertThatThrownBy(() -> event.submitTreasurySettlement())
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already queued");
                 // 等待财务槽完成或复用槽完成的有界截止点。
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
@@ -214,11 +205,10 @@ class MatcherTreasurySettlementTest {
                 runtime.releaseMatcherSettlement(event);
                 // 复用事件新一代撤单命令的 UUID。
                 UUID secondId = new UUID(3, 4);
-                // 从池中借到的同一结算事件，用于检查旧财务回调不污染新代。
+                // 从池中借到的同一结算事件，用于检查旧财务状态不污染新代。
                 var reused = runtime.prepareDirectCancellation(2, originalTaker.userId(), originalTaker.orderId(),
                         secondId, 0, identities, 30, 40);
                 assertThat(reused).isSameAs(event);
-                reused.submitTreasurySettlement(original);
                 reused.reserveMatcherPublication();
                 reused.beginMatcherPublication();
                 reused.publishDirectNativeResult(new MatcherResult(2,
@@ -232,12 +222,16 @@ class MatcherTreasurySettlementTest {
                 deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                 while (!reused.complete()) {
                     runtime.assertAccountLanesHealthy();
-                    if (System.nanoTime() >= deadline) throw new AssertionError("reused financial slot timed out");
+                    if (System.nanoTime() >= deadline) throw new AssertionError("reused account settlement timed out");
                     Thread.onSpinWait();
                 }
+                // 上一代保留的财务槽不能提前应用新一代；登记后仍须完成本代资金核对。
+                assertThat(reused.hasLedgerSettlement()).isFalse();
+                assertThatThrownBy(reused::markCollected).hasMessageContaining("financial settlement is incomplete");
+                reused.submitTreasurySettlement();
+                assertThat(reused.complete()).isTrue();
                 assertThat(runtime.collectMatcherSettlement(reused, null, null, null)).isTrue();
                 runtime.releaseMatcherSettlement(reused);
-                assertThat(failure.get()).isNull();
             } finally {
                 releaseMaker.countDown();
             }

@@ -339,12 +339,9 @@ public final class RuntimeDerivativeLiquidationProcessor {
         /** 本批各请求的账户执行步骤，所属 Lane 完成后 Owner 读取其用户与修订信息。 */
         private final BatchExecutionStage[] stages;
         /**
-         * accountsCollected：Owner 是否已经收集并登记账户阶段结果，防止重复登记变更。
          * done：本阶段已经完成的标记，Owner 重复轮询时可直接结束。
          */
-        private boolean accountsCollected, done;
-        /** 本批各步骤应增加的全局修订号合计，提交前先检查整数范围。 */
-        private long revisionDelta;
+        private boolean done;
 
         /**
          * 绑定这批包含资金回执的账户步骤，初始化一次账本命令，供 Owner 后续轮询完成。
@@ -357,22 +354,20 @@ public final class RuntimeDerivativeLiquidationProcessor {
         }
 
         /**
-         * Owner 先等全部账户步骤，登记有资金结果的用户并累计修订号增量；账本入队并完成后才写入本批最终修订号，等待期间返回 false。
+         * Owner 先等全部账户步骤，登记有资金结果的用户并累计修订号增量；同步应用账本后写入本批最终修订号，账户未完成时返回 false。
          */
         @Override public boolean getAsBoolean() {
             if (done) return true;
-            if (!accountsCollected) {
-                if (!runtime.pollControlLanes()) return false;
-                for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < stages.length; index++) {
-                    // Owner 正在收集的一笔账户步骤，用它定位结算变化并累计修订号增量。
-                    BatchExecutionStage stage = stages[index];
-                    if (stage.liquidated)
-                        runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
-                    revisionDelta = Math.addExact(revisionDelta, stage.canceledOrdersApplied ? 2 : 1);
-                }
-                Math.addExact(runtime.revision(), revisionDelta);
-                accountsCollected = true;
+            if (!runtime.pollControlLanes()) return false;
+            long revisionDelta = 0;
+            for (/* 当前处理的动作或账户步骤数组下标，只访问归属本 Lane 或本批的有效项。 */ int index = 0; index < stages.length; index++) {
+                // Owner 正在收集的一笔账户步骤，用它定位结算变化并累计修订号增量。
+                BatchExecutionStage stage = stages[index];
+                if (stage.liquidated)
+                    runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
+                revisionDelta = Math.addExact(revisionDelta, stage.canceledOrdersApplied ? 2 : 1);
             }
+            Math.addExact(runtime.revision(), revisionDelta);
             runtime.dispatchLedgerCommand(this);
             runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), revisionDelta));
             done = true;
@@ -656,9 +651,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
         private RuntimeIdentityRegistry identities;
         /**
          * done：本阶段已经完成的标记，Owner 重复轮询时可直接结束。
-         * accountsCollected：Owner 是否已经收集并登记账户阶段结果，防止重复登记变更。
          */
-        private boolean done, accountsCollected;
+        private boolean done;
 
         /**
          * 绑定本次命令、撤单回执及下一游标，通过源强平路由定位 Lane，重置账户和账本完成标记并返回派发位图。
@@ -677,7 +671,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             var route = runtime.liquidationRoute(command.liquidationId());
             // 从强平路由或同步强平记录得到的源用户编号，没有记录时为 0。
             long userId = route == null ? runtime.liquidation(command.liquidationId()).userId() : route.userId();
-            this.done = accountsCollected = false;
+            this.done = false;
             return runtime.topology().accountLaneMask(userId);
         }
 
@@ -694,18 +688,15 @@ public final class RuntimeDerivativeLiquidationProcessor {
         }
 
         /**
-         * Owner 等账户步骤完成，登记变更并预检查修订号增量，再派发和等待账本；两边完成后写最终修订号，重复轮询直接返回 true。
+         * Owner 等账户步骤完成，登记变更并预检查修订号增量，再同步应用账本并写最终修订号，重复轮询直接返回 true。
          */
         @Override
         public boolean getAsBoolean() {
             if (done) return true;
-            if (!accountsCollected) {
-                if (!runtime.pollControlLanes()) return false;
-                if (stage.liquidated)
-                    runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
-                Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1);
-                accountsCollected = true;
-            }
+            if (!runtime.pollControlLanes()) return false;
+            if (stage.liquidated)
+                runtime.recordUserSettlementChanges(stage.userId, stage.assetId, stage.positionKey);
+            Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1);
             runtime.dispatchLedgerCommand(this);
             runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), stage.canceledOrdersApplied ? 2 : 1));
             done = true;

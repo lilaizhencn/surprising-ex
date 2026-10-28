@@ -527,7 +527,7 @@ class TradingCoreOwnerTest {
     }
 
     /**
-     * 先通过资金身份预检查进入真实账户续步，再注入撮合排队容量超限；检查原余额回滚、无 Owner 交接、队列清空且保留可幂等重试的拒绝结果。
+     * 同步检查资金身份后进入真实账户续步，再注入撮合排队容量超限；检查原余额回滚、无 Owner 交接、队列清空且保留可幂等重试的拒绝结果。
      */
     @Test
     void terminalPreparationFailureRollsBackOnLaneAndRetainsRejection() throws Exception {
@@ -552,16 +552,7 @@ class TradingCoreOwnerTest {
             CoreResponse result;
 
             assertThat(owner.applyDecodedCommand(request, 2000, 2000, null, false)).isNull();
-            // 保留资金身份的查询先于账户工作，
-            // 只在这一步已经接入真实控制续步后注入终态准备故障。
-            // 最多五秒等原资金身份预检查接入实际账户续步的截止值
-            long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (!owner.directCommand.hasControlWork()) {
-                assertThat(owner.directCommand.poll()).isNull();
-                if (System.nanoTime() >= preparationDeadline)
-                    throw new AssertionError("funds preflight did not reach Account Lane work");
-                Thread.onSpinWait();
-            }
+            assertThat(owner.directCommand.hasControlWork()).isTrue();
             // 替换故障续步前保存的原业务控制工作，先让它完成账户工作
             var business = owner.directCommand.controlWork();
             owner.directCommand.replaceControlWork(() -> {

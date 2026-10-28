@@ -1181,9 +1181,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
             sourceKey = new SourceKey(message.header().source(), message.header().sourceId());
         }
         if (isFundsIdempotencyCommand(message.header().messageType())) {
-            directCommand.beginFundsCheck(message, fingerprint, sourceKey, clusterTimestamp,
-                    clusterPosition, lastSourceSequence, terminalRetention);
-            return null;
+            CoreResponse fundsReplay = fundsReplayResponse(fingerprint, terminalRetention.fundsCommand(
+                    message.header().commandIdMsb(), message.header().commandIdLsb()));
+            if (fundsReplay != null) return fundsReplay;
         }
         // 来源序号或容量检查给出的拒绝响应，空时继续业务处理
         CoreResponse sourceSequenceResponse = checkSourceSequence(message, lastSourceSequence);
@@ -1211,7 +1211,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param sourceKey 本次命令的来源类型与来源身份键
      * @param fingerprint 与当前命令身份配套的内容指纹
      */
-    public CoreResponse applyDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
+    private CoreResponse applyDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                     SourceKey sourceKey, CommandFingerprint fingerprint) {
         // 直接业务处理状态，未识别类型时为空
         ResponseStatus status;
@@ -1299,7 +1299,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param fingerprint 与当前命令身份配套的内容指纹
      * @param retained 长期资金索引查出的可空命令身份记录
      */
-    public CoreResponse fundsReplayResponse(CommandFingerprint fingerprint, CommandFingerprint retained) {
+    private CoreResponse fundsReplayResponse(CommandFingerprint fingerprint, CommandFingerprint retained) {
         if (retained == null) return null;
         if (!retained.equals(fingerprint)) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.REJECTED,
@@ -1317,7 +1317,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
      * @param lastSourceSequence 该来源此前记录的最新序号，尚未记录时为负一
      */
-    public CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
+    private CoreResponse checkSourceSequence(CoreMessage message, long lastSourceSequence) {
         if (lastSourceSequence >= 0 && message.header().sourceSequence() <= lastSourceSequence) {
             return new CoreResponse(com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
                     com.surprising.aeron.protocol.ResponseStatus.DUPLICATE,
@@ -1349,10 +1349,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
             ResponseStatus status, CoreResultCode resultCode) {
         // 本次计算出的下一个已受理序号，实际写回仍需等待完成条件
         long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
-        if (directCommand.publicationComplete()) {
-            return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
-                    sourceKey, fingerprint, status, resultCode, nextAppliedCommandCount);
-        }
         if (!directCommand.finalizationPrepared()) {
             if (status != ResponseStatus.APPLIED
                     && (commits.publication.dirty()
@@ -1411,13 +1407,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         directCommand.clearFinalizationPrepared();
         commits.publication.complete();
-        directCommand.markPublicationComplete();
         return finishResponseAfterFundsRetention(message, clusterTimestamp, clusterPosition,
                 sourceKey, fingerprint, status, resultCode, nextAppliedCommandCount);
     }
 
     /**
-     * 成功资金命令先等长期身份保存，再推进计数、记来源、追加衍生撮合并保存近期收据，最后移交响应缓冲租约。长期保存失败可能发生在账户和发布已完成之后，不能据此声称业务已回滚。
+     * 成功资金命令同步保存长期身份，再推进计数、记来源、追加衍生撮合并保存近期收据，最后移交响应缓冲租约。长期保存失败可能发生在账户和发布已完成之后，不能据此声称业务已回滚。
      * @param message 本次借用的原协议输入，调用期间保持其缓冲租约有效
      * @param clusterTimestamp 本命令原复制日志业务时间
      * @param clusterPosition 本命令原复制日志位置
@@ -1432,10 +1427,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
             ResponseStatus status, CoreResultCode resultCode, long nextAppliedCommandCount) {
         if (isFundsIdempotencyCommand(message.header().messageType())
                 && status == ResponseStatus.APPLIED) {
-            if (!directCommand.retainFundsOnLedger()) {
-                directCommand.result(status, resultCode);
-                return null;
-            }
+            terminalRetention.retainFundsCommand(message.header().commandIdMsb(),
+                    message.header().commandIdLsb(), fingerprint);
         }
         recordAppliedSequence(nextAppliedCommandCount, sourceKey, message.header().sourceSequence());
         admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
@@ -1766,6 +1759,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         try {
             matcherPipeline.start(matchingAdapter::activateShard, affinity);
             bindOwner();
+            terminalRetention.activate();
             runtimeState.startAccountLanes(affinity);
             runtimeState.startSystemLedgerLane();
             matchingAdapter.activate();
@@ -2222,21 +2216,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 把本次变化订单的序号、时间和日志位置交给所属 Lane 盖章；确有变化时要求发布。
-     * @param timestamp 本次请求原复制日志业务时间
-     * @param clusterPosition 本命令原复制日志位置
-     * @param changedOrderIds 本次实际变化的订单身份列表
-     */
-    public void stampOrderChangesRuntime(long timestamp, long clusterPosition,
-                                          Iterable<Long> changedOrderIds) {
-        if (runtimeState.stampChangedOrders(
-                timestamp, clusterPosition,
-                changedOrderIds, resultBuilder.commandChangedUserIds)) {
-            commits.publication.request();
-        }
-    }
-
-    /**
      * 仅挂起具有有效续步的撮合提交：把原始变化缓冲、资金累加器及发布标记交给序号槽，清空当前公开变化视图并结束事实作用域，等待按序恢复。
      * @param pending 当前借用的在途命令槽，完成或释放后不能继续使用
      */
@@ -2255,7 +2234,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         CommandSlot context = pending;
         context.suspendCommitContext(
                 resultBuilder,
-                commits.publication.dirty(), commits.publication.provisionalOnly());
+                commits.publication.dirty());
         commits.publication.clearBatchState();
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
@@ -2274,7 +2253,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         // 保存在 Core 序号槽中的变化缓冲与提交发布续步上下文
         CommandSlot context = pending;
         activateFactContext(pending.command(), pending.fingerprint());
-        commits.publication.restore(context.commitSnapshotDirty(), context.commitSnapshotProvisionalOnly());
+        commits.publication.restore(context.commitSnapshotDirty());
         context.restoreCommitContext(resultBuilder);
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();

@@ -1238,7 +1238,7 @@ public final class OrderBatchExecutor {
         }
         beginOrderBatchCommitContext(batch, pending);
         if (!preparedCancel) {
-            owner.runtimeState().collectPlaceBatchAdmission(admission, null);
+            owner.runtimeState().collectPlaceBatchAdmission(admission);
             owner.runtimeState().releasePlaceBatchAdmission(admission);
             batch.placeBatchAdmissionEvent = null;
             owner.commits.publication.request();

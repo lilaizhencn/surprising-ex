@@ -2,6 +2,8 @@
 
 财库、OI 与合约维护页查询由 Owner 同步返回；账户和盘口查询继续通过所属线程的真实异步边界。撮合结算只收集已经完成财务校验的账户结果，批次不再搬运空财库差额。具体删除范围和相关验证见 [service README](surprising-aeron-service/README.md)。
 
+2026-10-28 继续清理无生产者结算队列、资金索引伪异步链、空准入发布/回滚、临时发布标记、未使用持仓计数、重复财务推进和强平中间状态。资金幂等由 Owner 同步读写；撮合财务统一等待账户完成后推进。八项改动、相关功能验证和未测范围见 [service README](surprising-aeron-service/README.md)。
+
 
 2026-10-28 第二轮冗余转换与转发清理及验证结果见 [逐项记录](../ROUND2_CLEANUP_PROGRESS.md)。
 活动订单页使用不可变原语编号列表；生命周期撤单统一从活动索引选路由，结果直接归入命令变更集。
@@ -350,14 +352,16 @@ flowchart TD
 
 ### 余额、划转与账户设置
 
-`ADJUST_BALANCE` / `TRANSFER_OUT` / `TRANSFER_IN` / `COMPLETE_TRANSFER` → [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `AccountControlTask` / `TransferRuntime` → 所属 Lane 与 System Ledger → 终态提交。不同产品账户通过显式划转连接，保留转出、转入、完成的幂等与恢复状态。
+`ADJUST_BALANCE` / `TRANSFER_OUT` / `TRANSFER_IN` / `COMPLETE_TRANSFER` → [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `AccountControlTask` / `TransferRuntime` → 所属 Lane 与 Owner 财务核对 → 长期资金身份保存 → 终态提交。不同产品账户通过显式划转连接，保留转出、转入、完成的幂等与恢复状态。
 
 ```mermaid
 flowchart LR
-    A[1. 余额或划转复制命令] --> B[2. DirectCommandDispatcher: 解码与业务校验]
+    A[1. 余额或划转复制命令] --> I[Owner 同步查重资金身份]
+    I --> B[2. DirectCommandDispatcher: 解码与业务校验]
     B --> C[3. 所属账户 Lane 修改余额 / 划转状态]
-    C --> D[4. System Ledger 资金变化与完成回执]
-    D --> E[5. DirectCommandSlot 续接 → 终态提交 / 回包]
+    C --> D[4. Owner 财务核对与发布]
+    D --> F[同步保存资金身份]
+    F --> E[5. 终态提交 / 回包]
 ```
 
 杠杆、仓位模式、逐仓保证金、费率直接由 `DirectCommandDispatcher` 分发，币对维护走 `InstrumentConfigurationCommands`。`DirectCommandSlot` 保留控制命令的异步续接，账户与账本工作完成后 Owner 才发布终态。

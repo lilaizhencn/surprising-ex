@@ -1272,22 +1272,6 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * 账本只读检查全部路由 Lane 的 release 完成标记，既不运行账户工作，也不修改 Owner 的观察缓存。
-     */
-    boolean accountLanesCompleteForLedger() {
-        if (!ready()) return false;
-        // 本次尚未观察、检查或内联执行的路由 Lane 位图。
-        long remaining = routedLaneMask();
-        while (remaining != 0) {
-            // 当前执行或检查的账户 Lane 编号。
-            int laneId = Long.numberOfTrailingZeros(remaining);
-            remaining &= remaining - 1;
-            if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) == 0) return false;
-        }
-        return true;
-    }
-
-    /**
      * 事件就绪且没有独立账户线程时，按路由推进尚未完成的 Lane；不在此代替已启动的账户工作线程执行。
      */
     public void ensureLanesExecuted() {
@@ -1305,25 +1289,18 @@ public final class MatcherSettlementEvent implements
         }
     }
 
-    /**
-     * Owner 等发布结束并按需推进内联账户；全部路由回执到齐后完成本地无成交核对，再检查已登记财务工作，成功结果缓存在本代。完成仍不代替变化收集和按序提交。
-     */
+    /** Owner 等齐账户回执后统一推进已登记的财务结算；成功结果只在本代缓存。 */
     public boolean complete() {
         if (ownerObservedComplete) return true;
         if (!ready()) return false;
         ensureLanesExecuted();
         if (completedLaneMask() != routedLaneMask()) return false;
-        if (treasurySettlement != null && !treasurySettlement.completed) {
-            if (treasurySettlement.localNoTrade) {
-                treasurySettlement.completeLocalNoTrade();
-            } else if (treasurySettlement.ready()) {
-                treasurySettlement.apply(runtime.treasury());
-            }
-        }
-        boolean done = treasurySettlement == null || treasurySettlement.completed;
-        if (done) ownerObservedComplete = true;
-        return done;
+        if (hasLedgerSettlement() && !treasurySettlement.completed)
+            treasurySettlement.apply(runtime.treasury());
+        ownerObservedComplete = true;
+        return true;
     }
+
     /**
      * 借用首个有效结算计划，空代次由带下标入口拒绝。
      */
@@ -1389,46 +1366,15 @@ public final class MatcherSettlementEvent implements
         return aggregate;
     }
 
-    /**
-     * 下单步骤 4.5：保留一个财务槽并就地或在账户完成后应用差额与资金守恒核对。已成功登记不允许重复投递。
-     * @param treasury 当前运行时由 Owner 独占持有的系统财库
-     */
-    public void submitTreasurySettlement(TreasuryRuntime treasury) {
-        if (treasury == null || runtime == null || changes == null || collected)
+    /** 登记本代财务结算并尝试推进；账户回执未齐时由 complete 继续，禁止重复登记。 */
+    public void submitTreasurySettlement() {
+        if (runtime == null || changes == null || collected)
             throw new IllegalStateException("Ledger settlement requires retained isolated account facts");
         if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
         if (treasurySettlement.queued) throw new IllegalStateException("Treasury settlement was already queued");
         ownerObservedComplete = false;
         treasurySettlement.queued = true;
-        if (ready() && !treasuryTrades) {
-            treasurySettlement.localNoTrade = true;
-            if (completedLaneMask() == routedLaneMask()) {
-                treasurySettlement.completeLocalNoTrade();
-                ownerObservedComplete = true;
-            }
-            return;
-        }
-        if (accountLanesCompleteForLedger()) {
-            treasurySettlement.apply(treasury);
-            if (completedLaneMask() == routedLaneMask()) {
-                ownerObservedComplete = true;
-            }
-        }
-    }
-
-    /**
-     * 在账户已就绪时推进内联财务结算并核对资金守恒。
-     */
-    public void tryAdvanceLedgerSettlement(TreasuryRuntime treasury) {
-        if (treasurySettlement != null && treasurySettlement.queued && !treasurySettlement.completed) {
-            if (accountLanesCompleteForLedger()) {
-                if (ready() && !treasuryTrades) {
-                    treasurySettlement.completeLocalNoTrade();
-                } else {
-                    treasurySettlement.apply(treasury);
-                }
-            }
-        }
+        complete();
     }
 
     /**
@@ -1437,49 +1383,29 @@ public final class MatcherSettlementEvent implements
     public boolean hasLedgerSettlement() { return treasurySettlement != null && treasurySettlement.queued; }
 
     /**
-     * 本事件保留的唯一财务任务槽，等账户完成后在账本所有权内应用差额及核对资金，完成位发布后不再访问事件。
+     * 本事件复用的财务槽，Owner 等账户完成后应用差额并核对资金。
      */
     private final class TreasurySettlement {
         /** 本财务槽独占的原语资金核对暂存，完成前校验守恒并清空，不是第二份资金账本。 */
         private final RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
-        /** 本代财务工作已成功登记，包含真实邮箱及本地或内联完成路径。 */
+        /** 本代财务工作已成功登记，等待 Owner 在账户完成后推进。 */
         private boolean queued;
-        /** 本代选择账户完成后就地核对无成交资金的标记。 */
-        private boolean localNoTrade;
         /** 本代财务处理已结束的完成标记。 */
         private boolean completed;
 
-        /**
-         * 账本消费者只在所有路由账户完成且发布租约已交出后应用财务事实。
-         */
-        public boolean ready() { return accountLanesCompleteForLedger(); }
-
-        /**
-         * 账户已完成的无成交路径就地汇集余额资金增量并校验守恒，清空临时资金后发布财务完成，不修改 Treasury。
-         */
-        void completeLocalNoTrade() {
-            if (completed) return;
-            changes.appendFundsDelta(requiredLaneMask, funds);
-            funds.requireConserved(false);
-            funds.clear();
-            completed = true;
-        }
-
-        /**
-         * 在账本所有权内应用 Lane 财务差额，汇集账户与财库资金并校验守恒，更新持仓索引，最后发布完成位并用提前保存的运行时通知；发布后不再读本槽或事件字段。
-         * @param treasury 当前账本执行方独占的原系统财库
-         */
+        /** 全部账户回执到齐后由 Owner 核对资金；有成交时同时应用财库差额和持仓索引。 */
         public void apply(TreasuryRuntime treasury) {
-            if (!ready() || completed || treasury.hasChangedValues())
+            if (completed || (treasuryTrades && treasury.hasChangedValues()))
                 throw new IllegalStateException("invalid Ledger financial scope");
-            mergeTreasuryDeltas().apply(treasury);
+            if (treasuryTrades) mergeTreasuryDeltas().apply(treasury);
             changes.appendFundsDelta(requiredLaneMask, funds);
-            treasury.appendFundsDelta(funds);
+            if (treasuryTrades) treasury.appendFundsDelta(funds);
             funds.requireConserved(false);
             funds.clear();
-            runtime.applyLedgerSettlementPositions(changes, requiredLaneMask, identities);
-            treasury.clearChangedKeys();
-            // Owner 观察完成后可以立即复用财务槽，发布后不再访问槽或事件字段。
+            if (treasuryTrades) {
+                runtime.applyLedgerSettlementPositions(changes, requiredLaneMask, identities);
+                treasury.clearChangedKeys();
+            }
             completed = true;
         }
 
@@ -1489,7 +1415,7 @@ public final class MatcherSettlementEvent implements
         void clear() {
             if (queued && !completed) throw new IllegalStateException("Ledger still owns this settlement");
             if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds scratch was not cleared");
-            queued = localNoTrade = completed = false;
+            queued = completed = false;
         }
     }
 

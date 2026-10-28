@@ -3,7 +3,6 @@ package com.surprising.aeron.service.retention;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.order.CoreTestCompletion;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,7 +16,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 验证活动资金索引 I/O 归真实 System Ledger，近期响应淘汰后仍按完整 UUID 与指纹去重；覆盖六产品线、账本邮箱满、写库失败和完成通知复用。本类不创建或恢复 Cluster 快照，冷身份导入也不等于恢复。
+ * 验证活动资金索引 I/O 归 Core Owner，近期响应淘汰后仍按完整 UUID 与指纹去重；覆盖六产品线、冷身份导入、重复执行和写库失败。本类不创建或恢复 Cluster 快照，冷身份导入也不等于恢复。
  */
 class CoreFundsLedgerIndexTest {
     /** 固定复制业务毫秒时间。 */
@@ -52,8 +51,8 @@ class CoreFundsLedgerIndexTest {
             var complete = command(source, CoreMessageType.COMPLETE_TRANSFER, 7,
                     TradingCommandCodec.encodeCompleteTransfer(new CompleteTransferCommand(511)));
             applied(source, out); applied(target, in); applied(source, complete);
-            assertOwnerCannotReadOrWriteIndex(source, deposit);
-            assertOwnerCannotReadOrWriteIndex(target, in);
+            assertOwnerCanReadRetainedIdentity(source, deposit);
+            assertOwnerCanReadRetainedIdentity(target, in);
             evictOldResults(source, 7); evictOldResults(target, 22);
             for (var /* 当前要检查、重试或等待的真实命令 */ request : List.of(deposit, out, complete))
                 assertThat(source.resultLedger().get(request.header().commandId())).isNull();
@@ -113,7 +112,7 @@ class CoreFundsLedgerIndexTest {
     }
 
     /**
-     * 用未就绪账本任务堵住真实邮箱并填满后续任务，余额命令先挂起且不增加应用数或结果记录；放行后只入账十七一次，再重试仍重复。
+     * 已有一百余额后追加十七，检查只增加一次计数和余额，重复命令不再入账。
      */
     @Test @Timeout(15)
     void balanceAdjustmentAppliesFundsExactlyOnceAndDeduplicates() {
@@ -136,9 +135,9 @@ class CoreFundsLedgerIndexTest {
     }
 
     /**
-     * 只在冷索引导入原命令指纹，没有执行原加一百或恢复快照；激活后原命令被判重复且哈希不变，随后真正加一余额只有一，并禁止 Owner 直接读写索引。
+     * 只在冷索引导入原命令指纹，没有执行原加一百或恢复快照；激活后原命令被判重复且哈希不变，随后真正加一余额只有一，Owner 可以直接读取保留身份。
      */
-    @Test void coldFundsIndexHandsExistingIdentitiesToActiveLedger() {
+    @Test void coldFundsIndexHandsExistingIdentitiesToActiveOwner() {
         try (/* 本场景自动关闭或故障后显式关闭的真实 Core */ var core = new TradingCoreRuntime(ProductLine.SPOT)) {
             // 冷阶段只导入指纹而没有真正执行的入账命令
             var original = command(core, CoreMessageType.ADJUST_BALANCE, 7,
@@ -157,7 +156,7 @@ class CoreFundsLedgerIndexTest {
             duplicate(core, original);
             assertThat(core.appliedCommandCount()).isEqualTo(count);
             assertThat(core.stateHash()).isEqualTo(hash);
-            assertOwnerCannotReadOrWriteIndex(core, original);
+            assertOwnerCanReadRetainedIdentity(core, original);
             applied(core, command(core, CoreMessageType.ADJUST_BALANCE, 7,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1))));
             assertThat(CoreTestCompletion.userState(core, 7).balances()).singleElement()
@@ -166,11 +165,46 @@ class CoreFundsLedgerIndexTest {
         }
     }
 
+    /** 冷导入允许另一启动线程执行；激活后，只有绑定 Owner 可以访问资金身份。 */
+    @Test @Timeout(15)
+    void coldIndexTransfersToOwnerAndRejectsOtherThreadsAfterActivation() throws Exception {
+        try (var core = new TradingCoreRuntime(ProductLine.SPOT)) {
+            var request = command(core, CoreMessageType.ADJUST_BALANCE, 7,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
+            var fingerprint = CommandFingerprint.of(request);
+            var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            var importer = Thread.ofPlatform().start(() -> {
+                try { core.terminalRetention().retainFundsCommand(request.header().commandId(), fingerprint); }
+                catch (Throwable error) { failure.set(error); }
+            });
+            importer.join(5_000);
+            assertThat(importer.isAlive()).isFalse();
+            assertThat(failure.get()).isNull();
+            core.activate();
+            assertThat(core.terminalRetention().fundsCommand(request.header().commandId())).isEqualTo(fingerprint);
+            var foreign = Thread.ofPlatform().start(() -> {
+                try {
+                    assertThatThrownBy(() -> core.terminalRetention().fundsCommand(request.header().commandId()))
+                            .isInstanceOf(IllegalStateException.class).hasMessageContaining("bound owner thread");
+                    assertThatThrownBy(() -> core.terminalRetention().retainFundsCommand(
+                            new UUID(998, 1), fingerprint))
+                            .isInstanceOf(IllegalStateException.class).hasMessageContaining("bound owner thread");
+                } catch (Throwable error) { failure.set(error); }
+            });
+            foreign.join(5_000);
+            assertThat(foreign.isAlive()).isFalse();
+            assertThat(failure.get()).isNull();
+            duplicate(core, request);
+            assertThat(core.appliedCommandCount()).isZero();
+            core.assertHealthy();
+        }
+    }
+
     /**
-     * 临时将目录配置指向文件，制造活动 Ledger 首次开库失败；要求无最终结果及应用计数、Core 健康失败，关闭传播工作线程故障并清测试文件。不以此断言余额已经回滚。
+     * 临时将目录配置指向文件，制造 Owner 首次开库失败；要求无最终结果及应用计数、Core 健康失败，关闭传播记录的故障并清测试文件。不以此断言余额已经回滚。
      */
     @Test @Timeout(15)
-        void indexWriteFailureStopsBeforeTerminalResponseAndDoesNotBecomeBusinessRejection() throws Exception {
+    void indexWriteFailureStopsBeforeTerminalResponseAndDoesNotBecomeBusinessRejection() throws Exception {
         // 本次写库故障测试开始前的原目录属性
         String previous = System.getProperty(INDEX_DIRECTORY);
         // 创建故障文件的配置或系统临时根目录
@@ -184,6 +218,7 @@ class CoreFundsLedgerIndexTest {
             var core = new TradingCoreRuntime(ProductLine.SPOT);
             try {
                 core.activate();
+                long publicationBefore = core.commits.publication.publishedSequence();
                 // 当前要检查、重试或等待的真实命令
                 var request = command(core, CoreMessageType.ADJUST_BALANCE, 7,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
@@ -191,7 +226,7 @@ class CoreFundsLedgerIndexTest {
                 assertThatThrownBy(() -> drain(core)).isInstanceOf(IllegalStateException.class)
                         .hasMessageContaining("funds command index unavailable");
                 assertThat(core.appliedCommandCount()).isZero();
-                assertThat(core.directCommand.publicationComplete()).isTrue();
+                assertThat(core.commits.publication.publishedSequence()).isGreaterThan(publicationBefore);
                 assertThat(core.directCommand.active()).isTrue();
                 assertThat(core.resultLedger().get(request.header().commandId())).isNull();
                 assertThatThrownBy(core::assertHealthy).isInstanceOf(IllegalStateException.class);
@@ -204,28 +239,6 @@ class CoreFundsLedgerIndexTest {
             if (previous == null) System.clearProperty(INDEX_DIRECTORY);
             else System.setProperty(INDEX_DIRECTORY, previous);
             Files.deleteIfExists(invalidRoot);
-        }
-    }
-
-    /** 完成后立即 clear 并复用资金索引请求，检查每次结果独立且不增加应用计数。 */
-    @Test @Timeout(15)
-    void indexRequestsCanBeImmediatelyReusedAfterCompletion() {
-        try (var core = new TradingCoreRuntime(ProductLine.SPOT)) {
-            core.activate();
-            var work = new TerminalStateRetention.FundsIndexWork();
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            for (int index = 0; index < 64; index++) {
-                work.prepareLookup(core.terminalRetention(), new UUID(998, index));
-                while (!work.poll(core)) {
-                    core.assertHealthy();
-                    if (System.nanoTime() >= deadline) throw new AssertionError("funds lookup completion timed out");
-                    Thread.onSpinWait();
-                }
-                assertThat(work.retained()).isNull();
-                work.clear();
-            }
-            assertThat(core.appliedCommandCount()).isZero();
-            core.assertHealthy();
         }
     }
 
@@ -243,11 +256,11 @@ class CoreFundsLedgerIndexTest {
     }
 
     /**
-     * 活动后从 Owner 线程直接查或写资金索引都必须被拒绝，错误明确指出 SystemLedgerLane。
+     * 活动后从 Owner 线程可直接读到已提交的资金身份。
      * @param core 当前执行真实资金流程的 Core
      * @param request 需要执行、重试或检查索引归属的原命令
      */
-    private void assertOwnerCannotReadOrWriteIndex(TradingCoreRuntime core, CoreMessage request) {
+    private void assertOwnerCanReadRetainedIdentity(TradingCoreRuntime core, CoreMessage request) {
         assertThat(core.terminalRetention().fundsCommand(request.header().commandId())).isNotNull();
     }
 

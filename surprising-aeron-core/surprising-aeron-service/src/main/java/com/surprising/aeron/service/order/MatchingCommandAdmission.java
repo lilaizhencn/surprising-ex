@@ -251,7 +251,7 @@ public final class MatchingCommandAdmission {
     }
 
     /**
-     * 初次解码或恢复延后输入，先检查生命周期，再建立事实作用域与回滚检查点，按操作派发账户准入或检查路由。已知准入错误按现有边界回滚并拒绝，不能跨在途账户命令回滚；成功则登记槽、保存收据并释放 Owner 访问权后提交 Matcher，返回待处理状态。
+     * 初次解码或恢复延后输入，先检查生命周期，再建立事实作用域，按操作派发账户准入或检查路由。已知准入错误直接拒绝，账户前值由 Lane 准入及后续提交边界管理；成功则登记槽、保存收据并释放 Owner 访问权后提交 Matcher，返回待处理状态。
      * @param message 当前完整 Core 消息
      * @param clusterTimestamp 固定使用的 Cluster 业务时间
      * @param clusterPosition 固定使用的复制日志位置
@@ -282,12 +282,12 @@ public final class MatchingCommandAdmission {
         owner.activateFactContext(message, effectiveFingerprint);
         try {
             rejectLifecycleOverlap(message, operation, decodedCommand);
-        } catch (/* 当前准入或盖戳过程中抛出的错误，按所在边界拒绝、回滚或继续传播 */ CoreStateRejectedException exception) {
+        } catch (/* Owner 准入校验失败，保留业务拒绝语义 */ CoreStateRejectedException exception) {
             // 本轮已决定的拒绝响应，由事实作用域收尾后返回
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
             return owner.finishFactContext(response);
-        } catch (/* 当前准入或盖戳过程中抛出的错误，按所在边界拒绝、回滚或继续传播 */ ArithmeticException | IllegalArgumentException exception) {
+        } catch (/* Owner 准入校验失败，保留业务拒绝语义 */ ArithmeticException | IllegalArgumentException exception) {
             // 本轮已决定的拒绝响应，由事实作用域收尾后返回
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
@@ -297,20 +297,13 @@ public final class MatchingCommandAdmission {
         // 本条命令新占或延后保留的 Core 序号
         long sequence = deferredPending == null
                 ? Math.incrementExact(owner.appliedCommandCount()) : deferredPending.sequence();
-        // 开始业务准入前的账户回滚检查点
-        long runtimeCommandCheckpoint = owner.runtimeState().revision();
-        // 开始业务准入前的持仓身份回滚检查点
-        long positionIdentityCheckpoint = owner.identities().positionCheckpoint();
         // 当前已能确定的先撤订单列表，未就绪准入可暂为空
         List<Long> preMatchingCancellations = List.of();
-        // 当前可空的解析准入输入
-        ResolvedMatchingAdmission admission = null;
         // 账户下单准入事件，可能尚未完成
         com.surprising.aeron.service.order.admission.PlaceAdmissionEvent placeAdmission = null;
         // 账户替换或改单准入事件，可能尚未完成
         com.surprising.aeron.service.order.admission.ReplacementAdmissionEvent replacementAdmission = null;
         owner.resultBuilder.beginCommand();
-        owner.commits.publication.begin();
         try {
             switch (operation) {
                 case PLACE -> {
@@ -331,50 +324,24 @@ public final class MatchingCommandAdmission {
             if (replacementAdmission == null)
                 preMatchingCancellations = preMatchingCloseCapacityCancellations(
                         operation, placeAdmission);
-        } catch (/* 当前准入或盖戳过程中抛出的错误，按所在边界拒绝、回滚或继续传播 */ CoreStateRejectedException exception) {
-            if (owner.commits.publication.dirty()) {
-                if (!owner.pendingMatching().isEmpty()) {
-                    throw new IllegalStateException("cannot roll back across an in-flight lane command", exception);
-                }
-                owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
-            }
-            else owner.commits.publication.clearBatchState();
+        } catch (/* Owner 准入校验失败，保留业务拒绝语义 */ CoreStateRejectedException exception) {
             // 本轮已决定的拒绝响应，由事实作用域收尾后返回
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
             return owner.finishFactContext(response);
-        } catch (/* 当前准入或盖戳过程中抛出的错误，按所在边界拒绝、回滚或继续传播 */ ArithmeticException | IllegalArgumentException exception) {
-            if (owner.commits.publication.dirty()) {
-                if (!owner.pendingMatching().isEmpty()) {
-                    throw new IllegalStateException("cannot roll back across an in-flight lane command", exception);
-                }
-                owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
-            }
-            else owner.commits.publication.clearBatchState();
+        } catch (/* Owner 准入校验失败，保留业务拒绝语义 */ ArithmeticException | IllegalArgumentException exception) {
             // 本轮已决定的拒绝响应，由事实作用域收尾后返回
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
             return owner.finishFactContext(response);
         }
-        // 准入后是否已有正式变化，临时投影不算在内
-        boolean tradingStateChanged = owner.commits.publication.dirty()
-                && !owner.commits.publication.provisionalOnly();
-        if (tradingStateChanged) {
-            try {
-                owner.stampOrderChangesRuntime(clusterTimestamp, clusterPosition, owner.resultBuilder.commandChangedOrderIds);
-            } catch (/* 当前准入或盖戳过程中抛出的错误，按所在边界拒绝、回滚或继续传播 */ RuntimeException exception) {
-                owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
-                throw exception;
-            }
-        }
-        owner.commits.publication.complete();
         // 当前新借、恢复或参与范围比较的命令槽
         CommandSlot pending = deferredPending == null
                 ? owner.pendingMatching().acquire(sequence, operation, message, effectiveFingerprint,
-                        preMatchingCancellations, decodedCommand, admission)
+                        preMatchingCancellations, decodedCommand, null)
                 : deferredPending.withPreMatchingCancellations(preMatchingCancellations)
-                        .withAdmission(admission);
+                        .withAdmission(null);
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
         if (deferredPending == null) {
             owner.matchingFlow.putPendingMatching(pending);

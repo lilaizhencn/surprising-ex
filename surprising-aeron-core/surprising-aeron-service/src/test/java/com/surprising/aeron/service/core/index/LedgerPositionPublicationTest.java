@@ -74,7 +74,6 @@ class LedgerPositionPublicationTest {
             long key = ids.findPositionKeyValue(7, instrument, CorePositionSide.NET);
             // 标的一对应的内部稠密编号，用于 Treasury 暂存
             int symbol = ids.symbolId("1");
-            assertThat(runtime.publishedPositionCount()).isOne();
             runtime.startAccountLanes(); runtime.startSystemLedgerLane();
             for (/* 本次控制删除、校验与回滚的轮次，共两轮 */ int round = 0; round < 2; round++) {
                 if (treasuryScope) {
@@ -95,12 +94,10 @@ class LedgerPositionPublicationTest {
                     runtime.removePosition(key, 7); return null;
                 });
                 LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-                assertThat(runtime.publishedPositionCount()).isZero();
                 // 即使没有资金补丁，仅持仓变化的控制命令仍须完成账本校验。
                 LedgerControlTestSupport.awaitFunds(runtime, false);
                 assertThat(adl.count()).isZero();
                 LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(1, 2 + round));
-                assertThat(runtime.publishedPositionCount()).isOne();
                 onLedger(runtime, () -> {
                     assertThat(oi.openInterestSteps("1")).isEqualTo(10);
                     assertThat(users.usersAfter("1", 0)).containsExactly(7L);

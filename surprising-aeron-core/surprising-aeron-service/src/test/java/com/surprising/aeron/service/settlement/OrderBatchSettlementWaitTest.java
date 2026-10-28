@@ -1,13 +1,12 @@
 package com.surprising.aeron.service.settlement;
 
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * 完成回执等待与复用边界测试。用直接构造和反射隔离完成位及 Owner 缓存契约；另启真实账本线程检查就绪读取，不在这些用例中执行真实成交资金计算。
+ * 完成回执等待与复用边界测试。用直接构造和反射隔离完成位及 Owner 缓存契约，不在这些用例中执行真实成交资金计算。
  */
 class OrderBatchSettlementWaitTest {
     /**
@@ -26,59 +25,6 @@ class OrderBatchSettlementWaitTest {
                     .hasMessageContaining("cannot recycle an incomplete");
             runtime.endOrderBatchMutationScope();
         }
-    }
-
-    /**
-     * 用反射和 release 写入模拟两个账户完成位，真实账本任务只读 readiness；检查它不更新 Owner 缓存，Owner 自己读取后缓存才变化，复用重置清除旧位。
-     */
-    @Test
-    void ledgerReadinessDoesNotMutateOwnerCompletionCacheOrExecuteAccounts() throws Exception {
-        // 尚未完成的结算或 Lane 变更事件，具体用例观察其完成契约。
-        var event = incompleteEvent();
-        // 反射取得的 requiredLaneMask 字段，用来设置必需业务 Lane。
-        var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask"); mask.setAccessible(true);
-        mask.setLong(event, 3);
-        // 反射取得的 routedLaneMask 字段，用来设置必须消费票据的实际路由。
-        var route = MatcherSettlementEvent.class.getDeclaredField("routedLaneMask"); route.setAccessible(true);
-        route.setLong(event, 3);
-        // 反射取得的完成数组及 Owner 缓存重置方法。
-        var reset = MatcherSettlementEvent.class.getDeclaredMethod("resetCompletions", int.class); reset.setAccessible(true);
-        reset.invoke(event, 2);
-        // 反射取得的每 Lane 完成标记数组字段。
-        var slotsField = MatcherSettlementEvent.class.getDeclaredField("completedLanes"); slotsField.setAccessible(true);
-        // 实际完成标记数组，两个 Lane 的有效标记下标分别为零和十六。
-        long[] slots = (long[]) slotsField.get(event);
-        // 反射取得的 Owner 已观察完成位图字段。
-        var cache = MatcherSettlementEvent.class.getDeclaredField("observedCompletedLaneMask"); cache.setAccessible(true);
-        // 用于以 release 语义模拟账户完成发布的 long 数组 VarHandle。
-        var longs = java.lang.invoke.MethodHandles.arrayElementVarHandle(long[].class);
-        // 实际账本线程意外故障的原子接收槽。
-        var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-        // 两个账户完成后由账本空任务释放的门闩。
-        var done = new java.util.concurrent.CountDownLatch(1);
-        var thread = new Thread(() -> {
-            while (!event.accountLanesCompleteForLedger()) Thread.onSpinWait();
-            done.countDown();
-        });
-        thread.start();
-        try {
-            assertThat(event.accountLanesCompleteForLedger()).isFalse();
-            assertThat(cache.getLong(event)).isZero();
-            longs.setRelease(slots, 0, 1L);
-            assertThat(event.accountLanesCompleteForLedger()).isFalse();
-            assertThat(cache.getLong(event)).isZero();
-            assertThat(done.getCount()).isOne();
-        } finally { longs.setRelease(slots, 16, 1L); }
-        assertThat(done.await(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-        thread.join(3_000);
-        assertThat(failure.get()).isNull();
-        assertThat(event.accountLanesCompleteForLedger()).isTrue();
-        assertThat(cache.getLong(event)).isZero();
-        assertThat(event.completedLaneMask()).isEqualTo(3);
-        assertThat(cache.getLong(event)).isEqualTo(3);
-        reset.invoke(event, 2);
-        assertThat(event.accountLanesCompleteForLedger()).isFalse();
-        assertThat(cache.getLong(event)).isZero();
     }
 
     /**

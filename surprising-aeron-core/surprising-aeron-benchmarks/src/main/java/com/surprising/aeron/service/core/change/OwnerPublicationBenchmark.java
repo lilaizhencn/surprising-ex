@@ -19,7 +19,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
-import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
@@ -57,7 +56,6 @@ public class OwnerPublicationBenchmark {
     private long coreSequence;
     private MatcherSettlementChanges settlement;
     private AccountLaneState settlementLane;
-    private PositionRuntime countPosition;
     private final RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
     private final OrderRuntime[] settlementOrders = new OrderRuntime[20];
     private final ReservationRuntime[] settlementReservations = new ReservationRuntime[20];
@@ -78,8 +76,6 @@ public class OwnerPublicationBenchmark {
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
-        countPosition = new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
-                instrument, 1, 100, 100, 0, 10);
         for (int i = 0; i < settlementOrders.length; i++) {
             boolean terminal = i % 4 == 0;
             settlementOrders[i] = new OrderRuntime(i + 1, ProductLine.LINEAR_PERPETUAL,
@@ -91,18 +87,6 @@ public class OwnerPublicationBenchmark {
             settlementReservations[i] = new ReservationRuntime(i + 1, 7, 0,
                     ReservationKind.DERIVATIVE_MARGIN, 0, 100, 0, terminal ? 100 : 0, 1);
         }
-    }
-
-    /** Lane count capture and existing receipt handoff/query only; no trading or transport. */
-    @Benchmark public int publishAndReadPositionCount() {
-        boolean present = (++coreSequence & 1) != 0;
-        if (present) settlementLane.storePosition(1, countPosition);
-        else settlementLane.removePositionValue(1);
-        delta.preparePositionRetirement(settlementLane);
-        delta.recordControlChanges(runtime, settlementLane.laneId());
-        int count = runtime.publishedPositionCount();
-        if (count != (present ? 1 : 0)) throw new IllegalStateException("position count receipt differs");
-        return count;
     }
 
     /** One actual preparation of 20 already-applied order/reservation changes; no trading or transport. */

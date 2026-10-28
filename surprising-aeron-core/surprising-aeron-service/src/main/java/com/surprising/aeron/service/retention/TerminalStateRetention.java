@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.retention;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.LaneCommitDelta;
 import com.surprising.aeron.service.result.FundsCommandIndex;
@@ -15,11 +14,11 @@ import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
 
-/** 保存当前产品线近期终态身份和长期资金命令指纹；Owner 管理墓碑 FIFO，Ledger 执行资金索引 I/O。 */
+/** 保存当前产品线近期终态身份和长期资金命令指纹；Owner 管理墓碑 FIFO 并同步执行资金索引 I/O。 */
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public final class TerminalStateRetention implements TradingAccountRuntime.TerminalOrderSink, AutoCloseable {
 
-    // 内存终态身份由当前产品 Owner 管理；资金 I/O 单独交给 Ledger，快照输出为独立字节。
+    // 内存终态身份由当前产品 Owner 管理；资金 I/O 由同一 Owner 执行，快照输出为独立字节。
 
     /** 近期订单终态身份的六万五千五百三十六项保留上限。 */
     static final int MAX_TOMBSTONES = 65_536;
@@ -29,7 +28,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     private static final int MAX_CLIENT_ID_BYTES = 256;
     /** Owner 持有的近期终态身份 FIFO，客户号与实体索引引用同一槽。 */
     private final TerminalTombstoneStore tombstones;
-    /** 长期资金命令身份索引，活动 I/O 由 Ledger 执行。 */
+    /** 长期资金命令身份索引，活动 I/O 由 Owner 执行。 */
     private final FundsCommandIndex fundsCommands;
 
     /**
@@ -41,6 +40,11 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
 
     public TerminalStateRetention(java.nio.file.Path fundsIndexDirectory) {
         this(new TerminalTombstoneStore(), new FundsCommandIndex(fundsIndexDirectory));
+    }
+
+    /** 冷阶段导入结束后，将活动资金索引 I/O 绑定到当前 Core Owner。 */
+    public void activate() {
+        fundsCommands.bindIoOwner();
     }
 
     /**
@@ -112,7 +116,7 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     }
 
     /**
-     * 把两段 UUID 查找交给资金索引，活动阶段须由 Ledger 线程调用。
+     * 把两段 UUID 查找交给资金索引，活动阶段须由 Owner 线程调用。
      * @param msb 资金命令 UUID 高位
      * @param lsb 资金命令 UUID 低位
      */
@@ -147,132 +151,6 @@ public final class TerminalStateRetention implements TradingAccountRuntime.Termi
     public void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
         if (commandId == null) throw new IllegalArgumentException("commandId is required");
         retainFundsCommand(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), fingerprint);
-    }
-
-    /**
-     * 直接控制命令复用的资金索引 I/O 任务。Owner 准备和轮询，Ledger 读写实际索引，通过完成位交回结果；冷阶段可在当前线程执行，不自建线程或另一份资金历史。
-     */
-    public static final class FundsIndexWork {
-        /** 当前任务借用的终态保留器，访问资金索引。 */
-        private TerminalStateRetention retention;
-        /** 本次资金 UUID 高位。 */
-        private long commandIdMsb;
-        /** 本次资金 UUID 低位。 */
-        private long commandIdLsb;
-        /**
-         * fingerprint：写任务借用的待保存指纹，使用方须保持至完成。
-         * retained：查任务执行后返回的可空稳定指纹。
-         */
-        private CommandFingerprint fingerprint, retained;
-        /**
-         * write：本次是否写入，假表示查找。
-         * prepared：当前请求是否仍在使用，clear 前禁止再次准备。
-         */
-        private boolean write, prepared;
-        private boolean completed = true;
-
-        /**
-         * 以两段 UUID 准备一次查找，不创建额外 UUID 对象，结果待 Ledger 或冷阶段执行。
-         * @param retention 实际拥有资金索引的非空保留器
-         * @param msb 资金命令 UUID 高位
-         * @param lsb 资金命令 UUID 低位
-         */
-        public void prepareLookup(TerminalStateRetention retention, long msb, long lsb) {
-            prepare(retention, msb, lsb, null, false);
-        }
-
-        /**
-         * 校验非空 UUID，取出两段数值后准备查找。
-         * @param retention 实际拥有资金索引的非空保留器
-         * @param commandId 本次资金命令 UUID，具体入口按规定处理空值
-         */
-        public void prepareLookup(TerminalStateRetention retention, UUID commandId) {
-            java.util.Objects.requireNonNull(commandId, "commandId");
-            prepare(retention, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), null, false);
-        }
-
-        /**
-         * 要求指纹非空，用两段 UUID 准备一次写入，调用方保持输入指纹在任务完成前有效。
-         * @param retention 实际拥有资金索引的非空保留器
-         * @param msb 资金命令 UUID 高位
-         * @param lsb 资金命令 UUID 低位
-         * @param fingerprint 本次写入借用的非空命令指纹
-         */
-        public void prepareWrite(TerminalStateRetention retention, long msb, long lsb, CommandFingerprint fingerprint) {
-            prepare(retention, msb, lsb, java.util.Objects.requireNonNull(fingerprint), true);
-        }
-
-        /**
-         * 要求 UUID 和指纹非空，准备保存该资金命令身份。
-         * @param retention 实际拥有资金索引的非空保留器
-         * @param commandId 本次资金命令 UUID，具体入口按规定处理空值
-         * @param fingerprint 本次写入借用的非空命令指纹
-         */
-        public void prepareWrite(TerminalStateRetention retention, UUID commandId, CommandFingerprint fingerprint) {
-            java.util.Objects.requireNonNull(commandId, "commandId");
-            prepare(retention, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), java.util.Objects.requireNonNull(fingerprint), true);
-        }
-
-        /**
-         * 上一次准备尚未 clear 就拒绝复用；接入保留器及请求字段，清旧结果并把完成位改为未完成，不在此执行 I/O。
-         * @param retention 实际拥有资金索引的非空保留器
-         * @param msb 资金命令 UUID 高位
-         * @param lsb 资金命令 UUID 低位
-         * @param fingerprint 本次写入借用的非空命令指纹
-         * @param write 是否准备写任务，假为查任务
-         */
-        private void prepare(TerminalStateRetention retention, long msb, long lsb,
-                             CommandFingerprint fingerprint, boolean write) {
-            if (prepared) throw new IllegalStateException("funds index request is still retained");
-            this.retention = java.util.Objects.requireNonNull(retention);
-            this.commandIdMsb = msb;
-            this.commandIdLsb = lsb;
-            this.fingerprint = fingerprint;
-            this.write = write;
-            retained = null;
-            completed = false;
-            prepared = true;
-        }
-
-        /**
-         * 检查 Core 健康与已准备状态，并在当前线程就地执行索引 I/O。
-         * @param owner 当前命令所属的健康 Core
-         */
-        public boolean poll(TradingCoreRuntime owner) {
-            owner.assertHealthy();
-            if (!prepared) throw new IllegalStateException("funds index request is not prepared");
-            apply();
-            return true;
-        }
-
-        /**
-         * 绑定索引 I/O 并读或写。
-         */
-        private void apply() {
-            retention.fundsCommands.bindIoOwner();
-            if (write) retention.fundsCommands.put(commandIdMsb, commandIdLsb, fingerprint);
-            else retained = retention.fundsCommands.get(commandIdMsb, commandIdLsb);
-            completed = true;
-        }
-
-        /**
-         * 只有完成位已发布才返回查得指纹；没有命中、写任务或已清空任务返回空，本入口不额外检查 prepared。
-         */
-        public CommandFingerprint retained() {
-            if (!completed) throw new IllegalStateException("funds index lookup is incomplete");
-            return retained;
-        }
-
-        /**
-         * 正常完成后或 Ledger 已停止的关闭阶段清任务引用及标记，恢复空闲完成状态；不在执行线程仍可能访问时提前调用。
-         */
-        public void clear() {
-            retention = null;
-            commandIdMsb = commandIdLsb = 0;
-            fingerprint = retained = null;
-            write = prepared = false;
-            completed = true;
-        }
     }
 
     /**
