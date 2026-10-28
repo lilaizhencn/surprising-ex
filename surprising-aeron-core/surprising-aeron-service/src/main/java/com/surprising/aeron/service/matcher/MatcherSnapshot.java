@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.matcher;
 
 import com.surprising.aeron.config.LaneTopology;
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.processors.journaling.ISerializationProcessor.SerializedModuleType;
 import exchange.core2.core.processors.journaling.InMemorySerializationProcessor.SerializedModule;
@@ -68,21 +67,10 @@ public record MatcherSnapshot(
         if (matcherShardProgress.size() != topology.matchingEngineCount() + 1) {
             throw new IllegalArgumentException("incomplete matcher shard progress");
         }
-        // 构造时各进度位置的存在位；progress 方法内则是取出的指定分片进度。
-        boolean[] progress = new boolean[matcherShardProgress.size()];
-        for (/* 当前进度条目在规定有序列表中的位置。 */ int progressIndex = 0; progressIndex < matcherShardProgress.size(); progressIndex++) {
-            // 当前需要核对编号及位置的业务证据进度。
-            MatcherShardProgress shard = matcherShardProgress.get(progressIndex);
-            // 分片编号加一后的规定位置，控制负一对应零。
-            int index = shard.matcherShardId() + 1;
-            if (index < 0 || index >= progress.length || progress[index]
-                    || index != progressIndex) {
+        for (int progressIndex = 0; progressIndex < matcherShardProgress.size(); progressIndex++) {
+            if (matcherShardProgress.get(progressIndex).matcherShardId() != progressIndex - 1) {
                 throw new IllegalArgumentException("invalid matcher shard progress");
             }
-            progress[index] = true;
-        }
-        for (boolean /* 该分片或引擎实例是否已经在清单中出现。 */ present : progress) {
-            if (!present) throw new IllegalArgumentException("incomplete matcher shard progress");
         }
         // 按撮合引擎实例编号保存的模块存在标记。
         boolean[] matching = new boolean[topology.matchingEngineCount()];
@@ -104,52 +92,10 @@ public record MatcherSnapshot(
                 throw new IllegalArgumentException("unsupported matcher module");
             }
         }
-        // 所有撮合引擎实例是否都存在。
-        boolean completeMatching = true;
-        for (boolean /* 该分片或引擎实例是否已经在清单中出现。 */ present : matching) completeMatching &= present;
-        if (!completeMatching
-                || modules.size() != topology.matchingEngineCount()
+        if (modules.size() != topology.matchingEngineCount()
                 || maximumModuleSequence != matcherSequence) {
             throw new IllegalArgumentException("incomplete matcher snapshot modules");
         }
-    }
-
-    /**
-     * 从清单拓扑返回撮合引擎数量。
-     */
-    public int matchingEngineCount() { return topology.matchingEngineCount(); }
-    /**
-     * 返回清单拓扑的账户 Lane 数量。
-     */
-    public int accountLaneCount() { return topology.accountLaneCount(); }
-    /**
-     * 按分片编号加一取对应进度，检查范围及列表中的编号仍一致；控制分片负一位于第零项。
-     * @param matcherShardId 需读取进度的分片编号，控制分片为负一
-     */
-    public MatcherShardProgress progress(int matcherShardId) {
-        // 分片编号加一后的规定位置，控制负一对应零。
-        int index = matcherShardId + 1;
-        if (index < 0 || index >= matcherShardProgress.size()) {
-            throw new IllegalArgumentException("matcher shard is outside snapshot topology");
-        }
-        // 按逻辑下标取出的分片进度，返回前再核对分片编号。
-        MatcherShardProgress progress = matcherShardProgress.get(index);
-        if (progress.matcherShardId() != matcherShardId) {
-            throw new IllegalStateException("matcher shard progress is not canonically ordered");
-        }
-        return progress;
-    }
-
-    /**
-     * 只要求给定 Core 状态非空，并取其产品线与调用方提供的预期序号和哈希核对清单；本方法不计算 state.businessStateHash，也不逐项核对订单或余额。
-     * @param state 需要与本清单配对的 Core 业务状态，本方法只直接读取其产品线
-     * @param expectedCoreSequence 由外部恢复清单提供的预期 Core 水位
-     * @param expectedCoreBusinessStateHash 调用方提供的预期 Core 业务哈希，不在本方法内重算
-     */
-    public void verifyCoreState(TradingCoreState state, long expectedCoreSequence,
-                                long expectedCoreBusinessStateHash) {
-        if (state == null) throw new IllegalStateException("Core snapshot state is missing");
-        verifyCoreManifest(state.productLine(), expectedCoreSequence, expectedCoreBusinessStateHash);
     }
 
     /**

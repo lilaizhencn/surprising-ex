@@ -2,7 +2,6 @@ package com.surprising.aeron.service.snapshot;
 
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.MatcherSnapshot;
 import com.surprising.product.api.ProductLine;
 import java.util.List;
 import lombok.AccessLevel;
@@ -11,7 +10,7 @@ import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
 import org.agrona.concurrent.UnsafeBuffer;
 
-/** 分段快照 v30 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。提供整体编码、恢复和增量接收；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。 构造约定：禁止实例化纯静态格式入口。 */
+/** 分段快照 v30 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。定义分段数据、整体恢复和清单读取；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。 构造约定：禁止实例化纯静态格式入口。 */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class SectionedCoreSnapshotCodec {
 
@@ -57,16 +56,6 @@ public final class SectionedCoreSnapshotCodec {
     }
 
     /**
-     * 使用 Matcher 快照自己的编号与 Core 水位，Cluster 时间和位置填零，交给写入器捕获当前运行时并编码；调用方须已建立一致性边界。
-     * @param state 已经建立快照一致性边界的交易运行时
-     * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
-     */
-    public static SectionedSnapshot encode(TradingCoreRuntime state, MatcherSnapshot matcherSnapshot) {
-        return SectionedCoreSnapshotWriter.encode(
-                state, matcherSnapshot, matcherSnapshot.snapshotId(), matcherSnapshot.coreSequence(), 0, 0);
-    }
-
-    /**
      * 把完整字节送入有界增量恢复器，校验全部组件并创建、激活指定产品线运行时；不是仅反序列化一个 Map。
      * @param snapshot 待探测或恢复的完整快照字节数组
      * @param expectedProductLine 调用方明确要求恢复或检查的产品线
@@ -76,22 +65,10 @@ public final class SectionedCoreSnapshotCodec {
     }
 
     public static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine,
-            com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-        return decode(snapshot, expectedProductLine, configuration,
-                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
-    }
-
-    public static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine,
             com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
             com.surprising.aeron.config.LaneTopology deploymentTopology) {
         return recovery(snapshot, configuration.snapshot().maxBytes())
                 .decode(expectedProductLine, configuration, deploymentTopology);
-    }
-
-    public static TradingCoreRuntime decodePassive(byte[] snapshot, ProductLine expectedProductLine,
-            com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-        return decodePassive(snapshot, expectedProductLine, configuration,
-                com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
     }
 
     public static TradingCoreRuntime decodePassive(byte[] snapshot, ProductLine expectedProductLine,

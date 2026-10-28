@@ -46,7 +46,8 @@ class CoreRuntimeConfigurationTest {
             assertThat(runtime.runtimeState().accountLanesStarted()).isTrue();
             byte[] snapshot = runtime.snapshot(1);
             try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decode(snapshot,
-                    com.surprising.product.api.ProductLine.SPOT, configuration)) {
+                    com.surprising.product.api.ProductLine.SPOT, configuration,
+                    com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
                 assertThat(restored.configuration()).isSameAs(configuration);
                 assertThat(restored.runtimeState().topology()).isEqualTo(runtime.runtimeState().topology());
             }
@@ -62,7 +63,8 @@ class CoreRuntimeConfigurationTest {
                 com.surprising.product.api.ProductLine.SPOT, com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY, configuration)) {
             byte[] snapshot = original.snapshot(7);
             try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decodePassive(snapshot,
-                    com.surprising.product.api.ProductLine.SPOT, configuration)) {
+                    com.surprising.product.api.ProductLine.SPOT, configuration,
+                    com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
                 assertThat(restored.activated()).isFalse();
                 assertThat(restored.runtimeState().accountLanesStarted()).isFalse();
                 restored.activate(TradingCpuAffinity.disabled());

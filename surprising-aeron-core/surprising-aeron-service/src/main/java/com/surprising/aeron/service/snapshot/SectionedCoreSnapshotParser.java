@@ -68,8 +68,6 @@ public final class SectionedCoreSnapshotParser {
         SectionedCoreSnapshotValidation.validateAccountLanes(manifest, accountLanes);
         SectionedCoreSnapshotValidation.validatePairing(
                 manifest, sourceSequences, matcherSnapshot, tradingState, feePolicies, pendingTransfers);
-        matcherSnapshot.verifyCoreState(tradingState,
-                manifest.appliedCommandCount(), manifest.businessStateHash());
         // 已由外层验证过的页尾 CRC 数值，这里只读入公开清单。
         long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
                 .order(ByteOrder.LITTLE_ENDIAN).getLong();

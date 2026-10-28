@@ -73,7 +73,7 @@ class MatcherTreasurySettlementTest {
         RuntimeTreasuryDelta[] slots = (RuntimeTreasuryDelta[]) storage.get(event);
         assertThat(slots).hasSize(2);
         assertThat(slots[0]).isSameAs(first);
-        assertThat(first.size()).isZero();
+        assertThat(appliedFee(first)).isZero();
         // 第二个保留财务槽，当前不参与时故意填入金额以验证不被合并。
         RuntimeTreasuryDelta second = slots[1];
 
@@ -82,25 +82,31 @@ class MatcherTreasurySettlementTest {
             assertThat(storage.get(event)).isSameAs(slots);
             assertThat(slots[0]).isSameAs(first);
             assertThat(slots[1]).isSameAs(second);
-            assertThat(first.size()).isZero();
-            assertThat(second.size()).isZero();
+            assertThat(appliedFee(first)).isZero();
+            assertThat(appliedFee(second)).isZero();
             mask.setLong(event, 1L << 63);
             trades.setBoolean(event, true);
             first.addFee(2, 3);
             // 保留容量不等于本代业务范围，非参与槽即使有数据也不能参与合并。
             second.addFee(2, 100);
-            assertThat(((RuntimeTreasuryDelta) merge.invoke(event)).feeUnits(0)).isEqualTo(3);
+            assertThat(appliedFee((RuntimeTreasuryDelta) merge.invoke(event))).isEqualTo(3);
 
             prepare.invoke(event, (1L << 63) | 1, true);
             mask.setLong(event, (1L << 63) | 1);
             first.addFee(2, 5);
             second.addFee(2, 7);
-            assertThat(((RuntimeTreasuryDelta) merge.invoke(event)).feeUnits(0)).isEqualTo(12);
+            assertThat(appliedFee((RuntimeTreasuryDelta) merge.invoke(event))).isEqualTo(12);
             prepare.invoke(event, 1L, false);
             assertThat(storage.get(event)).isSameAs(slots);
-            assertThat(first.size()).isZero();
-            assertThat(second.size()).isZero();
+            assertThat(appliedFee(first)).isZero();
+            assertThat(appliedFee(second)).isZero();
         }
+    }
+
+    private static long appliedFee(RuntimeTreasuryDelta delta) {
+        TreasuryRuntime treasury = new TreasuryRuntime();
+        delta.apply(treasury);
+        return treasury.fee(2);
     }
 
     /**

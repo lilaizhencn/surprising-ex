@@ -28,10 +28,18 @@ class SectionedSnapshotBudgetTest {
                 long hash = TradingCoreRuntime.canonicalBusinessStateHash(state.businessStateHash(), fees, transfers);
                 var matcher = core.snapshots.captureMatcherSnapshot(19, 0, hash, state, List.of())
                         .toCompletableFuture().get(5, TimeUnit.SECONDS);
+                var changedFees = java.util.Map.of(1L, new com.surprising.aeron.model.CoreFeePolicyState(
+                        1, 1, 7, "", 0, 1, 0, true, 1, 0));
+                assertThatThrownBy(() -> SectionedCoreSnapshotWriter.capture(core, matcher, 19, 0, 0, 0,
+                        state, changedFees, transfers, hash))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessage("snapshot rolling hash differs from immutable state audit");
                 var image = SectionedCoreSnapshotWriter.capture(core, matcher, 19, 0, 0, 0,
                         state, fees, transfers, hash);
                 byte[] encoded = SectionedCoreSnapshotWriter.encode(image, core.configuration().snapshot().maxBytes())
                         .toByteArray();
+                assertThat(SectionedCoreSnapshotWriter.encode(image, core.configuration().snapshot().maxBytes())
+                        .toByteArray()).containsExactly(encoded);
                 ByteBuffer buffer = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
                 int sectionCount = buffer.getInt(8);
                 int prefixBytes = 0;

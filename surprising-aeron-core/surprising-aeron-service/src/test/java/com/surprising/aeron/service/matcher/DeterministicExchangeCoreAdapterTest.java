@@ -480,7 +480,8 @@ class DeterministicExchangeCoreAdapterTest {
         }
 
         // Matcher 清单编码字节，损坏测试只修改内存副本。
-        byte[] encoded = MatcherSnapshotCodec.encode(snapshot);
+        byte[] encoded = MatcherSnapshotCodec.encode(snapshot,
+                com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
         // 同一真实小快照：恰好预算成功，少一字节及很小预算均在有界正文缓冲拒绝。
         assertThat(MatcherSnapshotCodec.encode(snapshot, encoded.length)).containsExactly(encoded);
         assertThatThrownBy(() -> MatcherSnapshotCodec.encode(snapshot, encoded.length - 1))
@@ -491,18 +492,18 @@ class DeterministicExchangeCoreAdapterTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("byte limit");
 
         // 从编码字节恢复出的 Matcher 清单。
-        MatcherSnapshot decoded = MatcherSnapshotCodec.decode(encoded);
+        MatcherSnapshot decoded = MatcherSnapshotCodec.decode(encoded, snapshot.topology());
         assertThat(decoded.symbols()).containsEntry(instrumentId, Integer.parseInt(instrumentId));
         assertThat(decoded.matcherShardProgress()).isEqualTo(snapshot.matcherShardProgress());
         assertThat(decoded.symbols()).containsExactlyEntriesOf(snapshot.symbols());
         assertThat(decoded.users()).containsExactlyElementsOf(snapshot.users());
         assertThat(decoded.modules()).hasSize(
-                decoded.matchingEngineCount());
+                decoded.topology().matchingEngineCount());
         assertThat(decoded.modules().stream()
                 .filter(/* 当前用来筛选和检查类型、实例编号的原生模块。 */ module -> module.type().name().equals("MATCHING_ENGINE_ROUTER"))
                 .map(/* 当前用来筛选和检查类型、实例编号的原生模块。 */ module -> module.instanceId()).sorted().toList())
                 .containsExactlyElementsOf(java.util.stream.IntStream.range(
-                        0, decoded.matchingEngineCount()).boxed().toList());
+                        0, decoded.topology().matchingEngineCount()).boxed().toList());
         assertThat(decoded.modules()).zipSatisfy(snapshot.modules(), (/* 解码清单中当前待比较的模块记录。 */ actual, /* 原始清单中同一位置的模块记录。 */ expected) -> {
             assertThat(actual.type()).isEqualTo(expected.type());
             assertThat(actual.sequence()).isEqualTo(expected.sequence());
@@ -519,7 +520,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(afterRestore.accepted()).isTrue();
             assertThat(restored.orderBookLevels(instrumentId, 30)).hasSize(2);
             assertThat(afterRestore.nativeMatcherSequence()).isGreaterThan(
-                    snapshot.progress(afterRestore.nativeMatcherShardId()).matcherSequence());
+                    snapshot.matcherShardProgress().get(afterRestore.nativeMatcherShardId() + 1).matcherSequence());
         }
     }
 
@@ -537,6 +538,10 @@ class DeterministicExchangeCoreAdapterTest {
             snapshot = matcherSnapshot(adapter,
                     92, 1, original.businessStateHash(), original, activeOrders(original));
         }
+        assertThatThrownBy(() -> new DeterministicExchangeCoreAdapter(
+                null, activeOrders(original), 1, snapshot))
+                .isInstanceOf(FatalMatchingDivergenceException.class)
+                .hasRootCauseInstanceOf(IllegalStateException.class);
         // 故意把同笔 Core 买价改为一百零一的分歧元数据。
         TradingCoreState divergent = stateWithOpenBid(101);
         // 业务哈希也改为分歧 Core 的清单，但其原生模块仍保存旧订单簿。
@@ -553,6 +558,37 @@ class DeterministicExchangeCoreAdapterTest {
                 .hasMessageContaining("Core OPEN orders do not exactly match exchange-core open orders");
     }
 
+    @Test
+    void snapshotRejectsMissingDuplicateAndUnorderedShardEvidence() {
+        var topology = new com.surprising.aeron.config.LaneTopology(2, 2, 1, 64, 64, 64);
+        var state = TradingCoreState.empty(ProductLine.SPOT);
+        MatcherSnapshot snapshot;
+        try (var adapter = new DeterministicExchangeCoreAdapter(topology, true)) {
+            snapshot = matcherSnapshot(adapter, 94, 0, state.businessStateHash(), state, List.of());
+        }
+        var progress = snapshot.matcherShardProgress();
+        for (var invalid : List.of(progress.subList(1, progress.size()), progress.reversed(),
+                List.of(progress.get(0), progress.get(0), progress.get(2)),
+                List.of(progress.get(0), progress.get(1), new MatcherShardProgress(Integer.MAX_VALUE, 0)))) {
+            assertThatThrownBy(() -> new MatcherSnapshot(snapshot.productLine(), snapshot.topology(),
+                    snapshot.snapshotId(), snapshot.coreSequence(), snapshot.matcherSequence(), invalid,
+                    snapshot.coreBusinessStateHash(), snapshot.engineStateHash(), snapshot.symbols(),
+                    snapshot.users(), snapshot.modules())).isInstanceOf(IllegalArgumentException.class);
+        }
+        var modules = snapshot.modules();
+        for (var invalid : List.of(modules.subList(0, 1), List.of(modules.get(0), modules.get(0)))) {
+            assertThatThrownBy(() -> new MatcherSnapshot(snapshot.productLine(), snapshot.topology(),
+                    snapshot.snapshotId(), snapshot.coreSequence(), snapshot.matcherSequence(), progress,
+                    snapshot.coreBusinessStateHash(), snapshot.engineStateHash(), snapshot.symbols(),
+                    snapshot.users(), invalid)).isInstanceOf(IllegalArgumentException.class);
+        }
+        // 模块允许换序；完整性来自实例编号唯一、范围合法和数量相等。
+        assertThat(new MatcherSnapshot(snapshot.productLine(), snapshot.topology(), snapshot.snapshotId(),
+                snapshot.coreSequence(), snapshot.matcherSequence(), progress, snapshot.coreBusinessStateHash(),
+                snapshot.engineStateHash(), snapshot.symbols(), snapshot.users(), modules.reversed()).modules())
+                .containsExactlyElementsOf(modules.reversed());
+    }
+
     /**
      * 翻转编码快照中间一位后要求正文校验错误；没有重算正文 CRC 后再独立构造模块 CRC 错误。
      */
@@ -565,11 +601,12 @@ class DeterministicExchangeCoreAdapterTest {
         try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             assertThat(placeDirect(adapter, 7, bid(100)).accepted()).isTrue();
             encoded = MatcherSnapshotCodec.encode(matcherSnapshot(adapter,
-                    93, 1, state.businessStateHash(), state, activeOrders(state)));
+                    93, 1, state.businessStateHash(), state, activeOrders(state)),
+                    com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
         }
         encoded[encoded.length / 2] ^= 1;
 
-        assertThatThrownBy(() -> MatcherSnapshotCodec.decode(encoded))
+        assertThatThrownBy(() -> MatcherSnapshotCodec.decode(encoded, com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY))
                 .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)
                 .hasMessageContaining("checksum");
     }

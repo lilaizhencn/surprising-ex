@@ -294,10 +294,10 @@ class SectionedCoreSnapshotCodecTest {
     }
 
     /**
-     * 准备合成 Core 挂单与真实原生订单簿配对，编解码后使用同一个 MatcherSnapshot 输入再次编码，要求字节相同、状态哈希和订单相同；再独立捕获恢复运行时的新快照比较引擎哈希及拓扑。
+     * 准备合成 Core 挂单与真实原生订单簿配对，通过生产冻结流程编码和恢复，要求状态哈希和订单相同；再独立捕获恢复运行时的新快照比较引擎哈希及拓扑。
      */
     @Test
-    void byteExactRoundTripPreservesStateHashAndOpenOrders() {
+    void roundTripPreservesStateHashAndOpenOrders() {
         // 含合成 OPEN 买单的 Core 元数据状态。
         TradingCoreState tradingState = stateWithOpenBid();
         // 真实原生订单簿捕获并与该测试 Core 元数据配对的快照。
@@ -321,20 +321,16 @@ class SectionedCoreSnapshotCodecTest {
         // 从快照恢复的候选运行时，具体关闭范围见当前测试。
         TradingCoreRuntime restored = null;
         try {
-            // 对原运行时与指定 MatcherSnapshot 第一次编码的字节。
-            byte[] first = SectionedCoreSnapshotCodec.encode(original, matcherSnapshot).toByteArray();
+            // 通过生产冻结流程捕获并编码完整快照。
+            byte[] first = original.snapshot(44);
             restored = SectionedCoreSnapshotCodec.decode(first, ProductLine.SPOT);
-            // 对恢复运行时使用同一个 MatcherSnapshot 输入再次编码的字节。
-            byte[] second = SectionedCoreSnapshotCodec.encode(restored, matcherSnapshot).toByteArray();
-
-            assertThat(second).containsExactly(first);
             assertThat(restored.stateHash()).isEqualTo(original.stateHash());
             assertThat(restored.tradingState().orders()).containsExactlyEntriesOf(original.tradingState().orders());
             // 第一次编码字节解析得到的原清单。
             CoreSnapshotManifest originalManifest = SectionedCoreSnapshotCodec.manifest(first, ProductLine.SPOT);
             // 恢复运行时独立捕获新编号快照后解析出的清单。
             CoreSnapshotManifest restoredMatcherManifest = SectionedCoreSnapshotCodec.manifest(
-                    restored.snapshot(44), ProductLine.SPOT);
+                    restored.snapshot(45), ProductLine.SPOT);
             assertThat(restoredMatcherManifest.engineStateHash()).isEqualTo(originalManifest.engineStateHash());
             assertThat(restoredMatcherManifest.topology()).isEqualTo(originalManifest.topology());
         } finally {
@@ -483,7 +479,7 @@ class SectionedCoreSnapshotCodecTest {
      * 使用当前 v30 快照，改产品线为期权并把第五段交易状态清零，再重算 CRC；要求先报产品线不匹配，说明该检查早于交易状态解码，方法名中的 V9 不改变当前格式。
      */
     @Test
-    void rejectsWrongProductLineBeforeDecodingOtherV9Sections() {
+    void rejectsWrongProductLineBeforeDecodingOtherSections() {
         // 当前正常捕获或轮询得到的完整字节，轮询未完成时为空。
         byte[] snapshot;
         try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {

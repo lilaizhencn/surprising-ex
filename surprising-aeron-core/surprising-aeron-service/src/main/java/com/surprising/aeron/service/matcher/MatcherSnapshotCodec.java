@@ -40,17 +40,6 @@ public final class MatcherSnapshotCodec {
     /** 单个原生模块载荷上限，在总快照限额内预留一百二十八字节空间。 */
     private static final int MAX_MODULE_BYTES = HARD_MAX_SNAPSHOT_BYTES - 128;
 
-    /**
-     * 用限长正文缓冲写版本十清单，按清单现有迭代顺序保存注册表、进度及模块，最后追加八字节无符号 CRC32C 值。模块类型沿当前实现写 ordinal，单模块与总字节限长在这里检查；不额外执行 decode 的百万条目数上限。
-     * @param snapshot 已经完成清单构造校验、输入引用在编码期间稳定的 MatcherSnapshot
-     */
-    public static byte[] encode(MatcherSnapshot snapshot) {
-        int deploymentLimit = com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes()
-                - SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
-                - SectionedCoreSnapshotCodec.MAX_SECTION_COUNT * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH;
-        return encode(snapshot, Math.min(deploymentLimit, HARD_MAX_SNAPSHOT_BYTES));
-    }
-
     /** 在调用方已经扣除外层封套/段头和已编码部分的预算内写入，扩容前拒绝超限。 */
     public static byte[] encode(MatcherSnapshot snapshot, int maximumSnapshotBytes) {
         if (maximumSnapshotBytes <= Long.BYTES || maximumSnapshotBytes > HARD_MAX_SNAPSHOT_BYTES)
@@ -113,14 +102,6 @@ public final class MatcherSnapshotCodec {
         } catch (/* 编码 IO、解码 EOF 或参数/IO 异常，按当前分支转换错误说明。 */ IOException exception) {
             throw new IllegalStateException("unable to encode matcher snapshot", exception);
         }
-    }
-
-    /**
-     * 先检查总长度与正文 CRC32C，再按版本十读取拓扑和清单，检查注册表重复/数量、模块字节长度及各模块 CRC32C，最终要求没有尾部字节并构造 MatcherSnapshot 核对清单不变量。截断和其他 IO/参数异常按原代码转为协议异常，转换时保留消息而不附原 cause，已有协议异常原样抛出。
-     * @param encoded 包含正文及末尾八字节 CRC32C 的完整快照字节
-     */
-    public static MatcherSnapshot decode(byte[] encoded) {
-        return decode(encoded, com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
     }
 
     /** 路由来自快照，空环与队列容量来自当前部署。 */

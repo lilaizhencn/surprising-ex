@@ -277,7 +277,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             throw new IllegalArgumentException("matcher snapshot is required");
         }
         try {
-            snapshot.verifyCoreState(state, coreSequence, expectedCoreBusinessStateHash);
+            if (state == null) throw new IllegalStateException("Core snapshot state is missing");
+            snapshot.verifyCoreManifest(state.productLine(), coreSequence, expectedCoreBusinessStateHash);
             this.topology = snapshot.topology();
             initializeCommandScopes();
             this.matcherEvidence = new MatcherEvidenceLedger(

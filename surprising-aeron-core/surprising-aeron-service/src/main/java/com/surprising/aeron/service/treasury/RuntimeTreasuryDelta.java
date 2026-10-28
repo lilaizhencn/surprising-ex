@@ -1,7 +1,5 @@
 package com.surprising.aeron.service.treasury;
 
-import lombok.Getter;
-import lombok.experimental.Accessors;
 /**
  * 所属命令或 Lane 的系统资金差额，按资产归集费用、保险、亏空、资金费残差、舍入及清算。单资产先用标量，第二个资产才分配固定容量数组；clear 只重置有效长度。差额不等于权威余额，应用时仍须持有原 Treasury 的单写者所有权。
  */
@@ -39,9 +37,7 @@ public final class RuntimeTreasuryDelta {
     private long[] roundingResidualUnits;
     /** 多资产清算盈亏差额列。 */
     private long[] clearingUnits;
-    /**  本代实际登记的资产项数，金额归零不会自动移除资产项。 返回本代有效资产项数，不表示金额非零项数或数组容量。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
+    /** 本代实际登记的资产项数，金额归零不会自动移除资产项。 */
     private int size;
 
     /**
@@ -58,33 +54,6 @@ public final class RuntimeTreasuryDelta {
     public RuntimeTreasuryDelta(int capacity) {
         if (capacity <= 0) throw new IllegalArgumentException("treasury delta capacity must be positive");
         this.capacity = capacity;
-    }
-
-    /**
-     * 校验当前有效下标后读取对应资产编号。
-     * @param index 本代有效资产槽下标
-     */
-    public int assetId(int index) {
-        checkIndex(index);
-        return (assetIds == null ? firstAssetId : assetIds[index]);
-    }
-
-    /**
-     * 校验下标后读取该资产手续费变化。
-     * @param index 本代有效资产槽下标
-     */
-    public long feeUnits(int index) {
-        checkIndex(index);
-        return (feeUnits == null ? firstFeeUnits : feeUnits[index]);
-    }
-
-    /**
-     * 校验下标后读取该资产清算盈亏变化。
-     * @param index 本代有效资产槽下标
-     */
-    public long clearingUnits(int index) {
-        checkIndex(index);
-        return (clearingUnits == null ? firstClearingUnits : clearingUnits[index]);
     }
 
     /**
@@ -311,11 +280,4 @@ public final class RuntimeTreasuryDelta {
         }
     }
 
-    /**
-     * 拒绝负数或超出本代有效资产前缀的下标。
-     * @param index 本代有效资产槽下标
-     */
-    private void checkIndex(int index) {
-        if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
-    }
 }

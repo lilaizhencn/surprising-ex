@@ -77,7 +77,6 @@ class AsyncFundingCommandTest {
                 if (progress == null) break;
                 assertThat(progress.nextCursorUserId()).isGreaterThan(cursor);
                 assertThat(progress.settlementId()).isEqualTo(900);
-                assertThat(state.runtimeState.treasury().incompleteFundingCount()).isEqualTo(1);
                 cursor = progress.nextCursorUserId();
                 if (pages == 0) {
                     // 续页只能使用首轮固定的100，不能跟随新行情200。
@@ -113,7 +112,7 @@ class AsyncFundingCommandTest {
             }
             assertThat(pages).isEqualTo(7);
             assertThat(state.runtimeState.treasury().fundingSettlement(symbolId)).isEqualTo(900);
-            assertThat(state.runtimeState.treasury().incompleteFundingCount()).isZero();
+            assertThat(state.runtimeState.treasury().fundingProgress(symbolId)).isNull();
             long payment = type.isInverse() ? 1 : 10;
             for (long user = 1; user <= 8; user++) {
                 assertThat(CoreStateTestFixtures.totalUnits(state.tradingState().users().get(user), asset))

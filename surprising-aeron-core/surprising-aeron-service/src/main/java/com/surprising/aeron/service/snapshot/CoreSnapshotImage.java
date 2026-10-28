@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * 编码前的同一冻结点输入：把 Core 交易状态、Matcher 快照、消费水位、幂等结果、费率、划转和各 Lane 清单配在一起。record 只固定引用，不在构造器里复制 Map、List 或字节数组；调用方须在编码结束前保持输入稳定。完整哈希审计另由 verifyFullState 执行。
+ * 编码前的同一冻结点输入：把 Core 交易状态、Matcher 快照、消费水位、幂等结果、费率、划转和各 Lane 清单配在一起。record 只固定引用，不在构造器里复制 Map、List 或字节数组；调用方须在编码结束前保持输入稳定。配对与完整业务哈希审计由 Writer 捕获边界执行，编码器直接消费该冻结镜像。
  * @param productLine 该快照唯一所属的产品线
  * @param appliedCommandCount 冻结点已应用的 Core 命令水位
  * @param sourceSequenceDigest 各消息来源已消费序号的汇总摘要
@@ -63,19 +63,6 @@ public record CoreSnapshotImage(
                 || sourceSequences == null || commandResults == null || feePolicies == null
                 || pendingTransfers == null || accountLanes == null) {
             throw new IllegalArgumentException("invalid core snapshot image");
-        }
-    }
-
-    /**
-     * 先核对 Matcher 与 Core 的产品线、序号及业务哈希元数据，再从物化交易状态、费率及划转重算业务哈希和资金哈希；与保存值不同即拒绝。这里不重算来源摘要或 Lane 清单摘要。
-     */
-    void verifyFullState() {
-        matcherSnapshot.verifyCoreState(tradingState, appliedCommandCount, businessStateHash);
-        if (TradingCoreRuntime.canonicalBusinessStateHash(
-                tradingState.businessStateHash(), feePolicies, pendingTransfers) != businessStateHash
-                || com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(tradingState)
-                != fundsStateHash) {
-            throw new IllegalStateException("snapshot rolling hash differs from immutable state audit");
         }
     }
 

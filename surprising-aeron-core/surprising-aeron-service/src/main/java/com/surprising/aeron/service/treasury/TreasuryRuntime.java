@@ -4,8 +4,6 @@ import com.surprising.aeron.service.core.change.RuntimeChangeBuffer;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.settlement.FundsPosting;
 import java.util.Arrays;
-import lombok.Getter;
-import lombok.experimental.Accessors;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
@@ -30,10 +28,6 @@ public final class TreasuryRuntime {
     private final IntLongHashMap clearingPnlBalances = new IntLongHashMap();
     /** 按稠密币对编号索引的 volatile 发布单元数组，扩容只复制单元引用，旧读者仍见同一单元。 */
     private volatile SettlementStatusCell[] settlementStates = new SettlementStatusCell[8];
-    /**  非空资金费进度条目数的 volatile 索引，由账本所有者随发布维护。 直接读取已发布的非空资金费进度数量索引，用于准入栅栏，不扫描所有币对。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    private volatile int incompleteFundingCount;
     /** 当前范围首次写入资产的连续原语键索引，值列不用，槽号对应七列前值。 */
     private final RuntimeChangeBuffer<Void> assetChanges = new RuntimeChangeBuffer<>();
     /** 对应捕获槽的首个手续费前值。 */
@@ -566,12 +560,7 @@ public final class TreasuryRuntime {
             // 新单元需要通过 volatile 数组引用发布，即使本次没有扩容也一样。
             settlementStates = states;
         }
-        // 替换前该币对是否有非空资金费进度。
-        boolean wasIncomplete = cell.value.fundingProgress() != null;
-        // 替换后该币对是否有非空资金费进度，用来调整未完成计数。
-        boolean isIncomplete = value.fundingProgress() != null;
         cell.value = value;
-        if (wasIncomplete != isIncomplete) incompleteFundingCount += isIncomplete ? 1 : -1;
     }
 
     /**

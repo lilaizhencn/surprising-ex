@@ -295,13 +295,12 @@ class RuntimeTreasuryDeltaTest {
 
         first.merge(second);
 
-        assertThat(first.size()).isEqualTo(2);
-        assertThat(first.assetId(0)).isEqualTo(1);
-        assertThat(first.feeUnits(0)).isEqualTo(7);
-        assertThat(first.clearingUnits(0)).isEqualTo(-17);
-        assertThat(first.assetId(1)).isEqualTo(2);
-        assertThat(first.feeUnits(1)).isEqualTo(13);
-        assertThat(first.clearingUnits(1)).isEqualTo(-11);
+        TreasuryRuntime treasury = new TreasuryRuntime();
+        first.apply(treasury);
+        assertThat(treasury.fee(1)).isEqualTo(7);
+        assertThat(treasury.clearingPnl(1)).isEqualTo(-17);
+        assertThat(treasury.fee(2)).isEqualTo(13);
+        assertThat(treasury.clearingPnl(2)).isEqualTo(-11);
     }
 
     /**

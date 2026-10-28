@@ -23,33 +23,7 @@ import lombok.NoArgsConstructor;
 public final class SectionedCoreSnapshotWriter {
 
     /**
-     * 从已建立边界的运行时捕获镜像，再交给分段编码；不是自行建立或等待快照屏障。
-     * @param state 已建立一致性读取边界的交易运行时
-     * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
-     * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
-     * @param coreSequence 快照覆盖的已应用 Core 命令水位
-     * @param clusterTimestamp 捕获点的非负 Cluster 业务时间
-     * @param clusterPosition 捕获点的非负 Cluster 日志位置
-     */
-    public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(
-            TradingCoreRuntime state,
-            MatcherSnapshot matcherSnapshot,
-            long snapshotId,
-            long coreSequence,
-            long clusterTimestamp,
-            long clusterPosition) {
-        var snapshotState = state.snapshotTradingState();
-        var feePolicies = state.feePolicies();
-        var pendingTransfers = state.pendingTransfers();
-        long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
-                snapshotState.businessStateHash(), feePolicies, pendingTransfers);
-        return encode(capture(state, matcherSnapshot, snapshotId, coreSequence,
-                clusterTimestamp, clusterPosition, snapshotState, feePolicies, pendingTransfers,
-                businessStateHash), state.configuration().snapshot().maxBytes());
-    }
-
-    /**
-     * 复用同一栅栏物化的状态、费率、划转和业务哈希，计算资金哈希并核对 Matcher 清单、快照号、Core 水位及 Cluster 元数据；收集结果、终态索引和账户 Lane 清单。
+     * 复用同一栅栏物化的状态、费率及划转，审计完整业务哈希并计算资金哈希，核对 Matcher 清单、快照号、Core 水位及 Cluster 元数据；收集结果、终态索引和账户 Lane 清单。
      * @param state 已建立一致性读取边界的交易运行时
      * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
      * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
@@ -78,7 +52,7 @@ public final class SectionedCoreSnapshotWriter {
                 || coreSequence != state.appliedCommandCount() || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new IllegalStateException("snapshot fence and matcher manifest do not match");
         }
-        return new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(),
+        CoreSnapshotImage image = new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(),
                 state.sourceSequenceIndex().digest(), snapshotId, state.commits.publication.publishedSequence(),
                 businessStateHash, fundsStateHash,
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
@@ -86,6 +60,11 @@ public final class SectionedCoreSnapshotWriter {
                 feePolicies, pendingTransfers,
                 state.terminalRetention().encode(),
                 state.accountLaneSnapshots(coreSequence, snapshotState));
+        if (TradingCoreRuntime.canonicalBusinessStateHash(
+                snapshotState.businessStateHash(), feePolicies, pendingTransfers) != businessStateHash) {
+            throw new IllegalStateException("snapshot rolling hash differs from immutable state audit");
+        }
+        return image;
     }
 
     public static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image, int maximumSnapshotBytes) {
@@ -93,17 +72,15 @@ public final class SectionedCoreSnapshotWriter {
             throw new IllegalArgumentException("invalid snapshot byte limit");
         // 本次镜像已经配对的 Matcher 快照引用。
         MatcherSnapshot matcherSnapshot = image.matcherSnapshot();
-        // 捕获点物化的交易状态；header 方法中仅取得引用而未继续使用。
+        // 捕获点物化的交易状态。
         var snapshotState = image.tradingState();
-        matcherSnapshot.verifyCoreManifest(image.productLine(), image.appliedCommandCount(),
-                image.businessStateHash());
         // 按固定协议顺序排列的业务负载列表，尚未加上 CRC 页尾。
         ArrayList<byte[]> payloads = new ArrayList<>();
         payloads.add(header(image));
         payloads.add(sources(image.sourceSequences()));
         payloads.add(results(image.commandResults()));
         long remainingMatcherBudget = maximumSnapshotBytes - (long) SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
-                - (long) SectionedCoreSnapshotCodec.sectionCount(matcherSnapshot.accountLaneCount())
+                - (long) SectionedCoreSnapshotCodec.sectionCount(matcherSnapshot.topology().accountLaneCount())
                     * SectionedCoreSnapshotCodec.SECTION_HEADER_LENGTH
                 - SectionedCoreSnapshotCodec.FOOTER_LENGTH;
         for (byte[] payload : payloads) remainingMatcherBudget -= payload.length;
@@ -120,7 +97,7 @@ public final class SectionedCoreSnapshotWriter {
         }
         // 所有业务负载再加一个 CRC 页尾的总段数。
         int sectionCount = Math.addExact(payloads.size(), 1);
-        if (sectionCount != SectionedCoreSnapshotCodec.sectionCount(matcherSnapshot.accountLaneCount())) {
+        if (sectionCount != SectionedCoreSnapshotCodec.sectionCount(matcherSnapshot.topology().accountLaneCount())) {
             throw new IllegalStateException("account lane snapshot section count mismatch");
         }
         // 包含封套、所有段头、业务负载及页尾的 long 总长度，检查上限后才转 int。

@@ -503,7 +503,13 @@ public final class LinearPerpetualMixedWorkload {
 
             @Override
             public int incompleteFundingSettlements() {
-                return harness.state().runtimeState().treasury().incompleteFundingCount();
+                int incomplete = 0;
+                // 仅在场景结束或采样时读取已发布进度，生产结算不维护基准专用计数。
+                for (String instrumentId : template.listedSymbols()) {
+                    int symbolId = harness.state().identities.symbolId(instrumentId);
+                    if (harness.state().runtimeState().treasury().fundingProgress(symbolId) != null) incomplete++;
+                }
+                return incomplete;
             }
 
             @Override

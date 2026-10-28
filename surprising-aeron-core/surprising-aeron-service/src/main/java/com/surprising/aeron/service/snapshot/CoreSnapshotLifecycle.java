@@ -197,7 +197,6 @@ public final class CoreSnapshotLifecycle {
                 CoreSnapshotImage image = SectionedCoreSnapshotWriter.capture(owner, matcherSnapshot, fence.snapshotId,
                         fence.coreSequence, clusterTimestamp, clusterPosition, fence.snapshotState,
                         fence.feePolicies, fence.pendingTransfers, fence.businessStateHash);
-                image.verifyFullState();
                 SectionedCoreSnapshotCodec.SectionedSnapshot encoded = SectionedCoreSnapshotWriter.encode(
                         image, owner.configuration().snapshot().maxBytes());
                 lastSnapshotId = Math.max(lastSnapshotId, fence.snapshotId);
