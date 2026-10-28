@@ -89,7 +89,7 @@ class LedgerPositionPublicationTest {
                              */
                             @Override protected void applyLedger(TreasuryRuntime ledger) { ledger.setFundingSettlement(symbol, 9); }
                         };
-                        assertThat(runtime.dispatchLedgerCommand(command)).isTrue();
+                        runtime.dispatchLedgerCommand(command);
                         LedgerControlTestSupport.await(runtime, command::complete);
                     }
                     runtime.dispatchControlLanes(runtime.topology().accountLaneMask(7), /* 本次删除持仓的实际账户 Lane，操作只改用户七持仓 */ lane -> {

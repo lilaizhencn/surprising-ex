@@ -639,12 +639,6 @@ public final class CoreQueryService {
         }
     }
 
-    /**
-     * 沿用账本查询的登记和投递流程，Owner 返回待完成，财库内容由账本线程读取及编码。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
-     */
-    public CoreResponse beginTreasuryQuery(CoreMessage message) { return beginLedgerQuery(message); }
-
     /** 账本邮箱暂满时保留的唯一强平工作查询，Owner 在消费入口重试投递，成功后清空。 */
     private LiquidationWorkQuery deferredLiquidationWorkQuery;
 
@@ -853,7 +847,7 @@ public final class CoreQueryService {
      * 创建财库查询并就地读取资产余额。
      * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
      */
-    private CoreResponse beginLedgerQuery(CoreMessage message) {
+    public CoreResponse beginTreasuryQuery(CoreMessage message) {
         LedgerQuery query = new LedgerQuery(owner.appliedCommandCount());
         registerQuery(message, query);
         query.apply(owner.runtimeState().treasury());

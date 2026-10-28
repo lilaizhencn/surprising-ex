@@ -32,7 +32,7 @@ class SystemLedgerFundsValidationTest {
              */
             @Override protected void applyLedger(TreasuryRuntime ledger) { ledger.setFee(1, 7); }
         };
-        assertThat(accountRuntime.dispatchLedgerCommand(work)).isTrue();
+        accountRuntime.dispatchLedgerCommand(work);
         // 等待校验故障的三秒单调纳秒截止时间
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         // 已从健康检查观察到的原故障，空时继续轮询

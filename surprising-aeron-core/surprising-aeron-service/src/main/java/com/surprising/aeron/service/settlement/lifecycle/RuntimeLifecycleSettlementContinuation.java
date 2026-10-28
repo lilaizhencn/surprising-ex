@@ -364,7 +364,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                     return false;
                 }
                 case BUDGET_WAIT -> {
-                    if (!pollLedger()) return false;
+                    applyFinancialPhase();
                     if (!budgetSufficient) {
                         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
                         // 保险不足时原样保留的用户游标，不跳过尚未应用的用户页。
@@ -385,7 +385,7 @@ public final class RuntimeLifecycleSettlementContinuation {
                     return false;
                 }
                 case FINAL_WAIT -> {
-                    if (!pollLedger()) return false;
+                    applyFinancialPhase();
                     runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), selectedOrders.isEmpty() ? 1 : 2));
                     if (financialPhase == FinancialPhase.ORDER_PROGRESS)
                         result = new CoreSettlementProgressView(command.settlementId(), false, false,
@@ -422,10 +422,10 @@ public final class RuntimeLifecycleSettlementContinuation {
         /**
          * 预检元数据修订号容量，直接把当前财务阶段交给账本内联执行。
          */
-        private boolean pollLedger() {
+        private void applyFinancialPhase() {
             Math.addExact(runtime.revision(), financialPhase == FinancialPhase.INSURANCE ? 1 : selectedOrders.isEmpty() ? 1 : 2);
             runtime.dispatchLedgerCommand(this);
-            return ledgerCommandCompleted();
+            ledgerCommandCompleted();
         }
 
         /**

@@ -35,7 +35,6 @@ public abstract class SystemLedgerCommand {
         if (!reusable()) throw new IllegalStateException("Ledger still owns this command scope");
         if (!funds.isEmpty()) throw new IllegalStateException("Ledger funds receipt was not consumed");
         this.runtime = runtime;
-        funds.clear();
         rejection = null;
         completed = scopeCompleted = true;
         close.clear();

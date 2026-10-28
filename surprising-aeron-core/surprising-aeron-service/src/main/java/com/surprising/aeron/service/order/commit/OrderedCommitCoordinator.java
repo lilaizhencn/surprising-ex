@@ -1069,7 +1069,7 @@ public final class OrderedCommitCoordinator {
             if (event == null) return;
             // 当前是否为仍可能继续产生子项的顺序批次
             boolean sequential = pending.orderBatch() != null && !pending.orderBatch().pipelined();
-            if (!owner.runtimeState().dispatchMatcherFinancialSettlement(event)) return;
+            owner.runtimeState().dispatchMatcherFinancialSettlement(event);
             // 顺序批次还会产生后续子项。
             // 在最后子项或显式业务关闭前保留资金游标，响应槽租约也继续保留。
             if (sequential && !pending.orderBatch().matchingApplied()) return;

@@ -151,7 +151,7 @@ class SystemLedgerControlTest {
                 }
                 // 本用例局部类创建的未结束财务范围保险预留任务。
                 var reservation = new InsuranceReservation(runtime);
-                assertThat(runtime.dispatchLedgerCommand(reservation)).isTrue();
+                runtime.dispatchLedgerCommand(reservation);
                 LedgerControlTestSupport.await(runtime, reservation::poll);
                 runtime.dispatchControlLanes(1, /* 占位任务或故意拒绝的控制回调收到的入参，本测试不读取其业务内容。 */ ignored -> { throw new CoreStateRejectedException("ACCOUNT_REJECTED", "account settlement rejected"); });
                 assertThatThrownBy(() -> LedgerControlTestSupport.await(runtime, runtime::pollControlLanes)).isInstanceOf(CoreStateRejectedException.class);
@@ -209,7 +209,7 @@ class SystemLedgerControlTest {
                 }
                 // 当前需要等待账本执行及范围关闭的控制任务。
                 var work = new FinancialWork(runtime);
-                assertThat(runtime.dispatchLedgerCommand(work)).isTrue();
+                runtime.dispatchLedgerCommand(work);
                 LedgerControlTestSupport.await(runtime, work::poll);
                 assertThat(original.fundingSettlement(symbol)).isEqualTo(3);
                 assertThat(work.reusable()).isFalse();

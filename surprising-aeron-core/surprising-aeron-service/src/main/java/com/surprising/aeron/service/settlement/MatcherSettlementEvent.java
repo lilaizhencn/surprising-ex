@@ -1396,14 +1396,10 @@ public final class MatcherSettlementEvent implements
     }
 
     /**
-     * 下单步骤 4.5：保留一个财务槽并尝试登记，无成交可在账户完成后本地核对，否则投递账本邮箱。满队列返回 false 保留同槽供重试，已成功登记不允许重复投递。
-     * @param ledger 当前运行时使用的系统账本执行边界
-     */
-    /**
      * 下单步骤 4.5：保留一个财务槽并就地或在账户完成后应用差额与资金守恒核对。已成功登记不允许重复投递。
      * @param treasury 当前运行时由 Owner 独占持有的系统财库
      */
-    public boolean submitTreasurySettlement(TreasuryRuntime treasury) {
+    public void submitTreasurySettlement(TreasuryRuntime treasury) {
         if (treasury == null || runtime == null || changes == null || collected)
             throw new IllegalStateException("Ledger settlement requires retained isolated account facts");
         if (treasurySettlement == null) treasurySettlement = new TreasurySettlement();
@@ -1416,7 +1412,7 @@ public final class MatcherSettlementEvent implements
                 treasurySettlement.completeLocalNoTrade();
                 ownerObservedComplete = true;
             }
-            return true;
+            return;
         }
         if (accountLanesCompleteForLedger()) {
             treasurySettlement.apply(treasury);
@@ -1424,7 +1420,6 @@ public final class MatcherSettlementEvent implements
                 ownerObservedComplete = true;
             }
         }
-        return true;
     }
 
     /**

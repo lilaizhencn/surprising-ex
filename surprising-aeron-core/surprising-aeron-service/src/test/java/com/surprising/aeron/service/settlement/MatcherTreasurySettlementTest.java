@@ -180,7 +180,7 @@ class MatcherTreasurySettlementTest {
                         new MatcherResult.MarketData(List.of(), List.of(), 0, 0)),
                         1, 1, 2, 11, 1, 0);
                 event.completeMatcherPublication();
-                assertThat(event.submitTreasurySettlement(original)).isTrue();
+                event.submitTreasurySettlement(original);
                 try {
                     long takerDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
                     while ((event.completedLaneMask() & (1L << takerLane)) == 0) {
@@ -218,7 +218,7 @@ class MatcherTreasurySettlementTest {
                 var reused = runtime.prepareDirectCancellation(2, originalTaker.userId(), originalTaker.orderId(),
                         secondId, 0, identities, 30, 40);
                 assertThat(reused).isSameAs(event);
-                assertThat(reused.submitTreasurySettlement(original)).isTrue();
+                reused.submitTreasurySettlement(original);
                 reused.reserveMatcherPublication();
                 reused.beginMatcherPublication();
                 reused.publishDirectNativeResult(new MatcherResult(2,

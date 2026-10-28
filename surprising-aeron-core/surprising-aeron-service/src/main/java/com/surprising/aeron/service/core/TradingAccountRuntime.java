@@ -618,7 +618,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      * 在 Owner 上派发财务控制命令：内联应用并保证同一控制命令独占财务范围。
      * @param command 要交给财库处理的财务控制命令
      */
-    public boolean dispatchLedgerCommand(SystemLedgerCommand command) {
+    public void dispatchLedgerCommand(SystemLedgerCommand command) {
         assertOwner();
         if (command == null) throw new IllegalArgumentException("Ledger command is required");
         if (ledgerControl != null && ledgerControl != command)
@@ -626,7 +626,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         command.submitted();
         ledgerControl = command;
         command.apply(treasury);
-        return true;
     }
 
     /**
@@ -2173,14 +2172,14 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 活动账本存在时，要求直接财务控制范围已经结束，再推进原撮合事件的财务提交；没有事件或账本时无需派发，返回真不单独代表整条结算已经完成。
+     * 要求直接财务控制范围已经结束，再登记原撮合事件的财务结算；没有事件时无需登记。
      * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
      */
-    public boolean dispatchMatcherFinancialSettlement(MatcherSettlementEvent event) {
+    public void dispatchMatcherFinancialSettlement(MatcherSettlementEvent event) {
         assertOwner();
-        if (event == null) return true;
+        if (event == null) return;
         if (ledgerControl != null) throw new IllegalStateException("Matcher money cannot enter an unfinished control scope");
-        return event.hasLedgerSettlement() || event.submitTreasurySettlement(treasury);
+        if (!event.hasLedgerSettlement()) event.submitTreasurySettlement(treasury);
     }
 
     /**
