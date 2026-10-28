@@ -83,12 +83,11 @@ public abstract class SystemLedgerCommand {
     }
 
     /**
-     * 阶段未完成返回 false，完成后如保留拒绝异常则重新抛出，否则返回 true。
+     * 要求同步财务阶段已经结束，并传播本阶段保存的业务拒绝。
      */
-    protected final boolean ledgerCommandCompleted() {
-        if (!completed) return false;
+    protected final void requireLedgerPhaseComplete() {
+        if (!completed) throw new IllegalStateException("Ledger command phase is incomplete");
         if (rejection != null) throw rejection;
-        return true;
     }
 
     /**
@@ -107,12 +106,11 @@ public abstract class SystemLedgerCommand {
     public final void publishRiskPositionInputs() { runtime.applyLedgerControlPositions(close.positionUndo); }
 
     /**
-     * 等待阶段完成，再请求恢复财库及持仓索引；返回值表示关闭回执已完成，而非仅已请求。
+     * 同步恢复财库及持仓索引；未完成的财务阶段不能回滚或复用。
      */
-    public final boolean requestRollback() {
-        if (!completed) return false;
+    public final void rollbackScope() {
+        if (!completed) throw new IllegalStateException("Ledger command phase is incomplete");
         close.apply(runtime.treasury(), true);
-        return close.completed;
     }
 
     /**
@@ -129,7 +127,8 @@ public abstract class SystemLedgerCommand {
      * @param externalAdjustment 本命令是否为外部资金调整，true 时按既有规则跳过逐资产合计为零检查
      */
     public final boolean validateFunds(boolean externalAdjustment) {
-        if (!ledgerCommandCompleted() || !scopeCompleted) return false;
+        requireLedgerPhaseComplete();
+        if (!scopeCompleted) return false;
         try {
             close.validate(externalAdjustment);
             return close.validated;

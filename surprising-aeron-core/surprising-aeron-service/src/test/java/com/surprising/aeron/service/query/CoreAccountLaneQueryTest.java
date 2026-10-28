@@ -276,7 +276,7 @@ class CoreAccountLaneQueryTest {
                 core.runtimeState().dispatchControlLanes(mask, /* 控制任务传入的 Lane 参数，实际通过运行时入口写入再移除风险快照，留下待收集变化。 */ ignored -> {
                     core.runtimeState().putRiskSnapshot(key, new com.surprising.aeron.service.risk.RiskSnapshotRuntime(
                             1, symbolId, CorePositionSide.NET, 1, 100, 0, 1, 1));
-                    core.runtimeState().removeRiskSnapshot(key);
+                    com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(core.runtimeState(), key);
                     return null;
                 });
                 // 目标 Lane 完成只读回调后发布的原子标记，测试线程据此等待后续断言。

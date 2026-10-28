@@ -130,7 +130,7 @@ public class AccountLaneCommitBenchmark {
             metadataOrders = java.util.List.copyOf(orderList);
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
-            runtime.enterAsynchronousCommandScope();
+
         }
 
         long commitBatch() { return commitBatch(false); }
@@ -175,7 +175,7 @@ public class AccountLaneCommitBenchmark {
         @TearDown(Level.Trial)
         public void tearDown() {
             try {
-                runtime.exitAsynchronousCommandScope();
+
                 runtime.acquireOwnerLaneAccess();
                 try {
                     for (long user : users) {

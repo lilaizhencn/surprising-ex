@@ -64,17 +64,15 @@ class ParallelRiskScanTest {
                     new com.surprising.aeron.service.core.index.ActiveOrderIndex(source),
                     new AdlPositionIndex(source, ids)), ids);
             RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 80), runtime, ids);
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
-            try {
-                // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
-                var work = new RiskScanCoordinator(budget, index, runtime, ids);
-                for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; runtime.firstRiskIncompleteScan() != null; page++) {
-                    assertThat(page).isLessThan(4096);
-                    if (page != 0) work.resetForCommand(budget);
-                    await(work::poll);
-                    assertThat(work.completedWork()).isBetween(1, budget);
-                }
-            } finally { runtime.exitAsynchronousCommandScope(); }
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
+            var work = new RiskScanCoordinator(budget, index, runtime, ids);
+            for (/* 已经推进的页数，限制循环次数并在交替预算场景选择本页预算。 */ int page = 0; runtime.firstRiskIncompleteScan() != null; page++) {
+                assertThat(page).isLessThan(4096);
+                if (page != 0) work.resetForCommand(budget);
+                await(work::poll);
+                assertThat(work.completedWork()).isBetween(1, budget);
+            }
             runtime.close();
             // 扫描结束后的业务物化结果，用来核对风险条数、编号和账户资金事实。
             var complete = RuntimeStateMaterializer.materialize(runtime, ids);
@@ -351,13 +349,11 @@ class ParallelRiskScanTest {
      * @param budget 本批允许的工作量，小预算用来验证跨页继续而非一次处理完整用户
      */
     private static int run(TradingAccountRuntime runtime, RuntimeIdentityRegistry ids, PositionUserIndex index, int budget) {
-        runtime.enterAsynchronousCommandScope();
-        try {
-            // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
-            var work = new RiskScanCoordinator(budget, index, runtime, ids);
-            await(work::poll);
-            return work.completedWork();
-        } finally { runtime.exitAsynchronousCommandScope(); }
+
+        // 本次风险续步对象，Owner 轮询它完成；小预算连续命令场景会复用同一对象。
+        var work = new RiskScanCoordinator(budget, index, runtime, ids);
+        await(work::poll);
+        return work.completedWork();
     }
 
     /**

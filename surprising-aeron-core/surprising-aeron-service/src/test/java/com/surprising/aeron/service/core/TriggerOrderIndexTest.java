@@ -83,28 +83,26 @@ class TriggerOrderIndexTest {
             runtime.setMetadata(ProductLine.SPOT, 10);
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
-            runtime.enterAsynchronousCommandScope();
-            try {
-                // 携带两个跨 Lane 用户关联触发撤销的首个可复用提交事件
-                var event = runtime.dispatchLaneMutation(1, java.util.List.of(7L, second),
-                        java.util.List.of(), java.util.List.of(901L, 902L), 100, 200);
-                awaitCommit(runtime, event);
-                assertThat(runtime.revision()).isEqualTo(10);
-                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                assertThat(runtime.ownerLaneAccess()).isFalse();
-                runtime.releaseLaneCommit(event);
-                assertThat(runtime.revision()).isEqualTo(12);
-                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
-                assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).revision())).isEqualTo(2);
-                // 再次派发的普通无触发撤销提交事件，必须复用原 event 对象
-                var plain = runtime.dispatchLaneMutation(2, java.util.List.of(7L, second));
-                assertThat(plain).isSameAs(event);
-                awaitCommit(runtime, plain);
-                runtime.releaseLaneCommit(plain);
-                assertThat(runtime.revision()).isEqualTo(12);
-                assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).revision())).isEqualTo(2);
-            } finally { runtime.exitAsynchronousCommandScope(); }
+
+            // 携带两个跨 Lane 用户关联触发撤销的首个可复用提交事件
+            var event = runtime.dispatchLaneMutation(1, java.util.List.of(7L, second),
+                    java.util.List.of(), java.util.List.of(901L, 902L), 100, 200);
+            awaitCommit(runtime, event);
+            assertThat(runtime.revision()).isEqualTo(10);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+            assertThat(runtime.ownerLaneAccess()).isFalse();
+            runtime.releaseLaneCommit(event);
+            assertThat(runtime.revision()).isEqualTo(12);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).revision())).isEqualTo(2);
+            // 再次派发的普通无触发撤销提交事件，必须复用原 event 对象
+            var plain = runtime.dispatchLaneMutation(2, java.util.List.of(7L, second));
+            assertThat(plain).isSameAs(event);
+            awaitCommit(runtime, plain);
+            runtime.releaseLaneCommit(plain);
+            assertThat(runtime.revision()).isEqualTo(12);
+            assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).revision())).isEqualTo(2);
         }
     }
 
@@ -145,26 +143,12 @@ class TriggerOrderIndexTest {
             runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 控制任务携带的 Lane 编号，本测试 lambda 当前不读取 */ ignored -> { runtime.putTriggerOrder(changed); return null; });
             LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
             assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.triggerOrder(901))).isSameAs(changed);
-            // 观察到的触发 ID 到本命令新值表，删除时保存 null
-            var observed = new java.util.TreeMap<Long, com.surprising.aeron.model.CoreTriggerOrderState>();
-            // 只记录触发变更的新值观察器，Owner 通过它接回账户事实
-            var consumer = /* 只收集本命令触发单新值的匿名观察器，供账户更新、删除和回滚断言 */ new TradingAccountRuntime.ChangedIndexConsumer() {
-                /**
-                 * 收到触发单变更时仅把 ID 到新值记入观察表，before 不参与断言；新值为空表示本命令删除。
-                 * @param id 测试触发单或变更回调的业务 ID
-                 * @param before 变更前触发状态，此观察器当前不读取
-                 * @param after 本次变更后触发状态，空表示删除，存入观察表以断言
-                 */
-                @Override public void triggerOrder(long id, com.surprising.aeron.model.CoreTriggerOrderState before,
-                        com.surprising.aeron.model.CoreTriggerOrderState after) { observed.put(id, after); }
-            };
-            runtime.visitChangedIndexes(consumer);
-            assertThat(observed).containsEntry(901L, changed);
-            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 控制任务携带的 Lane 编号，本测试 lambda 当前不读取 */ ignored -> { runtime.removeTriggerOrder(901); return null; });
+            assertThat(runtime.changedTriggerOrders().get(901)).isSameAs(changed);
+            runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 控制任务携带的 Lane 编号，本测试 lambda 当前不读取 */ ignored -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteTrigger(runtime, 901); return null; });
             LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-            runtime.visitChangedIndexes(consumer);
             assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.triggerOrder(901))).isNull();
-            assertThat(observed).containsEntry(901L, null);
+            assertThat(runtime.changedTriggerOrders().containsKey(901)).isTrue();
+            assertThat(runtime.changedTriggerOrders().get(901)).isNull();
             LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(runtime.revision(), 1));
             assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.triggerOrder(901))).isSameAs(initial);
             assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.hasTriggerClient(userId, initial.clientTriggerOrderId()))).isTrue();
@@ -238,7 +222,7 @@ class TriggerOrderIndexTest {
         try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ TradingAccountRuntime runtime = RuntimeStateProjector.project(state, identities)) {
             assertThat(runtime.hasTriggerClient(7, "client-1")).isTrue();
             assertThat(runtime.hasTriggerClient(8, "client-1")).isFalse();
-            runtime.removeTriggerOrder(1);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deleteTrigger(runtime, 1);
             assertThat(runtime.hasTriggerClient(7, "client-1")).isFalse();
             runtime.putTriggerOrder(triggers.get(1L));
             assertThat(runtime.hasTriggerClient(7, "client-1")).isTrue();

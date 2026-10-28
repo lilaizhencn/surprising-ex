@@ -126,21 +126,6 @@ public interface ProductTradingRules {
     }
 
     /**
-     * 计算一份持仓从入场到到期结算的现金变化；没有实现此能力的产品直接拒绝。
-     * @param instrument 当前交割或期权合约的结算配置
-     * @param signedQuantitySteps 带方向的待结算数量，单位为数量步数
-     * @param entryPriceTicks 持仓入场价格，单位为价格 tick；期权现金公式可不使用
-     * @param settlementPriceTicks 到期采用的结算价格，单位为价格 tick
-     * @return 需要记入账户的结算资产现金增减，使用最小整数单位
-     */
-    default long lifecycleCashDeltaUnits(CoreInstrument instrument, long signedQuantitySteps,
-                                         long entryPriceTicks, long settlementPriceTicks) {
-        requireInstrument(instrument);
-        throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED",
-                "lifecycle settlement is unsupported for " + productLine());
-    }
-
-    /**
      * 统一生命周期结算边界使用的单持仓现金计算入口，具体产品决定采用哪套结算公式。
      * @param instrument 本次生命周期结算的合约配置
      * @param signedQuantitySteps 带方向的待结算持仓数量，单位为数量步数

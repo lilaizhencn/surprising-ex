@@ -178,19 +178,6 @@ public final class SectionedCoreSnapshotRecovery {
     }
 
     /**
-     * 累加固定封套、复用段头和各已分配负载数组的字节长度，不统计对象头或解析后的状态对象。
-     */
-    public int allocatedBytes() {
-        // 固定缓冲与已分配负载数组的字节长度累计值。
-        int allocated = envelope.length + sectionHeader.length;
-        if (payloads == null) return allocated;
-        for (byte[] /* 当前正在写入或统计容量的段负载数组。 */ payload : payloads) {
-            if (payload != null) allocated = Math.addExact(allocated, payload.length);
-        }
-        return allocated;
-    }
-
-    /**
      * 收齐十二字节封套后检查魔数、当前版本、零保留位及段数范围，分配外层负载引用数组并将封套加入 CRC；不接受其他外层版本。
      */
     private void selectMode() {

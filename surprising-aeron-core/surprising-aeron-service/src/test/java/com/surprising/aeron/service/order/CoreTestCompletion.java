@@ -166,7 +166,6 @@ public final class CoreTestCompletion {
             if (System.nanoTime() >= deadline) throw new AssertionError("Lane handoff timeout");
             Thread.onSpinWait();
         }
-        owner.runtimeState().enterAsynchronousCommandScope();
         try {
             // 当前协议入口或续步返回的可空响应。
             CoreResponse response = owner.applyDecodedCommand(message, timestamp, position, window.decodedIfPresent(message), independent);
@@ -193,7 +192,6 @@ public final class CoreTestCompletion {
             }
             return completed[0];
         } finally {
-            owner.runtimeState().exitAsynchronousCommandScope();
             owner.runtimeState().releaseOwnerLaneAccess();
         }
     }

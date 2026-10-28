@@ -1,9 +1,43 @@
 # aeron-service 代码导航
 
+本轮继续删除八组冗余路径：测试专用的七个 Runtime 变更入口、现货终态释放的冷路径、已完成结算之后的空财库差额返回/批次合并链、通用索引观察接口、同步查询的 Future 包装、同步账本回滚的等待状态及异步模式标记、提交前空遍历、重复生命周期现金公式入口。
+
+实际顺序是：账户 Lane 应用撮合事实 → Owner 等账户完成并同步执行财务校验 → 单次收集账户结果 → 直接更新已绑定的事实索引 → 发布终态。保留资金守恒、余额前值、持仓索引撤销、账户等待、事件租约和对象复用约束；协议与快照格式不变。测试以真实索引删除、Lane 释放和财务作用域回滚验证行为，删除专为旧 API 和空遍历注入异常的用例。
+
+| 删除范围 | 当前入口或保留边界 |
+| --- | --- |
+| `replaceReservation`、`removeReservation`、`cancelOpenOrder`、`removeTriggerOrder`、`removeLiquidation`、`removeRiskSnapshot`、`removeClientOrder` 七个测试专用入口 | 测试直接准备 Lane 事实；实际撤单、预留消耗及终态规则不变 |
+| `releaseTerminalReservation` 通用冷入口及现货 fallback | 统一使用原结算作用域中的 `releaseTerminalReservationInLane` |
+| 收集结算后的空财库差额返回、批次字段/合并、激活前应用 | 财务阶段真实差额合并与资金守恒校验保留，账户结果只收集一次 |
+| `ChangedIndexConsumer`、空默认回调、临时身份表与转发 | `applyChangedIndexes` 直接更新绑定索引，保留删除语义及持仓索引撤销 |
+| `LedgerQuery` Future、注册/消费和两个转发入口 | 财库、OI、维护页同步 `queryLedger`；账户和盘口仍异步 |
+| 同步账本完成/回滚的伪等待状态、异步命令范围标记 | 明确要求财务阶段完成，账户回滚仍等待真实 Lane 完成 |
+| `validateCommitStampInputs` 空遍历、无用局部变量及重复发布请求 | 实际 Lane 元数据校验、最终发布与故障回滚保留 |
+| `lifecycleCashDeltaUnits` 重复公式入口、未用的结果收集/内存统计方法及批次容量常量 | 生命周期只保留统一现金公式入口，整数及溢出规则不变 |
+
+2026-10-28 验证：HotSpot JDK 27、Maven 3.9.16；上述 service 生产源码净减少 655 行。干净构建的 14 个相关模块全部成功，28 个测试类中选定的 264 个用例通过；另补验提交事件复用与预留资金异步回滚 3 个用例，合计 267 个不重复用例通过（0 失败、0 错误、0 跳过）。覆盖六产品线成交/手续费/终态、批量自成交前缀、资金和预留、回滚及恢复、索引删除和退休、查询预算等相关行为。删除的两个内部类型无旧 `.class` 残留，`git diff --check` 通过。
+
+<details>
+<summary>本轮实际执行的定向验证命令（仓库根目录）</summary>
+
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am clean test \
+  '-Dtest=CoreLedgerQueryTest,CoreAccountLaneQueryTest,CoreLaneMetricsBoundaryTest,CoreProductLineArchitectureContractTest,CommittedIndexVisitTest,RuntimeChangedIndexCommitTest,TriggerOrderIndexTest,OwnerPositionRetirementTest,LaneEntityMembershipTest,AccountLanePendingReservationTest,ControlOrderMetadataLeaseTest,MatcherSettlementPlanTest,MatcherTreasurySettlementTest,OrderBatchSettlementWaitTest,SystemLedgerControlTest,RuntimeDerivativeFillCalculatorTest,RuntimeDerivativeMatchProcessorTest,RuntimeCommitRecoveryTest,LedgerPositionPublicationTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,AsyncFundingCommandTest,CoreSelfTradePrefixTest,ParallelRiskScanTest,TradingAccountRuntimeTest#removingAClientOrderAlsoRemovesItsReverseIndexEntry+reassigningAliasesDoesNotLeaveStaleReverseMappings+pendingReservationReplacementAndRestoreKeepTransientCountersExact+pendingReservationConsumptionAndCancellationKeepCountersAndFundsExact+activeWorkersRejectInlineSettlementWithoutRunningOrRenamingOwner,TradingCoreOwnerTest#terminalPreparationFailureRollsBackOnLaneAndRetainsRejection,RuntimeStateBusinessRulesTest#reservesAndReleasesSpotBuyQuoteAssetAtomically+repeatedCancelDoesNotReleaseTwice+spotMatchAppliesOrderFeeSnapshotsAndPreservesAssets+derivativeMatchUsesMakerAndTakerFeeSnapshots,ClusterCommandPipelineTest#matcherPublishesOrdinaryAndBatchFillsToLanesWithoutOwnerDrainingResults+nativeRejectionReleasesFundsInTheAccountLane+deferredIngressPreservesDependentBatchOrderAndSnapshot' \
+  -Dsurefire.failIfNoSpecifiedTests=false
+
+mvn -pl surprising-aeron-core/surprising-aeron-service -am test \
+  '-Dtest=TradingAccountRuntimeTest#commitEventStampsOnLanesPublishesOnOwnerAndClearsReusedMetadata+asynchronousRollbackRestoresReservedFundsAndBothReservationIndexes' \
+  -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+</details>
+
+仅执行上述相关用例；benchmarks 模块只编译，没有运行 JMH、JFR、压测或全量测试，也没有启动完整集群或前后端联调。协议、快照格式和前端接口未改；不据此声明性能提升。
+
 移除仅供测试使用的独立 Lane 撤单事件、同步 Lane 提交包装、资金缓冲转移及活动订单索引交集接口；测试通过生产撮合撤单、异步 Lane 提交和订单分页验证实际行为。
 
 财务控制命令由 Owner 同步应用财库；撮合财务槽登记后仍等待相关账户 Lane 完成，再核对资金并按序提交。
-交割结算的财务阶段直接执行并检查拒绝，财务范围的关闭、回滚及账户 Lane 等待保持独立；财库查询由 `CoreQueryService.beginTreasuryQuery` 直接登记和读取。
+交割结算的财务阶段直接执行并检查拒绝，财务范围的关闭、回滚及账户 Lane 等待保持独立；财库、OI 和合约维护页由 `CoreQueryService.queryLedger` 在 Owner 上同步读取并直接返回响应。
 
 
 2026-10-28 第二轮清理的逐项处理及验证结果见 [第二轮记录](../../ROUND2_CLEANUP_PROGRESS.md)。
@@ -39,7 +73,7 @@ Owner借用同一组 `RuntimeFactIndexes`；固定路由只保存一份，恢复
 算法及触发单保留权威终态和查询进度，近期普通订单墓碑保存身份与客户号，资金命令指纹长期保留。
 
 本轮收敛冷查询、冷资金、Owner 唤醒和客户身份绑定四条历史路径：
-`TradingCoreRuntime.apply` 先激活再执行，财库与强平工作查询只进入原异步账本/Lane 入口；
+`TradingCoreRuntime.apply` 先激活再执行，财库查询同步读取 Owner 账本，强平工作查询进入真实账户 Lane；
 `RuntimeLiquidationQueryService` 仅归并真实 Lane 回执和查询进度，不再维护同步筛选副本。
 提交上下文只交换用户/订单变化与发布标记，不再保存或恢复冷资金缓冲；活动资金仍由原系统账本检查守恒及回滚。
 Owner 由 Cluster 服务线程轮询推进，不再安装外部唤醒回调；Matcher 在构造时固定连接原分片就绪位，

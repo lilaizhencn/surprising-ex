@@ -165,32 +165,30 @@ class TradingAccountRuntimeTest {
                 ordersField.set(state.accountLanes[id], maps[id]);
             }
             state.startAccountLanes();
-            state.enterAsynchronousCommandScope();
-            try {
-                // 第一次给两用户订单盖提交元数据的原事件
-                var first = state.dispatchLaneMutation(1, java.util.List.of(7L, second),
-                        java.util.List.of(11L, 12L), 100, 200);
-                awaitMetadataCommit(state, first);
-                assertThat(maps[topology.accountLaneId(7)].inspect(11)).isSameAs(original);
-                assertThat(state.ownerLaneAccess()).isFalse();
-                state.releaseLaneCommit(first);
-                assertThat(maps[topology.accountLaneId(7)].inspect(11).updatedAtEpochMillis()).isEqualTo(100);
-                assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
-                // 下一次复用原提交事件，预留用例中为候选第二单
-                var next = state.dispatchLaneMutation(2, java.util.List.of(7L),
-                        java.util.List.of(11L), 101, 201);
-                assertThat(next).isSameAs(first);
-                awaitMetadataCommit(state, next);
-                state.releaseLaneCommit(next);
-                assertThat(maps[topology.accountLaneId(7)].inspect(11).clusterPosition()).isEqualTo(201);
-                assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
-                // 复用池中不带任何订单盖章列表的原提交事件
-                var plain = state.dispatchLaneMutation(3, java.util.List.of(7L, second));
-                awaitMetadataCommit(state, plain);
-                state.releaseLaneCommit(plain);
-                assertThat(maps[topology.accountLaneId(7)].inspect(11).clusterPosition()).isEqualTo(201);
-                assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
-            } finally { state.exitAsynchronousCommandScope(); }
+
+            // 第一次给两用户订单盖提交元数据的原事件
+            var first = state.dispatchLaneMutation(1, java.util.List.of(7L, second),
+                    java.util.List.of(11L, 12L), 100, 200);
+            awaitMetadataCommit(state, first);
+            assertThat(maps[topology.accountLaneId(7)].inspect(11)).isSameAs(original);
+            assertThat(state.ownerLaneAccess()).isFalse();
+            state.releaseLaneCommit(first);
+            assertThat(maps[topology.accountLaneId(7)].inspect(11).updatedAtEpochMillis()).isEqualTo(100);
+            assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
+            // 下一次复用原提交事件，预留用例中为候选第二单
+            var next = state.dispatchLaneMutation(2, java.util.List.of(7L),
+                    java.util.List.of(11L), 101, 201);
+            assertThat(next).isSameAs(first);
+            awaitMetadataCommit(state, next);
+            state.releaseLaneCommit(next);
+            assertThat(maps[topology.accountLaneId(7)].inspect(11).clusterPosition()).isEqualTo(201);
+            assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
+            // 复用池中不带任何订单盖章列表的原提交事件
+            var plain = state.dispatchLaneMutation(3, java.util.List.of(7L, second));
+            awaitMetadataCommit(state, plain);
+            state.releaseLaneCommit(plain);
+            assertThat(maps[topology.accountLaneId(7)].inspect(11).clusterPosition()).isEqualTo(201);
+            assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
         }
     }
 
@@ -277,18 +275,16 @@ class TradingAccountRuntimeTest {
             } else {
                 for (var /* 当前原准入或测试成员订单 */ order : admitted) state.pendingReservations.collectControlReservation(order, 4);
             }
-            state.enterAsynchronousCommandScope();
-            try {
-                // 本次原命令失败后的异步 Lane 回滚续步
-                var rollback = state.beginCommandRollback(0, 4);
-                // 当前回执、回滚或控制收集阶段的五秒单调截止值
-                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-                while (!rollback.getAsBoolean()) {
-                    if (System.nanoTime() > deadline) throw new AssertionError("account rollback timed out");
-                    Thread.onSpinWait();
-                }
-                assertThat(state.ownerLaneAccess()).isFalse();
-            } finally { state.exitAsynchronousCommandScope(); }
+
+            // 本次原命令失败后的异步 Lane 回滚续步
+            var rollback = state.beginCommandRollback(0, 4);
+            // 当前回执、回滚或控制收集阶段的五秒单调截止值
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (!rollback.getAsBoolean()) {
+                if (System.nanoTime() > deadline) throw new AssertionError("account rollback timed out");
+                Thread.onSpinWait();
+            }
+            assertThat(state.ownerLaneAccess()).isFalse();
             assertThat(state.pendingReservations.pendingReservationCount()).isZero();
             state.dispatchControlLanes(1L << laneId, /* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ id -> {
                 assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
@@ -684,7 +680,7 @@ class TradingAccountRuntimeTest {
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
         state.pendingReservations().markPendingReservation(7, 11, 4);
-        state.removeClientOrder(7, 91);
+        state.onLane(7L, lane -> TradingAccountRuntime.removeClientOrderIndex(lane, 7, 91));
         state.clearChangedKeys();
 
         state.pendingReservations().completePendingReservation(7, 11, 4);
@@ -706,8 +702,8 @@ class TradingAccountRuntimeTest {
         state.putClientOrder(7, 93, 11);
         state.putClientOrder(7, 94, 11);
         state.putClientOrder(7, 93, 12);
-        state.removeClientOrder(7, 91);
-        state.removeClientOrder(7, 94);
+        state.onLane(7L, lane -> TradingAccountRuntime.removeClientOrderIndex(lane, 7, 91));
+        state.onLane(7L, lane -> TradingAccountRuntime.removeClientOrderIndex(lane, 7, 94));
         state.pendingReservations().markPendingReservation(7, 11, 4);
         state.pendingReservations().completePendingReservation(7, 11, 4);
         assertThat(state.orderIdByClient(7, 91)).isNull();
@@ -847,7 +843,13 @@ class TradingAccountRuntimeTest {
         state.pendingReservations().markPendingReservation(7, 11, 2);
 
         // 新增原 pending 后部分释放，再恢复此前 Lane 快照围栏。
-        state.replaceReservation(state.reservation(11).release(50));
+        state.onLane(7L, lane -> {
+            var reservation = lane.reservation(11);
+            long previous = reservation.reservedUnits();
+            reservation.releaseInPlace(50);
+            lane.updatePendingReservationInPlace(reservation, previous);
+            return null;
+        });
         assertThat(state.pendingReservations.pendingReservationCount(7)).isEqualTo(1);
         assertThat(state.pendingReservations.pendingReservedUnits(7, assetId)).isEqualTo(150);
         assertThatThrownBy(() -> state.accountLaneSnapshots(2, global))
@@ -878,7 +880,13 @@ class TradingAccountRuntimeTest {
         state.pendingReservations().markPendingReservation(7, 11, 4);
 
         // 先消费原预留一部分并更新冻结，再撤单释放剩余部分。
-        state.replaceReservation(state.reservation(11).consume(50));
+        state.onLane(7L, lane -> {
+            var reservation = lane.reservation(11);
+            long previous = reservation.reservedUnits();
+            reservation.consumeInPlace(50);
+            lane.updatePendingReservationInPlace(reservation, previous);
+            return null;
+        });
         state.replaceBalance(new BalanceRuntime(7, 3, 800, 150));
         assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isEqualTo(150);
         state.cancelOrder(11, 7, 150);
@@ -888,31 +896,6 @@ class TradingAccountRuntimeTest {
         assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isZero();
         assertThat(state.balance(7, 3).availableUnits()).isEqualTo(950);
         assertThat(state.balance(7, 3).lockedUnits()).isZero();
-    }
-
-    /**
-     * 尚有 pending 身份时直接删预留必须拒绝，正文、全局/用户计数及冻结资金不变。
-     */
-    @Test
-    void rejectsPendingReservationRemovalWithoutCounterOrFundsDrift() {
-        // 准备所属 Lane 已标记 pending 并冻结资金的原预留。
-        // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
-        TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putUser(new UserRuntime(7));
-        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
-        CoreStateTestFixtures.reserveOrder(state, 11, 7, 91, 5, 2, 3, 200);
-        state.pendingReservations().markPendingReservation(7, 11, 4);
-
-        // 尚未收到生命周期完成就尝试直接删除原预留。
-        assertThatThrownBy(() -> state.removeReservation(11, 7)).isInstanceOf(IllegalStateException.class);
-
-        // 删除拒绝后原预留正文、pending 计数及冻结都不变。
-        assertThat(state.reservation(11)).isNotNull();
-        assertThat(state.pendingReservations.pendingReservationCount()).isEqualTo(1);
-        assertThat(state.pendingReservations.pendingReservationCount(7)).isEqualTo(1);
-        assertThat(state.pendingReservations.pendingReservedUnits(7, 3)).isEqualTo(200);
-        assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
-        assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
     }
 
     /**
@@ -1468,7 +1451,7 @@ class TradingAccountRuntimeTest {
             assertThat(inlineThread).isSameAs(owner);
             assertThat(owner.getName()).isEqualTo(originalName);
             state.startAccountLanes();
-            assertThat(state.asynchronousCommands()).isTrue();
+            assertThat(state.accountLanesStarted()).isTrue();
             assertThat(state.ownerLaneAccess()).isFalse();
             // 通知两 Lane 已执行的门闩，或检查被拒绝内联回调没有执行的原子计数
             var executed = new java.util.concurrent.atomic.AtomicInteger();

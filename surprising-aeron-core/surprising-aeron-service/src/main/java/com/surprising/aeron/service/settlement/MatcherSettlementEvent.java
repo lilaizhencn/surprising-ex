@@ -1362,18 +1362,12 @@ public final class MatcherSettlementEvent implements
         return value;
     }
 
-    /**
-     * 只有事件完成才允许一次收集；已登记账本工作时禁止非空资金目标并返回空财务差额，其他路径合并 Lane 差额。未完成返回空引用，本方法不向 target 写资金。
-     * @param target 既有资金接收参数；本方法不写入，已登记账本工作时必须为空
-     */
-    public RuntimeTreasuryDelta collectTreasuryDelta(RuntimeFundsAccumulator target) {
-        if (!complete()) return null;
+    /** 财务结算完成后一次性收集账户事实；重复收集或绕过财务阶段均拒绝。 */
+    public void markCollected() {
+        if (!hasLedgerSettlement() || !complete())
+            throw new IllegalStateException("matcher financial settlement is incomplete");
         if (collected) throw new IllegalStateException("matcher settlement event was already collected");
-        if (hasLedgerSettlement() && target != null)
-            throw new IllegalStateException("Ledger funds remain on SystemLedgerLane");
         collected = true;
-        if (treasurySettlement != null && treasurySettlement.queued) return EMPTY_TREASURY_DELTA;
-        return mergeTreasuryDeltas();
     }
 
     /**

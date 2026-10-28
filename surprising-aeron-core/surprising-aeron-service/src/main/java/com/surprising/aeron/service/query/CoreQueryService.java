@@ -828,103 +828,52 @@ public final class CoreQueryService {
         }
     }
 
-    /**
-     * 把未平仓量或合约维护页查询交给所属账本线程，投递失败清除编号，成功返回待完成。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
-     * @param page 合约编号、排他用户游标和返回条数条件
-     * @param maintenance 查询进入时取得的合约维护状态，随用户页一起编码返回
-     */
-    public CoreResponse beginPositionIndexQuery(CoreMessage message,
+    /** 在 Owner 上同步读取财库、未平仓量或合约维护页，沿用查询预算和业务拒绝码。 */
+    public CoreResponse queryLedger(CoreMessageType type,
             com.surprising.aeron.protocol.CoreMaintenanceCodec.Query page,
             com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
-        var query = new LedgerQuery(owner.appliedCommandCount(), message.header().messageType(), page, maintenance);
-        registerQuery(message, query);
-        query.apply(owner.runtimeState().treasury());
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
-    }
-
-    /**
-     * 创建财库查询并就地读取资产余额。
-     * @param message 已经通过核心消息入口的查询请求，携带类型、外部命令 UUID、用户及编码载荷
-     */
-    public CoreResponse beginTreasuryQuery(CoreMessage message) {
-        LedgerQuery query = new LedgerQuery(owner.appliedCommandCount());
-        registerQuery(message, query);
-        query.apply(owner.runtimeState().treasury());
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, com.surprising.aeron.protocol.CoreResultCode.MATCHING_PENDING, owner.appliedCommandCount());
-    }
-
-    /**
-     * 在系统账本线程读取财库、未平仓量或合约维护用户页的单次任务，直接消费原账本或其索引，编码后通知 Owner。
-     * 构造约定：固定本次账本查询的协议类型，以及可选的合约维护分页条件和维护状态。
-     * 参数 commandCount：查询进入时固定的已应用命令计数，作为响应计数
-     * 参数 type：本次查询的协议消息类型，用来选择账户、账本或编码分支
-     * 参数 page：可选的合约维护用户分页条件，财库或 OI 查询不使用
-     * 参数 maintenance：查询进入时取得的合约维护状态，随用户页一起编码返回
-     */
-    @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
-    private final class LedgerQuery extends CompletableFuture<QueryResult> {
-        /** 任务创建时固定的已应用命令计数，响应沿用此值。 */
-        private final long commandCount;
-        /** 任务固定的协议查询类型，决定读取对象和响应编码。 */
-        private final CoreMessageType type;
-        /** 账本查询可选的合约用户分页条件，财库和 OI 分支不使用。 */
-        private final com.surprising.aeron.protocol.CoreMaintenanceCodec.Query page;
-        /** 随合约维护用户页一起返回的固定维护状态，不在账本查询中修改。 */
-        private final com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance;
-        /**
-         * 创建只读取财库的账本任务，页条件与合约维护信息均不需要。
-         * @param commandCount 查询进入时固定的已应用命令计数，作为响应计数
-         */
-        private LedgerQuery(long commandCount) {
-            this(commandCount, CoreMessageType.TREASURY_STATE_QUERY, null, null);
+        long commandCount = owner.appliedCommandCount();
+        TreasuryRuntime ledger = owner.runtimeState().treasury();
+        // 原账本或索引读取后生成的成功或业务拒绝响应。
+        CoreResponse response;
+        try {
+            // 当前查询已经编码的协议字节，随后由对应响应或盘口上限检查使用。
+            byte[] encoded;
+            if (type == CoreMessageType.OPEN_INTEREST_QUERY) {
+                // OI 索引导出的各币对多空数量汇总，先检查规模再构造查询视图。
+                var totals = owner.openInterestIndex().totals();
+                if (totals.size() > RuntimeOperationalQueryService.MAX_QUERY_ENTITIES)
+                    throw new RuntimeOperationalQueryService.QueryTooLargeException();
+                // 与各币对多空汇总一一对应的 OI 协议 DTO 列表。
+                var views = new ArrayList<com.surprising.aeron.protocol.CoreOpenInterestView>(totals.size());
+                for (var /* 当前币对及其多空持仓数量汇总项，转成 OI 查询 DTO。 */ entry : totals.entrySet()) {
+                    views.add(new com.surprising.aeron.protocol.CoreOpenInterestView(
+                            entry.getKey(), entry.getValue().longQuantity(), entry.getValue().shortQuantity()));
+                }
+                encoded = com.surprising.aeron.protocol.CoreOpenInterestCodec.encode(views);
+            } else if (type == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
+                // 合约维护页内按用户编号升序选择的有仓用户编号，数量不超过页上限。
+                var users = new ArrayList<Long>(page.limit());
+                // 已经发现页上限之后还有用户，供维护页指示后续仍有数据。
+                boolean more = false;
+                // 持仓用户索引中严格大于当前游标的下一用户编号，0 表示已无后继。
+                long next = owner.positionUserIndex().higherUserId(page.instrumentId(), page.afterUserId());
+                while (next != 0) {
+                    if (users.size() == page.limit()) { more = true; break; }
+                    users.add(next);
+                    next = owner.positionUserIndex().higherUserId(page.instrumentId(), next);
+                }
+                encoded = com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
+                        new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(maintenance, users, more));
+            } else encoded = CoreStateQueryCodec.encodeTreasuryState(
+                    RuntimeOperationalQueryService.treasuryAssets(ledger, owner.identities()));
+            response = new CoreResponse(ResponseStatus.OK, commandCount, encoded);
+        } catch (/* 财库或 OI 返回数量超限，只把本次查询转换为响应过大。 */ RuntimeOperationalQueryService.QueryTooLargeException failure) {
+            response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
+        } catch (/* 账本查询条件或编码参数非法，转换为 INVALID_COMMAND。 */ IllegalArgumentException failure) {
+            response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.INVALID_COMMAND, commandCount);
         }
-        /**
-         * 读取 OI 索引、按用户游标的合约维护页或财库资产，检查响应规模并编码；参数或规模错误只拒绝本次查询，随后保存响应通知 Owner。
-         * @param ledger 当前原财库，用于只读查询
-         */
-        public void apply(TreasuryRuntime ledger) {
-            // 原账本或索引读取后生成的成功或业务拒绝响应。
-            CoreResponse response;
-            try {
-                // 当前查询已经编码的协议字节，随后由对应响应或盘口上限检查使用。
-                byte[] encoded;
-                if (type == CoreMessageType.OPEN_INTEREST_QUERY) {
-                    // OI 索引导出的各币对多空数量汇总，先检查规模再构造查询视图。
-                    var totals = owner.openInterestIndex().totals();
-                    if (totals.size() > RuntimeOperationalQueryService.MAX_QUERY_ENTITIES)
-                        throw new RuntimeOperationalQueryService.QueryTooLargeException();
-                    // 与各币对多空汇总一一对应的 OI 协议 DTO 列表。
-                    var views = new ArrayList<com.surprising.aeron.protocol.CoreOpenInterestView>(totals.size());
-                    for (var /* 当前币对及其多空持仓数量汇总项，转成 OI 查询 DTO。 */ entry : totals.entrySet()) {
-                        views.add(new com.surprising.aeron.protocol.CoreOpenInterestView(
-                                entry.getKey(), entry.getValue().longQuantity(), entry.getValue().shortQuantity()));
-                    }
-                    encoded = com.surprising.aeron.protocol.CoreOpenInterestCodec.encode(views);
-                } else if (type == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
-                    // 合约维护页内按用户编号升序选择的有仓用户编号，数量不超过页上限。
-                    var users = new ArrayList<Long>(page.limit());
-                    // 已经发现页上限之后还有用户，供维护页指示后续仍有数据。
-                    boolean more = false;
-                    // 持仓用户索引中严格大于当前游标的下一用户编号，0 表示已无后继。
-                    long next = owner.positionUserIndex().higherUserId(page.instrumentId(), page.afterUserId());
-                    while (next != 0) {
-                        if (users.size() == page.limit()) { more = true; break; }
-                        users.add(next);
-                        next = owner.positionUserIndex().higherUserId(page.instrumentId(), next);
-                    }
-                    encoded = com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
-                            new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(maintenance, users, more));
-                } else encoded = CoreStateQueryCodec.encodeTreasuryState(
-                        RuntimeOperationalQueryService.treasuryAssets(ledger, owner.identities()));
-                response = new CoreResponse(ResponseStatus.OK, commandCount, encoded);
-            } catch (/* 财库或 OI 返回数量超限，只把本次查询转换为响应过大。 */ RuntimeOperationalQueryService.QueryTooLargeException failure) {
-                response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
-            } catch (/* 账本查询条件或编码参数非法，转换为 INVALID_COMMAND。 */ IllegalArgumentException failure) {
-                response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, CoreResultCode.INVALID_COMMAND, commandCount);
-            }
-            complete(QueryResult.encoded(response));
-        }
+        return response;
     }
 
     /**

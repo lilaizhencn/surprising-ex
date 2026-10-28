@@ -149,4 +149,59 @@ public final class CoreStateTestFixtures {
                 Math.max(1, reservedUnits), 0, 0, quantitySteps);
         runtime.reserveOrder(order, reservation, clientKey, reservedUnits);
     }
+    /** 为索引与退休测试准备风险删除事实，由原 Lane 完成边界生成身份退休证明。 */
+    public static void deleteRiskSnapshot(TradingAccountRuntime runtime, long key) {
+        long userId = runtime.riskSnapshot(key).userId();
+        runtime.onLane(userId, lane -> {
+            lane.removeRiskSnapshotValue(key);
+            runtime.publishRiskSnapshot(key, null);
+            return null;
+        });
+    }
+
+    /** 为成员索引测试准备已完成预留的删除，并沿用真实回滚前值。 */
+    public static void deleteReservation(TradingAccountRuntime runtime, long orderId, long userId) {
+        runtime.onLane(userId, lane -> {
+            runtime.accountRollback().captureReservationBefore(orderId, userId);
+            lane.removeReservationValue(orderId);
+            lane.removeReservationId(userId, orderId);
+            return null;
+        });
+    }
+
+    /** 为触发索引测试准备删除事实；回滚与变化发布仍使用真实 Lane 边界。 */
+    public static void deleteTrigger(TradingAccountRuntime runtime, long id) {
+        long userId = runtime.triggerOrder(id).userId();
+        runtime.onLane(userId, lane -> {
+            runtime.accountRollback().captureTriggerOrderBefore(id, userId);
+            lane.removeTrigger(id);
+            runtime.publishTriggerOrder(id, null);
+            return null;
+        });
+    }
+
+    /** 冷公式测试进入真实结算作用域调用 Lane 释放规则，不另写资金释放算法。 */
+    public static long releaseRemainingReservation(TradingAccountRuntime runtime, long orderId) {
+        var order = runtime.order(orderId);
+        if (order == null || !order.canceled()) return 0;
+        var lane = runtime.accountLaneForUser(order.userId());
+        var changes = runtime.acquireMatcherSettlementChanges(1L << lane.laneId());
+        try {
+            long released;
+            runtime.enterMatcherSettlementScope(lane, changes);
+            try {
+                released = runtime.releaseTerminalReservationInLane(lane, order, null);
+            } finally {
+                runtime.exitMatcherSettlementScope(lane, changes);
+            }
+            changes.laneDelta(lane.laneId()).preparePublication();
+            changes.laneDelta(lane.laneId()).commitTerminalToOwner(runtime, lane.laneId(), null, null, null);
+            var balances = changes.balancePatch(lane.laneId());
+            for (int index = 0; index < balances.size(); index++) balances.publishAvailableAt(runtime, index);
+            return released;
+        } finally {
+            runtime.releaseMatcherSettlementChanges(changes);
+        }
+    }
+
 }

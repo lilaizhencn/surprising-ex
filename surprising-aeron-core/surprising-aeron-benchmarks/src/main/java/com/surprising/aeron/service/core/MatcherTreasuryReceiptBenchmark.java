@@ -53,7 +53,7 @@ public class MatcherTreasuryReceiptBenchmark {
                 CommandResultCode.MATCHING_UNKNOWN_ORDER_ID, List.of(),
                 new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
         runtime.startAccountLanes();
-        runtime.enterAsynchronousCommandScope();
+
         runtime.releaseOwnerLaneAccess();
     }
 
@@ -68,14 +68,14 @@ public class MatcherTreasuryReceiptBenchmark {
         event.publishDirectNativeResult(nativeResult, currentSequence, 1, 2, 11, currentSequence, 0);
         event.completeMatcherPublication();
         while (!event.complete()) { runtime.assertAccountLanesHealthy(); Thread.onSpinWait(); }
-        runtime.collectMatcherSettlement(event, null, null);
+        runtime.collectMatcherSettlement(event, null, null, null);
         long sequence = event.coreSequence();
         runtime.releaseMatcherSettlement(event);
         return sequence;
     }
 
     @TearDown public void close() {
-        runtime.exitAsynchronousCommandScope();
+
         if (runtime.treasury().assetLedgerEntryCount() != 0)
             throw new IllegalStateException("no-trade fact changed Treasury money");
         runtime.close();

@@ -129,7 +129,7 @@ public final class RuntimeDerivativeMatchFixture {
             if (makerTerminal) {
                 // 终态订单仍可释放的订单预留金额，正数才额外推进用户修订。
                 long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
-                runtime.releaseTerminalReservation(maker.orderId());
+                com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, maker.orderId());
                 if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
             }
         }
@@ -141,7 +141,7 @@ public final class RuntimeDerivativeMatchFixture {
         if (runtime.order(takerOrderId).canceled()) {
             // 终态订单仍可释放的订单预留金额，正数才额外推进用户修订。
             long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
-            runtime.releaseTerminalReservation(takerOrderId);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, takerOrderId);
             if (releaseUnits > 0) runtime.advanceUserRevision(runtime.order(takerOrderId).userId());
         }
         treasuryDelta.apply(runtime.treasury());

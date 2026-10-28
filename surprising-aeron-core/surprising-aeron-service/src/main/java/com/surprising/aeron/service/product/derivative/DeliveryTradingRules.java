@@ -21,14 +21,9 @@ public final class DeliveryTradingRules extends AbstractFuturesTradingRules {
     }
 
     @Override
-    public long lifecycleCashDeltaUnits(CoreInstrument instrument, long quantity, long entry, long settlement) {
+    public long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument, long quantity, long entry, long settlement) {
         requireInstrument(instrument);
         return CoreContractMath.pnlUnits(instrument, quantity, entry, settlement);
     }
 
-    @Override
-    public long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument,
-                                                  long quantity, long entry, long settlement) {
-        return lifecycleCashDeltaUnits(instrument, quantity, entry, settlement);
-    }
 }

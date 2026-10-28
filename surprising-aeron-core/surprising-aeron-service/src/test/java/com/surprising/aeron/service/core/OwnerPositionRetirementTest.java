@@ -25,7 +25,7 @@ class OwnerPositionRetirementTest {
     @Test
     void deletingRiskOnlyKeepsPositionIdentityThenActualPositionDeletionReleasesIt() throws Exception {
         try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.runtime)) {
-            fixture.applyLane(() -> { fixture.runtime.removeRiskSnapshot(fixture.key); return null; });
+            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.runtime, fixture.key); return null; });
             fixture.runtime.clearCommittedChanges(fixture.identities);
             assertThat(fixture.identities.findPositionKey(7, "1")).isEqualTo(fixture.key);
             fixture.applyLane(() -> { fixture.runtime.removePosition(fixture.key, 7); return null; });
@@ -43,7 +43,7 @@ class OwnerPositionRetirementTest {
             fixture.applyLane(() -> { fixture.runtime.removePosition(fixture.key, 7); return null; });
             fixture.runtime.clearCommittedChanges(fixture.identities);
             assertThat(fixture.identities.findPositionKey(7, "1")).isEqualTo(fixture.key);
-            fixture.applyLane(() -> { fixture.runtime.removeRiskSnapshot(fixture.key); return null; });
+            fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.runtime, fixture.key); return null; });
             fixture.runtime.clearCommittedChanges(fixture.identities);
             assertThat(fixture.identities.findPositionKey(7, "1")).isNull();
         }
@@ -57,7 +57,7 @@ class OwnerPositionRetirementTest {
         try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.runtime)) {
             fixture.applyLane(() -> {
                 fixture.runtime.removePosition(fixture.key, 7);
-                fixture.runtime.removeRiskSnapshot(fixture.key);
+                com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.runtime, fixture.key);
                 fixture.runtime.putPosition(fixture.key, fixture.position);
                 return null;
             });

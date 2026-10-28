@@ -588,47 +588,32 @@ public final class OrderedCommitCoordinator {
         com.surprising.aeron.service.settlement.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null || !event.complete()) return null;
         owner.captureRealtimeTrades(pending);
-        // 已完成账户收集得到的财库变化，在激活前按原规则接入
-        com.surprising.aeron.service.treasury.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
-            settlementTreasuryDelta = owner.runtimeState().collectMatcherSettlement(
-                    event, null, owner.terminalRetention(),
+            owner.runtimeState().collectMatcherSettlement(
+                    event, owner.terminalRetention(),
                     owner.resultBuilder.changedUserIds(), owner.resultBuilder.changedOrderIds());
             owner.resultBuilder.markLaneCommitIdsSeeded();
             pending.completeLanes(event.requiredLaneMask());
             switch (pending.operation()) {
                 case CANCEL -> { /* Lane 已按撮合结论完成解冻和撤单。 */ }
                 case PLACE -> {
-                    // 原有 PLACE 输入读取，此收集分支随后不使用该局部值
-                    var command = pending.decodedCommand().placeOrder();
                     owner.resultBuilder.commandTradeCount(TradingCoreRuntime.tradeCount(pending.settlementPlan()));
                 }
                 case REPLACE, AMEND -> {
-                    // 核对存在的替换准入，后续成交统计不再读取此局部引用
-                    ResolvedMatchingAdmission admission = owner.requireMatchingAdmission(pending);
+                    owner.requireMatchingAdmission(pending);
                     owner.resultBuilder.commandTradeCount(TradingCoreRuntime.tradeCount(pending.settlementPlan()));
                 }
                 case TRIGGER -> {
-                    // 触发输入的原语数组，此收集分支只保留原有读取，不使用其内容
-                    long[] execute = pending.decodedCommand().trigger();
                     // 原槽持有的源触发单，必须仍可取得
                     var trigger = pending.sourceTrigger();
                     if (trigger == null) {
                         throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
                     }
-                    publication.request();
                     owner.resultBuilder.commandTradeCount(TradingCoreRuntime.tradeCount(pending.settlementPlan()));
                 }
                 default -> throw new IllegalStateException(
                         "operation cannot own an asynchronous matcher settlement: " + pending.operation());
             }
-            if (pending.operation() == CommandSlot.Operation.PLACE
-                    || pending.operation() == CommandSlot.Operation.REPLACE
-                    || pending.operation() == CommandSlot.Operation.AMEND
-                    || pending.operation() == CommandSlot.Operation.TRIGGER) {
-                publication.request();
-            }
-            owner.runtimeState().applyCollectedTreasuryBeforeActivation(settlementTreasuryDelta);
             // 按现有操作及接受结果确定的运行时修订增量，之后再加前置撤单数量
             long revisionDelta = switch (pending.operation()) {
                 case CANCEL -> matchingResult.accepted() ? 1 : 0;
@@ -641,8 +626,6 @@ public final class OrderedCommitCoordinator {
                             Math.addExact(revisionDelta, pending.settlementPlan().preCancellationCount())));
             publication.request();
             owner.resultBuilder.materializeChangeAccumulators();
-            // 事件登记的参与 Lane 位图局部值，后续判断直接读取槽位图，不使用此局部值
-            long committedLaneMask = event.requiredLaneMask();
             if (pending.completedLaneMask() != pending.expectedLaneMask()) {
                 throw owner.failMatching(pending, "account lane completion differs from immutable matcher fact", null);
             }
@@ -701,8 +684,6 @@ public final class OrderedCommitCoordinator {
                 mask |= owner.matchingAdapter().topology().accountLaneMask(action.userId());
             }
         } else if (pending.operation() == CommandSlot.Operation.LIQUIDATION) {
-            // 原有单笔强平输入读取，此位图分支随后不使用该局部值
-            var command = pending.decodedCommand().liquidation();
             // 本次账户执行检查或派生索引给出的可空强平计划
             var liquidation = pending.liquidationCheck().liquidation(0);
             if (liquidation != null) mask |= owner.matchingAdapter().topology().accountLaneMask(liquidation.userId());

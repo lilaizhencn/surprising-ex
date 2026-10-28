@@ -127,22 +127,10 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 绑定当前 Owner，在异步命令作用域内推进，finally 退出作用域；未完成命令的租约由命令窗口持有。
+     * 主流程：先收集队首完成，再按容量、冲突前缀及重试栅栏接纳输入。控制命令保留队首；独立撮合命令把输入租约交给窗口，按原日志顺序提交。
      */
     private void progressCommands() {
         state.bindOwner();
-        state.runtimeState.enterAsynchronousCommandScope();
-        try {
-            progressCommandsInScope();
-        } finally {
-            state.runtimeState.exitAsynchronousCommandScope();
-        }
-    }
-
-    /**
-     * 主流程：先收集队首完成，再按容量、冲突前缀及重试栅栏接纳输入。控制命令保留队首；独立撮合命令把输入租约交给窗口，按原日志顺序提交。
-     */
-    private void progressCommandsInScope() {
         // 当前 Owner 持有的流水命令窗口
         ClusterCommandWindow window = commandPipeline.commandWindow();
 

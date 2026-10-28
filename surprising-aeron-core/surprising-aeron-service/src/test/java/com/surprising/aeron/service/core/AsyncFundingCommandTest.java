@@ -237,7 +237,7 @@ class AsyncFundingCommandTest {
         // 本辅助器轮询完成的五秒纳秒截止点。
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         state.runtimeState.releaseOwnerLaneAccess();
-        state.runtimeState.enterAsynchronousCommandScope();
+
         try (/* 本次异步期间检查 Owner 未直接读取账户的可关闭守卫。 */ var guard = new OwnerAccountReadGuard(state.runtimeState)) {
             assertThat(state.applyDecodedCommand(message, TIME, message.header().sourceSequence(), null, false)).isNull();
             assertThat(state.directCommand.active()).isTrue();
@@ -255,7 +255,7 @@ class AsyncFundingCommandTest {
             assertThat(state.runtimeState.ownerLaneAccess()).isFalse();
             return response;
         } finally {
-            state.runtimeState.exitAsynchronousCommandScope();
+
             state.runtimeState.releaseOwnerLaneAccess();
         }
     }

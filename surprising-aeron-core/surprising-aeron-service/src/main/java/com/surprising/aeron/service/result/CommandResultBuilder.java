@@ -206,17 +206,6 @@ public final class CommandResultBuilder {
         changedUserIds.add(userId);
     }
 
-    /**
-     * 接续当前集合，从非空撤单条目收集用户 ID；空输入或空条目跳过，结果列表先置空待后续绑定。
-     * @param orders 可空撤单订单序列，空条目跳过
-     */
-    public void addChangedUsersFromOrders(Iterable<CancellationOrder> orders) {
-        owner.seedChangeAccumulators();
-        commandChangedUserIds = List.of();
-        if (orders == null) return;
-        for (var /* 本轮借用的现存订单或撤单条目，空项按当前入口规则跳过 */ order : orders) if (order != null) changedUserIds.add(order.userId());
-    }
-
     public void addLifecycleChanges(Iterable<CancellationOrder> orders) {
         owner.seedChangeAccumulators();
         commandChangedOrderIds = List.of();

@@ -146,7 +146,7 @@ public final class CommitPublication {
                 if (owner.realtimeCapture() != null) owner.runtimeState().captureRealtimeChanges(owner.realtimeCapture());
                 if (owner.runtimeState().committedRevision() < runtimePatchRevision)
                     throw new IllegalStateException("runtime changed-index commit is out of order");
-                owner.factIndexes().applyCurrent(owner.runtimeState(), owner.identities());
+                owner.runtimeState().applyChangedIndexes();
                 publishedSequence = sequence;
                 runtimePatchRevision = owner.runtimeState().committedRevision();
                 owner.runtimeState().clearCommittedChanges(owner.identities());

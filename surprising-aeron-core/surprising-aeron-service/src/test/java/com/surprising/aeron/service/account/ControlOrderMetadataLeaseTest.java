@@ -81,30 +81,28 @@ class ControlOrderMetadataLeaseTest {
             // 元数据命令前的产品修订号，真实回滚以它恢复命令边界。
             long revision = state.revision();
             state.clearChangedKeys();
-            state.enterAsynchronousCommandScope();
-            try {
-                // 保存本次 Lane 提交元数据及冻结发布值的命令回执。
-                var event = state.dispatchLaneMutation(1, List.of(7L), List.of(11L), 100, 200);
-                await(state, () -> state.laneCommitComplete(event));
-                state.releaseLaneCommit(event);
-                assertThat(state.orderChanges().get(11).clusterPosition()).isEqualTo(200);
-                await(state, state.beginCommandRollback(revision, 1));
-                state.dispatchControlLanes(state.topology().accountLaneMask(7), /* 控制回调提供的 Lane 编号，本用例按固定用户及订单执行，不读取此参数。 */ ignored -> {
-                    // 回滚完成后在所属 Lane 重新读取的原权威订单。
-                    var order = state.order(11);
-                    assertThat(order).isSameAs(authority.get());
-                    assertThatThrownBy(() -> order.prepareReservation(ReservationKind.DERIVATIVE_MARGIN, 3, 200))
-                            .isInstanceOf(IllegalStateException.class);
-                    assertThat(order.createdAtEpochMillis()).isZero();
-                    assertThat(order.updatedAtEpochMillis()).isZero();
-                    assertThat(order.clusterPosition()).isZero();
-                    assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
-                    assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
-                    assertThat(state.reservation(11).reservedUnits()).isEqualTo(200);
-                    return null;
-                });
-                await(state, state::pollControlLanes);
-            } finally { state.exitAsynchronousCommandScope(); }
+
+            // 保存本次 Lane 提交元数据及冻结发布值的命令回执。
+            var event = state.dispatchLaneMutation(1, List.of(7L), List.of(11L), 100, 200);
+            await(state, () -> state.laneCommitComplete(event));
+            state.releaseLaneCommit(event);
+            assertThat(state.orderChanges().get(11).clusterPosition()).isEqualTo(200);
+            await(state, state.beginCommandRollback(revision, 1));
+            state.dispatchControlLanes(state.topology().accountLaneMask(7), /* 控制回调提供的 Lane 编号，本用例按固定用户及订单执行，不读取此参数。 */ ignored -> {
+                // 回滚完成后在所属 Lane 重新读取的原权威订单。
+                var order = state.order(11);
+                assertThat(order).isSameAs(authority.get());
+                assertThatThrownBy(() -> order.prepareReservation(ReservationKind.DERIVATIVE_MARGIN, 3, 200))
+                        .isInstanceOf(IllegalStateException.class);
+                assertThat(order.createdAtEpochMillis()).isZero();
+                assertThat(order.updatedAtEpochMillis()).isZero();
+                assertThat(order.clusterPosition()).isZero();
+                assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
+                assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
+                assertThat(state.reservation(11).reservedUnits()).isEqualTo(200);
+                return null;
+            });
+            await(state, state::pollControlLanes);
         }
     }
 

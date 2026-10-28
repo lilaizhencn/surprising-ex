@@ -61,7 +61,7 @@ class MatcherSettlementPlanTest {
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
             event.completeMatcherPublication();
-            assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
+            assertThat(collect(runtime, event)).isTrue();
             runtime.releaseMatcherSettlement(event);
         }
     }
@@ -95,12 +95,12 @@ class MatcherSettlementPlanTest {
             event.beginMatcherPublication();
             assertThat(event.ready()).isFalse();
             assertThat(event.completedLaneMask()).isZero();
-            assertThat(runtime.collectMatcherSettlement(event)).isNull();
+            assertThat(collect(runtime, event)).isFalse();
             event.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
             event.completeMatcherPublication();
             assertThat(event.complete()).isTrue();
-            assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
+            assertThat(collect(runtime, event)).isTrue();
             assertThat(runtime.order(11)).isSameAs(original);
             runtime.releaseMatcherSettlement(event);
         }
@@ -137,9 +137,9 @@ class MatcherSettlementPlanTest {
             first.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 1, List.of()), 1, 1, 2, 11, 1, 0);
             first.completeMatcherPublication();
-            assertThat(runtime.collectMatcherSettlement(first)).isNotNull();
+            assertThat(collect(runtime, first)).isTrue();
             runtime.releaseMatcherSettlement(first);
-            assertThat(runtime.collectMatcherSettlement(suffix)).isNotNull();
+            assertThat(collect(runtime, suffix)).isTrue();
             runtime.releaseMatcherSettlement(suffix);
             assertThat(runtime.order(11)).isSameAs(original);
         }
@@ -191,7 +191,7 @@ class MatcherSettlementPlanTest {
             assertThat(signalling.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             assertThat(failure.get()).isNull();
             assertThat(event.ready()).isTrue();
-            assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
+            assertThat(collect(runtime, event)).isTrue();
             runtime.releaseMatcherSettlement(event);
             // 从事件池再次借到的同一对象，用于检查新代字段未被旧线程覆盖。
             var reused = runtime.prepareDirectCancellation(2, original.userId(), original.orderId(), new java.util.UUID(3, 4),
@@ -208,7 +208,7 @@ class MatcherSettlementPlanTest {
             reused.publishDirectNativeResult(nativeResult(CommandResultCode.MATCHING_UNKNOWN_ORDER_ID,
                     symbol, 2, List.of()), 2, 3, 4, 11, 2, 0);
             reused.execute(runtime.accountLane(runtime.topology().accountLaneId(21)));
-            assertThat(runtime.collectMatcherSettlement(reused)).isNotNull();
+            assertThat(collect(runtime, reused)).isTrue();
             runtime.releaseMatcherSettlement(reused);
         } finally {
             finishSignal.countDown();
@@ -288,7 +288,7 @@ class MatcherSettlementPlanTest {
             event.execute(runtime.accountLane(runtime.topology().accountLaneId(21)));
             assertThat(event.complete()).isTrue();
             assertThat(event.plan().orderCount()).isZero();
-            runtime.collectMatcherSettlement(event);
+            collect(runtime, event);
             assertThat(runtime.order(11)).isSameAs(original);
             runtime.releaseMatcherSettlement(event);
         }
@@ -361,7 +361,7 @@ class MatcherSettlementPlanTest {
                 if (System.nanoTime() >= deadline) throw new AssertionError("reserved Lane tickets did not drain");
                 Thread.onSpinWait();
             }
-            assertThat(runtime.collectMatcherSettlement(event)).isNotNull();
+            assertThat(collect(runtime, event)).isTrue();
             runtime.releaseMatcherSettlement(event);
             // 从事件池再次借到的同一对象，用于检查新代字段未被旧线程覆盖。
             var reused = runtime.prepareDirectMatcherSettlement(2, 15, taker, null, 1, id, 0,
@@ -639,4 +639,9 @@ class MatcherSettlementPlanTest {
     private static CoreInstrument instrument() {
         return INSTRUMENT;
     }
+    private static boolean collect(TradingAccountRuntime runtime, MatcherSettlementEvent event) {
+        if (!runtime.pollMatcherFinancialSettlement(event)) return false;
+        return runtime.collectMatcherSettlement(event, null, null, null);
+    }
+
 }

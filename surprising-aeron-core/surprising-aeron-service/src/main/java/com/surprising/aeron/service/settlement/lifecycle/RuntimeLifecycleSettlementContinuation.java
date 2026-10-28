@@ -425,7 +425,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         private void applyFinancialPhase() {
             Math.addExact(runtime.revision(), financialPhase == FinancialPhase.INSURANCE ? 1 : selectedOrders.isEmpty() ? 1 : 2);
             runtime.dispatchLedgerCommand(this);
-            ledgerCommandCompleted();
+            requireLedgerPhaseComplete();
         }
 
         /**

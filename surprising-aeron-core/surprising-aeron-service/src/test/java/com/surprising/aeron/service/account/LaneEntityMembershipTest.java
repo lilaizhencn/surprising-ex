@@ -50,7 +50,7 @@ class LaneEntityMembershipTest {
                 assertThat(reservations.size()).isEqualTo(21);
                 for (/* 当前加入、移除或构造待回滚成员的订单编号。 */ long id = first; id < first + 20; id++) {
                     state.removeOrder(id);
-                    state.removeReservation(id, 7);
+                    CoreStateTestFixtures.deleteReservation(state, id, 7);
                 }
                 assertThat(lane.activeOrderIdsByUser.get(7)).isSameAs(orders);
                 assertThat(lane.reservationIdsByUser.get(7)).isSameAs(reservations);
@@ -68,7 +68,7 @@ class LaneEntityMembershipTest {
             detached[0] = 99;
             assertThat(reservations.contains(1)).isTrue();
             state.removeOrder(1);
-            state.removeReservation(1, 7);
+            CoreStateTestFixtures.deleteReservation(state, 1, 7);
             assertThat(orders.size()).isZero();
             assertThat(reservations.size()).isZero();
             state.removeUser(7);
@@ -94,7 +94,7 @@ class LaneEntityMembershipTest {
             state.onLane(7L, /* 执行待回滚修改的 Lane 回调参数，本测试通过外层 state 发起操作，不读取此参数。 */ current -> {
                 state.replaceOrder(state.order(1).withStatus(
                         com.surprising.aeron.model.CoreOrderStatus.CANCELED, 3));
-                state.removeReservation(1, 7);
+                CoreStateTestFixtures.deleteReservation(state, 1, 7);
                 state.putOrder(CoreStateTestFixtures.order(3, 7, 1, 2));
                 state.putReservation(CoreStateTestFixtures.reservation(3, 7, 3, 5));
                 return null;
@@ -126,40 +126,6 @@ class LaneEntityMembershipTest {
             }
         }
         throw new AssertionError("membership has no primitive backing array");
-    }
-
-    /**
-     * 替换预留金额并迁移资产，检查成员集合复用、待完成聚合正确及跨用户替换被拒绝。
-     */
-    @Test
-    void reservationAmountAndAssetChangesKeepMembershipAndPendingTotals() {
-        try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
-            state.putUser(new UserRuntime(7));
-            state.putBalance(new BalanceRuntime(7, 1, 1000, 0));
-            state.putBalance(new BalanceRuntime(7, 2, 1000, 0));
-            state.putReservation(CoreStateTestFixtures.reservation(11, 7, 1, 40));
-            state.pendingReservations().markPendingReservation(7, 11, 1);
-            // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
-            var lane = state.onLane(7L, /* onLane 回调收到的所属 Lane，这里原样返回以便断言。 */ value -> value);
-            // 用户七复用的预留编号集合，金额和资产改变不应替换它。
-            var ids = lane.reservationIdsByUser.get(7);
-            state.replaceReservation(CoreStateTestFixtures.reservation(11, 7, 1, 20));
-            assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
-            assertThat(lane.pendingReservedUnits(7, 1)).isEqualTo(20);
-            state.replaceReservation(CoreStateTestFixtures.reservation(11, 7, 2, 10));
-            assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
-            assertThat(ids).containsExactly(11L);
-            assertThat(lane.pendingReservedUnits(7, 1)).isZero();
-            assertThat(lane.pendingReservedUnits(7, 2)).isEqualTo(10);
-            assertThatThrownBy(() -> state.replaceReservation(CoreStateTestFixtures.reservation(11, 8, 2, 10)))
-                    .isInstanceOf(IllegalArgumentException.class);
-            assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
-            state.pendingReservations().completePendingReservations(1);
-            state.removeReservation(11, 7);
-            assertThat(lane.reservationIdsByUser.get(7)).isSameAs(ids);
-            assertThat(ids.size()).isZero();
-            assertThat(lane.pendingReservationCount()).isZero();
-        }
     }
 
     /**

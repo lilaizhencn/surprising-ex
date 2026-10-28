@@ -8,8 +8,6 @@ import lombok.experimental.Accessors;
 public final class RuntimeTreasuryDelta {
     /** 普通命令默认允许的四个不同资产槽位上限。 */
     public static final int SINGLE_COMMAND_CAPACITY = 4;
-    /** 批量订单使用的四十个不同资产槽位容量常量。 */
-    public static final int ORDER_BATCH_CAPACITY = 40;
 
     /** 本对象固定允许的不同资产项数上限。 */
     private final int capacity;

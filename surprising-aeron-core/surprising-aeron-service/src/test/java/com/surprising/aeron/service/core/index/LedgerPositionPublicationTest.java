@@ -75,41 +75,39 @@ class LedgerPositionPublicationTest {
             // 标的一对应的内部稠密编号，用于 Treasury 暂存
             int symbol = ids.symbolId("1");
             assertThat(runtime.publishedPositionCount()).isOne();
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
-            try {
-                for (/* 本次控制删除、校验与回滚的轮次，共两轮 */ int round = 0; round < 2; round++) {
-                    if (treasuryScope) {
-                        // 可选的本次资金费暂存账本命令，初始化时绑定原运行时
-                        var command = /* 只用于验证控制范围资金费暂存回滚的账本命令，实例初始化时接入当前运行时。 */ new SystemLedgerCommand() {
-                            // 实例创建时绑定当前运行时及账本控制范围，再允许派发。
-                            { initializeLedgerCommand(accountRuntime); }
-                            /**
-                             * 把本次未发布控制范围的资金费暂存设为九，供随后验证回滚归零。
-                             * @param ledger 本次控制命令可写的权威 Treasury 账本
-                             */
-                            @Override protected void applyLedger(TreasuryRuntime ledger) { ledger.setFundingSettlement(symbol, 9); }
-                        };
-                        runtime.dispatchLedgerCommand(command);
-                        LedgerControlTestSupport.await(runtime, command::complete);
-                    }
-                    runtime.dispatchControlLanes(runtime.topology().accountLaneMask(7), /* 本次删除持仓的实际账户 Lane，操作只改用户七持仓 */ lane -> {
-                        runtime.removePosition(key, 7); return null;
-                    });
-                    LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-                    assertThat(runtime.publishedPositionCount()).isZero();
-                    // 即使没有资金补丁，仅持仓变化的控制命令仍须完成账本校验。
-                    LedgerControlTestSupport.awaitFunds(runtime, false);
-                    assertThat(adl.count()).isZero();
-                    LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(1, 2 + round));
-                    assertThat(runtime.publishedPositionCount()).isOne();
-                    onLedger(runtime, () -> {
-                        assertThat(oi.openInterestSteps("1")).isEqualTo(10);
-                        assertThat(users.usersAfter("1", 0)).containsExactly(7L);
-                        assertThat(adl.value(key).signedQuantitySteps()).isEqualTo(10);
-                    });
-                    assertThat(runtime.treasury().fundingSettlement(symbol)).isZero();
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            for (/* 本次控制删除、校验与回滚的轮次，共两轮 */ int round = 0; round < 2; round++) {
+                if (treasuryScope) {
+                    // 可选的本次资金费暂存账本命令，初始化时绑定原运行时
+                    var command = /* 只用于验证控制范围资金费暂存回滚的账本命令，实例初始化时接入当前运行时。 */ new SystemLedgerCommand() {
+                        // 实例创建时绑定当前运行时及账本控制范围，再允许派发。
+                        { initializeLedgerCommand(accountRuntime); }
+                        /**
+                         * 把本次未发布控制范围的资金费暂存设为九，供随后验证回滚归零。
+                         * @param ledger 本次控制命令可写的权威 Treasury 账本
+                         */
+                        @Override protected void applyLedger(TreasuryRuntime ledger) { ledger.setFundingSettlement(symbol, 9); }
+                    };
+                    runtime.dispatchLedgerCommand(command);
+                    LedgerControlTestSupport.await(runtime, command::complete);
                 }
-            } finally { runtime.exitAsynchronousCommandScope(); }
+                runtime.dispatchControlLanes(runtime.topology().accountLaneMask(7), /* 本次删除持仓的实际账户 Lane，操作只改用户七持仓 */ lane -> {
+                    runtime.removePosition(key, 7); return null;
+                });
+                LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
+                assertThat(runtime.publishedPositionCount()).isZero();
+                // 即使没有资金补丁，仅持仓变化的控制命令仍须完成账本校验。
+                LedgerControlTestSupport.awaitFunds(runtime, false);
+                assertThat(adl.count()).isZero();
+                LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(1, 2 + round));
+                assertThat(runtime.publishedPositionCount()).isOne();
+                onLedger(runtime, () -> {
+                    assertThat(oi.openInterestSteps("1")).isEqualTo(10);
+                    assertThat(users.usersAfter("1", 0)).containsExactly(7L);
+                    assertThat(adl.value(key).signedQuantitySteps()).isEqualTo(10);
+                });
+                assertThat(runtime.treasury().fundingSettlement(symbol)).isZero();
+            }
         }
     }
 

@@ -101,16 +101,14 @@ public class TriggerCommitBenchmark {
     public long cancelWithSequenceCommit() {
         long before = runtime.revision();
         long next = ++sequence;
-        runtime.enterAsynchronousCommandScope();
-        try {
-            var event = runtime.dispatchLaneMutation(next, users, List.of(), triggerIds, next, next);
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (!runtime.laneCommitComplete(event)) {
-                if (System.nanoTime() > deadline) throw new IllegalStateException("trigger commit timeout");
-                Thread.onSpinWait();
-            }
-            runtime.releaseLaneCommit(event);
-        } finally { runtime.exitAsynchronousCommandScope(); }
+
+        var event = runtime.dispatchLaneMutation(next, users, List.of(), triggerIds, next, next);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!runtime.laneCommitComplete(event)) {
+            if (System.nanoTime() > deadline) throw new IllegalStateException("trigger commit timeout");
+            Thread.onSpinWait();
+        }
+        runtime.releaseLaneCommit(event);
         if (runtime.revision() != before + users.size()) throw new IllegalStateException("trigger version mismatch");
         runtime.acquireOwnerLaneAccess();
         try {

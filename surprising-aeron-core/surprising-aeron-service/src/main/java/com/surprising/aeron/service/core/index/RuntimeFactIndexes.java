@@ -1,18 +1,11 @@
 package com.surprising.aeron.service.core.index;
 
-import com.surprising.aeron.model.CoreAlgoOrderState;
-import com.surprising.aeron.model.CoreCancelAllAfterKey;
-import com.surprising.aeron.model.CoreCancelAllAfterState;
-import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.model.TradingCoreState;
-import com.surprising.aeron.service.core.TradingAccountRuntime;
 import com.surprising.aeron.service.core.change.OwnerIndexedChanges;
 import com.surprising.aeron.service.core.change.RuntimeIndexedChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
-import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.aeron.service.position.RuntimePositionIndexValue;
-import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.settlement.MatcherSettlementChanges;
 import lombok.Getter;
 import lombok.experimental.Accessors;
@@ -20,7 +13,7 @@ import lombok.experimental.Accessors;
 /**
  * 把账户已发布变化应用到现有派生索引的入口。Owner 维护订单及条件任务轻量路由，持仓用户、未平仓量及 ADL 业务索引可绑定给 System Ledger；不另存账户正文，不把各索引更新包装成自动事务。
  */
-public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIndexConsumer {
+public final class RuntimeFactIndexes {
     /** 现有标的到持仓用户的派生索引，可绑定业务线程。 */
     @Getter
     @Accessors(fluent = true, chain = false)
@@ -53,8 +46,6 @@ public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIn
     @Getter
     @Accessors(fluent = true, chain = false)
     private final AdlPositionIndex adlPositions;
-    /** 仅 applyCurrent 回调期间有效的临时身份表引用，同时防止重入。 */
-    private RuntimeIdentityRegistry activeIdentities;
 
     /**
      * 要求八个现有索引全部存在，保存引用；不新建另一套业务状态。
@@ -228,23 +219,6 @@ public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIn
     }
 
     /**
-     * 校验运行时、身份表及非重入条件，临时接入身份表后消费本次变化；finally 清掉临时引用，回调失败不在此自动回滚已更新索引。
-     * @param runtime 提供当前变更 ID 和发布值的原交易运行时
-     * @param identities 内部资产及标的编号对应的已准备身份表
-     */
-    public void applyCurrent(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities) {
-        if (runtime == null || identities == null || activeIdentities != null) {
-            throw new IllegalArgumentException("runtime changed indexes are invalid");
-        }
-        activeIdentities = identities;
-        try {
-            runtime.visitChangedIndexes(this);
-        } finally {
-            activeIdentities = null;
-        }
-    }
-
-    /**
      * 直接应用已冻结的持仓索引值，空值表示删除，不回读 Lane 可变持仓。
      * @param positionKey 当前持仓的确定性身份键
      * @param current 冻结的当前持仓索引值，空值删除
@@ -288,74 +262,16 @@ public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIn
     }
 
     /**
-     * 按订单新状态更新 OPEN 路由；旧值由已有路由表提供，before 不参与计算。
-     * @param orderId 当前变更的订单号
-     * @param before 变更前值；这些回调使用索引已有原值，不读取此参数
-     * @param after 变更后的真实状态，空值表示删除
-     */
-    @Override
-    public void order(long orderId, OrderRuntime before, OrderRuntime after) {
-        activeOrders.apply(orderId, after, activeIdentities);
-    }
-
-    /**
      * 把本次持仓新状态转为用户、永久标的、资产、方向及数量；空值删除，旧事实从 ADL 索引读取。
      * @param positionKey 当前持仓的确定性身份键
-     * @param before 变更前值；这些回调使用索引已有原值，不读取此参数
+     * @param identities 运行时已经绑定的资产及标的身份表
      * @param after 变更后的真实状态，空值表示删除
      */
-    @Override
-    public void position(long positionKey, PositionRuntime before, PositionRuntime after) {
+    public void applyPosition(long positionKey, PositionRuntime after, RuntimeIdentityRegistry identities) {
         applyPosition(positionKey, after == null ? 0 : after.userId(),
-                after == null ? null : activeIdentities.instrumentId(after.symbolId()),
-                after == null ? null : activeIdentities.asset(after.assetId()),
+                after == null ? null : identities.instrumentId(after.symbolId()),
+                after == null ? null : identities.asset(after.assetId()),
                 after == null ? null : after.positionSide(), after == null ? 0 : after.signedQuantitySteps());
-    }
-
-    /**
-     * 按新强平状态更新路由与未结束集合，旧路由由强平索引自己读取。
-     * @param liquidationId 当前变更的强平 ID
-     * @param before 变更前值；这些回调使用索引已有原值，不读取此参数
-     * @param after 变更后的真实状态，空值表示删除
-     */
-    @Override
-    public void liquidation(long liquidationId, LiquidationRuntime before, LiquidationRuntime after) {
-        liquidations.apply(liquidationId, after, activeIdentities);
-    }
-
-    /**
-     * 按新算法状态更新身份及调度索引，旧值由既有索引提供。
-     * @param algoOrderId 当前变更的算法单 ID
-     * @param before 变更前值；这些回调使用索引已有原值，不读取此参数
-     * @param after 变更后的真实状态，空值表示删除
-     */
-    @Override
-    public void algoOrder(long algoOrderId, CoreAlgoOrderState before, CoreAlgoOrderState after) {
-        algos.apply(algoOrderId, after);
-    }
-
-    /**
-     * 按新触发单状态更新路由及价格触发索引，旧值由既有索引提供。
-     * @param triggerOrderId 当前变更的触发单 ID
-     * @param before 变更前值；这些回调使用索引已有原值，不读取此参数
-     * @param after 变更后的真实状态，空值表示删除
-     */
-    @Override
-    public void triggerOrder(long triggerOrderId, CoreTriggerOrderState before,
-                             CoreTriggerOrderState after) {
-        triggers.apply(triggerOrderId, after);
-    }
-
-    /**
-     * 按新计时器值更新到期索引，空值删除；before 不参与计算。
-     * @param key 计时器的用户与标的范围业务键
-     * @param before 变更前值；这些回调使用索引已有原值，不读取此参数
-     * @param after 变更后的真实状态，空值表示删除
-     */
-    @Override
-    public void timer(CoreCancelAllAfterKey key, CoreCancelAllAfterState before,
-                      CoreCancelAllAfterState after) {
-        timers.apply(key, after);
     }
 
     /**

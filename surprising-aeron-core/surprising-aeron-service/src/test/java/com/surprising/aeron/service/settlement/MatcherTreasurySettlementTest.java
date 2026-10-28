@@ -208,8 +208,8 @@ class MatcherTreasurySettlementTest {
                     if (System.nanoTime() >= deadline) throw new AssertionError("financial settlement timed out");
                     Thread.onSpinWait();
                 }
-                assertThat(runtime.collectMatcherSettlement(event, null, null).size()).isZero();
-                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, null, null))
+                assertThat(runtime.collectMatcherSettlement(event, null, null, null)).isTrue();
+                assertThatThrownBy(() -> runtime.collectMatcherSettlement(event, null, null, null))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("already collected");
                 runtime.releaseMatcherSettlement(event);
                 // 复用事件新一代撤单命令的 UUID。
@@ -235,7 +235,7 @@ class MatcherTreasurySettlementTest {
                     if (System.nanoTime() >= deadline) throw new AssertionError("reused financial slot timed out");
                     Thread.onSpinWait();
                 }
-                assertThat(runtime.collectMatcherSettlement(reused, null, null).size()).isZero();
+                assertThat(runtime.collectMatcherSettlement(reused, null, null, null)).isTrue();
                 runtime.releaseMatcherSettlement(reused);
                 assertThat(failure.get()).isNull();
             } finally {

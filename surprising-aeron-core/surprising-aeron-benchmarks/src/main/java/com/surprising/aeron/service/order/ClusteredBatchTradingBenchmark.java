@@ -674,32 +674,30 @@ public class ClusteredBatchTradingBenchmark {
             var request = command(CoreMessageType.ADJUST_BALANCE, 1000,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
             CoreResponse result;
-            runtime.enterAsynchronousCommandScope();
-            try {
-                if (owner.applyDecodedCommand(request, 1_700_000_000_000L, sequence, null, false) != null)
-                    throw new IllegalStateException("fault command did not enter continuation");
-                long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (!owner.directCommand.hasControlWork()) {
-                    if (owner.directCommand.poll() != null)
-                        throw new AssertionError("funds preflight did not reach Account Lane work");
-                    if (System.nanoTime() >= preparationDeadline)
-                        throw new AssertionError("funds preflight did not reach Account Lane work");
-                    Thread.onSpinWait();
-                }
-                var business = owner.directCommand.controlWork();
-                owner.directCommand.replaceControlWork(() -> {
-                    if (!business.getAsBoolean()) return false;
-                    // Deliberate capacity fault: this sentinel must be cleared before dispatch.
-                    owner.admissions().queuedMatching.addAll(java.util.Collections.nCopies(
-                                owner.pendingMatching().capacity() + 1, null));
-                    return true;
-                });
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                do {
-                    result = owner.directCommand.poll();
-                    if (System.nanoTime() > deadline) throw new IllegalStateException("fault rollback timeout");
-                } while (result == null);
-            } finally { runtime.exitAsynchronousCommandScope(); }
+
+            if (owner.applyDecodedCommand(request, 1_700_000_000_000L, sequence, null, false) != null)
+                throw new IllegalStateException("fault command did not enter continuation");
+            long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!owner.directCommand.hasControlWork()) {
+                if (owner.directCommand.poll() != null)
+                    throw new AssertionError("funds preflight did not reach Account Lane work");
+                if (System.nanoTime() >= preparationDeadline)
+                    throw new AssertionError("funds preflight did not reach Account Lane work");
+                Thread.onSpinWait();
+            }
+            var business = owner.directCommand.controlWork();
+            owner.directCommand.replaceControlWork(() -> {
+                if (!business.getAsBoolean()) return false;
+                // Deliberate capacity fault: this sentinel must be cleared before dispatch.
+                owner.admissions().queuedMatching.addAll(java.util.Collections.nCopies(
+                            owner.pendingMatching().capacity() + 1, null));
+                return true;
+            });
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            do {
+                result = owner.directCommand.poll();
+                if (System.nanoTime() > deadline) throw new IllegalStateException("fault rollback timeout");
+            } while (result == null);
             if (result.status() != ResponseStatus.REJECTED || result.resultCode() != CoreResultCode.MATCHING_BACKPRESSURE)
                 throw new IllegalStateException("terminal capacity failure was not rejected");
             var after = readAccountAtRest(1000, () -> runtime.balance(1000, assetId));

@@ -507,26 +507,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         laneLifecycle.start(affinity);
     }
 
-    /** 显式集群命令范围标记，禁止范围内同步等待尚未完成的账户提交。 */
-    private boolean asynchronousCommandScope;
-
-    /**
-     * 在 Owner 上进入单层异步命令范围，禁止嵌套；范围内不能退回等待未完成账户提交的同步调用。
-     */
-    public void enterAsynchronousCommandScope() {
-        assertOwner();
-        if (asynchronousCommandScope) throw new IllegalStateException("nested asynchronous command scope");
-        asynchronousCommandScope = true;
-    }
-
-    /**
-     * 在 Owner 上退出显式异步命令范围。
-     */
-    public void exitAsynchronousCommandScope() {
-        assertOwner();
-        asynchronousCommandScope = false;
-    }
-
     public boolean ownerLaneAccess() { return laneLifecycle.ownerHasAccess(); }
     public long laneHandoffEpoch() { return laneLifecycle.handoffEpoch(); }
 
@@ -625,21 +605,16 @@ public final class TradingAccountRuntime implements AutoCloseable {
     /**
      * 向原控制槽或资金校验状态请求逆向收尾。
      */
-    private boolean rollbackLedgerControl() {
+    private void rollbackLedgerControl() {
         if (ledgerControl == null) {
             if (controlFundsValidated) {
                 rollbackLedgerPositions(controlPositionUndo);
                 controlFundsValidated = false;
             }
-            return true;
+            return;
         }
-        return ledgerControl.requestRollback();
+        ledgerControl.rollbackScope();
     }
-
-    /**
-     * 在 Owner 上判断账户已启动、账本已启动或显式异步范围是否任一成立。
-     */
-    public boolean asynchronousCommands() { assertOwner(); return accountLanesStarted() || asynchronousCommandScope; }
 
     /** 控制账户任务的唯一有界派发和完成收集入口。 */
     private final ControlLaneDispatcher controlLanes = new ControlLaneDispatcher(this);
@@ -2098,16 +2073,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 仅在账本未激活时，把非空的已收集财库变化应用到唯一财库；空变化直接返回，活动资金交给账本处理。
-     * @param delta 冷阶段需要应用到财库的变化，空或无内容时直接跳过
-     */
-    public void applyCollectedTreasuryBeforeActivation(RuntimeTreasuryDelta delta) {
-        assertOwner();
-        if (delta == null || delta.size() == 0) return;
-        delta.apply(treasury);
-    }
-
-    /**
      * 要求直接财务控制范围已经结束，再登记原撮合事件的财务结算；没有事件时无需登记。
      * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
      */
@@ -2130,48 +2095,20 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 不附加资金及终态接收器，进入统一撮合结算收集入口。
+     * 等待账户及财务结算完成，标记事件单次收集；一次遍历 Lane 变化交接终态、余额和响应身份。取走变化槽后在 finally 归还，事件本身仍由外层管理。
      * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
-     */
-    public RuntimeTreasuryDelta collectMatcherSettlement(MatcherSettlementEvent event) {
-        return collectMatcherSettlement(event, null, null, null, null);
-    }
-
-    /**
-     * 为撮合收集补上空的附加变化身份集合，沿用同一次 Lane 遍历。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
-     * @param fundsAccumulator 可空的资金变化接收器，按实际账本或 Lane 交接来源累计
-     * @param terminalOrderSink 可空终态身份接收器，接收完本序号后调用结束钩子
-     */
-    public RuntimeTreasuryDelta collectMatcherSettlement(
-            MatcherSettlementEvent event,
-            RuntimeFundsAccumulator fundsAccumulator,
-            TerminalOrderSink terminalOrderSink) {
-        return collectMatcherSettlement(event, fundsAccumulator, terminalOrderSink, null, null);
-    }
-
-    /**
-     * 等待事件完成并确认活动财务已派发，收集财库变化、客户身份分配及待预留完成事实；一次遍历 Lane 变化交接终态、余额和响应身份，避免重复累计账本资金。取走变化槽后在 finally 归还，事件本身仍由外层管理。
-     * @param event 本次准入、撤单或撮合结算的原事件，沿用其完成和缓冲持有周期
-     * @param fundsAccumulator 可空的资金变化接收器，按实际账本或 Lane 交接来源累计
      * @param terminalOrderSink 可空终态身份接收器，接收完本序号后调用结束钩子
      * @param changedUsers 可空的响应用户变化身份集合，随同 Lane 遍历填充
      * @param changedOrders 可空的响应订单变化身份集合，随同 Lane 遍历填充
      */
-    public RuntimeTreasuryDelta collectMatcherSettlement(
+    public boolean collectMatcherSettlement(
             MatcherSettlementEvent event,
-            RuntimeFundsAccumulator fundsAccumulator,
             TerminalOrderSink terminalOrderSink,
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedUsers,
             com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedOrders) {
         assertOwner();
-        if (event == null || !event.complete()) return null;
-        if (systemLedgerStarted && !event.hasLedgerSettlement())
-            throw new IllegalStateException("Matcher money must be dispatched from the ordered commit head");
-        // 事件汇总交出的财库变化，后续账户变化收集不会再造一份财库状态
-        RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta(fundsAccumulator);
-        // 该事件是否已有账本财务交接，避免再从各 Lane 重复累计同一资金变化
-        boolean ledgerFunds = event.hasLedgerSettlement();
+        if (event == null || !event.complete()) return false;
+        event.markCollected();
         // 该计划 Core 序号是否仍有 Owner 侧待预留索引，需要按原计划移除
         boolean ownerPending = pendingReservations.containsSequence(event.plan().coreSequence());
         for (/* 本轮正在处理的计划、订单或变化缓冲项下标 */ int index = 0; index < event.planCount(); index++) {
@@ -2193,7 +2130,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 int laneId = Long.numberOfTrailingZeros(remainingLanes);
                 remainingLanes &= remainingLanes - 1;
                 completed += changes.laneDelta(laneId).completedPending();
-                if (fundsAccumulator != null && !ledgerFunds) fundsAccumulator.add(changes.laneFundsDelta(laneId));
                 if (changes.directPositionIdentities()) {
                     // 本 Lane 已交出的持仓变化及身份键，用于释放发布后的身份引用
                     var positions = changes.laneDelta(laneId).positions();
@@ -2212,7 +2148,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             }
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
             pendingReservations.completedBatchItems(event.plan().coreSequence(), completed);
-            return aggregate;
+            return true;
         } finally {
             releaseMatcherSettlementChanges(changes);
         }
@@ -2632,7 +2568,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
      */
     public java.util.function.BooleanSupplier beginCommandRollback(long revisionCheckpoint, long coreSequence) {
         assertOwner();
-        if (!asynchronousCommands() || revisionCheckpoint < 0 || coreSequence <= 0)
+        if (revisionCheckpoint < 0 || coreSequence <= 0)
             throw new IllegalArgumentException("invalid asynchronous rollback");
         if (realtimeCapture != null && realtimeCapture.active()) realtimeCapture.abort();
         // 本 Core 序号登记的单笔待预留订单快照，账户恢复完成前保持不变
@@ -2668,31 +2604,26 @@ public final class TradingAccountRuntime implements AutoCloseable {
             accountRollback.restoreLane(lane);
             return completed;
         });
-        return /* 由 Owner 轮询的失败恢复续步，先完成账户和 Owner 恢复，再等待账本回滚；返回真后停止轮询 */ new java.util.function.BooleanSupplier() {
-            /** 账户与 Owner 前值是否已经恢复并收集，避免等待账本期间重复恢复；不表示财务回滚已经完成。 */
-            private boolean ownerRestored;
+        return /* 由 Owner 轮询的失败恢复续步，等待账户恢复，再同步恢复 Owner 与账本；返回真后停止轮询 */ new java.util.function.BooleanSupplier() {
             /**
-             * 首次收集账户恢复时核对预留完成总数、移除 Owner 索引并恢复 Owner 前值；随后可多轮等待财务回滚，完成后恢复修订并清变化。返回真后调用方停止继续推进该回调。
+             * 收齐账户恢复后核对预留完成总数、移除 Owner 索引，同步恢复 Owner、账本与修订并清变化。返回真后调用方停止继续推进该回调。
              */
             @Override public boolean getAsBoolean() {
-                if (!ownerRestored) {
-                    if (!pollControlLanes()) return false;
-                    // 本轮已经统计完成的待预留项数，随后与原索引数量核对或扣减
-                    int completed = 0;
-                    for (/* 正在收集恢复结果的账户 Lane 下标 */ int id = 0; id < accountLanes.length; id++)
-                        completed = Math.addExact(completed, (Integer) controlLaneResult(id));
-                    if (completed != expectedPending) throw new IllegalStateException("rollback reservation count mismatch");
-                    for (long /* 本轮正在登记、完成或撤销的订单实体 ID */ orderId : pendingOrders) {
-                        // 本轮业务项所属用户，用于恢复索引或核对账户路由
-                        long userId = pendingReservations.pendingUser(orderId);
-                        pendingReservations.unindexPendingReservation(orderId, coreSequence, userId,
-                                Math.subtractExact(pendingReservations.totalPendingReservations(), 1));
-                    }
-                    if (batch != null) pendingReservations.completedBatchItems(coreSequence, batch.remaining());
-                    accountRollback.restoreOwner();
-                    ownerRestored = true;
+                if (!pollControlLanes()) return false;
+                // 本轮已经统计完成的待预留项数，随后与原索引数量核对或扣减
+                int completed = 0;
+                for (/* 正在收集恢复结果的账户 Lane 下标 */ int id = 0; id < accountLanes.length; id++)
+                    completed = Math.addExact(completed, (Integer) controlLaneResult(id));
+                if (completed != expectedPending) throw new IllegalStateException("rollback reservation count mismatch");
+                for (long /* 本轮正在登记、完成或撤销的订单实体 ID */ orderId : pendingOrders) {
+                    // 本轮业务项所属用户，用于恢复索引或核对账户路由
+                    long userId = pendingReservations.pendingUser(orderId);
+                    pendingReservations.unindexPendingReservation(orderId, coreSequence, userId,
+                            Math.subtractExact(pendingReservations.totalPendingReservations(), 1));
                 }
-                if (!rollbackLedgerControl()) return false;
+                if (batch != null) pendingReservations.completedBatchItems(coreSequence, batch.remaining());
+                accountRollback.restoreOwner();
+                rollbackLedgerControl();
                 ledgerControl = null;
                 revision = revisionCheckpoint;
                 clearChangedKeys();
@@ -4059,34 +3990,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 尽可能先保存原触发单前值，再在所属范围删除并登记空值；原实体缺失且没有范围时只保留 Owner 删除标记。
-     * @param triggerOrderId 触发单实体 ID
-     */
-    public void removeTriggerOrder(long triggerOrderId) {
-        assertOwner();
-        rejectUnsupportedOrderBatchMutation("trigger-order state");
-        // 待删除的原触发单，存在时先按原用户保存前值
-        CoreTriggerOrderState current = triggerOrder(triggerOrderId);
-        if (current != null) {
-            accountRollback.captureTriggerOrderBefore(triggerOrderId, current.userId());
-        }
-        // 当前已经接入的可空账户范围，用于直接执行或选择交接路径
-        AccountLaneState scoped = currentLaneCommandScope();
-        if (scoped != null) {
-            scoped.removeTrigger(triggerOrderId);
-            publishTriggerOrder(triggerOrderId, null);
-        } else if (current != null) {
-            onLane(current.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-                lane.removeTrigger(triggerOrderId);
-                publishTriggerOrder(triggerOrderId, null);
-                return null;
-            });
-        } else {
-            changedTriggerOrders.put(triggerOrderId, null);
-        }
-    }
-
-    /**
      * 按外部标的名称建立有序映射副本，配置对象本身仍与运行时共享。
      */
     public Map<String, CoreInstrument> instrumentsForRuntime() {
@@ -4805,74 +4708,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 禁止预留更换用户，在所属 Lane 保存前值并替换；若旧值仍待撮合，同步维护待预留及相关余额前后补丁，再按当前范围交接变化。
-     * @param reservation 与订单对应的资金预留值
-     */
-    public void replaceReservation(ReservationRuntime reservation) {
-        assertOwner();
-        // 通过已有路由或账户检索找到的原预留，先禁止改变用户
-        ReservationRuntime existing = findReservation(reservation.orderId());
-        if (existing != null && existing.userId() != reservation.userId()) {
-            throw new IllegalArgumentException("runtime reservation owner cannot change");
-        }
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
-        ReservationRuntime previous = onLane(reservation.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            accountRollback.captureUserBefore(reservation.userId());
-            accountRollback.captureReservationBefore(reservation.orderId(), reservation.userId());
-            // 当前用户 Lane 内的原预留或持仓，用于替换前值和索引比较
-            ReservationRuntime prev = lane.reservation(reservation.orderId());
-            // 原预留是否仍待撮合，决定是否同时记录相关资产余额前后值
-            boolean pending = prev != null && lane.pendingReservation(prev.orderId());
-            if (pending) {
-                accountRollback.captureBalanceBefore(prev.userId(), prev.assetId());
-                accountRollback.captureBalanceBefore(reservation.userId(), reservation.assetId());
-            }
-            if (prev != null) lane.replacePendingReservation(prev, reservation);
-            lane.storeReservation(reservation.orderId(), reservation.laneValue());
-            if (prev == null)
-                lane.addReservationId(reservation.userId(), reservation.orderId());
-            if (pending) {
-                accountRollback.captureBalanceAfter(lane, prev.userId(), prev.assetId());
-                accountRollback.captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
-            }
-            return prev;
-        });
-        publishReservation(reservation.orderId(), reservation);
-        if (currentMatcherSettlementChangesScope() == null) {
-            markReservationChanged(reservation.orderId());
-            markUserChanged(reservation.userId());
-            if (previous != null) markUserChanged(previous.userId());
-        }
-    }
-
-    /**
-     * 要求所属用户预留存在且待撮合已经完成，保存前值后删除预留与用户索引，再登记变化。
-     * @param orderId 本次操作关联的订单实体 ID
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     */
-    public void removeReservation(long orderId, long userId) {
-        assertOwner();
-        onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            accountRollback.captureUserBefore(userId);
-            accountRollback.captureReservationBefore(orderId, userId);
-            // 该用户的原预留，必须存在、归属一致且不再待撮合
-            ReservationRuntime current = lane.reservation(orderId);
-            if (current == null || current.userId() != userId) {
-                throw new IllegalArgumentException("runtime reservation is not registered: " + orderId);
-            }
-            if (lane.pendingReservation(orderId)) {
-                throw new IllegalStateException("pending reservation must complete before removal");
-            }
-            lane.removeReservationValue(orderId);
-            lane.removeReservationId(userId, orderId);
-            return null;
-        });
-        publishReservation(orderId, null);
-        markReservationChanged(orderId);
-        markUserChanged(userId);
-    }
-
-    /**
      * 把余额对象的用户、资产及数值交给原地更新入口。
      * @param balance 本次需要保存或更新的资产余额值
      */
@@ -5285,56 +5120,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 原强平存在时删除所属账户值和活动索引，再交出删除标记及用户变化。
-     * @param liquidationId 要删除或交接的强平实体 ID
-     */
-    public void removeLiquidation(long liquidationId) {
-        assertOwner();
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
-        LiquidationRuntime previous = liquidation(liquidationId);
-        if (previous != null) {
-            accountRollback.captureUserBefore(previous.userId());
-            onLane(previous.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-                lane.removeLiquidationValue(liquidationId);
-                removeActiveLiquidation(lane, previous);
-                publishLiquidation(liquidationId, null);
-                return null;
-            });
-            if (currentLaneCommandScope() == null) changedLiquidations.put(liquidationId, null);
-            markUserChanged(previous.userId());
-        }
-    }
-
-    /**
-     * 保存已有风险快照前值并在所属 Lane 删除，交接持仓是否也已缺失的索引信息；实体缺失时仍按当前范围登记删除或清身份保留。
-     * @param positionKey 持仓内部身份键
-     */
-    public void removeRiskSnapshot(long positionKey) {
-        assertOwner();
-        rejectUnsupportedOrderBatchMutation("risk snapshot");
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
-        RiskSnapshotRuntime previous = riskSnapshot(positionKey);
-        if (previous != null) {
-            accountRollback.captureUserBefore(previous.userId());
-            accountRollback.captureRiskSnapshotBefore(positionKey, previous.userId());
-            // 删除风险快照后，该内部身份是否也已没有持仓，交给发布后身份退休处理
-            boolean positionAbsent = onLane(previous.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-                lane.removeRiskSnapshotValue(positionKey);
-                publishRiskSnapshot(positionKey, null);
-                return lane.position(positionKey) == null;
-            });
-            if (currentLaneCommandScope() == null)
-                changedRiskSnapshots.putIndexed(positionKey, null, true, positionAbsent);
-        } else if (currentLaneCommandScope() != null) {
-            laneDelta(currentLaneCommandScope().laneId()).putRiskSnapshot(positionKey, null);
-        } else {
-            riskPositionIdentities.remove(positionKey);
-        }
-        if (currentLaneCommandScope() == null && previous == null) changedRiskSnapshots.put(positionKey, null);
-        if (previous != null) markUserChanged(previous.userId());
-    }
-
-    /**
      * 保存用户、订单与预留前值，在所属账户完成精确冻结释放及终态更新，再交出变化并推进用户修订。
      * @param orderId 本次操作关联的订单实体 ID
      * @param userId 本次业务所属用户身份，按固定拓扑路由
@@ -5562,50 +5347,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 通过所属账户释放终态订单剩余冻结，保存回滚前后值；确有释放且没有外层账户范围时登记 Owner 变化。
-     * @param orderId 本次操作关联的订单实体 ID
-     */
-    public void releaseTerminalReservation(long orderId) {
-        assertOwner();
-        accountRollback.captureReservationBefore(orderId);
-        // 当前处理的原订单或更新后订单，使用范围由本分支的账户所有权限定
-        OrderRuntime order = order(orderId);
-        if (order == null) throw new IllegalArgumentException("runtime order is not terminal: " + orderId);
-        accountRollback.captureUserBefore(order.userId());
-        // 所属账户只返回是否发生释放，金额和资产仍在 Lane 内处理
-        boolean releasedFunds = onLane(order.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            // 当前订单对应的原预留，释放与消耗修改需同时维护待预留差额
-            ReservationRuntime reservation = lane.reservation(orderId);
-            if (reservation == null || !order.canceled()) {
-                throw new IllegalArgumentException("runtime order is not terminal: " + orderId);
-            }
-            // 该预留当前全部剩余冻结量，零时不再产生余额释放
-            long releaseUnits = reservation.reservedUnits();
-            if (releaseUnits == 0) return false;
-            // 本次所属用户的原资产余额映射，用于按预留资产取得余额
-            IntObjectHashMap<BalanceRuntime> balances = lane.userBalances(order.userId());
-            // 按本订单或预留资产取到的余额，必须存在才能冻结或释放
-            BalanceRuntime balance = balances == null ? null : balances.get(reservation.assetId());
-            if (balance == null) throw new IllegalStateException("runtime terminal balance is missing: " + orderId);
-            accountRollback.captureBalanceBefore(order.userId(), reservation.assetId());
-            balance.release(releaseUnits);
-            // 释放本次冻结数量后的预留值，随后替换原账户预留
-            ReservationRuntime released = reservation.release(releaseUnits);
-            lane.replacePendingReservation(reservation, released);
-            lane.storeReservation(orderId, released.laneValue());
-            publishReservation(orderId, released);
-            accountRollback.captureBalanceAfter(lane, order.userId(), reservation.assetId());
-            return true;
-        });
-        if (!releasedFunds) return;
-        if (currentLaneCommandScope() == null) {
-            markReservationChanged(orderId);
-            markUserChanged(order.userId());
-            markBalancesChanged();
-        }
-    }
-
-    /**
      * 保存用户及客户号索引前值，在所属 Lane 更新客户号与订单的双向索引，并标记用户变化。
      * @param userId 本次业务所属用户身份，按固定拓扑路由
      * @param clientKey 客户订单号内部键，零表示没有客户号
@@ -5617,22 +5358,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         accountRollback.captureClientOrderBefore(userId, clientKey);
         onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
             putClientOrderIndex(lane, userId, clientKey, orderId);
-            return null;
-        });
-        markUserChanged(userId);
-    }
-
-    /**
-     * 保存索引前值，在所属 Lane 删除客户号及反向关系，再登记用户变化。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param clientKey 客户订单号内部键，零表示没有客户号
-     */
-    public void removeClientOrder(long userId, long clientKey) {
-        assertOwner();
-        accountRollback.captureUserBefore(userId);
-        accountRollback.captureClientOrderBefore(userId, clientKey);
-        onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            removeClientOrderIndex(lane, userId, clientKey);
             return null;
         });
         markUserChanged(userId);
@@ -5723,7 +5448,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
 
     /**
      * 校验接收函数后直接遍历原始变化用户身份，不先创建集合副本。
-     * @param consumer 接收本次变化身份或索引值的回调
+     * @param consumer 接收本次变化身份的回调
      */
     public void acceptChangedUserIds(java.util.function.LongConsumer consumer) {
         assertOwner();
@@ -5838,83 +5563,26 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 本命令变化的索引接收契约，各默认方法为空；调用方只覆盖需要的业务类型，当前访问器通常将前值传空。
+     * 遍历直接及保留 Lane 变化缓冲，直接更新运行时绑定的事实索引。活动账本已负责持仓业务索引时跳过其重复应用；强平/触发单捕获故障单独记录，索引更新异常仍传播。
      */
-    public interface ChangedIndexConsumer {
-        /**
-         * 接收订单身份及前后值，默认不处理；当前访问入口通常把 before 传空。
-         * @param orderId 本次操作关联的订单实体 ID
-         * @param before 变化前值参数；当前索引访问器通常传空，由接收器沿用既有索引处理
-         * @param after 本次变化后值，空值保留删除含义
-         */
-        default void order(long orderId, OrderRuntime before, OrderRuntime after) {}
-        /**
-         * 接收持仓变化，默认不处理；已准备索引值可由专门路径直接应用。
-         * @param positionKey 持仓内部身份键
-         * @param before 变化前值参数；当前索引访问器通常传空，由接收器沿用既有索引处理
-         * @param after 本次变化后值，空值保留删除含义
-         */
-        default void position(long positionKey, PositionRuntime before, PositionRuntime after) {}
-        /**
-         * 接收强平变化或删除，默认不处理。
-         * @param liquidationId 要删除或交接的强平实体 ID
-         * @param before 变化前值参数；当前索引访问器通常传空，由接收器沿用既有索引处理
-         * @param after 本次变化后值，空值保留删除含义
-         */
-        default void liquidation(long liquidationId, LiquidationRuntime before, LiquidationRuntime after) {}
-        /**
-         * 接收算法单变化或删除，默认不处理。
-         * @param algoOrderId 算法单实体 ID
-         * @param before 变化前值参数；当前索引访问器通常传空，由接收器沿用既有索引处理
-         * @param after 本次变化后值，空值保留删除含义
-         */
-        default void algoOrder(long algoOrderId,
-                               com.surprising.aeron.model.CoreAlgoOrderState before,
-                               com.surprising.aeron.model.CoreAlgoOrderState after) {}
-        /**
-         * 接收触发单变化或删除，默认不处理。
-         * @param triggerOrderId 触发单实体 ID
-         * @param before 变化前值参数；当前索引访问器通常传空，由接收器沿用既有索引处理
-         * @param after 本次变化后值，空值保留删除含义
-         */
-        default void triggerOrder(long triggerOrderId,
-                                  com.surprising.aeron.model.CoreTriggerOrderState before,
-                                  com.surprising.aeron.model.CoreTriggerOrderState after) {}
-        /**
-         * 接收定时全撤业务键及变化值，默认不处理。
-         * @param key 本次查询或修改使用的业务键
-         * @param before 变化前值参数；当前索引访问器通常传空，由接收器沿用既有索引处理
-         * @param after 本次变化后值，空值保留删除含义
-         */
-        default void timer(com.surprising.aeron.model.CoreCancelAllAfterKey key,
-                           com.surprising.aeron.model.CoreCancelAllAfterState before,
-                           com.surprising.aeron.model.CoreCancelAllAfterState after) {}
-    }
-
-    /**
-     * 遍历直接及保留 Lane 变化缓冲，向索引接收器交出本次变化。活动账本已负责持仓业务索引时跳过其重复应用；强平/触发单捕获故障单独记录，索引回调异常仍传播。
-     * @param consumer 接收本次变化身份或索引值的回调
-     */
-    public void visitChangedIndexes(ChangedIndexConsumer consumer) {
+    public void applyChangedIndexes() {
         assertOwner();
-        if (consumer == null) throw new IllegalArgumentException("changed-index consumer is required");
-        // 接收器恰为事实索引时复用其已准备值入口，否则为空
-        RuntimeFactIndexes preparedConsumer = consumer instanceof RuntimeFactIndexes /* 已匹配为事实索引的接收器，避免再从业务实体重算持仓索引 */ indexes ? indexes : null;
-        visitChangedOrderIndexes(consumer, changedOrders.directBuffer());
+        if (factIndexes == null) throw new IllegalStateException("fact indexes are not bound");
+        applyChangedOrderIndexes(changedOrders.directBuffer());
         // 还未遍历的保留 Lane 变化缓冲位集合
         long remaining = changedOrders.retainedLaneMask();
         while (remaining != 0) {
             // 本轮正在处理或按用户路由选出的账户 Lane 编号
             int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-            visitChangedOrderIndexes(consumer, changedOrders.laneBuffer(laneId));
+            applyChangedOrderIndexes(changedOrders.laneBuffer(laneId));
         }
-        if (!systemLedgerStarted || preparedConsumer == null) {
-            visitChangedPositionIndexes(consumer, preparedConsumer, changedPositions.directBuffer());
+        if (!systemLedgerStarted) {
+            applyChangedPositionIndexes(changedPositions.directBuffer());
             remaining = changedPositions.retainedLaneMask();
             while (remaining != 0) {
                 // 本轮正在处理或按用户路由选出的账户 Lane 编号
                 int laneId = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-                visitChangedPositionIndexes(consumer, preparedConsumer, changedPositions.laneBuffer(laneId));
+                applyChangedPositionIndexes(changedPositions.laneBuffer(laneId));
             }
         }
         for (/* 本轮有效强平后值，Lane 已完成交接。 */ int index = 0; index < changedLiquidations.size(); index++) {
@@ -5923,48 +5591,44 @@ public final class TradingAccountRuntime implements AutoCloseable {
                 try { realtimeCapture.liquidation(value); }
                 catch (RuntimeException failure) { realtimeCapture.failed(); }
             }
-            consumer.liquidation(changedLiquidations.keyAt(index), null, value);
+            factIndexes.liquidations().apply(changedLiquidations.keyAt(index), value, indexIdentities);
         }
         for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < changedAlgoOrders.size(); index++)
-            consumer.algoOrder(changedAlgoOrders.keyAt(index), null, changedAlgoOrders.valueAt(index));
+            factIndexes.algos().apply(changedAlgoOrders.keyAt(index), changedAlgoOrders.valueAt(index));
         for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < changedTriggerOrders.size(); index++) {
-            // 当前触发单变化身份，空后值也交给接收器表示删除
+            // 当前触发单变化身份，空后值表示从索引删除
             long triggerOrderId = changedTriggerOrders.keyAt(index);
-            // 当前触发单变化后值，先按需捕获实时值再交给索引接收器
+            // 当前触发单变化后值，先按需捕获实时值再更新索引
             CoreTriggerOrderState value = changedTriggerOrders.valueAt(index);
             if (realtimeCapture != null && realtimeCapture.active()) {
                 try { realtimeCapture.trigger(value); } catch (/* 当前实时读取或捕获发生的运行时异常，由所在入口完成失败结果或记录捕获失败 */ RuntimeException failure) { realtimeCapture.failed(); }
             }
-            consumer.triggerOrder(triggerOrderId, null, value);
+            factIndexes.triggers().apply(triggerOrderId, value);
         }
         if (!changedCancelAllAfterTimers.isEmpty())
-            for (var /* 当前变化的定时全撤业务键，后值从原定时器表读取 */ key : changedCancelAllAfterTimers) consumer.timer(key, null, cancelAllAfterTimer(key));
+            for (var /* 当前变化的定时全撤业务键，后值从原定时器表读取 */ key : changedCancelAllAfterTimers) factIndexes.timers().apply(key, cancelAllAfterTimer(key));
     }
 
     /**
-     * 只遍历本订单变化缓冲的有效项，前值传空，空后值保留删除含义。
-     * @param consumer 接收本次变化身份或索引值的回调
+     * 只遍历本订单变化缓冲的有效项，空后值保留删除含义。
      * @param orders 本轮有效订单变化缓冲，包含空删除值
      */
-    private void visitChangedOrderIndexes(ChangedIndexConsumer consumer, RuntimeChangeBuffer<OrderRuntime> orders) {
+    private void applyChangedOrderIndexes(RuntimeChangeBuffer<OrderRuntime> orders) {
         for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < orders.size(); index++)
-            consumer.order(orders.keyAt(index), null, orders.valueAt(index));
+            factIndexes.activeOrders().apply(orders.keyAt(index), orders.valueAt(index), indexIdentities);
     }
 
     /**
-     * 有已准备持仓索引值且接收器为事实索引时直接应用，否则交出持仓值；只遍历当前有效项。
-     * @param consumer 接收本次变化身份或索引值的回调
-     * @param preparedConsumer 接收器恰为事实索引时使用的可空专门入口
+     * 有已准备持仓索引值时直接应用，否则转换当前持仓值；只遍历当前有效项。
      * @param positions 当前持仓变化缓冲，包含删除项或已准备索引值
      */
-    private void visitChangedPositionIndexes(ChangedIndexConsumer consumer, RuntimeFactIndexes preparedConsumer,
-            RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions) {
+    private void applyChangedPositionIndexes(RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions) {
         for (/* 本轮有效变化项、原始列表或余额补丁的遍历下标 */ int index = 0; index < positions.size(); index++) {
             // 当前持仓变化项的内部键，配套交出已准备索引或业务值
             long key = positions.keyAt(index);
-            if (positions.hasPreparedAt(index) && preparedConsumer != null)
-                preparedConsumer.preparedPosition(key, positions.preparedAt(index));
-            else consumer.position(key, null, positions.valueAt(index));
+            if (positions.hasPreparedAt(index))
+                factIndexes.preparedPosition(key, positions.preparedAt(index));
+            else factIndexes.applyPosition(key, positions.valueAt(index), indexIdentities);
         }
     }
 
@@ -7065,23 +6729,12 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 使用空资金接收器收集批次撮合结算。
-     * @param event 要收集或归还的原结算事件
-     * @param terminalOrderSink 可空的本批终态订单身份接收器
-     */
-    public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
-            MatcherSettlementEvent event, TerminalOrderSink terminalOrderSink) {
-        return collectOrderBatchMatcherSettlement(event, null, terminalOrderSink);
-    }
-
-    /**
      * 在批量账户作用域中等待本项结算完成，先把余额前后值按顺序接入批次回滚边界，再交既有收集入口处理变化。
      * @param event 要收集或归还的原结算事件
-     * @param funds 可空的本批资金差额接收器
      * @param terminalOrderSink 可空的本批终态订单身份接收器
      */
-    public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
-            MatcherSettlementEvent event, RuntimeFundsAccumulator funds, TerminalOrderSink terminalOrderSink) {
+    public void collectOrderBatchMatcherSettlement(
+            MatcherSettlementEvent event, TerminalOrderSink terminalOrderSink) {
         assertOwner();
         if (!orderBatchMutationScope() || !event.complete())
             throw new IllegalStateException("batch item settlement is not ready to collect");
@@ -7092,7 +6745,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
             lanes &= lanes - 1;
             accountRollback.balancePatch(laneId).mergeSequential(event.changes().balancePatches[laneId]);
         }
-        return collectMatcherSettlement(event, event.hasLedgerSettlement() ? funds : null, terminalOrderSink);
+        collectMatcherSettlement(event, terminalOrderSink, null, null);
     }
 
     /**
@@ -7190,39 +6843,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         com.surprising.aeron.service.order.state.OrderRuntime receipt = laneDelta(lane.laneId()).orders().get(command.orderId());
         if (receipt == null) throw new IllegalStateException("trigger admission receipt is missing");
         return receipt.copyIntoCommandSlot(null);
-    }
-
-    /**
-     * 核对订单存在和归属，释放活动订单冻结并推进命令版本。
-     */
-    public boolean cancelOpenOrder(long userId, long orderId) {
-        if (userId <= 0 || orderId <= 0) {
-            throw new IllegalArgumentException("invalid runtime cancel order");
-        }
-        assertOwner();
-        com.surprising.aeron.service.order.state.OrderRuntime order = order(orderId);
-        if (order == null) throw new com.surprising.aeron.exception.CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-        if (order.userId() != userId) {
-            throw new com.surprising.aeron.exception.CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
-        }
-        if (order.status().terminal()) return false;
-        com.surprising.aeron.service.order.state.ReservationRuntime reservation = reservation(orderId);
-        if (reservation == null) throw new IllegalStateException("open order is missing reservation");
-        cancelOrder(orderId, userId, reservation.reservedUnits());
-        incrementCommandRevision();
-        return true;
-    }
-
-    /**
-     * 检查非负提交时间、日志位置及非空迭代源，使延迟迭代异常在账户任务开始前暴露。
-     * @param timestamp 需要补写的非负集群业务毫秒时间
-     * @param position 需要补写的非负集群日志位置
-     * @param orderIds 本次普通订单编号列表或可重遍历编号源
-     */
-    public void validateCommitStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
-        if (timestamp < 0 || position < 0 || orderIds == null)
-            throw new IllegalArgumentException("invalid order commit metadata");
-        for (Long ignored : orderIds) { }
     }
 
     /**

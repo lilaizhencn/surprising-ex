@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 系统账本及强平工作页的异步查询测试，检查所属线程读取、账户无交接、分页预算、保险建议分配、邮箱满时的拒绝与续投，以及关闭后的查询资源清理。
+ * Owner 同步账本查询与账户 Lane 异步强平工作页测试，检查所属线程读取、账户无交接、分页预算、保险建议分配、邮箱满时的拒绝与续投，以及关闭后的查询资源清理。
  */
 class CoreLedgerQueryTest {
     /** 本组账本查询测试独立使用的 U 本位永续产品线。 */
@@ -267,14 +267,16 @@ class CoreLedgerQueryTest {
      * 提交一笔尚未消费的查询后关闭核心，核对关闭后账本停止、查询编号与结果表清空；本用例直接断言的是关闭后的状态。
      */
     @Test
-    void closeJoinsLedgerBeforeClearingUnconsumedQueryResults() {
+    void closeClearsUnconsumedAccountLaneQueryResults() {
         // 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。
         var core = new TradingCoreRuntime(LINE);
         try {
             core.activate();
             assertThat(core.runtimeState().systemLedgerStarted()).isTrue();
             // 已经构造的查询消息，用其命令 UUID 核对内部查询关联。
-            var message = message(CoreMessageType.TREASURY_STATE_QUERY, new byte[0]);
+            var message = message(CoreMessageType.LIQUIDATION_WORK_QUERY,
+                    CoreLiquidationWorkCodec.encodeQuery(new CoreLiquidationWorkView.Query(
+                            LINE, CoreLiquidationWorkView.Purpose.EXECUTION, 0, 1, 1024)));
             assertThat(CoreTestCompletion.applyAsynchronously(core, message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             assertThat(core.bookQueries.hasPendingQuery(message.header().commandId())).isTrue();
         } finally { core.close(); }
@@ -318,6 +320,12 @@ class CoreLedgerQueryTest {
         assertThat(core.requiresOwnerLaneAccessForPreparation(message)).isFalse();
         // 本次查询消费到的最终响应，按场景核对成功、响应超限或页内容。
         var response = CoreTestCompletion.applyAsynchronously(core, message);
+        if (type != CoreMessageType.LIQUIDATION_WORK_QUERY) {
+            assertThat(response.resultCode()).isNotEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(core.bookQueries.hasPendingQuery(message.header().commandId())).isFalse();
+            assertThat(core.bookQueries.takeQueryResult(message.header().commandId())).isNull();
+            return response;
+        }
         assertThat(response.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         // 本次查询对应的内部异步编号，完成后只能取一次结果。
         var id = message.header().commandId();

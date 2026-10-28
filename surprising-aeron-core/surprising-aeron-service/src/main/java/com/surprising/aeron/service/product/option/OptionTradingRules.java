@@ -61,21 +61,10 @@ public final class OptionTradingRules implements ProductTradingRules {
      * @param settlement 本次到期结算价格，单位为价格 tick
      * @return 结算资产最小整数单位表示的现金变化，失效无行权价值时为 0
      */
-    public long lifecycleCashDeltaUnits(CoreInstrument instrument, long quantity, long entry, long settlement) {
+    @Override
+    public long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument, long quantity, long entry, long settlement) {
         requireInstrument(instrument);
         return Math.multiplyExact(OptionContractMath.optionSettlementCashUnits(instrument, settlement), quantity);
-    }
-    /**
-     * 给统一生命周期结算入口提供同一套期权现金计算，不在此处直接写账户。
-     * @param instrument 当前期权合约配置
-     * @param quantity 带方向的待结算数量，单位为数量步数
-     * @param entry 统一接口保留的入场价格，期权到期现金计算不读取
-     * @param settlement 到期或维护结算价格，单位为价格 tick
-     */
-    @Override
-    public long lifecycleSettlementCashDeltaUnits(CoreInstrument instrument,
-                                                  long quantity, long entry, long settlement) {
-        return lifecycleCashDeltaUnits(instrument, quantity, entry, settlement);
     }
     /**
      * 按期权专有公式计算冻结，区分买方权利金、卖方开仓保证金以及已有仓位可释放的保证金。

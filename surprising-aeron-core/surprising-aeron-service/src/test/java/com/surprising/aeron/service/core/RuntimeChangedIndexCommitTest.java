@@ -49,7 +49,8 @@ class RuntimeChangedIndexCommitTest {
                 runtime.putPosition(key, new PositionRuntime(7, symbol, asset, CoreMarginMode.CROSS,
                         CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), quantity,
                         quantity == 0 ? 0 : 100, Math.abs(quantity) * 100, 0, Math.abs(quantity) * 10));
-                indexes.coordinator.applyCurrent(runtime, identities);
+                runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
                 runtime.clearChangedKeys();
                 assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(Math.abs(quantity));
                 if (quantity == 0) assertThat(indexes.openInterest.totals()).isEmpty();
@@ -58,7 +59,8 @@ class RuntimeChangedIndexCommitTest {
                 assertThat(indexes.positionUsers.usersAfter("1", 0)).containsExactly(7L);
             }
             runtime.removePosition(key, 7);
-            indexes.coordinator.applyCurrent(runtime, identities);
+            runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
             assertThat(indexes.openInterest.totals()).isEmpty();
             assertThat(indexes.positionUsers.usersAfter("1", 0)).isEmpty();
         }
@@ -89,7 +91,8 @@ class RuntimeChangedIndexCommitTest {
         // 四项可断言索引及共同事实应用入口组成的测试记录
         IndexSet indexes = indexes(initial, identities);
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        indexes.coordinator.applyCurrent(runtime, identities);
+        runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).containsExactly(11L);
         assertThat(indexes.positionUsers.usersAfter("1", 0)).containsExactly(7L);
@@ -101,7 +104,8 @@ class RuntimeChangedIndexCommitTest {
                 3, 100, 300, 0, 60));
         runtime.putOrder(CoreStateTestFixtures.order(11, 7, symbolId, 5));
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        indexes.coordinator.applyCurrent(runtime, identities);
+        runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
 
         assertThat(runtime.admissionOrders(7, symbolId).inspect(7, "1", CorePositionSide.NET,
                 com.surprising.aeron.protocol.CoreOrderSide.BUY, CoreMarginMode.ISOLATED).pendingQuantity()).isEqualTo(5);
@@ -111,7 +115,8 @@ class RuntimeChangedIndexCommitTest {
         runtime.removeOrder(11);
         runtime.removePosition(positionKey, 7);
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        indexes.coordinator.applyCurrent(runtime, identities);
+        runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
 
         assertThat(indexes.activeOrders.page(0, null, 0, 1024).orderIds()).isEmpty();
         assertThat(indexes.positionUsers.usersAfter("1", 0)).isEmpty();
@@ -154,18 +159,20 @@ class RuntimeChangedIndexCommitTest {
             return null;
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        indexes.coordinator.applyCurrent(runtime, identities);
+        runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isEqualTo(risk);
 
         runtime.clearChangedKeys();
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
-            runtime.removeRiskSnapshot(positionKey);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(runtime, positionKey);
             runtime.removePosition(positionKey, userId);
             return null;
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        indexes.coordinator.applyCurrent(runtime, identities);
+        runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
         runtime.clearCommittedChanges(identities);
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isNull();
@@ -175,10 +182,10 @@ class RuntimeChangedIndexCommitTest {
     }
 
     /**
-     * 通过真实账户 Lane 新增再移除计划中强平，应用冻结变化后核对账户正文和 Owner 未结束 ID 集合同步。
+     * 通过真实账户 Lane 新增再取消计划中强平，应用冻结变化后核对账户正文和 Owner 未结束 ID 集合同步。
      */
     @Test
-    void commitsLanePublishedLiquidationValuesAndDeletion() {
+    void commitsLanePublishedLiquidationValuesAndTerminalStatus() {
         // 本用例 U 本位永续的空冷状态
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         // 原始身份表，供内部编号转换和最终身份回收断言
@@ -202,20 +209,25 @@ class RuntimeChangedIndexCommitTest {
             return null;
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        indexes.coordinator.applyCurrent(runtime, identities);
+        runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1))).isEqualTo(planned);
         assertThat(indexes.liquidations.activeIds()).containsExactly(1L);
 
         runtime.clearChangedKeys();
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
-            runtime.removeLiquidation(1);
+            runtime.replaceLiquidation(new LiquidationRuntime(1, userId, symbolId,
+                    CoreMarginMode.CROSS, CorePositionSide.NET, CoreStateTestFixtures.runtimeInstrument(), 9, 2, 2,
+                    0, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
             return null;
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
-        indexes.coordinator.applyCurrent(runtime, identities);
+        runtime.bindFactIndexes(indexes.coordinator, identities);
+        runtime.applyChangedIndexes();
 
-        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1))).isNull();
+        assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.liquidation(1)).status())
+                .isEqualTo(CoreLiquidationState.Status.CANCELED);
         assertThat(indexes.liquidations.activeIds()).isEmpty();
         runtime.close();
     }

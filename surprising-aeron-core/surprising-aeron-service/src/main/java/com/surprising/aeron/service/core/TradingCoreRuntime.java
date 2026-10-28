@@ -340,7 +340,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 // 当前业务查到的标的配置，用于身份、结算规则或路由判断
                 var instrument = runtimeState.instrument(query.instrumentId());
                 if (instrument == null) return rejected(CoreResultCode.ENTITY_NOT_FOUND);
-                return bookQueries.beginPositionIndexQuery(message, query, instrument.maintenance());
+                return bookQueries.queryLedger(message.header().messageType(), query, instrument.maintenance());
             } catch (/* 本分支明确捕获的业务或输入异常，按对应协议码处理 */ IllegalArgumentException | java.nio.BufferUnderflowException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
             }
@@ -394,7 +394,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.TREASURY_STATE_QUERY) {
             try {
-                return bookQueries.beginTreasuryQuery(message);
+                return bookQueries.queryLedger(CoreMessageType.TREASURY_STATE_QUERY, null, null);
             } catch (/* 本分支明确捕获的业务或输入异常，按对应协议码处理 */ com.surprising.aeron.service.query.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             }
@@ -442,7 +442,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.OPEN_INTEREST_QUERY) {
-            return bookQueries.beginPositionIndexQuery(message, null, null);
+            return bookQueries.queryLedger(message.header().messageType(), null, null);
         }
         if (message.header().kind() == com.surprising.aeron.protocol.WireMessageKind.QUERY
                 && message.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.CANCEL_ALL_AFTER_QUERY) {
@@ -1381,20 +1381,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                             Math.incrementExact(appliedCommandCount));
                     return finishDirectCommandContext(rejected(CoreResultCode.MATCHING_BACKPRESSURE));
-                }
-            }
-            if (status == ResponseStatus.APPLIED) {
-                // 本次需要校验或盖章的订单身份，没有变化时使用共享空列表
-                java.util.List<Long> changedOrderIds = resultBuilder.commandChangedOrderIds == null
-                        ? java.util.List.of() : resultBuilder.commandChangedOrderIds;
-                try {
-                    runtimeState.validateCommitStampInputs(
-                            clusterTimestamp, clusterPosition, changedOrderIds);
-                } catch (/* 订单变化盖章准备失败，按异步续步或同步回滚路径处理 */ IllegalStateException exception) {
-                    if (deferFinalizationRejection(CoreResultCode.INVALID_COMMAND)) return null;
-                    rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                            Math.incrementExact(appliedCommandCount));
-                    return finishDirectCommandContext(rejected(CoreResultCode.INVALID_COMMAND));
                 }
             }
             resultBuilder.materializeDirectChangeAccumulators();

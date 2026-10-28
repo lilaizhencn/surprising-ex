@@ -272,8 +272,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
     final PrimitiveLongChangeSet changedUserIds;
     /** 本批实际变化订单原语去重缓冲，最终提交统一盖戳。 */
     final PrimitiveLongChangeSet runtimeChangedOrderIds;
-    /** 跨子项累积的财库差额对象，清批时清内容并保留容量。 */
-    com.surprising.aeron.service.treasury.RuntimeTreasuryDelta treasuryDelta;
     /**
      *  下一条要准入或处理的批内项下标。
      * 保存调用方推进后的批内项游标，不在此验证范围或完成账户工作。
@@ -588,7 +586,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         decodedCommand = null;
         changedUserIds.clear();
         runtimeChangedOrderIds.clear();
-        if (treasuryDelta != null) treasuryDelta.clear();
 
         nextIndex = 0;
         tradeCount = 0;
@@ -631,20 +628,6 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
         kind = null;
         clusterTimestamp = 0;
         clusterPosition = 0;
-    }
-
-    /**
-     * 要求资金差额非空，首次才创建本批财库累加器，再合并本轮结果。
-     * @param delta 已收集且非空的财库差额
-     */
-    void mergeTreasuryDelta(
-            com.surprising.aeron.service.treasury.RuntimeTreasuryDelta delta) {
-        if (delta == null) throw new IllegalArgumentException("order batch Treasury delta is required");
-        if (treasuryDelta == null) {
-            treasuryDelta = new com.surprising.aeron.service.treasury.RuntimeTreasuryDelta(
-                    com.surprising.aeron.service.treasury.RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
-        }
-        treasuryDelta.merge(delta);
     }
 
     /**

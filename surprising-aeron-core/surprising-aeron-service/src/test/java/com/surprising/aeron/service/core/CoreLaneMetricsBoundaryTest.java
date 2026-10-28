@@ -59,7 +59,7 @@ class CoreLaneMetricsBoundaryTest {
             core.runtimeState.dispatchControlLanes(mask, /* 控制任务传入的 Lane 编号，当前夹具使用已固定的运行时 */ actualLane -> {
                 core.runtimeState.putRiskSnapshot(key, new RiskSnapshotRuntime(1, symbol, CorePositionSide.NET,
                         1, 100, 0, 1, 1));
-                core.runtimeState.removeRiskSnapshot(key);
+                com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(core.runtimeState, key);
                 entered.countDown();
                 try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("control Lane timeout"); }
                 catch (/* 阻塞账户任务等待时的中断，转换为测试失败 */ InterruptedException failure) { throw new AssertionError(failure); }

@@ -582,7 +582,7 @@ public final class RuntimeSpotMatchProcessor {
     }
 
     /**
-     * 只处理已终态订单；活跃 Matcher 结算变化作用域使用 Lane 写入入口，其余沿通用运行时入口释放，实际释放金额为正才增加用户修订。
+     * 只在原 Matcher 结算作用域释放终态订单的剩余预留，实际释放金额为正才增加用户修订。
      * @param runtime 当前所属交易运行时，具体所有权由通用或 Lane 入口决定
      * @param lane 当前线程持有的账户 Lane
      * @param orderId 当前要累加、读取或释放预留的订单编号
@@ -591,15 +591,8 @@ public final class RuntimeSpotMatchProcessor {
         // 当前首次累加、终态释放或读取时取得的权威订单。
         OrderRuntime order = lane.order(orderId);
         if (order == null || !order.canceled()) return;
-        if (lane.matcherSettlementChanges() != null) {
-            long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
-            if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
-        } else {
-            // 终态订单当前仍可释放的预留金额，正数才额外推进用户修订。
-            long releaseUnits = lane.reservation(orderId).reservedUnits();
-            runtime.releaseTerminalReservation(orderId);
-            if (releaseUnits > 0) runtime.advanceUserRevision(order.userId());
-        }
+        long releaseUnits = runtime.releaseTerminalReservationInLane(lane, order, null);
+        if (releaseUnits > 0) runtime.advanceUserRevision(lane, order.userId());
     }
 
     /**

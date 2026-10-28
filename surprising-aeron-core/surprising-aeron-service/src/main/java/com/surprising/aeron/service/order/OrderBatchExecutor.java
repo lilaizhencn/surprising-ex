@@ -23,7 +23,6 @@ import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.order.command.OrderBatchKind;
 import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
@@ -823,8 +822,7 @@ public final class OrderBatchExecutor {
                     && event == batch.itemSettlementEvent && event.hasDirectNativeResult()) {
                 if (!event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
                 batch.observedSettlementLaneMask |= event.requiredLaneMask();
-                batch.mergeTreasuryDelta(owner.runtimeState().collectOrderBatchMatcherSettlement(
-                        event, null, owner.terminalRetention()));
+                owner.runtimeState().collectOrderBatchMatcherSettlement(event, owner.terminalRetention());
                 owner.commits.publication.request();
                 if (event.commitSequence() != 0) batch.laneCommitCompleted(true);
                 owner.runtimeState().releaseMatcherSettlement(event);
@@ -866,7 +864,7 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 收当前项账户结算并合并财库差额；成功改单保留既有修订计数，现货还计原单撤销。随后完成项结果、回收事件并开始下一项，运行异常转为批次恢复故障。
+     * 收当前项已完成财务验证的账户结算；成功改单保留既有修订计数，现货还计原单撤销。随后完成项结果、回收事件并开始下一项，运行异常转为批次恢复故障。
      * @param batch 本条批量命令的复用上下文
      * @param pending 本批仍占用的命令槽
      * @param timestamp 继续当前批次使用的业务时间
@@ -877,8 +875,7 @@ public final class OrderBatchExecutor {
         try {
             // 当前已就绪并待收集的单项结算事件
             var settledEvent = batch.itemSettlementEvent;
-            batch.mergeTreasuryDelta(owner.runtimeState().collectOrderBatchMatcherSettlement(
-                    settledEvent, null, owner.terminalRetention()));
+            owner.runtimeState().collectOrderBatchMatcherSettlement(settledEvent, owner.terminalRetention());
             if (batch.kind == OrderBatchKind.AMEND && batch.lastMatchingResult.accepted()) {
                 // 保留原有预留修订计数；现货同时计算原单撤销，所以增加两次，其他产品增加一次。
                 owner.runtimeState().setMetadata(owner.productLine(), Math.addExact(owner.runtimeState().revision(),
@@ -1017,7 +1014,7 @@ public final class OrderBatchExecutor {
     }
 
     /**
-     * 开始整批收尾并建立账户位图，收整批结算与财库差额，必要时等待最终账户盖戳和响应编码；核对参与 Lane、资金及终态响应后发布、保存整批 APPLIED 终态。再摘排序和品种依赖、退休命令并归池，各项成功与否仍保存在响应内。
+     * 开始整批收尾并建立账户位图，收整批账户及财务结算结果，必要时等待最终账户盖戳和响应编码；核对参与 Lane、资金及终态响应后发布、保存整批 APPLIED 终态。再摘排序和品种依赖、退休命令并归池，各项成功与否仍保存在响应内。
      * @param batch 本条批量命令的复用上下文
      * @param pending 本批仍占用的命令槽
      * @param clusterTimestamp 整批固定使用的 Cluster 业务时间
@@ -1035,14 +1032,11 @@ public final class OrderBatchExecutor {
             long settlementLaneMask = batch.settlementEvent.requiredLaneMask();
             // 整批事件是否携带非零最终账户提交序号
             boolean finalLaneCommit = batch.settlementEvent.commitSequence() != 0;
-            // 整批事件已经收集的可空财库差额，未就绪时为空
-            RuntimeTreasuryDelta delta = owner.runtimeState().collectMatcherSettlement(
-                    batch.settlementEvent, null, owner.terminalRetention());
-            if (delta == null) {
+            if (!owner.runtimeState().collectMatcherSettlement(
+                    batch.settlementEvent, owner.terminalRetention(), null, null)) {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             }
-            batch.mergeTreasuryDelta(delta);
             owner.runtimeState().releaseMatcherSettlement(batch.settlementEvent);
             batch.settlementsCollected(true);
             if (finalLaneCommit) {
@@ -1079,7 +1073,6 @@ public final class OrderBatchExecutor {
             throw failOrderBatch(batch, pending, "order batch account lane mask mismatch", null);
         }
         try {
-            owner.runtimeState().applyCollectedTreasuryBeforeActivation(batch.treasuryDelta);
             owner.runtimeState().setMetadata(owner.productLine(),
                     Math.incrementExact(owner.runtimeState().revision()));
             if (pending.completedLaneMask() != pending.expectedLaneMask()) {

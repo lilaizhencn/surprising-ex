@@ -303,18 +303,16 @@ class CorePerpetualFinancialMatrixTest {
                 .isEqualTo(accountLaneCount == 1);
         var identities = new RuntimeIdentityRegistry(topology);
         try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
-            try {
-                // 在原 System Ledger 作用域内准备的资金费续步工作
-                var work = RuntimePerpetualFundingProcessor.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
-                        identities);
-                LedgerControlTestSupport.await(runtime, work::poll);
-                assertThat(work.poll()).isTrue();
-                assertThat(work.result().payments()).isEqualTo(expected.payments());
-                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected.state());
-                assertThat(runtime.treasury().fundingResidual(identities.assetId(variant.settleAsset())))
-                        .isEqualTo(expected.state().treasuryState().fundingResidualBalances().getOrDefault(variant.settleAsset(), 0L));
-            } finally { runtime.exitAsynchronousCommandScope(); }
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            // 在原 System Ledger 作用域内准备的资金费续步工作
+            var work = RuntimePerpetualFundingProcessor.prepare(null, command, List.of(USER_ID, SECOND_MAKER_ID), runtime,
+                    identities);
+            LedgerControlTestSupport.await(runtime, work::poll);
+            assertThat(work.poll()).isTrue();
+            assertThat(work.result().payments()).isEqualTo(expected.payments());
+            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected.state());
+            assertThat(runtime.treasury().fundingResidual(identities.assetId(variant.settleAsset())))
+                    .isEqualTo(expected.state().treasuryState().fundingResidualBalances().getOrDefault(variant.settleAsset(), 0L));
         }
     }
 
@@ -335,25 +333,23 @@ class CorePerpetualFinancialMatrixTest {
             // 本例先完成选页，再激活线程，才能只阻塞资金记账，不把用户选页也挡在满队列后。
             var work = RuntimePerpetualFundingProcessor.prepare(null, command,
                     List.of(USER_ID, SECOND_MAKER_ID), runtime, identities);
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
-            try {
-                LedgerControlTestSupport.await(runtime, work::poll);
-                var retained = work.result();
-                assertThat(retained.payments()).isEqualTo(expected.payments());
-                var settled = LedgerControlTestSupport.commit(runtime, identities, false);
-                assertThat(settled).isEqualTo(expected.state());
-                var empty = RuntimePerpetualFundingProcessor.prepare(work,
-                        new ApplyFundingCommand(702, SYMBOL, 100_000), List.of(), runtime, identities);
-                assertThat(empty).isSameAs(work);
-                LedgerControlTestSupport.await(runtime, empty::poll);
-                assertThat(empty.result().payments()).isEmpty();
-                assertThat(empty.result().progress().complete()).isTrue();
-                assertThat(empty.result().progress().processedUsers()).isZero();
-                var afterEmpty = LedgerControlTestSupport.commit(runtime, identities, false);
-                assertThat(afterEmpty.users()).isEqualTo(settled.users());
-                assertThat(afterEmpty.treasuryState().fundingSettlements()).containsEntry(SYMBOL, 702L);
-                assertThat(retained.payments()).isEqualTo(expected.payments());
-            } finally { runtime.exitAsynchronousCommandScope(); }
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            LedgerControlTestSupport.await(runtime, work::poll);
+            var retained = work.result();
+            assertThat(retained.payments()).isEqualTo(expected.payments());
+            var settled = LedgerControlTestSupport.commit(runtime, identities, false);
+            assertThat(settled).isEqualTo(expected.state());
+            var empty = RuntimePerpetualFundingProcessor.prepare(work,
+                    new ApplyFundingCommand(702, SYMBOL, 100_000), List.of(), runtime, identities);
+            assertThat(empty).isSameAs(work);
+            LedgerControlTestSupport.await(runtime, empty::poll);
+            assertThat(empty.result().payments()).isEmpty();
+            assertThat(empty.result().progress().complete()).isTrue();
+            assertThat(empty.result().progress().processedUsers()).isZero();
+            var afterEmpty = LedgerControlTestSupport.commit(runtime, identities, false);
+            assertThat(afterEmpty.users()).isEqualTo(settled.users());
+            assertThat(afterEmpty.treasuryState().fundingSettlements()).containsEntry(SYMBOL, 702L);
+            assertThat(retained.payments()).isEqualTo(expected.payments());
         }
     }
 
@@ -380,37 +376,35 @@ class CorePerpetualFinancialMatrixTest {
                 .isEqualTo(accountLaneCount == 1);
         var identities = new RuntimeIdentityRegistry(topology);
         try (/* 本次验证直接转换或异步控制使用的投影运行时 */ var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
-            try {
-                // 按原账户及账本路径准备的可轮询强平执行工作
-                var execution = RuntimeDerivativeLiquidationProcessor.beginExecution(null, execute, List.of(), 0, runtime, identities);
-                LedgerControlTestSupport.await(runtime, execution);
-                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
-                // 给保险外部注入的数量，随后按分配政策确定实际覆盖
-                long coverage = variant.type() == ContractType.LINEAR_PERPETUAL ? 25 : 50_000;
-                // 本次向结算资产保险基金增加指定数量的命令
-                var adjustment = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), coverage);
-                expected = reducer.adjustInsuranceFund(expected, adjustment);
-                LedgerControlTestSupport.await(runtime, InsuranceFundCommands.prepare(runtime, identities, adjustment));
-                assertThat(LedgerControlTestSupport.commit(runtime, identities, true)).isEqualTo(expected);
-                coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(expected, 1);
-                // 按政策金额确认保险覆盖的强平结果命令
-                var resolve = new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
-                expected = reducer.resolveLiquidation(expected, resolve);
-                LedgerControlTestSupport.await(runtime, RuntimeLiquidationResolution.begin(null, resolve, runtime, identities, List.of(1L)));
-                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
-                // 覆盖剩余亏空的 ADL 命令，目标为第二做市用户空头
-                var adl = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
-                        -QUANTITY, 150, expected.riskState().markPrices().get(SYMBOL).priceSequence(), 5, linearOrInverse(variant, 700, 40_000));
-                expected = reducer.executeAdl(expected, adl);
-                var work = RuntimeAdlExecution.begin(null, adl, runtime, identities);
-                LedgerControlTestSupport.await(runtime, work);
-                long completedRevision = runtime.revision();
-                assertThat(work.getAsBoolean()).isTrue();
-                assertThat(runtime.revision()).isEqualTo(completedRevision);
-                assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
-                runtime.assertAccountLanesHealthy();
-            } finally { runtime.exitAsynchronousCommandScope(); }
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            // 按原账户及账本路径准备的可轮询强平执行工作
+            var execution = RuntimeDerivativeLiquidationProcessor.beginExecution(null, execute, List.of(), 0, runtime, identities);
+            LedgerControlTestSupport.await(runtime, execution);
+            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+            // 给保险外部注入的数量，随后按分配政策确定实际覆盖
+            long coverage = variant.type() == ContractType.LINEAR_PERPETUAL ? 25 : 50_000;
+            // 本次向结算资产保险基金增加指定数量的命令
+            var adjustment = new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), coverage);
+            expected = reducer.adjustInsuranceFund(expected, adjustment);
+            LedgerControlTestSupport.await(runtime, InsuranceFundCommands.prepare(runtime, identities, adjustment));
+            assertThat(LedgerControlTestSupport.commit(runtime, identities, true)).isEqualTo(expected);
+            coverage = RuntimeTestStateTransitions.expectedInsuranceCoverage(expected, 1);
+            // 按政策金额确认保险覆盖的强平结果命令
+            var resolve = new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
+            expected = reducer.resolveLiquidation(expected, resolve);
+            LedgerControlTestSupport.await(runtime, RuntimeLiquidationResolution.begin(null, resolve, runtime, identities, List.of(1L)));
+            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+            // 覆盖剩余亏空的 ADL 命令，目标为第二做市用户空头
+            var adl = new ExecuteAdlCommand(1, SECOND_MAKER_ID, SYMBOL, variant.marginMode(), CorePositionSide.NET,
+                    -QUANTITY, 150, expected.riskState().markPrices().get(SYMBOL).priceSequence(), 5, linearOrInverse(variant, 700, 40_000));
+            expected = reducer.executeAdl(expected, adl);
+            var work = RuntimeAdlExecution.begin(null, adl, runtime, identities);
+            LedgerControlTestSupport.await(runtime, work);
+            long completedRevision = runtime.revision();
+            assertThat(work.getAsBoolean()).isTrue();
+            assertThat(runtime.revision()).isEqualTo(completedRevision);
+            assertThat(LedgerControlTestSupport.commit(runtime, identities, false)).isEqualTo(expected);
+            runtime.assertAccountLanesHealthy();
         }
     }
 
@@ -437,27 +431,25 @@ class CorePerpetualFinancialMatrixTest {
                 .isEqualTo(accountLaneCount == 1);
         var identities = new RuntimeIdentityRegistry(topology);
         try (var runtime = RuntimeStateProjector.project(marked, identities, topology)) {
-            runtime.startAccountLanes(); runtime.startSystemLedgerLane(); runtime.enterAsynchronousCommandScope();
-            try {
-                var requests = actions.stream().map(action ->
-                        new RuntimeDerivativeLiquidationProcessor.ExecutionRequest(action, List.of(), 0)).toList();
-                var work = RuntimeDerivativeLiquidationProcessor.beginExecutionBatch(
-                        requests, batch.liquidationFeeRatePpm(), runtime, identities);
-                LedgerControlTestSupport.await(runtime, work);
-                assertThat(work.getAsBoolean()).isTrue();
-                var actual = LedgerControlTestSupport.commit(runtime, identities, false);
-                assertThat(actual).isEqualTo(expected);
-                boolean isolated = variant.marginMode() == CoreMarginMode.ISOLATED;
-                long fee = isolated ? 0 : linearOrInverse(variant, 80, 69);
-                assertThat(actual.riskState().liquidations().values()).allSatisfy(value -> {
-                    assertThat(value.liquidationFeeRatePpm()).isEqualTo(100_000);
-                    assertThat(value.liquidationFeeUnits()).isEqualTo(fee);
-                });
-                assertThat(actual.treasuryState().insuranceBalances()).containsEntry(variant.settleAsset(), isolated ? 200L : 360L);
-                assertThat(runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
-                        .isEqualTo(isolated ? 200L : 360L);
-                runtime.assertAccountLanesHealthy();
-            } finally { runtime.exitAsynchronousCommandScope(); }
+            runtime.startAccountLanes(); runtime.startSystemLedgerLane();
+            var requests = actions.stream().map(action ->
+                    new RuntimeDerivativeLiquidationProcessor.ExecutionRequest(action, List.of(), 0)).toList();
+            var work = RuntimeDerivativeLiquidationProcessor.beginExecutionBatch(
+                    requests, batch.liquidationFeeRatePpm(), runtime, identities);
+            LedgerControlTestSupport.await(runtime, work);
+            assertThat(work.getAsBoolean()).isTrue();
+            var actual = LedgerControlTestSupport.commit(runtime, identities, false);
+            assertThat(actual).isEqualTo(expected);
+            boolean isolated = variant.marginMode() == CoreMarginMode.ISOLATED;
+            long fee = isolated ? 0 : linearOrInverse(variant, 80, 69);
+            assertThat(actual.riskState().liquidations().values()).allSatisfy(value -> {
+                assertThat(value.liquidationFeeRatePpm()).isEqualTo(100_000);
+                assertThat(value.liquidationFeeUnits()).isEqualTo(fee);
+            });
+            assertThat(actual.treasuryState().insuranceBalances()).containsEntry(variant.settleAsset(), isolated ? 200L : 360L);
+            assertThat(runtime.treasury().insurance(identities.assetId(variant.settleAsset())))
+                    .isEqualTo(isolated ? 200L : 360L);
+            runtime.assertAccountLanesHealthy();
         }
     }
 

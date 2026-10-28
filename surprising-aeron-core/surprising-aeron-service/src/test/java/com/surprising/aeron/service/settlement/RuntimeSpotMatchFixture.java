@@ -109,7 +109,8 @@ public final class RuntimeSpotMatchFixture {
     private static void releaseTerminalReservation(TradingAccountRuntime runtime, long orderId) {
         // 当前首次累加、终态释放或读取时取得的权威订单。
         OrderRuntime order = runtime.order(orderId);
-        if (order != null) RuntimeSpotMatchProcessor.releaseTerminalReservation(runtime, runtime.accountLaneForUser(order.userId()), orderId);
+        if (order != null && com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, orderId) > 0)
+            runtime.advanceUserRevision(order.userId());
     }
 
     /**

@@ -164,7 +164,7 @@ class RuntimeDerivativeFillCalculatorTest {
 
         applyFill(runtime, identities, instrument, order,
                 positionKey, 100, 2, true, 10_000_000, assetId);
-        runtime.releaseTerminalReservation(11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, 11);
 
         // 成交后读取的权威持仓值，用于核对数量、均价、盈亏和保证金。
         PositionRuntime position = runtime.position(positionKey);
@@ -229,7 +229,7 @@ class RuntimeDerivativeFillCalculatorTest {
 
         applyFill(runtime, identities, instrument, runtime.order(11),
                 positionKey, 110, 1, true, 10_000_000, assetId);
-        runtime.releaseTerminalReservation(11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, 11);
 
         // 成交后读取的权威持仓值，用于核对数量、均价、盈亏和保证金。
         PositionRuntime position = runtime.position(positionKey);
@@ -266,7 +266,7 @@ class RuntimeDerivativeFillCalculatorTest {
 
         applyFill(runtime, identities, instrument, runtime.order(11),
                 positionKey, 120, 1, true, 10_000_000, assetId);
-        runtime.releaseTerminalReservation(11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, 11);
 
         // 成交后读取的权威持仓值，用于核对数量、均价、盈亏和保证金。
         PositionRuntime position = runtime.position(positionKey);
@@ -298,7 +298,7 @@ class RuntimeDerivativeFillCalculatorTest {
 
         applyFill(runtime, identities, instrument, runtime.order(11),
                 positionKey, 120, 3, true, 10_000_000, assetId);
-        runtime.releaseTerminalReservation(11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.releaseRemainingReservation(runtime, 11);
 
         // 成交后读取的权威持仓值，用于核对数量、均价、盈亏和保证金。
         PositionRuntime position = runtime.position(positionKey);

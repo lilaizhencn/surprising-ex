@@ -243,12 +243,12 @@ class CoreSelfTradePrefixTest {
         var window = new ClusterCommandWindow();
         // 本条输入是否满足既有窗口内独立撮合准入条件
         boolean independent = core.prepareClusterPipelineScope(message, window);
-        core.runtimeState.enterAsynchronousCommandScope();
+
         try {
             return core.applyDecodedCommand(message, TIME, message.header().sourceSequence(),
                     window.decodedIfPresent(message), independent);
         } finally {
-            core.runtimeState.exitAsynchronousCommandScope();
+
             core.runtimeState.releaseOwnerLaneAccess();
         }
     }

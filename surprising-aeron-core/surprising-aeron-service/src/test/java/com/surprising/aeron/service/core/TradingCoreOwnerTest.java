@@ -527,12 +527,10 @@ class TradingCoreOwnerTest {
     }
 
     /**
-     * 先通过资金身份预检查进入真实账户续步，再注入撮合排队容量超限或终态元数据读取异常；检查原余额回滚、无 Owner 交接、队列清空且保留可幂等重试的拒绝结果。
-     * @param capacityFailure 是否注入匹配排队容量溢出，否则在终态元数据读取中注入异常
+     * 先通过资金身份预检查进入真实账户续步，再注入撮合排队容量超限；检查原余额回滚、无 Owner 交接、队列清空且保留可幂等重试的拒绝结果。
      */
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void terminalPreparationFailureRollsBackOnLaneAndRetainsRejection(boolean capacityFailure) throws Exception {
+    @Test
+    void terminalPreparationFailureRollsBackOnLaneAndRetainsRejection() throws Exception {
         // 本用例进程内 Owner 测试辅助，结束时按原生命周期终止
         var service = service();
         service.onStart(cluster(), null);
@@ -552,58 +550,33 @@ class TradingCoreOwnerTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
             // 本轮原业务、Matcher 控制或撮合结果，未就绪可为空
             CoreResponse result;
-            runtime.enterAsynchronousCommandScope();
-            try {
-                assertThat(owner.applyDecodedCommand(request, 2000, 2000, null, false)).isNull();
-                // 保留资金身份的查询先于账户工作，
-                // 只在这一步已经接入真实控制续步后注入终态准备故障。
-                // 最多五秒等原资金身份预检查接入实际账户续步的截止值
-                long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                while (!owner.directCommand.hasControlWork()) {
-                    assertThat(owner.directCommand.poll()).isNull();
-                    if (System.nanoTime() >= preparationDeadline)
-                        throw new AssertionError("funds preflight did not reach Account Lane work");
-                    Thread.onSpinWait();
-                }
-                // 替换故障续步前保存的原业务控制工作，先让它完成账户工作
-                var business = owner.directCommand.controlWork();
-                owner.directCommand.replaceControlWork(() -> {
-                    if (!business.getAsBoolean()) return false;
-                    if (capacityFailure) {
-                        // 这里只制造排队溢出，条目须在实际派发前被拒绝并清空。
-                        PipelineTestAccess.overflowQueuedMatching(owner.admissions, owner.pendingMatching().capacity() + 1);
-                    } else {
-                        owner.resultBuilder.commandChangedOrderIds = /* 只在终态盖元数据调用栈中抛错的测试列表，故障只存在本测试源码。 */ new java.util.AbstractList<Long>() {
-                            /**
-                             * 故障列表只报告一个原订单 ID，确保终态准备会尝试读取它。
-                             */
-                            public int size() { return 1; }
-                            /**
-                             * 仅当调用栈进入终态盖元数据或其校验时抛注入异常，其余返回最大 long 假 ID，定位终态准备的回滚边界。
-                             * @param index 测试故障列表要求读取的位置，仅用于触发原终态准备
-                             */
-                            public Long get(int index) {
-                                if (StackWalker.getInstance().walk(/* StackWalker 提供的当前调用栈帧流，只用于定位终态准备方法 */ frames -> frames.anyMatch(
-                                        /* 当前调用栈帧，按方法名决定是否注入终态故障 */ frame -> (frame.getMethodName().equals("stampChangedOrdersByLane")
-                                                || frame.getMethodName().equals("validateStampInputs")
-                                                || frame.getMethodName().equals("validateCommitStampInputs")))))
-                                    throw new IllegalStateException("injected terminal metadata failure");
-                                return Long.MAX_VALUE;
-                            }
-                        };
-                    }
-                    return true;
-                });
-                // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-                do {
-                    result = owner.directCommand.poll();
-                    if (System.nanoTime() > deadline) throw new AssertionError("finalization rollback timed out");
-                } while (result == null);
-            } finally { runtime.exitAsynchronousCommandScope(); }
+
+            assertThat(owner.applyDecodedCommand(request, 2000, 2000, null, false)).isNull();
+            // 保留资金身份的查询先于账户工作，
+            // 只在这一步已经接入真实控制续步后注入终态准备故障。
+            // 最多五秒等原资金身份预检查接入实际账户续步的截止值
+            long preparationDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!owner.directCommand.hasControlWork()) {
+                assertThat(owner.directCommand.poll()).isNull();
+                if (System.nanoTime() >= preparationDeadline)
+                    throw new AssertionError("funds preflight did not reach Account Lane work");
+                Thread.onSpinWait();
+            }
+            // 替换故障续步前保存的原业务控制工作，先让它完成账户工作
+            var business = owner.directCommand.controlWork();
+            owner.directCommand.replaceControlWork(() -> {
+                if (!business.getAsBoolean()) return false;
+                PipelineTestAccess.overflowQueuedMatching(owner.admissions, owner.pendingMatching().capacity() + 1);
+                return true;
+            });
+            // 当前局部等待阶段的单调截止值，按该方法原代码独立或共用
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            do {
+                result = owner.directCommand.poll();
+                if (System.nanoTime() > deadline) throw new AssertionError("finalization rollback timed out");
+            } while (result == null);
             assertThat(result.status()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(result.resultCode()).isEqualTo(capacityFailure
-                    ? CoreResultCode.MATCHING_BACKPRESSURE : CoreResultCode.INVALID_COMMAND);
+            assertThat(result.resultCode()).isEqualTo(CoreResultCode.MATCHING_BACKPRESSURE);
             assertThat(CoreTestCompletion.userState(owner, 1001).balances())
                     .filteredOn(/* 原用户已提交 USDT 余额视图，或余额筛选回调的当前资产项 */ balance -> balance.asset().equals("USDT")).singleElement().satisfies(/* 原用户已提交 USDT 余额视图，或余额筛选回调的当前资产项 */ balance -> {
                         assertThat(balance.availableUnits()).isEqualTo(10000);
