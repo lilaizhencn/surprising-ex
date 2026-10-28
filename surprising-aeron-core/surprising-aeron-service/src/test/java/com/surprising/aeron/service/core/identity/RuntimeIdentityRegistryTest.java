@@ -33,7 +33,7 @@ class RuntimeIdentityRegistryTest {
      * Owner 用带方向原名准备持仓，再由单线程执行器中的独立 Lane 以结构化标的、方向保留；验证是同一身份并完成引用释放。
      */
     @Test
-    void preparedDerivativePositionProbeMatchesStringIdentityWithoutRebuildingItsName() throws Exception {
+    void preparedDerivativePositionKeyMatchesItsCanonicalIdentity() throws Exception {
         // 本用例当前验证的独立身份表，或原表与恢复表遍历中的当前实例
         var registry = new RuntimeIdentityRegistry();
         // 本用例身份所属用户十七
@@ -47,9 +47,9 @@ class RuntimeIdentityRegistryTest {
         try (/* 模拟独立 Lane 操作或普通冷读的单线程执行器，用例结束关闭 */ var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
             // 工作线程读到或保留的持仓键，必须等于原预期键
             long actual = executor.submit(() -> registry.retainPositionInLane(
-                    lane, user, "1", CorePositionSide.LONG)).get();
+                    lane, expected, user, "1", CorePositionSide.LONG)).get();
             assertThat(actual).isEqualTo(expected);
-            assertThat(registry.preparedPositionKey(user, "1", CorePositionSide.LONG))
+            assertThat(registry.preparedPositionKey(user, "1:LONG"))
                     .isEqualTo(expected);
             registry.releasePublishedPosition(actual);
             registry.releasePositionKey(actual);
@@ -66,14 +66,15 @@ class RuntimeIdentityRegistryTest {
         registry.assertOwner();
         // 本用例身份所属用户十七
         long user = 17;
+        long identity = RuntimeIdentityRegistry.positionIdentityKey(user, "1", CorePositionSide.LONG);
         // 按测试用户路由构造或从冷运行时取得的所属账户 Lane
         var lane = new AccountLaneState(CoreConfiguration.standaloneLaneTopology().accountLaneId(user), 16);
         try (/* 模拟独立 Lane 操作或普通冷读的单线程执行器，用例结束关闭 */ var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
             // 本用例反复保留、发布消费和退休的确定性持仓键
-            long key = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
+            long key = executor.submit(() -> registry.retainPositionInLane(lane, identity, user, "1", CorePositionSide.LONG)).get();
             registry.releasePositionKey(key);
             assertThat(registry.positionKey(user, key)).isEqualTo("1:LONG");
-            executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
+            executor.submit(() -> registry.retainPositionInLane(lane, identity, user, "1", CorePositionSide.LONG)).get();
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);
             assertThat(registry.preparedPositionKey(user, "1:LONG")).isEqualTo(key);
@@ -82,7 +83,7 @@ class RuntimeIdentityRegistryTest {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.preparedPositionKey(user, "1:LONG"))
                     .isInstanceOf(IllegalStateException.class);
             // 最后删除后重新准备同名身份所得结果；客户端结果保留新分配符号
-            long recreated = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
+            long recreated = executor.submit(() -> registry.retainPositionInLane(lane, identity, user, "1", CorePositionSide.LONG)).get();
             assertThat(recreated).isEqualTo(key);
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);

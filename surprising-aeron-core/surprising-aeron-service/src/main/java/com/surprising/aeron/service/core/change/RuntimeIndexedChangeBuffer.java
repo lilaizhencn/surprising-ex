@@ -14,23 +14,6 @@ public class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
     private Object[] prepared = NO_PREPARED;
 
     /**
-     * 消费同槽业务变化及可选预计算事实的内部回调，标记可区分未准备与已准备删除。
-     * @param <V> 命令变化的业务值类型
-     * @param <I> 同槽可选预计算事实或原权威引用的类型
-     */
-    @FunctionalInterface
-    interface Consumer<V, I> {
-        /**
-         * 消费一个业务变化及其预计算列；hasPrepared 区分未准备和已经准备的 null。
-         * @param key 业务变化的原语 long 键
-         * @param value 本次消费的业务后值，null 表示删除或调用方定义的空值
-         * @param hasPrepared 这次变化是否携带已准备的第二列，true 时 null 仍有意义
-         * @param indexValue 这次已准备的索引结果，null 可明确表示删除
-         */
-        void accept(long key, V value, boolean hasPrepared, I indexValue);
-    }
-
-    /**
      * 创建可用于接收交换存储的空索引缓冲；需要专用发布槽的子类会覆盖此入口。
      */
     RuntimeIndexedChangeBuffer<V, I> emptyLike() { return new RuntimeIndexedChangeBuffer<>(); }
@@ -98,22 +81,6 @@ public class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
     }
 
     /**
-     * 按当前有效槽遍历业务值、是否已准备以及还原后的预计算值，不清理缓冲。
-     * @param consumer 在当前读取边界内消费业务值及预计算事实的回调
-     */
-    void forEachIndexed(Consumer<V, I> consumer) {
-        for (/* 当前业务键对应或正在遍历的有效连续槽。 */ int slot = 0; slot < size; slot++) {
-            // 预计算列槽的原始引用，null 未准备，哨兵表示已准备空值。
-            Object stored = slot < prepared.length ? prepared[slot] : null;
-            // 当前槽是否明确保存了预计算事实。
-            boolean hasPrepared = stored != null;
-            // 把专用空值哨兵还原后的预计算结果。
-            @SuppressWarnings("unchecked") I indexValue = stored == DELETED_INDEX ? null : (I) stored;
-            consumer.accept(keyAt(slot), valueAt(slot), hasPrepared, indexValue);
-        }
-    }
-
-    /**
      * 查询有效槽是否保存了预计算事实，专用空值哨兵也算已准备；调用方负责下标有效。
      * @param slot 基础缓冲中有效连续下标
      */
@@ -127,15 +94,6 @@ public class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         // 当前槽的预计算原始引用，可能是空值哨兵。
         Object value = slot < prepared.length ? prepared[slot] : null;
         return value == DELETED_INDEX ? null : (I) value;
-    }
-
-    /**
-     * 把全部业务变化与预计算列交给消费者，全部成功后清空；中途异常不在此回滚消费者已发生的变化。
-     * @param consumer 在当前读取边界内消费业务值及预计算事实的回调
-     */
-    void drainIndexedTo(Consumer<V, I> consumer) {
-        forEachIndexed(consumer);
-        clear();
     }
 
     /**

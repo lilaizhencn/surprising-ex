@@ -53,15 +53,15 @@ class RuntimeLeverageLookupTest {
             runtime.startAccountLanes();
             try {
                 org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                        runtime.leverage(blockedUser, "1", CoreMarginMode.CROSS))
+                        runtime.leverage(blockedLane, blockedUser, "1", CoreMarginMode.CROSS))
                         .isInstanceOf(IllegalStateException.class);
                 // 包含两个不同账户 Lane 的派发位集合。
                 long mask = runtime.topology().accountLaneMask(blockedUser) | runtime.topology().accountLaneMask(otherUser);
                 runtime.dispatchControlLanes(mask, /* 本次控制回调接收的实际 Lane 编号。 */ lane -> {
                     if (lane == runtime.accountLaneId(blockedUser))
-                        return runtime.leverage(blockedUser, "1", CoreMarginMode.CROSS);
+                        return runtime.leverage(blockedLane, blockedUser, "1", CoreMarginMode.CROSS);
                     await(blockedEntered);
-                    try { return runtime.leverage(otherUser, "2", CoreMarginMode.ISOLATED); }
+                    try { return runtime.leverage(runtime.accountLane(runtime.accountLaneId(otherUser)), otherUser, "2", CoreMarginMode.ISOLATED); }
                     finally { otherFinished.countDown(); }
                 });
                 // 当前控制派发最多等待五秒的单调时钟截止时间。
@@ -100,7 +100,7 @@ class RuntimeLeverageLookupTest {
             runtime.putLeverage(new CoreLeverageKey(second, "2", CoreMarginMode.ISOLATED), 3_000_000);
             runtime.clearChangedKeys();
             runtime.startAccountLanes();
-            org.assertj.core.api.Assertions.assertThatThrownBy(() -> runtime.leverage(first, "1", CoreMarginMode.CROSS))
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> runtime.leverage(runtime.accountLane(runtime.accountLaneId(first)), first, "1", CoreMarginMode.CROSS))
                     .isInstanceOf(IllegalStateException.class);
             // 计数为二的门闩，要求两个 Lane 回调均已进入再开始重复查找。
             var entered = new CountDownLatch(2);
@@ -117,8 +117,8 @@ class RuntimeLeverageLookupTest {
                 // 当前 Lane 用户已配置的全仓或逐仓保证金模式。
                 CoreMarginMode mode = isFirst ? CoreMarginMode.CROSS : CoreMarginMode.ISOLATED;
                 for (/* 当前 Lane 内重复查找和余额更新的轮次。 */ int i = 0; i < 256; i++) {
-                    assertThat(runtime.leverage(user, symbol, mode)).isEqualTo(isFirst ? 2_000_000L : 3_000_000L);
-                    assertThat(runtime.leverage(user, symbol, mode == CoreMarginMode.CROSS
+                    assertThat(runtime.leverage(runtime.accountLane(lane), user, symbol, mode)).isEqualTo(isFirst ? 2_000_000L : 3_000_000L);
+                    assertThat(runtime.leverage(runtime.accountLane(lane), user, symbol, mode == CoreMarginMode.CROSS
                             ? CoreMarginMode.ISOLATED : CoreMarginMode.CROSS)).isNull();
                     runtime.replaceBalance(user, 3, 900, 100);
                 }
@@ -127,7 +127,7 @@ class RuntimeLeverageLookupTest {
                 org.assertj.core.api.Assertions.assertThatThrownBy(() -> runtime.replaceBalance(
                         isFirst ? second : first, 3, 0, 0)).isInstanceOf(IllegalStateException.class)
                         .hasMessageContaining("balance write crossed its owner Lane");
-                return runtime.leverage(user, symbol, mode);
+                return runtime.leverage(runtime.accountLane(lane), user, symbol, mode);
             });
             // 当前控制派发最多等待五秒的单调时钟截止时间。
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

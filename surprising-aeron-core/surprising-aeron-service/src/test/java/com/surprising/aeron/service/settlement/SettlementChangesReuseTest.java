@@ -173,7 +173,9 @@ class SettlementChangesReuseTest {
             delta.putPosition(1, null);
             delta.preparePublication();
             delta.commitTerminalToOwner(runtime, 0, null, null, null);
-            assertThat(runtime.positionChanges().toArray()).containsExactly(1);
+            var changes = runtime.positionChanges().longIterator();
+            assertThat(changes.next()).isEqualTo(1);
+            assertThat(changes.hasNext()).isFalse();
         }
     }
 

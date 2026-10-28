@@ -44,7 +44,7 @@ class ControlOrderMetadataLeaseTest {
             });
             await(state, state::pollControlLanes);
             // 保存本次 Lane 提交元数据及冻结发布值的命令回执。
-            var event = state.dispatchLaneMutation(1, List.of(7L), List.of(11L), 100, 200);
+            var event = state.dispatchLaneMutation(1, List.of(7L), List.of(11L), null, 100, 200);
             await(state, () -> state.laneCommitComplete(event));
             // 确认较晚的 Lane 元数据修改已经执行完的门闩。
             var later = new CountDownLatch(1);
@@ -83,7 +83,7 @@ class ControlOrderMetadataLeaseTest {
             state.clearChangedKeys();
 
             // 保存本次 Lane 提交元数据及冻结发布值的命令回执。
-            var event = state.dispatchLaneMutation(1, List.of(7L), List.of(11L), 100, 200);
+            var event = state.dispatchLaneMutation(1, List.of(7L), List.of(11L), null, 100, 200);
             await(state, () -> state.laneCommitComplete(event));
             state.releaseLaneCommit(event);
             assertThat(state.orderChanges().get(11).clusterPosition()).isEqualTo(200);

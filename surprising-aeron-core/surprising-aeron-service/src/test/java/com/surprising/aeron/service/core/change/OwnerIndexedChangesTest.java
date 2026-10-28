@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core.change;
 
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import java.util.HashMap;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,7 +38,7 @@ class OwnerIndexedChangesTest {
      */
     @Test void laneStorageMovesWithoutCopyAndCanBeReusedBeforeOwnerPublication() throws Exception {
         // 当前测试的 Owner 有序变化视图，订单场景使用专用冻结直接缓冲。
-        var owner = new OwnerIndexedChanges<String, String>();
+        var owner = new OwnerIndexedChanges<String, String>(new RuntimeIndexedChangeBuffer<>());
         // 第一条模拟 Lane 输出缓冲。
         var first = new RuntimeIndexedChangeBuffer<String, String>();
         // 第二条模拟 Lane 输出缓冲。
@@ -57,11 +56,14 @@ class OwnerIndexedChangesTest {
         assertThat(keys.get(((Object[])lanes.get(owner))[0])).isSameAs(originalKeys);
         first.put(1, "next-command"); second.clear();
         assertThat(owner.get(1)).isEqualTo("a");
-        assertThat(owner.toArray()).containsExactly(1, 2);
-        // 收集已准备索引事实的独立断言 Map。
-        var prepared = new HashMap<Long, String>();
-        owner.forEachIndexed((/* 内部遍历回调接收的业务键。 */ id, /* 内部遍历回调接收的业务后值，null 也必须传播。 */ value, /* 当前键是否带有预计算事实的标记。 */ flag, /* 回调收到的预计算事实值，null 可为已准备删除或尚未准备。 */ index) -> { assertThat(flag).isTrue(); prepared.put(id, index); });
-        assertThat(prepared).containsEntry(1L,"index-a").containsEntry(2L,"index-b");
+        var ids = owner.longIterator();
+        assertThat(ids.next()).isEqualTo(1);
+        assertThat(ids.next()).isEqualTo(2);
+        assertThat(ids.hasNext()).isFalse();
+        assertThat(owner.laneBuffer(0).hasPreparedAt(0)).isTrue();
+        assertThat(owner.laneBuffer(0).preparedAt(0)).isEqualTo("index-a");
+        assertThat(owner.laneBuffer(3).hasPreparedAt(0)).isTrue();
+        assertThat(owner.laneBuffer(3).preparedAt(0)).isEqualTo("index-b");
         owner.clear(); assertThat(owner.isEmpty()).isTrue();
         assertThat(first.get(1)).isEqualTo("next-command");
     }
@@ -70,42 +72,23 @@ class OwnerIndexedChangesTest {
      */
     @Test void sameLaneAndOwnerControlUpdatesKeepLastValueAndInvalidateOldPreparedIndex() {
         // 当前测试的 Owner 有序变化视图，订单场景使用专用冻结直接缓冲。
-        var owner = new OwnerIndexedChanges<String, String>();
+        var owner = new OwnerIndexedChanges<String, String>(new RuntimeIndexedChangeBuffer<>());
         // 模拟一个 Lane 输出的变化缓冲。
         var lane = new RuntimeIndexedChangeBuffer<String, String>();
         lane.putIndexed(9, "old", true, "old-index"); owner.adopt(2, lane);
         lane.putIndexed(9, "new", true, "new-index"); owner.adopt(2, lane);
-        assertThat(owner.toArray()).containsExactly(9);
+        var ids = owner.longIterator();
+        assertThat(ids.next()).isEqualTo(9);
+        assertThat(ids.hasNext()).isFalse();
         assertThat(owner.get(9)).isEqualTo("new");
         owner.put(9, null);
-        owner.forEachIndexed((/* 内部遍历回调接收的业务键。 */ id, /* 内部遍历回调接收的业务后值，null 也必须传播。 */ value, /* 当前键是否带有预计算事实的标记。 */ flag, /* 回调收到的预计算事实值，null 可为已准备删除或尚未准备。 */ index) -> { assertThat(value).isNull(); assertThat(flag).isFalse(); assertThat(index).isNull(); });
+        assertThat(owner.directBuffer().valueAt(0)).isNull();
+        assertThat(owner.directBuffer().hasPreparedAt(0)).isFalse();
+        assertThat(owner.directBuffer().preparedAt(0)).isNull();
         lane.putIndexed(9, "after-control", true, "last-index"); owner.adopt(2,lane);
         assertThat(owner.get(9)).isEqualTo("after-control");
-        owner.forEachIndexed((/* 内部遍历回调接收的业务键。 */ id, /* 内部遍历回调接收的业务后值，null 也必须传播。 */ value, /* 当前键是否带有预计算事实的标记。 */ flag, /* 回调收到的预计算事实值，null 可为已准备删除或尚未准备。 */ index) -> { assertThat(flag).isTrue(); assertThat(index).isEqualTo("last-index"); });
+        assertThat(owner.directBuffer().hasPreparedAt(0)).isTrue();
+        assertThat(owner.directBuffer().preparedAt(0)).isEqualTo("last-index");
     }
 
-    /**
-     * 消费不同 Lane 的保留值并清空 Owner 视图，之后直接缓冲仍可重新写入和读取。
-     */
-    @Test void drainConsumesDirectAndLaneValuesAndClearsRetainedReferences() {
-        // 当前测试的 Owner 有序变化视图，订单场景使用专用冻结直接缓冲。
-        var owner = new OwnerIndexedChanges<String, Void>();
-        // 模拟一个 Lane 输出的变化缓冲。
-        var lane = new RuntimeIndexedChangeBuffer<String, Void>();
-        // 另一条模拟 Lane 输出缓冲，用于核对同时保留多个分区。
-        var otherLane = new RuntimeIndexedChangeBuffer<String, Void>();
-        lane.put(1, "lane");
-        otherLane.put(2, "other-lane");
-        owner.adopt(2, lane);
-        owner.adopt(4, otherLane);
-        // 消费者收集到的最终键值 Map。
-        var values = new HashMap<Long, String>();
-
-        owner.drainTo(values::put);
-
-        assertThat(values).containsEntry(1L, "lane").containsEntry(2L, "other-lane");
-        assertThat(owner.isEmpty()).isTrue();
-        owner.put(3, "reused");
-        assertThat(owner.get(3)).isEqualTo("reused");
-    }
 }

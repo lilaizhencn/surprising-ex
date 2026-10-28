@@ -104,9 +104,6 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
  * 交易账户与账本的运行时：按产品线和 Lane 保存可变业务状态，Owner 负责命令交接、变化收集和完成水位。账户、Matcher 及账本各有实际执行边界；构造先准备状态和复用资源，活动阶段通过派发或明确的所有权交接访问账户。
  */
 public final class TradingAccountRuntime implements AutoCloseable {
-    /** Owner 冷查询或控制路径复用的杠杆查找探针，正式映射仍保存 CoreLeverageKey。 */
-    private final LeverageLookup ownerLeverageLookup = new LeverageLookup();
-
     /**  Owner 维护的在途订单预留序号与用户计数，Lane 完成后再释放。 借出唯一待完成预留跟踪器，不建立第二套计数。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -1321,49 +1318,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public boolean workersStopped() { return laneLifecycle.workersStopped(); }
 
     /**
-     * 从原始用户数组收集目标 Lane，派发提交事件并交给调用方后续收集。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
-     */
-    public LaneCommitEvent dispatchLaneMutation(long coreSequence, long[] userIds) {
-        assertOwner();
-        if (coreSequence <= 0 || userIds == null) {
-            throw new IllegalArgumentException("invalid lane apply");
-        }
-        clearLaneUserScratch();
-        for (long /* 本轮读出的用户身份，按对应入口过滤或路由 */ userId : userIds) {
-            if (userId > 0) addLaneUser(userId);
-        }
-        return dispatchLaneMutationFromScratch(coreSequence);
-    }
-
-    /**
-     * 从已有结果集合收集实际变化用户，仅派发这些用户所在 Lane 的提交事件。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
-     */
-    public LaneCommitEvent dispatchLaneMutation(long coreSequence, Iterable<Long> userIds) {
-        assertOwner();
-        if (coreSequence <= 0 || userIds == null) throw new IllegalArgumentException("invalid lane apply");
-        clearLaneUserScratch();
-        addLaneUsers(userIds);
-        return dispatchLaneMutationFromScratch(coreSequence);
-    }
-
-    /**
-     * 为订单元数据提交补上空的触发取消列表，沿用同一账户提交任务。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
-     * @param orderIds 本次需要在同一 Lane 提交任务中盖章的订单身份
-     * @param timestamp 原复制日志业务时间，不用当前机器时间替代
-     * @param position 原复制日志位置，随同提交元数据交给账户任务
-     */
-    public LaneCommitEvent dispatchLaneMutation(long coreSequence, Iterable<Long> userIds,
-            Iterable<Long> orderIds, long timestamp, long position) {
-        return dispatchLaneMutation(coreSequence, userIds, orderIds, null, timestamp, position);
-    }
-
-    /**
      * 校验提交序号和原日志元数据，按变化用户派发账户提交任务，同时携带订单盖章和可选触发取消信息。
      * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
      * @param userIds 本次实际涉及的用户身份集合或原始数组，跳过空或非正身份
@@ -1443,14 +1397,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         // 当前按拓扑选中或从掩码取出的账户 Lane 编号
         int laneId = topology.accountLaneId(userId);
         laneUserScratch[laneId].add(userId);
-    }
-
-    /**
-     * 为不携带元数据的提交补上默认值，进入统一派发。
-     * @param coreSequence 本次准入、提交或完成通知关联的 Core 序号
-     */
-    LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence) {
-        return dispatchLaneMutationFromScratch(coreSequence, null, null, 0, 0, null, null, -1);
     }
 
     /**
@@ -3501,32 +3447,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     public Long leverage(CoreLeverageKey key) {
         assertOwner();
         return onLane(key.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> lane.leverage(key));
-    }
-
-    /**
-     * 检查用户、规范标的文本和保证金模式，复用当前 Lane 或 Owner 的查找探针读取杠杆，最后释放探针文本引用。标的规范化由命令入口完成。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     * @param canonicalSymbol 已经由入口规范化的标的名称，直接用于杠杆键比较
-     * @param marginMode 订单、持仓或杠杆配置的保证金模式
-     */
-    public Long leverage(long userId, String canonicalSymbol, CoreMarginMode marginMode) {
-        assertOwner();
-        if (userId <= 0 || canonicalSymbol == null || marginMode == null) {
-            throw new IllegalArgumentException("invalid runtime leverage lookup");
-        }
-        requireAccountReadOwnership();
-        // 当前已经进入的账户范围，用于核对用户归属及选择 Lane 自己的杠杆探针
-        AccountLaneState scopedLane = currentLaneCommandScope();
-        if (scopedLane != null && scopedLane.laneId() != topology.accountLaneId(userId))
-            throw new IllegalStateException("leverage read crossed its owning Lane");
-        // 本线程复用的杠杆查找探针，只查原映射，finally 清理临时引用
-        LeverageLookup lookup = scopedLane == null ? ownerLeverageLookup : scopedLane.leverageLookup();
-        lookup.set(userId, canonicalSymbol, marginMode);
-        try {
-            return accountLanes[topology.accountLaneId(userId)].leverage(lookup);
-        } finally {
-            lookup.clear();
-        }
     }
 
     /**

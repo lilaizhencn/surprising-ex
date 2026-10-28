@@ -671,54 +671,6 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * 所属 Lane 为尚未消费的发布结果保留持仓名身份：建立或找到同名项，遇到退休项重试，用 CAS 增加引用并保证正向登记。
-     * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
-     * @param userId 该身份所属用户
-     * @param name 该发布结果必须保留的完整原持仓名
-     */
-    public long retainPositionInLane(AccountLaneState lane, long userId, String name) {
-        lane.assertOwner();
-        if (clientTopology.accountLaneId(userId) != lane.laneId() || name == null || name.isBlank())
-            throw new IllegalArgumentException("position identity belongs to another Lane");
-        // 当前用户身份的确定性长整数键
-        long key = deterministicKey(userId, name);
-        while (true) {
-            // 本次反向表查到或发布的持仓身份项
-            PositionEntry entry = positionEntry(lane, key);
-            if (entry == null) {
-                // 为未命中身份建立、尚待 putIfAbsent 竞争发布的新持仓项
-                PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
-                entry = positions.putIfAbsent(new PositionMapKey(key), created);
-                if (entry == null) entry = created;
-            }
-            if (entry.identity.userId() != userId || !entry.identity.positionKey().equals(name))
-                throw new IllegalStateException("deterministic position identity collision");
-            // CAS 读取的当前发布保留计数，负数表示退休并需要重试
-            int uses = entry.get();
-            if (uses < 0) { Thread.onSpinWait(); continue; }
-            if (!entry.compareAndSet(uses, Math.incrementExact(uses))) continue;
-            ensurePositionIdentityRegistered(entry, key);
-            return key;
-        }
-    }
-
-    /**
-     * 按标的和方向计算确定性键，再保留所属 Lane 发布所需的一份持仓身份引用。
-     * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
-     * @param userId 该身份所属用户
-     * @param instrumentId 永久数字标的身份；整数重载直接给数值，文本重载使用规范数字文本
-     * @param side 净仓、多头或空头持仓方向
-     */
-    public long retainPositionInLane(AccountLaneState lane, long userId, String instrumentId,
-                              CorePositionSide side) {
-        if (instrumentId == null || instrumentId.isBlank() || side == null) {
-            throw new IllegalArgumentException("position identity belongs to another Lane");
-        }
-        return retainPositionInLane(lane, positionIdentityKey(userId, instrumentId, side),
-                userId, instrumentId, side);
-    }
-
-    /**
      * 使用调用方已计算的持仓键，核对 Lane 与身份后保留一次发布引用并缓存；不重新计算传入键，退休项重试、计数溢出报错。
      * @param lane 实际持有该用户账户身份的 Lane，显式入口核对路由和运行时实例
      * @param key 待查询、登记或释放的确定性身份长整数键
@@ -888,23 +840,6 @@ public final class RuntimeIdentityRegistry {
         // 当前用户身份的确定性长整数键
         Long key = findPositionIdentity(userId, positionKey);
         if (key == null) throw new IllegalStateException("position identity was not prepared by the Sequencer");
-        return key;
-    }
-
-    /**
-     * 按标的和方向查已有持仓键，并核对反向身份；缺失或不匹配时报错。
-     * @param userId 该身份所属用户
-     * @param instrumentId 永久数字标的身份；整数重载直接给数值，文本重载使用规范数字文本
-     * @param side 净仓、多头或空头持仓方向
-     */
-    public long preparedPositionKey(long userId, String instrumentId, CorePositionSide side) {
-        // 当前用户身份的确定性长整数键
-        long key = positionIdentityKey(userId, instrumentId, side);
-        // 本次反向表查到或发布的持仓身份项
-        PositionEntry entry = positionEntry(key);
-        if (entry == null || !entry.matches(userId, instrumentId, side)) {
-            throw new IllegalStateException("position identity was not prepared by the Sequencer");
-        }
         return key;
     }
 

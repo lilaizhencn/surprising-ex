@@ -157,8 +157,8 @@ public class AccountLaneCommitBenchmark {
             for (int index = 0; index < commits.length; index++) {
                 long next = ++sequence;
                 commits[index] = metadata
-                        ? runtime.dispatchLaneMutation(next, metadataUsers, metadataOrders, next, next)
-                        : runtime.dispatchLaneMutation(next, users);
+                        ? runtime.dispatchLaneMutation(next, metadataUsers, metadataOrders, null, next, next)
+                        : runtime.dispatchLaneMutation(next, metadataUsers, java.util.List.of(), null, 0, 0);
             }
             for (int index = 0; index < commits.length; index++) {
                 LaneCommitEvent commit = commits[index];

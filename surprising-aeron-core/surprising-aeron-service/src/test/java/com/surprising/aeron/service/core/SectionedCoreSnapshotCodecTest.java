@@ -235,31 +235,29 @@ class SectionedCoreSnapshotCodecTest {
         }
     }
 
-    /**
-     * 把当前快照版本改为二十二，要求完整恢复、清单读取和增量接收三个入口都在版本边界拒绝，未尝试兼容旧版。
-     */
-    @Test
-    void onlyCurrentSectionedDecoderAcceptsRecoveryInput() {
-        // 外层版本被改为二十二的快照字节。
-        byte[] unsupported;
-        try (/* 当前创建的运行时或激活前钩子接收到的候选，具体用途由当前语句决定。 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
-            unsupported = state.snapshot(47);
+    /** 六产品线的当前快照换成旧版本或下一版本，完整恢复、清单和增量入口都必须在外层版本边界拒绝。 */
+    @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void onlyCurrentSectionedDecoderAcceptsRecoveryInput(ProductLine product) {
+        byte[] current;
+        try (var state = new TradingCoreRuntime(product)) {
+            current = state.snapshot(47);
         }
-        ByteBuffer.wrap(unsupported).order(ByteOrder.LITTLE_ENDIAN).putShort(Integer.BYTES, (short) 22);
-        // 把不支持版本的字节包成 DirectBuffer，供增量入口接收。
-        UnsafeBuffer encoded = new UnsafeBuffer(unsupported);
-
-        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(unsupported, ProductLine.SPOT))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 22");
-        assertThatThrownBy(() -> SectionedCoreSnapshotCodec.manifest(unsupported, ProductLine.SPOT))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 22");
-        // 验证版本拒绝的增量接收入口。
-        com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery();
-        assertThatThrownBy(() -> recovery.accept(encoded, 0, unsupported.length))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 22");
+        for (int version = 0; version <= SectionedCoreSnapshotCodec.VERSION + 1; version++) {
+            if (version == SectionedCoreSnapshotCodec.VERSION) continue;
+            byte[] unsupported = current.clone();
+            ByteBuffer.wrap(unsupported).order(ByteOrder.LITTLE_ENDIAN).putShort(Integer.BYTES, (short) version);
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(unsupported, product))
+                    .isInstanceOf(ProtocolException.class)
+                    .hasMessageContaining("unsupported snapshot version: " + version);
+            assertThatThrownBy(() -> SectionedCoreSnapshotCodec.manifest(unsupported, product))
+                    .isInstanceOf(ProtocolException.class)
+                    .hasMessageContaining("unsupported snapshot version: " + version);
+            var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery();
+            assertThatThrownBy(() -> recovery.accept(new UnsafeBuffer(unsupported), 0, unsupported.length))
+                    .isInstanceOf(ProtocolException.class)
+                    .hasMessageContaining("unsupported snapshot version: " + version);
+        }
     }
 
     /**

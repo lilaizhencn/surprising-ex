@@ -96,7 +96,7 @@ class TriggerOrderIndexTest {
             assertThat(AccountLaneQueryTestSupport.read(runtime, 7, () -> runtime.triggerOrder(901).status())).isEqualTo(CoreTriggerOrderStatus.CANCELED);
             assertThat(AccountLaneQueryTestSupport.read(runtime, secondUser, () -> runtime.triggerOrder(902).revision())).isEqualTo(2);
             // 再次派发的普通无触发撤销提交事件，必须复用原 event 对象
-            var plain = runtime.dispatchLaneMutation(2, java.util.List.of(7L, second));
+            var plain = runtime.dispatchLaneMutation(2, java.util.List.of(7L, second), java.util.List.of(), null, 0, 0);
             assertThat(plain).isSameAs(event);
             awaitCommit(runtime, plain);
             runtime.releaseLaneCommit(plain);

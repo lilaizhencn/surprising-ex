@@ -71,6 +71,7 @@ class PositionPublicationReuseTest {
         values.clear();
         assertThat(cell.instrument()).isNull();
         values.put(1, position(99, 9));
-        values.forEachIndexed((/* 消费回调收到的持仓原语键。 */ key, /* 消费回调收到的较早持仓发布值。 */ value, /* 当前遍历项是否带预计算事实，清空复用后应为 false。 */ prepared, /* 当前遍历项的预计算索引值，本断言只检查是否准备。 */ index) -> assertThat(prepared).isFalse());
+        assertThat(values.hasPreparedAt(0)).isFalse();
+        assertThat(values.preparedAt(0)).isNull();
     }
 }

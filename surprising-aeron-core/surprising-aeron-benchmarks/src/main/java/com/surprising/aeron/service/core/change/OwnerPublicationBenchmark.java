@@ -46,7 +46,7 @@ public class OwnerPublicationBenchmark {
     private final TradingAccountRuntime runtime = new TradingAccountRuntime();
     private final LaneCommitDelta delta = new LaneCommitDelta();
     private final RuntimeIndexedChangeBuffer<String, String> lane = new RuntimeIndexedChangeBuffer<>();
-    private final OwnerIndexedChanges<String, String> owner = new OwnerIndexedChanges<>();
+    private final OwnerIndexedChanges<String, String> owner = new OwnerIndexedChanges<>(new RuntimeIndexedChangeBuffer<>());
     private final UserRuntime[] users = new UserRuntime[20];
     private final com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedIds =
             new com.surprising.aeron.support.collection.PrimitiveLongChangeSet(20);

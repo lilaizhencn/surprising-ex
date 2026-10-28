@@ -14,11 +14,6 @@ public final class OwnerIndexedChanges<V, I> {
     private long laneMask;
 
     /**
-     * 创建使用普通索引缓冲的 Owner 变化视图；需要可复用发布值时调用方传专用缓冲。
-     */
-    public OwnerIndexedChanges() { this(new RuntimeIndexedChangeBuffer<>()); }
-
-    /**
      * 保存 Owner 直接更新使用的具体缓冲，并准备最多六十四条 Lane 的按需接管槽。
      * @param direct Owner 直接写入要使用的具体变化缓冲
      */
@@ -136,20 +131,6 @@ public final class OwnerIndexedChanges<V, I> {
      */
     public RuntimeIndexedChangeBuffer<V, I> laneBuffer(int laneId) { return lanes[laneId]; }
     /**
-     * 先遍历直接变化，再按 Lane 编号顺序遍历保留变化，向内部消费者提供预计算事实，不自动清空。
-     * @param consumer 在 Owner 当前读取或提交边界内消费变化的回调
-     */
-    void forEachIndexed(RuntimeIndexedChangeBuffer.Consumer<V, I> consumer) {
-        direct.forEachIndexed(consumer);
-        // 还要处理的保留 Lane 位图，每次清除最低有效位。
-        long remaining = laneMask;
-        while (remaining != 0) {
-            // 当前位图选出的 Lane 编号。
-            int lane = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-            lanes[lane].forEachIndexed(consumer);
-        }
-    }
-    /**
      * 按直接缓冲及保留 Lane 的顺序提供业务键和值，遍历期间不能并发改动这些缓冲。
      * @param consumer 在 Owner 当前读取或提交边界内消费变化的回调
      */
@@ -162,21 +143,6 @@ public final class OwnerIndexedChanges<V, I> {
             int lane = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
             lanes[lane].forEach(consumer);
         }
-    }
-    /**
-     * 消费直接缓冲及各保留 Lane 的值，交由具体缓冲释放其引用和发布槽，全部成功后把保留位图清零；不提供异常原子回滚。
-     * @param consumer 在 Owner 当前读取或提交边界内消费变化的回调
-     */
-    void drainTo(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<V> consumer) {
-        direct.drainTo(consumer);
-        // 还要处理的保留 Lane 位图，每次清除最低有效位。
-        long remaining = laneMask;
-        while (remaining != 0) {
-            // 当前位图选出的 Lane 编号。
-            int lane = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-            lanes[lane].drainTo(consumer);
-        }
-        laneMask = 0;
     }
     /**
      * 创建按直接缓冲、再按保留 Lane 顺序读取有效键的迭代器；只保存遍历进度，不复制底层数据，期间不得修改变化视图。
@@ -208,26 +174,6 @@ public final class OwnerIndexedChanges<V, I> {
                 return current.keyAt(offset++);
             }
         };
-    }
-    /**
-     * 在导出边界合计有效变化数并复制当前键序列，不把源缓冲的后续变化暴露到数组中。
-     */
-    public long[] toArray() {
-        // 直接和所有保留 Lane 的有效变化总数。
-        int size = direct.size();
-        // 还要处理的保留 Lane 位图，每次清除最低有效位。
-        long remaining = laneMask;
-        while (remaining != 0) {
-            // 当前位图选出的 Lane 编号。
-            int lane = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-            size += lanes[lane].size();
-        }
-        // 导出边界新建的独立原语键数组。
-        long[] result = new long[size];
-        // 按当前变化视图读取键序列的临时迭代器。
-        var iterator = longIterator();
-        for (/* 当前复制到导出数组的下标。 */ int i = 0; i < size; i++) result[i] = iterator.next();
-        return result;
     }
     /**
      * 清空直接缓冲和已置位的 Lane 缓冲，再清保留位图；容器与发布槽容量留待下一命令复用。

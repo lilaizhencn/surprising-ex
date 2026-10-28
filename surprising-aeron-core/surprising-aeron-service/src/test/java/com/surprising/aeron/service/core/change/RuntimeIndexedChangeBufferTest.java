@@ -15,7 +15,7 @@ class RuntimeIndexedChangeBufferTest {
         // 模拟 Lane 输出的普通索引变化缓冲，未使用预计算列。
         var lane = new RuntimeIndexedChangeBuffer<String, Void>();
         // 接管模拟 Lane 输出的 Owner 变化视图。
-        var owner = new OwnerIndexedChanges<String, Void>();
+        var owner = new OwnerIndexedChanges<String, Void>(new RuntimeIndexedChangeBuffer<>());
         // 读取第二列数组的反射字段，用于检查未使用预计算列时长度仍为零。
         var prepared = RuntimeIndexedChangeBuffer.class.getDeclaredField("prepared");
         prepared.setAccessible(true);
@@ -45,8 +45,10 @@ class RuntimeIndexedChangeBufferTest {
         target.putIndexed(1, "filled", true, null);
         // 记录各键值、准备标记及索引结果的断言用 Map。
         var result = new java.util.HashMap<Long, String>();
-        target.forEachIndexed((/* 回调接收的业务变化原语键。 */ key, /* 回调接收的当前业务后值。 */ value, /* 本键是否已经准备预计算事实，true 且结果为 null 表示明确空值。 */ present, /* 回调收到的预计算结果，需要结合 present 标记区分尚未准备与明确空值。 */ prepared) ->
-                result.put(key, value + ":" + present + ":" + prepared));
+        for (int slot = 0; slot < target.size(); slot++) {
+            result.put(target.keyAt(slot), target.valueAt(slot) + ":" + target.hasPreparedAt(slot)
+                    + ":" + target.preparedAt(slot));
+        }
         assertThat(result).containsEntry(1L, "filled:true:null").containsEntry(2L, "closed:true:null")
                 .containsEntry(3L, "control:false:null");
         assertThat(target.size()).isEqualTo(3);
@@ -85,9 +87,10 @@ class RuntimeIndexedChangeBufferTest {
         var field = RuntimeIndexedChangeBuffer.class.getDeclaredField("prepared"); field.setAccessible(true);
         assertThat((Object[]) field.get(buffer)).containsOnlyNulls();
         for (/* 本次填充或核对的连续业务键下标。 */ int i = 0; i < 100; i++) buffer.put(1000 + i, "next");
-        buffer.forEachIndexed((/* 回调接收的业务变化原语键。 */ key, /* 回调接收的当前业务后值。 */ value, /* 本键是否已经准备预计算事实，true 且结果为 null 表示明确空值。 */ present, /* 回调收到的预计算结果，需要结合 present 标记区分尚未准备与明确空值。 */ prepared) -> {
-            assertThat(present).isFalse(); assertThat(prepared).isNull();
-        });
+        for (int slot = 0; slot < buffer.size(); slot++) {
+            assertThat(buffer.hasPreparedAt(slot)).isFalse();
+            assertThat(buffer.preparedAt(slot)).isNull();
+        }
         buffer.clear();
         assertThat(buffer.isEmpty()).isTrue();
         assertThat((Object[]) field.get(buffer)).containsOnlyNulls();

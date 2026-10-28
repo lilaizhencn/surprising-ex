@@ -128,8 +128,8 @@ class TradingAccountRuntimeTest {
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ var state = new TradingAccountRuntime()) {
             state.putLeverage(new CoreLeverageKey(7, "1", CoreMarginMode.CROSS), 5_000_000L);
 
-            assertThat(state.leverage(7, "1", CoreMarginMode.CROSS)).isEqualTo(5_000_000L);
-            assertThat(state.leverage(7, "1", CoreMarginMode.ISOLATED)).isNull();
+            assertThat(state.leverage(state.accountLane(state.accountLaneId(7)), 7, "1", CoreMarginMode.CROSS)).isEqualTo(5_000_000L);
+            assertThat(state.leverage(state.accountLane(state.accountLaneId(7)), 7, "1", CoreMarginMode.ISOLATED)).isNull();
             assertThat(state.leverage(new CoreLeverageKey(7, "1", CoreMarginMode.CROSS)))
                     .isEqualTo(5_000_000L);
         }
@@ -168,7 +168,7 @@ class TradingAccountRuntimeTest {
 
             // 第一次给两用户订单盖提交元数据的原事件
             var first = state.dispatchLaneMutation(1, java.util.List.of(7L, second),
-                    java.util.List.of(11L, 12L), 100, 200);
+                    java.util.List.of(11L, 12L), null, 100, 200);
             awaitMetadataCommit(state, first);
             assertThat(maps[topology.accountLaneId(7)].inspect(11)).isSameAs(original);
             assertThat(state.ownerLaneAccess()).isFalse();
@@ -177,14 +177,14 @@ class TradingAccountRuntimeTest {
             assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
             // 下一次复用原提交事件，预留用例中为候选第二单
             var next = state.dispatchLaneMutation(2, java.util.List.of(7L),
-                    java.util.List.of(11L), 101, 201);
+                    java.util.List.of(11L), null, 101, 201);
             assertThat(next).isSameAs(first);
             awaitMetadataCommit(state, next);
             state.releaseLaneCommit(next);
             assertThat(maps[topology.accountLaneId(7)].inspect(11).clusterPosition()).isEqualTo(201);
             assertThat(maps[topology.accountLaneId(second)].inspect(12).clusterPosition()).isEqualTo(200);
             // 复用池中不带任何订单盖章列表的原提交事件
-            var plain = state.dispatchLaneMutation(3, java.util.List.of(7L, second));
+            var plain = state.dispatchLaneMutation(3, java.util.List.of(7L, second), java.util.List.of(), null, 0, 0);
             awaitMetadataCommit(state, plain);
             state.releaseLaneCommit(plain);
             assertThat(maps[topology.accountLaneId(7)].inspect(11).clusterPosition()).isEqualTo(201);
@@ -1377,12 +1377,13 @@ class TradingAccountRuntimeTest {
             users[laneId] = userForLane(topology, laneId);
             state.putUser(new UserRuntime(users[laneId]));
         }
+        var committedUsers = java.util.Arrays.stream(users).boxed().toList();
         state.startAccountLanes();
         try {
             // 先派发、后逐个收集的二百五十六个原 Lane 提交事件
             LaneCommitEvent[] commits = new LaneCommitEvent[256];
             for (/* 当前数组或订单循环下标 */ int index = 0; index < commits.length; index++) {
-                commits[index] = state.dispatchLaneMutation(index + 1L, users);
+                commits[index] = state.dispatchLaneMutation(index + 1L, committedUsers, java.util.List.of(), null, 0, 0);
             }
             for (LaneCommitEvent /* 当前待完成、核对实际掩码并归还的原提交事件 */ commit : commits) {
                 while (!state.laneCommitComplete(commit)) Thread.onSpinWait();
@@ -1777,7 +1778,7 @@ class TradingAccountRuntimeTest {
     }
 
     private static long stageLaneMutation(TradingAccountRuntime state, long sequence, Iterable<Long> users) {
-        var event = state.dispatchLaneMutation(sequence, users);
+        var event = state.dispatchLaneMutation(sequence, users, java.util.List.of(), null, 0, 0);
         if (event == null) return 0;
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
         while (!state.laneCommitComplete(event)) {
