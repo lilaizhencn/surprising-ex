@@ -75,10 +75,10 @@ class RiskBatchBudgetTest {
                 }
                 // 运行时 Lane 所有权交接代次的反射字段，用来确认异步续步没有再次借用账户表。
                 // 准备阶段已取得访问权之后的交接代次，整批异步续步不应再次增加它。
-                long handoffBefore = state.runtimeState.laneHandoffEpoch();
+                long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState);
                 // 原运行时本批执行的最终响应，需要与同步或恢复参照逐字节一致。
                 var actual = apply(state, firstBatch);
-                assertThat(state.runtimeState.laneHandoffEpoch()).isEqualTo(handoffBefore);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState)).isEqualTo(handoffBefore);
                 assertThat(actual.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(actual.data()).isEqualTo(expected.data());
                 assertThat(state.tradingState().businessStateHash())

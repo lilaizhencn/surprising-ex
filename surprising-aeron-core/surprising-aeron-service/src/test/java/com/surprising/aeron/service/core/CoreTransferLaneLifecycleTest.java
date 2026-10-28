@@ -47,7 +47,7 @@ class CoreTransferLaneLifecycleTest {
             while (source.runtimeState.topology().accountLaneId(second) == source.runtimeState.topology().accountLaneId(first)) second++;
             deposit(source, first, 100); deposit(source, second, 200);
             // 进入守卫前的所有权交接轮次，结束时要求不变
-            long handoff = source.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(source.runtimeState);
             // 业务ID91、金额30的第一用户划转
             var a = transfer(product, destination, 91, first, 30);
             // 业务ID92、金额10的第二用户划转
@@ -98,7 +98,7 @@ class CoreTransferLaneLifecycleTest {
                     assertThat(source.runtimeState.revision()).isEqualTo(revision);
                 }
                 assertThat(query(source, 256)).isEmpty();
-                assertThat(source.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(source.runtimeState)).isEqualTo(handoff);
             }
             // 完成后的第一源用户只读视图，余额70
             var firstUser = CoreTestCompletion.userState(source, first);

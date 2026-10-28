@@ -2,7 +2,6 @@ package com.surprising.aeron.service.core.change;
 
 import lombok.Getter;
 import lombok.experimental.Accessors;
-import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 /**
  * 由单个 Owner 或 Lane 持有的命令变化缓冲。键和值按首次插入顺序连续保存，原语索引负责定位，重复键覆盖同一槽；null 是有效删除变化，containsKey 可区分删除与未记录。值默认只是引用，交接和复制由具体缓冲及调用方保证，清空保留容量。
@@ -122,26 +121,6 @@ public class RuntimeChangeBuffer<V> {
         indexSlots[indexPosition] = size;
         indexGenerations[indexPosition] = indexGeneration;
         return size++;
-    }
-
-    /**
-     * 逐项把值引用写入目标原语 Map，null 则删除目标键，并释放源引用；全部处理完才重置索引，不承诺回调或写入异常时原子回滚。
-     * @param target 接收变化的目标原语 Map，写入引用而非自动深复制
-     */
-    public void drainToEclipseMap(LongObjectHashMap<V> target) {
-        for (/* 当前遍历、消费或重建的有效连续下标。 */ int index = 0; index < size; index++) {
-            // 当前遍历项的原语业务键。
-            long key = keys[index];
-            // 当前连续槽的业务值引用，null 删除项也必须被消费者看到。
-            @SuppressWarnings("unchecked") V value = (V) values[index];
-            values[index] = null;
-            if (value == null) {
-                target.removeKey(key);
-            } else {
-                target.put(key, value);
-            }
-        }
-        resetIndex();
     }
 
     /**
@@ -289,4 +268,3 @@ public class RuntimeChangeBuffer<V> {
         }
     }
 }
-

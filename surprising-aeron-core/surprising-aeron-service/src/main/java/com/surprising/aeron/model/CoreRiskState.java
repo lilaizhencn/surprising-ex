@@ -102,18 +102,6 @@ public record CoreRiskState(
     }
 
     /**
-     * 只要任一币对的账户风险或条件单扫描尚未完成，就表示仍有待处理扫描。
-     */
-    public boolean hasPendingScans() {
-        for (RiskScan /* 当前检查的币对扫描，账户风险和条件单都结束才算完成。 */ value : scans.values()) {
-            if (!value.complete()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
      * 按统一状态映射规则冻结并排序，具体的复制和排序由 StateMapSupport 承担。
      * @param <K> 状态映射的键类型，排序和冻结规则沿用 StateMapSupport
      * @param <V> 状态映射保存的业务记录类型

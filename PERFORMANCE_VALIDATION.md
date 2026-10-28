@@ -714,7 +714,7 @@ JFR 配对单独运行同样参数，稳定窗 10.013152s，完成 2,890,867 项
 
 真实快照记录均确认 service 0 与 consensus -1 在相同时间、日志位置、任期配对，再停止进程、等待 Driver 心跳失效并原目录重启，只读重验全部账户：主运行业务哈希 `106d84dcc206a9d6`、配对 `c6c9efe9a8ab1b1a` 均与重启前相同。LINEAR_PERPETUAL 网络验证通过；六产品线的资金、终态、回滚与恢复由测试及进程内夹具覆盖。
 
-完整测试验收 2,685 项，0 failures/errors，4 skipped，构建中失败及修正过程、当前源码校验见 [第二轮验收](ROUND2_CLEANUP_PROGRESS.md) 和 [验证明细](docs/validation/deep-forwarding-round2-20261028/verification.json)。未测无 swap 正式容量、普通 50/50 GTC、三成员、完整 Valkey 运营流、长稳泄漏及完整 native/硬件计数；后续应在符合门槛的环境重跑锁定场景，不能由本次诊断代替。
+完整测试验收 2,685 项，0 failures/errors，4 skipped，构建中失败及修正过程、当前源码校验见 [验证明细](docs/validation/deep-forwarding-round2-20261028/verification.json)。未测无 swap 正式容量、普通 50/50 GTC、三成员、完整 Valkey 运营流、长稳泄漏及完整 native/硬件计数；后续应在符合门槛的环境重跑锁定场景，不能由本次诊断代替。
 
 本轮原始录制、独立节点目录及临时日志在摘要、view、配置和校验归档后清理；实际清理状态记录于验证目录的 `cleanup.json`。
 

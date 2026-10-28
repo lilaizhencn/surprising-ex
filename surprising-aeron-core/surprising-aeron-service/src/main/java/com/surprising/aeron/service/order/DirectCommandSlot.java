@@ -160,11 +160,6 @@ public final class DirectCommandSlot {
      */
     public boolean hasControlWork() { return controlWork != null; }
     /**
-     * 把当前续步换成非空的新续步，供原控制工作转入后续阶段。
-     * @param work 当前要保存、替换或轮询的业务续步
-     */
-    public void replaceControlWork(BooleanSupplier work) { controlWork = Objects.requireNonNull(work); }
-    /**
      * 保存调用方已经决定的状态和结果码，不在此检查非空或完成发布。
      * @param status 已决定的响应状态
      * @param resultCode 已决定的业务结果码

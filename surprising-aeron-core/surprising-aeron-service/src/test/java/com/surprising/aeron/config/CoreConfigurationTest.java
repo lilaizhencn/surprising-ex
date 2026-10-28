@@ -33,7 +33,7 @@ class CoreConfigurationTest {
         // 读取真实发布配置并通过容器取得 Bean，避免直接调用未代理的 Bean 方法。
         try (var context = application().run("--surprising.aeron.product-line=SPOT",
                 "--surprising.aeron.hostnames=localhost")) {
-            assertThat(context.getBean(LaneTopology.class)).isEqualTo(LaneTopology.productionDefault());
+            assertThat(context.getBean(LaneTopology.class)).isEqualTo(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
         }
     }
 

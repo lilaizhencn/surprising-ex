@@ -48,9 +48,6 @@ public class OwnerPublicationBenchmark {
     private final RuntimeIndexedChangeBuffer<String, String> lane = new RuntimeIndexedChangeBuffer<>();
     private final OwnerIndexedChanges<String, String> owner = new OwnerIndexedChanges<>();
     private final UserRuntime[] users = new UserRuntime[20];
-    private final RuntimeChangeBuffer<UserRuntime> mapChanges = new RuntimeChangeBuffer<>();
-    private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<UserRuntime> map =
-            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     private final com.surprising.aeron.support.collection.PrimitiveLongChangeSet changedIds =
             new com.surprising.aeron.support.collection.PrimitiveLongChangeSet(20);
     private long coreSequence;
@@ -117,14 +114,6 @@ public class OwnerPublicationBenchmark {
     @Benchmark public void clearRecycledBuffers() {
         delta.clear();
         runtime.treasury().clearChangedKeys();
-    }
-
-    /** Exercises the actual one-pass clearing drain, including explicit deletions. */
-    @Benchmark public Object drainChangesToMap() {
-        for (int i = 0; i < users.length; i++) mapChanges.put(i + 1, users[i]);
-        mapChanges.put(1, null);
-        mapChanges.drainToEclipseMap(map);
-        return map.get(20);
     }
 
     @Benchmark public Object handoffAndQueryPreparedChanges() {

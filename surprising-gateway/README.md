@@ -56,7 +56,6 @@ ICEBERG创建请求可省略intervalSeconds，若提供则在请求/状态类型
 本轮17模块执行相关`-am -DskipTests clean test-compile`通过（命令65.661秒），Web/Flutter bundle编译分别通过（2.903/9.352秒），未运行测试或交互。50处构造的保留实参及其他快照字段已静态比较。
 
 算法创建直接完成原校验、字符串规范化、稳定订单身份和提交，不再复制一份完整请求或计算无人读取的命令UUID。内部算法记录只保存TIF，PostOnly结果按GTX读取；用户选择PostOnly的ICEBERG在入口统一为GTX，GTC/GTX之外的无效选择仍拒绝。TWAP按类型采用IOC，不再要求请求提供固定选项。Web和移动端同步删除无用请求字段。
-本轮后端17个相关模块及依赖执行`-am -DskipTests clean test-compile`通过，Web build与Flutter bundle编译通过；未运行测试、服务、交易、恢复或设备/浏览器交互。详见[Aeron字段审计](../surprising-aeron-core/surprising-aeron-service/validation/command-data-audit-20261023.json)。
 
 ## 用户安全与设备限制
 

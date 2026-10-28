@@ -81,11 +81,11 @@ class CoreBusinessStateHashTest {
 
             while (!core.runtimeState.tryAcquireOwnerLaneAccess()) Thread.onSpinWait();
             // 调用前已经持有 Owner 访问权时的原交接代号，查询不得另作交接
-            long epoch = core.runtimeState.laneHandoffEpoch();
+            long epoch = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             try {
                 assertThat(core.stateHash()).isEqualTo(expected);
                 assertThat(core.runtimeState.ownerLaneAccess()).isTrue();
-                assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(epoch);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(epoch);
             } finally { core.runtimeState.releaseOwnerLaneAccess(); }
 
             apply(core, CoreMessageType.COMPLETE_TRANSFER, first,

@@ -314,16 +314,6 @@ public final class CoreMatchingFlow {
     }
 
     /**
-     * 实际只检查批量下单准入事件存在且命令尚未标记 Matcher 提交，不代表普通 PLACE 收据状态。
-     * @param pending 本池仍在生命周期内的命令槽
-     */
-    public boolean placeAdmissionOutstanding(CommandSlot pending) {
-        // 当前槽关联的可空批次上下文。
-        OrderBatchPending batch = pending.orderBatch;
-        return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
-    }
-
-    /**
      * 准入未完成检查 Lane 健康后返回假；完成后检查新身份，保存准入及先撤列表。已知业务/算术/参数错误转为槽内拒绝并释放提交头，其他运行异常继续传播。
      * @param pending 本池仍在生命周期内的命令槽
      */

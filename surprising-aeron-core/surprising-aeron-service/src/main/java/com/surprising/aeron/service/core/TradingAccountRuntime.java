@@ -423,8 +423,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         laneLifecycle.worker(laneId).submit(command);
     }
 
-    public Thread accountWorkerThread(int laneId) { return laneLifecycle.worker(laneId).thread(); }
-
     /**
      * 在 Owner 上采样指定工作队列深度；未启动返回零，瞬时负差截为零，只供观测。
      * @param laneId 账户 Lane 的零起始编号
@@ -497,8 +495,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     public boolean ownerLaneAccess() { return laneLifecycle.ownerHasAccess(); }
-    public long laneHandoffEpoch() { return laneLifecycle.handoffEpoch(); }
-
     /**
      * Owner 持有账户访问权且没有批量修改范围时归还 Lane，避免过早释放仍被批次使用的访问权。
      */

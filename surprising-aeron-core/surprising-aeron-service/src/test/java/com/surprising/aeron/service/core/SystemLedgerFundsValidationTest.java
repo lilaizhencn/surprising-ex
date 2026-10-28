@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import org.junit.jupiter.api.Test;
@@ -18,7 +17,7 @@ class SystemLedgerFundsValidationTest {
     @Test
     void unbalancedControlPostingFailsOnLedgerBeforeOwnerCanCommit() {
         // 本例账户与财库运行时，显式启动账本
-        var accountRuntime = new TradingAccountRuntime(LaneTopology.characterization());
+        var accountRuntime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY);
         accountRuntime.bindOwner();
         accountRuntime.bindLedgerPositionOwner();
         // 故意产生不守恒分账的匿名财务命令

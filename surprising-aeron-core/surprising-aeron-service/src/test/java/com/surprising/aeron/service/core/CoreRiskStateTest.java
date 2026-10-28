@@ -648,7 +648,7 @@ class CoreRiskStateTest {
      * @param state 要继续扫描或加入持仓的不可变测试状态
      */
     private TradingCoreState continueRiskScans(TradingCoreState state) {
-        for (/* 已尝试推进的批次数量，到一万批就停止并交给测试断言判断。 */ int page = 0; page < 10_000 && state.riskState().hasPendingScans(); page++) {
+        for (/* 已尝试推进的批次数量，到一万批就停止并交给测试断言判断。 */ int page = 0; page < 10_000 && state.riskState().scans().values().stream().anyMatch(scan -> !scan.complete()); page++) {
             state = reducer.continueRiskScan(state, 64);
         }
         return state;

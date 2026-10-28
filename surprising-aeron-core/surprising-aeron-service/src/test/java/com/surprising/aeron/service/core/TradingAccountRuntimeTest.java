@@ -379,13 +379,13 @@ class TradingAccountRuntimeTest {
         var failure = new NoSuchMethodError("synthetic settlement linkage failure");
         try {
             state.submitAccountCommand(0, /* 当前用户所属 Lane 下标或回调提供的实际账户 Lane */ lane -> { throw failure; });
-            state.accountWorkerThread(0).join(3_000);
-            assertThat(state.accountWorkerThread(0).isAlive()).isFalse();
+            com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state)[0].thread().join(3_000);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state)[0].thread().isAlive()).isFalse();
             assertThatThrownBy(state::hasMatchingNotifications).isSameAs(failure);
         } finally {
             assertThatThrownBy(state::close).isSameAs(failure);
         }
-        for (int laneId = 0; laneId < state.laneCount(); laneId++) assertThat(state.accountWorkerThread(laneId).isAlive()).isFalse();
+        for (int laneId = 0; laneId < state.laneCount(); laneId++) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state)[laneId].thread().isAlive()).isFalse();
     }
 
     /**
@@ -512,7 +512,7 @@ class TradingAccountRuntimeTest {
     @Test
     void returnedBalanceIsDetachedFromTheLaneOwnedAuthoritativeBalance() throws InterruptedException {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 本次内部用户 ID，部分用例按固定 Lane 路由寻找
@@ -883,7 +883,7 @@ class TradingAccountRuntimeTest {
         state.onLane(7L, lane -> {
             var reservation = lane.reservation(11);
             long previous = reservation.reservedUnits();
-            reservation.consumeInPlace(50);
+            reservation.setConsumedInPlace(Math.addExact(reservation.consumedUnits(), 50));
             lane.updatePendingReservationInPlace(reservation, previous);
             return null;
         });
@@ -946,7 +946,7 @@ class TradingAccountRuntimeTest {
     void pendingReservationBatchRejectsLaterLaneBeforeEarlierLaneDrifts() throws Exception {
         // 准备分别归属两个冷账户 Lane 的原 pending 预留。
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 按拓扑固定归属于零号 Lane 的原用户
         long firstUser = userForLane(topology, 0);
         // 按拓扑固定归属于一号 Lane 的原用户
@@ -1148,14 +1148,14 @@ class TradingAccountRuntimeTest {
     @Test
     void routesStateAndReadFencesThroughThePermanentLaneOwner() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
-        TradingAccountRuntime state = new TradingAccountRuntime(LaneTopology.characterization());
+        TradingAccountRuntime state = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY);
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         state.startAccountLanes();
         try {
             // 本次原 Lane 阶段调用返回的实际参与位图
             var apply = stageLaneMutation(state, 1, java.util.List.of(7L));
-            assertThat(apply).isEqualTo(1L << LaneTopology.characterization().accountLaneId(7));
+            assertThat(apply).isEqualTo(1L << com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY.accountLaneId(7));
             state.readFence(7, 1);
 
             // 所属 Lane 围栏内复制出的独立数字对照，含 applied/committed 水位
@@ -1179,7 +1179,7 @@ class TradingAccountRuntimeTest {
     @Test
     void crossLaneReadFenceDoesNotPartiallyAdvanceBeforeEveryLaneIsReady() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 按拓扑路由到最后 Lane 的原用户
@@ -1201,7 +1201,7 @@ class TradingAccountRuntimeTest {
     @Test
     void laneApplyPublishesCommittedWatermarkInTheSameOwnerTask() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 固定路由到零号 Lane 的原用户
@@ -1230,7 +1230,7 @@ class TradingAccountRuntimeTest {
     @Test
     void laneCompletionMaskCoversConfiguredLanesAndTheEmptyApply() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 按每 Lane 选出的原用户数组或列表
@@ -1289,7 +1289,7 @@ class TradingAccountRuntimeTest {
     @Test
     void stagedMutationRejectsAnOlderGlobalSequenceWithoutChangingAnyLane() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 固定路由到零号 Lane 的原用户
@@ -1342,7 +1342,7 @@ class TradingAccountRuntimeTest {
     @Test
     void accountLanePublishesEachConsecutiveSequenceWithoutASecondCommitTask() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 本次内部用户 ID，部分用例按固定 Lane 路由寻找
@@ -1368,7 +1368,7 @@ class TradingAccountRuntimeTest {
     @Test
     void keepsTwoHundredFiftySixSequenceLocalLaneCommitsInFlight() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 按每 Lane 选出的原用户数组或列表
@@ -1403,7 +1403,7 @@ class TradingAccountRuntimeTest {
     @Test
     void invalidSnapshotSetDoesNotPartiallyRestoreEarlierLanes() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime(topology);
         // 本用例原资产、标的、客户端和持仓身份字典
@@ -1473,7 +1473,7 @@ class TradingAccountRuntimeTest {
     @Test
     void lifecycleSettlementUsesPermanentIndependentLaneOwners() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ TradingAccountRuntime state = new TradingAccountRuntime(topology)) {
             // 按每 Lane 选出的原用户数组或列表
             java.util.List<Long> users = new java.util.ArrayList<>();
@@ -1496,7 +1496,7 @@ class TradingAccountRuntimeTest {
                 for (/* 当前要派发、反射或读取的原账户 Lane 下标 */ int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
                     // 控制回调返回的实际执行线程，应该为固定 worker
                     Thread actual = (Thread) state.controlLaneResult(laneId);
-                    assertThat(actual).isSameAs(state.accountWorkerThread(laneId)).isNotSameAs(Thread.currentThread());
+                    assertThat(actual).isSameAs(com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state)[laneId].thread()).isNotSameAs(Thread.currentThread());
                     assertThat(state.user(users.get(laneId)).revision()).isEqualTo(1);
                 }
             } finally {
@@ -1565,7 +1565,7 @@ class TradingAccountRuntimeTest {
     @Test
     void directMetricsReadMatchesLaneCountersWithIndependentOwners() {
         // 当前夹具固定 Lane 数、容量与用户路由拓扑
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         try (/* 当前被测原运行时，冷对象或按用例启动实际账户工作资源 */ TradingAccountRuntime state = new TradingAccountRuntime(topology)) {
             for (/* 当前用户所属 Lane 下标或回调提供的实际账户 Lane */ int lane = 0; lane < topology.accountLaneCount(); lane++) {
                 state.putUser(new UserRuntime(userForLane(topology, lane)));

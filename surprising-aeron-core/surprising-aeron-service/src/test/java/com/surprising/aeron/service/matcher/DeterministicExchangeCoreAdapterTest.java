@@ -219,7 +219,7 @@ class DeterministicExchangeCoreAdapterTest {
                 assertThat(actual.plan().takerOrderId()).isEqualTo(i);
                 assertThat(actual.nativeMatcherSequence()).isEqualTo(i);
                 assertThat(actual.nativeMatcherShardId()).isEqualTo(adapter.matcherShardId("21"));
-                assertThat(actual.nativeMatcherResult().timestamp()).isEqualTo(1000 + i);
+                assertThat(MatcherEventFixtures.nativeResult(actual).timestamp()).isEqualTo(1000 + i);
                 if (first == null) first = actual;
             }
             assertThat(first.nativeCoreSequence()).isEqualTo(1);
@@ -282,7 +282,7 @@ class DeterministicExchangeCoreAdapterTest {
             // 从实际 Matcher 输出比较两个订单簿的原生进度，不要求控制回执保存原生对象。
             var firstProbe = placeDirect(adapter, 7, bid(20, first, 90));
             var secondProbe = placeDirect(adapter, 8, bid(21, second, 90));
-            assertThat(secondProbe.nativeMatcherResult().sequence()).isLessThan(firstProbe.nativeMatcherResult().sequence());
+            assertThat(MatcherEventFixtures.nativeResult(secondProbe).sequence()).isLessThan(MatcherEventFixtures.nativeResult(firstProbe).sequence());
             assertThat(b.nativeMatcherSequence()).isGreaterThan(a.nativeMatcherSequence());
         } finally {
             if (previous == null) System.clearProperty("surprising.aeron.matching-engines");
@@ -302,9 +302,9 @@ class DeterministicExchangeCoreAdapterTest {
             var second = placeDirect(adapter, 2, new java.util.UUID(0, 2), 5678, 7, bid(902, 90));
             // 显式输入零时间的第三条直接命令回执。
             var third = placeDirect(adapter, 3, new java.util.UUID(0, 3), 0, 7, bid(903, 90));
-            assertThat(first.nativeMatcherResult().timestamp()).isEqualTo(1234);
-            assertThat(second.nativeMatcherResult().timestamp()).isEqualTo(5678);
-            assertThat(third.nativeMatcherResult().timestamp()).isZero();
+            assertThat(MatcherEventFixtures.nativeResult(first).timestamp()).isEqualTo(1234);
+            assertThat(MatcherEventFixtures.nativeResult(second).timestamp()).isEqualTo(5678);
+            assertThat(MatcherEventFixtures.nativeResult(third).timestamp()).isZero();
         }
     }
 
@@ -371,15 +371,15 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(result.matcherEvents()).extracting(MatcherResult.MatcherEvent::matchedOrderId)
                     .containsExactly(101L, 102L);
             assertThat(result.plan().takerOrderId()).isEqualTo(201);
-            assertThat(result.nativeMatcherResult().sequence()).isPositive();
-            assertThat(result.matcherEvents()).isSameAs(result.nativeMatcherResult().events());
+            assertThat(MatcherEventFixtures.nativeResult(result).sequence()).isPositive();
+            assertThat(result.matcherEvents()).isSameAs(MatcherEventFixtures.nativeResult(result).events());
         }
     }
 
     /** 控制业务证据递增并保留原 Core 序号、UUID 和固定控制分片。 */
     @Test
     void matcherEvidenceAdvancesSequences() {
-        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.config.LaneTopology.productionDefault());
+        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
         var first = ledger.bindControl(1, new java.util.UUID(0, 1),
                 ledger.nextSequence(-1), new CoreMatchingResult(true, "SUCCESS"));
         var second = ledger.bindControl(2, new java.util.UUID(0, 2),
@@ -397,7 +397,7 @@ class DeterministicExchangeCoreAdapterTest {
     /** 实际原生登记入口拒绝同一分片的倒退及重复，拒绝后仍能继续推进。 */
     @Test
     void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
-        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.config.LaneTopology.productionDefault());
+        var ledger = new MatcherEvidenceLedger(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
         ledger.recordControlNative(0, 2);
         assertThatThrownBy(() -> ledger.recordControlNative(0, 1))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("native sequence is not strictly increasing");

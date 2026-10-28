@@ -185,15 +185,6 @@ public final class ReservationRuntime {
     public ReservationRuntime publicationValue() { return mutable ? snapshot() : this; }
 
     /**
-     * 在所属 Lane 原位增加累计消耗，允许 0，负数或超过当前剩余额度立即拒绝。
-     * @param units 本次要释放或消耗的非负金额，不得超过当前剩余额度
-     */
-    public void consumeInPlace(long units) {
-        if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime consumption");
-        consumedUnits = Math.addExact(consumedUnits, units);
-    }
-
-    /**
      * 在所属 Lane 原位增加累计释放，允许 0，负数或超过当前剩余额度立即拒绝。
      * @param units 本次要释放或消耗的非负金额，不得超过当前剩余额度
      */
@@ -213,19 +204,6 @@ public final class ReservationRuntime {
     }
 
     /**
-     * 只能保持或减少剩余额度；相同值返回自身，减少则把差额计入累计释放并返回新可变值。
-     * @param remainingUnits 希望保留的新剩余额度，只能保持或减少
-     */
-    public ReservationRuntime withRemainingUnits(long remainingUnits) {
-        if (remainingUnits < 0 || remainingUnits > reservedUnits())
-            throw new IllegalArgumentException("invalid runtime reservation remainder");
-        if (remainingUnits == reservedUnits()) return this;
-        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
-                totalReservedUnits, Math.addExact(releasedUnits, reservedUnits() - remainingUnits),
-                consumedUnits, orderQuantitySteps);
-    }
-
-    /**
      * 非原位释放路径：0 返回自身，正数返回累计释放增加的新可变值，原对象不变。
      * @param units 本次要释放或消耗的非负金额，不得超过当前剩余额度
      */
@@ -234,17 +212,6 @@ public final class ReservationRuntime {
         if (units == 0) return this;
         return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
                 totalReservedUnits, Math.addExact(releasedUnits, units), consumedUnits, orderQuantitySteps);
-    }
-
-    /**
-     * 非原位消耗路径：0 返回自身，正数返回累计消耗增加的新可变值，原对象不变。
-     * @param units 本次要释放或消耗的非负金额，不得超过当前剩余额度
-     */
-    public ReservationRuntime consume(long units) {
-        if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime consumption");
-        if (units == 0) return this;
-        return new ReservationRuntime(orderId, userId, symbolId, kind, assetId,
-                totalReservedUnits, releasedUnits, Math.addExact(consumedUnits, units), orderQuantitySteps);
     }
 
     /**

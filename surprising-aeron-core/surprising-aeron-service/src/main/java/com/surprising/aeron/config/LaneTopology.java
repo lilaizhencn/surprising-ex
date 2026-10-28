@@ -45,18 +45,6 @@ public record LaneTopology(
     /** 分片掩码完全由已校验的分片数量决定。 */
     public int matcherShardMask() { return matchingEngineCount - 1; }
 
-    /** 创建固定默认拓扑；外部配置统一由 CoreConfiguration 绑定并传入。 */
-    public static LaneTopology productionDefault() {
-        return new LaneTopology(DEFAULT_MATCHING_ENGINE_COUNT, DEFAULT_ACCOUNT_LANE_COUNT, DEFAULT_ACCOUNT_LANE_SEED,
-                DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
-    }
-
-    /** 创建只有一个 Matcher 和一个账户 Lane 的固定测试拓扑，便于核对基础行为。 */
-    public static LaneTopology characterization() {
-        return new LaneTopology(1, 1, DEFAULT_ACCOUNT_LANE_SEED, DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY,
-                DEFAULT_QUEUE_CAPACITY);
-    }
-
     /**
      * 使用固定币对编号选择订单簿所属分片，不使用用户编号路由撮合。
      * @param stableSymbolId 已分配的正数币对编号

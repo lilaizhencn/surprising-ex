@@ -23,6 +23,13 @@ import com.surprising.product.api.ProductLine;
  * 为状态和 Lane 测试构造最小标的、订单及预留数据。这里可以直接拼运行时对象，不等于生产下单准入；共享标的原引用不应被测试改写，以免用例互相影响。
  */
 public final class CoreStateTestFixtures {
+    public static final com.surprising.aeron.config.LaneTopology DEFAULT_TOPOLOGY =
+            new com.surprising.aeron.config.LaneTopology(1, 2,
+                    com.surprising.aeron.config.LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4096, 4096, 4096);
+    public static final com.surprising.aeron.config.LaneTopology SINGLE_LANE_TOPOLOGY =
+            new com.surprising.aeron.config.LaneTopology(1, 1,
+                    com.surprising.aeron.config.LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 4096, 4096, 4096);
+
 
     /** 类加载时创建并在本辅助中共享的正向永续标的一，所有测试订单借用该原对象。 */
     private static final CoreInstrument RUNTIME_INSTRUMENT = CoreInstrument.from(

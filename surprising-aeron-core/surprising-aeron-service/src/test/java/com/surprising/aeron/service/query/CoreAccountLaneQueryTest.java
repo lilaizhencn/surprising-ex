@@ -59,7 +59,7 @@ class CoreAccountLaneQueryTest {
                 var order = RuntimeStateQueryService.orderState(expected,
                         expected.accountLaneForUser(7), identities, 200, false);
                 // 查询开始前账户所有权交接计数，查询完成后必须不变。
-                long handoff = core.runtimeState().laneHandoffEpoch();
+                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
                 try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
                     assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 1, new byte[0]).data())
                             .isEqualTo(CoreStateQueryCodec.encodeUserState(user.view()));
@@ -74,7 +74,7 @@ class CoreAccountLaneQueryTest {
                             CoreStateQueryCodec.encodeClientOrderStateQuery("account-q-200")).data())
                             .isEqualTo(CoreStateQueryCodec.encodeOrderState(order.view()));
                 }
-                assertThat(core.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
                 core.assertClusterCallbackComplete();
             }
         }
@@ -87,7 +87,7 @@ class CoreAccountLaneQueryTest {
     void openOrderPagesAreEncodedByTheirLanesAndKeepGlobalCursorOrder() throws Exception {
         try (/* 本用例持有的核心运行时，通过其正常命令或异步查询读取结果，结束时关闭。 */ var core = prepared(); /* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
             // 查询开始前账户所有权交接计数，查询完成后必须不变。
-            long handoff = core.runtimeState().laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
             // 不限定用户的币对 1 挂单页，应按订单编号降序包含 202 和 200。
             var all = query(core, CoreMessageType.USER_OPEN_ORDERS_QUERY, 0,
                     CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery("1", 0, 10)));
@@ -107,7 +107,7 @@ class CoreAccountLaneQueryTest {
             var empty = query(core, CoreMessageType.USER_OPEN_ORDERS_QUERY, 99,
                     CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery("1", 0, 10)));
             assertThat(CoreStateQueryCodec.decodeOpenOrders(empty.data()).orders()).isEmpty();
-            assertThat(core.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
             core.assertClusterCallbackComplete();
         }
     }

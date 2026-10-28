@@ -15,10 +15,10 @@ public final class BenchmarkMatchingAwait {
         if (timeoutNanos <= 0) return null;
         long deadline = System.nanoTime() + timeoutNanos;
         CommandSlot pending = state.pendingMatching().get(sequence);
-        while (pending != null && state.matchingFlow.placeAdmissionOutstanding(pending)
+        while (pending != null && placeAdmissionOutstanding(pending)
                 && !state.matchingFlow.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
             state.matchingProgress.progressPlaceBatchAdmissions();
-            if (state.matchingFlow.placeAdmissionOutstanding(pending)) Thread.onSpinWait();
+            if (placeAdmissionOutstanding(pending)) Thread.onSpinWait();
         }
         if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         int idle = 0;
@@ -40,5 +40,9 @@ public final class BenchmarkMatchingAwait {
             }
         }
         return null;
+    }
+    private static boolean placeAdmissionOutstanding(CommandSlot pending) {
+        var batch = pending.orderBatch;
+        return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
     }
 }

@@ -18,11 +18,11 @@ class ReservationPublicationLeaseTest {
         // 本测试的原冻结变更缓冲，负责捕获及回收自己的发布槽。
         var buffer = new RuntimeReservationChangeBuffer();
         buffer.putLive(11, source);
-        source.consumeInPlace(20);
+        source.setConsumedInPlace(Math.addExact(source.consumedUnits(), 20));
         buffer.freezeValues();
         // freeze 时捕获的发布值，Lane 后续变化不影响它，但 clear 结束租约后可被下一单覆盖。
         var frozen = buffer.get(11);
-        source.consumeInPlace(10);
+        source.setConsumedInPlace(Math.addExact(source.consumedUnits(), 10));
         assertThat(frozen.reservedUnits()).isEqualTo(80);
         assertThat(source.reservedUnits()).isEqualTo(70);
         assertThat(frozen).isNotSameAs(source);

@@ -84,7 +84,7 @@ class CoreAlgoLaneQueryTest {
             assertThat(core.activeOrderIndex().activeOrderRoute(102)).isNull();
             assertThat(core.activeOrderIndex().activeOrderRoute(104)).isNull();
             // 查询前账户所有权交接计数，查询后不能因 Owner 读账户而增加。
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             assertThat(java.util.Arrays.stream(TradingAccountRuntime.class.getDeclaredFields()).map(java.lang.reflect.Field::getName))
                     .doesNotContain("publishedAlgoOrders");
             try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询只能在所属 Lane 读取。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
@@ -108,7 +108,7 @@ class CoreAlgoLaneQueryTest {
                 assertThat(partial.activeQuantitySteps()).isEqualTo(6);
                 assertThat(partial.activeChildOrderCount()).isOne();
             }
-            assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(state);
             core.assertClusterCallbackComplete();
         }

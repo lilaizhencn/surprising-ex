@@ -686,7 +686,9 @@ public class ClusteredBatchTradingBenchmark {
                 Thread.onSpinWait();
             }
             var business = owner.directCommand.controlWork();
-            owner.directCommand.replaceControlWork(() -> {
+            var controlWork = DirectCommandSlot.class.getDeclaredField("controlWork");
+            controlWork.setAccessible(true);
+            controlWork.set(owner.directCommand, (java.util.function.BooleanSupplier) () -> {
                 if (!business.getAsBoolean()) return false;
                 // Deliberate capacity fault: this sentinel must be cleared before dispatch.
                 owner.admissions().queuedMatching.addAll(java.util.Collections.nCopies(

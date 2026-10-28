@@ -541,7 +541,7 @@ class TradingCoreOwnerTest {
                     .status()).isEqualTo(ResponseStatus.APPLIED);
             // 只供测试观察账户所有权交接代号的反射字段
             // 本次原业务执行前账户所有权交接代号，完成或拒绝后均应不变
-            long before = runtime.laneHandoffEpoch();
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
             // 本轮逐项检查或入队的原协议请求
             var request = command(CoreMessageType.ADJUST_BALANCE, 2, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
@@ -552,7 +552,7 @@ class TradingCoreOwnerTest {
             assertThat(owner.directCommand.hasControlWork()).isTrue();
             // 替换故障续步前保存的原业务控制工作，先让它完成账户工作
             var business = owner.directCommand.controlWork();
-            owner.directCommand.replaceControlWork(() -> {
+            com.surprising.aeron.service.order.PipelineTestAccess.replaceControlWork(owner.directCommand, () -> {
                 if (!business.getAsBoolean()) return false;
                 PipelineTestAccess.overflowQueuedMatching(owner.admissions, owner.pendingMatching().capacity() + 1);
                 return true;
@@ -570,7 +570,7 @@ class TradingCoreOwnerTest {
                         assertThat(balance.availableUnits()).isEqualTo(10000);
                         assertThat(balance.lockedUnits()).isZero();
                     });
-            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
             assertThat(owner.admissions.queuedMatchingCount()).isZero();
             // 重复原请求取得的已记录拒绝终态
             var duplicate = CoreTestCompletion.applyAsynchronously(owner, request);
@@ -595,7 +595,7 @@ class TradingCoreOwnerTest {
             var runtime = service.state().runtimeState;
             // 只供测试观察账户所有权交接代号的反射字段
             // 本次原业务执行前账户所有权交接代号，完成或拒绝后均应不变
-            long before = runtime.laneHandoffEpoch();
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
             for (/* 算法单当前要发布的一到三修订号 */ int revision = 1; revision <= 3; revision++) {
                 // 本轮要写入的原算法状态视图
                 var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "1", 0,
@@ -608,7 +608,7 @@ class TradingCoreOwnerTest {
                 assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(revision);
                 assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).userId()).isEqualTo(1001);
             }
-            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
             // 主动设全局元数据为 long 上限之前保存的原修订
             long revisionBeforeFailure = runtime.revision();
             runtime.setMetadata(ProductLine.SPOT, Long.MAX_VALUE);
@@ -631,7 +631,7 @@ class TradingCoreOwnerTest {
             assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getLast()).payloadUnsafe()).status())
                     .isEqualTo(ResponseStatus.APPLIED);
             assertThat(CoreTestCompletion.algoState(service.state(), 1001, 501).revision()).isEqualTo(4);
-            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
 
         } finally { service.onTerminate(null); }
     }
@@ -651,7 +651,7 @@ class TradingCoreOwnerTest {
             var runtime = service.state().runtimeState;
             // 只供测试观察账户所有权交接代号的反射字段
             // 本次原业务执行前账户所有权交接代号，完成或拒绝后均应不变
-            long before = runtime.laneHandoffEpoch();
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
             onSessionMessage(service, responses,
                     command(CoreMessageType.ADJUST_BALANCE, 1, 1001, com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 3))));
             finishCommands(service);
@@ -663,7 +663,7 @@ class TradingCoreOwnerTest {
             onSessionMessage(service, responses, command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 3, 1001,
                     com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
             finishCommands(service);
-            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
             assertThat(testBalance(service.state(), 1001)).isEqualTo(3);
             assertThat(runtime.cancelAllAfterTimer(new com.surprising.aeron.model.CoreCancelAllAfterKey(
                     1001, "1")).revision()).isEqualTo(1);
@@ -702,7 +702,7 @@ class TradingCoreOwnerTest {
             })).isTrue();
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             // 本次异步查询开始前原账户所有权交接代号
-            long handoff = runtime.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
             // 原用户买三份的预检意图
             var intent = new PlaceOrderCommand(910, "1", CoreOrderSide.BUY, 100, 3, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "preflight-910");
@@ -730,7 +730,7 @@ class TradingCoreOwnerTest {
                 assertThat(response.status()).isEqualTo(ResponseStatus.OK);
                 assertThat(response.data()).isEqualTo(com.surprising.aeron.protocol.CoreOrderPreflightCodec.encode(
                         new com.surprising.aeron.protocol.CoreOrderPreflightView("USDT", 300)));
-                assertThat(runtime.laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(handoff);
                 service.state().assertClusterCallbackComplete();
             }
         } finally { service.onTerminate(null); }

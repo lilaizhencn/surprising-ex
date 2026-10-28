@@ -15,7 +15,7 @@ class LaneTopologyTest {
     @Test
     void productionDefaultsUseMatcherRiskAndAccountLanes() {
         // 本例生产默认拓扑，用于核对实际数量或路由
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
 
         assertThat(topology.matchingEngineCount()).isEqualTo(1);
         assertThat(topology.matcherShardMask()).isZero();
@@ -48,7 +48,7 @@ class LaneTopologyTest {
     @Test
     void stableIdsRouteDeterministically() {
         // 本例生产默认拓扑，用于核对实际数量或路由
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
 
         assertThat(topology.matcherShardId(101)).isZero();
         assertThat(topology.matcherShardId(202)).isZero();

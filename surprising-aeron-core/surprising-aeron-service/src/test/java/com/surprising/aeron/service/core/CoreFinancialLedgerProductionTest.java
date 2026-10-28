@@ -119,9 +119,9 @@ class CoreFinancialLedgerProductionTest {
             var expected = expected(core.tradingState(), (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
                     RuntimeDerivativeLiquidationFixture.applyExecutionRuntime(execute, List.of(), runtime, identities));
             // 执行前的账户所有权交接轮次，执行后要求不变
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             appliedWithGuard(core, CoreMessageType.EXECUTE_LIQUIDATION, 0, TradingCommandCodec.encodeExecuteLiquidation(execute), TIME);
-            assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(expected);
 
             // 使保险余额达到25所需的差额调整，不能直接理解为固定充值25
@@ -174,9 +174,9 @@ class CoreFinancialLedgerProductionTest {
             var expected = expected(opening, (/* 冷对照回调实际操作的账户运行时 */ runtime, /* 与冷对照运行时配套的身份注册表 */ identities) ->
                     RuntimeTestStateTransitions.applyLifecycleSettlement(opening, settlement, null, null, runtime, identities));
             // 执行前的账户所有权交接轮次，执行后要求不变
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             appliedWithGuard(core, CoreMessageType.SETTLE_INSTRUMENT, 0, TradingCommandCodec.encodeSettleInstrument(settlement), TIME + 2_000);
-            assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(expected);
             assertThat(core.tradingState().users().values()).allSatisfy(/* 本轮准备资金、成交或检查的测试用户 */ user -> assertThat(user.positions().values()).allSatisfy(/* 当前断言的持仓视图，要求数量为零 */ position -> assertThat(position.signedQuantitySteps()).isZero()));
             core.assertClusterCallbackComplete();

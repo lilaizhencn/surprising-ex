@@ -119,12 +119,12 @@ class CoreLiquidationLaneCheckTest {
                 // 该笔或该批强平的最终响应，稍后解码处理数量和失效动作数。
                 CoreResponse result;
                 // 执行前的 Lane 所有权交接代次，Owner 不应为读取账户而改变它。
-                long handoff = core.runtimeState.laneHandoffEpoch();
+                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
                 try (/* 禁止独立 Lane 模式下 Owner 直接读取账户表的测试哨兵。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                     result = applied(core, CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
                             TradingCommandCodec.encodeExecuteLiquidationBatch(batch));
                 }
-                assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
                 // 批执行返回的动作及撤单统计，用来核对预算、待处理项或过期动作数。
                 var summary = CoreLiquidationBatchResultCodec.decode(result.data());
                 assertThat(summary.processedOrders()).isEqualTo(1);

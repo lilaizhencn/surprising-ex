@@ -162,7 +162,7 @@ class CoreSelfTradePrefixTest {
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, CAPITAL))));
             applied(core, place(core, maker, 101, CoreOrderSide.SELL, 2));
             // 原下单后账户交接代号，测试轨迹不得新增 Owner 交接
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             // 按 Core 序号收集各原在途命令终态状态的表
             Map<Long, ResponseStatus> terminals = new HashMap<>();
             try (/* 用来发现 Owner 越界读取账户正文的既有测试保护器 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
@@ -208,7 +208,7 @@ class CoreSelfTradePrefixTest {
                 }
                 assertThat(terminals.get(nextSequence)).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(terminals.values()).allMatch(/* 每条已收集命令的最终业务状态，均应 APPLIED */ status -> status == ResponseStatus.APPLIED);
-                assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             } finally { releaseMaker.countDown(); }
             // 按资产把双方可用加冻结精确汇总的对照表
             Map<String, Long> totals = new HashMap<>();

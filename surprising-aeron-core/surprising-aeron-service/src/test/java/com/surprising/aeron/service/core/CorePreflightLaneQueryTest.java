@@ -41,7 +41,7 @@ class CorePreflightLaneQueryTest {
             // 查询前持仓身份表检查点，预检不能分配新的持仓身份。
             long positionCheckpoint = core.identities.positionCheckpoint();
             // 查询前账户所有权交接计数，Lane 原位只读查询后不应增加。
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             // 冷参照运行时独立使用的身份表，用于调用相同正式预留规则。
             var identities = new RuntimeIdentityRegistry();
             try (/* 从已提交状态投影的冷运行时，用其决策和金额计算核对在线预检。 */ var cold = RuntimeStateProjector.project(before, identities)) {
@@ -63,7 +63,7 @@ class CorePreflightLaneQueryTest {
                 }
             }
             assertThat(core.identities.positionCheckpoint()).isEqualTo(positionCheckpoint);
-            assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(before);
             core.assertClusterCallbackComplete();
         }
@@ -169,7 +169,7 @@ class CorePreflightLaneQueryTest {
             })).isTrue();
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             // 查询前账户所有权交接计数，Lane 原位只读查询后不应增加。
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             try (/* 禁止 Owner 越界读取活动账户的守卫，确保预检在所属 Lane 执行。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 // Lane 尚被阻塞时提交的旧配置预检消息。
                 var request = message(core, 1, TradingCommandCodec.encodePlaceOrder(intent));
@@ -185,7 +185,7 @@ class CorePreflightLaneQueryTest {
                 release.countDown();
                 assertThat(await(core, request, id).data()).isEqualTo(expected);
                 assertThat(query(core, 1, intent).data()).isNotEqualTo(expected);
-                assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             }
             core.assertClusterCallbackComplete();
         } finally { release.countDown(); }

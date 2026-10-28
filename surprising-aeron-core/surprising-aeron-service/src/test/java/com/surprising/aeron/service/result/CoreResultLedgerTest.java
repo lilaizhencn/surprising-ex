@@ -12,7 +12,6 @@ import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.TradingCoreRuntimeRestoreTestSupport;
 import com.surprising.aeron.service.order.CoreTestCompletion;
 import com.surprising.product.api.ProductLine;
-import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -101,8 +100,9 @@ class CoreResultLedgerTest {
             expected.put(id, new long[]{sequence, retention});
             if (expected.size() > TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS)
                 expected.remove(expected.keySet().iterator().next());
-            ledger.storeResult(id, stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    sequence, 0, new byte[]{(byte) sequence}, 0));
+            ledger.storeOwnedResult(id, stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    sequence, 0, new byte[]{(byte) sequence}, 0).fingerprint(), ResponseStatus.APPLIED,
+                    CoreResultCode.NONE, sequence, new byte[]{(byte) sequence});
             assertThat(ledger.get(id).appliedCommandCount()).isEqualTo(sequence);
             if (sequence % 97 != 0) continue;
             assertThat(ledger.entries().keySet()).containsExactlyElementsOf(expected.keySet());
@@ -151,7 +151,7 @@ class CoreResultLedgerTest {
     }
 
     /**
-     * 默认构造先复制源数组，修改保留序号的新记录与原记录共用内部字节；对外 responseData 返回独立副本，改外部副本不能改内部数据。
+     * 默认构造先复制源数组，另一保留序号记录同样保存独立字节；对外 responseData 返回独立副本，改外部副本不能改内部数据。
      */
     @Test
     void retentionMetadataReusesOwnedResponseBytesWithoutExposingThem() {
@@ -162,13 +162,13 @@ class CoreResultLedgerTest {
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 7, source, 0);
         source[0] = 9;
 
-        // 只换保留序号、继续共用内部字节的新独立记录
-        CommandResultLedger.StoredResult retained = created.withRetentionSequence(11);
+        // 用原响应构造另一保留序号的独立记录
+        CommandResultLedger.StoredResult retained = stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
+                1, 7, created.responseData(), 11);
         // 从记录导出的有效响应副本，测试故意改写它
         byte[] exposed = retained.responseData();
         exposed[1] = 9;
 
-        assertThat(created.responseDataUnsafe()).isSameAs(retained.responseDataUnsafe());
         assertThat(retained.responseData()).containsExactly(1, 2, 3);
         assertThat(retained.retentionSequence()).isEqualTo(11);
     }
@@ -220,15 +220,11 @@ class CoreResultLedgerTest {
     }
 
     /**
-     * 反射调用实际存储入口写入三条十二 MiB 响应，要求按字节上限淘汰最早项，并将剩余结果恢复后核对业务哈希。
+     * 调用实际存储入口写入三条十二 MiB 响应，要求按字节上限淘汰最早项，并将剩余结果恢复后核对业务哈希。
      */
     @Test
     void evictsOldestResultWhenResponseBytesExceedTheBound() throws Exception {
         try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
-            // 通过反射取得的实际账本存储方法
-            Method storeResult = CommandResultLedger.class.getDeclaredMethod(
-                    "storeResult", UUID.class, CommandResultLedger.StoredResult.class);
-            storeResult.setAccessible(true);
             // 本场景构造的大响应字节数组
             byte[] response = new byte[12 * 1024 * 1024];
             // 按场景最先存入的结果 UUID
@@ -238,11 +234,11 @@ class CoreResultLedgerTest {
             // 按字节上限测试中第三个结果 UUID
             UUID third = UUID.randomUUID();
 
-            storeResult.invoke(state.resultLedger(), first,
+            storeResult(state.resultLedger(), first,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, response, 0));
-            storeResult.invoke(state.resultLedger(), second,
+            storeResult(state.resultLedger(), second,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 2, 2, response, 0));
-            storeResult.invoke(state.resultLedger(), third,
+            storeResult(state.resultLedger(), third,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, response, 0));
 
             assertThat(state.commandResults()).doesNotContainKey(first);
@@ -260,10 +256,6 @@ class CoreResultLedgerTest {
     @Test
     void replacementEvictsOldestOtherResultsAndKeepsTheReplacedKeyBounded() throws Exception {
         try (/* 本场景自动关闭的现货 Core 运行时 */ TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
-            // 通过反射取得的实际账本存储方法
-            Method storeResult = CommandResultLedger.class.getDeclaredMethod(
-                    "storeResult", UUID.class, CommandResultLedger.StoredResult.class);
-            storeResult.setAccessible(true);
             // 替换扩容场景最早的其他结果 UUID，超限时应淘汰
             UUID oldest = UUID.randomUUID();
             // 手动构造为待完成样式、随后替换的受保护结果 UUID
@@ -277,16 +269,16 @@ class CoreResultLedgerTest {
             // 受保护项替换后的四 MiB 响应数组
             byte[] fourMiB = new byte[4 * 1024 * 1024];
 
-            storeResult.invoke(state.resultLedger(), oldest,
+            storeResult(state.resultLedger(), oldest,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, fourteenMiB, 0));
-            storeResult.invoke(state.resultLedger(), pending,
+            storeResult(state.resultLedger(), pending,
                     stored(ResponseStatus.OK, CoreResultCode.MATCHING_PENDING, 2, 2, oneMiB, 0));
             // 替换前保存的受保护项保留序号，替换后必须沿用
             long pendingRetention = state.commandResults().get(pending).retentionSequence();
-            storeResult.invoke(state.resultLedger(), newest,
+            storeResult(state.resultLedger(), newest,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, fourteenMiB, 0));
 
-            storeResult.invoke(state.resultLedger(), pending,
+            storeResult(state.resultLedger(), pending,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 4, 4, fourMiB, 0));
 
             assertThat(state.commandResults()).doesNotContainKey(oldest);
@@ -346,5 +338,9 @@ class CoreResultLedgerTest {
         return new CoreMessage(CoreMessageHeader.query(CoreMessageType.COMMAND_RESULT_QUERY,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 7, 0, 1001, 9_000, 99),
                 CoreStateQueryCodec.encodeCommandResultQuery(commandId));
+    }
+    private static void storeResult(CommandResultLedger ledger, UUID id, CommandResultLedger.StoredResult result) {
+        ledger.storeOwnedResult(id, result.fingerprint(), result.status(), result.resultCode(),
+                result.appliedCommandCount(), result.responseData());
     }
 }

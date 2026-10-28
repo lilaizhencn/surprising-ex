@@ -80,7 +80,7 @@ class OrderSlotReuseTest {
         var first = lane.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, intent(1), new UUID(1, 1), 0, 100, 200, 0);
         // 与原订单绑定、生命周期跟随订单的预留权威对象。
         var reservation = first.prepareReservation(ReservationKind.DERIVATIVE_MARGIN, 3, 100);
-        reservation.consumeInPlace(60);
+        reservation.setConsumedInPlace(Math.addExact(reservation.consumedUnits(), 60));
         reservation.releaseInPlace(40);
         // 独立保存的预留业务值快照，原预留重用后仍保存消耗及释放结果。
         var retained = reservation.snapshot(); // 这是独立业务值副本，本用例没有运行集群快照场景。

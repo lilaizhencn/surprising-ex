@@ -27,4 +27,12 @@ public final class MatcherEventFixtures {
         return new MatcherEvent(MatcherEventType.TRADE, 0, activeCompleted, makerOrderId,
                 makerUserId, makerCompleted, price, size, 0);
     }
+    public static exchange.core2.core.common.MatcherResult nativeResult(
+            com.surprising.aeron.service.settlement.MatcherSettlementEvent event) {
+        try {
+            var field = event.getClass().getDeclaredField("directNativeResult");
+            field.setAccessible(true);
+            return (exchange.core2.core.common.MatcherResult) field.get(event);
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
 }

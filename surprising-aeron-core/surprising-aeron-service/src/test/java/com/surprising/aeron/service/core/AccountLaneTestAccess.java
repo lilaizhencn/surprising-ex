@@ -12,6 +12,9 @@ public final class AccountLaneTestAccess {
             return field.get(target);
         } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
     }
+    public static long handoffEpoch(TradingAccountRuntime runtime) {
+        return (long) field(field(runtime, "laneLifecycle"), "handoffEpoch");
+    }
     public static SettlementLaneWorker[] workers(TradingAccountRuntime runtime) {
         return (SettlementLaneWorker[]) field(field(runtime, "laneLifecycle"), "workers");
     }

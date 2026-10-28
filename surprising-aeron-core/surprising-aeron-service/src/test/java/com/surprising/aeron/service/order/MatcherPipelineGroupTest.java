@@ -189,14 +189,14 @@ class MatcherPipelineGroupTest {
             // 已经就绪的第二笔事件别名，用于检查接受状态及业务时间。
             var secondResult = secondTarget;
             assertThat(secondResult.accepted()).isTrue();
-            assertThat(secondResult.nativeMatcherResult().timestamp()).isEqualTo(1_001);
+            assertThat(com.surprising.aeron.service.matcher.MatcherEventFixtures.nativeResult(secondResult).timestamp()).isEqualTo(1_001);
             assertThat(firstTarget.ready()).isFalse();
             releaseFirst.countDown();
             awaitDirect(firstTarget);
             // 放行后就绪的第一笔事件别名，用于检查接受状态及业务时间。
             var firstResult = firstTarget;
             assertThat(firstResult.accepted()).isTrue();
-            assertThat(firstResult.nativeMatcherResult().timestamp()).isEqualTo(1_000);
+            assertThat(com.surprising.aeron.service.matcher.MatcherEventFixtures.nativeResult(firstResult).timestamp()).isEqualTo(1_000);
         } finally {
             releaseFirst.countDown();
             pipelines.closeShards(adapter::closeShard);

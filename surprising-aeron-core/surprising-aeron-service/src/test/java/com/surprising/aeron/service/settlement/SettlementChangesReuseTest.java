@@ -52,8 +52,8 @@ class SettlementChangesReuseTest {
                     2, 1000, 2000);
             lane.updateOrderInPlace(12, 10, 0, 3, CoreOrderStatus.FILLED,
                     2, 1000, 2000);
-            openReservation.consumeInPlace(40);
-            filledReservation.consumeInPlace(100);
+            openReservation.setConsumedInPlace(Math.addExact(openReservation.consumedUnits(), 40));
+            filledReservation.setConsumedInPlace(Math.addExact(filledReservation.consumedUnits(), 100));
 
             changes.prepareLaneTerminal(laneId, identities, lane, 1);
             assertThat(lane.order(12)).isNull();

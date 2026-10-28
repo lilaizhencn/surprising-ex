@@ -490,9 +490,9 @@ class RuntimeCommitRecoveryTest {
                                     current.nextCancelOrderId(), 1)));
                 }
                 // 原强平页执行前账户所有权交接代号
-                long handoffBefore = uninterrupted.state().runtimeState.laneHandoffEpoch();
+                long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState);
                 replayClustered(uninterrupted, List.of(executeLiquidation));
-                assertThat(uninterrupted.state().runtimeState.laneHandoffEpoch()).isEqualTo(handoffBefore);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState)).isEqualTo(handoffBefore);
                 assertThat(uninterrupted.state().runtimeState.ownerLaneAccess()).isFalse();
                 current = liquidation(uninterrupted.state(), planned.liquidationId());
             }
@@ -536,10 +536,10 @@ class RuntimeCommitRecoveryTest {
                 assertThat(RuntimeTestStateTransitions.expectedInsuranceCoverage(uninterrupted.state().tradingState(),
                         planned.liquidationId())).isEqualTo(25);
                 // 部分保险确认前的原账户交接代号，执行不得接管其他 Lane
-                long insuranceHandoff = uninterrupted.state().runtimeState.laneHandoffEpoch();
+                long insuranceHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState);
                 // 原入口执行部分保险确认的响应
                 ReplayResult partialReference = replayClustered(uninterrupted, List.of(partialInsurance.getLast()));
-                assertThat(uninterrupted.state().runtimeState.laneHandoffEpoch())
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState))
                         .as("insurance resolution must not take Lane ownership").isEqualTo(insuranceHandoff);
                 // 保险前恢复入口执行相同确认的响应
                 ReplayResult partialRecovered = replayClustered(restoredBeforeInsurance, List.of(partialInsurance.getLast()));
@@ -574,7 +574,7 @@ class RuntimeCommitRecoveryTest {
                         // 错误目标 ADL 前保存的完整冷状态
                         var beforeRejected = rejectedState.tradingState();
                         // 错误目标 ADL 前的原账户所有权交接代号
-                        long handoff = rejectedState.runtimeState.laneHandoffEpoch();
+                        long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(rejectedState.runtimeState);
                         // 将 ADL 预期价格改成一百零一的目标冲突消息
                         var invalid = operationsCommand(adlSequence, CoreMessageType.EXECUTE_ADL,
                                 TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(planned.liquidationId(),
@@ -583,7 +583,7 @@ class RuntimeCommitRecoveryTest {
                         var rejected = CoreTestCompletion.applyAsynchronously(rejectedState, invalid);
                         assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
                         assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.ADL_POSITION_CONFLICT);
-                        assertThat(rejectedState.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+                        assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(rejectedState.runtimeState)).isEqualTo(handoff);
                         assertThat(rejectedState.tradingState()).as("all participating Lanes roll back on target rejection")
                                 .isEqualTo(beforeRejected);
                         try (/* 从拒绝后快照再次恢复的运行时，继续正确 ADL */ var again = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, rejectedState.snapshot())) {
@@ -601,10 +601,10 @@ class RuntimeCommitRecoveryTest {
                     // 正确 ADL 前本夹具口径经济权益，减仓不应凭空改变它
                     long beforeAdlEconomic = economicEquityUsdt(uninterrupted.state());
                     // 正确 ADL 前原账户交接代号
-                    long adlHandoff = uninterrupted.state().runtimeState.laneHandoffEpoch();
+                    long adlHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState);
                     // 原入口执行正确 ADL 的响应清单
                     ReplayResult adlReference = replayClustered(uninterrupted, List.of(adl));
-                    assertThat(uninterrupted.state().runtimeState.laneHandoffEpoch())
+                    assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(uninterrupted.state().runtimeState))
                             .as("ADL target and liquidation remain on their own Lanes").isEqualTo(adlHandoff);
                     // 保险前恢复并已继续保险的入口执行同一 ADL 响应
                     ReplayResult adlFromBeforeCut = replayClustered(restoredBeforeInsurance, List.of(adl));

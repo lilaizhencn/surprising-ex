@@ -293,10 +293,10 @@ public final class CoreTestCompletion {
         long deadline = System.nanoTime() + timeoutNanos;
         // 当前等待的命令槽，可能已经拥有批次或结算事件。
         CommandSlot pending = state.pendingMatching().get(sequence);
-        while (pending != null && state.matchingFlow.placeAdmissionOutstanding(pending)
+        while (pending != null && placeAdmissionOutstanding(pending)
                 && !state.matchingFlow.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
             state.matchingProgress.progressPlaceBatchAdmissions();
-            if (state.matchingFlow.placeAdmissionOutstanding(pending)) Thread.onSpinWait();
+            if (placeAdmissionOutstanding(pending)) Thread.onSpinWait();
         }
         if (state.matchingFlow.hasPendingMatchingRejection(sequence)) return null;
         // 连续空探查次数，达到阈值后从自旋转为短暂 park。
@@ -338,5 +338,9 @@ public final class CoreTestCompletion {
             }
         }
         return null;
+    }
+    private static boolean placeAdmissionOutstanding(CommandSlot pending) {
+        var batch = pending.orderBatch;
+        return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
     }
 }

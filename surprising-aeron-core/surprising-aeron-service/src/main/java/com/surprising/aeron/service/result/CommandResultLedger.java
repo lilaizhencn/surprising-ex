@@ -201,17 +201,6 @@ public final class CommandResultLedger {
     }
 
     /**
-     * 读取传入结果的指纹、状态和响应切片，交给统一存储入口；传入结果自身的保留序号不决定本账本的新增顺序。
-     * @param commandId 本次存入的非空命令 UUID
-     * @param result 要计费或存入账本的完整结果描述
-     */
-    public void storeResult(UUID commandId, StoredResult result) {
-        storeOwnedResult(commandId, result.fingerprint, result.status, result.resultCode,
-                result.appliedCommandCount,
-                result.responseData, result.responseOffset, result.responseLength);
-    }
-
-    /**
      * 以整个响应数组作为有效载荷交给切片入口；空数组引用按空响应处理，不复制已交入的有效字节。
      * @param commandId 本次存入的非空命令 UUID
      * @param fingerprint 当前结果或请求的命令指纹
@@ -644,16 +633,6 @@ public final class CommandResultLedger {
             set(other.fingerprint, other.status, other.resultCode, other.appliedCommandCount,
                     other.responseData, other.responseOffset,
                     other.responseLength, other.retentionSequence, true);
-        }
-
-        /**
-         * 创建仅更换保留序号的独立记录，共用原响应切片；不自行增加响应池引用，也不修改当前记录。
-         * @param sequence 新记录要采用的保留顺序号
-         */
-        public StoredResult withRetentionSequence(long sequence) {
-            return new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
-                    responseData, responseOffset, responseLength,
-                    sequence, true);
         }
 
         /**

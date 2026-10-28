@@ -65,7 +65,7 @@ class CoreShutdownFailureTest {
         core.activate();
         var accounts = core.runtimeState();
         Thread[] workers = new Thread[accounts.laneCount()];
-        for (int lane = 0; lane < workers.length; lane++) workers[lane] = accounts.accountWorkerThread(lane);
+        for (int lane = 0; lane < workers.length; lane++) workers[lane] = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(accounts)[lane].thread();
         try {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             accounts.submitAccountCommand(0, lane -> { throw laneFailure; });

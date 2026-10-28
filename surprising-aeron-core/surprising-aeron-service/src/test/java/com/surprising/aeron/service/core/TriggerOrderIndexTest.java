@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.core;
 
-import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.CoreRiskState;
 import com.surprising.aeron.model.CoreTriggerOrderState;
 import com.surprising.aeron.model.TradingCoreState;
@@ -55,7 +54,7 @@ class TriggerOrderIndexTest {
      */
     @Test
     void closeTriggerCommitPublishesOnlyAfterLanesAndDoesNotRepeatOnReuse() {
-        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
+        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
             // 从用户八开始找出与用户七不同账户 Lane 的用户 ID
             long second = 8;
             while (runtime.topology().accountLaneId(second) == runtime.topology().accountLaneId(7)) second++;
@@ -125,7 +124,7 @@ class TriggerOrderIndexTest {
      */
     @Test
     void accountThreadMutatesTriggerWhileOwnerUsesOnlyCommitReceipts() {
-        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
+        try (/* 本用例的账户运行时，在资源作用域结束时关闭 */ var runtime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
             // 按拓扑从一开始搜索目标账户 Lane 的用户 ID
             long user = 1;
             // 生产拓扑中的最后一个账户 Lane 编号

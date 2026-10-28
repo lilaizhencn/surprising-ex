@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.*;
  */
 class ParallelRiskScanTest {
     /** 生产默认账户 Lane 拓扑，所有账户分布、索引和运行时都用同一配置。 */
-    private static final LaneTopology TOPOLOGY = LaneTopology.productionDefault();
+    private static final LaneTopology TOPOLOGY = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
     /** 本组测试主要使用的 BTC 合约外部编号。 */
     private static final String SYMBOL = "1";
 

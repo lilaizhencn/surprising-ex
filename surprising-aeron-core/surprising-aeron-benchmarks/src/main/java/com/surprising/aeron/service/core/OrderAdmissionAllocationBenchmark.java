@@ -16,7 +16,6 @@ import com.surprising.aeron.service.account.AccountLaneState;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
 import com.surprising.aeron.service.order.state.OrderRuntime;
-import com.surprising.aeron.service.order.state.ReservationRuntime;
 import com.surprising.aeron.service.position.PositionCloseCapacity;
 import com.surprising.aeron.service.position.PositionRuntime;
 import com.surprising.product.api.ProductLine;
@@ -34,7 +33,6 @@ import org.openjdk.jmh.annotations.Scope;
 import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.Warmup;
-import org.openjdk.jmh.infra.Blackhole;
 
 /** Actual immutable admission constructor; input decoding and trading are outside this microbenchmark. */
 @State(Scope.Thread)
@@ -46,7 +44,6 @@ import org.openjdk.jmh.infra.Blackhole;
 public class OrderAdmissionAllocationBenchmark {
     private ResolvedPlaceOrder resolved;
     private final UUID commandId = new UUID(1, 1);
-    private ReservationRuntime reservation;
 
     @Setup public void setup() {
         var instrument = CoreInstrument.from(ProductLine.LINEAR_PERPETUAL,
@@ -56,8 +53,6 @@ public class OrderAdmissionAllocationBenchmark {
                                 100_000, (1_000_000_000_000L / (100_000)), Long.MAX_VALUE, 0, Long.MAX_VALUE,
                                 java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                         0, 0, 0, -1, 0));
-        reservation = new ReservationRuntime(11, 7, 0, ReservationKind.DERIVATIVE_MARGIN,
-                0, 100, 0, 0, 1);
         var intent = new PlaceOrderCommand(11, "1", CoreOrderSide.BUY, 100, 1,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-11");
@@ -65,8 +60,7 @@ public class OrderAdmissionAllocationBenchmark {
                 ReservationKind.DERIVATIVE_MARGIN, "USDT", 0, 0);
     }
 
-    @Benchmark public OrderRuntime admitWithFinalMetadata(Blackhole blackhole) {
-        blackhole.consume(reservation.release(0).consume(0).withRemainingUnits(100));
+    @Benchmark public OrderRuntime admitWithFinalMetadata() {
         return TradingAccountRuntime.preparedOrder(ProductLine.LINEAR_PERPETUAL, 7, resolved,
                 commandId, 0, 1000, 2000);
     }

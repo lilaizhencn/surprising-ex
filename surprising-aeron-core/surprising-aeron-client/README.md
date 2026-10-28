@@ -26,76 +26,27 @@ Cluster log position、回调内 ordinal、事件时间、快照标识和实体�
 接收端必须验证连续 ordinal，不能把部分批次当作完整状态。
 价格等独立生产者的 sequence 属于自身来源，不能与 Core log position 混合比较。
 
-验证：HotSpot JDK 27，`mvn -pl surprising-aeron-core/surprising-aeron-client -am test`。
-测试覆盖协议截断/越界、全部产品线和消息类型、完整回调发布、撤销、总内存额度、
-跨线程可见性，以及真实 Media Driver 上的大消息分片重组和目标 stream 隔离。
-当前测试不构成完整交易主链路性能验收。
+## 请求与响应生命周期
 
-### 响应分发与轮询预算（2026-10-25）
+`Session.drainResponses` 批量消费响应，按关联号完成在途请求。池化连接由 `EgressDispatcher` 绑定 I/O 线程，顺序执行 offer、轮询、心跳与关闭；独立客户端在监视器内串行访问 Cluster。
 
-`Session.drainResponses` 是连接池唯一的响应消费契约。Dispatcher 按收到的关联号取出在途请求并完成，
-不再提供负数哨兵或逐个扫描在途请求的备用实现。独立直连客户端的同步 `submit` 仍自行按关联号取响应。
-测试 Session 和回环基准使用相同批量契约；片段预算测试通过 `ClusterOperations` 调用真实 `pollEgress`，
-已删除单独复制给测试的轮询算法。
+`AeronClientPool.Request` 用代数与原子状态控制发送、取消和完成。旧代数不能取消已复用的槽；完成者清理引用后归还空闲槽。`ADMIN_ACTION` 保留发送状态及原来源序号，资金命令结果未知时不能自动重发。
 
-### 命令池线程归属与请求槽复用（2026-10-15）
+`AsyncConnection` 的建连期限与业务响应期限独立。建连期限通过 `surprising.aeron.client.connect-timeout-ms` 配置；不能用反复重建连接代替处理业务超时。
 
-池化连接在既有 `EgressDispatcher` 完成异步握手时绑定 I/O 线程。该线程顺序执行
-`offer`、egress 轮询、心跳和关闭，直接复用客户端编码缓冲区；其他线程调用这些操作立即失败。
-独立客户端允许共享调用及定时心跳，继续在同一监视器内串行访问 Aeron Cluster。
-egress 的轮询回调在连接创建时保留，不在每次轮询时重新创建方法引用。
+## 实时传输与关闭
 
-`AeronClientPool.Request` 将复用代数和排队、发送、取消、完成状态合在一个原子字中。
-发送与发送前取消通过 CAS 决定唯一结果；旧代数的超时不能取消复用后的请求。
-完成者清理关联号和引用，再通过既有空闲槽队列归还槽位。`ADMIN_ACTION` 保留发送状态与原序号，
-只有查询在重新建连后才能返回排队状态；资金命令结果未知时仍不得自动重发。
-邮箱、额度、Dispatcher 数量和产品线隔离沿用现有实现。
+`AeronRealtimeReceiver` 发生传输错误后退出本轮并关闭旧订阅，再重新连接。发送与接收组件使用 Aeron Driver 超时配置；正常关闭会唤醒或中断等待，并释放自己拥有的资源。
 
-验证入口为 `AeronRequestLeaseTest`、`SurprisingAeronClientConcurrencyTest` 及既有命令池测试。
-`ClientSourceOrderingBenchmark` 使用实际命令池和客户端编解码，四个生产者各保留最多 64 个请求，
-全局窗口固定 256；对端即时回送确定性响应，排除真实网络、Cluster、Archive 和交易 Core。
-该基准的分配包含模拟对端开销，不能作为 Core 的 bytes/business op 或吞吐验收结果。
-功能范围见 [验证清单](../../docs/validation/client-request-lease-20261015.json)。
+`RealtimeOutbox.commit` 只发布完整回调；消费者登记等待线程后再次检查队列，避免丢失唤醒。命令 Dispatcher 在没有工作时退避，有工作、心跳或建连期限时按相应预算推进。
 
-### 行情订阅异常恢复
+## 验证
 
-`AeronRealtimeReceiver` 收到传输错误后标记不可用，当前轮询必须退出并关闭旧订阅，再重新连接。
-即使 Driver 尚未关闭，也不能继续轮询一个已被错误处理器标记失效的订阅。错误原因会记录到日志。
-`AeronRealtimeTransportTest` 使用真实 Driver 覆盖传输错误后的重连、Driver 重启恢复和分片消息交付。
+选择受影响连接、租约、预算或实时传输用例：
 
-发送端和接收端沿用 Aeron 的 `aeron.driver.timeout`（默认 10 秒），不再写死 1 秒。
-本地 100 用户测试捕获 `keepalive age=1003ms > timeout=1000ms` 的误断连；真实 Driver
-测试使用 1.5 秒定时间隔检查健康传输不被误判，同时保留 Driver 丢失后的恢复断言。
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-client -am test \
+  -Dtest=<相关测试类> -Dsurefire.failIfNoSpecifiedTests=false
+```
 
-### 连接池建连期限与业务请求期限
-
-`SurprisingAeronClient.AsyncConnection` 的握手期限默认 30 秒，可用 `surprising.aeron.client.connect-timeout-ms` 设置；业务命令/查询继续使用原来的 responseTimeout。连接建立涉及 Driver 分配日志缓冲区和 Cluster 握手，不能因为一次 5 秒业务请求超时就不断重建连接资源。本地抓到连接池连续 NOT_CONNECTED、核心 Driver 忙于预触碰新缓冲区；此项只延长握手期限，不重试未知结果的资金命令、不放宽业务请求成功标准。
-
-
-## 空闲等待优化（2026-10-08）
-
-`RealtimeOutbox.commit` 在发布完整回调后唤醒唯一发送线程。消费者先登记等待线程再检查队列，避免提交与入睡交错时丢失唤醒；stage/abort 不唤醒或暴露未提交消息。发送端空队列最多等待 100ms，仍定期检查 Driver 健康，关闭时中断等待。
-
-`AeronClientPool.EgressDispatcher` 没有排队或在途请求时，将等待从 100µs 逐步延长到 1ms；新请求沿用入队唤醒，在途响应保持 100µs 轮询，心跳与重连期限限制最长等待。`AeronRealtimeReceiver` 没有跨进程入队通知，采用 100–250µs 退避，收到消息后重置。未修改命令身份、未知结果处理、产品线或连接隔离。
-
-HotSpot JDK 27 本地对比基线 `292e4e04`：10 个双 lane 客户端池，加一对真实 IPC Sender/Receiver；预热后用 ThreadMXBean 统计这 12 个线程的 2 秒 CPU 时间，另录制有大小上限的 JFR。200 条 IPC 消息逐条发送，间隔 10ms，在 JFR 录制之外统计发送至接收回调的延迟。
-
-| 指标 | 优化前 | 优化后 |
-| --- | ---: | ---: |
-| 目标线程 2 秒 CPU 时间 | 1273.855ms | 229.707ms |
-| JFR 中 dispatcher park 次数（合计） | 151737 | 16655 |
-| JFR 中 sender park 次数 | 15167 | 20 |
-| JFR 中 receiver park 次数 | 15163 | 6150 |
-| IPC P50 | 276.0µs | 348.8µs |
-| IPC P99 | 405.3µs | 529.4µs |
-
-目标空闲线程 CPU 时间约减少 82%，代价是本组 IPC P99 增加约 0.124ms；这是组件采样，不是整台服务器 CPU 或真实交易吞吐结果。接收退避上限曾试验 1ms，因 P99 达约 1.50ms，最终收紧为 250µs。
-
-客户端模块及依赖测试通过；新增覆盖提交唤醒、未提交不可见、跨线程顺序，相关池、超时、真实 Driver 重连和分片测试通过。原始 JFR、临时编译程序及日志仅用于本轮验证，汇总后清理。
-
-
-## 实时接收缓冲区解码（2026-10-08）
-
-`AeronRealtimeReceiver` 在 FragmentAssembler 回调内取得有界 ByteBuffer 视图，按 Agrona wrapAdjustment 和本次 offset/length 确定帧边界，交给 `RealtimeFrameCodec.decode(ByteBuffer)`。不再分配并复制完整消息数组；解码仍生成独立 payload，回调返回后不会保留 Aeron term 或分片重组缓冲区。
-
-真实 Driver 测试覆盖普通帧、100KB 分片、stream 隔离、传输错误重连和 Driver 重启；protocol 测试覆盖借用缓冲区被修改后已交付 payload 不变。组件分配采样及限制见 [协议说明](../surprising-aeron-protocol/README.md)。本轮未部署服务器。
+真实 Media Driver 传输测试与业务交易、资金结算和完整 Cluster 验收分别判断；历史采样数值不作为当前源码的性能结论。

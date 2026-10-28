@@ -3,10 +3,8 @@ package com.surprising.aeron.bootstrap.account;
 import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.config.TradingCpuAffinity;
 import com.surprising.aeron.service.account.AccountLaneState;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 /** 账户执行资源的唯一生命周期：创建/回滚/关闭工作线程，并按原栅栏协议交接账户所有权。 */
 public final class AccountLaneLifecycle implements AutoCloseable {
@@ -30,8 +28,6 @@ public final class AccountLaneLifecycle implements AutoCloseable {
 
     public boolean started() { return started; }
     public boolean ownerHasAccess() { return ownerHasAccess; }
-    public long handoffEpoch() { return handoffEpoch; }
-
     /** 只借出指定 Lane 的工作入口，不暴露可替换的资源数组；队列仍校验各生产者契约。 */
     public SettlementLaneWorker worker(int laneId) { return workers[laneId]; }
 

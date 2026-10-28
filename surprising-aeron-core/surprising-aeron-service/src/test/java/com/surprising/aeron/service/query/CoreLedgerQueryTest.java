@@ -47,7 +47,7 @@ class CoreLedgerQueryTest {
             int assetId = core.identities().assetId("USDT");
             assertThat(core.runtimeState().treasury().insurance(assetId)).isEqualTo(250L);
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
-            long handoff = core.runtimeState().laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
             try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
                 // 本次查询消费到的最终响应，按场景核对成功、响应超限或页内容。
                 var response = query(core, CoreMessageType.TREASURY_STATE_QUERY, new byte[0]);
@@ -58,7 +58,7 @@ class CoreLedgerQueryTest {
                             assertThat(asset.insuranceBalanceUnits()).isEqualTo(250);
                         });
             }
-            assertThat(core.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
             core.assertClusterCallbackComplete();
         }
     }
@@ -100,7 +100,7 @@ class CoreLedgerQueryTest {
         try (var core = coreWithInitialState(state)) {
             core.activate();
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
-            long handoff = core.runtimeState().laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
             try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
                 for (long /* 本轮页起点，覆盖第一页、中间游标和末尾之后。 */ cursor : new long[]{0, 1, 3, 5}) {
                     for (int /* 本轮允许的工作页编码字节预算，与单项条数限制一起生效。 */ maxBytes : new int[]{256, 1_024}) {
@@ -113,7 +113,7 @@ class CoreLedgerQueryTest {
                     }
                 }
             }
-            assertThat(core.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
             core.assertClusterCallbackComplete();
         }
     }
@@ -166,7 +166,7 @@ class CoreLedgerQueryTest {
         try (/* 本用例激活的核心运行时，结束时关闭其账本和账户工作资源。 */ var core = coreWithInitialState(state)) {
             core.activate();
             // 查询前的账户所有权交接计数，异步读取后应保持不变。
-            long handoff = core.runtimeState().laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState());
             try (/* 禁止 Owner 越界读取活动账户的守卫，保证页数据由所属 Lane 查询。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
                 // 从游标 0 取得的第一页，应仅包含计划 1、建议赔付 18 且尚未结束。
                 var pageOne = insuranceQuery(core, 0);
@@ -184,7 +184,7 @@ class CoreLedgerQueryTest {
                     assertThat(claim.recommendedCoveredUnits()).isEqualTo(7);
                 });
             }
-            assertThat(core.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState())).isEqualTo(handoff);
             assertThat(core.runtimeState().treasuryForQuery(core.identities()).insuranceBalances()).containsEntry("USDT", 25L);
             core.assertClusterCallbackComplete();
         }

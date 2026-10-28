@@ -71,7 +71,7 @@ class TradingCpuAffinityTest {
     void disabledDoesNotValidateCpuAssignmentsOrRestrictWorkerTopology() {
         // 故意使用未配置的 CPU 编号，验证关闭分支确实不会检查或使用它们。
         var disabled = new TradingCpuAffinity(false, -1, -1, -1, -1);
-        disabled.validateConfiguration(LaneTopology.characterization());
+        disabled.validateConfiguration(com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY);
         startsAndStopsOwner(disabled);
         try (/* Owner 的空操作恢复凭据，关闭它不应调用系统绑定接口。 */ var owner = disabled.owner();
              /* 即便传入额外 Matcher 编号，关闭功能时也只返回空操作凭据。 */ var matcher = disabled.matcher(7);
@@ -105,7 +105,7 @@ class TradingCpuAffinityTest {
     void macSkipsEnabledAffinityEvenWithoutValidCpuAssignments() {
         // 打开开关但不提供有效编号，专门验证 macOS 的平台跳过分支。
         var configured = new TradingCpuAffinity(true, -1, -1, -1, -1);
-        configured.validateConfiguration(LaneTopology.characterization());
+        configured.validateConfiguration(com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY);
         startsAndStopsOwner(configured);
         try (/* macOS 上 Owner 绑定也是空操作。 */ var owner = configured.owner();
              /* 不会尝试修改 Matcher 的 CPU 范围。 */ var matcher = configured.matcher(0);
@@ -159,7 +159,7 @@ class TradingCpuAffinityTest {
         int[] cpus = original.stream().limit(4).toArray();
         // 按 Owner、Matcher、Lane 0、Lane 1 顺序应用这四个有效 CPU。
         var configured = new TradingCpuAffinity(true, cpus[0], cpus[1], cpus[2], cpus[3]);
-        configured.validateConfiguration(LaneTopology.productionDefault());
+        configured.validateConfiguration(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY);
         try {
             for (/* 当前验证的角色下标，决定本轮应该绑定哪一个 CPU。 */ int role = 0; role < 4; role++) {
                 try (/* 本轮绑定凭据；离开当前作用域就恢复进入前的 CPU 范围。 */ var binding = switch (role) {

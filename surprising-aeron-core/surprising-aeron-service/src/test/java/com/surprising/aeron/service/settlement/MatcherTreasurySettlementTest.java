@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.settlement;
 
-import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.model.*;
 import com.surprising.aeron.model.AssetBalance;
 import com.surprising.aeron.model.CoreOrderState;
@@ -110,7 +109,7 @@ class MatcherTreasurySettlementTest {
     @Test
     void ownerSettlesFeesAfterIndependentAccountWritersAndReusesFinancialSlot() throws Exception {
         // 生产默认账户 Lane 拓扑，用于挑选跨 Lane 用户。
-        var topology = LaneTopology.productionDefault();
+        var topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 固定 maker 用户编号。
         // 调整为与 maker 不同 Lane 的主动用户编号。
         long makerUser = 8, takerUser = 7;

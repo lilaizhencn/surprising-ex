@@ -16,7 +16,6 @@ import com.surprising.aeron.service.treasury.RuntimeTreasuryDelta;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
-import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
@@ -924,12 +923,6 @@ public final class MatcherSettlementEvent implements
         return directCommandId == null ? most == 0 && least == 0
                 : directCommandId.getMostSignificantBits() == most
                 && directCommandId.getLeastSignificantBits() == least;
-    }
-    /**
-     * 为结果接口借用本代原生结果引用，合成拒绝时为空；调用方负责先遵守发布边界。
-     */
-    public exchange.core2.core.common.MatcherResult nativeMatcherResult() {
-        return directNativeResult;
     }
     /**
      * 合成准入拒绝返回空事件列表，其他结果借用原生事件列表；不复制事件。

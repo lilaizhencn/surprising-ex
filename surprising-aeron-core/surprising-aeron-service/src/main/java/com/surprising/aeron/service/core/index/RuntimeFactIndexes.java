@@ -219,17 +219,6 @@ public final class RuntimeFactIndexes {
     }
 
     /**
-     * 直接应用已冻结的持仓索引值，空值表示删除，不回读 Lane 可变持仓。
-     * @param positionKey 当前持仓的确定性身份键
-     * @param current 冻结的当前持仓索引值，空值删除
-     */
-    public void preparedPosition(long positionKey, RuntimePositionIndexValue current) {
-        applyPosition(positionKey, current == null ? 0 : current.userId(), current == null ? null : current.instrumentId(),
-                current == null ? null : current.asset(), current == null ? null : current.positionSide(),
-                current == null ? 0 : current.signedQuantitySteps());
-    }
-
-    /**
      * 从现有 ADL 表读取旧索引单元，再以新持仓字段更新三个业务索引。
      * @param key 待更新持仓的确定性长整数键
      * @param userId 变更后用户，零表示删除

@@ -100,7 +100,7 @@ class PositionUserIndexTest {
                         11L, positionedUser(11, position)),
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
         // 生产默认账户 Lane 拓扑，索引分组和期望用户筛选必须一致。
-        LaneTopology topology = LaneTopology.productionDefault();
+        LaneTopology topology = com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY;
         // 本用例操作的索引，成员场景用 PositionUserIndex，总量场景用 OpenInterestIndex。
         PositionUserIndex index = new PositionUserIndex(state, topology);
 

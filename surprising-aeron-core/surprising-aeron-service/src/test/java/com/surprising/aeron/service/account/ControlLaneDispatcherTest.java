@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.account;
 
-import com.surprising.aeron.config.LaneTopology;
 import com.surprising.aeron.service.core.AccountLaneQueryTestSupport;
 import com.surprising.aeron.service.core.CoreStateTestFixtures;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
@@ -16,7 +15,7 @@ class ControlLaneDispatcherTest {
      */
     @Test
     void controlTasksExecuteOnPermanentWorkersAndPublishOnlyAfterCompletion() throws Exception {
-        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
+        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
             runtime.startAccountLanes();
             // 发起控制命令的测试线程，用于核对回调确实在常驻 Lane 线程执行。
             Thread owner = Thread.currentThread();
@@ -61,7 +60,7 @@ class ControlLaneDispatcherTest {
      */
     @Test
     void businessRejectionWaitsForOtherLanesAndDoesNotPoisonTheNextCommand() throws Exception {
-        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
+        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
             runtime.startAccountLanes();
             // 计数为二的门闩，确认两条目标 Lane 都已进入。
             var entered = new java.util.concurrent.CountDownLatch(2);
@@ -124,7 +123,7 @@ class ControlLaneDispatcherTest {
      */
     @Test
     void invalidDispatchThrowsIllegalStateException() {
-        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(LaneTopology.productionDefault())) {
+        try (/* 本场景独立运行时，作用域内启动实际账户工作线程，结束自动关闭。 */ var runtime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY)) {
             runtime.startAccountLanes();
             assertThatThrownBy(() -> runtime.dispatchControlLanes(0, /* 控制派发回调接收的目标 Lane 编号。 */ lane -> lane))
                     .isInstanceOf(IllegalStateException.class);

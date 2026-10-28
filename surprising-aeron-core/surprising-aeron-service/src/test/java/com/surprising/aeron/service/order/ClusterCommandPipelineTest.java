@@ -1037,7 +1037,7 @@ class ClusterCommandPipelineTest {
             var beforeBalances = state.tradingState().user(11).balances();
             // 账户所有权交接代数的反射字段
             // 本轮交易动作开始前的账户交接代数
-            long before = state.runtimeState().laneHandoffEpoch();
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
             live.apply(live.place(11, "1", 101, 80, 1, CoreOrderSide.BUY));
             live.apply(live.message(CoreMessageType.AMEND_ORDER, 11, TradingCommandCodec.encodeAmendOrder(
                     new AmendOrderCommand(101, 102, "amend-102", 90L, 1L, CoreTimeInForce.GTC, false))));
@@ -1054,7 +1054,7 @@ class ClusterCommandPipelineTest {
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(live.responses.getLast(), 20)).isEqualTo(-1);
             live.apply(live.cancel(11, 999_999));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(state.runtimeState().laneHandoffEpoch()).isEqualTo(before);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(before);
             assertThat(state.tradingState().user(11).balances()).isEqualTo(beforeBalances);
             try (/* 从当前快照恢复出的独立 Core，资源结束时关闭 */ var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
@@ -1082,12 +1082,12 @@ class ClusterCommandPipelineTest {
             live.apply(live.place(maker, "1", 103, 100, 1, CoreOrderSide.SELL));
             // 账户所有权交接代数的反射字段
             // 本轮交易前记录的账户交接代数，动作完成后要求不增加
-            long handoffBefore = live.service.state().runtimeState().laneHandoffEpoch();
+            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState());
             live.responses.clear();
             live.apply(live.message(CoreMessageType.AMEND_ORDER, user, TradingCommandCodec.encodeAmendOrder(
                     new AmendOrderCommand(102, 104, "reject-104", 100L, 1L, CoreTimeInForce.GTX, true))));
             assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(live.service.state().runtimeState().laneHandoffEpoch()).isEqualTo(handoffBefore);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState())).isEqualTo(handoffBefore);
             // 已拒绝改单响应解码出的订单结果，核对原单取消视图
             var result = CoreCommandResultCodec.decode(live.responses.getLast().data());
             assertThat(result.orders()).filteredOn(/* 从改单结果中筛选并检查取消状态的订单视图 */ order -> order.orderId() == 102)
@@ -1328,13 +1328,13 @@ class ClusterCommandPipelineTest {
                 live.responses.clear();
                 // 账户交接代数的反射字段，用来证明交易工作留在固定 Lane
                 // 执行触发命令之前记录的账户交接代数
-                long beforeHandoff = live.service.state().runtimeState().laneHandoffEpoch();
+                long beforeHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState());
                 try (/* 可空 Owner 账户表读取守卫，存在时在作用域结束还原表 */ var guard = recovery ? null : new OwnerAccountReadGuard(live.service.state().runtimeState())) {
                     if (internalScan) scanTriggers(live, 1);
                     else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                             CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
                 }
-                assertThat(live.service.state().runtimeState().laneHandoffEpoch())
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState()))
                         .as("trigger claim/reserve/settle stays on permanent Account Lane")
                         .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r ->
@@ -1429,11 +1429,11 @@ class ClusterCommandPipelineTest {
                 live.responses.clear();
                 // 账户交接代数的反射字段，用来证明交易工作留在固定 Lane
                 // 执行触发命令之前记录的账户交接代数
-                long beforeHandoff = live.service.state().runtimeState().laneHandoffEpoch();
+                long beforeHandoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState());
                 if (internalScan) scanTriggers(live, 1);
                 else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                         CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
-                assertThat(live.service.state().runtimeState().laneHandoffEpoch())
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(live.service.state().runtimeState()))
                         .as("trigger claim/reserve/settle stays on permanent Account Lane")
                         .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(/* 当前待检查状态或结果码的 Core 响应 */ r ->
@@ -1512,11 +1512,11 @@ class ClusterCommandPipelineTest {
             // 触发失败前导出的用户账户状态，用来检查资金没有残留变化
             var accountsBefore = live.service.state().tradingState().users();
             // 执行失败触发命令之前的账户交接代数
-            long before = runtime.laneHandoffEpoch();
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
             live.responses.clear();
             live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, user,
                     CoreTriggerOrderCodec.encodeExecute(9101, 1, 100, TIME)));
-            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
             assertThat(live.responses.getLast().commandStatus())
                     .isEqualTo(overflow ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
             assertThat(CoreTestCompletion.triggerState(live.service.state(), user, 9101).status())
@@ -1597,10 +1597,10 @@ class ClusterCommandPipelineTest {
                 var runtime = live.service.state().runtimeState();
                 // 账户所有权交接代数的反射字段
                 // 单项批次开始前的账户交接代数
-                long before = runtime.laneHandoffEpoch();
+                long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
                 live.responses.clear();
                 live.apply(batch); serial.apply(batch);
-                assertThat(runtime.laneHandoffEpoch()).as("single-item admission/settlement never takes Lane ownership")
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).as("single-item admission/settlement never takes Lane ownership")
                         .isEqualTo(before);
                 // 单项批次响应解码得到的一项结果列表
                 var result = TradingOrderBatchCodec.decodeResult(live.responses.getFirst().data()).items();
@@ -2995,7 +2995,7 @@ class ClusterCommandPipelineTest {
             // 触发扫描前的资金状态哈希，扫描完成后必须相同
             long funds = com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(live.service.state().tradingState());
             // 当前分段开始前的账户交接代数，中途恢复快照后重新取基线
-            long before = runtime.laneHandoffEpoch();
+            long before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
             live.sequence += 1000; // 后续命令时间越过条件单有效期及新标记价时间。
             live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
@@ -3023,13 +3023,13 @@ class ClusterCommandPipelineTest {
                         assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                     }
                     resumed = true;
-                    before = runtime.laneHandoffEpoch();
+                    before = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime);
                 } else {
                     resumed |= scan.triggerOcoOrderId() != 0;
                     live.apply(command);
                 }
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
-                assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(runtime)).isEqualTo(before);
             }
             assertThat(resumed).as("cross-command OCO continuation exercised").isTrue();
             assertThat(runtime.firstIncompleteRiskScan()).isNull();

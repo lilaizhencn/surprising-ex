@@ -42,10 +42,15 @@ class ClusteredBatchTradingBenchmarkTest {
             serviceField.setAccessible(true);
             var service = (TradingCoreOwner) serviceField.get(workload);
             var runtime = service.state().runtimeState;
-            long before = runtime.laneHandoffEpoch();
+            var lifecycleField = TradingAccountRuntime.class.getDeclaredField("laneLifecycle");
+            lifecycleField.setAccessible(true);
+            var lifecycle = lifecycleField.get(runtime);
+            var epochField = lifecycle.getClass().getDeclaredField("handoffEpoch");
+            epochField.setAccessible(true);
+            long before = epochField.getLong(lifecycle);
             var counters = new ClusteredBatchTradingBenchmark.Counters();
             new ClusteredBatchTradingBenchmark().riskScanBetweenOpenAndClose(workload, counters);
-            assertThat(runtime.laneHandoffEpoch()).isEqualTo(before);
+            assertThat(epochField.getLong(lifecycle)).isEqualTo(before);
             assertThat(counters.terminalBusinessOperations).isGreaterThan(1024);
             assertThat(counters.terminalBusinessOperations).isEqualTo(counters.acceptedBusinessOperations);
             assertThat(counters.terminalTrades).isEqualTo(512);

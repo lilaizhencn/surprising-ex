@@ -73,7 +73,7 @@ class CoreActiveLaneIngressTest {
             })).isTrue();
             assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
             // 命令开始前保存的账户交接代次，跨线程保护期间应保持不变
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             try (/* 禁止 Owner 直接访问账户状态的检查器 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 // 这里不手动开启异步命令作用域，实际激活状态本身就应选择工作线程路径。
                 // 在所属 Lane 阻塞时从普通入口交入的余额调整命令
@@ -99,7 +99,7 @@ class CoreActiveLaneIngressTest {
                 // 余额不足请求最终得到的拒绝响应
                 var rejection = complete(core, failed, core.apply(failed));
                 assertThat(rejection.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-                assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             }
             // 移出跨线程读取保护后导出的挂单用户状态
             var maker = CoreTestCompletion.userState(core, 7);

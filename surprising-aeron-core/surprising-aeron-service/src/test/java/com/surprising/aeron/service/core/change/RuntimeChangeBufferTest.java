@@ -26,34 +26,6 @@ class RuntimeChangeBufferTest {
     }
 
     /**
-     * 多轮向 Eclipse 原语 Map 排出变化，核对覆盖、null 删除及源槽全部释放，空缓冲再次排出不改目标。
-     */
-    @Test
-    void eclipseDrainDeletesOverwritesAndReleasesSlotsAcrossReuse() throws Exception {
-        // 当前测试独立使用的普通变化缓冲或预留专用缓冲。
-        var buffer = new RuntimeChangeBuffer<String>();
-        // 接收排出变化的 Eclipse 原语 Map，null 变化应删除其键。
-        var target = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<String>();
-        // 读取基础缓冲 values 数组的反射字段，用于核对没有保留引用。
-        var values = RuntimeChangeBuffer.class.getDeclaredField("values");
-        values.setAccessible(true);
-        for (/* 当前清理和复用的测试轮次。 */ int round = 0; round < 64; round++) {
-            for (/* 本轮随机、极值或连续变化使用的 long 业务键。 */ long key = -64; key < 64; key++) buffer.put(key, "value" + round);
-            buffer.put(0, "updated");
-            buffer.put(1, null);
-            buffer.drainToEclipseMap(target);
-            assertThat(target.size()).isEqualTo(127);
-            assertThat(target.get(0)).isEqualTo("updated");
-            assertThat(target.containsKey(1)).isFalse();
-            assertThat(buffer.isEmpty()).isTrue();
-            assertThat(buffer.containsKey(0)).isFalse();
-            assertThat((Object[]) values.get(buffer)).containsOnlyNulls();
-            buffer.drainToEclipseMap(target);
-            assertThat(target.size()).isEqualTo(127);
-        }
-    }
-
-    /**
      * 通过消费者接收每个键一次，要求 null 删除通知不丢失、源索引和引用清理完整，并保留零键的存在性语义。
      */
     @Test

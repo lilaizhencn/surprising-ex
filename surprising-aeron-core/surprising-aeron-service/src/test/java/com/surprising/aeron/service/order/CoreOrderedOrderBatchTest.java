@@ -167,7 +167,7 @@ class CoreOrderedOrderBatchTest {
                             place(85_001, "funds-original", 1_000))))));
 
             // 继续准入前记录的账户所有权交接代数，完成后核对没有临时借走 Lane
-            long handoffBefore = state.runtimeState().laneHandoffEpoch();
+            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
             // 资金不足而预期被拒绝的改单消息
             CoreMessage rejectedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 5,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
@@ -185,7 +185,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().order(85_000)).isNotNull();
             assertThat(state.tradingState().order(85_002)).isNull();
 
-            handoffBefore = state.runtimeState().laneHandoffEpoch();
+            handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
             // 降价后能够复用原冻结资金的改单消息
             CoreMessage appliedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
@@ -194,7 +194,7 @@ class CoreOrderedOrderBatchTest {
             // 成功改单的 Core 终态响应
             CoreResponse applied = asynchronous ? CoreTestCompletion.applyAsynchronously(state, appliedCommand)
                     : drainBatch(state, appliedCommand);
-            if (asynchronous) assertThat(state.runtimeState().laneHandoffEpoch())
+            if (asynchronous) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState()))
                     .as("amend preflight and reservation stay on the permanent Lane").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(applied, 1)).isEqualTo(-1);
             assertThat(state.tradingState().order(85_001)).isNull();
@@ -407,11 +407,11 @@ class CoreOrderedOrderBatchTest {
                     UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(
                             new PlaceOrderBatchCommand(List.of(sell, buy))));
             // 继续准入前记录的账户所有权交接代数，完成后核对没有临时借走 Lane
-            long handoffBefore = state.runtimeState().laneHandoffEpoch();
+            long handoffBefore = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
             // 当前已收到或由完成回调交出的 Core 响应
             CoreResponse response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, batch)
                     : drainBatch(state, batch);
-            if (asynchronous) assertThat(state.runtimeState().laneHandoffEpoch())
+            if (asynchronous) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState()))
                     .as("sequential admission must not borrow Lane ownership").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
@@ -1582,14 +1582,14 @@ class CoreOrderedOrderBatchTest {
                             linearOrder(98_300, "proceeds-maker", CoreOrderSide.BUY, 1_000, 1)))), 1002));
             state.activate();
             // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-            long handoff = state.runtimeState().laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
             // 当前已收到或由完成回调交出的 Core 响应
             var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
                     UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             linearOrder(98_301, "sell-for-proceeds", CoreOrderSide.SELL, 1_000, 1),
                             linearOrder(98_302, "buy-with-proceeds", CoreOrderSide.BUY, 1_000, 1))))));
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
-            assertThat(state.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(handoff);
             // 完成阶段导出的业务状态，供余额、预留及订单断言读取
             var trading = state.tradingState();
             assertThat(trading.order(98_300)).isNull();
@@ -1636,7 +1636,7 @@ class CoreOrderedOrderBatchTest {
                     }
                 }
                 // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-                long handoff = state.runtimeState().laneHandoffEpoch();
+                long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
                 // 当前已收到或由完成回调交出的 Core 响应
                 var response = CoreTestCompletion.applyAsynchronously(state, command(CoreMessageType.PLACE_ORDER_BATCH,
                         UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1658,7 +1658,7 @@ class CoreOrderedOrderBatchTest {
                 assertThat(TradingOrderBatchCodec.decodeResult(rejected.data()).items())
                         .extracting(CoreOrderBatchResult.Item::resultCode)
                         .containsExactly(CoreResultCode.DUPLICATE_ORDER_ID, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-                assertThat(state.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(handoff);
             } finally {
                 for (/* 当前账户 Lane 数组下标 */ int lane = 0; lane < lanes.length; lane++) {
                     for (/* 当前订单项、分片或账户表的遍历下标 */ int index = 0; index < names.length; index++) {
@@ -2412,7 +2412,7 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             postOnly, place(97_002, "reject-funds", 1000)))));
             // 执行本场景前的账户所有权交接代数，后续准入和结算不应增加
-            long handoff = state.runtimeState().laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState());
             // 两项均拒绝但整批已完成的 Core 响应
             var result = CoreTestCompletion.applyAsynchronously(state, message);
             // 按原输入下标排列的批量单项结果列表
@@ -2421,7 +2421,7 @@ class CoreOrderedOrderBatchTest {
                     .containsExactly(ResponseStatus.REJECTED, ResponseStatus.REJECTED);
             assertThat(items).extracting(CoreOrderBatchResult.Item::resultCode)
                     .containsExactly(CoreResultCode.MATCHING_REJECTED, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
-            assertThat(state.runtimeState().laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(state.runtimeState())).isEqualTo(handoff);
             // 两种拒绝全部完成后导出的请求用户状态
             var user = state.tradingState().user(1001);
             assertThat(user.reservations()).isEmpty();

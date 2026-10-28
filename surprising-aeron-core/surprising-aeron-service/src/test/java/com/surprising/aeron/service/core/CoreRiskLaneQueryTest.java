@@ -83,7 +83,7 @@ class CoreRiskLaneQueryTest {
             var beforeQueries = core.tradingState();
             core.activate();
             // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             try (/* 临时禁止 Owner 越界读取账户表的哨兵，离开作用域时恢复原表。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 assertThat(query(core, CoreMessageType.RISK_STATE_QUERY, 0, new byte[0]).data())
                         .isEqualTo(CoreRiskQueryCodec.encode(globalRisk));
@@ -100,7 +100,7 @@ class CoreRiskLaneQueryTest {
             }
             assertThat(globalRisk).hasSize(5);
             assertThat(adl).hasSize(2);
-            assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(beforeQueries);
             core.assertClusterCallbackComplete();
         }
@@ -126,7 +126,7 @@ class CoreRiskLaneQueryTest {
             // 包含逐仓委托冻结扣减后的用户风险参照结果。
             var expected = new RuntimeTestStateTransitions().riskSnapshots(before, 1);
             // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             try (/* 临时禁止 Owner 越界读取账户表的哨兵，离开作用域时恢复原表。 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 // 实际账户 Lane 返回的风险查询响应，用来核对编码及钱包余额。
                 var response = query(core, CoreMessageType.RISK_STATE_QUERY, 1, new byte[0]);
@@ -134,7 +134,7 @@ class CoreRiskLaneQueryTest {
                 assertThat(CoreRiskQueryCodec.decode(response.data())).allSatisfy(/* 逐条检查的钱包风险记录，钱包余额必须扣除逐仓订单预占金额。 */ row ->
                         assertThat(row.walletBalanceUnits()).isEqualTo(9500 - reserved));
             }
-            assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+            assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             assertThat(core.tradingState()).isEqualTo(before);
             core.assertClusterCallbackComplete();
         }
@@ -157,7 +157,7 @@ class CoreRiskLaneQueryTest {
             var expectedAdl = new RuntimeTestStateTransitions().adlCandidates(state, "USDT", 10);
             core.activate();
             // 查询前的 Lane 所有权交接代次，查询后不应发生变化。
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             // 确认目标账户 Lane 已进入阻塞回调的闩锁。
             var entered = new CountDownLatch(1);
             // 用户 1 所属账户 Lane 的位掩码，只阻塞需要检查的 Lane。
@@ -203,7 +203,7 @@ class CoreRiskLaneQueryTest {
                 assertThat(fresh).isNotEqualTo(expectedRisk);
                 assertThat(fresh.stream().filter(/* 新查询结果中正在检查或筛选的风险行，应使用更新后的行情事实。 */ row -> row.userId() == 1 && row.instrumentId().equals("1")).findFirst().orElseThrow()
                         .maintenanceMarginUnits()).isEqualTo(72);
-                assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
             }
             core.assertClusterCallbackComplete();
         } finally { release.countDown(); }

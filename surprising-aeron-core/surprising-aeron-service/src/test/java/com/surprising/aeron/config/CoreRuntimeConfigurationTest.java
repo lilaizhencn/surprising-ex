@@ -41,7 +41,7 @@ class CoreRuntimeConfigurationTest {
         var configuration = bind(Map.of("surprising.aeron.max-pending-matching", "64"));
         String previous = System.setProperty("surprising.aeron.max-pending-matching", "INVALID_LOW_PRIORITY_VALUE");
         try (var runtime = new com.surprising.aeron.service.core.TradingCoreRuntime(
-                com.surprising.product.api.ProductLine.SPOT, LaneTopology.productionDefault(), configuration)) {
+                com.surprising.product.api.ProductLine.SPOT, com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY, configuration)) {
             runtime.activate();
             assertThat(runtime.runtimeState().accountLanesStarted()).isTrue();
             byte[] snapshot = runtime.snapshot(1);
@@ -59,7 +59,7 @@ class CoreRuntimeConfigurationTest {
     @Test void nodeRecoveryStaysPassiveUntilExplicitActivation() {
         var configuration = bind(Map.of());
         try (var original = new com.surprising.aeron.service.core.TradingCoreRuntime(
-                com.surprising.product.api.ProductLine.SPOT, LaneTopology.productionDefault(), configuration)) {
+                com.surprising.product.api.ProductLine.SPOT, com.surprising.aeron.service.core.CoreStateTestFixtures.DEFAULT_TOPOLOGY, configuration)) {
             byte[] snapshot = original.snapshot(7);
             try (var restored = com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.decodePassive(snapshot,
                     com.surprising.product.api.ProductLine.SPOT, configuration)) {

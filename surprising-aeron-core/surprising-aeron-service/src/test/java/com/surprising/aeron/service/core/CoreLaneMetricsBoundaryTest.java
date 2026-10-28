@@ -69,7 +69,7 @@ class CoreLaneMetricsBoundaryTest {
             // 控制任务仍持有Lane作用域；排队一项查询以验证深度不再恒为零。
             assertThat(core.runtimeState.dispatchAccountQuery(mask, /* 排在阻塞任务后面的只读任务参数，任务本身不读取 */ ignored -> {})).isTrue();
             // 指标查询前保存的账户所有权交接代次
-            long handoff = core.runtimeState.laneHandoffEpoch();
+            long handoff = com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState);
             try (/* 禁止 Owner 跨线程读取账户状态的保护器 */ var guard = new OwnerAccountReadGuard(core.runtimeState)) {
                 assertThat((Boolean) isEmpty.invoke(changed)).isTrue();
                 // 不要求 Owner 账户访问权的运行指标查询
@@ -90,7 +90,7 @@ class CoreLaneMetricsBoundaryTest {
                 assertThat(core.runtimeState.currentLaneCommandScope()).isNull();
                 assertThat(core.runtimeState.pollControlLanes()).isFalse();
                 assertThat(core.identities.findPositionKeyValue(1, instrument, CorePositionSide.NET)).isEqualTo(key);
-                assertThat(core.runtimeState.laneHandoffEpoch()).isEqualTo(handoff);
+                assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.handoffEpoch(core.runtimeState)).isEqualTo(handoff);
                 release.countDown();
                 // 放行后等待真实控制完成的五秒截止时间
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
