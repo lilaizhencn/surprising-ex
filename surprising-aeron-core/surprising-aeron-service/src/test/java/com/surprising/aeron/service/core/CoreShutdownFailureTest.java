@@ -64,7 +64,7 @@ class CoreShutdownFailureTest {
         var core = new TradingCoreRuntime(ProductLine.SPOT);
         core.activate();
         var accounts = core.runtimeState();
-        Thread[] workers = new Thread[accounts.laneCount()];
+        Thread[] workers = new Thread[accounts.topology().accountLaneCount()];
         for (int lane = 0; lane < workers.length; lane++) workers[lane] = com.surprising.aeron.service.core.AccountLaneTestAccess.workers(accounts)[lane].thread();
         try {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

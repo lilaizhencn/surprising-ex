@@ -59,7 +59,7 @@ class RuntimeChangedIndexCommitTest {
                         "1", new OpenInterestIndex.Totals(Math.max(quantity, 0), Math.max(-quantity, 0))));
                 assertThat(indexes.positionUsers.usersAfter("1", 0)).containsExactly(7L);
             }
-            runtime.removePosition(key, 7);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, key, 7);
             runtime.bindFactIndexes(indexes.coordinator, identities);
         runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
         runtime.applyChangedIndexes();
@@ -116,8 +116,8 @@ class RuntimeChangedIndexCommitTest {
         assertThat(indexes.openInterest.openInterestSteps("1")).isEqualTo(3);
 
         runtime.clearChangedKeys();
-        runtime.removeOrder(11);
-        runtime.removePosition(positionKey, 7);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.deleteOrder(runtime, 11);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, positionKey, 7);
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
         runtime.bindFactIndexes(indexes.coordinator, identities);
         runtime.applyLedgerControlPositions(new com.surprising.aeron.service.core.index.RuntimeFactIndexes.PositionUndo());
@@ -173,7 +173,7 @@ class RuntimeChangedIndexCommitTest {
         runtime.clearChangedKeys();
         runtime.dispatchControlLanes(runtime.topology().accountLaneMask(userId), /* 实际执行此控制工作的所属 Lane，闭包按原用户与键操作 */ ignored -> {
             com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(runtime, positionKey);
-            runtime.removePosition(positionKey, userId);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, positionKey, userId);
             return null;
         });
         if (runtime.accountLanesStarted()) LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);

@@ -691,7 +691,7 @@ class CoreLifecycleStateTest {
                     runtime.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.resolve(receipts, count, id, assetId, ledger));
             // 对反向候选列表一次性求出的全部保险分配结果。
             long[] ids = reverseIds.stream().mapToLong(Long::longValue).toArray();
-            var claims = new InsuranceAllocationPolicy.AllocationInputs[runtime.laneCount()];
+            var claims = new InsuranceAllocationPolicy.AllocationInputs[runtime.topology().accountLaneCount()];
             for (int laneId = 0; laneId < claims.length; laneId++) {
                 final int current = laneId;
                 long[] laneIds = java.util.Arrays.stream(ids)

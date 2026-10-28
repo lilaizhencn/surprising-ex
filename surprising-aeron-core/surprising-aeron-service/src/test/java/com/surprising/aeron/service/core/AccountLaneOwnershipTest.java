@@ -49,13 +49,14 @@ class AccountLaneOwnershipTest {
         // 所属账户线程读取完成的门闩
         var done = new CountDownLatch(1);
         try (/* 本例实际账户工作对象，资源退出时关闭 */ var worker = new SettlementLaneWorker("ownership", lane, 16)) {
-            assertThatThrownBy(lane::userCount).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> lane.owns(7)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> lane.pendingReservation(1)).isInstanceOf(IllegalStateException.class);
             worker.submit(/* 已在真实账户线程中取得的所属 Lane，按范围读取或修改 */ owned -> { assertThat(owned.owns(7)).isTrue(); done.countDown(); });
             assertThat(done.await(2, TimeUnit.SECONDS)).isTrue();
             worker.assertHealthy();
         }
-        assertThat(lane.userCount()).isOne();
+        assertThat(lane.owns(7)).isTrue();
+        assertThat(lane.owns(8)).isFalse();
     }
 
     /**
@@ -66,7 +67,7 @@ class AccountLaneOwnershipTest {
         try (/* 本例账户运行时，按当前显式或资源关闭路径结束工作资源 */ var runtime = new TradingAccountRuntime(com.surprising.aeron.service.core.CoreStateTestFixtures.SINGLE_LANE_TOPOLOGY)) {
             runtime.bindOwner();
             runtime.startAccountLanes();
-            assertThatThrownBy(() -> runtime.onLane(0, /* 本例原账户状态，启动前登记用户，交接期间由明确拥有者访问 */ lane -> lane.userCount())).isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> runtime.onLane(0, /* 本例原账户状态，启动前登记用户，交接期间由明确拥有者访问 */ lane -> lane.owns(7))).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> runtime.enterLaneCommandScope(runtime.accountLanes[0])).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> runtime.user(7)).isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> runtime.order(1)).isInstanceOf(IllegalStateException.class);
@@ -109,11 +110,13 @@ class AccountLaneOwnershipTest {
             try {
                 worker.submitAdmission(/* 已在真实账户线程中取得的所属 Lane，按范围读取或修改 */ owned -> { owned.registerUser(8); admitted.countDown(); });
                 assertThat(admitted.await(50, TimeUnit.MILLISECONDS)).isFalse();
-                assertThat(lane.userCount()).isOne();
+                assertThat(lane.owns(7)).isTrue();
+                assertThat(lane.owns(8)).isFalse();
             } finally { lane.releaseOwnerForHandoff(); worker.resumeHandoff(1); }
             assertThat(admitted.await(2, TimeUnit.SECONDS)).isTrue();
             worker.assertHealthy();
         }
-        assertThat(lane.userCount()).isEqualTo(2);
+        assertThat(lane.owns(7)).isTrue();
+        assertThat(lane.owns(8)).isTrue();
     }
 }

@@ -385,7 +385,7 @@ class TradingAccountRuntimeTest {
         } finally {
             assertThatThrownBy(state::close).isSameAs(failure);
         }
-        for (int laneId = 0; laneId < state.laneCount(); laneId++) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state)[laneId].thread().isAlive()).isFalse();
+        for (int laneId = 0; laneId < state.topology().accountLaneCount(); laneId++) assertThat(com.surprising.aeron.service.core.AccountLaneTestAccess.workers(state)[laneId].thread().isAlive()).isFalse();
     }
 
     /**
@@ -477,10 +477,10 @@ class TradingAccountRuntimeTest {
         assertThat(state.order(11).symbolId()).isEqualTo(5);
         assertThat(state.reservation(11).reservedUnits()).isEqualTo(200);
         assertThat(state.orderIdByClient(7, 91)).isEqualTo(11);
-        assertThat(state.changedUsers().contains(7L)).isTrue();
+        assertThat(state.changedUsers.contains(7L)).isTrue();
         assertThat(state.snapshotProjectionStateDirty()).isTrue();
-        assertThat(state.changedOrders().contains(11L)).isTrue();
-        assertThat(state.changedReservations().contains(11L)).isTrue();
+        assertThat(state.orderChanges().containsKey(11L)).isTrue();
+        assertThat(state.changedReservations.contains(11L)).isTrue();
     }
 
     /**
@@ -1277,7 +1277,7 @@ class TradingAccountRuntimeTest {
         state.putPosition(positionKey, open);
         state.clearChangedKeys();
 
-        state.removePosition(positionKey, 7);
+        com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(state, positionKey, 7);
 
         assertThat(state.currentPatchPositionBefore(positionKey)).isSameAs(open);
         assertThat(state.currentPatchPositionBefore(positionKey)).isSameAs(open);
@@ -1327,7 +1327,7 @@ class TradingAccountRuntimeTest {
                         .isEqualTo(beforeFailure[laneId].localFundsHash());
             }
             assertThat(state.revision()).isEqualTo(revisionBeforeFailure);
-            assertThat(state.changedUsers().isEmpty()).isTrue();
+            assertThat(state.changedUsers.isEmpty()).isTrue();
             state.dispatchControlLanes(topology.accountLaneMask(laneOneUser), /* 当前 Lane 遍历下标或实际控制回调提供的所属 Lane 下标 */ id -> "apply-reclaimed");
             awaitControlLanes(state);
             assertThat(state.controlLaneResult(topology.accountLaneId(laneOneUser))).isEqualTo("apply-reclaimed");

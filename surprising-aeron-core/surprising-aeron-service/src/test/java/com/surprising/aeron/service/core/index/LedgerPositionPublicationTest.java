@@ -90,7 +90,7 @@ class LedgerPositionPublicationTest {
                     runtime.dispatchLedgerCommand(command);
                 }
                 runtime.dispatchControlLanes(runtime.topology().accountLaneMask(7), /* 本次删除持仓的实际账户 Lane，操作只改用户七持仓 */ lane -> {
-                    runtime.removePosition(key, 7); return null;
+                    com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, key, 7); return null;
                 });
                 LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
                 // 即使没有资金补丁，仅持仓变化的控制命令仍须完成账本校验。

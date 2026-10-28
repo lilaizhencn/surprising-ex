@@ -567,11 +567,6 @@ public final class AccountLaneState {
      */
     public boolean owns(long userId) { assertOwner(); return userIds.contains(userId); }
     /**
-     * 返回登记的用户成员数，不等同于直接读取 users 表大小。
-     */
-    public int userCount() { assertOwner(); return userIds.size(); }
-
-    /**
      * 核对所属线程并登记正数用户编号；重复登记不增加成员数，不在此创建用户余额。
      * @param userId 本次处理的用户编号，路由已由外层选择到本 Lane
      */
@@ -1861,11 +1856,6 @@ public final class AccountLaneState {
      */
     public void clearTriggerOrderValues() { cold.triggerOrders.clear(); }
     /**
-     * 只移除并返回用户权威值，不清理成员、余额、订单或身份索引。
-     * @param key 用户编号
-     */
-    public UserRuntime removeUserValue(long key) { return users.remove(key); }
-    /**
      * 直接写入并返回旧预留值；待完成金额及用户成员索引由外层同步维护。
      * @param key 预留对应的订单编号
      * @param value 要保存的预留记录
@@ -1894,11 +1884,6 @@ public final class AccountLaneState {
      * @param key 强平编号
      */
     public com.surprising.aeron.service.risk.LiquidationRuntime removeLiquidationValue(long key) { return cold.liquidations.remove(key); }
-    /**
-     * 只移除并返回持仓值，不自动移除用户或合约成员索引。
-     * @param key 运行时持仓键
-     */
-    public com.surprising.aeron.service.position.PositionRuntime removePositionValue(long key) { return positions.remove(key); }
     /**
      * 以原语订单编号和记录遍历订单表，避免把键转换为 Long；不自动排序。
      * @param consumer 在当前 Lane 访问边界内消费遍历项的回调，不应修改正在遍历的容器
@@ -1948,20 +1933,10 @@ public final class AccountLaneState {
      */
     public IntObjectHashMap<BalanceRuntime> userBalances(long key) { return balances.get(key); }
     /**
-     * 移除并返回用户资产余额表，不在此对余额作账务冲正。
-     * @param key 用户编号
-     */
-    public IntObjectHashMap<BalanceRuntime> removeUserBalances(long key) { return balances.remove(key); }
-    /**
      * 返回用户实际使用的预留编号集合，不创建集合副本。
      * @param key 用户编号
      */
     public org.agrona.collections.LongHashSet reservationIds(long key) { return reservationIdsByUser.get(key); }
-    /**
-     * 移除并返回该用户的预留成员集合，不删除预留值。
-     * @param key 用户编号
-     */
-    public org.agrona.collections.LongHashSet removeReservationIds(long key) { return reservationIdsByUser.remove(key); }
     /**
      * 返回用户实际使用的持仓键集合。
      * @param key 用户编号
@@ -1978,11 +1953,6 @@ public final class AccountLaneState {
      */
     public org.agrona.collections.LongHashSet activeOrderIds(long key) { return activeOrderIdsByUser.get(key); }
     /**
-     * 移除并返回用户活跃订单成员集合，不删除订单值。
-     * @param key 用户编号
-     */
-    public org.agrona.collections.LongHashSet removeActiveOrderIds(long key) { return activeOrderIdsByUser.remove(key); }
-    /**
      * 安装并返回旧的用户杠杆键集合，不修改杠杆值。
      * @param key 用户编号
      * @param value 该用户对应的业务杠杆键集合
@@ -1997,11 +1967,6 @@ public final class AccountLaneState {
      * 清空用户到杠杆键的成员索引，不同时清空杠杆值表。
      */
     public void clearLeverageKeys() { cold.leverageKeysByUser.clear(); }
-    /**
-     * 移除并返回用户杠杆键集合，不同时移除杠杆设置。
-     * @param key 用户编号
-     */
-    public java.util.HashSet<CoreLeverageKey> removeLeverageKeys(long key) { return cold.leverageKeysByUser.remove(key); }
     /**
      * 安装并返回旧的合约到用户持仓键索引分组。
      * @param key 稠密合约编号
@@ -2054,11 +2019,6 @@ public final class AccountLaneState {
      * @param key 用户编号
      */
     public Long2LongHashMap userClientOrders(long key) { return clientOrderIndex.get(key); }
-    /**
-     * 移除并返回用户客户号映射，不释放身份字典引用或订单反向索引。
-     * @param key 用户编号
-     */
-    public Long2LongHashMap removeUserClientOrders(long key) { return clientOrderIndex.remove(key); }
     /**
      * 给用户登记一个持仓键，首次出现时创建集合；本入口不写入持仓权威表。
      * @param userId 本次处理的用户编号，路由已由外层选择到本 Lane

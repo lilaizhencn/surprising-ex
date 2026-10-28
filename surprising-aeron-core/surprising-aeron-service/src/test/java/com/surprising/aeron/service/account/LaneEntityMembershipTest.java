@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.*;
  */
 class LaneEntityMembershipTest {
     /**
-     * 反复增加和移除大编号订单及预留，检查长期成员、原语数组与返回副本隔离，并要求用户删除后释放成员容器。
+     * 反复增加和移除大编号订单及预留，检查长期成员、原语数组与返回副本隔离，移除最后一项后仍保留空成员容器供复用。
      */
     @Test
     void liveOrderAndReservationMembershipSurvivesUniqueIdChurnWithoutReplacingArrays() throws Exception {
@@ -49,7 +49,7 @@ class LaneEntityMembershipTest {
                 assertThat(orders.size()).isEqualTo(21);
                 assertThat(reservations.size()).isEqualTo(21);
                 for (/* 当前加入、移除或构造待回滚成员的订单编号。 */ long id = first; id < first + 20; id++) {
-                    state.removeOrder(id);
+                    com.surprising.aeron.service.core.CoreStateTestFixtures.deleteOrder(state, id);
                     CoreStateTestFixtures.deleteReservation(state, id, 7);
                 }
                 assertThat(lane.activeOrderIdsByUser.get(7)).isSameAs(orders);
@@ -67,13 +67,10 @@ class LaneEntityMembershipTest {
             var detached = state.reservationIdsForUser(7);
             detached[0] = 99;
             assertThat(reservations.contains(1)).isTrue();
-            state.removeOrder(1);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deleteOrder(state, 1);
             CoreStateTestFixtures.deleteReservation(state, 1, 7);
             assertThat(orders.size()).isZero();
             assertThat(reservations.size()).isZero();
-            state.removeUser(7);
-            assertThat(lane.activeOrderIdsByUser.get(7)).isNull();
-            assertThat(lane.reservationIdsByUser.get(7)).isNull();
         }
     }
 
@@ -129,10 +126,10 @@ class LaneEntityMembershipTest {
     }
 
     /**
-     * 客户号映射删空后继续加入新映射，要求复用同一原语表，用户删除时才移除该表。
+     * 客户号映射删空后继续加入新映射，要求复用同一原语表。
      */
     @Test
-    void clientOrderIndexReusesItsPrimitiveTableUntilUserRemoval() {
+    void clientOrderIndexReusesItsPrimitiveTableAfterLastAliasRemoval() {
         try (/* 本场景独立的交易运行时，测试结束时自动关闭工作资源。 */ var state = new TradingAccountRuntime()) {
             state.putUser(new UserRuntime(7));
             // 用户七实际所属的账户 Lane，检查其权威表和成员索引。
@@ -147,8 +144,6 @@ class LaneEntityMembershipTest {
 
             TradingAccountRuntime.putClientOrderIndex(lane, 7, 92, 12);
             assertThat(lane.clientOrderIndex.get(7)).isSameAs(clients);
-            state.removeUser(7);
-            assertThat(lane.clientOrderIndex.get(7)).isNull();
         }
     }
 
@@ -274,13 +269,13 @@ class LaneEntityMembershipTest {
             state.replacePosition(11, position(7, 2, 3));
             assertThat(open.toArray()).containsExactly(12);
             assertThat(lane.positionKeysBySymbolAndUser.get(2).get(7).toArray()).containsExactly(11);
-            state.removePosition(12, 7);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(state, 12, 7);
             assertThat(lane.positionKeysBySymbolAndUser.get(1)).isNull();
             state.replacePosition(11, position(7, 2, 0));
             assertThat(lane.positionKeysBySymbolAndUser.get(2)).isNull();
             assertThat(lane.positionKeysByUser.get(7)).isSameAs(all);
             assertThat(all.toArray()).containsExactly(11);
-            state.removePosition(11, 7);
+            com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(state, 11, 7);
             assertThat(lane.positionKeysByUser.get(7)).isNull();
         }
     }

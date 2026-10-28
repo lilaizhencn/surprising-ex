@@ -227,7 +227,7 @@ class ParallelRiskScanTest {
             runtime.acquireOwnerLaneAccess();
             try {
                 runtime.replaceBalance(new BalanceRuntime(userId, ids.assetId("USDT"), 300, 0));
-                runtime.removePosition(ids.preparedPositionKey(userId, SYMBOL), userId);
+                com.surprising.aeron.service.core.CoreStateTestFixtures.deletePosition(runtime, ids.preparedPositionKey(userId, SYMBOL), userId);
                 runtime.advanceUserRevision(userId);
             } finally {
                 runtime.releaseOwnerLaneAccess();

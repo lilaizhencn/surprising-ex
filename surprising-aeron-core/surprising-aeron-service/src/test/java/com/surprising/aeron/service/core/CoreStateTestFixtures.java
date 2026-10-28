@@ -158,6 +158,31 @@ public final class CoreStateTestFixtures {
                 Math.max(1, reservedUnits), 0, 0, quantitySteps);
         runtime.reserveOrder(order, reservation, clientKey, reservedUnits);
     }
+    /** 测试制造订单删除事实；业务撤单仍走原终态结算。 */
+    public static void deleteOrder(TradingAccountRuntime runtime, long orderId) {
+        var previous = runtime.order(orderId);
+        runtime.accountRollback().captureOrderBefore(orderId);
+        runtime.accountRollback().captureUserBefore(previous.userId());
+        runtime.onLane(previous.userId(), lane -> { lane.removeOrder(orderId); return null; });
+        runtime.publishOrder(orderId, null);
+        runtime.changedOrder(orderId, null);
+        runtime.markUserChanged(previous.userId());
+    }
+
+    /** 测试制造持仓删除事实，继续使用实际索引撤销和回滚前值。 */
+    public static void deletePosition(TradingAccountRuntime runtime, long key, long userId) {
+        runtime.onLane(userId, lane -> {
+            runtime.accountRollback().captureUserBefore(userId);
+            runtime.accountRollback().capturePositionBefore(key, userId);
+            var previous = com.surprising.aeron.service.account.AccountLaneTestAccess.positions(lane).remove(key);
+            TradingAccountRuntime.unindexPosition(lane, key, previous);
+            return null;
+        });
+        runtime.publishPosition(key, null);
+        runtime.changedPosition(key, null);
+        runtime.markUserChanged(userId);
+    }
+
     /** 为索引与退休测试准备风险删除事实，由原 Lane 完成边界生成身份退休证明。 */
     public static void deleteRiskSnapshot(TradingAccountRuntime runtime, long key) {
         long userId = runtime.riskSnapshot(key).userId();

@@ -46,10 +46,12 @@ class RuntimeStateTransitionsTest {
                     new TransferFundsCommand(id, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
                                     "SPOT", "USDT_PERPETUAL", "USDT", 1, "r" + id, "", 7L, 7L));
             runtime.restorePendingTransfers(pending);
-            assertThat(runtime.pendingTransfers(2)).extracting(/* 分页中抽取业务 ID 的当前划转 */ t -> t.transferId()).containsExactly(1L, 2L);
-            assertThat(runtime.pendingTransfers(2)).extracting(/* 分页中抽取业务 ID 的当前划转 */ t -> t.transferId()).containsExactly(3L, 4L);
-            assertThat(runtime.pendingTransfers(2)).extracting(/* 分页中抽取业务 ID 的当前划转 */ t -> t.transferId()).containsExactly(5L);
-            assertThat(runtime.pendingTransfers(2)).extracting(/* 分页中抽取业务 ID 的当前划转 */ t -> t.transferId()).containsExactly(1L, 2L);
+            for (long[] expected : new long[][]{{1, 2}, {3, 4}, {5}, {1, 2}}) {
+                var page = runtime.pendingTransferRoutes(2);
+                assertThat(page.ids()).containsExactly(expected);
+                for (long id : page.ids()) assertThat(runtime.pendingTransfer(id)).isEqualTo(pending.get(id));
+                runtime.completePendingTransferPage(page);
+            }
             assertThat(runtime.pendingTransfersSnapshot()).isEqualTo(pending);
         }
     }

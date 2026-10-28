@@ -354,13 +354,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 返回账户 Lane 数量。
-     */
-    public int laneCount() {
-        return accountLanes.length;
-    }
-
-    /**
      * 按固定拓扑把用户身份路由到所属账户 Lane。
      * @param userId 本次业务对应的用户身份，按固定拓扑路由到账户 Lane
      */
@@ -3998,22 +3991,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 只在账户未启动时按路由页读取划转，完成页边界后返回固定列表；活动查询交给账户 Lane。
-     * @param limit 本次向财库请求的最大分页条数，具体范围由财库入口检查
-     */
-    public List<TransferFundsCommand> pendingTransfers(int limit) {
-        assertOwner();
-        if (accountLanesStarted()) throw new IllegalStateException("active transfer queries must run on Account Lanes");
-        // 本次冷读取使用的路由页，读取结束后推进其最后 ID 边界
-        TreasuryRuntime.PendingTransferRoutes page = pendingTransferRoutes(limit);
-        // 本页逐项读取出的原划转引用列表，随后生成固定列表
-        var values = new java.util.ArrayList<TransferFundsCommand>(page.ids().length);
-        for (long /* 本轮正在恢复、读取或捕获的业务实体身份 */ id : page.ids()) values.add(pendingTransfer(id));
-        completePendingTransferPage(page);
-        return List.copyOf(values);
-    }
-
-    /**
      * 要求账户已停止，校验映射容量、键值非空及划转身份一致，再清旧路由与账户值并逐项恢复。
      * @param restored 需要恢复的政策或待完成划转映射，按对应入口校验
      */
@@ -4345,33 +4322,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 保存用户前值，删除用户值、余额及各用户索引并清客户号反向关系，再登记用户删除；已有订单、预留及持仓实体不在此递归删除。
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     */
-    public void removeUser(long userId) {
-        assertOwner();
-        accountRollback.captureUserBefore(userId);
-        onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            // 该用户客户号到订单的原始映射，零表示没有对应订单
-            Long2LongHashMap userClientOrders = lane.userClientOrders(userId);
-            if (userClientOrders != null) userClientOrders.forEachLong((/* 当前客户号内部键，与订单反向索引一起维护 */ clientKey, /* 当前客户号、订单或预留对应的订单实体 ID */ orderId) -> {
-                lane.clientKeysByOrderId().remove(orderId, clientKey);
-            });
-            lane.removeUserValue(userId);
-            lane.removeUser(userId);
-            lane.removeUserBalances(userId);
-            lane.removeUserClientOrders(userId);
-            lane.removeReservationIds(userId);
-            lane.removeActiveOrderIds(userId);
-            lane.removePositionKeys(userId);
-            lane.removeLeverageKeys(userId);
-            return null;
-        });
-        publishUser(userId, null);
-        markUserChanged(userId);
-    }
-
-    /**
      * 读取输入余额数值，保存前值后在所属 Lane 建立独立余额对象并捕获后值；没有外层账户范围时再标记 Owner 变化。
      * @param balance 本次需要保存或更新的资产余额值
      */
@@ -4466,8 +4416,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
             return null;
         });
         publishReservation(reservation.orderId(), reservation);
-        if (previous == null) {
-        }
         markReservationChanged(reservation.orderId());
         markUserChanged(reservation.userId());
         if (previous != null) markUserChanged(previous.userId());
@@ -4488,31 +4436,9 @@ public final class TradingAccountRuntime implements AutoCloseable {
         }
         onLane(order.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> { lane.putOrder(order); return null; });
         publishOrder(order.orderId(), order);
-        if (previous == null) {
-            if (currentMatcherSettlementChangesScope() == null) {
-            }
-        }
         if (currentMatcherSettlementChangesScope() == null) {
             changedOrder(order.orderId(), order);
             markUserChanged(order.userId());
-        }
-    }
-
-    /**
-     * 保存原订单及用户前值，存在时在所属 Lane 删除并交出删除标记；原订单缺失直接结束。
-     * @param orderId 本次操作关联的订单实体 ID
-     */
-    public void removeOrder(long orderId) {
-        assertOwner();
-        accountRollback.captureOrderBefore(orderId);
-        // 本次替换或删除前的原业务值，用于保存原用户和维护旧索引
-        OrderRuntime previous = order(orderId);
-        if (previous != null) {
-            accountRollback.captureUserBefore(previous.userId());
-            onLane(previous.userId(), /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> { lane.removeOrder(orderId); return null; });
-            publishOrder(orderId, null);
-            changedOrder(orderId, null);
-            markUserChanged(previous.userId());
         }
     }
 
@@ -4905,30 +4831,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 校验用户持仓存在，保存前值后在所属 Lane 删除实体及持仓索引，并登记删除与用户变化。
-     * @param positionKey 持仓内部身份键
-     * @param userId 本次业务所属用户身份，按固定拓扑路由
-     */
-    public void removePosition(long positionKey, long userId) {
-        assertOwner();
-        onLane(userId, /* 本次业务所在的账户 Lane，回调仅在既有合法执行范围内使用 */ lane -> {
-            accountRollback.captureUserBefore(userId);
-            accountRollback.capturePositionBefore(positionKey, userId);
-            // 待删除的原持仓，必须属于当前用户
-            PositionRuntime current = lane.position(positionKey);
-            if (current == null || current.userId() != userId) {
-                throw new IllegalArgumentException("runtime position is not registered: " + positionKey);
-            }
-            lane.removePositionValue(positionKey);
-            unindexPosition(lane, positionKey, current);
-            return null;
-        });
-        publishPosition(positionKey, null);
-        changedPosition(positionKey, null);
-        markUserChanged(userId);
-    }
-
-    /**
      * 保存用户、订单与预留前值，在所属账户完成精确冻结释放及终态更新，再交出变化并推进用户修订。
      * @param orderId 本次操作关联的订单实体 ID
      * @param userId 本次业务所属用户身份，按固定拓扑路由
@@ -5248,14 +5150,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     }
 
     /**
-     * 复制当前命令变化用户集合，避免调用方修改原缓冲。
-     */
-    public LongHashSet changedUsers() {
-        assertOwner();
-        return new LongHashSet(changedUsers);
-    }
-
-    /**
      * 校验接收函数后直接遍历原始变化用户身份，不先创建集合副本。
      * @param consumer 接收本次变化身份的回调
      */
@@ -5334,25 +5228,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
         AccountLaneState lane = currentLaneCommandScope();
         if (lane == null) changedPositions.put(positionKey, position);
         else laneDelta(lane.laneId()).putPosition(positionKey, position);
-    }
-
-    /**
-     * 从当前订单变化缓冲复制身份集合，空删除值对应的身份也保留。
-     */
-    public LongHashSet changedOrders() {
-        assertOwner();
-        // 本次要返回给调用方的订单变化身份副本，删除项同样保留
-        LongHashSet keys = new LongHashSet();
-        changedOrders.forEach((/* 当前客户号、订单或预留对应的订单实体 ID */ orderId, /* 遍历变化键时不需要的业务值，删除项身份同样保留 */ ignored) -> keys.add(orderId));
-        return keys;
-    }
-
-    /**
-     * 复制当前变化预留身份集合。
-     */
-    public LongHashSet changedReservations() {
-        assertOwner();
-        return new LongHashSet(changedReservations);
     }
 
     /**
