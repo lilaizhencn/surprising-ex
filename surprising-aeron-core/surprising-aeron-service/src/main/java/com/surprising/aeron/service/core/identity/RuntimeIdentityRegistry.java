@@ -520,18 +520,10 @@ public final class RuntimeIdentityRegistry {
             throw new IllegalStateException("position identity crossed account Lane");
         }
         // 当前用户身份的确定性长整数键
-        long key = positionIdentityKey(userId, instrumentId(instrument), side);
+        long key = positionIdentityKey(userId, instrument.instrumentId(), side);
         // 本次反向表查到或发布的持仓身份项
         PositionEntry entry = positionEntry(lane, key);
         return entry != null && entry.matches(userId, instrument.instrumentId(), side) ? key : 0;
-    }
-
-    /**
-     * 要求合约对象存在，取其永久数字标的文本。
-     * @param instrument 提供永久标的文本的合约配置
-     */
-    private static String instrumentId(CoreInstrument instrument) {
-        return instrument.instrumentId();
     }
 
     /**
@@ -789,17 +781,6 @@ public final class RuntimeIdentityRegistry {
         if (entry.allocationRecorded) return;
         trackAllocation(positionAllocationKeys, positionKeyAllocations, nextPositionKey++, key);
         entry.allocationRecorded = true;
-    }
-
-    /**
-     * Owner 按用户、原持仓名查询；非法用户或空白名称返回空，不分配。
-     * @param userId 该身份所属用户
-     * @param positionKey 用户原持仓名，非法或空白返回空
-     */
-    public Long findPositionKey(long userId, String positionKey) {
-        assertOwner();
-        if (userId <= 0 || positionKey == null || positionKey.isBlank()) return null;
-        return findPositionIdentity(userId, positionKey);
     }
 
     /**

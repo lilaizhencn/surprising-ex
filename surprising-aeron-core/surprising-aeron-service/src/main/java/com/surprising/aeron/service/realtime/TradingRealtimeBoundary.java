@@ -10,8 +10,6 @@ import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.realtime.state.RealtimeStateCapture;
 import com.surprising.product.api.ProductLine;
 import io.aeron.cluster.service.Cluster;
-import lombok.Getter;
-import lombok.experimental.Accessors;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 
 /**
@@ -36,8 +34,6 @@ public final class TradingRealtimeBoundary implements AutoCloseable {
     /** 运行时当前使用的 Owner 编码捕获器，恢复时重新绑定。 */
     private RealtimeStateCapture capture;
     /**  控制接收线程等生产者交给 Owner 的有界原请求队列。 借出原有界请求队列供现有调用边界投递，不能把直接入队当成已通过接收器协议筛选。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
     private final ManyToOneConcurrentArrayQueue<RealtimeFrame> requests =
             new ManyToOneConcurrentArrayQueue<>(REQUEST_CAPACITY);
     /** 当前角色是否允许开始捕获或推进实时请求。 */

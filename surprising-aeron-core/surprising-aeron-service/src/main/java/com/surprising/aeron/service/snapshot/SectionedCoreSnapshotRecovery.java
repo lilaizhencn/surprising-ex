@@ -7,8 +7,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.zip.CRC32C;
-import lombok.Getter;
-import lombok.experimental.Accessors;
 import org.agrona.DirectBuffer;
 
 /**
@@ -56,9 +54,7 @@ public final class SectionedCoreSnapshotRecovery {
     private int sectionIndex;
     /** 当前段负载已经接收的字节数。 */
     private int payloadPosition;
-    /**  从来源实际拷入内部数组的累计字节数。 返回已经拷入数组的总字节计数，不是声明的最终快照大小。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
+    /**  从来源实际拷入内部数组的累计字节数，用于接收预算与完整性检查。 */
     private int totalLength;
     /** 封套格式和段数是否已经校验通过。 */
     private boolean modeKnown;

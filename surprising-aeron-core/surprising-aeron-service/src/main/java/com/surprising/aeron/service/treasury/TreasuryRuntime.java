@@ -435,24 +435,6 @@ public final class TreasuryRuntime {
     }
 
     /**
-     * 清空权威资产资金和已发布结算进度，保留发布单元数组并把未完成资金费数归零；不清当前回滚前值、变化键或待划转路由，重建调用方另行管理这些边界。
-     */
-    public void clear() {
-        assertOwner();
-        feeBalances.clear();
-        insuranceBalances.clear();
-        insuranceDeficits.clear();
-        liquidationFeeBalances.clear();
-        fundingResidualBalances.clear();
-        roundingResidualBalances.clear();
-        clearingPnlBalances.clear();
-        for (SettlementStatusCell /* 本币对共享的发布单元，扩容数组时单元本身保持同一引用。 */ cell : settlementStates) {
-            if (cell != null) cell.value = SettlementStatus.EMPTY;
-        }
-        incompleteFundingCount = 0;
-    }
-
-    /**
      * 当前所有者借用权威手续费原语 Map；直接改 Map 不自动捕获前值，事务变化应走 setter。
      */
     public IntLongHashMap feeBalances() { assertOwner(); return feeBalances; }

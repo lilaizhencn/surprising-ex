@@ -285,7 +285,7 @@ class CoreMatchingStateTest {
             int takerLane = state.runtimeState.topology().accountLaneId(9);
             assertThat(makerLane).isNotEqualTo(takerLane);
             // 完成后读取的 Lane 应用与提交水位指标。
-            CoreLaneMetricsView metrics = state.laneMetrics();
+            CoreLaneMetricsView metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics());
             assertThat(metrics.accountLaneAppliedSequences()[makerLane]).isEqualTo(state.realtimeExportSequence());
             assertThat(metrics.accountLaneCommittedSequences()[makerLane]).isEqualTo(state.realtimeExportSequence());
             assertThat(metrics.accountLaneAppliedSequences()[takerLane]).isEqualTo(state.realtimeExportSequence());
@@ -1166,9 +1166,8 @@ class CoreMatchingStateTest {
                 assertThat(restoredIdentities.asset(restoredIdentities.assetId(sellerAsset))).isEqualTo(sellerAsset);
                 if (productLine != ProductLine.SPOT) {
                     for (long user : new long[]{11, 22}) {
-                        Long position = originalIdentities.findPositionKey(user, "1");
+                        Long position = originalIdentities.preparedPositionKey(user, "1");
                         assertThat(position).isNotNull();
-                        assertThat(restoredIdentities.findPositionKey(user, "1")).isEqualTo(position);
                         assertThat(restoredIdentities.preparedPositionKey(user, "1")).isEqualTo(position);
                     }
                 }

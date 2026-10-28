@@ -26,6 +26,8 @@
 - `InProcessTradingAllocationBenchmark` 使用进程内传输夹具；不代表 UDP、Consensus、Archive 或完整 Core 容量。
 - 无业务消费者的方法及其专用基准一起删除，不能为保留基准而保留生产接口。
 
+夹具的 Lane 指标使用现有指标编码/查询路径；已删除单独构造指标视图的生产入口。实时请求队列的夹具访问留在测试或基准源集，生产 Owner 不再提供转发访问器。
+
 ## 结果要求
 
 核对 offered、accepted、terminal、unfinished 和账户资金、冻结、持仓、终态及恢复。JMH fork 失败、缺少资金核对或录制窗口截断都不能记为通过。

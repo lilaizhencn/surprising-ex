@@ -175,17 +175,4 @@ public final class LaneClientIdentities {
         publishedCount--;
     }
 
-    /**
-     * 清空索引与已分配数组区间，并重置行计数和空闲栈指针；保留数组容量，旧空闲下标因指针归零不再使用。
-     */
-    public void clear() {
-        assertOwner();
-        rowsByKey.clear();
-        Arrays.fill(keys, 0, nextRow, 0);
-        Arrays.fill(users, 0, nextRow, 0);
-        Arrays.fill(references, 0, nextRow, 0);
-        Arrays.fill(names, 0, nextRow, null);
-        nextRow = freeCount = publishedCount = 0;
-    }
-
 }

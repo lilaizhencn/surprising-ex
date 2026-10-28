@@ -328,7 +328,17 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      * 借出真实实时边界的有界快照请求队列。
      */
     public ManyToOneConcurrentArrayQueue<com.surprising.aeron.protocol.RealtimeFrame> snapshotRequests() {
-        return owner.snapshotRequests();
+        try {
+            var boundaryField = TradingCoreOwner.class.getDeclaredField("realtimeBoundary");
+            boundaryField.setAccessible(true);
+            Object boundary = boundaryField.get(owner);
+            var requestsField = boundary.getClass().getDeclaredField("requests");
+            requestsField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var requests = (ManyToOneConcurrentArrayQueue<com.surprising.aeron.protocol.RealtimeFrame>)
+                    requestsField.get(boundary);
+            return requests;
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
     }
     /**
      * 取得真实 Owner 当前已启动的运行时引用，仍须遵守账户所有权。

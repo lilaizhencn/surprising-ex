@@ -15,7 +15,7 @@ class CommittedIndexVisitTest {
         try (var core = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             var state = core.runtimeState();
             var identities = core.identities();
-            var indexes = core.factIndexes();
+            var indexes = CoreStateTestFixtures.factIndexes(core);
             int symbol = identities.symbolId("1");
             indexes.activeOrders().apply(11, CoreStateTestFixtures.order(11, 7, symbol, 2), identities);
             seedPosition(indexes, identities, 21);

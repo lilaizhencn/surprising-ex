@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.core.index;
 
-import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.core.change.OwnerIndexedChanges;
 import com.surprising.aeron.service.core.change.RuntimeIndexedChangeBuffer;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -261,22 +260,6 @@ public final class RuntimeFactIndexes {
                 after == null ? null : identities.instrumentId(after.symbolId()),
                 after == null ? null : identities.asset(after.assetId()),
                 after == null ? null : after.positionSide(), after == null ? 0 : after.signedQuantitySteps());
-    }
-
-    /**
-     * 在冷边界依次重建全部八个索引；这不是候选集合的一次原子替换，中途失败交给恢复边界处理。
-     * @param state 冷边界重建全部索引使用的已提交状态
-     * @param identities 内部资产及标的编号对应的已准备身份表
-     */
-    public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        positionUsers.rebuild(state);
-        openInterest.rebuild(state);
-        triggers.rebuild(state);
-        algos.rebuild(state);
-        liquidations.rebuild(state);
-        timers.rebuild(state);
-        activeOrders.rebuild(state, identities);
-        adlPositions.rebuild(state, identities);
     }
 
     /**

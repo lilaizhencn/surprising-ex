@@ -463,7 +463,16 @@ public class ClusteredBatchTradingBenchmark {
             batchTrades = 0;
             makerBaseBalance = 1L + 256L * batchSize;
             service = new TradingCoreOwner(productLine, this::publishResponse);
-            snapshotRequests = service.snapshotRequests();
+            try {
+                var boundaryField = TradingCoreOwner.class.getDeclaredField("realtimeBoundary");
+                boundaryField.setAccessible(true);
+                Object boundary = boundaryField.get(service);
+                var requestsField = boundary.getClass().getDeclaredField("requests");
+                requestsField.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                var requests = (java.util.Queue<RealtimeFrame>) requestsField.get(boundary);
+                snapshotRequests = requests;
+            } catch (ReflectiveOperationException failure) { throw new IllegalStateException(failure); }
             Cluster cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(),
                     new Class<?>[]{Cluster.class}, (proxy, method, args) -> switch (method.getName()) {
                         case "role" -> Cluster.Role.LEADER;
@@ -1159,7 +1168,10 @@ public class ClusteredBatchTradingBenchmark {
                         || state.clientOrderIndex().values().stream().anyMatch(id -> id != 1L)) {
                     throw new IllegalStateException("terminal order retained client aliases");
                 }
-                var metrics = service.state().laneMetrics();
+                var metricsRequest = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LANE_METRICS_QUERY,
+                        UUID.randomUUID(), productLine, CommandSource.GATEWAY, 77, 0, 0, 0, 0), new byte[0]);
+                var metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(
+                        service.state().apply(metricsRequest).data());
                 if (metrics.accountLaneCount() != accountLanes
                         || metrics.accountLaneQueueDepths().length != accountLanes
                         || metrics.accountLaneCompletedOperations().length != accountLanes * 4

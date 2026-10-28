@@ -174,9 +174,7 @@ public final class AccountLaneState {
     @Getter
     final RuntimeDerivativeFillCalculator.FillCursor singleFillCursor = new RuntimeDerivativeFillCalculator.FillCursor();
 
-    /**  对外可见的队列历史深度峰值，写入按现有串行调用约定执行。 返回最近发布的队列深度峰值，监控读取不会申请账户所有权。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
+    /**  队列历史深度峰值，由现有串行观测入口更新并写入指标响应。 */
     private volatile int queueHighWaterMark;
 
     /**
@@ -1783,10 +1781,6 @@ public final class AccountLaneState {
      */
     public com.surprising.aeron.service.risk.RiskSnapshotRuntime riskSnapshot(long key) { return cold.riskSnapshots.get(key); }
     /**
-     * 返回持仓记录条数，包括表中保留的零仓位记录；不是净持仓数量或未平仓量。
-     */
-    public int positionCount() { return positions.size(); }
-    /**
      * 直接写入并返回旧杠杆设置，用户键索引由调用方同步维护。
      * @param key 用户、合约和保证金模式组成的杠杆键
      * @param value 要保存的杠杆值
@@ -2235,4 +2229,3 @@ final class LaneColdState {
         pendingTransfers.clear();
     }
 }
-

@@ -2237,9 +2237,9 @@ class CoreOrderedOrderBatchTest {
             assertThat(first.matcherEvents()).as(first.resultCode()).isNotEmpty();
             CoreFaults.afterSettlement(state, () -> {
                 // 主动方用户在品种一的永久持仓身份
-                Long takerPositionKey = identities.findPositionKey(1001, "1");
+                Long takerPositionKey = identities.preparedPositionKey(1001, "1");
                 // 被动方用户在品种一的永久持仓身份
-                Long makerPositionKey = identities.findPositionKey(1002, "1");
+                Long makerPositionKey = identities.preparedPositionKey(1002, "1");
                 assertThat(takerPositionKey).isNotNull();
                 assertThat(makerPositionKey).isNotNull();
                 assertThat(runtime.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
@@ -2255,9 +2255,9 @@ class CoreOrderedOrderBatchTest {
             long[] observedSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             assertThat(java.util.Arrays.stream(observedSequences).anyMatch(/* 当前被检查是否大于零的已观察 Matcher 进度值 */ value -> value > 0)).isTrue();
             // 主动方用户在品种一的永久持仓身份
-            Long takerPositionKey = identities.findPositionKey(1001, "1");
+            Long takerPositionKey = identities.preparedPositionKey(1001, "1");
             // 被动方用户在品种一的永久持仓身份
-            Long makerPositionKey = identities.findPositionKey(1002, "1");
+            Long makerPositionKey = identities.preparedPositionKey(1002, "1");
             assertThat(takerPositionKey).isNotNull();
             assertThat(makerPositionKey).isNotNull();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.position(takerPositionKey).signedQuantitySteps())).isEqualTo(1);

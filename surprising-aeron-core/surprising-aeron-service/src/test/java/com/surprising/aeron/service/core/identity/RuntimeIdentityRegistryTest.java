@@ -76,16 +76,18 @@ class RuntimeIdentityRegistryTest {
             executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);
-            assertThat(registry.findPositionKey(user, "1:LONG")).isEqualTo(key);
+            assertThat(registry.preparedPositionKey(user, "1:LONG")).isEqualTo(key);
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);
-            assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.preparedPositionKey(user, "1:LONG"))
+                    .isInstanceOf(IllegalStateException.class);
             // 最后删除后重新准备同名身份所得结果；客户端结果保留新分配符号
             long recreated = executor.submit(() -> registry.retainPositionInLane(lane, user, "1:LONG")).get();
             assertThat(recreated).isEqualTo(key);
             registry.releasePublishedPosition(key);
             registry.releasePositionKey(key);
-            assertThat(registry.findPositionKey(user, "1:LONG")).isNull();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.preparedPositionKey(user, "1:LONG"))
+                    .isInstanceOf(IllegalStateException.class);
         }
     }
 
@@ -237,10 +239,11 @@ class RuntimeIdentityRegistryTest {
         assertThat(registry.positionKey(7, new String("Aa"))).isEqualTo(first);
         assertThat(registry.preparedPositionKey(7, "BB")).isEqualTo(second).isNotEqualTo(first);
         assertThat(registry.preparedPositionKey(8, "Aa")).isEqualTo(third).isNotEqualTo(first);
-        assertThat(registry.findPositionKey(7, "客户😀:NET")).isEqualTo(unicode);
+        assertThat(registry.preparedPositionKey(7, "客户😀:NET")).isEqualTo(unicode);
         registry.releasePositionKey(first);
-        assertThat(registry.findPositionKey(7, "Aa")).isNull();
-        assertThat(registry.findPositionKey(7, "BB")).isEqualTo(second);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.preparedPositionKey(7, "Aa"))
+                    .isInstanceOf(IllegalStateException.class);
+        assertThat(registry.preparedPositionKey(7, "BB")).isEqualTo(second);
     }
 
     /**
@@ -338,9 +341,11 @@ class RuntimeIdentityRegistryTest {
         identities.releasePositionKey(released);
         identities.rollbackPositionKeys(checkpoint);
 
-        assertThat(identities.findPositionKey(1001, "1:NET")).isNotNull();
-        assertThat(identities.findPositionKey(1002, "1:NET")).isNull();
-        assertThat(identities.findPositionKey(1003, "2:NET")).isNull();
+        assertThat(identities.preparedPositionKey(1001, "1:NET")).isPositive();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.preparedPositionKey(1002, "1:NET"))
+                    .isInstanceOf(IllegalStateException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.preparedPositionKey(1003, "2:NET"))
+                    .isInstanceOf(IllegalStateException.class);
         assertThat(identities.positionCheckpoint()).isEqualTo(checkpoint);
     }
 

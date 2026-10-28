@@ -59,7 +59,6 @@ import com.surprising.aeron.service.snapshot.CoreSnapshotLifecycle;
 import com.surprising.aeron.service.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
-import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
@@ -532,9 +531,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final ProductLine productLine;
     /** 当前绑定的 Owner 线程，被动构造后可交接，活动业务要求线程一致。 */
     Thread owner;
-    /**  基于运行时事实建立的索引集合，恢复时重新绑定并重建。 借出运行时事实索引集合，沿用各索引已有所有权。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
+    /**  基于运行时事实建立的索引集合，恢复时与账户运行时绑定，沿用各索引所有权。 */
     final com.surprising.aeron.service.core.index.RuntimeFactIndexes factIndexes;
     /**  近期完整命令收据及响应租约的有界保存表。 借出近期命令收据表，不延长其中响应缓冲的持有期限。 */
     @Accessors(fluent = true, chain = false)
@@ -671,14 +668,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
      */
     public java.util.function.BooleanSupplier pendingTriggerScan(String instrumentId, int maxWork) {
         return triggers.pendingTriggerScan(instrumentId, maxWork);
-    }
-    /**
-     * 按本轮预算推进指定标的的触发扫描，由既有触发单逻辑裁决和生成后续工作。
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
-     * @param maxWork 本轮最多处理的工作数量
-     */
-    public void evaluatePendingTriggerScan(String instrumentId, int maxWork) {
-        triggers.evaluatePendingTriggerScan(instrumentId, maxWork);
     }
     /**
      * 返回已经排队、尚待追加派发的衍生撮合命令数量。
@@ -1615,36 +1604,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public long terminalTradeCount() {
         assertOwner();
         return terminalTradeCount;
-    }
-
-    /**
-     * 从原语观测计数直接构造独立视图；各字段允许独立滞后，不取得账户业务读取权限。
-     */
-    public CoreLaneMetricsView laneMetrics() {
-        assertOwner();
-        int count = matchingAdapter.topology().accountLaneCount();
-        int operations = Math.multiplyExact(count, CoreLaneMetricsView.OPERATION_TYPE_COUNT);
-        long[] revisions = new long[count], applied = new long[count], committed = new long[count];
-        int[] depths = new int[count], capacities = new int[count], highWaterMarks = new int[count];
-        long[] completed = new long[operations];
-        for (int laneId = 0; laneId < count; laneId++) {
-            var lane = runtimeState.accountLane(laneId);
-            revisions[laneId] = lane.observedRevision();
-            committed[laneId] = lane.observedCommittedSequence();
-            applied[laneId] = Math.max(committed[laneId], lane.observedAppliedSequence());
-            depths[laneId] = runtimeState.laneWorkerDepth(laneId);
-            capacities[laneId] = runtimeState.laneWorkerCapacity(laneId);
-            highWaterMarks[laneId] = runtimeState.observeLaneQueueHighWaterMark(laneId, depths[laneId]);
-            for (int operation = 0; operation < CoreLaneMetricsView.OPERATION_TYPE_COUNT; operation++) {
-                completed[laneId * CoreLaneMetricsView.OPERATION_TYPE_COUNT + operation] = lane.observedOperationCount(operation);
-            }
-        }
-        return new CoreLaneMetricsView(matchingAdapter.topology().matchingEngineCount(), count,
-                matcherPipeline.submissionDepth(), matcherPipeline.capacity(), matcherPipeline.submissionHighWaterMark(),
-                matcherPipeline.completionDepth(), matcherPipeline.capacity(), matcherPipeline.completionHighWaterMark(),
-                pendingMatching.inFlight(), pendingMatching.capacity(), pendingMatching.highWaterMark(), committedCoreSequence,
-                revisions, applied, committed, depths, capacities, highWaterMarks, new long[count], new long[count],
-                completed, new long[operations], new long[operations], new long[operations]);
     }
 
     /**

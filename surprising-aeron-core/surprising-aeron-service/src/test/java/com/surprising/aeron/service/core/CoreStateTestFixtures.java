@@ -36,9 +36,11 @@ public final class CoreStateTestFixtures {
             ProductLine.LINEAR_PERPETUAL,
             instrument(ProductLine.LINEAR_PERPETUAL, "1", "BTC", "USDT", "USDT"));
 
-    /**
-     * 仅提供静态测试数据，不需要实例。
-     */
+    /** 测试在所属 Core 包内取得真实业务索引，不为观察提供生产 API。 */
+    public static com.surprising.aeron.service.core.index.RuntimeFactIndexes factIndexes(TradingCoreRuntime core) {
+        return core.runtimeState().factIndexes();
+    }
+
     private CoreStateTestFixtures() {
     }
 

@@ -133,7 +133,6 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
     /** 账户 Lane 生命周期，未启动时没有工作线程。 */
     final AccountLaneLifecycle laneLifecycle;
-    public AccountLaneLifecycle laneLifecycle() { return laneLifecycle; }
     private final CoreRuntimeConfiguration configuration;
     /** 账户准入完成后按 Matcher 分片设置的唤醒提示，业务结果仍在原事件。 */
     private final PaddedReadyMask accountAdmissionReadyShards;
@@ -168,7 +167,7 @@ public final class TradingAccountRuntime implements AutoCloseable {
     final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
     /** 本产品线各标的的风险扫描续步状态。 */
     final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
-    /** 唯一系统财库，账本激活后由账本线程写入，不建立 Owner 财库副本。 */
+    /** 唯一系统财库，由 Owner 同步写入，不建立资金状态副本。 */
     final TreasuryRuntime treasury = new TreasuryRuntime();
     /** 当前唯一财务控制命令槽，普通撮合事件使用各自已有的财务交接槽。 */
     private SystemLedgerCommand ledgerControl;

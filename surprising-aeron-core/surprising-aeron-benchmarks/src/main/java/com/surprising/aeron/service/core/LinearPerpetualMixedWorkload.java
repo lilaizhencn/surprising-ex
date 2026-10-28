@@ -596,7 +596,7 @@ public final class LinearPerpetualMixedWorkload {
 
     private static long[] completedLaneOperations(TradingCoreRuntime state) {
         long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
-        long[] completed = state.laneMetrics().accountLaneCompletedOperations();
+        long[] completed = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics()).accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
             int type = index % CoreLaneMetricsView.OPERATION_TYPE_COUNT;
             total[type] = Math.addExact(total[type], completed[index]);

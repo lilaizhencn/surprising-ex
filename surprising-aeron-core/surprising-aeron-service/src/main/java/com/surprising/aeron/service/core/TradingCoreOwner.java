@@ -10,7 +10,6 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.protocol.RealtimeFrame;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.order.ClusterCommandWindow;
 import com.surprising.aeron.service.order.OwnerCommandPipelineState;
@@ -23,7 +22,6 @@ import io.aeron.cluster.service.Cluster;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
-import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 import static com.surprising.aeron.support.egress.ClusterServiceEgress.NO_SESSION_ID;
 
 /**
@@ -427,13 +425,6 @@ public final class TradingCoreOwner {
      * 借出命令流水线的窗口引用，供既有编排和测试查看；不复制也不转移所有权。
      */
     ClusterCommandWindow commandWindow() { return commandPipeline.commandWindow(); }
-
-    /**
-     * 借出实时边界的有界快照请求队列，由 Owner 在既有边界内消费。
-     */
-    public ManyToOneConcurrentArrayQueue<RealtimeFrame> snapshotRequests() {
-        return realtimeBoundary.requests();
-    }
 
     /**
      * 等待推进时先检查中断和显式截止时间，再调用忙等自旋；失败附带诊断，不把技术超时伪装成业务拒绝。

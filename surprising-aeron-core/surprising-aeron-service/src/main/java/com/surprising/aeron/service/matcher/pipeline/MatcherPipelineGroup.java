@@ -223,11 +223,6 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     }
 
     /**
-     * 返回创建时固定的 Matcher 分片数量。
-     */
-    public int shardCount() { return shards.length; }
-
-    /**
      * 检查分片号在拓扑内并返回对应流水线。
      * @param shardId 目标全局 Matcher 分片号
      */

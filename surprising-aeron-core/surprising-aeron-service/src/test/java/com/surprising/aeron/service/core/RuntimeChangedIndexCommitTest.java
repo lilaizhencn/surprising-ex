@@ -183,7 +183,8 @@ class RuntimeChangedIndexCommitTest {
         runtime.clearCommittedChanges(identities);
 
         assertThat(AccountLaneQueryTestSupport.read(runtime, userId, () -> runtime.riskSnapshot(positionKey))).isNull();
-        assertThat(identities.findPositionKey(userId, "1:NET")).isNull();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.preparedPositionKey(userId, "1:NET"))
+                    .isInstanceOf(IllegalStateException.class);
         assertThat(runtime.snapshotProjectionStateDirty()).isFalse();
         runtime.close();
     }

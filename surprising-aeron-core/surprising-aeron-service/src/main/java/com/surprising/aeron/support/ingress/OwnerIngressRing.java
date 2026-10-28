@@ -74,13 +74,6 @@ public final class OwnerIngressRing {
     }
 
     /**
-     * 返回输入环固定容量。
-     */
-    public int capacity() {
-        return CAPACITY;
-    }
-
-    /**
      * Owner 完成当前动作或交出请求租约后移除队首并推进消费游标。
      */
     public void remove() {

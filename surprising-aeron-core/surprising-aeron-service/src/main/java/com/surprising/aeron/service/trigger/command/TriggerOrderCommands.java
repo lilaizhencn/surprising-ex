@@ -108,17 +108,6 @@ public final class TriggerOrderCommands {
     }
 
     /**
-     * 同步尝试执行一页触发扫描；若账户或子单仍异步等待，明确报错要求调用方使用续步，而不在此阻塞线程。
-     * @param instrumentId 本次扫描的规范数字标的 ID 文本，准备时解析为整数
-     * @param maxWork 本次允许使用的候选页及 OCO 处理预算，另受配置批量上限约束
-     */
-    public void evaluatePendingTriggerScan(String instrumentId, int maxWork) {
-        // 本次准备的一页可轮询触发扫描工作，当前只同步调用一次
-        var work = pendingTriggerScan(instrumentId, maxWork);
-        if (!work.getAsBoolean()) throw new IllegalStateException("asynchronous trigger scan requires continuation");
-    }
-
-    /**
      * 优先把本命令收集到的非空触发新值转成路由；返回空新值时仍回退 Owner 已发布索引，本方法不单独区分删除与没有新值。
      * @param id 需要查询的触发单业务 ID
      */

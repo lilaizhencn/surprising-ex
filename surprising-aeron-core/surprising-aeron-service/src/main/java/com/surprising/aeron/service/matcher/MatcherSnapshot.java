@@ -119,18 +119,9 @@ public record MatcherSnapshot(
      */
     public int matchingEngineCount() { return topology.matchingEngineCount(); }
     /**
-     * 返回清单拓扑的撮合分片路由掩码。
-     */
-    public int matcherShardMask() { return topology.matcherShardMask(); }
-    /**
      * 返回清单拓扑的账户 Lane 数量。
      */
     public int accountLaneCount() { return topology.accountLaneCount(); }
-    /**
-     * 返回清单保存的用户到账户 Lane 路由种子。
-     */
-    public long accountLaneSeed() { return topology.accountLaneSeed(); }
-
     /**
      * 按分片编号加一取对应进度，检查范围及列表中的编号仍一致；控制分片负一位于第零项。
      * @param matcherShardId 需读取进度的分片编号，控制分片为负一

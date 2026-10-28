@@ -79,42 +79,6 @@ public final class RuntimeTreasuryDelta {
     }
 
     /**
-     * 校验下标后读取该资产保险基金变化。
-     * @param index 本代有效资产槽下标
-     */
-    public long insuranceUnits(int index) {
-        checkIndex(index);
-        return (insuranceUnits == null ? firstInsuranceUnits : insuranceUnits[index]);
-    }
-
-    /**
-     * 校验下标后读取该资产保险亏空变化。
-     * @param index 本代有效资产槽下标
-     */
-    public long deficitUnits(int index) {
-        checkIndex(index);
-        return (deficitUnits == null ? firstDeficitUnits : deficitUnits[index]);
-    }
-
-    /**
-     * 校验下标后读取该资产资金费残差变化。
-     * @param index 本代有效资产槽下标
-     */
-    public long fundingResidualUnits(int index) {
-        checkIndex(index);
-        return (fundingResidualUnits == null ? firstFundingResidualUnits : fundingResidualUnits[index]);
-    }
-
-    /**
-     * 校验下标后读取该资产舍入残差变化。
-     * @param index 本代有效资产槽下标
-     */
-    public long roundingResidualUnits(int index) {
-        checkIndex(index);
-        return (roundingResidualUnits == null ? firstRoundingResidualUnits : roundingResidualUnits[index]);
-    }
-
-    /**
      * 校验下标后读取该资产清算盈亏变化。
      * @param index 本代有效资产槽下标
      */

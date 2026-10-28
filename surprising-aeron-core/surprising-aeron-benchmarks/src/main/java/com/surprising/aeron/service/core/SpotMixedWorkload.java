@@ -346,7 +346,7 @@ public final class SpotMixedWorkload {
 
     private static long[] completedLaneOperations(TradingCoreRuntime state) {
         long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
-        long[] completed = state.laneMetrics().accountLaneCompletedOperations();
+        long[] completed = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics()).accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
             total[index % CoreLaneMetricsView.OPERATION_TYPE_COUNT] += completed[index];
         }

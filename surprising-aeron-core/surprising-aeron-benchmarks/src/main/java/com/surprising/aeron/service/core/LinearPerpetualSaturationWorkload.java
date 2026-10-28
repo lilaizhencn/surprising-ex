@@ -499,7 +499,7 @@ public final class LinearPerpetualSaturationWorkload {
                 int closingActiveOrders = activeOrderCount(harness.state());
                 int closingClientIdentities = harness.state().runtimeClientIdentityCount();
                 int settledLogicalLanes = 0;
-                CoreLaneMetricsView laneMetrics = harness.state().laneMetrics();
+                CoreLaneMetricsView laneMetrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(harness.state().encodeLaneMetrics());
                 long[] completedByLane = laneMetrics.accountLaneCompletedOperations();
                 for (int lane = 0; lane < laneMetrics.accountLaneCount(); lane++) {
                     // Account partitions still route settlement, but have no worker queues.
@@ -579,7 +579,7 @@ public final class LinearPerpetualSaturationWorkload {
 
     private static long[] completedLaneOperations(TradingCoreRuntime state) {
         long[] total = new long[CoreLaneMetricsView.OPERATION_TYPE_COUNT];
-        long[] completed = state.laneMetrics().accountLaneCompletedOperations();
+        long[] completed = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(state.encodeLaneMetrics()).accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
             int type = index % CoreLaneMetricsView.OPERATION_TYPE_COUNT;
             total[type] = Math.addExact(total[type], completed[index]);

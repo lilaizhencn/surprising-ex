@@ -27,10 +27,11 @@ class OwnerPositionRetirementTest {
         try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.runtime)) {
             fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.runtime, fixture.key); return null; });
             fixture.runtime.clearCommittedChanges(fixture.identities);
-            assertThat(fixture.identities.findPositionKey(7, "1")).isEqualTo(fixture.key);
+            assertThat(fixture.identities.preparedPositionKey(7, "1")).isEqualTo(fixture.key);
             fixture.applyLane(() -> { fixture.runtime.removePosition(fixture.key, 7); return null; });
             fixture.runtime.clearCommittedChanges(fixture.identities);
-            assertThat(fixture.identities.findPositionKey(7, "1")).isNull();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.identities.preparedPositionKey(7, "1"))
+                    .isInstanceOf(IllegalStateException.class);
         }
     }
 
@@ -42,10 +43,11 @@ class OwnerPositionRetirementTest {
         try (/* 本场景自动关闭的持仓退休夹具 */ var fixture = new Fixture(); /* 禁止 Owner 直接读账户状态的保护器 */ var guard = new OwnerAccountReadGuard(fixture.runtime)) {
             fixture.applyLane(() -> { fixture.runtime.removePosition(fixture.key, 7); return null; });
             fixture.runtime.clearCommittedChanges(fixture.identities);
-            assertThat(fixture.identities.findPositionKey(7, "1")).isEqualTo(fixture.key);
+            assertThat(fixture.identities.preparedPositionKey(7, "1")).isEqualTo(fixture.key);
             fixture.applyLane(() -> { com.surprising.aeron.service.core.CoreStateTestFixtures.deleteRiskSnapshot(fixture.runtime, fixture.key); return null; });
             fixture.runtime.clearCommittedChanges(fixture.identities);
-            assertThat(fixture.identities.findPositionKey(7, "1")).isNull();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.identities.preparedPositionKey(7, "1"))
+                    .isInstanceOf(IllegalStateException.class);
         }
     }
 
@@ -62,10 +64,11 @@ class OwnerPositionRetirementTest {
                 return null;
             });
             fixture.runtime.clearCommittedChanges(fixture.identities);
-            assertThat(fixture.identities.findPositionKey(7, "1")).isEqualTo(fixture.key);
+            assertThat(fixture.identities.preparedPositionKey(7, "1")).isEqualTo(fixture.key);
             fixture.applyLane(() -> { fixture.runtime.removePosition(fixture.key, 7); return null; });
             fixture.runtime.clearCommittedChanges(fixture.identities);
-            assertThat(fixture.identities.findPositionKey(7, "1")).isNull();
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.identities.preparedPositionKey(7, "1"))
+                    .isInstanceOf(IllegalStateException.class);
         }
     }
 
