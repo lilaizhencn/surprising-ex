@@ -1,0 +1,1382 @@
+{
+  "runId": "perpetual-single-aeron-20261028T042509Z",
+  "sourceCommit": "161ef228e5bf17c460dd1f7552865df9f720f03d",
+  "status": "FAIL: saturation acceptance not met",
+  "saturation": "UNCONFIRMED",
+  "stages": [
+    {
+      "name": "diagnostic-4",
+      "workers": 4,
+      "profile": true,
+      "startEpochMillis": 1793162187304,
+      "nodePid": 23252,
+      "clientPid": 23638,
+      "observerPid": 23637,
+      "phase": "after",
+      "matchingEngines": 1,
+      "accountLanes": 2,
+      "matcherDispatchDepth": 0,
+      "matchingCompletionDepth": 0,
+      "commandContextDepth": 0,
+      "accountQueueDepths": "[0,",
+      "accountQueueHighWater": "[0,",
+      "committedCoreSequence": 156638,
+      "warmupMatches": 348200,
+      "totalRunMatches": 1345800,
+      "capacity": "PASS",
+      "scope": "CLUSTER_NETWORK",
+      "productLine": "LINEAR_PERPETUAL",
+      "workload": "MATCH_BATCH_STREAM",
+      "symbols": 256,
+      "users": 10000,
+      "connections": 4,
+      "targetOfferedPerSec": 0,
+      "offered": 1995200,
+      "accepted": 1995200,
+      "finalized": 1995200,
+      "matches": 997600,
+      "failures": 0,
+      "elapsedSeconds": 60.0,
+      "inclusiveFinalizedPerSec": 33189.28,
+      "inclusiveCoreMatchEventsPerSec": 16594.64,
+      "requestToTerminalP50Micros": 55050,
+      "requestToTerminalP99Micros": 640679,
+      "requestToTerminalP999Micros": 1340080,
+      "pendingMax": -1,
+      "completionQueueMax": -1,
+      "fundsDiff": 0,
+      "bookLevels": 0,
+      "terminalBusinessOperations": 1990020,
+      "businessOpsPerSec": 33167.0,
+      "requestToTerminalP90Micros": 187301,
+      "requestToTerminalP95Micros": 278396,
+      "requestToTerminalMaxMicros": 1516240,
+      "drain_elapsedNanos": 115796854,
+      "drain_terminalBusinessOperations": 5180,
+      "drain_unfinishedRequests": 0,
+      "marketDataCommands": 9034,
+      "marketDataCommandsPerSec": 150.277,
+      "totalTerminalCoreMessages": 108794,
+      "totalWindow": 256,
+      "observedRequestMax": 256,
+      "unfinishedRequests": 0,
+      "submittedRequests": 108794,
+      "completedRequests": 108794,
+      "requestOccupancySampleIntervalSeconds": 1,
+      "samples": 59,
+      "mean": 161.39,
+      "windowStartMs": 1793162255795,
+      "windowEndMs": 1793162315795,
+      "pass": true,
+      "auditBefore": {
+        "users": 10000,
+        "funds": 10000000000000000,
+        "fundsDiff": 0,
+        "longQuantity": 1345800,
+        "shortQuantity": 1345800,
+        "positions": 24946,
+        "locked": 26916000,
+        "unfinished": 0,
+        "backlog": 0,
+        "businessHash": "5e444f95f9c2c069"
+      },
+      "status": "PASS",
+      "finishEpochMillis": 1793162368863,
+      "environment": {
+        "sampleCount": 27,
+        "firstSampleMs": 1793162256142,
+        "lastSampleMs": 1793162314101,
+        "swapinsPages": 2635475,
+        "swapoutsPages": 2713506,
+        "cpuSpeedLimitMin": 64,
+        "cpuSpeedLimitMax": 68,
+        "swapAtFirstSample": "vm.swapusage: total = 10240.00M  used = 9632.00M  free = 608.00M  (encrypted)\n",
+        "swapAtLastSample": "vm.swapusage: total = 11264.00M  used = 9912.25M  free = 1351.75M  (encrypted)\n",
+        "node": {
+          "rssMaxKiB": 2074732,
+          "cpuPercentAvg": 236.7259259259259,
+          "cpuPercentMax": 402.1
+        },
+        "client": {
+          "rssMaxKiB": 958416,
+          "cpuPercentAvg": 320.53333333333336,
+          "cpuPercentMax": 538.1
+        },
+        "observer": {
+          "rssMaxKiB": 88760,
+          "cpuPercentAvg": 5.474074074074075,
+          "cpuPercentMax": 16.9
+        }
+      },
+      "performanceValidity": "INVALID",
+      "queues": {
+        "samples": 402,
+        "nonzeroDispatch": 0,
+        "nonzeroCompletion": 7,
+        "nonzeroContext": 0,
+        "nonzeroAccount": 0,
+        "maxQueryNanos": 1121108669,
+        "limitations": [
+          "100ms target query polling; actual delays include transport/CPU stalls",
+          "queue snapshots may miss short bursts; zero samples do not prove no backlog",
+          "account execution time metrics returned zero; not evidence of zero execution time"
+        ]
+      },
+      "clearingObserved": {
+        "firstMs": 1793162255828,
+        "lastMs": 1793162315743,
+        "seconds": 59.915,
+        "countsByLaneAndType": [
+          50631,
+          99686,
+          0,
+          0,
+          49055,
+          99686,
+          0,
+          0
+        ],
+        "operationTypes": [
+          "COMMAND",
+          "SETTLEMENT",
+          "QUERY",
+          "RISK"
+        ],
+        "completedPerSecond": 4991.371109071184,
+        "settlementPerSecond": 3327.5807393807895,
+        "scope": "difference between periodic query snapshots inside measurement, not the exact stable-window total"
+      },
+      "businessView": {
+        "ordersPerSecond": 33167.0,
+        "stableOrders": 1990020,
+        "steadyMatchedTradesPerSecond": null,
+        "matchedTradesNote": "actual fill count reported for measurement+drain only; stable-window fill delta unavailable; do not divide order TPS by two and call it measured trades TPS",
+        "matchedTradesIncludingDrain": 997600,
+        "cancelPerSecond": 0,
+        "businessOpsPerSecondIncludingMark": null,
+        "aeronAppMessagesPerSecondStable": null,
+        "aeronAppMessagesIncludingDrain": 108794,
+        "payloadMBPerSecond": null
+      },
+      "transientOfferRetries": 0
+    },
+    {
+      "name": "load-16",
+      "workers": 16,
+      "profile": false,
+      "startEpochMillis": 1793162120176,
+      "nodePid": 20790,
+      "clientPid": 21303,
+      "observerPid": 21302,
+      "status": "FAIL",
+      "error": "process failed 1 pid=21303",
+      "finishEpochMillis": 1793162163914,
+      "environment": {
+        "sampleCount": 16,
+        "firstSampleMs": 1793162130196,
+        "lastSampleMs": 1793162163395,
+        "swapinsPages": 1095825,
+        "swapoutsPages": 1039700,
+        "cpuSpeedLimitMin": 66,
+        "cpuSpeedLimitMax": 75,
+        "swapAtFirstSample": "vm.swapusage: total = 11264.00M  used = 10358.25M  free = 905.75M  (encrypted)\n",
+        "swapAtLastSample": "vm.swapusage: total = 11264.00M  used = 9996.25M  free = 1267.75M  (encrypted)\n",
+        "node": {
+          "rssMaxKiB": 2269888,
+          "cpuPercentAvg": 326.17500000000007,
+          "cpuPercentMax": 543.3
+        },
+        "client": {
+          "rssMaxKiB": 230368,
+          "cpuPercentAvg": 265.49333333333334,
+          "cpuPercentMax": 865.4
+        },
+        "observer": {
+          "rssMaxKiB": 132868,
+          "cpuPercentAvg": 8.799999999999999,
+          "cpuPercentMax": 62.3
+        }
+      },
+      "performanceValidity": "NO_STABLE_WINDOW",
+      "queues": {
+        "samples": 153,
+        "nonzeroDispatch": 0,
+        "nonzeroCompletion": 0,
+        "nonzeroContext": 0,
+        "nonzeroAccount": 0,
+        "maxQueryNanos": 7898461795,
+        "limitations": [
+          "100ms target query polling; actual delays include transport/CPU stalls",
+          "queue snapshots may miss short bursts; zero samples do not prove no backlog",
+          "account execution time metrics returned zero; not evidence of zero execution time"
+        ]
+      },
+      "failureReasons": [
+        "STALE_MARK_PRICE"
+      ]
+    },
+    {
+      "name": "load-4",
+      "workers": 4,
+      "profile": false,
+      "startEpochMillis": 1793161621840,
+      "nodePid": 2395,
+      "clientPid": 2702,
+      "observerPid": 2701,
+      "phase": "after",
+      "matchingEngines": 1,
+      "accountLanes": 2,
+      "matcherDispatchDepth": 0,
+      "matchingCompletionDepth": 0,
+      "commandContextDepth": 0,
+      "accountQueueDepths": "[0,",
+      "accountQueueHighWater": "[0,",
+      "committedCoreSequence": 743526,
+      "warmupMatches": 2426980,
+      "totalRunMatches": 7136780,
+      "capacity": "PASS",
+      "scope": "CLUSTER_NETWORK",
+      "productLine": "LINEAR_PERPETUAL",
+      "workload": "MATCH_BATCH_STREAM",
+      "symbols": 256,
+      "users": 10000,
+      "connections": 4,
+      "targetOfferedPerSec": 0,
+      "offered": 9419600,
+      "accepted": 9419600,
+      "finalized": 9419600,
+      "matches": 4709800,
+      "failures": 0,
+      "elapsedSeconds": 60.0,
+      "inclusiveFinalizedPerSec": 156736.183,
+      "inclusiveCoreMatchEventsPerSec": 78368.091,
+      "requestToTerminalP50Micros": 21200,
+      "requestToTerminalP99Micros": 104005,
+      "requestToTerminalP999Micros": 343146,
+      "pendingMax": -1,
+      "completionQueueMax": -1,
+      "fundsDiff": 0,
+      "bookLevels": 0,
+      "terminalBusinessOperations": 9414460,
+      "businessOpsPerSec": 156907.667,
+      "requestToTerminalP90Micros": 48234,
+      "requestToTerminalP95Micros": 57409,
+      "requestToTerminalMaxMicros": 586678,
+      "elapsedNanos": 98439443,
+      "unfinishedRequests": 0,
+      "marketDataCommands": 13211,
+      "marketDataCommandsPerSec": 219.823,
+      "totalTerminalCoreMessages": 484191,
+      "totalWindow": 256,
+      "observedRequestMax": 256,
+      "submittedRequests": 484191,
+      "completedRequests": 484191,
+      "requestOccupancySampleIntervalSeconds": 1,
+      "samples": 59,
+      "mean": 224.271,
+      "windowStartMs": 1793161676604,
+      "windowEndMs": 1793161736604,
+      "pass": true,
+      "status": "PARTIAL_VERIFICATION",
+      "error": "process failed 1 pid=7133",
+      "finishEpochMillis": 1793161747602,
+      "drain_elapsedNanos": 98439443,
+      "drain_terminalBusinessOperations": 5140,
+      "drain_unfinishedRequests": 0,
+      "supplementalAuditStatus": "FAILED_TOOLING",
+      "environment": {
+        "sampleCount": 28,
+        "firstSampleMs": 1793161678130,
+        "lastSampleMs": 1793161735826,
+        "swapinsPages": 316788,
+        "swapoutsPages": 415632,
+        "cpuSpeedLimitMin": 66,
+        "cpuSpeedLimitMax": 75,
+        "swapAtFirstSample": "vm.swapusage: total = 10240.00M  used = 8939.00M  free = 1301.00M  (encrypted)\n",
+        "swapAtLastSample": "vm.swapusage: total = 10240.00M  used = 9309.50M  free = 930.50M  (encrypted)\n",
+        "node": {
+          "rssMaxKiB": 2452432,
+          "cpuPercentAvg": 441.9535714285716,
+          "cpuPercentMax": 598.3
+        },
+        "client": {
+          "rssMaxKiB": 1001668,
+          "cpuPercentAvg": 500.31428571428575,
+          "cpuPercentMax": 581.2
+        },
+        "observer": {
+          "rssMaxKiB": 101628,
+          "cpuPercentAvg": 4.335714285714286,
+          "cpuPercentMax": 5.9
+        }
+      },
+      "performanceValidity": "INVALID",
+      "queues": {
+        "samples": 573,
+        "nonzeroDispatch": 0,
+        "nonzeroCompletion": 12,
+        "nonzeroContext": 0,
+        "nonzeroAccount": 0,
+        "maxQueryNanos": 339073297,
+        "limitations": [
+          "100ms target query polling; actual delays include transport/CPU stalls",
+          "queue snapshots may miss short bursts; zero samples do not prove no backlog",
+          "account execution time metrics returned zero; not evidence of zero execution time"
+        ]
+      },
+      "clearingObserved": {
+        "firstMs": 1793161676608,
+        "lastMs": 1793161736396,
+        "seconds": 59.788,
+        "countsByLaneAndType": [
+          238920,
+          470836,
+          0,
+          0,
+          231916,
+          470836,
+          0,
+          0
+        ],
+        "operationTypes": [
+          "COMMAND",
+          "SETTLEMENT",
+          "QUERY",
+          "RISK"
+        ],
+        "completedPerSecond": 23625.275975112065,
+        "settlementPerSecond": 15750.183983408042,
+        "scope": "difference between periodic query snapshots inside measurement, not the exact stable-window total"
+      },
+      "businessView": {
+        "ordersPerSecond": 156907.667,
+        "stableOrders": 9414460,
+        "steadyMatchedTradesPerSecond": null,
+        "matchedTradesNote": "actual fill count reported for measurement+drain only; stable-window fill delta unavailable; do not divide order TPS by two and call it measured trades TPS",
+        "matchedTradesIncludingDrain": 4709800,
+        "cancelPerSecond": 0,
+        "businessOpsPerSecondIncludingMark": null,
+        "aeronAppMessagesPerSecondStable": null,
+        "aeronAppMessagesIncludingDrain": 484191,
+        "payloadMBPerSecond": null
+      },
+      "workloadStatus": "PASS",
+      "recovery": "NOT_VERIFIED: client connected before replay completed; no state audit available",
+      "transientOfferRetries": 0
+    },
+    {
+      "name": "load-8",
+      "workers": 8,
+      "profile": false,
+      "startEpochMillis": 1793161835631,
+      "nodePid": 10563,
+      "clientPid": 10987,
+      "observerPid": 10986,
+      "phase": "after",
+      "matchingEngines": 1,
+      "accountLanes": 2,
+      "matcherDispatchDepth": 0,
+      "matchingCompletionDepth": 0,
+      "commandContextDepth": 0,
+      "accountQueueDepths": "[0,",
+      "accountQueueHighWater": "[0,",
+      "committedCoreSequence": 74146,
+      "warmupMatches": 128600,
+      "totalRunMatches": 601200,
+      "capacity": "PASS",
+      "scope": "CLUSTER_NETWORK",
+      "productLine": "LINEAR_PERPETUAL",
+      "workload": "MATCH_BATCH_STREAM",
+      "symbols": 256,
+      "users": 10000,
+      "connections": 8,
+      "targetOfferedPerSec": 0,
+      "offered": 945200,
+      "accepted": 945200,
+      "finalized": 945200,
+      "matches": 472600,
+      "failures": 0,
+      "elapsedSeconds": 60.0,
+      "inclusiveFinalizedPerSec": 15651.67,
+      "inclusiveCoreMatchEventsPerSec": 7825.835,
+      "requestToTerminalP50Micros": 97124,
+      "requestToTerminalP99Micros": 895483,
+      "requestToTerminalP999Micros": 1094713,
+      "pendingMax": -1,
+      "completionQueueMax": -1,
+      "fundsDiff": 0,
+      "bookLevels": 0,
+      "terminalBusinessOperations": 940040,
+      "businessOpsPerSec": 15667.333,
+      "requestToTerminalP90Micros": 412352,
+      "requestToTerminalP95Micros": 607649,
+      "requestToTerminalMaxMicros": 1109393,
+      "drain_elapsedNanos": 389722201,
+      "drain_terminalBusinessOperations": 5160,
+      "drain_unfinishedRequests": 0,
+      "marketDataCommands": 2958,
+      "marketDataCommandsPerSec": 48.982,
+      "totalTerminalCoreMessages": 50218,
+      "totalWindow": 256,
+      "observedRequestMax": 256,
+      "unfinishedRequests": 0,
+      "submittedRequests": 50218,
+      "completedRequests": 50218,
+      "requestOccupancySampleIntervalSeconds": 1,
+      "samples": 60,
+      "mean": 134.267,
+      "windowStartMs": 1793161904623,
+      "windowEndMs": 1793161964623,
+      "pass": true,
+      "auditBefore": {
+        "users": 10000,
+        "funds": 10000000000000000,
+        "fundsDiff": 0,
+        "longQuantity": 601200,
+        "shortQuantity": 601200,
+        "positions": 5916,
+        "locked": 12024000,
+        "unfinished": 0,
+        "backlog": 0,
+        "businessHash": "a82caca13dbc7410"
+      },
+      "snapshotRequestLog": "Member [0]: SNAPSHOT applied successfully\n",
+      "auditAfter": {
+        "users": 10000,
+        "funds": 10000000000000000,
+        "fundsDiff": 0,
+        "longQuantity": 601200,
+        "shortQuantity": 601200,
+        "positions": 5916,
+        "locked": 12024000,
+        "unfinished": 0,
+        "backlog": 0,
+        "businessHash": "a82caca13dbc7410"
+      },
+      "recovery": "PASS",
+      "status": "PASS",
+      "finishEpochMillis": 1793162091540,
+      "environment": {
+        "sampleCount": 28,
+        "firstSampleMs": 1793161905038,
+        "lastSampleMs": 1793161963798,
+        "swapinsPages": 740957,
+        "swapoutsPages": 663589,
+        "cpuSpeedLimitMin": 68,
+        "cpuSpeedLimitMax": 70,
+        "swapAtFirstSample": "vm.swapusage: total = 11264.00M  used = 10234.25M  free = 1029.75M  (encrypted)\n",
+        "swapAtLastSample": "vm.swapusage: total = 11264.00M  used = 9892.75M  free = 1371.25M  (encrypted)\n",
+        "node": {
+          "rssMaxKiB": 2070968,
+          "cpuPercentAvg": 235.35357142857148,
+          "cpuPercentMax": 353.2
+        },
+        "client": {
+          "rssMaxKiB": 768232,
+          "cpuPercentAvg": 622.4499999999998,
+          "cpuPercentMax": 851.8
+        },
+        "observer": {
+          "rssMaxKiB": 90840,
+          "cpuPercentAvg": 2.7857142857142856,
+          "cpuPercentMax": 5.1
+        }
+      },
+      "performanceValidity": "INVALID",
+      "queues": {
+        "samples": 274,
+        "nonzeroDispatch": 0,
+        "nonzeroCompletion": 3,
+        "nonzeroContext": 0,
+        "nonzeroAccount": 0,
+        "maxQueryNanos": 1060642542,
+        "limitations": [
+          "100ms target query polling; actual delays include transport/CPU stalls",
+          "queue snapshots may miss short bursts; zero samples do not prove no backlog",
+          "account execution time metrics returned zero; not evidence of zero execution time"
+        ]
+      },
+      "clearingObserved": {
+        "firstMs": 1793161904659,
+        "lastMs": 1793161964448,
+        "seconds": 59.789,
+        "countsByLaneAndType": [
+          23931,
+          47026,
+          0,
+          0,
+          23095,
+          47026,
+          0,
+          0
+        ],
+        "operationTypes": [
+          "COMMAND",
+          "SETTLEMENT",
+          "QUERY",
+          "RISK"
+        ],
+        "completedPerSecond": 2359.5979193497133,
+        "settlementPerSecond": 1573.0652795664755,
+        "scope": "difference between periodic query snapshots inside measurement, not the exact stable-window total"
+      },
+      "businessView": {
+        "ordersPerSecond": 15667.333,
+        "stableOrders": 940040,
+        "steadyMatchedTradesPerSecond": null,
+        "matchedTradesNote": "actual fill count reported for measurement+drain only; stable-window fill delta unavailable; do not divide order TPS by two and call it measured trades TPS",
+        "matchedTradesIncludingDrain": 472600,
+        "cancelPerSecond": 0,
+        "businessOpsPerSecondIncludingMark": null,
+        "aeronAppMessagesPerSecondStable": null,
+        "aeronAppMessagesIncludingDrain": 50218,
+        "payloadMBPerSecond": null
+      },
+      "transientOfferRetries": 0
+    }
+  ],
+  "limits": [
+    "single-host loopback / 256 Core messages; cannot infer 3-member or Core capacity ceiling",
+    "producer threads and connections both increase; staircase is not a one-factor causal experiment",
+    "CPU frequency throttling and swap activity invalidate throughput/latency acceptance",
+    "16-producer stage rejected orders during warmup; no stable-window throughput"
+  ],
+  "temporaryObserverCorrections": [
+    "first audit queried user 0; corrected binding for later audits",
+    "first Archive audit connected before replay was ready; subsequent restart waits for LEADER",
+    "initial command list overwritten by resume helper; exact initial argv reconstructed and labeled"
+  ],
+  "jfr": {
+    "node": {
+      "sha256": "ecd97ca9d64cfc8f5d9c27d7852eae1a891341ba981affc135de47f49a9dad83",
+      "bytes": 75509220,
+      "dataLoss": 0,
+      "cpuCoverage": {
+        "firstMs": 1793162255808.961,
+        "lastMs": 1793162315781.525
+      },
+      "topStacks": [
+        {
+          "thread": "core-matcher-0",
+          "stack": "com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.runMatching:471 | com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.run:418 | com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.lambda$start$0:171 | com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline$$Lambda/0x000000012c4be400.run:-1 | java/lang/Thread.runWith:1540",
+          "samples": 1783
+        },
+        {
+          "thread": "core-account-lane-0",
+          "stack": "com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:366 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145 | com.surprising.aeron.bootstrap.account.SettlementLaneWorker$$Lambda/0x000000012c4d6400.run:-1 | java/lang/Thread.runWith:1540 | java/lang/Thread.run:1527",
+          "samples": 1617
+        },
+        {
+          "thread": "core-account-lane-1",
+          "stack": "com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:366 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145 | com.surprising.aeron.bootstrap.account.SettlementLaneWorker$$Lambda/0x000000012c4d6400.run:-1 | java/lang/Thread.runWith:1540 | java/lang/Thread.run:1527",
+          "samples": 1579
+        },
+        {
+          "thread": "driver-conductor",
+          "stack": "java/lang/Thread.yield0:-1 | java/lang/Thread.yield:515 | org/agrona/concurrent/BackoffIdleStrategy.idle:220 | org/agrona/concurrent/BackoffIdleStrategy.idle:186 | org/agrona/concurrent/AgentRunner.doWork:345",
+          "samples": 496
+        },
+        {
+          "thread": "clustered-service-101-0",
+          "stack": "java/lang/Thread.yield0:-1 | java/lang/Thread.yield:515 | org/agrona/concurrent/YieldingIdleStrategy.idle:51 | org/agrona/concurrent/AgentRunner.doWork:345 | org/agrona/concurrent/AgentRunner.workLoop:336",
+          "samples": 487
+        },
+        {
+          "thread": "consensus-module-101-0",
+          "stack": "java/lang/Thread.yield0:-1 | java/lang/Thread.yield:515 | org/agrona/concurrent/BackoffIdleStrategy.idle:220 | org/agrona/concurrent/BackoffIdleStrategy.idle:186 | org/agrona/concurrent/AgentRunner.doWork:345",
+          "samples": 465
+        },
+        {
+          "thread": "archive-conductor",
+          "stack": "java/lang/Thread.yield0:-1 | java/lang/Thread.yield:515 | org/agrona/concurrent/BackoffIdleStrategy.idle:220 | org/agrona/concurrent/BackoffIdleStrategy.idle:186 | org/agrona/concurrent/AgentRunner.doWork:345",
+          "samples": 443
+        },
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/aeron-surprising-linear_perpetual-0 [sender,receiver]",
+          "stack": "java/lang/Thread.yield0:-1 | java/lang/Thread.yield:515 | org/agrona/concurrent/BackoffIdleStrategy.idle:220 | org/agrona/concurrent/BackoffIdleStrategy.idle:186 | org/agrona/concurrent/AgentRunner.doWork:345",
+          "samples": 334
+        },
+        {
+          "thread": "core-account-lane-0",
+          "stack": "com/surprising/aeron/bootstrap/account/SettlementLaneWorker.peekMatcherSettlement:436 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:333 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145 | com.surprising.aeron.bootstrap.account.SettlementLaneWorker$$Lambda/0x000000012c4d6400.run:-1 | java/lang/Thread.runWith:1540",
+          "samples": 293
+        },
+        {
+          "thread": "core-account-lane-1",
+          "stack": "com/surprising/aeron/bootstrap/account/SettlementLaneWorker.peekMatcherSettlement:436 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:333 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145 | com.surprising.aeron.bootstrap.account.SettlementLaneWorker$$Lambda/0x000000012c4d6400.run:-1 | java/lang/Thread.runWith:1540",
+          "samples": 236
+        },
+        {
+          "thread": "core-matcher-0",
+          "stack": "com/surprising/aeron/service/order/OrderBatchExecutor$PipelinedPlaceBatchSubmission.get:1502 | com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.runMatching:486 | com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.run:418 | com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.lambda$start$0:171 | com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline$$Lambda/0x000000012c4be400.run:-1",
+          "samples": 159
+        },
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/aeron-surprising-linear_perpetual-0 [sender,receiver]",
+          "stack": "sun/nio/ch/KQueue.poll:-1 | sun/nio/ch/KQueueSelectorImpl.doSelect:121 | sun/nio/ch/SelectorImpl.lockAndDoSelect:130 | sun/nio/ch/SelectorImpl.selectNow:174 | io/aeron/driver/media/ControlTransportPoller.pollTransports:119",
+          "samples": 118
+        },
+        {
+          "thread": "core-account-lane-1",
+          "stack": "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.resolveInto:475 | com/surprising/aeron/service/order/admission/PlaceBatchAdmissionEvent.execute:143 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.execute:397 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:322 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145",
+          "samples": 49
+        },
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/aeron-surprising-linear_perpetual-0 [sender,receiver]",
+          "stack": "sun/nio/ch/DatagramChannelImpl.receive0:-1 | sun/nio/ch/DatagramChannelImpl.receiveIntoNativeBuffer:730 | sun/nio/ch/DatagramChannelImpl.receive:702 | sun/nio/ch/DatagramChannelImpl.receive:568 | io/aeron/driver/media/UdpChannelTransport.receive:470",
+          "samples": 40
+        },
+        {
+          "thread": "core-account-lane-0",
+          "stack": "com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.resolveInto:475 | com/surprising/aeron/service/order/admission/PlaceBatchAdmissionEvent.execute:143 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.execute:397 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:322 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145",
+          "samples": 35
+        },
+        {
+          "thread": "archive-conductor",
+          "stack": "sun/nio/ch/UnixFileDispatcherImpl.pwrite0:-1 | sun/nio/ch/UnixFileDispatcherImpl.pwrite:71 | sun/nio/ch/IOUtil.writeFromNativeBuffer:135 | sun/nio/ch/IOUtil.write:81 | sun/nio/ch/IOUtil.write:72",
+          "samples": 23
+        },
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/aeron-surprising-linear_perpetual-0 [sender,receiver]",
+          "stack": "sun/nio/ch/DatagramDispatcher.write0:-1 | sun/nio/ch/DatagramDispatcher.write:54 | sun/nio/ch/IOUtil.writeFromNativeBuffer:137 | sun/nio/ch/IOUtil.write:81 | sun/nio/ch/IOUtil.write:58",
+          "samples": 20
+        },
+        {
+          "thread": "clustered-service-101-0",
+          "stack": "io/aeron/ConcurrentPublication.appendFragmentedMessage:560 | io/aeron/ConcurrentPublication.offer:202 | com/surprising/aeron/support/egress/ClusterServiceEgress$SessionResponsePublication.offer:302 | com/surprising/aeron/support/egress/ClusterServiceEgress$TransportSession.offer:266 | com/surprising/aeron/support/egress/DeferredSessionResponses.offer:60",
+          "samples": 17
+        },
+        {
+          "thread": "core-account-lane-1",
+          "stack": "com/surprising/aeron/bootstrap/account/SettlementLaneWorker.shouldRunMatcherSettlement:482 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:336 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145 | com.surprising.aeron.bootstrap.account.SettlementLaneWorker$$Lambda/0x000000012c4d6400.run:-1 | java/lang/Thread.runWith:1540",
+          "samples": 17
+        },
+        {
+          "thread": "clustered-service-101-0",
+          "stack": "sun/security/provider/ByteArrayAccess.i2bBig:126 | sun/security/provider/SHA2.implDigest:116 | sun/security/provider/DigestBase.engineDigest:205 | java/security/MessageDigest$Delegate.engineDigest:732 | java/security/MessageDigest.digest:464",
+          "samples": 16
+        },
+        {
+          "thread": "clustered-service-101-0",
+          "stack": "io/aeron/Image.boundedControlledPoll:610 | io/aeron/cluster/service/BoundedLogAdapter.poll:132 | io/aeron/cluster/service/ClusteredServiceAgent.doWork:264 | org/agrona/concurrent/AgentRunner.doWork:344 | org/agrona/concurrent/AgentRunner.workLoop:336",
+          "samples": 9
+        },
+        {
+          "thread": "core-account-lane-1",
+          "stack": "org/agrona/collections/Long2LongHashMap.get:215 | com/surprising/aeron/service/account/AccountLaneState.pendingReservationSequence:723 | com/surprising/aeron/service/core/TradingAccountRuntime.completeMatcherPendingReservations:2512 | com/surprising/aeron/service/settlement/MatcherSettlementEvent.applyPlan:1148 | com/surprising/aeron/service/settlement/MatcherSettlementEvent.execute:1056",
+          "samples": 9
+        },
+        {
+          "thread": "core-account-lane-1",
+          "stack": "org/agrona/collections/LongHashSet.compactChain:319 | org/agrona/collections/LongHashSet.remove:278 | com/surprising/aeron/service/account/AccountLaneState.removeActiveOrder:1002 | com/surprising/aeron/service/account/AccountLaneState.updateOrderInPlace:907 | com/surprising/aeron/service/core/TradingAccountRuntime.updateOrderInLane:5247",
+          "samples": 9
+        },
+        {
+          "thread": "core-account-lane-0",
+          "stack": "com/surprising/aeron/bootstrap/account/SettlementLaneWorker.shouldRunMatcherSettlement:482 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.run:336 | com/surprising/aeron/bootstrap/account/SettlementLaneWorker.lambda$new$1:145 | com.surprising.aeron.bootstrap.account.SettlementLaneWorker$$Lambda/0x000000012c4d6400.run:-1 | java/lang/Thread.runWith:1540",
+          "samples": 9
+        },
+        {
+          "thread": "clustered-service-101-0",
+          "stack": "com/surprising/aeron/service/retention/TerminalStateRetention.acceptBatch:64 | com/surprising/aeron/service/core/change/LaneCommitDelta.commitTerminalToOwner:337 | com/surprising/aeron/service/core/TradingAccountRuntime.collectMatcherSettlement:2268 | com/surprising/aeron/service/core/TradingAccountRuntime.collectMatcherSettlement:2215 | com/surprising/aeron/service/order/OrderBatchExecutor.finishOrderBatch:1039",
+          "samples": 8
+        }
+      ],
+      "samplesByThread": {
+        "core-matcher-0": 2012,
+        "core-account-lane-0": 2091,
+        "core-account-lane-1": 2128,
+        "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/aeron-surprising-linear_perpetual-0 [sender,receiver]": 544,
+        "clustered-service-101-0": 734,
+        "archive-conductor": 470,
+        "consensus-module-101-0": 476,
+        "driver-conductor": 531,
+        "aeron-client": 6
+      },
+      "allocationPartialBytes": 238370408,
+      "allocationCoverage": [
+        {
+          "thread": "main",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "Reference Handler",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "Finalizer",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "Signal Dispatcher",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "Service Thread",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "Monitor Deflation Thread",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "C2 CompilerThread0",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "C1 CompilerThread0",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "Common-Cleaner",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "JFR Recorder Thread",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "JFR Periodic Tasks",
+          "bytes": 7824,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "Notification Thread",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "InnocuousThread-1",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "aeron-md-nra",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "driver-conductor",
+          "bytes": 0,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/aeron-surprising-linear_perpetual-0 [sender,receiver]",
+          "bytes": 148176,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "archive-conductor",
+          "bytes": 1624,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "consensus-module-101-0",
+          "bytes": 224,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "aeron-client",
+          "bytes": 54816,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "clustered-service-101-0",
+          "bytes": 36182624,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "core-matcher-0",
+          "bytes": 1789688,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "core-account-lane-0",
+          "bytes": 101470472,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "core-account-lane-1",
+          "bytes": 98714960,
+          "coveredMs": 59524.47314453125,
+          "firstMs": 1793162256101.832,
+          "lastMs": 1793162315626.3052
+        },
+        {
+          "thread": "C2 CompilerThread1",
+          "bytes": 0,
+          "coveredMs": 9246.905029296875,
+          "firstMs": 1793162261188.551,
+          "lastMs": 1793162270435.456
+        }
+      ],
+      "gcPauseMs": 87.911342,
+      "gcPauseCount": 1,
+      "gcPausePercent": 0.14651890333333334,
+      "directMaxBytes": 9575136,
+      "io": {
+        "byThread": [
+          {
+            "type": "jdk.FileWrite",
+            "thread": "archive-conductor",
+            "count": 46915,
+            "bytes": 153902880,
+            "durationMs": 1719.4578549999846,
+            "maxMs": 44.70302
+          }
+        ],
+        "ownerEvents": [],
+        "scope": "Java JFR events; native UDP/JNI I/O may not be visible"
+      },
+      "other": {
+        "eventCountsStableWindow": {
+          "jdk.Compilation": 169,
+          "jdk.Deoptimization": 30,
+          "jdk.SafepointBegin": 2
+        },
+        "locks": []
+      },
+      "latencyMicros": {
+        "queuedToOffered": {
+          "samples": 0,
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null,
+          "p999": null,
+          "max": null
+        },
+        "offeredToDelivered": {
+          "samples": 0,
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null,
+          "p999": null,
+          "max": null
+        },
+        "queuedToDelivered": {
+          "samples": 0,
+          "p50": null,
+          "p90": null,
+          "p95": null,
+          "p99": null,
+          "p999": null,
+          "max": null
+        }
+      },
+      "unpairedBoundaries": 0
+    },
+    "client": {
+      "sha256": "47aa330397bdb0c9f5fddced87b3a5b7995ba7f4d8b96a216a86a527ce8f8501",
+      "bytes": 35870902,
+      "dataLoss": 0,
+      "cpuCoverage": {
+        "firstMs": 1793162255800.668,
+        "lastMs": 1793162315786.4338
+      },
+      "topStacks": [
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/tmp/surprising-aeron-8025277836492642454 [sender,receiver,aeron-md-nra,driver-conductor]",
+          "stack": "java/lang/Thread.yield0:-1 | java/lang/Thread.yield:515 | org/agrona/concurrent/BackoffIdleStrategy.idle:220 | org/agrona/concurrent/BackoffIdleStrategy.idle:186 | org/agrona/concurrent/AgentRunner.doWork:345",
+          "samples": 1701
+        },
+        {
+          "thread": "pool-2-thread-3",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:490 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330 | java/util/concurrent/ThreadPoolExecutor.runWorker:1090",
+          "samples": 1115
+        },
+        {
+          "thread": "pool-2-thread-2",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:490 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330 | java/util/concurrent/ThreadPoolExecutor.runWorker:1090",
+          "samples": 1079
+        },
+        {
+          "thread": "pool-2-thread-4",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:490 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330 | java/util/concurrent/ThreadPoolExecutor.runWorker:1090",
+          "samples": 1061
+        },
+        {
+          "thread": "pool-2-thread-1",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:490 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330 | java/util/concurrent/ThreadPoolExecutor.runWorker:1090",
+          "samples": 1042
+        },
+        {
+          "thread": "pool-2-thread-1",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.refreshMarkAsync:641 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:454 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330",
+          "samples": 902
+        },
+        {
+          "thread": "pool-2-thread-3",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.refreshMarkAsync:641 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:454 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330",
+          "samples": 902
+        },
+        {
+          "thread": "pool-2-thread-2",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.refreshMarkAsync:641 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:454 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330",
+          "samples": 888
+        },
+        {
+          "thread": "pool-2-thread-4",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.refreshMarkAsync:641 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:454 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330",
+          "samples": 874
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "com/surprising/aeron/client/AeronClientPool$EgressDispatcher.run:831 | java/lang/Thread.runWith:1540 | java/lang/Thread.run:1527",
+          "samples": 735
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "java/util/concurrent/ConcurrentHashMap$Traverser.advance:3410 | java/util/concurrent/ConcurrentHashMap$BaseIterator.<init>:3462 | java/util/concurrent/ConcurrentHashMap$EntryIterator.<init>:3521 | java/util/concurrent/ConcurrentHashMap$EntrySetView.iterator:4850 | com/surprising/aeron/client/SurprisingAeronClient.drainResponses:291",
+          "samples": 362
+        },
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/tmp/surprising-aeron-8025277836492642454 [sender,receiver,aeron-md-nra,driver-conductor]",
+          "stack": "sun/nio/ch/DatagramChannelImpl.receive0:-1 | sun/nio/ch/DatagramChannelImpl.receiveIntoNativeBuffer:730 | sun/nio/ch/DatagramChannelImpl.receive:702 | sun/nio/ch/DatagramChannelImpl.receive:568 | io/aeron/driver/media/UdpChannelTransport.receive:470",
+          "samples": 325
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "io/aeron/Image.poll:357 | io/aeron/Subscription.poll:203 | io/aeron/cluster/client/AeronCluster.pollEgress:601 | com/surprising/aeron/client/SurprisingAeronClient$AeronClusterOperations.pollEgress:499 | com/surprising/aeron/client/SurprisingAeronClient.pollClusterEgress:272",
+          "samples": 162
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "com/surprising/aeron/client/AeronClientPool$EgressDispatcher.run:840 | java/lang/Thread.runWith:1540 | java/lang/Thread.run:1527",
+          "samples": 103
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "java/util/concurrent/ArrayBlockingQueue.bulkRemove:1505 | java/util/concurrent/ArrayBlockingQueue.removeIf:1474 | com/surprising/aeron/client/AeronClientPool$EgressDispatcher.expireQueued:1063 | com/surprising/aeron/client/AeronClientPool$EgressDispatcher.run:831 | java/lang/Thread.runWith:1540",
+          "samples": 99
+        },
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/tmp/surprising-aeron-8025277836492642454 [sender,receiver,aeron-md-nra,driver-conductor]",
+          "stack": "sun/nio/ch/DatagramDispatcher.write0:-1 | sun/nio/ch/DatagramDispatcher.write:54 | sun/nio/ch/IOUtil.writeFromNativeBuffer:137 | sun/nio/ch/IOUtil.write:81 | sun/nio/ch/IOUtil.write:58",
+          "samples": 93
+        },
+        {
+          "thread": "pool-2-thread-2",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.instrumentId:721 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:447 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330",
+          "samples": 53
+        },
+        {
+          "thread": "pool-2-thread-1",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.instrumentId:721 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:447 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330",
+          "samples": 52
+        },
+        {
+          "thread": "pool-2-thread-3",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.instrumentId:721 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:447 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330",
+          "samples": 49
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "java/util/concurrent/ConcurrentHashMap$EntryIterator.next:3517 | com/surprising/aeron/client/SurprisingAeronClient.drainResponses:293 | com/surprising/aeron/client/SurprisingAeronClient$AsyncConnection.drainResponses:579 | com/surprising/aeron/client/AeronClientPool$EgressDispatcher.dispatchResponses:1074 | com/surprising/aeron/client/AeronClientPool$EgressDispatcher.pollSession:913",
+          "samples": 43
+        },
+        {
+          "thread": "pool-2-thread-4",
+          "stack": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.instrumentId:721 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.streamMatch:447 | com/surprising/aeron/benchmarks/workload/ClusterCapacityMain.lambda$execute$0:302 | com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$$Lambda/0x000000012129c400.call:-1 | java/util/concurrent/FutureTask.run:330",
+          "samples": 40
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "com/surprising/aeron/client/SurprisingAeronClient$AsyncConnection.poll:554 | com/surprising/aeron/client/SurprisingAeronClient$AsyncConnection.pollEgress:572 | com/surprising/aeron/client/AeronClientPool$EgressDispatcher.pollSession:912 | com/surprising/aeron/client/AeronClientPool$EgressDispatcher.run:824 | java/lang/Thread.runWith:1540",
+          "samples": 36
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "com/surprising/aeron/client/AeronClientPool$EgressDispatcher.run:862 | java/lang/Thread.runWith:1540 | java/lang/Thread.run:1527",
+          "samples": 35
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "io/aeron/ExclusivePublication.appendFragmentedMessage:823 | io/aeron/ExclusivePublication.offer:325 | io/aeron/cluster/client/AeronCluster.offer:453 | com/surprising/aeron/client/SurprisingAeronClient$AeronClusterOperations.offer:494 | com/surprising/aeron/client/SurprisingAeronClient.offerToCluster:242",
+          "samples": 27
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "stack": "com/surprising/aeron/client/AeronClientPool$EgressDispatcher.admitQueued:972 | com/surprising/aeron/client/AeronClientPool$EgressDispatcher.run:830 | java/lang/Thread.runWith:1540 | java/lang/Thread.run:1527",
+          "samples": 25
+        }
+      ],
+      "samplesByThread": {
+        "pool-1-thread-1": 1,
+        "pool-1-thread-2": 1,
+        "pool-1-thread-3": 1,
+        "pool-1-thread-4": 1,
+        "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/tmp/surprising-aeron-8025277836492642454 [sender,receiver,aeron-md-nra,driver-conductor]": 2177,
+        "main": 5,
+        "pool-2-thread-1": 2004,
+        "pool-2-thread-2": 2038,
+        "pool-2-thread-3": 2086,
+        "pool-2-thread-4": 1992,
+        "capacity-egress-dispatcher": 1925,
+        "JFR Periodic Tasks": 2,
+        "aeron-client": 2
+      },
+      "allocationPartialBytes": 4923084536,
+      "allocationCoverage": [
+        {
+          "thread": "main",
+          "bytes": 512680,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "Reference Handler",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "Finalizer",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "Signal Dispatcher",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "Service Thread",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "Monitor Deflation Thread",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "C2 CompilerThread0",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "C1 CompilerThread0",
+          "bytes": 56,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "Common-Cleaner",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "JFR Recorder Thread",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "JFR Periodic Tasks",
+          "bytes": 7824,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "Notification Thread",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "InnocuousThread-1",
+          "bytes": 0,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/tmp/surprising-aeron-8025277836492642454 [sender,receiver,aeron-md-nra,driver-conductor]",
+          "bytes": 3776,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "capacity-egress-dispatcher",
+          "bytes": 4758087744,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "aeron-client",
+          "bytes": 38856,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "pool-2-thread-1",
+          "bytes": 39412376,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "pool-2-thread-2",
+          "bytes": 38945288,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "pool-2-thread-3",
+          "bytes": 44630552,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "pool-2-thread-4",
+          "bytes": 41445384,
+          "coveredMs": 58392.38818359375,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162314907.9731
+        },
+        {
+          "thread": "C1 CompilerThread1",
+          "bytes": 0,
+          "coveredMs": 2046.774169921875,
+          "firstMs": 1793162256515.585,
+          "lastMs": 1793162258562.3591
+        }
+      ],
+      "gcPauseMs": 138.04761199999996,
+      "gcPauseCount": 65,
+      "gcPausePercent": 0.23007935333333326,
+      "directMaxBytes": 8522400,
+      "io": {
+        "byThread": [
+          {
+            "type": "jdk.FileRead",
+            "thread": "main",
+            "count": 28,
+            "bytes": 23192,
+            "durationMs": 3.4347270000000005,
+            "maxMs": 0.86598
+          },
+          {
+            "type": "jdk.FileWrite",
+            "thread": "main",
+            "count": 7,
+            "bytes": 804,
+            "durationMs": 1.2714109999999998,
+            "maxMs": 0.37544500000000003
+          }
+        ],
+        "ownerEvents": [],
+        "scope": "Java JFR events; native UDP/JNI I/O may not be visible"
+      },
+      "other": {
+        "eventCountsStableWindow": {
+          "jdk.Deoptimization": 38,
+          "jdk.Compilation": 157,
+          "jdk.JavaMonitorEnter": 89,
+          "jdk.SafepointBegin": 66
+        },
+        "locks": [
+          {
+            "thread": "capacity-egress-dispatcher",
+            "class": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain$CapacityMetrics",
+            "count": 10,
+            "totalMs": 26.184010999999995,
+            "maxMs": 19.525145000000002
+          },
+          {
+            "thread": "pool-2-thread-3",
+            "class": "com/surprising/aeron/benchmarks/workload/ClusterMarkPriceGate",
+            "count": 22,
+            "totalMs": 20.896451,
+            "maxMs": 11.771451
+          },
+          {
+            "thread": "pool-2-thread-1",
+            "class": "com/surprising/aeron/benchmarks/workload/ClusterMarkPriceGate",
+            "count": 13,
+            "totalMs": 17.913542999999997,
+            "maxMs": 12.272595
+          },
+          {
+            "thread": "pool-2-thread-2",
+            "class": "com/surprising/aeron/benchmarks/workload/ClusterMarkPriceGate",
+            "count": 8,
+            "totalMs": 16.730566999999997,
+            "maxMs": 12.26205
+          },
+          {
+            "thread": "pool-2-thread-4",
+            "class": "com/surprising/aeron/benchmarks/workload/ClusterMarkPriceGate",
+            "count": 35,
+            "totalMs": 7.845159000000001,
+            "maxMs": 2.8903930000000004
+          },
+          {
+            "thread": "pool-2-thread-1",
+            "class": "com/surprising/aeron/benchmarks/workload/ClusterCapacityMain$CapacityMetrics",
+            "count": 1,
+            "totalMs": 0.156786,
+            "maxMs": 0.156786
+          }
+        ]
+      },
+      "latencyMicros": {
+        "queuedToOffered": {
+          "samples": 1708,
+          "p50": 87.472,
+          "p90": 852.883,
+          "p95": 2252.484,
+          "p99": 13482.43,
+          "p999": 66308.562,
+          "max": 81019.58
+        },
+        "offeredToDelivered": {
+          "samples": 1708,
+          "p50": 55246.7,
+          "p90": 209392.199,
+          "p95": 311881.905,
+          "p99": 722911.602,
+          "p999": 1360632.379,
+          "max": 1398020.202
+        },
+        "queuedToDelivered": {
+          "samples": 1708,
+          "p50": 56064.12,
+          "p90": 209681.362,
+          "p95": 312292.881,
+          "p99": 724064.87,
+          "p999": 1360722.79,
+          "max": 1398524.992
+        }
+      },
+      "unpairedBoundaries": 7
+    }
+  },
+  "verification": {
+    "build": {
+      "command": "mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests package",
+      "exitCode": 0,
+      "testsSkipped": true
+    },
+    "tests": {
+      "command": "mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=ClusterCapacityMetricsTest,ClusterAsyncPairTest,ClusterStreamFillCountTest -Dsurefire.failIfNoSpecifiedTests=false test",
+      "exitCode": 0,
+      "classes": [
+        {
+          "class": "ClusterCapacityMetricsTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "ClusterAsyncPairTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        {
+          "class": "ClusterStreamFillCountTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        }
+      ],
+      "totals": {
+        "tests": 15,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    "skippedScope": [
+      "full backend regression",
+      "HTTP/WebSocket/frontends; no API changes",
+      "three-member replication",
+      "full production mixed risk/liquidation/ADL workload",
+      "long-duration stability and PMU/cache-counter measurements"
+    ]
+  },
+  "artifactDirectory": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z"
+}

@@ -1,0 +1,30 @@
+
+                                                                                             Java Methods that Execute the Most
+
+Method                                                                                                                                                                                                      Samples Percent
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- ------- -------
+com.surprising.aeron.benchmarks.workload.ClusterCapacityMain.streamMatch(int, long, boolean)                                                                                                                  6,183  37.85%
+com.surprising.aeron.benchmarks.workload.ClusterCapacityMain.refreshMarkAsync(String, boolean)                                                                                                                3,580  21.91%
+com.surprising.aeron.client.AeronClientPool$EgressDispatcher.run()                                                                                                                                            2,051  12.55%
+java.util.concurrent.CompletableFuture.postComplete()                                                                                                                                                         1,994  12.21%
+java.util.concurrent.ConcurrentHashMap$Traverser.advance()                                                                                                                                                      616   3.77%
+io.aeron.Image.poll(FragmentHandler, int)                                                                                                                                                                       461   2.82%
+java.util.concurrent.ArrayBlockingQueue.bulkRemove(Predicate)                                                                                                                                                   285   1.74%
+com.surprising.aeron.benchmarks.workload.ClusterCapacityMain.instrumentId(int, long)                                                                                                                            195   1.19%
+java.util.concurrent.ConcurrentHashMap$EntryIterator.next()                                                                                                                                                      64   0.39%
+com.surprising.aeron.client.SurprisingAeronClient$AsyncConnection.poll()                                                                                                                                         57   0.35%
+com.surprising.aeron.client.AeronClientPool$EgressDispatcher.pollSession(AeronClientPool$AgentLane)                                                                                                              54   0.33%
+com.surprising.aeron.client.SurprisingAeronClient$AeronClusterOperations.pollEgress()                                                                                                                            49   0.30%
+io.aeron.ExclusivePublication.appendFragmentedMessage(UnsafeBuffer, int, DirectBuffer, int, int, DirectBuffer, int, int, int, ReservedValueSupplier)                                                             36   0.22%
+com.surprising.aeron.client.AeronClientPool$EgressDispatcher.admitQueued(AeronClientPool$AgentLane)                                                                                                              36   0.22%
+com.surprising.aeron.client.SurprisingAeronClient$AsyncConnection.pollEgress(int)                                                                                                                                35   0.21%
+io.aeron.cluster.client.AeronCluster.pollEgress()                                                                                                                                                                34   0.21%
+com.surprising.aeron.client.SurprisingAeronClient.pollEgress(int)                                                                                                                                                31   0.19%
+com.surprising.aeron.client.AeronClientPool$EgressDispatcher.dispatchResponses(AeronClientPool$Session, Map)                                                                                                     30   0.18%
+java.util.concurrent.locks.AbstractQueuedSynchronizer.signalNext(AbstractQueuedSynchronizer$Node)                                                                                                                24   0.15%
+com.surprising.aeron.benchmarks.workload.ClusterCapacityMain$CapacityMetrics.recordFinalizedAt(long, long)                                                                                                       23   0.14%
+com.surprising.aeron.client.AeronClientPool$EgressDispatcher.expireAdmitted(AeronClientPool$AgentLane)                                                                                                           23   0.14%
+java.util.concurrent.CompletableFuture.join()                                                                                                                                                                    20   0.12%
+com.surprising.aeron.client.AeronClientPool$EgressDispatcher.openSession(AeronClientPool$AgentLane)                                                                                                              20   0.12%
+java.util.Objects.equals(Object, Object)                                                                                                                                                                         18   0.11%
+com.surprising.aeron.protocol.CoreStateQueryCodec$Reader.text()                                                                                                                                                  17   0.10%

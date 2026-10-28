@@ -41,3 +41,8 @@ The single-node stack has six Java processes:
 | Realtime | Market data, candles, trade export, and realtime routing |
 | Derivatives lifecycle | Funding, risk scans, and liquidation workflows |
 | Maker | Reference-market-based quotes and trading |
+
+
+## 单节点永续压测记录
+
+2026-10-28 使用10,000个账户、256币对、每批20单、全局256报文窗口执行4/8/16发压线程递增测试。16线程档因标记价过期拒单失败，稳定窗存在系统换页与CPU限频，尚未确认Core饱和，吞吐不能作为容量上限。8线程档资金、持仓、冻结与原Archive重启审计通过。详见 [压测报告](docs/validation/perpetual-saturation-20261028/REPORT.md)。

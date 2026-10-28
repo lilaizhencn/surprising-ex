@@ -1,0 +1,18 @@
+
+                                                                                                    Contention by Thread
+
+Thread                                                                                                                                                                                   Count       Avg       P90     Max.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- ----- --------- --------- --------
+pool-1-thread-3                                                                                                                                                                             50   1.09 ms  0.405 ms  48.4 ms
+pool-1-thread-1                                                                                                                                                                             34  0.822 ms  0.658 ms  23.5 ms
+capacity-egress-dispatcher                                                                                                                                                                  19   1.61 ms   4.59 ms  19.5 ms
+pool-2-thread-1                                                                                                                                                                             14   1.29 ms   7.61 ms  12.3 ms
+pool-2-thread-2                                                                                                                                                                              8   2.09 ms   12.3 ms  12.3 ms
+pool-2-thread-3                                                                                                                                                                             22  0.950 ms   4.26 ms  11.8 ms
+pool-2-thread-4                                                                                                                                                                             35  0.224 ms  0.612 ms  2.89 ms
+pool-1-thread-2                                                                                                                                                                             36  0.190 ms  0.893 ms  1.48 ms
+main                                                                                                                                                                                         7  0.378 ms   1.23 ms  1.23 ms
+aeron-client                                                                                                                                                                                 2  0.217 ms  0.400 ms 0.400 ms
+JFR Periodic Tasks                                                                                                                                                                           1  0.222 ms  0.222 ms 0.222 ms
+/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/tmp/surprising-aeron-8025277836492642454 [sender,receiver,aeron-md-nra,driver-conductor]                 1  0.214 ms  0.214 ms 0.214 ms
+pool-1-thread-4                                                                                                                                                                             18 0.0279 ms 0.0972 ms 0.121 ms

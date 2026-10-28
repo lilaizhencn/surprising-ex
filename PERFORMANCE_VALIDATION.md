@@ -717,3 +717,24 @@ JFR 配对单独运行同样参数，稳定窗 10.013152s，完成 2,890,867 项
 完整测试验收 2,685 项，0 failures/errors，4 skipped，构建中失败及修正过程、当前源码校验见 [第二轮验收](ROUND2_CLEANUP_PROGRESS.md) 和 [验证明细](docs/validation/deep-forwarding-round2-20261028/verification.json)。未测无 swap 正式容量、普通 50/50 GTC、三成员、完整 Valkey 运营流、长稳泄漏及完整 native/硬件计数；后续应在符合门槛的环境重跑锁定场景，不能由本次诊断代替。
 
 本轮原始录制、独立节点目录及临时日志在摘要、view、配置和校验归档后清理；实际清理状态记录于验证目录的 `cleanup.json`。
+
+
+## 2026-10-28 单 Aeron 节点永续普通订单压测（perpetual-single-aeron-20261028T042509Z）
+
+### 执行前锁定计划
+
+当前 master `161ef228e5bf17c460dd1f7552865df9f720f03d`，原工作区干净；Corretto HotSpot JDK 27、G1。一个真实 Aeron 成员、一个 Matcher、两个 Account Lane，保留 UDP、Consensus、Archive 与 Core。LINEAR_PERPETUAL，MATCH_STREAM，单笔 GTC 买卖各半，无外部做市；100 用户、256 币对、4 worker/4 connection、seed=9901、全局 in-flight=256、batchSize=1。预热 30s、稳定测量 60s、排空最多 30s、主运行一次；JFR/GC 相同参数独立一次。节点堆 512m–1536m，客户端 128m–512m。资源每 2s 采样；JFR Java/native 栈周期 20ms，客户端边界按命令 ID 1/64 抽样。
+
+门槛：资金偏差零、业务与请求 accepted=terminal、排空及盘口/队列零积压、实际拓扑一致；性能要求稳定窗无换页、无 CPU 节流，诊断 JFR 无 DataLoss。起始系统 swap 约 7.8GiB，最终按窗口采样判定性能有效性。闭环窗口存在 coordinated omission，不外推 Core 上限或三成员容量。本次不测生产混合风控、强平/ADL 和长稳；恢复与采样缺口按实际执行补记。完整命令、计划和原始证据归档于 `/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z`；结果待追加。
+
+
+### 用户要求饱和压测后的计划修订（尚未开始发压）
+
+用户指出原规模过小，要求饱和状态。本轮取消 100 用户单笔方案，改为 10,000 用户、256 币对、MATCH_BATCH_STREAM、每报文 20 笔 GTC、买卖各半；仍是单真实成员、单 Matcher、2 Lane、全局 256 报文窗口，即最多 5,120 笔业务订单在途。相同数据与 batch 下按 4/8/16 发压 worker 和连接递增，每档新节点、预热 30s / 测量 60s；选定一档另行 JFR/GC 配对。只读观察客户端每 100ms 查询真实 Core 队列，记录墙钟、请求耗时、队列深度及累计分片操作；它本身增加少量查询负载，各档保持相同。结合吞吐平台、持续积压和业务 CPU 栈判断，不把在途打满或 BUSY_SPIN 高 CPU 当作业务饱和。主档压测后在原 Archive 目录重启，查询状态哈希并复核资金与盘口；全局 swap / 节流门槛不变。
+
+
+### 执行结果与最终判定
+
+**饱和验收失败，Core饱和未确认，速度验收无效。** 10,000账户、256币对、batch20、全局256报文，4线程稳窗完成9,414,460单，观察156,907.667单/秒；8线程15,667.333单/秒；16线程预热因STALE_MARK_PRICE拒单失败。稳定窗均存在系统换页和CPU限频。完整五板块看板、命令和缺口见 [本轮报告](docs/validation/perpetual-saturation-20261028/REPORT.md) 与 [结果JSON](docs/validation/perpetual-saturation-20261028/summary.json)。
+
+内置资金/终态通过的各档单列保留；8线程独立10,000账户、持仓、冻结及原Archive快照重启审计通过，哈希a82caca13dbc7410一致。4线程主档附加工具/提前连接恢复的问题保留为未验证。独立JFR覆盖稳窗、DataLoss=0，热点主要落在等待轮询，未确认Core业务饱和；精确B/item、混合自愈、三节点和长稳未测。构建退出0、相关15项测试通过，不能替代性能门槛。归档及清理见报告与cleanup.json。

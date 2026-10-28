@@ -1,0 +1,47 @@
+{
+  "build": {
+    "command": "mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-benchmarks -am -DskipTests package",
+    "exitCode": 0,
+    "testsSkipped": true
+  },
+  "tests": {
+    "command": "mvn -B -ntp -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=ClusterCapacityMetricsTest,ClusterAsyncPairTest,ClusterStreamFillCountTest -Dsurefire.failIfNoSpecifiedTests=false test",
+    "exitCode": 0,
+    "classes": [
+      {
+        "class": "ClusterCapacityMetricsTest",
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "ClusterAsyncPairTest",
+        "tests": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "class": "ClusterStreamFillCountTest",
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "totals": {
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "skippedScope": [
+    "full backend regression",
+    "HTTP/WebSocket/frontends; no API changes",
+    "three-member replication",
+    "full production mixed risk/liquidation/ADL workload",
+    "long-duration stability and PMU/cache-counter measurements"
+  ]
+}

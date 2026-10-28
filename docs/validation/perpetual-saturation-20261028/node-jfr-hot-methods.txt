@@ -1,0 +1,30 @@
+
+                                                                                             Java Methods that Execute the Most
+
+Method                                                                                                                                                                                                      Samples Percent
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- ------- -------
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.run(TradingCpuAffinity)                                                                                                                          10,261  52.70%
+com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline.runMatching()                                                                                                                            5,538  28.44%
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.peekMatcherSettlement()                                                                                                                           1,348   6.92%
+com.surprising.aeron.service.order.OrderBatchExecutor$PipelinedPlaceBatchSubmission.get()                                                                                                                       240   1.23%
+com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline$BackgroundRead.execute()                                                                                                                   154   0.79%
+com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto(ResolvedPlaceOrder, RuntimeOrderAdmission$Context, long, PlaceOrderCommand)                                                      108   0.55%
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.ready(Object)                                                                                                                                        96   0.49%
+org.agrona.collections.Long2ObjectHashMap.getMapped(long)                                                                                                                                                        84   0.43%
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.shouldRunMatcherSettlement(MatcherSettlementEvent, SettlementLaneWorker$Command)                                                                     61   0.31%
+io.aeron.driver.IpcPublication.updatePublisherPositionAndLimit()                                                                                                                                                 59   0.30%
+io.aeron.driver.buffer.MappedRawLog.preTouchPages(UnsafeBuffer[], int, int)                                                                                                                                      57   0.29%
+io.aeron.driver.NetworkPublication.hasSubscribers()                                                                                                                                                              54   0.28%
+org.agrona.AbstractMutableDirectBuffer.putByte(int, byte)                                                                                                                                                        39   0.20%
+com.surprising.aeron.service.core.change.RuntimeChangeBuffer.put(long, Object)                                                                                                                                   34   0.17%
+org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.probe(long)                                                                                                                                   31   0.16%
+org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.getIfAbsent(int, Function0)                                                                                                                  30   0.15%
+io.aeron.driver.PublicationImage.trackRebuild(long)                                                                                                                                                              25   0.13%
+com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.hashUtf8(long, String)                                                                                                                        25   0.13%
+sun.security.provider.ByteArrayAccess.i2bBig(int[], int, byte[], int, int)                                                                                                                                       24   0.12%
+io.aeron.ConcurrentPublication.appendFragmentedMessage(UnsafeBuffer, int, DirectBuffer, int, int, DirectBuffer, int, int, ReservedValueSupplier)                                                                 22   0.11%
+org.agrona.collections.Long2LongHashMap.get(long)                                                                                                                                                                19   0.10%
+io.aeron.driver.DriverConductor.processClientCommands()                                                                                                                                                          19   0.10%
+java.util.concurrent.ConcurrentHashMap.get(Object)                                                                                                                                                               18   0.09%
+org.agrona.collections.LongHashSet.compactChain(int)                                                                                                                                                             17   0.09%
+io.aeron.Image.boundedControlledPoll(ControlledFragmentHandler, long, int)                                                                                                                                       15   0.08%

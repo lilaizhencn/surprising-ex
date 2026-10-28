@@ -1,0 +1,13 @@
+
+                                                                                                    Contention by Thread
+
+Thread                                                                                                                                                                                  Count       Avg       P90      Max.
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- ----- --------- --------- ---------
+core-account-lane-1                                                                                                                                                                        10   3.38 ms   16.3 ms   16.7 ms
+consensus-module-101-0                                                                                                                                                                      3  0.435 ms   1.23 ms   1.23 ms
+core-account-lane-0                                                                                                                                                                         9  0.358 ms  0.847 ms  0.847 ms
+main                                                                                                                                                                                        4  0.132 ms  0.397 ms  0.397 ms
+driver-conductor                                                                                                                                                                            6  0.122 ms  0.337 ms  0.337 ms
+JFR Periodic Tasks                                                                                                                                                                          1  0.329 ms  0.329 ms  0.329 ms
+archive-conductor                                                                                                                                                                           1 0.0587 ms 0.0587 ms 0.0587 ms
+clustered-service-101-0                                                                                                                                                                     1 0.0279 ms 0.0279 ms 0.0279 ms

@@ -1,0 +1,30 @@
+
+                                                                                                     Allocation by Site
+
+Method                                                                                                                                                                                                  Allocation Pressure
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- -------------------
+com.surprising.aeron.service.order.OrderBatchPending.resolvedOrderSlot(int)                                                                                                                                          38.21%
+java.util.Arrays.copyOf(byte[], int)                                                                                                                                                                                  5.51%
+com.surprising.aeron.service.result.ResponseArena.<init>(int, int)                                                                                                                                                    5.43%
+org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.allocateTable(int)                                                                                                                               3.13%
+java.util.Arrays.copyOfRange(byte[], int, int)                                                                                                                                                                        2.82%
+org.agrona.collections.LongHashSet.rehash(int)                                                                                                                                                                        2.79%
+com.surprising.aeron.service.retention.TerminalTombstoneStore.grow()                                                                                                                                                  2.24%
+jdk.internal.classfile.impl.EntryMap.<init>(int, float)                                                                                                                                                               1.38%
+java.util.zip.InflaterInputStream.<init>(InputStream, Inflater, int)                                                                                                                                                  1.37%
+com.surprising.aeron.service.query.state.RuntimeStateQueryService.userState(TradingAccountRuntime, AccountLaneState, RuntimeIdentityRegistry, long, boolean)                                                          1.22%
+java.nio.HeapByteBuffer.slice()                                                                                                                                                                                       1.17%
+jdk.internal.classfile.impl.SplitConstantPool.<init>()                                                                                                                                                                1.14%
+org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.allocateTable(int)                                                                                                                                     1.06%
+com.surprising.aeron.protocol.CoreStateQueryCodec$Writer.<init>(int)                                                                                                                                                  1.04%
+com.surprising.aeron.service.order.admission.PendingReservationTracker.registerBatch(long, long, OrderRuntime[], int)                                                                                                 0.87%
+com.surprising.aeron.service.order.OrderBatchExecutor.prepareBatchDecision(OrderBatchPending, String)                                                                                                                 0.87%
+org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap.allocateTable(int)                                                                                                                                  0.85%
+exchange.core2.collections.objpool.ObjectsPool$ArrayStack.<init>(int)                                                                                                                                                 0.84%
+com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.context(TradingAccountRuntime, RuntimeIdentityRegistry, int, long)                                                                                 0.77%
+org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.allocateTable(int)                                                                                                                                0.69%
+org.agrona.collections.LongHashSet.<init>(int, float, boolean)                                                                                                                                                        0.69%
+com.surprising.aeron.service.core.TradingAccountRuntime.updatePositionInLane(AccountLaneState, long, long, int, int, CoreInstrument, long, long, long, long, long, CoreMarginMode, CorePositionSide)                  0.69%
+org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.allocateTable(int)                                                                                                                                 0.69%
+jdk.internal.misc.Unsafe.allocateInstance(Class)                                                                                                                                                                      0.65%
+java.util.concurrent.ConcurrentHashMap.putVal(Object, Object, boolean)                                                                                                                                                0.62%

@@ -1,0 +1,30 @@
+
+                                                                                                     Allocation by Site
+
+Method                                                                                                                                                                                                  Allocation Pressure
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- -------------------
+java.util.concurrent.ConcurrentHashMap$EntrySetView.iterator()                                                                                                                                                       53.22%
+java.lang.invoke.DirectMethodHandle.allocateInstance(Object)                                                                                                                                                         16.92%
+java.util.Arrays.copyOfRange(byte[], int, int)                                                                                                                                                                        5.48%
+com.surprising.aeron.client.SurprisingAeronClient.onMessage(long, long, DirectBuffer, int, int, Header)                                                                                                               5.18%
+com.surprising.aeron.protocol.CoreStateQueryCodec.readOrderState(CoreStateQueryCodec$Reader)                                                                                                                          3.09%
+com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeResultFrame(ByteBuffer)                                                                                                                                    2.96%
+com.surprising.aeron.benchmarks.workload.ClusterCapacityMain.order(String, long, CoreOrderSide, CoreTimeInForce, long)                                                                                                2.74%
+java.util.Arrays.copyOf(byte[], int)                                                                                                                                                                                  1.79%
+java.nio.HeapByteBuffer.<init>(int, int, MemorySegment)                                                                                                                                                               1.63%
+java.nio.HeapByteBuffer.slice(int, int)                                                                                                                                                                               1.30%
+com.surprising.aeron.protocol.CoreStateQueryCodec$Reader.text()                                                                                                                                                       0.72%
+java.util.ImmutableCollections$AbstractImmutableList.iterator()                                                                                                                                                       0.70%
+java.util.ArrayList.<init>(int)                                                                                                                                                                                       0.56%
+java.util.ImmutableCollections.listFromArray(Object[])                                                                                                                                                                0.38%
+java.util.Arrays.copyOf(Object[], int)                                                                                                                                                                                0.38%
+java.util.List.of(Object[])                                                                                                                                                                                           0.25%
+com.surprising.aeron.protocol.PlaceOrderBatchCommand.<init>(List)                                                                                                                                                     0.20%
+com.surprising.aeron.protocol.CoreMessageHeader.command(CoreMessageType, long, long, ProductLine, CommandSource, long, long, long, long, long)                                                                        0.16%
+sun.security.provider.DigestBase.<init>(String, int, int)                                                                                                                                                             0.15%
+java.util.concurrent.CompletableFuture.uniWhenCompleteStage(Executor, BiConsumer)                                                                                                                                     0.15%
+jdk.internal.misc.Unsafe.allocateUninitializedArray(Class, int)                                                                                                                                                       0.13%
+sun.security.util.CryptoAlgorithmConstraints.permits(String, String)                                                                                                                                                  0.13%
+java.lang.Long.valueOf(long)                                                                                                                                                                                          0.12%
+com.surprising.aeron.protocol.CoreResponse.decoded(ResponseStatus, ResponseStatus, CoreResultCode, long, long, byte[])                                                                                                0.11%
+java.util.concurrent.CompletableFuture.uniAcceptStage(Executor, Consumer)                                                                                                                                             0.10%

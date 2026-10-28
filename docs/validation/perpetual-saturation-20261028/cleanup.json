@@ -1,0 +1,43 @@
+{
+  "epochMillis": 1793162766247,
+  "artifactDirectory": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z",
+  "remainingBenchmarkProcesses": [],
+  "removed": [
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-4/data",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-4/aeron",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-4/tmp",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-8/data",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-8/aeron",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-8/tmp",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-16/data",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-16/aeron",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/load-16/tmp",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/client.jfr",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/node.jfr",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/data",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/aeron",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/tmp",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/SaturationObserver.class",
+    "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/__pycache__"
+  ],
+  "recordings": [
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/client.jfr",
+      "sha256": "47aa330397bdb0c9f5fddced87b3a5b7995ba7f4d8b96a216a86a527ce8f8501",
+      "bytes": 35870902,
+      "summary": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/client-jfr-summary.txt",
+      "analysis": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/client-jfr-analysis.json",
+      "status": "deleted after checksum, summary/views/config preserved"
+    },
+    {
+      "path": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/node.jfr",
+      "sha256": "ecd97ca9d64cfc8f5d9c27d7852eae1a891341ba981affc135de47f49a9dad83",
+      "bytes": 75509220,
+      "summary": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/node-jfr-summary.txt",
+      "analysis": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z/diagnostic-4/node-jfr-analysis.json",
+      "status": "deleted after checksum, summary/views/config preserved"
+    }
+  ],
+  "retained": "scripts, Java observer source, logs, queue/resource JSONL, summaries/views/configuration/checksums and JSON analysis",
+  "postCleanupDisk": "Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on\n/dev/disk1s2   932Gi   697Gi   205Gi    78%    5.1M  2.2G    0%   /System/Volumes/Data\n"
+}

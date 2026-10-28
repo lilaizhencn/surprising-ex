@@ -1,0 +1,72 @@
+{
+  "runId": "perpetual-single-aeron-20261028T042509Z",
+  "sourceCommit": "161ef228e5bf17c460dd1f7552865df9f720f03d",
+  "artifactDirectory": "/Users/atomex/.codex/artifacts/perpetual-single-aeron-20261028T042509Z",
+  "productLine": "LINEAR_PERPETUAL",
+  "scenario": "clustered batch GTC MATCH_BATCH_STREAM; 50% buy / 50% sell; saturation search",
+  "members": 1,
+  "matchers": 1,
+  "accountLanes": 2,
+  "inFlight": 256,
+  "users": 10000,
+  "symbols": 256,
+  "workers": 4,
+  "connections": 4,
+  "seed": 9901,
+  "batchSize": 20,
+  "warmupSeconds": 30,
+  "measurementSeconds": 60,
+  "drainTimeoutSeconds": 30,
+  "repetitions": 1,
+  "diagnosticPair": "same parameters; separate JFR/GC run",
+  "jvm": {
+    "java": "Corretto HotSpot 27+33-FR",
+    "gc": "G1",
+    "nodeXms": "512m",
+    "nodeXmx": "1536m",
+    "clientXms": "128m",
+    "clientXmx": "512m"
+  },
+  "gates": [
+    "fundsDiff=0",
+    "offered=accepted=finalized",
+    "submittedRequests=completedRequests",
+    "unfinishedRequests=0",
+    "actual topology matcher=1, lanes=2",
+    "drained Core queues and order book",
+    "no swap activity / CPU throttling / JFR DataLoss for performance validity"
+  ],
+  "limits": [
+    "closed-loop 256 window: coordinated omission; cannot infer Core capacity ceiling",
+    "not production mixed workload",
+    "no 3-member or long-duration test",
+    "native/PMU coverage reported as missing where unavailable"
+  ],
+  "resourceSamplingSeconds": 2,
+  "profile": "surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc",
+  "stages": [
+    {
+      "name": "load-4",
+      "workers": 4,
+      "connections": 4
+    },
+    {
+      "name": "load-8",
+      "workers": 8,
+      "connections": 8
+    },
+    {
+      "name": "load-16",
+      "workers": 16,
+      "connections": 16
+    }
+  ],
+  "maxBusinessItemsInFlight": 5120,
+  "queueSamplingMillis": 100,
+  "saturationEvidence": [
+    "throughput plateau across increasing producer supply",
+    "sustained queue occupancy from actual Core metrics",
+    "JFR distinguishes busy spin/wait from business stacks; high CPU alone insufficient"
+  ],
+  "recovery": "restart original Archive after main stage; compare read-only state hash and funds/book audit"
+}
