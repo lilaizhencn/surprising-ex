@@ -27,6 +27,13 @@ public final class PipelineTestAccess {
     public static void overflowQueuedMatching(MatchingCommandAdmission admission, int count) {
         admission.queuedMatching.addAll(java.util.Collections.nCopies(count, null));
     }
+    public static java.util.function.BooleanSupplier controlWork(DirectCommandSlot slot) {
+        try {
+            var field = DirectCommandSlot.class.getDeclaredField("controlWork");
+            field.setAccessible(true);
+            return (java.util.function.BooleanSupplier) field.get(slot);
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
     public static void replaceControlWork(DirectCommandSlot slot, java.util.function.BooleanSupplier work) {
         try {
             var field = DirectCommandSlot.class.getDeclaredField("controlWork");

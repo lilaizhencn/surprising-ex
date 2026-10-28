@@ -3,9 +3,6 @@ package com.surprising.aeron.service.order;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.order.command.DecodedMatchingCommand;
 import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import lombok.Getter;
@@ -407,16 +404,6 @@ public final class PendingMatchingRing {
             CommandSlot pending = pendingAt(slot);
             if (pending != null) consumer.accept(pending);
         }
-    }
-
-    /**
-     * 按全局顺序复制外层 Map 并固定它，值仍是会被回收复用的原槽引用，只能作当前观察，不能当作持久化状态快照。
-     */
-    public Map<Long, CommandSlot> snapshot() {
-        // 复制出来的外层有序观察 Map，值仍借用原槽。
-        LinkedHashMap<Long, CommandSlot> snapshot = new LinkedHashMap<>(size);
-        forEach(/* 正在初始化、查询、遍历或观察的原命令槽引用。 */ pending -> snapshot.put(pending.sequence(), pending));
-        return Collections.unmodifiableMap(snapshot);
     }
 
     /**

@@ -17,7 +17,6 @@ import it.unimi.dsi.fastutil.longs.LongBidirectionalIterator;
 import it.unimi.dsi.fastutil.longs.LongComparators;
 import it.unimi.dsi.fastutil.longs.LongSortedSet;
 import it.unimi.dsi.fastutil.longs.LongSortedSets;
-import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,7 +26,7 @@ import java.util.Set;
  */
 public final class TriggerOrderIndex {
 
-    // 这些都是 Owner 派生索引，apply、remove 与 rebuild 跟随已经提交的账户 Lane 状态。
+    // 这些都是 Owner 派生索引，apply 与 remove 跟随已经提交的账户 Lane 状态。
     /** 按标的整数身份组织的倒序触发 ID 桶，含所有保留状态。 */
     private final Int2ObjectOpenHashMap<LongSortedSet> idsBySymbol = new Int2ObjectOpenHashMap<>();
     /** 按标的再按状态组织的倒序 ID 桶，用于筛选及固定最大待触发 ID。 */
@@ -38,8 +37,6 @@ public final class TriggerOrderIndex {
     private final Long2ObjectOpenHashMap<LongSortedSet> idsByUser = new Long2ObjectOpenHashMap<>();
     /** 全部已索引触发 ID 的倒序集合，支持查询游标从指定位置开始。 */
     private final LongSortedSet allIds = descendingIds();
-    /** 用户与客户端触发 ID 到业务 ID 的派生查重表，随保留状态的 apply/remove/rebuild 维护。 */
-    private final Object2LongOpenHashMap<ClientTriggerKey> idsByClient = new Object2LongOpenHashMap<>();
     /** 用户、标的、保证金模式及方向到自然升序 ID 集，包含非待触发状态。 */
     private final Map<TriggerPositionKey, LongSortedSet> idsByPosition = new java.util.HashMap<>();
     /** 相同用户及持仓腿 OCO 组的 PENDING 倒序 ID 集，包含组内主单自身。 */
@@ -63,7 +60,6 @@ public final class TriggerOrderIndex {
      * @param triggerOrderId 触发单业务 ID，使用原 long 身份
      * @param userId 触发单所属用户，零筛选语义由具体查询入口决定
      * @param instrumentId 标的身份，文本入口使用规范数字 ID，索引键和路由保存其整数值
-     * @param clientTriggerOrderId 用户范围内的客户端触发 ID，空值不进入客户端查重表
      * @param ocoGroupId 该单所属 OCO 文本组 ID，空文本表示不分组
      * @param marginMode 该触发关联持仓的全仓或逐仓模式
      * @param positionSide 该触发关联的净仓、多头或空头持仓腿
@@ -82,7 +78,7 @@ public final class TriggerOrderIndex {
      * @param cancelRevisionAvailable 路由生成时触发修订是否小于 long 最大值，可否再加一取消
      */
     public record TriggerRoute(long triggerOrderId, long userId, int instrumentId,
-            String clientTriggerOrderId, String ocoGroupId, CoreMarginMode marginMode,
+            String ocoGroupId, CoreMarginMode marginMode,
             CorePositionSide positionSide, CoreTriggerOrderStatus status, long expiresAtEpochMillis,
             CoreTriggerPriceSource priceSource, CoreTriggerOrderType triggerType,
             com.surprising.aeron.protocol.CoreTriggerCondition triggerCondition, long triggerPriceTicks,
@@ -95,7 +91,7 @@ public final class TriggerOrderIndex {
          */
         public static TriggerRoute from(CoreTriggerOrderState value) {
             return new TriggerRoute(value.triggerOrderId(), value.userId(), value.instrument().instrumentIdValue(),
-                    value.clientTriggerOrderId(), value.ocoGroupId(), value.marginMode(), value.positionSide(),
+                    value.ocoGroupId(), value.marginMode(), value.positionSide(),
                     value.status(), value.expiresAtEpochMillis(), value.priceSource(), value.triggerType(),
                     value.triggerCondition(), value.triggerPriceTicks(), value.side(), value.activationPriceTicks(),
                     value.callbackRatePpm(), value.highestPriceTicks(), value.lowestPriceTicks(), value.activatedAtEpochMillis(),
@@ -114,7 +110,7 @@ public final class TriggerOrderIndex {
      * @param state 用来重建索引的本产品线已提交冷状态
      */
     public TriggerOrderIndex(TradingCoreState state) {
-        rebuild(state);
+        state.triggerOrders().values().forEach(this::add);
     }
 
     /**
@@ -469,63 +465,23 @@ public final class TriggerOrderIndex {
     }
 
     /**
-     * 在用户范围检查非空客户端触发 ID 是否已经索引，包含仍保留在本索引中的终态身份；不在此处理外部终态墓碑。
-     * @param userId 触发单所属用户，零筛选语义由具体查询入口决定
-     * @param clientTriggerOrderId 用户范围内的客户端触发 ID，空值不进入客户端查重表
-     */
-    public boolean containsClient(long userId, String clientTriggerOrderId) {
-        return clientTriggerOrderId != null && !clientTriggerOrderId.isEmpty()
-                && idsByClient.containsKey(new ClientTriggerKey(userId, clientTriggerOrderId));
-    }
-
-    /**
-     * 先撤下旧路由的全部候选和身份键，再按非空当前值加入新路由；空值表示删除。调用方必须保证 id 与当前触发单自身身份一致，本方法不另校验两者。
+     * 先撤下旧路由的全部候选键，再按非空当前值加入新路由；空值表示删除。调用方必须保证 id 与当前触发单自身身份一致，本方法不另校验两者。
      * @param id 当前需要查询、更新或移除的触发业务 ID
      * @param current 该 ID 提交后的完整触发状态，空表示删除；调用方保证与 id 同身份
      */
     public void apply(long id, CoreTriggerOrderState current) {
-        // 该 ID 原轻量路由，先据它移除全部旧分组及客户端身份
+        // 该 ID 原轻量路由，用它撤销旧候选分组
         TriggerRoute previous = valuesById.remove(id);
         if (previous != null) {
             remove(previous, id);
-            if (!previous.clientTriggerOrderId().isEmpty()) {
-                idsByClient.removeLong(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
-            }
         }
         if (current != null) {
             add(current);
-            if (!current.clientTriggerOrderId().isEmpty()) {
-                idsByClient.put(new ClientTriggerKey(current.userId(), current.clientTriggerOrderId()), id);
-            }
         }
     }
 
     /**
-     * 清空全部桶和反向路由，从冷状态触发单逐一重建，并登记非空客户端身份。
-     * @param state 用来重建索引的本产品线已提交冷状态
-     */
-    public void rebuild(TradingCoreState state) {
-        idsBySymbol.clear();
-        idsBySymbolStatus.clear();
-        idsByStatus.clear();
-        idsByUser.clear();
-        allIds.clear();
-        idsByClient.clear();
-        idsByPosition.clear();
-        idsByOco.clear();
-        idsByPrice.clear();
-        idsByExpiry.clear();
-        valuesById.clear();
-        state.triggerOrders().values().forEach(/* 重建时当前一条完整触发状态，按其真实字段重建候选和身份桶 */ order -> {
-            add(order);
-            if (!order.clientTriggerOrderId().isEmpty()) {
-                idsByClient.put(new ClientTriggerKey(order.userId(), order.clientTriggerOrderId()), order.triggerOrderId());
-            }
-        });
-    }
-
-    /**
-     * 把完整触发单转成路由，再加入共同的派生索引；客户端身份由外层 apply 或 rebuild 单独维护。
+     * 把完整触发单转成路由，再加入共同的派生索引。
      * @param order 当前需要提取路由、归桶或移除旧桶的触发单或路由
      */
     private void add(CoreTriggerOrderState order) { add(TriggerRoute.from(order)); }
@@ -575,12 +531,11 @@ public final class TriggerOrderIndex {
     }
 
     /**
-     * 按旧路由从全部相关桶移除该 ID，空桶立即删除，最后删除空的价格分组；客户端身份仍由外层 apply 单独处理。
+     * 按旧路由从全部相关桶移除该 ID，空桶立即删除，最后删除空的价格分组；路由已由 apply 移除。
      * @param order 当前需要提取路由、归桶或移除旧桶的触发单或路由
      * @param id 当前需要查询、更新或移除的触发业务 ID
      */
     private void remove(TriggerRoute order, long id) {
-        valuesById.remove(id);
         // 当前加入或移除的路由所属用户
         long userId = order.userId();
         // 当前路由标的的规范整数身份
@@ -790,14 +745,6 @@ public final class TriggerOrderIndex {
      */
     private record TriggerOcoKey(long userId, int instrumentId, CoreMarginMode marginMode,
                                  CorePositionSide positionSide, String groupId) {
-    }
-
-    /**
-     * 用户范围内的客户端触发 ID 身份键。
-     * @param userId 触发单所属用户，零筛选语义由具体查询入口决定
-     * @param clientTriggerOrderId 用户范围内的客户端触发 ID，空值不进入客户端查重表
-     */
-    private record ClientTriggerKey(long userId, String clientTriggerOrderId) {
     }
 
     /**

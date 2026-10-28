@@ -78,6 +78,30 @@ public final class LinearPerpetualBenchmarkSupport {
         return Math.addExact(balance.availableUnits(), balance.lockedUnits());
     }
 
+    private static final java.lang.reflect.Field ACTIVE_ORDER_VALUES =
+            indexField(com.surprising.aeron.service.core.index.ActiveOrderIndex.class, "ordersById");
+    private static final java.lang.reflect.Field ADL_POSITION_VALUES =
+            indexField(com.surprising.aeron.service.core.index.AdlPositionIndex.class, "positions");
+
+    /** 仅在夹具已完成 Owner 交接后核对现有索引，不物化全表。 */
+    public static int activeOrderCount(com.surprising.aeron.service.core.index.ActiveOrderIndex index) {
+        try { return ((org.agrona.collections.Long2ObjectHashMap<?>) ACTIVE_ORDER_VALUES.get(index)).size(); }
+        catch (IllegalAccessException failure) { throw new AssertionError(failure); }
+    }
+
+    public static int adlPositionCount(com.surprising.aeron.service.core.index.AdlPositionIndex index) {
+        try { return ((org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<?>) ADL_POSITION_VALUES.get(index)).size(); }
+        catch (IllegalAccessException failure) { throw new AssertionError(failure); }
+    }
+
+    private static java.lang.reflect.Field indexField(Class<?> type, String name) {
+        try {
+            var field = type.getDeclaredField(name);
+            field.setAccessible(true);
+            return field;
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+
     public interface Scenario extends AutoCloseable {
         public long run();
 
@@ -543,7 +567,7 @@ public final class LinearPerpetualBenchmarkSupport {
                 }
                 long fees = state.treasuryState().feeBalances().getOrDefault(SETTLE_ASSET, 0L);
                 if (Math.addExact(balances, fees) != Math.multiplyExact(users.size(), SAFE_BALANCE)
-                        || netPosition != 0 || harness.state().activeOrderIndex().count() != 0) {
+                        || netPosition != 0 || LinearPerpetualBenchmarkSupport.activeOrderCount(harness.state().activeOrderIndex()) != 0) {
                     throw new IllegalStateException("deep fill violated funds, positions or terminal orders");
                 }
             }
@@ -990,7 +1014,7 @@ public final class LinearPerpetualBenchmarkSupport {
                 if (Math.addExact(balances, treasury) != Math.multiplyExact(SAFE_BALANCE, 2)
                         || harness.acceptedMessages() != harness.terminalMessages()
                         || harness.acceptedCoreMessages() != harness.terminalCoreMessages()
-                        || harness.state().activeOrderIndex().count() != (makerQuantity > filled ? 1 : 0))
+                        || LinearPerpetualBenchmarkSupport.activeOrderCount(harness.state().activeOrderIndex()) != (makerQuantity > filled ? 1 : 0))
                     throw new IllegalStateException("cross-lane fill did not conserve funds or drain commands");
             }
 

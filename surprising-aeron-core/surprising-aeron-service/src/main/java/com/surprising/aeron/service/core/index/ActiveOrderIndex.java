@@ -105,25 +105,16 @@ public final class ActiveOrderIndex {
      * @param state 只在冷边界用于重建的已提交状态
      */
     public ActiveOrderIndex(TradingCoreState state) {
-        rebuild(state);
-    }
+        for (CoreOrderState /* 冷状态中当前需要判断并重建的订单 */ order : state.orders().values()) {
+            if (!isActive(order)) continue;
+            // 该冷订单的已注册合约，缺失则重建拒绝
+            CoreInstrument instrument = state.instruments().get(order.instrumentId());
+            if (instrument == null) {
+                throw new IllegalStateException("instrument is not registered: " + order.instrumentId());
+            }
+            applyRoute(order.orderId(), order.userId(), order.instrumentId());
+        }
 
-    /**
-     * 先查原标的文本，未命中再验证规范身份；返回该标的 OPEN 订单数，非法或空标的仍拒绝。
-     * @param instrumentId 永久数字标的文本；page 中空白或空值表示不按标的筛选
-     */
-    public int count(String instrumentId) {
-        // 当前选中、复制或待复用的 primitive 订单号成员集合
-        LongHashSet ids = instrumentId == null ? null : idsBySymbol.get(instrumentId);
-        if (ids == null) ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
-        return ids == null ? 0 : ids.size();
-    }
-
-    /**
-     * 返回全部已索引 OPEN 订单数。
-     */
-    public int count() {
-        return ordersById.size();
     }
 
     /**
@@ -132,24 +123,6 @@ public final class ActiveOrderIndex {
      */
     public IndexedOrder activeOrderRoute(long orderId) {
         return ordersById.get(orderId);
-    }
-
-    /**
-     * 复制指定标的的全部 OPEN 订单号为独立降序数组。
-     * @param instrumentId 永久数字标的文本；page 中空白或空值表示不按标的筛选
-     */
-    public long[] sortedIdsDescending(String instrumentId) {
-        // 当前选中、复制或待复用的 primitive 订单号成员集合
-        LongHashSet ids = idsBySymbol.get(OrderReservation.requireInstrumentId(instrumentId));
-        return sortedDescending(ids);
-    }
-
-    /**
-     * 复制指定用户的全部 OPEN 订单号为独立降序数组。
-     * @param userId 用户 ID；page 中零表示不按用户筛选
-     */
-    public long[] sortedIdsDescending(long userId) {
-        return sortedDescending(idsByUser.get(userId));
     }
 
     /**
@@ -331,35 +304,6 @@ public final class ActiveOrderIndex {
     }
 
     /**
-     * 清三张有效路由表，从冷状态逐个加入 OPEN 订单；缺少合约配置拒绝。复用池和页暂存仍随本索引存活。
-     * @param state 只在冷边界用于重建的已提交状态
-     */
-    public void rebuild(TradingCoreState state) {
-        idsByUser.clear();
-        idsBySymbol.clear();
-        ordersById.clear();
-        for (CoreOrderState /* 冷状态中当前需要判断并重建的订单 */ order : state.orders().values()) {
-            if (!isActive(order)) continue;
-            // 该冷订单的已注册合约，缺失则重建拒绝
-            CoreInstrument instrument = state.instruments().get(order.instrumentId());
-            if (instrument == null) {
-                throw new IllegalStateException("instrument is not registered: " + order.instrumentId());
-            }
-            applyRoute(order.orderId(), order.userId(), order.instrumentId());
-        }
-    }
-
-    /**
-     * 要求身份表非空后重建；冷订单已带标的文本，重建主体不读取身份表。
-     * @param state 只在冷边界用于重建的已提交状态
-     * @param identities 内部编号到永久标的文本的身份表；冷构造器不读取此参数
-     */
-    public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        java.util.Objects.requireNonNull(identities, "runtime identities");
-        rebuild(state);
-    }
-
-    /**
      * 只把非空且状态为 OPEN 的冷订单视为活跃。
      * @param order 待加入索引的路由，或需要判断活跃状态的冷订单
      */
@@ -455,45 +399,6 @@ public final class ActiveOrderIndex {
     private void recycleMembership(LongHashSet ids) {
         if (ids.capacity() <= MAX_RECYCLED_MEMBERSHIP_CAPACITY
                 && recycledMemberships.size() < MAX_RECYCLED_MEMBERSHIPS) recycledMemberships.addFirst(ids);
-    }
-
-    /**
-     * 按集合当前迭代顺序复制成独立 long 数组，不排序。
-     * @param values 需要更新或复制的成员表、成员集合
-     */
-    private static long[] idsArray(LongHashSet values) {
-        // 按原成员集合大小分配的独立 primitive 结果数组
-        long[] ids = new long[values.size()];
-        // 本次调用独占的成员桶游标
-        var iterator = values.iterator();
-        for (/* 复制 primitive 集合时的目标数组下标 */ int i = 0; iterator.hasNext(); i++) ids[i] = iterator.nextValue();
-        return ids;
-    }
-
-    /**
-     * 空桶返回空数组，其余复制、升序排序再反转为降序。
-     * @param values 需要更新或复制的成员表、成员集合
-     */
-    private static long[] sortedDescending(LongHashSet values) {
-        if (values == null || values.isEmpty()) return new long[0];
-        // 从成员桶复制并准备排序反转的独立数组
-        long[] sorted = idsArray(values);
-        java.util.Arrays.sort(sorted);
-        reverse(sorted);
-        return sorted;
-    }
-
-    /**
-     * 原地交换数组两端直至中间，反转排序方向。
-     * @param sorted 要在原数组反转方向的订单号列表
-     */
-    private static void reverse(long[] sorted) {
-        for (/* 反转时从右向中间移动的下标 */ /* 反转时从左向中间移动的下标 */ int left = 0, right = sorted.length - 1; left < right; left++, right--) {
-            // 交换前暂存的左端订单号
-            long value = sorted[left];
-            sorted[left] = sorted[right];
-            sorted[right] = value;
-        }
     }
 
 }

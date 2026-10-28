@@ -21,7 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ConditionalOrderSchedulingIndexTest {
     /**
-     * 布置不同用户、标的及时间的三条算法单，验证交集筛选、时间优先与并列 ID 顺序；换标的和改期后旧键移除，删除清客户端身份，空重建清候选。
+     * 布置不同用户、标的及时间的三条算法单，验证交集筛选、时间优先与并列 ID 顺序；换标的和改期后旧键移除，删除后路由与调度候选同步移除。
      */
     @Test
     void algoFiltersIntersectInDueOrderAndUpdatesRemoveAllOldKeys() {
@@ -43,9 +43,8 @@ class ConditionalOrderSchedulingIndexTest {
         assertThat(index.query(7, "10000", 0, 10)).isEmpty();
         assertThat(index.query(7, "2147483647", 0, 10)).containsExactly(1L, 3L);
         index.apply(3, null);
-        assertThat(index.containsClient(7, "algo-3")).isFalse();
-        index.rebuild(TradingCoreState.empty(ProductLine.SPOT));
-        assertThat(index.query(0, "", 0, 10)).isEmpty();
+        assertThat(index.value(3)).isNull();
+        assertThat(index.query(0, "", 0, 10)).containsExactly(1L, 2L);
     }
 
     /**

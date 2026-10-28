@@ -16,8 +16,6 @@
 | `bin/test-verify-surefire-reports.sh`、`bin/tests` | 脚本自身的功能测试 |
 | `bin/generate-oldobject-jfc.sh` | 生成局部对象保留诊断配置 |
 
-旧 `qualify-linear-perpetual.sh` 携带已无读取方的 projection/matching-completion 配置，并重复旧的进程内资格流程，已删除。使用上表当前入口选择场景。
-
 ## 夹具边界
 
 - `LinearPerpetualBenchmarkSupport` 经实际命令入口推进，异步账户和 Matcher 必须完成后才收终态。使用规范数字标的 ID。
@@ -26,11 +24,11 @@
 - `InProcessTradingAllocationBenchmark` 使用进程内传输夹具；不代表 UDP、Consensus、Archive 或完整 Core 容量。
 - 无业务消费者的方法及其专用基准一起删除，不能为保留基准而保留生产接口。
 
-夹具的 Lane 指标使用现有指标编码/查询路径；已删除单独构造指标视图的生产入口。实时请求队列的夹具访问留在测试或基准源集，生产 Owner 不再提供转发访问器。
+夹具的 Lane 指标使用现有编码/查询路径；请求队列与故障注入字段访问留在本源集。撮合事实由 `BenchmarkMatchingAwait` 等待，终态直接交有序提交器。
 
-撮合事实等待由本模块的 `BenchmarkMatchingAwait` 读取已有命令槽；完成撮合直接调用有序提交器。生产 Runtime 不保留基准专用的结果读取或完成转发接口。
+冷状态通过 `users/orders` 的 Long 键映射读取；数据构造明确传入模式、进度及各子账，金额合计由本源集核对。索引规模在 Owner 工作完成后读取原表大小，不为观察在生产维护额外 ADL 计数；清理检查使用真实分页与候选入口。
 
-冷状态夹具直接读取 `users/orders` 的 Long 键映射，金额合计由本源集的核对辅助完成；数据构造明确传入模式、进度及各子账。规模脚本的 Probe/Soak 入口均指向当前 `service.core` 包，本轮仅核对入口和 Shell 语法，没有执行这些场景。
+规模脚本的 Probe/Soak 入口均指向当前 `service.core` 包。本轮只编译并运行指定的夹具功能用例，未执行规模脚本或 JMH 场景。
 
 ## 结果要求
 

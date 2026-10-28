@@ -1818,19 +1818,19 @@ class ClusterCommandPipelineTest {
             assertThat(state.prepareClusterPipelineScope(cancel, window)).isTrue();
             window.add(ClusterServiceEgress.NO_SESSION_ID, cancel, TIME, 1);
             assertThat(state.prepareClusterPipelineScope(independent, window)).isTrue();
-            assertThat(window.conflicts()).as("same-side different-account order").isFalse();
+            assertThat(window.conflictingPrefixSize()).as("same-side different-account order").isZero();
             assertThat(state.prepareClusterPipelineScope(
                     live.place(other, "1", 4201, 81, 1, CoreOrderSide.SELL), window)).isTrue();
-            assertThat(window.conflicts()).as("sell cannot consume the removed buy").isFalse();
+            assertThat(window.conflictingPrefixSize()).as("sell cannot consume the removed buy").isZero();
             assertThat(state.prepareClusterPipelineScope(
                     live.place(other, "1", 4202, 80, 1, CoreOrderSide.SELL), window)).isTrue();
             // 撮合价格范围和对手顺序由 Matcher 维护；Owner 入口只检查请求账户 Lane 及精确订单身份。
-            assertThat(window.conflicts()).as("crossing sell is not an Owner ingress dependency").isFalse();
+            assertThat(window.conflictingPrefixSize()).as("crossing sell is not an Owner ingress dependency").isZero();
             assertThat(state.prepareClusterPipelineScope(
                     live.place(11, "1", 4203, 79, 1, CoreOrderSide.BUY), window)).isTrue();
-            assertThat(window.conflicts()).as("same account must observe released funds").isTrue();
+            assertThat(window.conflictingPrefixSize()).as("same account must observe released funds").isPositive();
             assertThat(state.prepareClusterPipelineScope(cancel, window)).isTrue();
-            assertThat(window.conflicts()).as("same order identity remains fenced").isTrue();
+            assertThat(window.conflictingPrefixSize()).as("same order identity remains fenced").isPositive();
             live.responses.clear();
             live.send(cancel); live.send(independent); live.tick();
             serial.apply(cancel); serial.apply(independent);

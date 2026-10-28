@@ -60,9 +60,7 @@ public final class DirectCommandSlot {
     private long checkpoint;
     /** 命令开始前的持仓身份回滚检查点。 */
     private long identityCheckpoint;
-    /**  当前业务或回滚续步，返回假时由 Owner 之后再轮询。 借用当前可空续步，不调用或复制它。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
+    /** 当前业务或回滚续步，返回假时由 Owner 后续轮询推进。 */
     private BooleanSupplier controlWork;
     /**  业务已决定的响应状态，未决定时为空。 返回已决定的响应状态，业务续步尚未结束时可为空。 */
     @Accessors(fluent = true, chain = false)

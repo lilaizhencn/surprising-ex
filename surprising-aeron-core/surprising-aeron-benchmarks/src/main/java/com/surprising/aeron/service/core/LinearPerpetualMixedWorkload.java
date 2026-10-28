@@ -508,12 +508,12 @@ public final class LinearPerpetualMixedWorkload {
 
             @Override
             public int activeOrders() {
-                return harness.state().activeOrderIndex().count();
+                return LinearPerpetualBenchmarkSupport.activeOrderCount(harness.state().activeOrderIndex());
             }
 
             @Override
             public int positions() {
-                return harness.state().adlPositionIndex().count();
+                return LinearPerpetualBenchmarkSupport.adlPositionCount(harness.state().adlPositionIndex());
             }
 
             @Override

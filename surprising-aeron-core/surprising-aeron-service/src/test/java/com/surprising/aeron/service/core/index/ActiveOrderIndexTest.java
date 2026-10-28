@@ -51,12 +51,12 @@ class ActiveOrderIndexTest {
             assertThat(index.page(user, "2", 0, 10).orderIds()).containsExactly(id);
             index.apply(id, null, identities);
             index.apply(id, null, identities);
-            assertThat(index.sortedIdsDescending(user)).isEmpty();
-            assertThat(index.count("2")).isZero();
-            assertThat(index.sortedIdsDescending(7)).containsExactly(1L);
+            assertThat(index.page(user, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
+            assertThat(index.page(0, "2", 0, 1).orderIds().size()).isZero();
+            assertThat(index.page(7, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).containsExactly(1L);
             assertThat(index.activeOrderRoute(1).userId()).isEqualTo(7);
         }
-        assertThat(index.count()).isOne();
+        assertThat(com.surprising.aeron.service.core.CoreStateTestFixtures.activeOrderCount(index)).isOne();
         assertThat(index.page(0, null, 0, 10).orderIds()).containsExactly(1L);
     }
 
@@ -77,7 +77,7 @@ class ActiveOrderIndexTest {
             index.apply(id, com.surprising.aeron.service.snapshot.state.RuntimeStateProjector.toRuntimeOrder(order, identities, instrument), identities);
         }
         for (/* 当前构造、删除或遍历的订单号 */ long id = 1; id <= 4_097; id++) index.apply(id, null, identities);
-        assertThat(index.count()).isZero();
+        assertThat(com.surprising.aeron.service.core.CoreStateTestFixtures.activeOrderCount(index)).isZero();
         for (String /* 需要反射检查为空的有效成员表字段名 */ name : new String[]{"idsByUser", "idsBySymbol"}) {
             // 当前反射字段，检查其值或类型以确认路由不含订单正文
             var field = ActiveOrderIndex.class.getDeclaredField(name); field.setAccessible(true);
@@ -127,15 +127,15 @@ class ActiveOrderIndexTest {
             index.apply(1, null, identities);
             index.apply(999, null, identities);
             assertThat(index.activeOrderRoute(1)).isNull();
-            assertThat(index.sortedIdsDescending(7)).containsExactly(2L);
-            assertThat(index.sortedIdsDescending(8)).containsExactly(3L);
-            assertThat(index.sortedIdsDescending("1")).containsExactly(3L, 2L);
+            assertThat(index.page(7, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).containsExactly(2L);
+            assertThat(index.page(8, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).containsExactly(3L);
+            assertThat(index.page(0, "1", 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).containsExactly(3L, 2L);
             index.apply(2, null, identities);
             index.apply(3, null, identities);
-            assertThat(index.count()).isZero();
-            assertThat(index.sortedIdsDescending(7)).isEmpty();
-            assertThat(index.sortedIdsDescending(8)).isEmpty();
-            assertThat(index.sortedIdsDescending("1")).isEmpty();
+            assertThat(com.surprising.aeron.service.core.CoreStateTestFixtures.activeOrderCount(index)).isZero();
+            assertThat(index.page(7, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
+            assertThat(index.page(8, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
+            assertThat(index.page(0, "1", 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
         }
     }
 
@@ -175,11 +175,11 @@ class ActiveOrderIndexTest {
         var actual = index.page(7, "1", 0, 32).orderIds();
         assertThat(actual).hasSize(32).allMatch(id -> id > 4064 && id <= 4096);
         assertThat(index.page(0, null, 0, 16).orderIds()).hasSize(16);
-        assertThat(index.count()).isEqualTo(32);
+        assertThat(com.surprising.aeron.service.core.CoreStateTestFixtures.activeOrderCount(index)).isEqualTo(32);
         for (/* 当前构造、删除或遍历的订单号 */ long id = 4065; id <= 4096; id++) index.apply(id, null, identities);
-        assertThat(index.count()).isZero();
-        assertThat(index.sortedIdsDescending(7)).isEmpty();
-        assertThat(index.sortedIdsDescending("1")).isEmpty();
+        assertThat(com.surprising.aeron.service.core.CoreStateTestFixtures.activeOrderCount(index)).isZero();
+        assertThat(index.page(7, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
+        assertThat(index.page(0, "1", 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
     }
 
     /**
@@ -207,7 +207,7 @@ class ActiveOrderIndexTest {
         assertThat(index.page(7, "1", 0, 10).orderIds()).containsExactly(1L);
         index.apply(1, order.withStatus(CoreOrderStatus.CANCELED, 3), identities);
         assertThat(index.activeOrderRoute(1)).isNull();
-        assertThat(index.sortedIdsDescending(7)).isEmpty();
+        assertThat(index.page(7, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
     }
 
     /**
@@ -230,9 +230,9 @@ class ActiveOrderIndexTest {
                 second, identities, instrument(second.instrumentId()));
         index.apply(1, replacement, identities);
         assertThat(index.activeOrderRoute(1).userId()).isEqualTo(8);
-        assertThat(index.sortedIdsDescending(7)).isEmpty();
-        assertThat(index.sortedIdsDescending("1")).isEmpty();
-        assertThat(index.sortedIdsDescending(8)).containsExactly(1L);
+        assertThat(index.page(7, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
+        assertThat(index.page(0, "1", 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
+        assertThat(index.page(8, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).containsExactly(1L);
         assertThat(index.activeOrderRoute(1).instrumentId()).isEqualTo("2");
     }
 
@@ -377,9 +377,9 @@ class ActiveOrderIndexTest {
         // 本用例 Owner 活跃订单路由索引
         ActiveOrderIndex index = new ActiveOrderIndex(state);
 
-        assertThat(index.sortedIdsDescending("1")).containsExactly(9L, 8L, 7L);
-        assertThat(index.sortedIdsDescending(11L)).containsExactly(9L, 7L);
-        assertThat(index.sortedIdsDescending(999L)).isEmpty();
+        assertThat(index.page(0, "1", 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).containsExactly(9L, 8L, 7L);
+        assertThat(index.page(11L, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).containsExactly(9L, 7L);
+        assertThat(index.page(999L, null, 0, ActiveOrderIndex.MAX_PAGE_SIZE).orderIds()).isEmpty();
         assertThat(index.page(0, null, 0, 1).orderIds()).containsExactly(9L);
         assertThat(index.page(0, null, 9, 1).orderIds()).containsExactly(8L);
         assertThat(index.page(11, "1", 0, 1).orderIds()).containsExactly(9L);

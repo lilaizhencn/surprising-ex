@@ -135,11 +135,6 @@ public final class ClusterCommandWindow {
     public long routeUserLaneBit() { return candidateRouted ? candidateUserLaneBit : 0; }
 
     /**
-     * 重新计算必须退休的依赖前缀，非零即表示当前入口需要等待。
-     */
-    public boolean conflicts() { return conflictingPrefixSize() != 0; }
-
-    /**
      * 计算撤单精确订单依赖前缀，再取与同 userId 最近命令前缀的较大值。不同用户即使路由同一 Lane，也不会仅凭 Lane 位在这里互斥。
      */
     public int conflictingPrefixSize() {

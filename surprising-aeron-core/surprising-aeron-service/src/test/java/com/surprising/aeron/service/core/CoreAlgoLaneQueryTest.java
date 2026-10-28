@@ -81,6 +81,11 @@ class CoreAlgoLaneQueryTest {
             var expected = List.of(RuntimeOperationalQueryService.algoOrder(cold, 502),
                     RuntimeOperationalQueryService.algoOrder(cold, 501), RuntimeOperationalQueryService.algoOrder(cold, 503));
             core.activate();
+            var alias = state.algoOrders().get(501L).clientAlgoOrderId();
+            assertThat(AccountLaneQueryTestSupport.read(core.runtimeState(), 1,
+                    () -> core.runtimeState().hasAlgoClient(1, alias))).isTrue();
+            assertThat(AccountLaneQueryTestSupport.read(core.runtimeState(), 7,
+                    () -> core.runtimeState().hasAlgoClient(7, alias))).isFalse();
             assertThat(core.activeOrderIndex().activeOrderRoute(102)).isNull();
             assertThat(core.activeOrderIndex().activeOrderRoute(104)).isNull();
             // 查询前账户所有权交接计数，查询后不能因 Owner 读账户而增加。

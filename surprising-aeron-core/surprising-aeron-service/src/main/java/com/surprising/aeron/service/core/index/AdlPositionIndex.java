@@ -16,7 +16,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 /**
- * 账本持有的 ADL 持仓业务索引。按结算资产维护非空仓候选成员，并保存独立可复用索引值，避免保留账户变更槽的借用对象；绑定业务线程后，除已发布数量读取外的索引遍历和更新都在该线程执行。
+ * 账本持有的 ADL 持仓业务索引。按结算资产维护非空仓候选成员，并保存独立可复用索引值，避免保留账户变更槽的借用对象；绑定业务线程后，索引遍历和更新都在该线程执行。
  */
 public final class AdlPositionIndex {
     /** 该索引绑定的账本业务访问线程，null 表示尚未启用线程限制。 */
@@ -45,15 +45,14 @@ public final class AdlPositionIndex {
      * @param identities 业务持仓键到运行时整数键的映射，重建时共用它保持身份一致
      */
     public AdlPositionIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        rebuild(state, identities);
-    }
+        state.users().values().forEach(/* 恢复状态中当前遍历的用户，从其持仓记录复制索引字段。 */ user -> user.positions().forEach((/* 该用户持仓映射里的业务键，交身份表生成对应整数持仓键。 */ key, /* 业务状态中的当前持仓，只提取索引所需身份、资产和数量字段。 */ position) -> {
+            // 本轮候选成员或恢复记录对应的整数持仓键。
+            long positionKey = identities.positionKey(user.userId(), key);
+            apply(positionKey, null, user.userId(), position.instrumentId(), position.marginAsset(),
+                    position.positionSide(), position.signedQuantitySteps());
+        }));
 
-    /** 通过 volatile 发布的索引值条数，包含空仓，新增或删除条目时更新。 */
-    private volatile int positionCount;
-    /**
-     * 读取已发布的索引值总条数，包含保留的空仓条目，不能把它当作非空 ADL 候选数。
-     */
-    public int count() { return positionCount; }
+    }
 
     /**
      * 先规范资产代码并检查候选数量上限，再复制当前有效成员为只读路由，按用户、合约和持仓腿排序，返回保持该顺序的不可修改集合。
@@ -109,7 +108,7 @@ public final class AdlPositionIndex {
     }
 
     /**
-     * 要求旧值引用就是本索引当前条目，先根据旧非空仓和新数量、资产调整成员集合，再删除或原位更新索引自有条目；只有条目增删才更新发布数量。
+     * 要求旧值引用就是本索引当前条目，先根据旧非空仓和新数量、资产调整成员集合，再删除或原位更新索引自有条目；新增时建立索引自有条目。
      * @param positionKey 目标持仓在共享身份表中的整数键
      * @param previous 本索引持有的精确旧条目引用，没有旧记录时为 null，不能传其他索引的同字段对象
      * @param userId 新索引值所属的用户编号，0 是删除记录的信号
@@ -134,13 +133,13 @@ public final class AdlPositionIndex {
         if (membershipChanged && previousActive) remove(previous, positionKey);
         if (membershipChanged && currentActive)
             keysByAsset.computeIfAbsent(asset, /* 首次建立资产成员集合时的资产映射键，回调只负责分配一个空整数键集合。 */ ignored -> new LongHashSet()).add(positionKey);
-        if (userId == 0) { positions.remove(positionKey); positionCount = positions.size(); }
+        if (userId == 0) { positions.remove(positionKey); }
         else {
             // 本索引持有且可复用的条目，首次出现才新建，之后直接替换字段。
             IndexedPosition entry = previous;
             if (entry == null) {
                 entry = new IndexedPosition();
-                positions.put(positionKey, entry); positionCount = positions.size();
+                positions.put(positionKey, entry);
             }
             entry.userId = userId; entry.instrumentId = instrumentId; entry.asset = asset;
             entry.positionSide = side; entry.signedQuantitySteps = quantity;
@@ -181,23 +180,6 @@ public final class AdlPositionIndex {
          * 返回当前结算资产代码，候选成员按它分组。
          */
         String asset() { return asset; }
-    }
-
-    /**
-     * 在索引所属线程清空旧成员和条目，从业务状态全部用户持仓重新复制字段；空仓也可保留条目，但不会加入候选资产成员。
-     * @param state 用于初次构建或恢复重建的完整业务状态
-     * @param identities 业务持仓键到运行时整数键的映射，重建时共用它保持身份一致
-     */
-    public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        assertBusinessOwner();
-        keysByAsset.clear();
-        positions.clear(); positionCount = 0;
-        state.users().values().forEach(/* 恢复状态中当前遍历的用户，从其持仓记录复制索引字段。 */ user -> user.positions().forEach((/* 该用户持仓映射里的业务键，交身份表生成对应整数持仓键。 */ key, /* 业务状态中的当前持仓，只提取索引所需身份、资产和数量字段。 */ position) -> {
-            // 本轮候选成员或恢复记录对应的整数持仓键。
-            long positionKey = identities.positionKey(user.userId(), key);
-            apply(positionKey, null, user.userId(), position.instrumentId(), position.marginAsset(),
-                    position.positionSide(), position.signedQuantitySteps());
-        }));
     }
 
     /**

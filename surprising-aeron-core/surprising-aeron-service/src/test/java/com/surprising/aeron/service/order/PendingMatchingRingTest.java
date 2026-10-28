@@ -120,10 +120,12 @@ class PendingMatchingRingTest {
         ring.put(acquire(ring, 12, UUID.randomUUID(), 1007));
         ring.put(acquire(ring, 13, UUID.randomUUID(), 1008));
         ring.put(acquire(ring, 14, UUID.randomUUID(), 1009));
-        assertThat(ring.snapshot().keySet()).containsExactly(11L, 12L, 13L, 14L);
+        var sequences = new java.util.ArrayList<Long>();
+        ring.forEach(slot -> sequences.add(slot.sequence()));
+        assertThat(sequences).containsExactly(11L, 12L, 13L, 14L);
         assertThat(ring.firstSequence()).isEqualTo(11);
         ring.clear();
-        assertThat(ring.snapshot()).isEmpty();
+        assertThat(ring.isEmpty()).isTrue();
     }
 
     /**

@@ -144,34 +144,6 @@ public final class PendingReservationTracker {
     }
 
     /**
-     * 捕获回滚前值并在所属 Lane 核对冻结归属、设置待完成序号，成功后登记 Owner 路由及计数，不能重复标记同一预留。
-     * @param userId 预留或批次所属用户编号，必须与真实账户路由一致
-     * @param orderId 当前预留所属的普通订单编号
-     * @param coreSequence 需要标记、完成或查询成员关系的 Core 命令序号
-     */
-    public void markPendingReservation(long userId, long orderId, long coreSequence) {
-        owner.assertOwner();
-        owner.accountRollback().captureReservationBefore(orderId);
-        if (pendingReservationUsers.containsKey(orderId)) {
-            throw new IllegalStateException("reservation is already indexed as pending");
-        }
-        // 调用方提前用精确加减算出的下一全局路由数，真正更新索引时再采用。
-        int nextTotalPendingReservations = Math.addExact(totalPendingReservations, 1);
-        owner.onLane(userId, /* 通过原账户访问范围进入的 Lane，只处理属于本 Lane 的用户和预留。 */ lane -> {
-            // 当前 Lane 持有的原冻结记录，用其资产捕获需要的余额回滚前后值。
-            ReservationRuntime reservation = lane.reservation(orderId);
-            if (reservation == null || reservation.userId() != userId) {
-                throw new IllegalStateException("pending reservation is missing");
-            }
-            owner.accountRollback().captureBalanceBefore(userId, reservation.assetId());
-            lane.markPendingReservation(orderId, coreSequence);
-            owner.accountRollback().captureBalanceAfter(lane, userId, reservation.assetId());
-            return null;
-        });
-        indexPendingReservation(userId, orderId, coreSequence, nextTotalPendingReservations);
-    }
-
-    /**
      * 消费已经完成的 Lane 准入订单回执，只登记序号、用户和变化标记，不回读活动账户表，也不重复复制已接管的订单缓冲。
      * @param order 已完成 Lane 准入并交出的订单回执，不能从这里再回读活动账户表
      * @param coreSequence 需要标记、完成或查询成员关系的 Core 命令序号
@@ -464,14 +436,6 @@ public final class PendingReservationTracker {
     public int pendingReservationCount() {
         owner.assertOwner();
         return totalPendingReservations;
-    }
-
-    /**
-     * 在原所有权要求下根据全局计数判断是否仍有待完成预留。
-     */
-    public boolean hasPendingReservations() {
-        owner.assertOwner();
-        return totalPendingReservations != 0;
     }
 
     /**

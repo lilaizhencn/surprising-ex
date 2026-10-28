@@ -165,7 +165,7 @@ public class ClusteredBatchTradingBenchmark {
     public long singleOrderSettlementReuse(Workload workload, Counters counters) {
         for (int round = 0; round < 2; round++) {
             workload.runRoundTripTrades();
-            if (workload.service.state().runtimeState().pendingReservations().hasPendingReservations())
+            if (workload.service.state().runtimeState().pendingReservations().pendingReservationCount() != 0)
                 throw new IllegalStateException("reservation turnover retained pending users");
             counters.acceptedBusinessOperations += 1024;
             counters.terminalBusinessOperations += 1024;
@@ -694,9 +694,9 @@ public class ClusteredBatchTradingBenchmark {
                     throw new AssertionError("funds preflight did not reach Account Lane work");
                 Thread.onSpinWait();
             }
-            var business = owner.directCommand.controlWork();
             var controlWork = DirectCommandSlot.class.getDeclaredField("controlWork");
             controlWork.setAccessible(true);
+            var business = (java.util.function.BooleanSupplier) controlWork.get(owner.directCommand);
             controlWork.set(owner.directCommand, (java.util.function.BooleanSupplier) () -> {
                 if (!business.getAsBoolean()) return false;
                 // Deliberate capacity fault: this sentinel must be cleared before dispatch.

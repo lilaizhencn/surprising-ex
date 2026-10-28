@@ -832,8 +832,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             // 第一条普通单登记后的待处理响应
             CoreResponse deferred = state.apply(later);
-            // 第二条普通单登记后的待处理响应，当前用例没有再读取这个局部值
-            CoreResponse lastDeferred = state.apply(last);
+            state.apply(last);
             // 用相同原命令再次请求得到的重复响应
             CoreResponse duplicate = state.apply(later);
             assertThat(state.apply(command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 4,
@@ -841,8 +840,8 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(CoreResultCode.STALE_SOURCE_SEQUENCE);
             assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
             assertThat(duplicate.appliedCommandCount()).isEqualTo(deferred.appliedCommandCount());
-            assertThat(state.pendingMatching().snapshot()).containsKeys(
-                    state.matchingSequence(laterId), state.matchingSequence(lastId));
+            assertThat(state.pendingMatching().contains(state.matchingSequence(laterId))).isTrue();
+            assertThat(state.pendingMatching().contains(state.matchingSequence(lastId))).isTrue();
             assertThat(state.commandResults()).doesNotContainKey(laterId);
             assertThat(state.commandResults()).doesNotContainKey(lastId);
 
@@ -853,8 +852,8 @@ class CoreOrderedOrderBatchTest {
             // 前置批次完成时的终态响应
             CoreResponse batchResponse = completeEventually(state, batchSequence, batchMatching, 2_000, 4);
             assertThat(batchResponse).isNotNull();
-            assertThat(state.pendingMatching().snapshot()).containsKeys(
-                    state.matchingSequence(laterId), state.matchingSequence(lastId));
+            assertThat(state.pendingMatching().contains(state.matchingSequence(laterId))).isTrue();
+            assertThat(state.pendingMatching().contains(state.matchingSequence(lastId))).isTrue();
             assertThat(batchResponse.appliedCommandCount()).isEqualTo(batchSequence);
             assertThat(state.commandResults().get(batchId).responseData()).containsExactly(batchResponse.data());
             assertThat(state.commandResults()).doesNotContainKey(laterId);

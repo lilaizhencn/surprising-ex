@@ -551,7 +551,7 @@ class TradingCoreOwnerTest {
             assertThat(owner.applyDecodedCommand(request, 2000, 2000, null, false)).isNull();
             assertThat(owner.directCommand.hasControlWork()).isTrue();
             // 替换故障续步前保存的原业务控制工作，先让它完成账户工作
-            var business = owner.directCommand.controlWork();
+            var business = PipelineTestAccess.controlWork(owner.directCommand);
             com.surprising.aeron.service.order.PipelineTestAccess.replaceControlWork(owner.directCommand, () -> {
                 if (!business.getAsBoolean()) return false;
                 PipelineTestAccess.overflowQueuedMatching(owner.admissions, owner.pendingMatching().capacity() + 1);

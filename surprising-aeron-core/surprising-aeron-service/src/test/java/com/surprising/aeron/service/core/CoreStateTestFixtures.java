@@ -41,6 +41,23 @@ public final class CoreStateTestFixtures {
         return Math.addExact(balance.availableUnits(), balance.lockedUnits());
     }
 
+    private static final java.lang.reflect.Field ACTIVE_ORDER_VALUES =
+            indexField(com.surprising.aeron.service.core.index.ActiveOrderIndex.class, "ordersById");
+
+    /** 仅在夹具已完成 Owner 交接后核对现有索引，不物化全表。 */
+    public static int activeOrderCount(com.surprising.aeron.service.core.index.ActiveOrderIndex index) {
+        try { return ((org.agrona.collections.Long2ObjectHashMap<?>) ACTIVE_ORDER_VALUES.get(index)).size(); }
+        catch (IllegalAccessException failure) { throw new AssertionError(failure); }
+    }
+
+    private static java.lang.reflect.Field indexField(Class<?> type, String name) {
+        try {
+            var field = type.getDeclaredField(name);
+            field.setAccessible(true);
+            return field;
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+    }
+
     /** 类加载时创建并在本辅助中共享的正向永续标的一，所有测试订单借用该原对象。 */
     private static final CoreInstrument RUNTIME_INSTRUMENT = CoreInstrument.from(
             ProductLine.LINEAR_PERPETUAL,
@@ -168,6 +185,24 @@ public final class CoreStateTestFixtures {
                 Math.max(1, reservedUnits), 0, 0, quantitySteps);
         runtime.reserveOrder(order, reservation, clientKey, reservedUnits);
     }
+    /** 为回滚/完成用例准备待预留事实，继续使用真实 Lane 标记与 Owner 路由登记。 */
+    public static void markPendingReservation(TradingAccountRuntime runtime, long userId, long orderId, long sequence) {
+        runtime.assertOwner();
+        runtime.accountRollback().captureReservationBefore(orderId);
+        var tracker = runtime.pendingReservations();
+        if (tracker.hasPendingUser(orderId)) throw new IllegalStateException("reservation is already indexed as pending");
+        int total = Math.incrementExact(tracker.totalPendingReservations());
+        runtime.onLane(userId, lane -> {
+            var reservation = lane.reservation(orderId);
+            if (reservation == null || reservation.userId() != userId) throw new IllegalStateException("pending reservation is missing");
+            runtime.accountRollback().captureBalanceBefore(userId, reservation.assetId());
+            lane.markPendingReservation(orderId, sequence);
+            runtime.accountRollback().captureBalanceAfter(lane, userId, reservation.assetId());
+            return null;
+        });
+        tracker.indexPendingReservation(userId, orderId, sequence, total);
+    }
+
     /** 测试制造订单删除事实；业务撤单仍走原终态结算。 */
     public static void deleteOrder(TradingAccountRuntime runtime, long orderId) {
         var previous = runtime.order(orderId);

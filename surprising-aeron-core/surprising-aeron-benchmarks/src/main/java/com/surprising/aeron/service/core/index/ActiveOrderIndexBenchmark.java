@@ -57,15 +57,15 @@ public class ActiveOrderIndexBenchmark {
     public int openThenTerminal() {
         for (var order : open) index.apply(order.orderId(), order, identities);
         for (var order : terminal) index.apply(order.orderId(), order, identities);
-        return index.count();
+        return com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.activeOrderCount(index);
     }
 
     @TearDown public void verifyEmpty() {
-        if (index.count() != 0)
+        if (com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupport.activeOrderCount(index) != 0)
             throw new IllegalStateException("terminal orders remain in admission indexes");
-        for (int symbol = 1; symbol <= symbols; symbol++) if (index.count(Integer.toString(symbol)) != 0)
+        for (int symbol = 1; symbol <= symbols; symbol++) if (!index.page(0, Integer.toString(symbol), 0, 1).orderIds().isEmpty())
             throw new IllegalStateException("terminal orders remain in symbol index");
-        for (int user = 1; user <= users; user++) if (index.sortedIdsDescending(user).length != 0)
+        for (int user = 1; user <= users; user++) if (!index.page(user, null, 0, 1).orderIds().isEmpty())
             throw new IllegalStateException("terminal orders remain in account index");
     }
 }

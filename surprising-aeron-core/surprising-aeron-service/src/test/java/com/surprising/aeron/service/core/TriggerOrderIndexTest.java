@@ -364,8 +364,9 @@ class TriggerOrderIndexTest {
         assertThat(index.expired(20, 10)).containsExactly(large + 1);
         index.apply(large + 1, null);
         assertThat(index.maxPendingId("2147483647")).isZero();
-        assertThat(index.containsClient(7, "indexed-" + (large + 1))).isFalse();
-        index.rebuild(TradingCoreState.empty(ProductLine.SPOT));
+        assertThat(index.route(large + 1)).isNull();
+        index.apply(large, null);
+        index.apply(large + 2, null);
         assertThat(index.ids()).isEmpty();
         assertThat(index.expired(Long.MAX_VALUE, 10)).isEmpty();
     }

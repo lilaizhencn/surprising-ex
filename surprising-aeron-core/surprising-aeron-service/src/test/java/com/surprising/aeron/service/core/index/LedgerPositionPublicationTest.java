@@ -18,9 +18,6 @@ import com.surprising.aeron.service.treasury.CoreTreasuryState;
 import com.surprising.aeron.service.treasury.SystemLedgerCommand;
 import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import com.surprising.product.api.ProductLine;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,12 +25,12 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.assertj.core.api.Assertions.*;
 
 /**
- * 验证持仓变化确实进入 System Ledger 业务索引，以及未发布控制命令如何撤销。使用真实账户和账本工作资源、十五秒用例期限；不从 Owner 直接读取已归账本所有的业务表。
+ * 验证持仓变化确实进入 System Ledger 业务索引，以及未发布控制命令如何撤销。账户工作由真实 Lane 执行，账本索引由 Owner 在原查询边界核对，十五秒用例期限。
  */
 @Timeout(15)
 class LedgerPositionPublicationTest {
     /**
-     * 分别有、无 Treasury 控制命令地移除唯一持仓，两轮检查即使没有资金补丁也执行账本持仓校验；控制回滚恢复发布计数、用户索引、未平仓量和 ADL，并清掉本次资金费暂存。
+     * 分别有、无 Treasury 控制命令地移除唯一持仓，两轮检查即使没有资金补丁也执行账本持仓校验；控制回滚恢复持仓值、用户索引、未平仓量和 ADL，并清掉本次资金费暂存。
      * @param treasuryScope 本轮是否先安排一条未发布的 Treasury 控制命令
      */
     @ParameterizedTest @ValueSource(booleans = {false, true})
@@ -95,20 +92,18 @@ class LedgerPositionPublicationTest {
                 LedgerControlTestSupport.await(runtime, runtime::pollControlLanes);
                 // 即使没有资金补丁，仅持仓变化的控制命令仍须完成账本校验。
                 runtime.validateControlFunds(false);
-                assertThat(adl.count()).isZero();
+                assertThat(adl.value(key)).isNull();
                 LedgerControlTestSupport.await(runtime, runtime.beginCommandRollback(1, 2 + round));
-                onLedger(runtime, () -> {
-                    assertThat(oi.openInterestSteps("1")).isEqualTo(10);
-                    assertThat(users.usersAfter("1", 0)).containsExactly(7L);
-                    assertThat(adl.value(key).signedQuantitySteps()).isEqualTo(10);
-                });
+                assertThat(oi.openInterestSteps("1")).isEqualTo(10);
+                assertThat(users.usersAfter("1", 0)).containsExactly(7L);
+                assertThat(adl.value(key).signedQuantitySteps()).isEqualTo(10);
                 assertThat(runtime.treasury().fundingSettlement(symbol)).isZero();
             }
         }
     }
 
     /**
-     * 真实账本接管三个持仓业务索引后，Owner 读取被拒绝；在账本线程应用连续持仓发布，再撤销后续控制变化，验证旧值复制不受可变 ADL 单元改写影响。
+     * 绑定三个持仓业务索引后，在原账本访问边界应用连续持仓发布，再撤销后续控制变化，验证旧值复制不受可变 ADL 单元改写影响。
      */
     @Test void committedPrefixAndMinimalControlUndoStayOnLedger() throws Exception {
         // 用于投影运行时的原始产品线冷状态
@@ -131,36 +126,32 @@ class LedgerPositionPublicationTest {
             assertThat(adl.positions("USDT", 2)).isEmpty();
             // 逐轮复用的冻结持仓变化缓冲，prepared 空值用于明确删除
             var changes = new RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue>();
-            onLedger(runtime, () -> {
-                changes.putIndexed(101, null, true, position(1, CorePositionSide.LONG, 10));
-                changes.putIndexed(102, null, true, position(2, CorePositionSide.SHORT, -10));
-                indexes.applyPositions(changes, ids, null);
-                assertThat(oi.openInterestSteps("1")).isEqualTo(10);
-                changes.clear();
-                changes.putIndexed(101, null, true, position(1, CorePositionSide.LONG, 15));
-                changes.putIndexed(103, null, true, position(1, CorePositionSide.SHORT, -5));
-                changes.putIndexed(102, null, true, position(2, CorePositionSide.SHORT, -20));
-                indexes.applyPositions(changes, ids, null);
-                assertThat(oi.openInterestSteps("1")).isEqualTo(25);
-                assertThat(users.usersAfter("1", 0)).containsExactly(1L, 2L);
-                changes.clear();
-            });
-            assertThat(adl.count()).isEqualTo(3); // 已发布的技术计数不需要跨线程读取业务映射。
+            changes.putIndexed(101, null, true, position(1, CorePositionSide.LONG, 10));
+            changes.putIndexed(102, null, true, position(2, CorePositionSide.SHORT, -10));
+            indexes.applyPositions(changes, ids, null);
+            assertThat(oi.openInterestSteps("1")).isEqualTo(10);
+            changes.clear();
+            changes.putIndexed(101, null, true, position(1, CorePositionSide.LONG, 15));
+            changes.putIndexed(103, null, true, position(1, CorePositionSide.SHORT, -5));
+            changes.putIndexed(102, null, true, position(2, CorePositionSide.SHORT, -20));
+            indexes.applyPositions(changes, ids, null);
+            assertThat(oi.openInterestSteps("1")).isEqualTo(25);
+            assertThat(users.usersAfter("1", 0)).containsExactly(1L, 2L);
+            changes.clear();
+            assertThat(adl.positions("USDT", 3)).hasSize(3);
             // 后续未发布控制范围的持仓旧字段记录
             var undo = new RuntimeFactIndexes.PositionUndo();
-            onLedger(runtime, () -> {
-                changes.putIndexed(101, null, true, position(1, CorePositionSide.LONG, -30));
-                changes.putIndexed(102, null, true, null);
-                indexes.applyPositions(changes, ids, undo);
-                assertThat(oi.openInterestSteps("1")).isEqualTo(35);
-                assertThat(users.usersAfter("1", 0)).containsExactly(1L);
-                // 原 ADL 单元会被原地改写，撤销记录必须保存旧字段值，而非该单元引用。
-                undo.rollback(indexes);
-                assertThat(oi.totals()).containsEntry("1", new OpenInterestIndex.Totals(15, 25));
-                assertThat(adl.value(101).signedQuantitySteps()).isEqualTo(15);
-                assertThat(adl.value(102).signedQuantitySteps()).isEqualTo(-20);
-                assertThat(users.usersAfter("1", 0)).containsExactly(1L, 2L);
-            });
+            changes.putIndexed(101, null, true, position(1, CorePositionSide.LONG, -30));
+            changes.putIndexed(102, null, true, null);
+            indexes.applyPositions(changes, ids, undo);
+            assertThat(oi.openInterestSteps("1")).isEqualTo(35);
+            assertThat(users.usersAfter("1", 0)).containsExactly(1L);
+            // 原 ADL 单元会被原地改写，撤销记录必须保存旧字段值，而非该单元引用。
+            undo.rollback(indexes);
+            assertThat(oi.totals()).containsEntry("1", new OpenInterestIndex.Totals(15, 25));
+            assertThat(adl.value(101).signedQuantitySteps()).isEqualTo(15);
+            assertThat(adl.value(102).signedQuantitySteps()).isEqualTo(-20);
+            assertThat(users.usersAfter("1", 0)).containsExactly(1L, 2L);
         }
         assertThat(oi.openInterestSteps("1")).isEqualTo(25);
     }
@@ -203,22 +194,5 @@ class LedgerPositionPublicationTest {
         return new RuntimePositionIndexValue(user, "1", "USDT", side, quantity);
     }
 
-    /**
-     * 把断言交给真实账本查询线程执行，确认入队成功并最多等待三秒；把工作线程异常传回测试线程验证。
-     * @param runtime 已启动账本工作资源的运行时
-     * @param operation 必须在账本业务线程执行的操作和断言
-     */
-    private static void onLedger(TradingAccountRuntime runtime, Runnable operation) throws Exception {
-        // 通知测试线程账本查询已经执行完的门闩
-        var done = new CountDownLatch(1);
-        // 把账本查询操作抛出的异常带回测试线程的原子槽
-        var failure = new AtomicReference<Throwable>();
-        assertThat(runtime.<Boolean>queryLedgerAtRest(/* 账本查询回调传入的账本对象，本用例操作使用闭包中的业务索引 */ ignored -> {
-            try { operation.run(); } catch (/* 账本查询断言或操作抛出的原异常 */ Throwable problem) { failure.set(problem); }
-            finally { done.countDown(); }
-            return true;
-        })).isTrue();
-        assertThat(done.await(3, TimeUnit.SECONDS)).isTrue();
-        assertThat(failure.get()).isNull();
-    }
+
 }

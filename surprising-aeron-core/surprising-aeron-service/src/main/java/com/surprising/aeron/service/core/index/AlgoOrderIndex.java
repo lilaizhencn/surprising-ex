@@ -6,14 +6,13 @@ import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.product.api.utils.InstrumentIds;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.TreeSet;
 
 /**
- * Owner 持有的算法单身份与调度索引。路由只保留用户、标的、客户端身份和调度时间；数量、状态和子单正文留在账户 Lane。终态仍可保留身份，但不会进入到期候选集。
+ * Owner 持有的算法单身份与调度索引。路由只保留用户、标的和调度时间；数量、状态和子单正文留在账户 Lane。终态仍可保留身份，但不会进入到期候选集。
  */
 public final class AlgoOrderIndex {
 
@@ -28,8 +27,6 @@ public final class AlgoOrderIndex {
     private final Int2ObjectOpenHashMap<NavigableSet<AlgoDueKey>> idsBySymbol = new Int2ObjectOpenHashMap<>();
     /** 所有非终态算法的统一调度键集。 */
     private final NavigableSet<AlgoDueKey> allDue = new TreeSet<>(DUE_ORDER);
-    /** 保留的用户/客户端算法 ID 到业务 ID 表，终态也可存在。 */
-    private final Object2LongOpenHashMap<AlgoClientKey> idsByClient = new Object2LongOpenHashMap<>();
     /** 每个已应用算法业务 ID 的轻量路由，供过滤及移除旧键。 */
     private final Long2ObjectOpenHashMap<AlgoRoute> valuesById = new Long2ObjectOpenHashMap<>();
 
@@ -39,27 +36,16 @@ public final class AlgoOrderIndex {
      * @param userId 算法单所属用户，查询为零表示不按用户筛选
      * @param instrumentId 标的身份，文本入口使用规范数字 ID，路由及内部键保存整数
      * @param nextSliceAtEpochMillis 路由计算后的有效调度毫秒时间，可能受持续期截止提前限制
-     * @param clientAlgoOrderId 用户范围内客户端算法单 ID，空文本不进查重表
      */
     public record AlgoRoute(long algoOrderId, long userId, int instrumentId,
-                            long nextSliceAtEpochMillis, String clientAlgoOrderId) { }
+                            long nextSliceAtEpochMillis) { }
 
     /**
      * 从已提交冷状态重建算法单路由、身份和待调度桶。
      * @param state 索引重建使用的本产品线已提交冷状态
      */
     public AlgoOrderIndex(TradingCoreState state) {
-        rebuild(state);
-    }
-
-    /**
-     * 按用户检查非空客户端算法 ID 是否已在保留身份表内，不区分是否仍可调度。
-     * @param userId 算法单所属用户，查询为零表示不按用户筛选
-     * @param clientAlgoOrderId 用户范围内客户端算法单 ID，空文本不进查重表
-     */
-    public boolean containsClient(long userId, String clientAlgoOrderId) {
-        return clientAlgoOrderId != null && !clientAlgoOrderId.isEmpty()
-                && idsByClient.containsKey(new AlgoClientKey(userId, clientAlgoOrderId));
+        state.algoOrders().values().forEach(this::add);
     }
 
     /**
@@ -114,28 +100,15 @@ public final class AlgoOrderIndex {
     }
 
     /**
-     * 按传入 ID 移除旧路由及旧调度/身份键，再加入非空新状态；空表示删除，调用方保证参数 ID 与新状态身份相同。
+     * 按传入 ID 移除旧路由及旧调度键，再加入非空新状态；空表示删除，调用方保证参数 ID 与新状态身份相同。
      * @param algoOrderId 算法单业务 ID；增量更新时须与新状态一致
      * @param after 该 ID 变更后的完整算法状态，空表示删除
      */
     public void apply(long algoOrderId, CoreAlgoOrderState after) {
-        // 本次更新前的旧路由，用来移除旧调度和客户端键
+        // 本次更新前的旧路由，用来移除旧调度键
         AlgoRoute previous = valuesById.remove(algoOrderId);
         if (previous != null) remove(previous);
         if (after != null) add(after);
-    }
-
-    /**
-     * 清所有用户、标的、全局调度、客户端及路由表，再从冷状态逐个重建。
-     * @param state 索引重建使用的本产品线已提交冷状态
-     */
-    public void rebuild(TradingCoreState state) {
-        idsByUser.clear();
-        idsBySymbol.clear();
-        allDue.clear();
-        idsByClient.clear();
-        valuesById.clear();
-        state.algoOrders().values().forEach(this::add);
     }
 
     /**
@@ -157,7 +130,7 @@ public final class AlgoOrderIndex {
     }
 
     /**
-     * 下一切片时间非正时先用开始时间；早期状态再取它与持续期截止的较小值，截止溢出饱和到 long 最大值。所有状态保留路由和非空客户端身份，只有非终态加入调度集。
+     * 下一切片时间非正时先用开始时间；早期状态再取它与持续期截止的较小值，截止溢出饱和到 long 最大值。所有状态保留路由，只有非终态加入调度集。
      * @param value 需要加入索引的完整算法状态或需要删除的原轻量路由
      */
     private void add(CoreAlgoOrderState value) {
@@ -173,11 +146,8 @@ public final class AlgoOrderIndex {
         }
         // 本次新生成的算法轻量身份与有效调度路由
         AlgoRoute route = new AlgoRoute(value.algoOrderId(), value.userId(), InstrumentIds.parse(value.instrumentId()),
-                due, value.clientAlgoOrderId());
+                due);
         valuesById.put(value.algoOrderId(), route);
-        if (!value.clientAlgoOrderId().isEmpty()) {
-            idsByClient.put(new AlgoClientKey(value.userId(), value.clientAlgoOrderId()), value.algoOrderId());
-        }
         if (value.terminal()) return;
         // 当前候选或待加入/移除的有效调度时间与算法 ID 组合
         AlgoDueKey key = new AlgoDueKey(due, value.algoOrderId());
@@ -187,19 +157,15 @@ public final class AlgoOrderIndex {
     }
 
     /**
-     * 按旧路由删除全局、用户、标的调度键及非空客户端身份，并移除该路由。
+     * 按旧路由删除全局、用户、标的调度键；路由已由 apply 移除。
      * @param value 需要加入索引的完整算法状态或需要删除的原轻量路由
      */
     private void remove(AlgoRoute value) {
-        valuesById.remove(value.algoOrderId());
         // 当前候选或待加入/移除的有效调度时间与算法 ID 组合
         AlgoDueKey key = new AlgoDueKey(value.nextSliceAtEpochMillis(), value.algoOrderId());
         allDue.remove(key);
         remove(idsByUser, value.userId(), key);
         remove(idsBySymbol, value.instrumentId(), key);
-        if (!value.clientAlgoOrderId().isEmpty()) {
-            idsByClient.removeLong(new AlgoClientKey(value.userId(), value.clientAlgoOrderId()));
-        }
     }
 
     /**
@@ -238,11 +204,4 @@ public final class AlgoOrderIndex {
     private record AlgoDueKey(long nextSliceAtEpochMillis, long algoOrderId) {
     }
 
-    /**
-     * 用户范围内的客户端算法单身份键。
-     * @param userId 算法单所属用户，查询为零表示不按用户筛选
-     * @param clientAlgoOrderId 用户范围内客户端算法单 ID，空文本不进查重表
-     */
-    private record AlgoClientKey(long userId, String clientAlgoOrderId) {
-    }
 }

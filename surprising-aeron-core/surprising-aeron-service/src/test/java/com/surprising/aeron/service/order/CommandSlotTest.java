@@ -110,7 +110,7 @@ class CommandSlotTest {
             slot.initialize(second, CommandFingerprint.of(second), new TradingCoreRuntime.SourceKey(
                     CommandSource.OPERATIONS, 1), 30, 40, 4, 5, 6);
             assertThat(slot.command()).isSameAs(second);
-            assertThat(slot.controlWork()).isNull();
+            assertThat(slot.hasControlWork()).isFalse();
             assertThat(slot.status()).isNull();
             assertThat(slot.resultCode()).isNull();
             assertThat(slot.finalizationPrepared()).isFalse();
