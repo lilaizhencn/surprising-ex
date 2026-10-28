@@ -32,20 +32,6 @@ public record RiskScanRuntime(
         return riskComplete && triggerComplete;
     }
 
-    public RiskScanRuntime withLastScheduledRevision(long revision) {
-        return new RiskScanRuntime(symbolId, accountLaneId, priceSequence, scanStartPriceSequence,
-                riskComplete, triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor,
-                triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId,
-                triggerOcoCursor, revision, laneProgress);
-    }
-
-    public RiskScanRuntime withLaneProgress(List<RiskLaneProgress> progress) {
-        return new RiskScanRuntime(symbolId, accountLaneId, priceSequence, scanStartPriceSequence,
-                riskComplete, triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor,
-                triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId,
-                triggerOcoCursor, lastScheduledRevision, progress);
-    }
-
     public RiskScanRuntime withTriggerProgress(boolean complete, int phase, long priceCursor, long orderCursor,
             long upperId, long markPriceTicks, long generatedAtEpochMillis) {
         return new RiskScanRuntime(symbolId, accountLaneId, priceSequence, scanStartPriceSequence,

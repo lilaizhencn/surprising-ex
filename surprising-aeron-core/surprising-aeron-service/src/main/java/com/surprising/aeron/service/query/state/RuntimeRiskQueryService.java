@@ -55,7 +55,7 @@ public final class RuntimeRiskQueryService {
         var cross = new java.util.HashMap<String, long[]>();
         // 当前用户各结算资产的全仓共享钱包缓存，每种资产只计算一次逐仓扣减。
         var wallets = new java.util.HashMap<String, Long>();
-        for (long /* 当前用户需要读取的一个持仓整数键。 */ key : runtime.positionKeysForUser(userId).toArray()) {
+        for (long /* 当前用户需要读取的一个持仓整数键。 */ key : runtime.positionKeysForUser(userId)) {
             // 本轮读取的实际持仓或临时估值所关联的持仓，空仓不会成为输出行。
             PositionRuntime position = runtime.position(key);
             if (position == null || position.signedQuantitySteps() == 0) continue;
@@ -296,7 +296,7 @@ public final class RuntimeRiskQueryService {
         if (runtime.reservationCountForUser(userId) > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
             throw new RuntimeOperationalQueryService.QueryTooLargeException();
         }
-        for (long /* 候选路由对应的整数持仓键，未注册时为空，或在钱包扣减时表示当前持仓键。 */ positionKey : runtime.positionKeysForUser(userId).toArray()) {
+        for (long /* 候选路由对应的整数持仓键，未注册时为空，或在钱包扣减时表示当前持仓键。 */ positionKey : runtime.positionKeysForUser(userId)) {
             // 当前用户该资产的实际持仓，只扣除逐仓保证金，不把其他资产或全仓持仓再次扣出钱包。
             PositionRuntime position = runtime.position(positionKey);
             if (position != null && position.marginMode() == CoreMarginMode.ISOLATED
@@ -304,7 +304,7 @@ public final class RuntimeRiskQueryService {
                 wallet = Math.subtractExact(wallet, position.positionMarginUnits());
             }
         }
-        for (long /* 当前需要检查是否占用逐仓资金的冻结订单编号。 */ orderId : runtime.reservationIdsForUser(userId).toArray()) {
+        for (long /* 当前需要检查是否占用逐仓资金的冻结订单编号。 */ orderId : runtime.reservationIdsForUser(userId)) {
             // 当前订单的资金预占记录，只有属于该资产逐仓委托时才扣出全仓钱包。
             ReservationRuntime reservation = runtime.reservation(orderId);
             // 当前预占关联的订单，用它的保证金模式区分逐仓和全仓。

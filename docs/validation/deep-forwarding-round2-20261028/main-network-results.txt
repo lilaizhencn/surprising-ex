@@ -1,0 +1,39 @@
+mixedConfig globalWindow=256 sessionWindow=256 commandSessions=1 reservedQuerySessions=1 batchSize=20 tradingStream=true
+mixedRiskDrain=PASS batchPages=589 continuationPages=588
+mixedRiskDrain=PASS batchPages=0 continuationPages=0
+mixedLiquidationCancellation=PASS pages=1
+mixedLossLifecycle=PASS liquidation=true insurance=true adl=true
+mixedSetup=PASS users=1025 retail=1000 symbols=8 initialFunds=1024000000125
+measurementStartEpochMillis=1793158681237
+measurementEndEpochMillis=1793158691255
+steadyBusiness type=PLACE_ORDER terminalItems=69232 terminalCoreMessages=69232
+steadyBusiness type=CANCEL_ORDER terminalItems=69232 terminalCoreMessages=69232
+steadyBusiness type=APPLY_MARK_PRICE terminalItems=88 terminalCoreMessages=88
+steadyBusiness type=PLACE_ORDER_BATCH terminalItems=2076940 terminalCoreMessages=103847
+steadyBusiness type=CANCEL_ORDER_BATCH terminalItems=692320 terminalCoreMessages=34616
+steadyCapacity elapsedSeconds=10.018130 terminalBusinessOperations=2907812 terminalCoreMessages=277015 fills=692320 businessOpsPerSec=290254.977 coreMessagesPerSec=27651.369 fillsPerSec=69106.712 peakInFlight=256 windowBlockedCount=205906 windowBlockedNanos=8801320913
+drain elapsedNanos=7838020 terminalBusinessOperations=20 terminalCoreMessages=1 fills=0
+laneWork lane=0 operation=0 completed=86540 executionNanos=0 measuredNanos=10025967702
+laneWork lane=0 operation=1 completed=190388 executionNanos=0 measuredNanos=10025967702
+laneWork lane=0 operation=2 completed=0 executionNanos=0 measuredNanos=10025967702
+laneWork lane=0 operation=3 completed=0 executionNanos=0 measuredNanos=10025967702
+laneWork lane=1 operation=0 completed=86540 executionNanos=0 measuredNanos=10025967702
+laneWork lane=1 operation=1 completed=190388 executionNanos=0 measuredNanos=10025967702
+laneWork lane=1 operation=2 completed=0 executionNanos=0 measuredNanos=10025967702
+laneWork lane=1 operation=3 completed=0 executionNanos=0 measuredNanos=10025967702
+pipelineHighWater matcher=23 completion=22 context=24 lanes=[0, 0]
+mixedRiskDrain=PASS batchPages=589 continuationPages=589
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4617 businessHash=106d84dcc206a9d6
+adminActionRetries=14
+mixedCapacity=PASS elapsedSeconds=10.026 terminalBusinessOperations=2907832 offeredBusinessOperations=2907832 terminalCoreMessages=277016 offeredCoreMessages=277016 businessOpsPerSec=290030.059 coreMessagesPerSec=27629.852 fills=692320 fillsPerSec=69052.686 queries=0 unfinished=0 peakInFlight=256 measuredCycles=4327 totalCycles=4617 triggerExecutions=0
+business=PLACE_ORDER items=69232 requests=69232 p50us=6787 p90us=15458 p95us=23199 p99us=39616 p999us=69271 maxus=163708 meanus=9225.274
+business=CANCEL_ORDER items=69232 requests=69232 p50us=6795 p90us=15532 p95us=23052 p99us=39387 p999us=68681 maxus=169607 meanus=9228.696
+business=APPLY_MARK_PRICE items=88 requests=88 p50us=7983 p90us=18055 p95us=23658 p99us=24264 p999us=24264 maxus=24264 meanus=9938.991
+business=PLACE_ORDER_BATCH items=2076960 requests=103848 p50us=6782 p90us=15392 p95us=23150 p99us=39485 p999us=71172 maxus=169607 meanus=9219.513
+business=CANCEL_ORDER_BATCH items=692320 requests=34616 p50us=6791 p90us=15433 p95us=23052 p99us=39387 p999us=68616 maxus=169082 meanus=9227.375
+
+RECOVERY
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=4617 businessHash=106d84dcc206a9d6
+
+RECORDING LOG
+RecordingLog{entries=[Entry{recordingId=0, leadershipTermId=0, termBaseLogPosition=0, logPosition=-1, timestamp=1793158649971, serviceId=-1, type=TERM, isValid=true, entryIndex=0}, Entry{recordingId=1, leadershipTermId=0, termBaseLogPosition=0, logPosition=258893536, timestamp=1793158719659, serviceId=0, type=SNAPSHOT, isValid=true, entryIndex=1}, Entry{recordingId=2, leadershipTermId=0, termBaseLogPosition=0, logPosition=258893536, timestamp=1793158719659, serviceId=-1, type=SNAPSHOT, isValid=true, entryIndex=2}], cacheIndex={0=0}}

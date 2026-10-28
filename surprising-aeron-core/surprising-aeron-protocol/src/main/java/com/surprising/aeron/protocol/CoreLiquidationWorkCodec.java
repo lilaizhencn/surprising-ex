@@ -60,18 +60,12 @@ public final class CoreLiquidationWorkCodec {
         if (work.actions().size() + work.resolutions().size() > MAX_ACTIONS) {
             throw new IllegalArgumentException("too many liquidation work items");
         }
-        int length = Integer.BYTES * 3 + Byte.BYTES * 3 + Long.BYTES;
-        if (work.riskScanPending()) {
-            length = Math.addExact(length,
-                    textLength(work.riskScanContinuation().instrumentId()) + Long.BYTES * 2);
-        }
+        int length = emptyWorkLength(work.riskScanContinuation());
         for (CoreLiquidationActionView action : work.actions()) {
-            length = Math.addExact(length, Long.BYTES * 7 + Integer.BYTES * 2
-                    + textLength(action.instrumentId()) + textLength(action.status()));
+            length = Math.addExact(length, actionLength(action));
         }
         for (CoreLiquidationWorkView.Resolution resolution : work.resolutions()) {
-            length = Math.addExact(length, Long.BYTES * 6 + Integer.BYTES * 2 + Byte.BYTES
-                    + textLength(resolution.instrumentId()) + textLength(resolution.asset()));
+            length = Math.addExact(length, resolutionLength(resolution));
         }
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
                 .putInt(VERSION)
@@ -113,6 +107,22 @@ public final class CoreLiquidationWorkCodec {
                     .put((byte) resolution.purpose().ordinal());
         }
         return buffer.array();
+    }
+
+    public static int emptyWorkLength(CoreRiskScanContinuation continuation) {
+        int length = Integer.BYTES * 3 + Byte.BYTES * 3 + Long.BYTES;
+        return continuation == null ? length : Math.addExact(length,
+                textLength(continuation.instrumentId()) + Long.BYTES * 2);
+    }
+
+    public static int actionLength(CoreLiquidationActionView action) {
+        return Math.addExact(Long.BYTES * 7 + Integer.BYTES * 2,
+                Math.addExact(textLength(action.instrumentId()), textLength(action.status())));
+    }
+
+    public static int resolutionLength(CoreLiquidationWorkView.Resolution resolution) {
+        return Math.addExact(Long.BYTES * 6 + Integer.BYTES * 2 + Byte.BYTES,
+                Math.addExact(textLength(resolution.instrumentId()), textLength(resolution.asset())));
     }
 
     private static int textLength(String value) {

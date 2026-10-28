@@ -31,17 +31,18 @@ public final class RuntimeStateQueryService {
     public static final int MAX_USER_QUERY_ENTITIES = 4_096;
 
     /**
-     * 在指定 Lane 定位用户，先统计余额、冻结、持仓和杠杆记录总量，超限则不物化；随后组装按资产、订单编号和持仓业务键排序的视图，杠杆沿原键集合顺序读取，并返回用户状态哈希。
+     * 在指定 Lane 定位用户，先核对实体数量上限，再整理有序明细；只构造请求的视图或计算请求的哈希。
      * @param runtime 当前查询运行时，账户实体通过显式 Lane 参数读取
      * @param lane 目标用户或订单所属的账户 Lane，调用方应在合法读取范围使用
      * @param identities 账户内资产、币对、客户端及持仓业务身份的映射
      * @param userId 本次用户或客户端订单查询所属的用户编号
+     * @param hashOnly true 只计算状态哈希；false 只构造完整用户视图
      */
     public static UserQueryResult userState(
             TradingAccountRuntime runtime,
             AccountLaneState lane,
             RuntimeIdentityRegistry identities,
-            long userId) {
+            long userId, boolean hashOnly) {
         // 指定账户 Lane 内的用户记录，缺失时不再读取其他用户实体。
         UserRuntime user = runtime.user(lane, userId);
         if (user == null) return UserQueryResult.notFound();
@@ -61,9 +62,9 @@ public final class RuntimeStateQueryService {
                 Math.addExact(reservationCount, Math.addExact(positionCount, leverageKeys.size())));
         if (entityCount > MAX_USER_QUERY_ENTITIES) return UserQueryResult.oversized();
         // 该用户冻结记录的订单编号数组，按编号排序后读取对应视图。
-        long[] reservationIds = runtime.reservationIdsForUser(lane, userId).toArray();
+        long[] reservationIds = runtime.reservationIdsForUser(lane, userId);
         // 该用户的整数持仓键数组，后续转为按业务键排序的持仓项。
-        long[] positionKeys = runtime.positionKeysForUser(lane, userId).toArray();
+        long[] positionKeys = runtime.positionKeysForUser(lane, userId);
 
         // 该用户资产代码及可用、冻结余额视图，按资产代码排序。
         ArrayList<CoreBalanceView> balances = new ArrayList<>(balanceCount);
@@ -113,27 +114,31 @@ public final class RuntimeStateQueryService {
         for (CoreLeverageKey /* 当前用户一项按合约及保证金模式区分的杠杆配置键。 */ key : leverageKeys) {
             leverages.add(new CoreLeverageView(key.instrumentId(), key.marginMode(), runtime.leverage(lane, key)));
         }
-        // 余额、冻结、持仓及杠杆都组装后的完整用户视图。
+        if (hashOnly) return UserQueryResult.found(null,
+                userStateHash(user, balances, reservations, positions, leverages));
         CoreUserStateView view = new CoreUserStateView(user.productLine(), user.userId(), user.revision(),
                 user.positionMode(), balances, reservations, positions, leverages);
-        return UserQueryResult.found(view, userStateHash(view));
+        return UserQueryResult.found(view, 0);
     }
 
     /**
-     * 在指定 Lane 读取订单，把币对整数键换为外部编号并保留成交、费用、时间及版本字段，同时计算包括内部撮合价在内的订单状态哈希；缺失返回未找到。
+     * 在指定 Lane 读取订单，按请求构造视图或计算包括内部撮合价在内的状态哈希；缺失返回未找到。
      * @param runtime 当前查询运行时，账户实体通过显式 Lane 参数读取
      * @param lane 目标用户或订单所属的账户 Lane，调用方应在合法读取范围使用
      * @param identities 账户内资产、币对、客户端及持仓业务身份的映射
      * @param orderId 需要读取的 Core 订单编号
+     * @param hashOnly true 只计算状态哈希；false 只构造订单视图
      */
     public static OrderQueryResult orderState(
             TradingAccountRuntime runtime,
             AccountLaneState lane,
             RuntimeIdentityRegistry identities,
-            long orderId) {
+            long orderId, boolean hashOnly) {
         // 目标订单的当前运行时记录，缺失时直接返回未找到。
         OrderRuntime order = runtime.order(lane, orderId);
         if (order == null) return OrderQueryResult.notFound();
+        if (hashOnly) return OrderQueryResult.found(null,
+                orderStateHash(order, identities.instrumentId(order.symbolId())));
         // 目标订单包含委托、成交、费用和提交信息的协议视图。
         CoreOrderStateView view = new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(),
                 identities.instrumentId(order.symbolId()), order.side(), order.priceTicks(),
@@ -142,7 +147,7 @@ public final class RuntimeStateQueryService {
                 order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
                 order.takerFeeRatePpm(), order.cumulativeFeeUnits(), order.executedValueHigh(), order.executedValueLow(), order.createdAtEpochMillis(),
                 order.updatedAtEpochMillis(), order.clusterPosition(), order.status().name(), order.revision());
-        return OrderQueryResult.found(view, orderStateHash(order, identities.instrumentId(order.symbolId())));
+        return OrderQueryResult.found(view, 0);
     }
 
     /**
@@ -164,25 +169,26 @@ public final class RuntimeStateQueryService {
         if (clientKey == 0) return OrderQueryResult.notFound();
         // 当前冻结或客户端订单映射对应的普通订单编号。
         long orderId = runtime.orderIdByClientValue(lane, userId, clientKey);
-        return orderId == 0 ? OrderQueryResult.notFound() : orderState(runtime, lane, identities, orderId);
+        return orderId == 0 ? OrderQueryResult.notFound() : orderState(runtime, lane, identities, orderId, false);
     }
 
     /**
      * 按用户身份、版本、模式及各视图列表的固定字段顺序混合状态哈希；已全部释放或消费的冻结记录不参与哈希，持仓和杠杆字段继续完整计入。
-     * @param user 已组装的完整用户视图，各列表顺序会参与哈希计算
+     * @param user 所属 Lane 当前用户元数据，各有序列表已经按查询顺序准备好
      */
-    private static long userStateHash(CoreUserStateView user) {
+    private static long userStateHash(UserRuntime user, List<CoreBalanceView> balances,
+            List<CoreReservationView> reservations, List<CorePositionView> positions, List<CoreLeverageView> leverages) {
         // 按固定字段顺序不断混合的业务状态哈希，返回前计入所有要求的版本字段。
         long hash = CoreStateHash.mix(CoreStateHash.start(), com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(user.productLine()));
         hash = CoreStateHash.mix(hash, user.userId());
         hash = CoreStateHash.mix(hash, user.revision());
         hash = CoreStateHash.mix(hash, user.positionMode().wireCode());
-        for (CoreBalanceView /* 当前转换或计算哈希的一项资产余额，保留可用与冻结金额。 */ balance : user.balances()) {
+        for (CoreBalanceView /* 当前转换或计算哈希的一项资产余额，保留可用与冻结金额。 */ balance : balances) {
             hash = CoreStateHash.mix(hash, balance.asset());
             hash = CoreStateHash.mix(hash, balance.availableUnits());
             hash = CoreStateHash.mix(hash, balance.lockedUnits());
         }
-        for (CoreReservationView /* 当前资金冻结记录；生成视图时保留字段，算哈希时跳过已用完的记录。 */ reservation : user.reservations()) {
+        for (CoreReservationView /* 当前资金冻结记录；生成视图时保留字段，算哈希时跳过已用完的记录。 */ reservation : reservations) {
             if (reservation.reservedUnits() - reservation.releasedUnits() - reservation.consumedUnits() == 0) {
                 continue;
             }
@@ -195,7 +201,7 @@ public final class RuntimeStateQueryService {
             hash = CoreStateHash.mix(hash, reservation.consumedUnits());
             hash = CoreStateHash.mix(hash, reservation.orderQuantitySteps());
         }
-        for (CorePositionView /* 当前读取或计算哈希的持仓，保证金模式、持仓腿及金额字段都保留。 */ position : user.positions()) {
+        for (CorePositionView /* 当前读取或计算哈希的持仓，保证金模式、持仓腿及金额字段都保留。 */ position : positions) {
             hash = CoreStateHash.mix(hash, position.instrumentId());
             hash = CoreStateHash.mix(hash, position.marginAsset());
             hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
@@ -206,7 +212,7 @@ public final class RuntimeStateQueryService {
             hash = CoreStateHash.mix(hash, position.realizedPnlUnits());
             hash = CoreStateHash.mix(hash, position.positionMarginUnits());
         }
-        for (CoreLeverageView /* 本轮加入用户状态哈希的一项杠杆配置，保留合约、保证金模式及 ppm 杠杆值。 */ leverage : user.leverages()) {
+        for (CoreLeverageView /* 本轮加入用户状态哈希的一项杠杆配置，保留合约、保证金模式及 ppm 杠杆值。 */ leverage : leverages) {
             hash = CoreStateHash.mix(hash, leverage.instrumentId());
             hash = CoreStateHash.mix(hash, leverage.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, leverage.leveragePpm());

@@ -57,13 +57,6 @@ public final class RealtimeStateCapture {
     }
 
     /**
-     * 返回 outbox 当前是否处于捕获中，与 active 相同；不单独根据 orderProjectionOnly 判断。
-     */
-    public boolean privateStateEnabled() {
-        return active();
-    }
-
-    /**
      * sequence：本轮原复制日志位置，作为帧序列身份。
      * timestamp：本轮原业务时间。
      * snapshotId：本轮用户快照身份，零表示普通提交批次。

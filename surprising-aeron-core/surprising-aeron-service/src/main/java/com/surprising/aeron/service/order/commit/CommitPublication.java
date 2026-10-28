@@ -116,15 +116,6 @@ public final class CommitPublication {
         else if (changed) publish();
     }
 
-    /**
-     * 仅清理发布积累标记，业务回滚须由调用方另行完成。
-     */
-    public void abort() { clearBatchState(); }
-
-    /**
-     * 只清理当前发布积累标记；命令槽需先保存恢复所需标记，本方法不回滚业务。
-     */
-    public void suspend() { clearBatchState(); }
 
     /**
      * 拒绝在已有积累或发布执行中覆盖标记，再恢复调用方保存的脏及临时状态。
@@ -173,7 +164,7 @@ public final class CommitPublication {
     /**
      * 清空积累、脏及临时三项标记，不改变发布水位、生命周期或账户状态。
      */
-    private void clearBatchState() {
+    public void clearBatchState() {
         deferred = false;
         dirty = false;
         provisionalOnly = false;

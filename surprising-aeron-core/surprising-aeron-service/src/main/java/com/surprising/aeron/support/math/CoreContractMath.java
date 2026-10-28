@@ -155,7 +155,7 @@ public final class CoreContractMath {
      */
     public static CoreRiskLimitBracket riskBracket(CoreInstrument instrument, long notionalUnits) {
         // 已按下界定位的候选档位，还要核对当前规模是否超过它的上限。
-        CoreRiskLimitBracket bracket = bracketForNotional(instrument, notionalUnits);
+        CoreRiskLimitBracket bracket = maintenanceRiskBracket(instrument, notionalUnits);
         if (notionalUnits > bracket.notionalCapUnits()) {
             throw new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
                     "position notional exceeds instrument risk brackets");
@@ -164,20 +164,11 @@ public final class CoreContractMath {
     }
 
     /**
-     * 按名义金额定位档位，不执行新开仓的上限拒绝，让已有持仓仍可获得维持风险参数。
-     * @param instrument 当前币对的合约类型、价格数量精度和结算资产配置
-     * @param notionalUnits 用于选风险档位的非负名义金额，单位与该产品风险档位配置一致
-     */
-    public static CoreRiskLimitBracket maintenanceRiskBracket(CoreInstrument instrument, long notionalUnits) {
-        return bracketForNotional(instrument, notionalUnits);
-    }
-
-    /**
      * 按已校验的递增上界选档；到达非最后一档上界时进入下一档，超出最后上界的已有持仓继续用最后一档估值。
      * @param instrument 当前币对的合约类型、价格数量精度和结算资产配置
      * @param notionalUnits 用于选风险档位的非负名义金额，单位与该产品风险档位配置一致
      */
-    private static CoreRiskLimitBracket bracketForNotional(CoreInstrument instrument, long notionalUnits) {
+    public static CoreRiskLimitBracket maintenanceRiskBracket(CoreInstrument instrument, long notionalUnits) {
         if (notionalUnits < 0) {
             throw new IllegalArgumentException("notional must not be negative");
         }

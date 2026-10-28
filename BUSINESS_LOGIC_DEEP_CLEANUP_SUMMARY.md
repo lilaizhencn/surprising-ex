@@ -53,7 +53,7 @@
 - **消除无实际工作内容的多层对象/集合转换**：
   - 删除 `TradingAccountRuntime.PendingTransferRoutes` 同构重复 Record，直接返回并消费 `TreasuryRuntime.PendingTransferRoutes`；
   - 删除 `PendingReservationTracker` 中的 `PendingReservationCompletion`、`PendingReservationRef`、`PendingReservationBatchCompletion` 三个过渡 Record 及 3 层列表转换（`ArrayList` → `List.copyOf` → `ArrayList`），单项直接返回 `ReservationRuntime`，多项基于平铺 `long[] userIds` 与 `ReservationRuntime[] reservations` 一次预检并完成；
-  - 删除 `RuntimeLifecycleSettlement.OrderPage` 重复 Record 与 `InstrumentSettlementCommands.boxedOrderIds` 私有重复装箱逻辑，统一复用 `TradingCoreRuntime.LifecycleOrderChunk`，且仅在撤单阶段尚未完成时才查询活动订单页；
+  - 删除 `RuntimeLifecycleSettlement.OrderPage` 重复 Record 与 `InstrumentSettlementCommands.boxedOrderIds` 私有重复装箱逻辑，统一复用生命周期订单页（当前位于 `ActiveOrderIndex.LifecycleOrderChunk`），且仅在撤单阶段尚未完成时才查询活动订单页；
   - 删除 `RuntimeOrderAdmission.AdmissionIdentity` 在查询预检路径中的打包即拆包中间层；
 - **消除跨类双向折返转发与 1:1 微型薄壳类**：
   - 内联并删除 `MatcherSettlementDispatcher.java` 与 `ControlFundsValidation.java`，消除 `TradingAccountRuntime` 上的 10 个长参数跨类纯转发方法与双向回调；
@@ -69,3 +69,12 @@
 - **JDK 版本**：OpenJDK 27 (HotSpot)
 - **编译状态**：`surprising-aeron-service`（233 个生产文件 + 198 个测试文件）与 `surprising-aeron-benchmarks`（97 个生产文件 + 42 个测试文件）生产源码及测试源码编译 100% 成功；
 - **单元测试验证**：前期深度清理全量 1591 个用例通过；本轮多层转发与无意义对象转换清理完成 `TradingAccountRuntimeTest`（58 个测试）及 `bootstrap`/`config`/`support`/`order` 等 32 个测试类（共 180 个测试）验证通过，0 Errors, 0 Failures（按指令跳过剩余全量单元测试）。
+
+
+## 4. 第二轮清理（2026-10-28）
+
+原计划全部 25 个编号及子项已处理，逐项清单、基线差异与保留必要边界的理由见 [第二轮验收](ROUND2_CLEANUP_PROGRESS.md)。
+
+风险进度、余额补丁、平仓容量、触发准入、订单分页与批次编码直接使用现有业务状态或原语；快照复用同一栅栏的状态、费率、划转及业务哈希，保留完整配对审计。单笔查询按需返回视图或哈希；强平页共用编码长度公式。删除三个命令薄壳、RecoveryBuffer、BalanceState、10 个 UUID 转发重载和重复入口，纯比例公式归入共享 API。
+
+验收覆盖 2,685 tests，0 failures/errors，4 项因平台或外部数据库条件跳过。真实 Aeron 主运行及 JFR 配对均完成资金、冻结、持仓与快照重启核对，业务哈希一致；控制场景覆盖资金费、触发、强平、保险及 ADL。JMH/JFR 已归档，系统 swap 使本轮时间/吞吐数据不能作为正式性能验收或提升证据，详见 [性能记录第 14 节](PERFORMANCE_VALIDATION.md#14-2026-10-28-第二轮转换与转发清理验收结果)。

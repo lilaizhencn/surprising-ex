@@ -436,7 +436,7 @@ public final class RuntimeOrderAdmission {
         if (symbolId < 0) throw new IllegalStateException("instrument instrumentId identity is missing");
         return resolveValues(null, instrument, symbolId, runtime.markPrice(symbolId),
                 runtime.feePolicyBook(), userId,
-                clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent);
+                clusterTimestamp, runtime.treasury().lifecycleSettlement(symbolId) != 0, intent, false);
     }
 
     public static void prepare(PlaceAdmissionEvent target, TradingAccountRuntime runtime,
@@ -460,7 +460,7 @@ public final class RuntimeOrderAdmission {
     public static void resolvePrepared(PlaceAdmissionEvent target, MarkPriceRuntime mark,
                                        FeePolicyBook policies, long userId, long clusterTimestamp, boolean lifecycleSettled) {
         resolveValues(target, target.instrument(), target.symbolId(), mark, policies, userId,
-                clusterTimestamp, lifecycleSettled, target.intent());
+                clusterTimestamp, lifecycleSettled, target.intent(), true);
     }
 
     public record Context(CoreInstrument instrument, int symbolId, MarkPriceRuntime mark,
@@ -473,14 +473,14 @@ public final class RuntimeOrderAdmission {
     public static <T extends ResolvedPlaceOrder> T resolveInto(T target, Context context, long userId, PlaceOrderCommand intent) {
         if (target == null || context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
         resolveValues(target, context.instrument(), context.symbolId(), context.mark(), context.policies(), userId,
-                context.clusterTimestamp(), context.lifecycleSettled(), intent);
+                context.clusterTimestamp(), context.lifecycleSettled(), intent, false);
         return target;
     }
 
     public static ResolvedPlaceOrder resolve(Context context, long userId, PlaceOrderCommand intent) {
         if (context == null || intent == null) throw new IllegalArgumentException("invalid order decision input");
         return resolveValues(null, context.instrument(), context.symbolId(), context.mark(), context.policies(), userId,
-                context.clusterTimestamp(), context.lifecycleSettled(), intent);
+                context.clusterTimestamp(), context.lifecycleSettled(), intent, false);
     }
 
     public static Context context(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities, String instrumentId, long clusterTimestamp) {
@@ -513,7 +513,7 @@ public final class RuntimeOrderAdmission {
                                                     CoreInstrument instrument, int symbolId,
                                                     MarkPriceRuntime mark, FeePolicyBook policies, long userId,
                                                     long clusterTimestamp, boolean lifecycleSettled,
-                                                    PlaceOrderCommand intent) {
+                                                    PlaceOrderCommand intent, boolean preparedRoute) {
         if (policies == null || userId <= 0) throw new IllegalArgumentException("invalid fee decision input");
         if (!instrument.instrumentId().equals(intent.instrumentId())) throw new IllegalArgumentException("decision context instrumentId mismatch");
         instrument.requireOrderEnabled(intent);
@@ -551,7 +551,8 @@ public final class RuntimeOrderAdmission {
                     markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
                     makerFee, takerFee);
         }
-        target.resolve(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
+        if (!preparedRoute) target.clearResolvedOrder();
+        target.initializeResolvedOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
                 markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
                 makerFee, takerFee);
         return target;

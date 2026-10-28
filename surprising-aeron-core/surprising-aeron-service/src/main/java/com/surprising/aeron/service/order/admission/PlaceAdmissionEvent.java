@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.order.admission;
 
-import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.account.AccountLaneState;
@@ -78,31 +77,6 @@ public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
         decisionTimestamp = timestamp;
     }
 
-    /**
-     * 在 Owner 已绑定的相同路由上补齐价格、冻结资产和费率，直接初始化决策，不能像父类通用 resolve 那样先清除路由。
-     * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
-     * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对的运行时稠密编号，冷业务状态入口允许用 -1 表示未分配
-     * @param matchingPriceTicks 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界
-     * @param reservationPriceTicks 计算预留金额采用的价格刻度，可能比撮合边界更保守
-     * @param markPriceTicks 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界
-     * @param indexPriceTicks 本次决策使用的指数价格刻度，不需要该价格的入口可为 0
-     * @param forwardPriceTicks 本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格
-     * @param reservationKind 应冻结现货资产还是衍生品保证金的类别
-     * @param reservationAsset 已经规范化的冻结资产代码，衍生品为结算资产，现货按买卖方向选择
-     * @param makerFeeRatePpm Maker 费率，单位为百万分比，负数表示返佣
-     * @param takerFeeRatePpm Taker 费率，单位为百万分比，且不能小于 Maker 费率
-     */
-    public void resolve(com.surprising.aeron.protocol.PlaceOrderCommand intent,
-                        com.surprising.aeron.service.instrument.CoreInstrument instrument,
-                        int symbolId, long matchingPriceTicks, long reservationPriceTicks,
-                        long markPriceTicks, long indexPriceTicks, long forwardPriceTicks,
-                        com.surprising.aeron.protocol.ReservationKind reservationKind,
-                        String reservationAsset, long makerFeeRatePpm, long takerFeeRatePpm) {
-        initializeResolvedOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
-                markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
-                makerFeeRatePpm, takerFeeRatePpm);
-    }
 
     /**
      * 校验已绑定路由并固定命令、用户、资产、目标 Lane 和账本事实，重置回执及消费标记，按产品规则决定是否等待 OI。
@@ -203,9 +177,8 @@ public final class PlaceAdmissionEvent extends BaseOrderAdmissionEvent {
                         && currentPosition != null && currentPosition.signedQuantitySteps() != 0
                         && (currentPosition.signedQuantitySteps() > 0)
                         != (side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-                    closeCapacityCancellations = PositionCloseCapacity.inspectLane(
-                            lane, userId, symbolId, positionKey, positionSide(), side(), orderId())
-                            .conflictsFor(quantitySteps());
+                    closeCapacityCancellations = PositionCloseCapacity.conflictsFor(
+                            lane, userId, symbolId, positionKey, positionSide(), side(), orderId(), quantitySteps());
                 }
                 closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId,
                         side(), matchingPriceTicks(), orderId(), orderId(), closeCapacityCancellations);

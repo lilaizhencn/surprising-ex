@@ -1,0 +1,24 @@
+{
+  "epoch_ms": 1793159911637,
+  "owned_pids_checked": [
+    1060,
+    1203,
+    3794,
+    9054,
+    12128,
+    12218,
+    15207,
+    15419,
+    16378,
+    16501,
+    97307
+  ],
+  "owned_jvms_running": [],
+  "temporary_root_removed": true,
+  "temporary_prefix_files_remaining": [],
+  "archive_files_manifest": "temporary-files.json",
+  "build_and_tool_manifest": "build-and-tool-files.json",
+  "udp_21001_to_21005_lsof_exit": 1,
+  "udp_ports_listeners": "",
+  "scope": "Only this round owned /tmp prefix, JVMs and files; original plan and other project/user resources retained."
+}

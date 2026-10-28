@@ -1,0 +1,801 @@
+{
+  "classification": "Correctness PASS; timings/throughput INVALID for formal acceptance due to pre-existing system swap. Diagnostic runs only. No old-version benchmark or speedup claim.",
+  "network": {
+    "main": {
+      "run_id": "round2-20261028-main",
+      "status": "PASS",
+      "measurement_window_epoch_ms": [
+        1793158681237,
+        1793158691255
+      ],
+      "steady": {
+        "elapsedSeconds": 10.01813,
+        "terminalBusinessOperations": 2907812,
+        "terminalCoreMessages": 277015,
+        "fills": 692320,
+        "businessOpsPerSec": 290254.977,
+        "coreMessagesPerSec": 27651.369,
+        "fillsPerSec": 69106.712,
+        "peakInFlight": 256,
+        "windowBlockedCount": 205906,
+        "windowBlockedNanos": 8801320913
+      },
+      "steady_business": [
+        {
+          "type": "PLACE_ORDER",
+          "terminalItems": 69232,
+          "terminalCoreMessages": 69232
+        },
+        {
+          "type": "CANCEL_ORDER",
+          "terminalItems": 69232,
+          "terminalCoreMessages": 69232
+        },
+        {
+          "type": "APPLY_MARK_PRICE",
+          "terminalItems": 88,
+          "terminalCoreMessages": 88
+        },
+        {
+          "type": "PLACE_ORDER_BATCH",
+          "terminalItems": 2076940,
+          "terminalCoreMessages": 103847
+        },
+        {
+          "type": "CANCEL_ORDER_BATCH",
+          "terminalItems": 692320,
+          "terminalCoreMessages": 34616
+        }
+      ],
+      "diagnostic_rates": {
+        "orders_per_second": 214228.80317983497,
+        "cancels_per_second": 76017.38048917314,
+        "matched_pairs_per_second": 69106.70953561194
+      },
+      "terminal_including_drain": {
+        "mixedCapacity": "PASS",
+        "elapsedSeconds": 10.026,
+        "terminalBusinessOperations": 2907832,
+        "offeredBusinessOperations": 2907832,
+        "terminalCoreMessages": 277016,
+        "offeredCoreMessages": 277016,
+        "businessOpsPerSec": 290030.059,
+        "coreMessagesPerSec": 27629.852,
+        "fills": 692320,
+        "fillsPerSec": 69052.686,
+        "queries": 0,
+        "unfinished": 0,
+        "peakInFlight": 256,
+        "measuredCycles": 4327,
+        "totalCycles": 4617,
+        "triggerExecutions": 0
+      },
+      "latency_including_drain_us": [
+        {
+          "business": "PLACE_ORDER",
+          "items": 69232,
+          "requests": 69232,
+          "p50us": 6787,
+          "p90us": 15458,
+          "p95us": 23199,
+          "p99us": 39616,
+          "p999us": 69271,
+          "maxus": 163708,
+          "meanus": 9225.274
+        },
+        {
+          "business": "CANCEL_ORDER",
+          "items": 69232,
+          "requests": 69232,
+          "p50us": 6795,
+          "p90us": 15532,
+          "p95us": 23052,
+          "p99us": 39387,
+          "p999us": 68681,
+          "maxus": 169607,
+          "meanus": 9228.696
+        },
+        {
+          "business": "APPLY_MARK_PRICE",
+          "items": 88,
+          "requests": 88,
+          "p50us": 7983,
+          "p90us": 18055,
+          "p95us": 23658,
+          "p99us": 24264,
+          "p999us": 24264,
+          "maxus": 24264,
+          "meanus": 9938.991
+        },
+        {
+          "business": "PLACE_ORDER_BATCH",
+          "items": 2076960,
+          "requests": 103848,
+          "p50us": 6782,
+          "p90us": 15392,
+          "p95us": 23150,
+          "p99us": 39485,
+          "p999us": 71172,
+          "maxus": 169607,
+          "meanus": 9219.513
+        },
+        {
+          "business": "CANCEL_ORDER_BATCH",
+          "items": 692320,
+          "requests": 34616,
+          "p50us": 6791,
+          "p90us": 15433,
+          "p95us": 23052,
+          "p99us": 39387,
+          "p999us": 68616,
+          "maxus": 169082,
+          "meanus": 9227.375
+        }
+      ],
+      "lane_counts_including_drain": [
+        {
+          "lane": 0,
+          "operation": 0,
+          "completed": 86540,
+          "executionNanos": 0,
+          "measuredNanos": 10025967702
+        },
+        {
+          "lane": 0,
+          "operation": 1,
+          "completed": 190388,
+          "executionNanos": 0,
+          "measuredNanos": 10025967702
+        },
+        {
+          "lane": 0,
+          "operation": 2,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 10025967702
+        },
+        {
+          "lane": 0,
+          "operation": 3,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 10025967702
+        },
+        {
+          "lane": 1,
+          "operation": 0,
+          "completed": 86540,
+          "executionNanos": 0,
+          "measuredNanos": 10025967702
+        },
+        {
+          "lane": 1,
+          "operation": 1,
+          "completed": 190388,
+          "executionNanos": 0,
+          "measuredNanos": 10025967702
+        },
+        {
+          "lane": 1,
+          "operation": 2,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 10025967702
+        },
+        {
+          "lane": 1,
+          "operation": 3,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 10025967702
+        }
+      ],
+      "admin_action_retries": 14,
+      "correctness": {
+        "funds_diff": 0,
+        "population_positions_and_retail_open_order_counts": true,
+        "hft_positions_and_empty_reservations": true,
+        "treasury_deficit_zero_checked": true,
+        "risk_drained": true,
+        "liquidation_insurance_adl": true
+      },
+      "business_hash": "106d84dcc206a9d6",
+      "recovery_hash": "106d84dcc206a9d6",
+      "snapshot_pair": [
+        "1793158719659",
+        "258893536",
+        "0"
+      ],
+      "vm_counter_delta_entire_run": {
+        "Swapins": 303160,
+        "Swapouts": 575571,
+        "Pageins": 649242,
+        "Pageouts": 8046
+      },
+      "swap_before": "vm.swapusage: total = 6144.00M  used = 4696.25M  free = 1447.75M  (encrypted)",
+      "swap_after": "vm.swapusage: total = 6144.00M  used = 5768.50M  free = 375.50M  (encrypted)",
+      "observed_max_rss_kib_in_measurement": {
+        "core": 1687972,
+        "client": 965368
+      }
+    },
+    "jfr": {
+      "run_id": "round2-20261028-jfr",
+      "status": "PASS",
+      "measurement_window_epoch_ms": [
+        1793159008326,
+        1793159018339
+      ],
+      "steady": {
+        "elapsedSeconds": 10.013152,
+        "terminalBusinessOperations": 2890867,
+        "terminalCoreMessages": 275403,
+        "fills": 688320,
+        "businessOpsPerSec": 288706.991,
+        "coreMessagesPerSec": 27504.126,
+        "fillsPerSec": 68741.591,
+        "peakInFlight": 256,
+        "windowBlockedCount": 196289,
+        "windowBlockedNanos": 8703815546
+      },
+      "steady_business": [
+        {
+          "type": "PLACE_ORDER",
+          "terminalItems": 68832,
+          "terminalCoreMessages": 68832
+        },
+        {
+          "type": "CANCEL_ORDER",
+          "terminalItems": 68827,
+          "terminalCoreMessages": 68827
+        },
+        {
+          "type": "APPLY_MARK_PRICE",
+          "terminalItems": 88,
+          "terminalCoreMessages": 88
+        },
+        {
+          "type": "PLACE_ORDER_BATCH",
+          "terminalItems": 2064800,
+          "terminalCoreMessages": 103240
+        },
+        {
+          "type": "CANCEL_ORDER_BATCH",
+          "terminalItems": 688320,
+          "terminalCoreMessages": 34416
+        }
+      ],
+      "diagnostic_rates": {
+        "orders_per_second": 213082.95329982007,
+        "cancels_per_second": 75615.25082211875,
+        "matched_pairs_per_second": 68741.59105943862
+      },
+      "terminal_including_drain": {
+        "mixedCapacity": "PASS",
+        "elapsedSeconds": 10.019,
+        "terminalBusinessOperations": 2891032,
+        "offeredBusinessOperations": 2891032,
+        "terminalCoreMessages": 275416,
+        "offeredCoreMessages": 275416,
+        "businessOpsPerSec": 288565.424,
+        "coreMessagesPerSec": 27490.368,
+        "fills": 688320,
+        "fillsPerSec": 68703.962,
+        "queries": 0,
+        "unfinished": 0,
+        "peakInFlight": 256,
+        "measuredCycles": 4302,
+        "totalCycles": 4490,
+        "triggerExecutions": 0
+      },
+      "latency_including_drain_us": [
+        {
+          "business": "PLACE_ORDER",
+          "items": 68832,
+          "requests": 68832,
+          "p50us": 7364,
+          "p90us": 13787,
+          "p95us": 20004,
+          "p99us": 39190,
+          "p999us": 64225,
+          "maxus": 93782,
+          "meanus": 9273.552
+        },
+        {
+          "business": "CANCEL_ORDER",
+          "items": 68832,
+          "requests": 68832,
+          "p50us": 7360,
+          "p90us": 13828,
+          "p95us": 20267,
+          "p99us": 39747,
+          "p999us": 64323,
+          "maxus": 92667,
+          "meanus": 9281.691
+        },
+        {
+          "business": "APPLY_MARK_PRICE",
+          "items": 88,
+          "requests": 88,
+          "p50us": 7700,
+          "p90us": 15065,
+          "p95us": 28491,
+          "p99us": 29753,
+          "p999us": 29753,
+          "maxus": 29753,
+          "meanus": 9997.859
+        },
+        {
+          "business": "PLACE_ORDER_BATCH",
+          "items": 2064960,
+          "requests": 103248,
+          "p50us": 7360,
+          "p90us": 13795,
+          "p95us": 20135,
+          "p99us": 39550,
+          "p999us": 64126,
+          "maxus": 93913,
+          "meanus": 9268.511
+        },
+        {
+          "business": "CANCEL_ORDER_BATCH",
+          "items": 688320,
+          "requests": 34416,
+          "p50us": 7368,
+          "p90us": 13828,
+          "p95us": 20004,
+          "p99us": 39616,
+          "p999us": 65110,
+          "maxus": 92602,
+          "meanus": 9278.383
+        }
+      ],
+      "lane_counts_including_drain": [
+        {
+          "lane": 0,
+          "operation": 0,
+          "completed": 86040,
+          "executionNanos": 0,
+          "measuredNanos": 10018636196
+        },
+        {
+          "lane": 0,
+          "operation": 1,
+          "completed": 189288,
+          "executionNanos": 0,
+          "measuredNanos": 10018636196
+        },
+        {
+          "lane": 0,
+          "operation": 2,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 10018636196
+        },
+        {
+          "lane": 0,
+          "operation": 3,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 10018636196
+        },
+        {
+          "lane": 1,
+          "operation": 0,
+          "completed": 86040,
+          "executionNanos": 0,
+          "measuredNanos": 10018636196
+        },
+        {
+          "lane": 1,
+          "operation": 1,
+          "completed": 189288,
+          "executionNanos": 0,
+          "measuredNanos": 10018636196
+        },
+        {
+          "lane": 1,
+          "operation": 2,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 10018636196
+        },
+        {
+          "lane": 1,
+          "operation": 3,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 10018636196
+        }
+      ],
+      "admin_action_retries": 14,
+      "correctness": {
+        "funds_diff": 0,
+        "population_positions_and_retail_open_order_counts": true,
+        "hft_positions_and_empty_reservations": true,
+        "treasury_deficit_zero_checked": true,
+        "risk_drained": true,
+        "liquidation_insurance_adl": true
+      },
+      "business_hash": "c6c9efe9a8ab1b1a",
+      "recovery_hash": "c6c9efe9a8ab1b1a",
+      "snapshot_pair": [
+        "1793159046259",
+        "251873152",
+        "0"
+      ],
+      "vm_counter_delta_entire_run": {
+        "Swapins": 362574,
+        "Swapouts": 536516,
+        "Pageins": 607150,
+        "Pageouts": 8310
+      },
+      "swap_before": "vm.swapusage: total = 6144.00M  used = 5128.50M  free = 1015.50M  (encrypted)",
+      "swap_after": "vm.swapusage: total = 6144.00M  used = 5790.00M  free = 354.00M  (encrypted)",
+      "observed_max_rss_kib_in_measurement": {
+        "core": 1825700,
+        "client": 982708
+      }
+    },
+    "control": {
+      "run_id": "round2-20261028-control",
+      "status": "PASS",
+      "measurement_window_epoch_ms": [
+        1793159139530,
+        1793159141795
+      ],
+      "steady": {
+        "elapsedSeconds": 2.265492,
+        "terminalBusinessOperations": 2463,
+        "terminalCoreMessages": 639,
+        "fills": 480,
+        "businessOpsPerSec": 1087.181,
+        "coreMessagesPerSec": 282.058,
+        "fillsPerSec": 211.875,
+        "peakInFlight": 65,
+        "windowBlockedCount": 0,
+        "windowBlockedNanos": 0
+      },
+      "steady_business": [
+        {
+          "type": "PLACE_ORDER",
+          "terminalItems": 48,
+          "terminalCoreMessages": 48
+        },
+        {
+          "type": "CANCEL_ORDER",
+          "terminalItems": 48,
+          "terminalCoreMessages": 48
+        },
+        {
+          "type": "APPLY_MARK_PRICE",
+          "terminalItems": 15,
+          "terminalCoreMessages": 15
+        },
+        {
+          "type": "APPLY_FUNDING",
+          "terminalItems": 144,
+          "terminalCoreMessages": 144
+        },
+        {
+          "type": "CONTINUE_RISK_SCAN",
+          "terminalItems": 96,
+          "terminalCoreMessages": 96
+        },
+        {
+          "type": "PLACE_TRIGGER_ORDER",
+          "terminalItems": 96,
+          "terminalCoreMessages": 96
+        },
+        {
+          "type": "EXECUTE_TRIGGER_ORDER",
+          "terminalItems": 96,
+          "terminalCoreMessages": 96
+        },
+        {
+          "type": "PLACE_ORDER_BATCH",
+          "terminalItems": 1440,
+          "terminalCoreMessages": 72
+        },
+        {
+          "type": "CANCEL_ORDER_BATCH",
+          "terminalItems": 480,
+          "terminalCoreMessages": 24
+        }
+      ],
+      "diagnostic_rates": {
+        "orders_per_second": 656.8109708619585,
+        "cancels_per_second": 233.0619574026304,
+        "matched_pairs_per_second": 211.874506729664
+      },
+      "terminal_including_drain": {
+        "mixedCapacity": "PASS",
+        "elapsedSeconds": 2.267,
+        "terminalBusinessOperations": 2463,
+        "offeredBusinessOperations": 2463,
+        "terminalCoreMessages": 639,
+        "offeredCoreMessages": 639,
+        "businessOpsPerSec": 1086.417,
+        "coreMessagesPerSec": 281.86,
+        "fills": 480,
+        "fillsPerSec": 211.726,
+        "queries": 96,
+        "unfinished": 0,
+        "peakInFlight": 65,
+        "measuredCycles": 3,
+        "totalCycles": 4,
+        "triggerExecutions": 128
+      },
+      "latency_including_drain_us": [
+        {
+          "business": "PLACE_ORDER",
+          "items": 48,
+          "requests": 48,
+          "p50us": 5599,
+          "p90us": 20725,
+          "p95us": 20873,
+          "p99us": 20955,
+          "p999us": 20955,
+          "maxus": 20955,
+          "meanus": 8836.64
+        },
+        {
+          "business": "CANCEL_ORDER",
+          "items": 48,
+          "requests": 48,
+          "p50us": 9756,
+          "p90us": 27148,
+          "p95us": 27164,
+          "p99us": 27164,
+          "p999us": 27164,
+          "maxus": 27164,
+          "meanus": 15439.531
+        },
+        {
+          "business": "APPLY_MARK_PRICE",
+          "items": 15,
+          "requests": 15,
+          "p50us": 3592,
+          "p90us": 5517,
+          "p95us": 5648,
+          "p99us": 5648,
+          "p999us": 5648,
+          "maxus": 5648,
+          "meanus": 3719.202
+        },
+        {
+          "business": "APPLY_FUNDING",
+          "items": 144,
+          "requests": 144,
+          "p50us": 10862,
+          "p90us": 15982,
+          "p95us": 17039,
+          "p99us": 18513,
+          "p999us": 25640,
+          "maxus": 25640,
+          "meanus": 10248.885
+        },
+        {
+          "business": "CONTINUE_RISK_SCAN",
+          "items": 96,
+          "requests": 96,
+          "p50us": 12967,
+          "p90us": 17022,
+          "p95us": 17694,
+          "p99us": 25673,
+          "p999us": 25673,
+          "maxus": 25673,
+          "meanus": 12635.781
+        },
+        {
+          "business": "PLACE_TRIGGER_ORDER",
+          "items": 96,
+          "requests": 96,
+          "p50us": 24215,
+          "p90us": 59965,
+          "p95us": 64978,
+          "p99us": 75235,
+          "p999us": 75235,
+          "maxus": 75235,
+          "meanus": 29157.771
+        },
+        {
+          "business": "EXECUTE_TRIGGER_ORDER",
+          "items": 96,
+          "requests": 96,
+          "p50us": 25067,
+          "p90us": 60719,
+          "p95us": 65634,
+          "p99us": 81854,
+          "p999us": 81854,
+          "maxus": 81854,
+          "meanus": 29869.568
+        },
+        {
+          "business": "PLACE_ORDER_BATCH",
+          "items": 1440,
+          "requests": 72,
+          "p50us": 10338,
+          "p90us": 27672,
+          "p95us": 27705,
+          "p99us": 28082,
+          "p999us": 28082,
+          "maxus": 28082,
+          "meanus": 14022.4
+        },
+        {
+          "business": "CANCEL_ORDER_BATCH",
+          "items": 480,
+          "requests": 24,
+          "p50us": 17743,
+          "p90us": 24854,
+          "p95us": 25133,
+          "p99us": 25427,
+          "p999us": 25427,
+          "maxus": 25427,
+          "meanus": 16993.365
+        }
+      ],
+      "lane_counts_including_drain": [
+        {
+          "lane": 0,
+          "operation": 0,
+          "completed": 60,
+          "executionNanos": 0,
+          "measuredNanos": 2267085748
+        },
+        {
+          "lane": 0,
+          "operation": 1,
+          "completed": 441,
+          "executionNanos": 0,
+          "measuredNanos": 2267085748
+        },
+        {
+          "lane": 0,
+          "operation": 2,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 2267085748
+        },
+        {
+          "lane": 0,
+          "operation": 3,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 2267085748
+        },
+        {
+          "lane": 1,
+          "operation": 0,
+          "completed": 60,
+          "executionNanos": 0,
+          "measuredNanos": 2267085748
+        },
+        {
+          "lane": 1,
+          "operation": 1,
+          "completed": 445,
+          "executionNanos": 0,
+          "measuredNanos": 2267085748
+        },
+        {
+          "lane": 1,
+          "operation": 2,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 2267085748
+        },
+        {
+          "lane": 1,
+          "operation": 3,
+          "completed": 0,
+          "executionNanos": 0,
+          "measuredNanos": 2267085748
+        }
+      ],
+      "admin_action_retries": 0,
+      "correctness": {
+        "funds_diff": 0,
+        "population_positions_and_retail_open_order_counts": true,
+        "hft_positions_and_empty_reservations": true,
+        "treasury_deficit_zero_checked": true,
+        "risk_drained": true,
+        "liquidation_insurance_adl": true
+      },
+      "business_hash": "8093e6541defb0b9",
+      "recovery_hash": null,
+      "snapshot_pair": null,
+      "vm_counter_delta_entire_run": {
+        "Swapins": 163727,
+        "Swapouts": 207140,
+        "Pageins": 174134,
+        "Pageouts": 3287
+      },
+      "swap_before": "vm.swapusage: total = 6144.00M  used = 5694.00M  free = 450.00M  (encrypted)",
+      "swap_after": "vm.swapusage: total = 7168.00M  used = 5834.50M  free = 1333.50M  (encrypted)",
+      "observed_max_rss_kib_in_measurement": {
+        "core": 668148,
+        "client": 768040
+      }
+    }
+  },
+  "micro": [
+    {
+      "params": {
+        "capacitySlack": "0",
+        "liveOrders": "0"
+      },
+      "diagnostic_time_ns": 5.669910356564575,
+      "gc_run_time_ns": 5.65095843054813,
+      "allocated_bytes_per_operation": 3.571524499430072e-05,
+      "jfr_run_time_ns": 5.9414895723001395,
+      "gc_profiler_allocation_rate_mb_per_second": 0.006026078765976452
+    },
+    {
+      "params": {
+        "capacitySlack": "0",
+        "liveOrders": "8"
+      },
+      "diagnostic_time_ns": 399.44498948704387,
+      "gc_run_time_ns": 388.4218884495796,
+      "allocated_bytes_per_operation": 176.00246759011625,
+      "jfr_run_time_ns": 407.72988881459196,
+      "gc_profiler_allocation_rate_mb_per_second": 433.107377088721
+    },
+    {
+      "params": {
+        "capacitySlack": "0",
+        "liveOrders": "64"
+      },
+      "diagnostic_time_ns": 4121.529733546501,
+      "gc_run_time_ns": 4522.883009594386,
+      "allocated_bytes_per_operation": 1728.0287233681045,
+      "jfr_run_time_ns": 5585.200558373809,
+      "gc_profiler_allocation_rate_mb_per_second": 371.510890276116
+    },
+    {
+      "params": {
+        "capacitySlack": "1",
+        "liveOrders": "0"
+      },
+      "diagnostic_time_ns": 5.6878091007944205,
+      "gc_run_time_ns": 5.477403761899601,
+      "allocated_bytes_per_operation": 3.458457662326034e-05,
+      "jfr_run_time_ns": 5.944391700140969,
+      "gc_profiler_allocation_rate_mb_per_second": 0.006019547099135988
+    },
+    {
+      "params": {
+        "capacitySlack": "1",
+        "liveOrders": "8"
+      },
+      "diagnostic_time_ns": 133.37453798672755,
+      "gc_run_time_ns": 126.04012569926647,
+      "allocated_bytes_per_operation": 0.0007955793643061676,
+      "jfr_run_time_ns": 127.34693923088916,
+      "gc_profiler_allocation_rate_mb_per_second": 0.006017749887052056
+    },
+    {
+      "params": {
+        "capacitySlack": "1",
+        "liveOrders": "64"
+      },
+      "diagnostic_time_ns": 929.1993263247241,
+      "gc_run_time_ns": 949.4539030390544,
+      "allocated_bytes_per_operation": 0.006006967132523658,
+      "jfr_run_time_ns": 941.7010457985002,
+      "gc_profiler_allocation_rate_mb_per_second": 0.006032285019955394
+    }
+  ],
+  "gaps": [
+    "No valid formal capacity/latency acceptance in swap environment",
+    "No ordinary 50/50 GTC workload or three-member result",
+    "No long-duration heap/native leak qualification or hardware cache-line counters",
+    "JFR profile file I/O threshold 1ms and JNI I/O not fully covered",
+    "Core internal admission/matching/account phase timestamps unavailable; three client-observed stages are reported separately",
+    "Whole-Core exact allocation counter unavailable; allocation samples are weighted estimates, not proof of zero allocation",
+    "Closed-loop 256 window excludes pre-submit window wait from request latency; coordinated omission remains",
+    "Full operational mode with Valkey/read materialization not run"
+  ]
+}

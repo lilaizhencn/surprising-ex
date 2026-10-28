@@ -512,22 +512,35 @@ public final class AccountLaneState {
     public void writeMetrics(com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder,
                       int depth, int capacity, int highWater) {
         // 不透明读取到的提交水位，各字段可能独立滞后。
-        long committed = (long) METRIC_COMMITTED.getOpaque(this);
+        long committed = observedCommittedSequence();
         // 观察到的应用水位与提交水位的较大值，防止监控帧显示应用落后于提交。
-        long applied = Math.max(committed, (long) METRIC_APPLIED.getOpaque(this));
-        encoder.writeLane(laneId, (long) METRIC_REVISION.getOpaque(this), applied, committed,
+        long applied = Math.max(committed, observedAppliedSequence());
+        encoder.writeLane(laneId, observedRevision(), applied, committed,
                 depth, capacity, highWater, 0, 0);
         encoder.writeOperations(laneId, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS, EMPTY_METRIC_OPERATIONS);
         // 不透明读取到的累计命令次数。
-        long commands = (long) METRIC_COMMANDS.getOpaque(this);
+        long commands = observedOperationCount(0);
         if (commands != 0) {
             encoder.addOperation(laneId, 0, commands, 0, 0, 0);
         }
         // 不透明读取到的累计 Matcher 结算次数。
-        long settlements = (long) METRIC_SETTLEMENTS.getOpaque(this);
+        long settlements = observedOperationCount(1);
         if (settlements != 0) {
             encoder.addOperation(laneId, 1, settlements, 0, 0, 0);
         }
+    }
+
+    /** 监控读取只访问 opaque 发布的计数，不借出账户实体或构成业务读取栅栏。 */
+    public long observedRevision() { return (long) METRIC_REVISION.getOpaque(this); }
+    public long observedAppliedSequence() { return (long) METRIC_APPLIED.getOpaque(this); }
+    public long observedCommittedSequence() { return (long) METRIC_COMMITTED.getOpaque(this); }
+    public long observedOperationCount(int operation) {
+        return switch (operation) {
+            case 0 -> (long) METRIC_COMMANDS.getOpaque(this);
+            case 1 -> (long) METRIC_SETTLEMENTS.getOpaque(this);
+            case 2, 3 -> 0;
+            default -> throw new IllegalArgumentException("invalid Lane metric operation");
+        };
     }
 
     /**
@@ -1490,6 +1503,17 @@ public final class AccountLaneState {
                 || localStateHash == 0 || localFundsHash == 0 || restoredUsers == null) {
             throw new IllegalArgumentException("invalid account lane snapshot");
         }
+        restoreMetadata(revision, appliedSequence, committedSequence, localStateHash, localFundsHash);
+        userIds.clear();
+        userIds.addAll(restoredUsers);
+    }
+
+    private void restoreMetadata(long revision, long appliedSequence, long committedSequence,
+            long localStateHash, long localFundsHash) {
+        if (revision < 0 || appliedSequence < committedSequence || committedSequence < 0
+                || localStateHash == 0 || localFundsHash == 0) {
+            throw new IllegalArgumentException("invalid account lane snapshot");
+        }
         this.revision = revision;
         this.appliedSequence = appliedSequence;
         this.committedSequence = committedSequence;
@@ -1497,8 +1521,6 @@ public final class AccountLaneState {
         java.util.Arrays.fill(committedSequencesByShard, committedSequence);
         this.localStateHash = localStateHash;
         this.localFundsHash = localFundsHash;
-        userIds.clear();
-        userIds.addAll(restoredUsers);
         pendingReservationSequences.clear();
         pendingReservationCountsByUser.clear();
         pendingReservedUnitsByAsset.clear();
@@ -1545,11 +1567,12 @@ public final class AccountLaneState {
         if (snapshot == null || snapshot.laneId() != laneId) {
             throw new IllegalArgumentException("account lane snapshot route mismatch");
         }
-        // 由元数据快照用户列表构造的成员集合。
-        LongHashSet restoredUsers = new LongHashSet();
-        snapshot.userIds().forEach(restoredUsers::add);
-        restore(snapshot.revision(), snapshot.appliedSequence(), snapshot.committedSequence(),
-                snapshot.localStateHash(), snapshot.localFundsHash(), restoredUsers);
+        restoreMetadata(snapshot.revision(), snapshot.appliedSequence(), snapshot.committedSequence(),
+                snapshot.localStateHash(), snapshot.localFundsHash());
+        userIds.clear();
+        for (int index = 0; index < snapshot.userIds().size(); index++) {
+            userIds.add(snapshot.userIds().get(index));
+        }
     }
 
     /**

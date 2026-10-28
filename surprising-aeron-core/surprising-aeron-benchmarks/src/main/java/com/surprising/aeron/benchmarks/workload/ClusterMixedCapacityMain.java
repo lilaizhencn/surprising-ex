@@ -128,6 +128,10 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
 
     void finishMeasuredRun() {
         if (sideLoad != null) sideLoad.stop();
+        for (int symbol = 0; symbol < SYMBOLS; symbol++) {
+            while (fundingCursor[symbol] != 0) funding(symbol);
+        }
+        drainRisk();
         verify();
         if (sideLoad != null) sideLoad.print();
         print();
@@ -240,7 +244,13 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         }
         long loadEnd = System.nanoTime();
         long loadTerminal = terminal, loadCoreTerminal = coreTerminal, loadFills = fills;
-        if (measure) log.info("{}", "measurementEndEpochMillis=" + System.currentTimeMillis());
+        if (measure) {
+            log.info("{}", "measurementEndEpochMillis=" + System.currentTimeMillis());
+            // 在排空前固定各业务终态数，不能用排空后的构成反推稳定窗口订单吞吐。
+            stats.forEach((type, value) -> log.info(
+                    "steadyBusiness type={} terminalItems={} terminalCoreMessages={}",
+                    type, value.items, value.latency.getTotalCount()));
+        }
         drain();
         if (measure) {
             elapsed = System.nanoTime() - started;
@@ -595,7 +605,10 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             if(b.availableUnits()<0||b.lockedUnits()<0)throw new IllegalStateException("negative balance");
             if(b.asset().equals("USDT"))total=Math.addExact(total,Math.addExact(b.availableUnits(),b.lockedUnits()));
         }
-        for(var t:treasury())if(t.asset().equals("USDT"))total=Math.addExact(total,treasuryFunds(t));
+        for(var t:treasury())if(t.asset().equals("USDT")) {
+            if(t.insuranceDeficitUnits()!=0)throw new IllegalStateException("mixed treasury deficit remains");
+            total=Math.addExact(total,treasuryFunds(t));
+        }
         if (sideLoad != null) total = Math.addExact(total, sideLoad.verifyAndBalance());
         long expected = Math.addExact(expectedFunds(), sideLoad == null ? 0 : sideLoad.netDeposits());
         if(total!=expected||!lossCompleted)throw new IllegalStateException("mixed funds/lifecycle mismatch actual="+total+" expected="+expected);

@@ -146,7 +146,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         lane.bindWorker(thread);
         thread.start();
         while (!started && failure == null) Thread.onSpinWait();
-        rethrowFailure();
+        assertHealthy();
     }
 
     /** 复用的普通控制任务，只释放账户所有权并发布交接完成轮次，不修改资金。 */
@@ -182,7 +182,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      */
     public long submit(Command command) {
         if (command == null) throw new IllegalArgumentException("settlement command is required");
-        rethrowFailure();
+        assertHealthy();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
         // 生产者本次准备写入的零起始位置
         long next = producerSequence.value;
@@ -206,7 +206,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      */
     public long submitAdmission(Command command) {
         if (command == null) throw new IllegalArgumentException("admission command is required");
-        rethrowFailure();
+        assertHealthy();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
         // 生产者本次准备写入的零起始位置
         long next = admissionProducerSequence.value;
@@ -230,12 +230,12 @@ public final class SettlementLaneWorker implements AutoCloseable {
         if (event == null || !event.readyForLane()
                 || matcherShard < 0 || matcherShard >= matcherSettlementRings.length)
             throw new IllegalArgumentException("invalid Matcher settlement publication");
-        rethrowFailure();
+        assertHealthy();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
         // 当前检查或消费的 Matcher 独占生产环
         MatcherSettlementRing ring = matcherSettlementRings[matcherShard];
         while (ring.isFull()) {
-            rethrowFailure();
+            assertHealthy();
             if (!running) throw new RejectedExecutionException("settlement lane is closed");
             Thread.onSpinWait();
         }
@@ -270,13 +270,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
      */
     public boolean hasCapacity() {
         return running && failure == null && depth() < commands.length;
-    }
-
-    /**
-     * 有故障时按原类型继续抛出，不消费任务或完成结果。
-     */
-    public void assertHealthy() {
-        rethrowFailure();
     }
 
     /**
@@ -407,7 +400,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
     /**
      * 保留已存 RuntimeException 或 Error 的原对象抛出，其他 Throwable 包装为账户线程故障。
      */
-    private void rethrowFailure() {
+    public void assertHealthy() {
         // 本账户线程实际保存或传播的原故障
         Throwable laneFailure = failure;
         if (laneFailure instanceof RuntimeException /* 原故障已是 RuntimeException，保留对象直接抛出 */ runtimeFailure) throw runtimeFailure;
@@ -428,7 +421,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
      * 检查原故障后，只判断独立准入物理邮箱是否仍有位置，不检查总深度预算。
      */
     public boolean hasAdmissionCapacity() {
-        rethrowFailure();
+        assertHealthy();
         return running && admissionProducerSequence.value - admissionConsumerSequence.value < admissionCommands.length;
     }
 
@@ -529,7 +522,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
         if (interrupted) Thread.currentThread().interrupt();
         if (thread.isAlive()) throw new IllegalStateException("settlement lane did not stop");
-        rethrowFailure();
+        assertHealthy();
     }
 
     /**

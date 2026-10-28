@@ -82,49 +82,12 @@ public final class RuntimeFactIndexes implements TradingAccountRuntime.ChangedIn
     }
 
     /**
-     * 读取已有强平轻量路由，不读取账户正文。
-     * @param id 待查询的订单、强平、算法或触发单业务 ID
-     */
-    public com.surprising.aeron.service.core.index.LiquidationIndex.LiquidationRoute liquidationRoute(long id) {
-        return liquidations.route(id);
-    }
-    /**
-     * 按可空标的文本检查是否还有未结束强平任务，空值表示全部标的。
-     * @param instrumentId 永久数字标的文本
-     */
-    public boolean hasUnresolvedLiquidation(String instrumentId) { return liquidations.hasUnresolved(instrumentId); }
-
-    /**
-     * 读取已有算法单轻量路由。
-     * @param id 待查询的订单、强平、算法或触发单业务 ID
-     */
-    public com.surprising.aeron.service.core.index.AlgoOrderIndex.AlgoRoute algoRoute(long id) { return algos.value(id); }
-
-    /**
-     * 读取已有触发单轻量路由。
-     * @param id 待查询的订单、强平、算法或触发单业务 ID
-     */
-    public TriggerOrderIndex.TriggerRoute triggerRoute(long id) { return triggers.route(id); }
-
-    /**
-     * 借用已有可变活跃订单路由，不能跨下次索引修改保存。
-     * @param id 待查询的订单、强平、算法或触发单业务 ID
-     */
-    public ActiveOrderIndex.IndexedOrder activeOrderRoute(long id) { return activeOrders.activeOrderRoute(id); }
-
-    /**
      * 只把持仓用户、未平仓量及 ADL 三个业务索引绑定到指定线程；其他 Owner 路由不随之转移。
      * @param thread 三个持仓业务索引新的权威线程
      */
     public void bindBusinessOwner(Thread thread) {
         positionUsers.bindBusinessOwner(thread); openInterest.bindBusinessOwner(thread); adlPositions.bindBusinessOwner(thread);
     }
-
-    /**
-     * 通过现有业务索引读取标的未平仓量，仍受该索引线程门禁约束。
-     * @param instrumentId 永久数字标的文本
-     */
-    public long admissionOpenInterest(String instrumentId) { return openInterest.openInterestSteps(instrumentId); }
 
     /**
      * 账本消费 laneMask 指定的冻结持仓发布缓冲，逐 Lane 更新业务索引；外层在消费完成之前保留结算结果租约。

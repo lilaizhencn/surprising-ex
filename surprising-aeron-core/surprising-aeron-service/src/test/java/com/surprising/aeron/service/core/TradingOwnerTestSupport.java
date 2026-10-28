@@ -89,7 +89,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
         logContext = new OwnerLogContext(cluster.role(), cluster.time(), cluster.logPosition());
         owner.start(logContext);
         if (snapshotImage != null) {
-            var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.RecoveryBuffer();
+            var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery();
             while (!snapshotImage.isEndOfStream()) {
                 int fragments = snapshotImage.poll(
                         (buffer, offset, length, header) -> recovery.accept(buffer, offset, length), 10);
@@ -362,7 +362,7 @@ public final class TradingOwnerTestSupport implements ClusteredService {
      * @param endOfStream 判断输入已经结束的函数
      */
     public void loadSnapshot(SnapshotFragmentSource source, BooleanSupplier endOfStream) {
-        var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec.RecoveryBuffer();
+        var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery();
         while (!endOfStream.getAsBoolean()) {
             int fragments = source.poll((buffer, offset, length, header) -> recovery.accept(buffer, offset, length), 10);
             if (fragments == 0) Thread.onSpinWait();

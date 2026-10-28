@@ -78,7 +78,8 @@ class CoreAlgoLaneQueryTest {
         var identities = new RuntimeIdentityRegistry();
         try (/* 由同一业务状态生成的冷运行时，直接查询它以构造协议字节参照，结束时关闭。 */ var cold = RuntimeStateProjector.project(state, identities); /* 本用例激活的在线核心，查询结果必须通过所属 Lane 返回，结束时释放工作资源。 */ var core = initial(state)) {
             // 冷运行时按 502、501、503 顺序汇总的父单视图，用于核对在线编码结果。
-            var expected = RuntimeOperationalQueryService.algoOrders(cold, List.of(502L, 501L, 503L));
+            var expected = List.of(RuntimeOperationalQueryService.algoOrder(cold, 502),
+                    RuntimeOperationalQueryService.algoOrder(cold, 501), RuntimeOperationalQueryService.algoOrder(cold, 503));
             core.activate();
             assertThat(core.activeOrderIndex().activeOrderRoute(102)).isNull();
             assertThat(core.activeOrderIndex().activeOrderRoute(104)).isNull();

@@ -64,7 +64,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
         capture = state.attachRealtime(outbox);
         capture.orderProjectionOnly(true);
         capture.liquidationObserver(liquidationChanges::add);
-        state.funding().observeReplayPayments(/* 资金费观察器交来的本命令完成事实，暂存后统一生成分页 */ result -> fundingResult = result);
+        state.observeReplayFundingPayments(/* 资金费观察器交来的本命令完成事实，暂存后统一生成分页 */ result -> fundingResult = result);
         forEachRetainedAlgo(/* 构造时遍历父单以重建路由的空消费者参数，不另外处理视图 */ ignored -> {});
     }
 
@@ -220,7 +220,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                 var flows = new ArrayList<DeliveryCashFlow>();
                 for (var /* 本页某用户执行前保存的结算资产及总额 */ before : deliveryBalances) {
                     // 本页该用户执行后的结算资产总额
-                    long total = deliveryBalance(before.userId(), before.asset(), timestamp, logPosition);
+                    long total = deliveryBalance(before.userId(), before.asset());
                     // 精确相减得到的本页现金差额
                     long amount = Math.subtractExact(total, before.totalUnits());
                     if (amount != 0) flows.add(new DeliveryCashFlow(before.userId(), before.asset(), amount, total));
@@ -501,7 +501,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
                             Math.min(32, command.maxUsers() - balances.size()))), timestamp, position).data());
             for (long /* 当前命令现金所属用户或内部查询目标 */ user : page.userIds()) {
                 if (user <= cursor) throw new IllegalStateException("nonadvancing committed delivery user page");
-                balances.add(new BeforeDeliveryBalance(user, instrument.settleAsset(), deliveryBalance(user, instrument.settleAsset(), timestamp, position)));
+                balances.add(new BeforeDeliveryBalance(user, instrument.settleAsset(), deliveryBalance(user, instrument.settleAsset())));
                 cursor = user;
             }
             if (!page.hasMore()) break;
@@ -510,22 +510,29 @@ public final class CommittedTradeReplay implements AutoCloseable {
         return List.copyOf(balances);
     }
 
-    /**
-     * 通过本副本的用户状态查询读取结算资产总额，核对产品和用户身份并要求余额存在，再用精确加法合计可用与冻结。
-     * @param user 本次读取或查询的用户 ID
-     * @param asset 需要比较的规范资产代码
-     * @param timestamp 该日志项原复制业务时间
-     * @param position 本副本内部读取使用的日志位置上下文
-     */
-    private long deliveryBalance(long user, String asset, long timestamp, long position) {
-        // 本副本用户状态查询返回的已解码视图
-        var view = CoreStateQueryCodec.decodeUserState(replayQuery(CoreMessageType.USER_STATE_QUERY, user, new byte[0], timestamp, position).data());
-        if (view.userId() != user || view.productLine() != state.productLine())
-            throw new IllegalStateException("committed delivery account identity mismatch");
-        // 当前资产的可空余额值或交割查询命中的结算余额
-        var balance = view.balances().stream().filter(/* 当前被筛选的用户资产余额，要求是本页结算资产 */ value -> value.asset().equals(asset)).findFirst()
-                .orElseThrow(() -> new IllegalStateException("delivery position has no settlement balance"));
-        return Math.addExact(balance.availableUnits(), balance.lockedUnits());
+    /** 在本副本 Owner 读取边界直接读取结算资产，余额缺失或总额溢出时拒绝推进交割检查点。 */
+    private long deliveryBalance(long user, String asset) {
+        var runtime = state.runtimeState();
+        Integer assetId = state.identities().findAssetId(asset);
+        boolean acquired = false;
+        try {
+            if (runtime.accountLanesStarted() && !runtime.ownerLaneAccess()) {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!runtime.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() >= deadline)
+                        throw new IllegalStateException("committed delivery balance read timeout; checkpoint must not advance");
+                    java.util.concurrent.locks.LockSupport.parkNanos(1_000L);
+                }
+                acquired = true;
+            }
+            if (runtime.productLine() != state.productLine() || runtime.user(user) == null)
+                throw new IllegalStateException("committed delivery account identity mismatch");
+            var balance = assetId == null ? null : runtime.balance(user, assetId);
+            if (balance == null) throw new IllegalStateException("delivery position has no settlement balance");
+            return Math.addExact(balance.availableUnits(), balance.lockedUnits());
+        } finally {
+            if (acquired) runtime.releaseOwnerLaneAccess();
+        }
     }
 
     /**

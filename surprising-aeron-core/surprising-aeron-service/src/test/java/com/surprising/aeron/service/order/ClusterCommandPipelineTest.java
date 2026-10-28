@@ -2070,10 +2070,34 @@ class ClusterCommandPipelineTest {
             CoreFaults.attachRealtime(f.service, outbox);
             // 已有实时快照请求队列，等待 Owner 在提交边界消费
             var requests = f.service.snapshotRequests();
-            f.send(f.placeBatch(11, "1", 1000));
-            requests.add(new RealtimeFrame(product, RealtimeFrame.Kind.SNAPSHOT_REQUEST,
-                    11, 0, 0, TIME, 900, "", "", new byte[0]));
-            assertThat(f.service.doBackgroundWork(System.nanoTime())).isZero();
+            // 固定未提交边界，直接检查命令与请求状态；后台进展计数也包含准入和派发。
+            var matcherField = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
+            matcherField.setAccessible(true);
+            var matcher = (MatcherPipelineGroup) matcherField.get(f.service.state());
+            CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+            var held = matcher.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("matcher test timeout");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+                return 1;
+            });
+            try {
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                f.send(f.placeBatch(11, "1", 1000));
+                requests.add(new RealtimeFrame(product, RealtimeFrame.Kind.SNAPSHOT_REQUEST,
+                        11, 0, 0, TIME, 900, "", "", new byte[0]));
+                f.service.doBackgroundWork(System.nanoTime());
+                assertThat(f.service.commandWindowSize()).isOne();
+                assertThat(requests.size()).isOne();
+                assertThat(f.responses).isEmpty();
+            } finally {
+                release.countDown();
+            }
+            held.get(5, TimeUnit.SECONDS);
             f.send(f.placeBatch(11, "1", 2000));
             f.progressUntil(() -> requests.isEmpty());
             assertThat(f.service.commandWindowSize()).isOne();

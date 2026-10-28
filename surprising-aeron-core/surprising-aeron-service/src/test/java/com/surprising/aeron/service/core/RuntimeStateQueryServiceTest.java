@@ -68,20 +68,25 @@ class RuntimeStateQueryServiceTest {
         // 把同一运行时完整物化得到的业务状态，用它独立核对用户与订单状态哈希。
         TradingCoreState snapshot = RuntimeStateMaterializer.materialize(runtime, identities);
         // 在该用户所属 Lane 内组装的完整用户查询结果。
-        var user = RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001);
+        var user = RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false);
         // 按 Core 订单编号 71 直接查询的订单结果。
-        var order = RuntimeStateQueryService.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71);
+        var order = RuntimeStateQueryService.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, false);
         // 按用户及客户端标识查询的结果，应与直接订单编号查询完全相同。
         var clientOrder = RuntimeStateQueryService.clientOrderState(runtime, runtime.accountLaneForUser(1001), identities, 1001, "client-71");
 
         assertThat(user.found()).isTrue();
-        assertThat(user.stateHash()).isEqualTo(snapshot.userStateHash(1001));
+        assertThat(RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, true)
+                .stateHash()).isEqualTo(snapshot.userStateHash(1001));
+        assertThat(user.stateHash()).isZero();
         assertThat(user.view().balances()).hasSize(1);
         assertThat(user.view().reservations()).hasSize(1);
         assertThat(user.view().positions()).hasSize(1);
         assertThat(user.view().leverages()).hasSize(1);
         assertThat(order.found()).isTrue();
-        assertThat(order.stateHash()).isEqualTo(snapshot.orderStateHash(71));
+        var orderHash = RuntimeStateQueryService.orderState(runtime, runtime.accountLaneForUser(1001), identities, 71, true);
+        assertThat(orderHash.stateHash()).isEqualTo(snapshot.orderStateHash(71));
+        assertThat(orderHash.view()).isNull();
+        assertThat(order.stateHash()).isZero();
         assertThat(clientOrder).isEqualTo(order);
     }
 
@@ -123,6 +128,6 @@ class RuntimeStateQueryServiceTest {
             runtime.putBalance(new BalanceRuntime(1001, assetId, 1, 0));
         }
 
-        assertThat(RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001).tooLarge()).isTrue();
+        assertThat(RuntimeStateQueryService.userState(runtime, runtime.accountLaneForUser(1001), identities, 1001, false).tooLarge()).isTrue();
     }
 }

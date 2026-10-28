@@ -114,52 +114,38 @@ public final class RuntimeOperationalQueryService {
     }
 
     /**
-     * 在母单和累计子单扫描上限内，汇总退役与仍保留子单的成交量和活动数量；已关联列表与待关联终态编号分别返回，最多一万条。
+     * 查询一笔算法母单，在子单扫描上限内汇总退役及仍保留子单的成交量和活动数量；母单不存在时返回 null。
      * @param runtime 本次查询的运行时，调用方负责在正确账户 Lane 或账本读取范围内调用
-     * @param algoIds 要查看的算法母单编号集合，空编号会跳过
+     * @param algoOrderId 要查看的算法母单编号
      */
-    public static List<CoreAlgoOrderView> algoOrders(TradingAccountRuntime runtime, Iterable<Long> algoIds) {
-        // 本次入口逐项组装的协议查询视图，达到其结果上限就停止。
-        ArrayList<CoreAlgoOrderView> result = new ArrayList<>();
-        // 本次已检查的非空候选数量，按入口规则超限时停止或抛响应过大异常。
-        int scanned = 0;
-        // 所有已读取母单累计涉及的子单编号数，单独检查扫描上限。
-        int scannedChildren = 0;
-        for (Long /* 本轮要读取的算法母单编号，记录已不存在时不生成视图。 */ algoId : algoIds) {
-            if (algoId == null) continue;
-            if (++scanned > MAX_INDEX_SCAN) throw new QueryTooLargeException();
-            // 当前算法母单，提供切片计划、已退役成交进度及仍关联的子单编号。
-            CoreAlgoOrderState state = runtime.algoOrder(algoId);
-            if (state == null) continue;
-            scannedChildren = Math.addExact(scannedChildren, state.childOrderIds().size());
-            if (scannedChildren > MAX_INDEX_SCAN) throw new QueryTooLargeException();
-            // 母单累计成交数量，先含退役子单进度，再加仍可读取子单的成交量。
-            long executed = state.retiredExecutedQuantitySteps();
-            // 母单仍处于 OPEN 的子单未成交量合计，单位为数量步数。
-            long active = 0;
-            // 仍有效的 OPEN 子单数量，与总历史子单数量区分。
-            int activeCount = 0;
-            for (long /* 母单当前关联的一笔子单编号，用来读取最新成交与剩余数量。 */ childOrderId : state.childOrderIds()) {
-                // 子单当前订单状态；已退役且不存在时，其最终成交应已计入母单历史进度。
-                OrderRuntime child = runtime.order(childOrderId);
-                if (child == null) continue; // 子单退役前，其最终成交量已经累计到母单。
-                executed = Math.addExact(executed, child.executedQuantitySteps());
-                if (child.status() == CoreOrderStatus.OPEN) {
-                    active = Math.addExact(active, child.remainingQuantitySteps());
-                    activeCount++;
-                }
+    public static CoreAlgoOrderView algoOrder(TradingAccountRuntime runtime, long algoOrderId) {
+        CoreAlgoOrderState state = runtime.algoOrder(algoOrderId);
+        if (state == null) return null;
+        if (state.childOrderIds().size() > MAX_INDEX_SCAN) throw new QueryTooLargeException();
+        // 母单累计成交数量，先含退役子单进度，再加仍可读取子单的成交量。
+        long executed = state.retiredExecutedQuantitySteps();
+        // 母单仍处于 OPEN 的子单未成交量合计，单位为数量步数。
+        long active = 0;
+        // 仍有效的 OPEN 子单数量，与总历史子单数量区分。
+        int activeCount = 0;
+        for (long /* 母单当前关联的一笔子单编号，用来读取最新成交与剩余数量。 */ childOrderId : state.childOrderIds()) {
+            // 子单当前订单状态；已退役且不存在时，其最终成交应已计入母单历史进度。
+            OrderRuntime child = runtime.order(childOrderId);
+            if (child == null) continue; // 子单退役前，其最终成交量已经累计到母单。
+            executed = Math.addExact(executed, child.executedQuantitySteps());
+            if (child.status() == CoreOrderStatus.OPEN) {
+                active = Math.addExact(active, child.remainingQuantitySteps());
+                activeCount++;
             }
-            result.add(new CoreAlgoOrderView(state.algoOrderId(), state.userId(), state.clientAlgoOrderId(),
-                    state.instrumentId(), state.algoTypeCode(), state.side(), state.priceTicks(), state.quantitySteps(),
-                    state.childQuantitySteps(), state.intervalSeconds(), state.durationSeconds(), state.marginMode(),
-                    state.positionSide(), state.reduceOnly(), state.timeInForce(), state.statusCode(),
-                    state.currentOrderId(), state.rejectReason(), state.startAtEpochMillis(),
-                    state.nextSliceAtEpochMillis(), state.createdAtEpochMillis(),
-                    state.updatedAtEpochMillis(), state.revision(), state.childOrderIds(), executed, active,
-                    activeCount, state.pendingClosedChildId()));
-            if (result.size() == MAX_QUERY_ENTITIES) break;
         }
-        return List.copyOf(result);
+        return new CoreAlgoOrderView(state.algoOrderId(), state.userId(), state.clientAlgoOrderId(),
+                state.instrumentId(), state.algoTypeCode(), state.side(), state.priceTicks(), state.quantitySteps(),
+                state.childQuantitySteps(), state.intervalSeconds(), state.durationSeconds(), state.marginMode(),
+                state.positionSide(), state.reduceOnly(), state.timeInForce(), state.statusCode(),
+                state.currentOrderId(), state.rejectReason(), state.startAtEpochMillis(),
+                state.nextSliceAtEpochMillis(), state.createdAtEpochMillis(),
+                state.updatedAtEpochMillis(), state.revision(), state.childOrderIds(), executed, active,
+                activeCount, state.pendingClosedChildId());
     }
 
     /**

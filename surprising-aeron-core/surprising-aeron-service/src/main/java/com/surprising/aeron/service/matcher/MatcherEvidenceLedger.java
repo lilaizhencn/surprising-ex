@@ -32,7 +32,13 @@ final class MatcherEvidenceLedger {
      * @param topology 包含撮合分片数量的有效 Lane 拓扑
      */
     MatcherEvidenceLedger(LaneTopology topology) {
-        this(topology, 0, initialProgress(topology));
+        if (topology == null) throw new IllegalArgumentException("matcher topology is required");
+        this.topology = topology;
+        this.shardCount = topology.matchingEngineCount() + 1;
+        int paddedLength = Math.multiplyExact(shardCount, CACHE_LINE_LONGS);
+        this.shardSequences = new long[paddedLength];
+        this.shardNativeSequences = new long[paddedLength];
+        this.issuedSequences = new long[paddedLength];
     }
 
     /**
@@ -110,27 +116,6 @@ final class MatcherEvidenceLedger {
     }
 
     /**
-     * 要求 UUID 非空，拆成高低位后向现有结算事件直接发布原生成交或撤单结果，沿用原有事件租约。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandId 原命令非空 UUID
-     * @param orderId 该事实关联的订单编号
-     * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
-     * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
-     * @param result 要绑定或发布的非空原生结果/普通结果对象
-     * @param target 当前命令持有租约的原 MatcherSettlementEvent，不新建账户结算状态
-     */
-    exchange.core2.core.common.MatcherResult publishNative(
-            long coreSequence, java.util.UUID commandId, long orderId,
-            long sequence, int matcherShardId, int nativeMatcherShardId,
-            exchange.core2.core.common.MatcherResult result,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("native matcher publication is required");
-        return publishNative(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, sequence, matcherShardId, nativeMatcherShardId, result, target);
-    }
-
-    /**
      * 检查结果和目标非空，正原生序号先按实际订单簿分片推进，再推进业务证据分片并向现有结算事件直接发布原生成交或撤单结果。失败不自动回退已写进度。
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandIdMsb 原命令 UUID 高六十四位
@@ -163,29 +148,6 @@ final class MatcherEvidenceLedger {
                 commandIdMsb, commandIdLsb, orderId,
                 sequence, matcherShardId);
         return result;
-    }
-
-    /**
-     * 要求 UUID 非空，拆成高低位后向现有结算事件发布撤旧与放新两个替换结果，沿用原有事件租约。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandId 原命令非空 UUID
-     * @param orderId 该事实关联的订单编号
-     * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
-     * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
-     * @param cancellation 替换操作中已经发生的撤旧原生结果
-     * @param result 要绑定或发布的非空原生结果/普通结果对象
-     * @param target 当前命令持有租约的原 MatcherSettlementEvent，不新建账户结算状态
-     */
-    exchange.core2.core.common.MatcherResult publishReplacement(
-            long coreSequence, java.util.UUID commandId, long orderId,
-            long sequence, int matcherShardId, int nativeMatcherShardId,
-            exchange.core2.core.common.MatcherResult cancellation,
-            exchange.core2.core.common.MatcherResult result,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("native matcher replacement publication is required");
-        return publishReplacement(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, sequence, matcherShardId, nativeMatcherShardId, cancellation, result, target);
     }
 
     /**
@@ -224,28 +186,6 @@ final class MatcherEvidenceLedger {
     }
 
     /**
-     * 要求 UUID 非空，拆成高低位后向现有结算事件指定下标发布一个批次子结果，沿用原有事件租约。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandId 原命令非空 UUID
-     * @param orderId 该事实关联的订单编号
-     * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
-     * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param nativeMatcherShardId 原生结果实际产生的订单簿分片，可与控制业务证据分片不同
-     * @param result 要绑定或发布的非空原生结果/普通结果对象
-     * @param index 逻辑数组下标，或 publishBatchItem 中目标批次子项下标
-     * @param target 当前命令持有租约的原 MatcherSettlementEvent，不新建账户结算状态
-     */
-    exchange.core2.core.common.MatcherResult publishBatchItem(
-            long coreSequence, java.util.UUID commandId, long orderId,
-            long sequence, int matcherShardId, int nativeMatcherShardId,
-            exchange.core2.core.common.MatcherResult result, int index,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("native matcher batch publication is required");
-        return publishBatchItem(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, sequence, matcherShardId, nativeMatcherShardId, result, index, target);
-    }
-
-    /**
      * 检查结果和目标非空，推进正原生序号及业务证据序号，再将结果和批次下标交给现有事件；本方法不额外检查目标批次下标，也不读取 aeronTimestamp，失败不回退已写序号。
      * @param coreSequence 该结果对应的 Core 命令序号
      * @param commandIdMsb 原命令 UUID 高六十四位
@@ -277,25 +217,6 @@ final class MatcherEvidenceLedger {
                 commandIdMsb, commandIdLsb, orderId,
                 sequence, matcherShardId);
         return result;
-    }
-
-    /**
-     * 要求命令 UUID 非空，拆高低位后发布没有原生成功结果的拒绝事实。
-     * @param coreSequence 该结果对应的 Core 命令序号
-     * @param commandId 原命令非空 UUID
-     * @param orderId 该事实关联的订单编号
-     * @param sequence 要发布的业务分片证据序号，必须严格大于原已发布值
-     * @param matcherShardId 业务证据所属分片，控制命令使用负一
-     * @param resultCode 要保存的非空拒绝结果码
-     * @param target 当前命令持有租约的原 MatcherSettlementEvent，不新建账户结算状态
-     */
-    void publishRejection(
-            long coreSequence, java.util.UUID commandId, long orderId,
-            long sequence, int matcherShardId, String resultCode,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("matcher rejection publication is required");
-        publishRejection(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, sequence, matcherShardId, resultCode, target);
     }
 
     /**
@@ -377,17 +298,4 @@ final class MatcherEvidenceLedger {
         return index * CACHE_LINE_LONGS;
     }
 
-    /**
-     * 按拓扑生成负一控制分片及所有撮合分片的零进度，只固定外层列表。
-     * @param topology 包含撮合分片数量的有效 Lane 拓扑
-     */
-    private static List<MatcherShardProgress> initialProgress(LaneTopology topology) {
-        if (topology == null) throw new IllegalArgumentException("matcher topology is required");
-        // 本次快照或初始零进度的列表构建器，返回前固定列表。
-        ArrayList<MatcherShardProgress> progress = new ArrayList<>(topology.matchingEngineCount() + 1);
-        for (/* 初始化时从负一控制分片到最后一个撮合分片的编号。 */ int shardId = -1; shardId < topology.matchingEngineCount(); shardId++) {
-            progress.add(new MatcherShardProgress(shardId, 0));
-        }
-        return List.copyOf(progress);
-    }
 }

@@ -54,7 +54,7 @@ class AccountControlTaskResultTest {
                 assertThat(task.stateChanged()).isTrue();
                 assertThat(runtime.controlLaneResult(runtime.topology().accountLaneId(7))).isNull();
                 long revision = runtime.revision();
-                assertThat(task.poll()).isTrue();
+                assertThat(task.getAsBoolean()).isTrue();
                 assertThat(runtime.revision()).isEqualTo(revision);
                 var committed = LedgerControlTestSupport.commit(runtime, ids, false);
                 assertThat(committed.users().get(7L).balances().get("USDT"))

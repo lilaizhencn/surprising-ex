@@ -6,8 +6,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
-import com.surprising.aeron.service.treasury.SystemLedgerCommand;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,8 +33,6 @@ public final class RiskScanCoordinator {
     private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] userPages;
     /** 当前币对片段最多可分给各 Lane 的工作预算。 */
     private int sliceBudget;
-    /** 准备用户路由时的账本命令引用，发布路由前用来同步风险持仓索引输入。 */
-    private SystemLedgerCommand ledgerScope;
     /** Owner 选中的本片原扫描记录，含行情序号及各 Lane 上次进度。 */
     private RiskScanRuntime initial;
     /** Owner 捕获的币对配置引用，Lane 估值只读使用，不在这里深复制配置。 */
@@ -49,7 +45,7 @@ public final class RiskScanCoordinator {
     private long laneMask, creationMask, nextLiquidationId;
     /** nextLane：下一轮从哪个 Lane 开始分配预算，Owner 在本片结束时提交为轮转位置；work：当前片段实际扣减的预算，参与 Lane 或空访问至少各计一个单位。 */
     private int nextLane, work;
-    /** 0 捕获本片输入，4 等账本路由，1 等 Lane 估值，2 等 Lane 写入新强平，3 命令完成。 */
+    /** 0 捕获本片输入，1 等 Lane 估值，2 等 Lane 写入新强平，3 命令完成。 */
     private int phase;
 
     /**
@@ -78,7 +74,7 @@ public final class RiskScanCoordinator {
     }
 
     /**
-     * Owner 为下一命令重新设置预算和阶段，复用各 Lane 数组；账本仍持有路由时拒绝复用，旧命令完成或失败回滚后的残留片段在这里丢弃。
+     * Owner 为下一命令重新设置预算和阶段，复用各 Lane 数组，丢弃旧命令完成或失败回滚后的残留片段。
      * @param maxWork 调用方允许的工作量上限，范围为 1 到 4096，实际还受扫描控制配置限制
      */
     public void resetForCommand(int maxWork) {
@@ -123,8 +119,11 @@ public final class RiskScanCoordinator {
             RiskScanRuntime selected = remaining == 0 ? null : runtime.firstRiskIncompleteScan();
             if (selected == null) { phase = 3; return true; }
             prepare(selected, Math.min(8, remaining));
-            runtime.dispatchLedgerRiskInput(this);
-            if (laneMask != 0) runtime.dispatchRiskLanes(laneMask, this::scanLane);
+            runtime.publishRiskPositionInputs();
+            prepareRoutes();
+            if (laneMask != 0) runtime.dispatchRiskLanes(laneMask, lane ->
+                    RiskLaneProcessor.scan(runtime, lane, inputs[lane], userPages[lane],
+                            instrument, mark, settleAssetId, initial.symbolId(), allocations[lane], identities));
             phase = 1;
         }
         if (laneMask != 0 && !runtime.pollControlLanes()) return false;
@@ -134,7 +133,10 @@ public final class RiskScanCoordinator {
                     results[lane] = (RiskLaneProcessor.Page) runtime.controlLaneResult(lane);
             assignLiquidationIds();
             if (creationMask != 0) {
-                runtime.dispatchRiskLanes(creationMask, this::applyLiquidations);
+                runtime.dispatchRiskLanes(creationMask, lane -> {
+                    results[lane].creations().apply(runtime);
+                    return null;
+                });
                 phase = 2;
                 return false;
             }
@@ -171,8 +173,7 @@ public final class RiskScanCoordinator {
     /**
      * 先发布持仓用户索引输入，再为每个 Lane 准备有界用户页与恢复游标，从上次轮转点给未完成 Lane 分配预算。
      */
-    public void applyRoutes() {
-        if (ledgerScope != null) ledgerScope.publishRiskPositionInputs();
+    private void prepareRoutes() {
         // 原扫描已经保存的各 Lane 独立进度；空列表表示新扫描尚未分派。
         List<RiskLaneProgress> cursors = initial.laneProgress();
         if (!cursors.isEmpty() && cursors.size() != inputs.length)
@@ -201,7 +202,7 @@ public final class RiskScanCoordinator {
             allocations[lane] = 0;
             if (!cursor.complete()) participants++;
         }
-        if (participants == 0) { nextLane = initial.accountLaneId(); publishRoutes(); return; }
+        if (participants == 0) { nextLane = initial.accountLaneId(); return; }
         // 本片真正能获得预算的 Lane 数量，不能超过参与数和片段预算。
         int selectedCount = Math.min(participants, sliceBudget);
         // 已经分配到工作量的 Lane 数量，用于均分及分配余数。
@@ -216,38 +217,6 @@ public final class RiskScanCoordinator {
             nextLane = (lane + 1) % inputs.length;
             assigned++;
         }
-        publishRoutes();
-    }
-
-    /**
-     * 账本释放当前路由命令引用。
-     */
-    private void publishRoutes() {
-        ledgerScope = null;
-    }
-
-    /**
-     * 绑定本次账本命令作用域，账本准备路由前用它发布风险持仓索引输入。
-     * @param scope 当前账本路由命令的作用域引用
-     */
-    public void bindLedgerScope(SystemLedgerCommand scope) { ledgerScope = scope; }
-
-    /**
-     * 在所属账户 Lane 内读取自己的有界用户页、分配预算和上次修订号，执行估值并返回本 Lane 回执。
-     * @param lane 本次准备、估值或提交的账户 Lane 编号
-     */
-    private RiskLaneProcessor.Page scanLane(int lane) {
-        return RiskLaneProcessor.scan(runtime, lane, inputs[lane], userPages[lane],
-                instrument, mark, settleAssetId, initial.symbolId(), allocations[lane], identities);
-    }
-
-    /**
-     * 由原账户 Lane 将 Owner 已经编号的新强平需求逐条写入运行时，本次回调不返回额外结果。
-     * @param lane 本次准备、估值或提交的账户 Lane 编号
-     */
-    private Object applyLiquidations(int lane) {
-        results[lane].creations().apply(runtime);
-        return null;
     }
 
     /**
@@ -277,32 +246,28 @@ public final class RiskScanCoordinator {
         for (int lane = 0; lane < inputs.length; lane++) {
             RiskLaneProcessor.Page page = results[lane];
             RiskLaneProgress cursor = page == null ? inputs[lane] : page.progress();
-            boolean done = cursor.complete();
-            long userRevision = cursor.userRevision();
-            long marketRevision = page == null ? inputs[lane].marketRevision() : runtime.marketRevision();
-            // 只保存各 Lane 自身的游标；没有未完成用户时清除累计值所依据的修订号。
-            cursors.add(new RiskLaneProgress(cursor.lastUserId(), done, cursor.userId(), cursor.phase(),
-                    cursor.positionCursor(), cursor.reservationCursor(), cursor.unrealizedPnlUnits(),
-                    cursor.maintenanceMarginUnits(), cursor.isolatedMarginUnits(), cursor.isolatedReservationUnits(),
-                    cursor.userId() == 0 ? 0 : userRevision, cursor.userId() == 0 ? 0 : marketRevision));
-            complete &= done;
+            cursors.add(cursor);
+            complete &= cursor.complete();
         }
         if (nextLiquidationId != runtime.nextLiquidationId()) runtime.setNextLiquidationId(nextLiquidationId);
         if (complete) nextLane = inputs.length - 1;
         if (!complete) {
             while (cursors.get(nextLane).complete()) nextLane = (nextLane + 1) % inputs.length;
         }
-        RiskScanRuntime next = new RiskScanRuntime(initial.symbolId(), nextLane, initial.priceSequence(),
-                initial.scanStartPriceSequence(), complete, initial.triggerComplete(), initial.triggerPhase(),
-                initial.triggerPriceCursor(), initial.triggerOrderCursor(), initial.triggerUpperId(),
-                initial.triggerMarkPriceTicks(), initial.triggerGeneratedAtEpochMillis(),
-                initial.triggerOcoOrderId(), initial.triggerOcoCursor(), initial.lastScheduledRevision(), cursors);
+        long scheduledRevision = Math.incrementExact(runtime.revision());
+        RiskScanRuntime next;
         if (complete && initial.scanStartPriceSequence() != initial.priceSequence()) {
             next = new RiskScanRuntime(initial.symbolId(), 0, initial.priceSequence(), initial.priceSequence(),
-                    false, next.triggerComplete(), next.triggerPhase(), next.triggerPriceCursor(),
-                    next.triggerOrderCursor(), next.triggerUpperId(), next.triggerMarkPriceTicks(),
-                    next.triggerGeneratedAtEpochMillis(), 0, 0, 0, List.of());
+                    false, initial.triggerComplete(), initial.triggerPhase(), initial.triggerPriceCursor(),
+                    initial.triggerOrderCursor(), initial.triggerUpperId(), initial.triggerMarkPriceTicks(),
+                    initial.triggerGeneratedAtEpochMillis(), 0, 0, scheduledRevision, List.of());
+        } else {
+            next = new RiskScanRuntime(initial.symbolId(), nextLane, initial.priceSequence(),
+                    initial.scanStartPriceSequence(), complete, initial.triggerComplete(), initial.triggerPhase(),
+                    initial.triggerPriceCursor(), initial.triggerOrderCursor(), initial.triggerUpperId(),
+                    initial.triggerMarkPriceTicks(), initial.triggerGeneratedAtEpochMillis(),
+                    initial.triggerOcoOrderId(), initial.triggerOcoCursor(), scheduledRevision, cursors);
         }
-        runtime.putRiskScan(next.withLastScheduledRevision(Math.incrementExact(runtime.revision())));
+        runtime.putRiskScan(next);
     }
 }

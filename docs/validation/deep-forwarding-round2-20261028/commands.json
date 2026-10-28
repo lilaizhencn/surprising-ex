@@ -1,0 +1,1503 @@
+{
+  "micro": [
+    {
+      "role": "main",
+      "argv": [
+        "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+        "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-jar",
+        "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+        "OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision",
+        "-bm",
+        "avgt",
+        "-tu",
+        "ns",
+        "-t",
+        "1",
+        "-f",
+        "1",
+        "-wi",
+        "2",
+        "-w",
+        "1s",
+        "-i",
+        "3",
+        "-r",
+        "1s",
+        "-p",
+        "liveOrders=0,8,64",
+        "-p",
+        "capacitySlack=0,1",
+        "-jvmArgsAppend",
+        "-Xms1g -Xmx1g -XX:+UseG1GC",
+        "-foe",
+        "true",
+        "-rf",
+        "json",
+        "-rff",
+        "/tmp/surprising-round2-evidence/micro/main.json"
+      ],
+      "started_epoch_ms": 1793158438738,
+      "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   290700.\nPages active:                                1079160.\nPages inactive:                              1239525.\nPages speculative:                             26507.\nPages throttled:                                   0.\nPages wired down:                            1199285.\nPages purgeable:                               43229.\n\"Translation faults\":                    30224540332.\nPages copy-on-write:                      1138962627.\nPages zero filled:                       21772261785.\nPages reactivated:                         798926415.\nPages purged:                                4882929.\nFile-backed pages:                            906286.\nAnonymous pages:                             1438903.\nPages stored in compressor:                  4219735.\nPages occupied by compressor:                 358051.\nDecompressions:                            361571119.\nCompressions:                              508900127.\nPageins:                                   430891914.\nPageouts:                                    6126855.\nSwapins:                                   246781576.\nSwapouts:                                  259461010.\n",
+      "swap_before": "vm.swapusage: total = 7168.00M  used = 5715.50M  free = 1452.50M  (encrypted)\n",
+      "returncode": 0,
+      "finished_epoch_ms": 1793158474389,
+      "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   162558.\nPages active:                                1178243.\nPages inactive:                              1248093.\nPages speculative:                             23564.\nPages throttled:                                   0.\nPages wired down:                            1196507.\nPages purgeable:                               29477.\n\"Translation faults\":                    30229816512.\nPages copy-on-write:                      1139149902.\nPages zero filled:                       21776235750.\nPages reactivated:                         798926654.\nPages purged:                                4882938.\nFile-backed pages:                            912791.\nAnonymous pages:                             1537109.\nPages stored in compressor:                  4133173.\nPages occupied by compressor:                 384127.\nDecompressions:                            361654516.\nCompressions:                              508900127.\nPageins:                                   430899779.\nPageouts:                                    6126943.\nSwapins:                                   246834783.\nSwapouts:                                  259461010.\n",
+      "swap_after": "vm.swapusage: total = 7168.00M  used = 5491.50M  free = 1676.50M  (encrypted)\n"
+    },
+    {
+      "role": "gc",
+      "argv": [
+        "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+        "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-jar",
+        "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+        "OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision",
+        "-bm",
+        "avgt",
+        "-tu",
+        "ns",
+        "-t",
+        "1",
+        "-f",
+        "1",
+        "-wi",
+        "2",
+        "-w",
+        "1s",
+        "-i",
+        "3",
+        "-r",
+        "1s",
+        "-p",
+        "liveOrders=0,8,64",
+        "-p",
+        "capacitySlack=0,1",
+        "-jvmArgsAppend",
+        "-Xms1g -Xmx1g -XX:+UseG1GC",
+        "-foe",
+        "true",
+        "-rf",
+        "json",
+        "-prof",
+        "gc",
+        "-rff",
+        "/tmp/surprising-round2-evidence/micro/gc.json"
+      ],
+      "started_epoch_ms": 1793158474403,
+      "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   173676.\nPages active:                                1167109.\nPages inactive:                              1248097.\nPages speculative:                             23562.\nPages throttled:                                   0.\nPages wired down:                            1196490.\nPages purgeable:                               29477.\n\"Translation faults\":                    30229818909.\nPages copy-on-write:                      1139150456.\nPages zero filled:                       21776236053.\nPages reactivated:                         798926654.\nPages purged:                                4882938.\nFile-backed pages:                            912793.\nAnonymous pages:                             1525975.\nPages stored in compressor:                  4133173.\nPages occupied by compressor:                 384127.\nDecompressions:                            361654516.\nCompressions:                              508900127.\nPageins:                                   430899784.\nPageouts:                                    6126943.\nSwapins:                                   246834783.\nSwapouts:                                  259461010.\n",
+      "swap_before": "vm.swapusage: total = 7168.00M  used = 5491.50M  free = 1676.50M  (encrypted)\n",
+      "returncode": 0,
+      "finished_epoch_ms": 1793158510173,
+      "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   156610.\nPages active:                                1191644.\nPages inactive:                              1175798.\nPages speculative:                             15316.\nPages throttled:                                   0.\nPages wired down:                            1197610.\nPages purgeable:                               24066.\n\"Translation faults\":                    30234747411.\nPages copy-on-write:                      1139326917.\nPages zero filled:                       21780005803.\nPages reactivated:                         798986620.\nPages purged:                                4883166.\nFile-backed pages:                            877495.\nAnonymous pages:                             1505263.\nPages stored in compressor:                  4167304.\nPages occupied by compressor:                 456124.\nDecompressions:                            361693957.\nCompressions:                              508976044.\nPageins:                                   430910658.\nPageouts:                                    6127735.\nSwapins:                                   246988034.\nSwapouts:                                  259545776.\n",
+      "swap_after": "vm.swapusage: total = 6144.00M  used = 5112.25M  free = 1031.75M  (encrypted)\n"
+    },
+    {
+      "role": "jfr",
+      "argv": [
+        "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+        "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+        "--enable-native-access=ALL-UNNAMED",
+        "-jar",
+        "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+        "OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision",
+        "-bm",
+        "avgt",
+        "-tu",
+        "ns",
+        "-t",
+        "1",
+        "-f",
+        "1",
+        "-wi",
+        "2",
+        "-w",
+        "1s",
+        "-i",
+        "3",
+        "-r",
+        "1s",
+        "-p",
+        "liveOrders=0,8,64",
+        "-p",
+        "capacitySlack=0,1",
+        "-jvmArgsAppend",
+        "-Xms1g -Xmx1g -XX:+UseG1GC",
+        "-foe",
+        "true",
+        "-rf",
+        "json",
+        "-prof",
+        "jfr:dir=/tmp/surprising-round2-evidence/micro/jfr",
+        "-rff",
+        "/tmp/surprising-round2-evidence/micro/jfr.json"
+      ],
+      "started_epoch_ms": 1793158510186,
+      "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   155904.\nPages active:                                1192126.\nPages inactive:                              1175853.\nPages speculative:                             15314.\nPages throttled:                                   0.\nPages wired down:                            1197734.\nPages purgeable:                               24068.\n\"Translation faults\":                    30234751576.\nPages copy-on-write:                      1139327756.\nPages zero filled:                       21780006511.\nPages reactivated:                         798986620.\nPages purged:                                4883166.\nFile-backed pages:                            877504.\nAnonymous pages:                             1505789.\nPages stored in compressor:                  4167304.\nPages occupied by compressor:                 456124.\nDecompressions:                            361693957.\nCompressions:                              508976044.\nPageins:                                   430910663.\nPageouts:                                    6127735.\nSwapins:                                   246988034.\nSwapouts:                                  259545776.\n",
+      "swap_before": "vm.swapusage: total = 6144.00M  used = 5112.25M  free = 1031.75M  (encrypted)\n",
+      "returncode": 0,
+      "finished_epoch_ms": 1793158550025,
+      "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                    98800.\nPages active:                                1226195.\nPages inactive:                              1196900.\nPages speculative:                             28729.\nPages throttled:                                   0.\nPages wired down:                            1198594.\nPages purgeable:                                3780.\n\"Translation faults\":                    30240807381.\nPages copy-on-write:                      1139568245.\nPages zero filled:                       21784467241.\nPages reactivated:                         799194855.\nPages purged:                                4883286.\nFile-backed pages:                            901532.\nAnonymous pages:                             1550292.\nPages stored in compressor:                  4133600.\nPages occupied by compressor:                 444122.\nDecompressions:                            361768068.\nCompressions:                              509022520.\nPageins:                                   430936283.\nPageouts:                                    6128710.\nSwapins:                                   247017719.\nSwapouts:                                  259545776.\n",
+      "swap_after": "vm.swapusage: total = 6144.00M  used = 5016.25M  free = 1127.75M  (encrypted)\n"
+    }
+  ],
+  "network": {
+    "main": {
+      "role": "main",
+      "seed": 92001,
+      "commands": [
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/main/server-tmp",
+            "-Daeron.dir=/tmp/surprising-round2-evidence/main/driver",
+            "-Xlog:gc*,safepoint:file=/tmp/surprising-round2-evidence/main/core-%p-gc.log:time,uptime,level,tags",
+            "-jar",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "--surprising.aeron.product-line=LINEAR_PERPETUAL",
+            "--surprising.aeron.hostnames=127.0.0.1",
+            "--surprising.aeron.node-id=0",
+            "--surprising.aeron.data-dir=/tmp/surprising-round2-evidence/main/data",
+            "--surprising.aeron.matching-engines=1",
+            "--surprising.aeron.account-lanes=2",
+            "--surprising.aeron.owner-command-window=256",
+            "--surprising.aeron.cpu-affinity.enabled=false"
+          ],
+          "log": "/tmp/surprising-round2-evidence/main/core.log",
+          "started_epoch_ms": 1793158646351,
+          "pid": 1060
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/main/client-tmp",
+            "-Dsurprising.aeron.hostnames=127.0.0.1",
+            "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+            "-Dsurprising.aeron.matching-engines=1",
+            "-Dsurprising.aeron.account-lanes=2",
+            "-Dsurprising.aeron.capacity-async-in-flight=256",
+            "-Dsurprising.aeron.capacity-session-in-flight=256",
+            "-Dsurprising.aeron.capacity-symbols=8",
+            "-Dsurprising.aeron.capacity-batch-size=20",
+            "-Dsurprising.aeron.capacity-seed=92001",
+            "-Dsurprising.aeron.mixed-trading-stream=true",
+            "-Dsurprising.aeron.capacity-warmup-seconds=3",
+            "-Dsurprising.aeron.capacity-duration-seconds=10",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+            "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain"
+          ],
+          "log": "/tmp/surprising-round2-evidence/main/client.log",
+          "started_epoch_ms": 1793158650166,
+          "pid": 1203,
+          "process_resources": [
+            {
+              "epoch_ms": 1793158650168,
+              "ps_pid_rss_kib_cpu_percent": " 1060 488216 420.9\n 1203   2516   0.0\n"
+            },
+            {
+              "epoch_ms": 1793158651251,
+              "ps_pid_rss_kib_cpu_percent": " 1060 516228 319.3\n 1203 177608 190.7\n"
+            },
+            {
+              "epoch_ms": 1793158652330,
+              "ps_pid_rss_kib_cpu_percent": " 1060 690996 777.3\n 1203 209972 294.8\n"
+            },
+            {
+              "epoch_ms": 1793158653415,
+              "ps_pid_rss_kib_cpu_percent": " 1060 715772 753.7\n 1203 295876 259.3\n"
+            },
+            {
+              "epoch_ms": 1793158654547,
+              "ps_pid_rss_kib_cpu_percent": " 1060 705232 441.1\n 1203 373416 175.0\n"
+            },
+            {
+              "epoch_ms": 1793158655615,
+              "ps_pid_rss_kib_cpu_percent": " 1060 702472 340.7\n 1203 402816 189.0\n"
+            },
+            {
+              "epoch_ms": 1793158656670,
+              "ps_pid_rss_kib_cpu_percent": " 1060 701308 349.8\n 1203 403244 172.6\n"
+            },
+            {
+              "epoch_ms": 1793158657730,
+              "ps_pid_rss_kib_cpu_percent": " 1060 702716 338.6\n 1203 403688 170.4\n"
+            },
+            {
+              "epoch_ms": 1793158658798,
+              "ps_pid_rss_kib_cpu_percent": " 1060 705736 349.6\n 1203 403748 172.0\n"
+            },
+            {
+              "epoch_ms": 1793158659862,
+              "ps_pid_rss_kib_cpu_percent": " 1060 706852 347.7\n 1203 474964 164.5\n"
+            },
+            {
+              "epoch_ms": 1793158660930,
+              "ps_pid_rss_kib_cpu_percent": " 1060 701588 335.3\n 1203 563148 171.1\n"
+            },
+            {
+              "epoch_ms": 1793158661989,
+              "ps_pid_rss_kib_cpu_percent": " 1060 701644 325.2\n 1203 555440 179.7\n"
+            },
+            {
+              "epoch_ms": 1793158663068,
+              "ps_pid_rss_kib_cpu_percent": " 1060 702588 340.2\n 1203 554336 173.3\n"
+            },
+            {
+              "epoch_ms": 1793158664124,
+              "ps_pid_rss_kib_cpu_percent": " 1060 703628 330.4\n 1203 565724 164.6\n"
+            },
+            {
+              "epoch_ms": 1793158665181,
+              "ps_pid_rss_kib_cpu_percent": " 1060 705304 333.0\n 1203 651968 171.0\n"
+            },
+            {
+              "epoch_ms": 1793158666250,
+              "ps_pid_rss_kib_cpu_percent": " 1060 705880 376.7\n 1203 769660 167.0\n"
+            },
+            {
+              "epoch_ms": 1793158667312,
+              "ps_pid_rss_kib_cpu_percent": " 1060 707416 334.7\n 1203 770632 171.8\n"
+            },
+            {
+              "epoch_ms": 1793158668377,
+              "ps_pid_rss_kib_cpu_percent": " 1060 708720 329.6\n 1203 770824 167.6\n"
+            },
+            {
+              "epoch_ms": 1793158669440,
+              "ps_pid_rss_kib_cpu_percent": " 1060 711420 340.4\n 1203 772304 127.7\n"
+            },
+            {
+              "epoch_ms": 1793158670510,
+              "ps_pid_rss_kib_cpu_percent": " 1060 712768 341.9\n 1203 773556 112.5\n"
+            },
+            {
+              "epoch_ms": 1793158671579,
+              "ps_pid_rss_kib_cpu_percent": " 1060 714408 338.8\n 1203 774392 114.5\n"
+            },
+            {
+              "epoch_ms": 1793158672639,
+              "ps_pid_rss_kib_cpu_percent": " 1060 715784 337.8\n 1203 774944 112.4\n"
+            },
+            {
+              "epoch_ms": 1793158673704,
+              "ps_pid_rss_kib_cpu_percent": " 1060 716348 330.3\n 1203 775120 112.2\n"
+            },
+            {
+              "epoch_ms": 1793158674764,
+              "ps_pid_rss_kib_cpu_percent": " 1060 717676 335.2\n 1203 776216 117.9\n"
+            },
+            {
+              "epoch_ms": 1793158675828,
+              "ps_pid_rss_kib_cpu_percent": " 1060 718844 332.6\n 1203 776840 113.5\n"
+            },
+            {
+              "epoch_ms": 1793158676890,
+              "ps_pid_rss_kib_cpu_percent": " 1060 719948 328.1\n 1203 777076 110.4\n"
+            },
+            {
+              "epoch_ms": 1793158677953,
+              "ps_pid_rss_kib_cpu_percent": " 1060 720356 333.7\n 1203 777644 110.7\n"
+            },
+            {
+              "epoch_ms": 1793158679022,
+              "ps_pid_rss_kib_cpu_percent": " 1060 775944 825.3\n 1203 788848 201.3\n"
+            },
+            {
+              "epoch_ms": 1793158680140,
+              "ps_pid_rss_kib_cpu_percent": " 1060 823668 823.5\n 1203 811752 162.6\n"
+            },
+            {
+              "epoch_ms": 1793158681261,
+              "ps_pid_rss_kib_cpu_percent": " 1060 901744 895.2\n 1203 867232 266.6\n"
+            },
+            {
+              "epoch_ms": 1793158682362,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1074292 780.2\n 1203 962892 397.6\n"
+            },
+            {
+              "epoch_ms": 1793158683450,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1150528 470.2\n 1203 964436 224.0\n"
+            },
+            {
+              "epoch_ms": 1793158684536,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1297936 751.1\n 1203 964220 296.3\n"
+            },
+            {
+              "epoch_ms": 1793158685649,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1377292 620.1\n 1203 964060 272.1\n"
+            },
+            {
+              "epoch_ms": 1793158686753,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1367112 522.0\n 1203 963968 253.7\n"
+            },
+            {
+              "epoch_ms": 1793158687846,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1488804 722.9\n 1203 965132 287.6\n"
+            },
+            {
+              "epoch_ms": 1793158688937,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1574448 486.8\n 1203 965140 232.6\n"
+            },
+            {
+              "epoch_ms": 1793158690050,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1641144 766.7\n 1203 965368 294.0\n"
+            },
+            {
+              "epoch_ms": 1793158691136,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1687972 704.5\n 1203 965152 284.0\n"
+            },
+            {
+              "epoch_ms": 1793158692240,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1693724 360.1\n 1203 966900 181.6\n"
+            },
+            {
+              "epoch_ms": 1793158693321,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1695036 332.5\n 1203 966996 176.8\n"
+            },
+            {
+              "epoch_ms": 1793158694400,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1696976 341.3\n 1203 967052 170.6\n"
+            },
+            {
+              "epoch_ms": 1793158695455,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1698064 324.3\n 1203 967132 166.7\n"
+            },
+            {
+              "epoch_ms": 1793158696509,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1699088 330.1\n 1203 967204 171.3\n"
+            },
+            {
+              "epoch_ms": 1793158697574,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1700532 333.4\n 1203 967292 172.4\n"
+            },
+            {
+              "epoch_ms": 1793158698640,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1836776 339.5\n 1203 967748 171.2\n"
+            },
+            {
+              "epoch_ms": 1793158699701,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1762812 331.6\n 1203 967672 165.2\n"
+            },
+            {
+              "epoch_ms": 1793158700770,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1718512 207.2\n 1203 967736 105.8\n"
+            },
+            {
+              "epoch_ms": 1793158701966,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1703164 126.6\n 1203 948328  73.9\n"
+            },
+            {
+              "epoch_ms": 1793158703098,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1704108 298.0\n 1203 948640 159.3\n"
+            },
+            {
+              "epoch_ms": 1793158704161,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1704920 329.7\n 1203 948716 172.2\n"
+            },
+            {
+              "epoch_ms": 1793158705231,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1694344 427.1\n 1203 948692 170.3\n"
+            },
+            {
+              "epoch_ms": 1793158706303,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1685700 342.9\n 1203 949436 115.3\n"
+            },
+            {
+              "epoch_ms": 1793158707365,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1691996 336.2\n 1203 949448 112.9\n"
+            },
+            {
+              "epoch_ms": 1793158708432,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1687160 342.4\n 1203 949740 111.6\n"
+            },
+            {
+              "epoch_ms": 1793158709495,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1686368 334.0\n 1203 954204 111.3\n"
+            },
+            {
+              "epoch_ms": 1793158710574,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1687040 336.3\n 1203 954812 113.2\n"
+            },
+            {
+              "epoch_ms": 1793158711637,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1687032 342.1\n 1203 954876 111.3\n"
+            },
+            {
+              "epoch_ms": 1793158712699,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1669648 330.9\n 1203 959632 111.9\n"
+            },
+            {
+              "epoch_ms": 1793158713773,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1669192 344.1\n 1203 959632 115.7\n"
+            },
+            {
+              "epoch_ms": 1793158714830,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1671320 397.5\n 1203 967876 117.6\n"
+            },
+            {
+              "epoch_ms": 1793158715891,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1670916 334.2\n 1203 967876 111.2\n"
+            },
+            {
+              "epoch_ms": 1793158716965,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1667200 335.8\n 1203 967876 112.6\n"
+            },
+            {
+              "epoch_ms": 1793158718028,
+              "ps_pid_rss_kib_cpu_percent": " 1060 1674220 467.5\n 1203 771172 106.7\n"
+            }
+          ],
+          "returncode": 0,
+          "finished_epoch_ms": 1793158719101
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "io.aeron.cluster.ClusterTool",
+            "/tmp/surprising-round2-evidence/main/data/linear_perpetual/node0/cluster",
+            "is-leader"
+          ],
+          "log": "/tmp/surprising-round2-evidence/main/leader.log",
+          "started_epoch_ms": 1793158719106,
+          "returncode": 0,
+          "finished_epoch_ms": 1793158719403
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "io.aeron.cluster.ClusterTool",
+            "/tmp/surprising-round2-evidence/main/data/linear_perpetual/node0/cluster",
+            "snapshot"
+          ],
+          "log": "/tmp/surprising-round2-evidence/main/snapshot.log",
+          "started_epoch_ms": 1793158719404,
+          "returncode": 0,
+          "finished_epoch_ms": 1793158721479
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "io.aeron.cluster.ClusterTool",
+            "/tmp/surprising-round2-evidence/main/data/linear_perpetual/node0/cluster",
+            "recording-log"
+          ],
+          "log": "/tmp/surprising-round2-evidence/main/recording-log.txt",
+          "started_epoch_ms": 1793158721481,
+          "returncode": 0,
+          "finished_epoch_ms": 1793158721663
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/main/server-tmp",
+            "-Daeron.dir=/tmp/surprising-round2-evidence/main/driver",
+            "-Xlog:gc*,safepoint:file=/tmp/surprising-round2-evidence/main/core-%p-gc.log:time,uptime,level,tags",
+            "-jar",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "--surprising.aeron.product-line=LINEAR_PERPETUAL",
+            "--surprising.aeron.hostnames=127.0.0.1",
+            "--surprising.aeron.node-id=0",
+            "--surprising.aeron.data-dir=/tmp/surprising-round2-evidence/main/data",
+            "--surprising.aeron.matching-engines=1",
+            "--surprising.aeron.account-lanes=2",
+            "--surprising.aeron.owner-command-window=256",
+            "--surprising.aeron.cpu-affinity.enabled=false"
+          ],
+          "log": "/tmp/surprising-round2-evidence/main/core-restart-active-driver.log",
+          "started_epoch_ms": 1793158721996,
+          "pid": 3794
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/main/server-tmp",
+            "-Daeron.dir=/tmp/surprising-round2-evidence/main/driver",
+            "-Xlog:gc*,safepoint:file=/tmp/surprising-round2-evidence/main/core-%p-gc.log:time,uptime,level,tags",
+            "-jar",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "--surprising.aeron.product-line=LINEAR_PERPETUAL",
+            "--surprising.aeron.hostnames=127.0.0.1",
+            "--surprising.aeron.node-id=0",
+            "--surprising.aeron.data-dir=/tmp/surprising-round2-evidence/main/data",
+            "--surprising.aeron.matching-engines=1",
+            "--surprising.aeron.account-lanes=2",
+            "--surprising.aeron.owner-command-window=256",
+            "--surprising.aeron.cpu-affinity.enabled=false"
+          ],
+          "log": "/tmp/surprising-round2-evidence/main/core-recovery.log",
+          "pid": 9054,
+          "started_epoch_ms": 1793158880153
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/main/client-tmp",
+            "-Dsurprising.aeron.hostnames=127.0.0.1",
+            "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+            "-Dsurprising.aeron.matching-engines=1",
+            "-Dsurprising.aeron.account-lanes=2",
+            "-Dsurprising.aeron.capacity-async-in-flight=256",
+            "-Dsurprising.aeron.capacity-session-in-flight=256",
+            "-Dsurprising.aeron.capacity-symbols=8",
+            "-Dsurprising.aeron.capacity-batch-size=20",
+            "-Dsurprising.aeron.capacity-seed=92001",
+            "-Dsurprising.aeron.mixed-trading-stream=true",
+            "-Dsurprising.aeron.capacity-warmup-seconds=3",
+            "-Dsurprising.aeron.capacity-duration-seconds=10",
+            "-Dsurprising.aeron.mixed-verify-only=true",
+            "-Dsurprising.aeron.mixed-expected-cycles=4617",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+            "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain"
+          ],
+          "log": "/tmp/surprising-round2-evidence/main/recovery-client.log",
+          "started_epoch_ms": 1793158886252,
+          "returncode": 0,
+          "finished_epoch_ms": 1793158903698
+        }
+      ],
+      "started_epoch_ms": 1793158646338,
+      "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                    29519.\nPages active:                                1262752.\nPages inactive:                              1193860.\nPages speculative:                             67355.\nPages throttled:                                   0.\nPages wired down:                            1195203.\nPages purgeable:                               54683.\n\"Translation faults\":                    30251800536.\nPages copy-on-write:                      1139973196.\nPages zero filled:                       21792506592.\nPages reactivated:                         799205877.\nPages purged:                                4883370.\nFile-backed pages:                            914121.\nAnonymous pages:                             1609846.\nPages stored in compressor:                  3812082.\nPages occupied by compressor:                 444723.\nDecompressions:                            361905555.\nCompressions:                              509036939.\nPageins:                                   430964293.\nPageouts:                                    6128878.\nSwapins:                                   247084585.\nSwapouts:                                  259545776.\n",
+      "swap_before": "vm.swapusage: total = 6144.00M  used = 4696.25M  free = 1447.75M  (encrypted)\n",
+      "core_pid": 3794,
+      "core_pids": [
+        1060,
+        3794,
+        9054
+      ],
+      "total_cycles": 4617,
+      "business_hash": "106d84dcc206a9d6",
+      "snapshot_pair": [
+        "1793158719659",
+        "258893536",
+        "0"
+      ],
+      "finished_epoch_ms": 1793158903876,
+      "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   329786.\nPages active:                                1117897.\nPages inactive:                              1168361.\nPages speculative:                             10395.\nPages throttled:                                   0.\nPages wired down:                            1298072.\nPages purgeable:                                3391.\n\"Translation faults\":                    30284321601.\nPages copy-on-write:                      1141069097.\nPages zero filled:                       21815365341.\nPages reactivated:                         802492214.\nPages purged:                                4886435.\nFile-backed pages:                            865861.\nAnonymous pages:                             1430792.\nPages stored in compressor:                  4121917.\nPages occupied by compressor:                 268578.\nDecompressions:                            362678408.\nCompressions:                              510268887.\nPageins:                                   431613535.\nPageouts:                                    6136924.\nSwapins:                                   247387745.\nSwapouts:                                  260121347.\n",
+      "swap_after": "vm.swapusage: total = 6144.00M  used = 5768.50M  free = 375.50M  (encrypted)\n",
+      "recovery_retry_reason": "Driver process was stopped; stale CnC heartbeat had not expired. Retry after liveness timeout, preserving Archive and snapshot data.",
+      "recovery_hash": "106d84dcc206a9d6",
+      "status": "PASS"
+    },
+    "jfr": {
+      "role": "jfr",
+      "seed": 92001,
+      "commands": [
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/jfr/server-tmp",
+            "-Daeron.dir=/tmp/surprising-round2-evidence/jfr/driver",
+            "-Xlog:gc*,safepoint:file=/tmp/surprising-round2-evidence/jfr/core-%p-gc.log:time,uptime,level,tags",
+            "-XX:StartFlightRecording=name=round2-core,settings=profile,dumponexit=true,filename=/tmp/surprising-round2-evidence/jfr/core.jfr,maxsize=256m",
+            "-jar",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "--surprising.aeron.product-line=LINEAR_PERPETUAL",
+            "--surprising.aeron.hostnames=127.0.0.1",
+            "--surprising.aeron.node-id=0",
+            "--surprising.aeron.data-dir=/tmp/surprising-round2-evidence/jfr/data",
+            "--surprising.aeron.matching-engines=1",
+            "--surprising.aeron.account-lanes=2",
+            "--surprising.aeron.owner-command-window=256",
+            "--surprising.aeron.cpu-affinity.enabled=false"
+          ],
+          "log": "/tmp/surprising-round2-evidence/jfr/core.log",
+          "started_epoch_ms": 1793158971312,
+          "pid": 12128
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/jfr/client-tmp",
+            "-Dsurprising.aeron.hostnames=127.0.0.1",
+            "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+            "-Dsurprising.aeron.matching-engines=1",
+            "-Dsurprising.aeron.account-lanes=2",
+            "-Dsurprising.aeron.capacity-async-in-flight=256",
+            "-Dsurprising.aeron.capacity-session-in-flight=256",
+            "-Dsurprising.aeron.capacity-symbols=8",
+            "-Dsurprising.aeron.capacity-batch-size=20",
+            "-Dsurprising.aeron.capacity-seed=92001",
+            "-Dsurprising.aeron.mixed-trading-stream=true",
+            "-Dsurprising.aeron.capacity-warmup-seconds=3",
+            "-Dsurprising.aeron.capacity-duration-seconds=10",
+            "-XX:StartFlightRecording=name=round2-client,settings=profile,dumponexit=true,filename=/tmp/surprising-round2-evidence/jfr/client.jfr,maxsize=256m",
+            "-Xlog:gc*,safepoint:file=/tmp/surprising-round2-evidence/jfr/client-gc.log:time,uptime,level,tags",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+            "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain"
+          ],
+          "log": "/tmp/surprising-round2-evidence/jfr/client.log",
+          "started_epoch_ms": 1793158975376,
+          "pid": 12218,
+          "process_resources": [
+            {
+              "epoch_ms": 1793158975378,
+              "ps_pid_rss_kib_cpu_percent": "12128 501896 450.2\n12218   2396   0.0\n"
+            },
+            {
+              "epoch_ms": 1793158976440,
+              "ps_pid_rss_kib_cpu_percent": "12128 501700 319.0\n12218 183016 193.2\n"
+            },
+            {
+              "epoch_ms": 1793158977499,
+              "ps_pid_rss_kib_cpu_percent": "12128 699732 485.9\n12218 238932 333.4\n"
+            },
+            {
+              "epoch_ms": 1793158978598,
+              "ps_pid_rss_kib_cpu_percent": "12128 711400 715.9\n12218 310644 227.0\n"
+            },
+            {
+              "epoch_ms": 1793158979709,
+              "ps_pid_rss_kib_cpu_percent": "12128 734056 820.4\n12218 395480 269.9\n"
+            },
+            {
+              "epoch_ms": 1793158980810,
+              "ps_pid_rss_kib_cpu_percent": "12128 721008 653.8\n12218 465424 156.9\n"
+            },
+            {
+              "epoch_ms": 1793158981915,
+              "ps_pid_rss_kib_cpu_percent": "12128 714508 465.1\n12218 467024 176.6\n"
+            },
+            {
+              "epoch_ms": 1793158982978,
+              "ps_pid_rss_kib_cpu_percent": "12128 711188 334.1\n12218 412868 177.8\n"
+            },
+            {
+              "epoch_ms": 1793158984053,
+              "ps_pid_rss_kib_cpu_percent": "12128 714848 356.4\n12218 440408 173.3\n"
+            },
+            {
+              "epoch_ms": 1793158985120,
+              "ps_pid_rss_kib_cpu_percent": "12128 716832 371.5\n12218 538432 169.3\n"
+            },
+            {
+              "epoch_ms": 1793158986182,
+              "ps_pid_rss_kib_cpu_percent": "12128 708836 337.7\n12218 553756 163.7\n"
+            },
+            {
+              "epoch_ms": 1793158987274,
+              "ps_pid_rss_kib_cpu_percent": "12128 709128 324.9\n12218 485952 170.7\n"
+            },
+            {
+              "epoch_ms": 1793158988339,
+              "ps_pid_rss_kib_cpu_percent": "12128 710216 219.3\n12218 457068 140.6\n"
+            },
+            {
+              "epoch_ms": 1793158989453,
+              "ps_pid_rss_kib_cpu_percent": "12128 710180 313.1\n12218 489836 114.9\n"
+            },
+            {
+              "epoch_ms": 1793158990546,
+              "ps_pid_rss_kib_cpu_percent": "12128 711556 334.3\n12218 580404 170.2\n"
+            },
+            {
+              "epoch_ms": 1793158991605,
+              "ps_pid_rss_kib_cpu_percent": "12128 711952 327.9\n12218 682320 164.8\n"
+            },
+            {
+              "epoch_ms": 1793158992686,
+              "ps_pid_rss_kib_cpu_percent": "12128 714352 351.6\n12218 781492 163.6\n"
+            },
+            {
+              "epoch_ms": 1793158993749,
+              "ps_pid_rss_kib_cpu_percent": "12128 715452 314.5\n12218 781940 168.5\n"
+            },
+            {
+              "epoch_ms": 1793158994841,
+              "ps_pid_rss_kib_cpu_percent": "12128 717052 324.2\n12218 782124 169.6\n"
+            },
+            {
+              "epoch_ms": 1793158995914,
+              "ps_pid_rss_kib_cpu_percent": "12128 718176 329.8\n12218 783540 168.9\n"
+            },
+            {
+              "epoch_ms": 1793158996980,
+              "ps_pid_rss_kib_cpu_percent": "12128 721204 343.0\n12218 787448 124.7\n"
+            },
+            {
+              "epoch_ms": 1793158998045,
+              "ps_pid_rss_kib_cpu_percent": "12128 722396 226.6\n12218 789844  79.9\n"
+            },
+            {
+              "epoch_ms": 1793158999160,
+              "ps_pid_rss_kib_cpu_percent": "12128 724008 328.8\n12218 790248 111.9\n"
+            },
+            {
+              "epoch_ms": 1793159000232,
+              "ps_pid_rss_kib_cpu_percent": "12128 725140 328.3\n12218 791064 109.9\n"
+            },
+            {
+              "epoch_ms": 1793159001294,
+              "ps_pid_rss_kib_cpu_percent": "12128 726256 328.8\n12218 791368 111.7\n"
+            },
+            {
+              "epoch_ms": 1793159002382,
+              "ps_pid_rss_kib_cpu_percent": "12128 727612 343.2\n12218 792480 120.6\n"
+            },
+            {
+              "epoch_ms": 1793159003454,
+              "ps_pid_rss_kib_cpu_percent": "12128 728920 329.7\n12218 792792 113.3\n"
+            },
+            {
+              "epoch_ms": 1793159004518,
+              "ps_pid_rss_kib_cpu_percent": "12128 730396 333.0\n12218 793320 111.7\n"
+            },
+            {
+              "epoch_ms": 1793159005601,
+              "ps_pid_rss_kib_cpu_percent": "12128 769264 763.2\n12218 802288 224.8\n"
+            },
+            {
+              "epoch_ms": 1793159006729,
+              "ps_pid_rss_kib_cpu_percent": "12128 809232 660.3\n12218 812368 166.4\n"
+            },
+            {
+              "epoch_ms": 1793159007823,
+              "ps_pid_rss_kib_cpu_percent": "12128 837952 929.6\n12218 831016 201.6\n"
+            },
+            {
+              "epoch_ms": 1793159008938,
+              "ps_pid_rss_kib_cpu_percent": "12128 902940 689.0\n12218 886040 267.2\n"
+            },
+            {
+              "epoch_ms": 1793159010042,
+              "ps_pid_rss_kib_cpu_percent": "12128 1058376 733.5\n12218 972948 360.8\n"
+            },
+            {
+              "epoch_ms": 1793159011140,
+              "ps_pid_rss_kib_cpu_percent": "12128 1184460 753.7\n12218 980768 289.8\n"
+            },
+            {
+              "epoch_ms": 1793159012241,
+              "ps_pid_rss_kib_cpu_percent": "12128 1275448 503.8\n12218 980976 231.0\n"
+            },
+            {
+              "epoch_ms": 1793159013336,
+              "ps_pid_rss_kib_cpu_percent": "12128 1398616 637.8\n12218 981732 275.1\n"
+            },
+            {
+              "epoch_ms": 1793159014436,
+              "ps_pid_rss_kib_cpu_percent": "12128 1537300 760.0\n12218 982148 297.9\n"
+            },
+            {
+              "epoch_ms": 1793159015537,
+              "ps_pid_rss_kib_cpu_percent": "12128 1677960 762.7\n12218 982636 292.2\n"
+            },
+            {
+              "epoch_ms": 1793159016635,
+              "ps_pid_rss_kib_cpu_percent": "12128 1825700 664.7\n12218 982708 263.4\n"
+            },
+            {
+              "epoch_ms": 1793159017724,
+              "ps_pid_rss_kib_cpu_percent": "12128 1789260 549.4\n12218 982632 242.2\n"
+            },
+            {
+              "epoch_ms": 1793159018829,
+              "ps_pid_rss_kib_cpu_percent": "12128 1784256 381.6\n12218 984200 191.4\n"
+            },
+            {
+              "epoch_ms": 1793159019904,
+              "ps_pid_rss_kib_cpu_percent": "12128 1772280 336.3\n12218 984248 171.4\n"
+            },
+            {
+              "epoch_ms": 1793159020966,
+              "ps_pid_rss_kib_cpu_percent": "12128 1765932 349.0\n12218 984220 171.8\n"
+            },
+            {
+              "epoch_ms": 1793159022027,
+              "ps_pid_rss_kib_cpu_percent": "12128 1766272 330.4\n12218 984292 177.1\n"
+            },
+            {
+              "epoch_ms": 1793159023112,
+              "ps_pid_rss_kib_cpu_percent": "12128 1765632 322.5\n12218 984360 167.1\n"
+            },
+            {
+              "epoch_ms": 1793159024170,
+              "ps_pid_rss_kib_cpu_percent": "12128 1765672 324.0\n12218 984640 168.4\n"
+            },
+            {
+              "epoch_ms": 1793159025229,
+              "ps_pid_rss_kib_cpu_percent": "12128 1735616 404.1\n12218 984700 180.0\n"
+            },
+            {
+              "epoch_ms": 1793159026309,
+              "ps_pid_rss_kib_cpu_percent": "12128 1715916 323.5\n12218 986880 175.0\n"
+            },
+            {
+              "epoch_ms": 1793159027371,
+              "ps_pid_rss_kib_cpu_percent": "12128 1715920 332.2\n12218 986952 167.5\n"
+            },
+            {
+              "epoch_ms": 1793159028432,
+              "ps_pid_rss_kib_cpu_percent": "12128 1632888 328.3\n12218 986900 163.7\n"
+            },
+            {
+              "epoch_ms": 1793159029493,
+              "ps_pid_rss_kib_cpu_percent": "12128 1537096 334.6\n12218 986672 173.4\n"
+            },
+            {
+              "epoch_ms": 1793159030573,
+              "ps_pid_rss_kib_cpu_percent": "12128 1537208 322.0\n12218 986920 164.4\n"
+            },
+            {
+              "epoch_ms": 1793159031631,
+              "ps_pid_rss_kib_cpu_percent": "12128 1537340 326.7\n12218 986984 168.8\n"
+            },
+            {
+              "epoch_ms": 1793159032691,
+              "ps_pid_rss_kib_cpu_percent": "12128 1486268 331.5\n12218 986972 168.0\n"
+            },
+            {
+              "epoch_ms": 1793159033749,
+              "ps_pid_rss_kib_cpu_percent": "12128 1486100 333.8\n12218 987260 114.7\n"
+            },
+            {
+              "epoch_ms": 1793159034820,
+              "ps_pid_rss_kib_cpu_percent": "12128 1453248 417.2\n12218 987056 112.2\n"
+            },
+            {
+              "epoch_ms": 1793159035902,
+              "ps_pid_rss_kib_cpu_percent": "12128 1420664 340.6\n12218 846860 112.9\n"
+            },
+            {
+              "epoch_ms": 1793159036981,
+              "ps_pid_rss_kib_cpu_percent": "12128 1412172 332.0\n12218 779776 114.2\n"
+            },
+            {
+              "epoch_ms": 1793159038068,
+              "ps_pid_rss_kib_cpu_percent": "12128 1409912 333.1\n12218 840720 112.6\n"
+            },
+            {
+              "epoch_ms": 1793159039141,
+              "ps_pid_rss_kib_cpu_percent": "12128 1408852 329.3\n12218 937520 110.4\n"
+            },
+            {
+              "epoch_ms": 1793159040240,
+              "ps_pid_rss_kib_cpu_percent": "12128 1404032 333.8\n12218 951752 109.0\n"
+            },
+            {
+              "epoch_ms": 1793159041323,
+              "ps_pid_rss_kib_cpu_percent": "12128 1403520 340.1\n12218 962420 166.4\n"
+            },
+            {
+              "epoch_ms": 1793159042382,
+              "ps_pid_rss_kib_cpu_percent": "12128 1409572 354.9\n12218 962412 114.2\n"
+            },
+            {
+              "epoch_ms": 1793159043457,
+              "ps_pid_rss_kib_cpu_percent": "12128 1409588 339.8\n12218 962796 112.7\n"
+            },
+            {
+              "epoch_ms": 1793159044525,
+              "ps_pid_rss_kib_cpu_percent": "12128 1408868 337.2\n12218 964436 111.5\n"
+            }
+          ],
+          "returncode": 0,
+          "finished_epoch_ms": 1793159045632
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "io.aeron.cluster.ClusterTool",
+            "/tmp/surprising-round2-evidence/jfr/data/linear_perpetual/node0/cluster",
+            "is-leader"
+          ],
+          "log": "/tmp/surprising-round2-evidence/jfr/leader.log",
+          "started_epoch_ms": 1793159045636,
+          "returncode": 0,
+          "finished_epoch_ms": 1793159045928
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "io.aeron.cluster.ClusterTool",
+            "/tmp/surprising-round2-evidence/jfr/data/linear_perpetual/node0/cluster",
+            "snapshot"
+          ],
+          "log": "/tmp/surprising-round2-evidence/jfr/snapshot.log",
+          "started_epoch_ms": 1793159045930,
+          "returncode": 0,
+          "finished_epoch_ms": 1793159048476
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "io.aeron.cluster.ClusterTool",
+            "/tmp/surprising-round2-evidence/jfr/data/linear_perpetual/node0/cluster",
+            "recording-log"
+          ],
+          "log": "/tmp/surprising-round2-evidence/jfr/recording-log.txt",
+          "started_epoch_ms": 1793159048477,
+          "returncode": 0,
+          "finished_epoch_ms": 1793159048663
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/jfr/server-tmp",
+            "-Daeron.dir=/tmp/surprising-round2-evidence/jfr/driver",
+            "-Xlog:gc*,safepoint:file=/tmp/surprising-round2-evidence/jfr/core-%p-gc.log:time,uptime,level,tags",
+            "-jar",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "--surprising.aeron.product-line=LINEAR_PERPETUAL",
+            "--surprising.aeron.hostnames=127.0.0.1",
+            "--surprising.aeron.node-id=0",
+            "--surprising.aeron.data-dir=/tmp/surprising-round2-evidence/jfr/data",
+            "--surprising.aeron.matching-engines=1",
+            "--surprising.aeron.account-lanes=2",
+            "--surprising.aeron.owner-command-window=256",
+            "--surprising.aeron.cpu-affinity.enabled=false"
+          ],
+          "log": "/tmp/surprising-round2-evidence/jfr/core-restart.log",
+          "started_epoch_ms": 1793159063960,
+          "pid": 15207
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/jfr/client-tmp",
+            "-Dsurprising.aeron.hostnames=127.0.0.1",
+            "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+            "-Dsurprising.aeron.matching-engines=1",
+            "-Dsurprising.aeron.account-lanes=2",
+            "-Dsurprising.aeron.capacity-async-in-flight=256",
+            "-Dsurprising.aeron.capacity-session-in-flight=256",
+            "-Dsurprising.aeron.capacity-symbols=8",
+            "-Dsurprising.aeron.capacity-batch-size=20",
+            "-Dsurprising.aeron.capacity-seed=92001",
+            "-Dsurprising.aeron.mixed-trading-stream=true",
+            "-Dsurprising.aeron.capacity-warmup-seconds=3",
+            "-Dsurprising.aeron.capacity-duration-seconds=10",
+            "-Dsurprising.aeron.mixed-verify-only=true",
+            "-Dsurprising.aeron.mixed-expected-cycles=4490",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+            "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain"
+          ],
+          "log": "/tmp/surprising-round2-evidence/jfr/recovery-client.log",
+          "started_epoch_ms": 1793159069561,
+          "pid": 15419,
+          "process_resources": [
+            {
+              "epoch_ms": 1793159069564,
+              "ps_pid_rss_kib_cpu_percent": "15207 675052 450.9\n15419   2120   0.0\n"
+            },
+            {
+              "epoch_ms": 1793159070634,
+              "ps_pid_rss_kib_cpu_percent": "15207 667616 316.0\n15419 168508 193.9\n"
+            },
+            {
+              "epoch_ms": 1793159071707,
+              "ps_pid_rss_kib_cpu_percent": "15207 857584 423.3\n15419 231860 149.9\n"
+            },
+            {
+              "epoch_ms": 1793159072790,
+              "ps_pid_rss_kib_cpu_percent": "15207 859708 356.7\n15419 376344 123.3\n"
+            },
+            {
+              "epoch_ms": 1793159073862,
+              "ps_pid_rss_kib_cpu_percent": "15207 861484 345.9\n15419 435400 120.6\n"
+            },
+            {
+              "epoch_ms": 1793159074930,
+              "ps_pid_rss_kib_cpu_percent": "15207 780124 336.0\n15419 431376 111.0\n"
+            },
+            {
+              "epoch_ms": 1793159075995,
+              "ps_pid_rss_kib_cpu_percent": "15207 669076 333.3\n15419 510472 114.7\n"
+            },
+            {
+              "epoch_ms": 1793159077074,
+              "ps_pid_rss_kib_cpu_percent": "15207 672980 337.2\n15419 511272 123.7\n"
+            },
+            {
+              "epoch_ms": 1793159078144,
+              "ps_pid_rss_kib_cpu_percent": "15207 676448 338.5\n15419 525576 112.3\n"
+            },
+            {
+              "epoch_ms": 1793159079208,
+              "ps_pid_rss_kib_cpu_percent": "15207 679584 329.3\n15419 677740 114.2\n"
+            },
+            {
+              "epoch_ms": 1793159080272,
+              "ps_pid_rss_kib_cpu_percent": "15207 679788 338.1\n15419 766308 116.0\n"
+            },
+            {
+              "epoch_ms": 1793159081342,
+              "ps_pid_rss_kib_cpu_percent": "15207 682988 344.3\n15419 766772 112.0\n"
+            },
+            {
+              "epoch_ms": 1793159082424,
+              "ps_pid_rss_kib_cpu_percent": "15207 684536 323.8\n15419 767604 109.2\n"
+            },
+            {
+              "epoch_ms": 1793159083487,
+              "ps_pid_rss_kib_cpu_percent": "15207 685576 334.8\n15419 768324 110.9\n"
+            },
+            {
+              "epoch_ms": 1793159084561,
+              "ps_pid_rss_kib_cpu_percent": "15207 686464 338.2\n15419 769124 114.8\n"
+            },
+            {
+              "epoch_ms": 1793159085638,
+              "ps_pid_rss_kib_cpu_percent": "15207 687408 327.2\n15419 769568 110.6\n"
+            }
+          ],
+          "returncode": 0,
+          "finished_epoch_ms": 1793159086733
+        }
+      ],
+      "started_epoch_ms": 1793158971301,
+      "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                    37339.\nPages active:                                1278741.\nPages inactive:                              1250777.\nPages speculative:                             27071.\nPages throttled:                                   0.\nPages wired down:                            1210658.\nPages purgeable:                               59442.\n\"Translation faults\":                    30292218992.\nPages copy-on-write:                      1141368190.\nPages zero filled:                       21820956895.\nPages reactivated:                         802493849.\nPages purged:                                4886468.\nFile-backed pages:                            907363.\nAnonymous pages:                             1649226.\nPages stored in compressor:                  3982410.\nPages occupied by compressor:                 388492.\nDecompressions:                            362810758.\nCompressions:                              510268887.\nPageins:                                   431647933.\nPageouts:                                    6136942.\nSwapins:                                   247543546.\nSwapouts:                                  260121347.\n",
+      "swap_before": "vm.swapusage: total = 6144.00M  used = 5128.50M  free = 1015.50M  (encrypted)\n",
+      "core_pid": 15207,
+      "core_pids": [
+        12128,
+        15207
+      ],
+      "total_cycles": 4490,
+      "business_hash": "c6c9efe9a8ab1b1a",
+      "snapshot_pair": [
+        "1793159046259",
+        "251873152",
+        "0"
+      ],
+      "recovery_hash": "c6c9efe9a8ab1b1a",
+      "status": "PASS",
+      "finished_epoch_ms": 1793159086807,
+      "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   330031.\nPages active:                                1098464.\nPages inactive:                              1185973.\nPages speculative:                             10676.\nPages throttled:                                   0.\nPages wired down:                            1239089.\nPages purgeable:                               28338.\n\"Translation faults\":                    30308614066.\nPages copy-on-write:                      1141889298.\nPages zero filled:                       21832224144.\nPages reactivated:                         805357906.\nPages purged:                                4887427.\nFile-backed pages:                            883968.\nAnonymous pages:                             1411145.\nPages stored in compressor:                  4274531.\nPages occupied by compressor:                 328831.\nDecompressions:                            363579597.\nCompressions:                              511578667.\nPageins:                                   432255083.\nPageouts:                                    6145252.\nSwapins:                                   247906120.\nSwapouts:                                  260657863.\n",
+      "swap_after": "vm.swapusage: total = 6144.00M  used = 5790.00M  free = 354.00M  (encrypted)\n"
+    },
+    "control": {
+      "role": "control",
+      "seed": 92002,
+      "commands": [
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/control/server-tmp",
+            "-Daeron.dir=/tmp/surprising-round2-evidence/control/driver",
+            "-Xlog:gc*,safepoint:file=/tmp/surprising-round2-evidence/control/core-%p-gc.log:time,uptime,level,tags",
+            "-jar",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+            "--surprising.aeron.product-line=LINEAR_PERPETUAL",
+            "--surprising.aeron.hostnames=127.0.0.1",
+            "--surprising.aeron.node-id=0",
+            "--surprising.aeron.data-dir=/tmp/surprising-round2-evidence/control/data",
+            "--surprising.aeron.matching-engines=1",
+            "--surprising.aeron.account-lanes=2",
+            "--surprising.aeron.owner-command-window=256",
+            "--surprising.aeron.cpu-affinity.enabled=false"
+          ],
+          "log": "/tmp/surprising-round2-evidence/control/core.log",
+          "started_epoch_ms": 1793159098785,
+          "pid": 16378
+        },
+        {
+          "argv": [
+            "/Users/atomex/.sdkman/candidates/java/current/bin/java",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "-Xms1g",
+            "-Xmx1g",
+            "-XX:+UseG1GC",
+            "-Djava.io.tmpdir=/tmp/surprising-round2-evidence/control/client-tmp",
+            "-Dsurprising.aeron.hostnames=127.0.0.1",
+            "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+            "-Dsurprising.aeron.matching-engines=1",
+            "-Dsurprising.aeron.account-lanes=2",
+            "-Dsurprising.aeron.capacity-async-in-flight=256",
+            "-Dsurprising.aeron.capacity-session-in-flight=256",
+            "-Dsurprising.aeron.capacity-symbols=8",
+            "-Dsurprising.aeron.capacity-batch-size=20",
+            "-Dsurprising.aeron.capacity-seed=92002",
+            "-Dsurprising.aeron.mixed-trading-stream=false",
+            "-Dsurprising.aeron.capacity-warmup-seconds=1",
+            "-Dsurprising.aeron.capacity-duration-seconds=2",
+            "-cp",
+            "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+            "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain"
+          ],
+          "log": "/tmp/surprising-round2-evidence/control/client.log",
+          "started_epoch_ms": 1793159101834,
+          "pid": 16501,
+          "process_resources": [
+            {
+              "epoch_ms": 1793159101837,
+              "ps_pid_rss_kib_cpu_percent": "16378 489628 428.8\n16501   2412   0.0\n"
+            },
+            {
+              "epoch_ms": 1793159102901,
+              "ps_pid_rss_kib_cpu_percent": "16378 579452 372.9\n16501 181316 273.6\n"
+            },
+            {
+              "epoch_ms": 1793159104036,
+              "ps_pid_rss_kib_cpu_percent": "16378 708888 763.8\n16501 218260 309.4\n"
+            },
+            {
+              "epoch_ms": 1793159105124,
+              "ps_pid_rss_kib_cpu_percent": "16378 756936 859.5\n16501 316924 316.3\n"
+            },
+            {
+              "epoch_ms": 1793159106218,
+              "ps_pid_rss_kib_cpu_percent": "16378 780272 597.2\n16501 379556 113.1\n"
+            },
+            {
+              "epoch_ms": 1793159107311,
+              "ps_pid_rss_kib_cpu_percent": "16378 762420 332.3\n16501 451460 176.7\n"
+            },
+            {
+              "epoch_ms": 1793159108378,
+              "ps_pid_rss_kib_cpu_percent": "16378 764288 335.8\n16501 452880 183.5\n"
+            },
+            {
+              "epoch_ms": 1793159109434,
+              "ps_pid_rss_kib_cpu_percent": "16378 769136 331.7\n16501 475960 174.4\n"
+            },
+            {
+              "epoch_ms": 1793159110497,
+              "ps_pid_rss_kib_cpu_percent": "16378 766608 359.9\n16501 552152 172.9\n"
+            },
+            {
+              "epoch_ms": 1793159111574,
+              "ps_pid_rss_kib_cpu_percent": "16378 769124 356.2\n16501 552800 171.7\n"
+            },
+            {
+              "epoch_ms": 1793159112635,
+              "ps_pid_rss_kib_cpu_percent": "16378 770368 337.5\n16501 554400 167.3\n"
+            },
+            {
+              "epoch_ms": 1793159113693,
+              "ps_pid_rss_kib_cpu_percent": "16378 771620 333.0\n16501 615696 172.4\n"
+            },
+            {
+              "epoch_ms": 1793159114756,
+              "ps_pid_rss_kib_cpu_percent": "16378 774548 333.9\n16501 735544 170.6\n"
+            },
+            {
+              "epoch_ms": 1793159115817,
+              "ps_pid_rss_kib_cpu_percent": "16378 773948 329.2\n16501 796000 169.8\n"
+            },
+            {
+              "epoch_ms": 1793159116878,
+              "ps_pid_rss_kib_cpu_percent": "16378 775396 341.5\n16501 796156 168.0\n"
+            },
+            {
+              "epoch_ms": 1793159117931,
+              "ps_pid_rss_kib_cpu_percent": "16378 776224 339.1\n16501 796324 173.9\n"
+            },
+            {
+              "epoch_ms": 1793159119010,
+              "ps_pid_rss_kib_cpu_percent": "16378 777360 329.7\n16501 798668 168.5\n"
+            },
+            {
+              "epoch_ms": 1793159120069,
+              "ps_pid_rss_kib_cpu_percent": "16378 778648 330.7\n16501 798960 168.8\n"
+            },
+            {
+              "epoch_ms": 1793159121141,
+              "ps_pid_rss_kib_cpu_percent": "16378 780636 338.4\n16501 799404 163.4\n"
+            },
+            {
+              "epoch_ms": 1793159122212,
+              "ps_pid_rss_kib_cpu_percent": "16378 707336 344.1\n16501 795096 121.1\n"
+            },
+            {
+              "epoch_ms": 1793159123286,
+              "ps_pid_rss_kib_cpu_percent": "16378 709152 336.1\n16501 795364 112.4\n"
+            },
+            {
+              "epoch_ms": 1793159124348,
+              "ps_pid_rss_kib_cpu_percent": "16378 621240 338.1\n16501 752948 113.0\n"
+            },
+            {
+              "epoch_ms": 1793159125431,
+              "ps_pid_rss_kib_cpu_percent": "16378 587796 329.4\n16501 753180 109.5\n"
+            },
+            {
+              "epoch_ms": 1793159126496,
+              "ps_pid_rss_kib_cpu_percent": "16378 585124 324.3\n16501 753176 110.4\n"
+            },
+            {
+              "epoch_ms": 1793159127576,
+              "ps_pid_rss_kib_cpu_percent": "16378 586356 311.4\n16501 754324 107.2\n"
+            },
+            {
+              "epoch_ms": 1793159128645,
+              "ps_pid_rss_kib_cpu_percent": "16378 587784 335.3\n16501 755276 116.5\n"
+            },
+            {
+              "epoch_ms": 1793159129705,
+              "ps_pid_rss_kib_cpu_percent": "16378 588996 330.8\n16501 755564 110.0\n"
+            },
+            {
+              "epoch_ms": 1793159130762,
+              "ps_pid_rss_kib_cpu_percent": "16378 617476 348.0\n16501 759636 137.8\n"
+            },
+            {
+              "epoch_ms": 1793159131851,
+              "ps_pid_rss_kib_cpu_percent": "16378 625348 347.5\n16501 759552 168.2\n"
+            },
+            {
+              "epoch_ms": 1793159132908,
+              "ps_pid_rss_kib_cpu_percent": "16378 626548 334.3\n16501 759680 169.3\n"
+            },
+            {
+              "epoch_ms": 1793159133971,
+              "ps_pid_rss_kib_cpu_percent": "16378 633520 346.0\n16501 761080 171.3\n"
+            },
+            {
+              "epoch_ms": 1793159135039,
+              "ps_pid_rss_kib_cpu_percent": "16378 634596 372.7\n16501 762120 151.5\n"
+            },
+            {
+              "epoch_ms": 1793159136214,
+              "ps_pid_rss_kib_cpu_percent": "16378 636036 334.6\n16501 762576 166.1\n"
+            },
+            {
+              "epoch_ms": 1793159137297,
+              "ps_pid_rss_kib_cpu_percent": "16378 637492 333.4\n16501 762720 167.8\n"
+            },
+            {
+              "epoch_ms": 1793159138359,
+              "ps_pid_rss_kib_cpu_percent": "16378 638604 328.4\n16501 763012 170.1\n"
+            },
+            {
+              "epoch_ms": 1793159139429,
+              "ps_pid_rss_kib_cpu_percent": "16378 643612 277.2\n16501 763400 147.6\n"
+            },
+            {
+              "epoch_ms": 1793159140494,
+              "ps_pid_rss_kib_cpu_percent": "16378 668148 521.5\n16501 767520 203.8\n"
+            },
+            {
+              "epoch_ms": 1793159141560,
+              "ps_pid_rss_kib_cpu_percent": "16378 667120 385.2\n16501 768040 184.8\n"
+            },
+            {
+              "epoch_ms": 1793159142627,
+              "ps_pid_rss_kib_cpu_percent": "16378 668444 325.7\n16501 769848 170.4\n"
+            },
+            {
+              "epoch_ms": 1793159143689,
+              "ps_pid_rss_kib_cpu_percent": "16378 669856 327.5\n16501 769992 170.6\n"
+            },
+            {
+              "epoch_ms": 1793159144759,
+              "ps_pid_rss_kib_cpu_percent": "16378 671008 337.0\n16501 772800 170.4\n"
+            },
+            {
+              "epoch_ms": 1793159145825,
+              "ps_pid_rss_kib_cpu_percent": "16378 672120 332.2\n16501 772936 168.7\n"
+            },
+            {
+              "epoch_ms": 1793159146885,
+              "ps_pid_rss_kib_cpu_percent": "16378 672660 313.5\n16501 773000 163.9\n"
+            },
+            {
+              "epoch_ms": 1793159147960,
+              "ps_pid_rss_kib_cpu_percent": "16378 674216 279.3\n16501 773184 154.0\n"
+            },
+            {
+              "epoch_ms": 1793159149034,
+              "ps_pid_rss_kib_cpu_percent": "16378 674948 324.5\n16501 773324 166.7\n"
+            },
+            {
+              "epoch_ms": 1793159150097,
+              "ps_pid_rss_kib_cpu_percent": "16378 675504 329.7\n16501 773584 166.1\n"
+            },
+            {
+              "epoch_ms": 1793159151162,
+              "ps_pid_rss_kib_cpu_percent": "16378 676556 325.3\n16501 773952 168.0\n"
+            },
+            {
+              "epoch_ms": 1793159152224,
+              "ps_pid_rss_kib_cpu_percent": "16378 677888 286.9\n16501 774108 160.0\n"
+            },
+            {
+              "epoch_ms": 1793159153303,
+              "ps_pid_rss_kib_cpu_percent": "16378 679224 324.0\n16501 774276 168.8\n"
+            },
+            {
+              "epoch_ms": 1793159154360,
+              "ps_pid_rss_kib_cpu_percent": "16378 680284 333.5\n16501 774992 152.5\n"
+            },
+            {
+              "epoch_ms": 1793159155419,
+              "ps_pid_rss_kib_cpu_percent": "16378 681316 336.4\n16501 775364 110.9\n"
+            },
+            {
+              "epoch_ms": 1793159156482,
+              "ps_pid_rss_kib_cpu_percent": "16378 682868 333.8\n16501 781852 118.8\n"
+            },
+            {
+              "epoch_ms": 1793159157548,
+              "ps_pid_rss_kib_cpu_percent": "16378 684516 353.6\n16501 782516 111.7\n"
+            },
+            {
+              "epoch_ms": 1793159158608,
+              "ps_pid_rss_kib_cpu_percent": "16378 685676 330.4\n16501 783164 110.3\n"
+            },
+            {
+              "epoch_ms": 1793159159668,
+              "ps_pid_rss_kib_cpu_percent": "16378 687296 341.4\n16501 784952 113.9\n"
+            },
+            {
+              "epoch_ms": 1793159160757,
+              "ps_pid_rss_kib_cpu_percent": "16378 688576 336.4\n16501 784220 112.3\n"
+            },
+            {
+              "epoch_ms": 1793159161816,
+              "ps_pid_rss_kib_cpu_percent": "16378 690444 332.7\n16501 784884 108.7\n"
+            },
+            {
+              "epoch_ms": 1793159162882,
+              "ps_pid_rss_kib_cpu_percent": "16378 691548 330.3\n16501 785204 110.2\n"
+            },
+            {
+              "epoch_ms": 1793159163955,
+              "ps_pid_rss_kib_cpu_percent": "16378 697580 365.8\n16501 791928 117.0\n"
+            },
+            {
+              "epoch_ms": 1793159165023,
+              "ps_pid_rss_kib_cpu_percent": "16378 698780 323.8\n16501 792352 107.1\n"
+            },
+            {
+              "epoch_ms": 1793159166094,
+              "ps_pid_rss_kib_cpu_percent": "16378 700016 351.1\n16501 793124 112.5\n"
+            }
+          ],
+          "returncode": 0,
+          "finished_epoch_ms": 1793159167180
+        }
+      ],
+      "started_epoch_ms": 1793159098775,
+      "vm_before": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   279393.\nPages active:                                1142699.\nPages inactive:                              1191489.\nPages speculative:                             16684.\nPages throttled:                                   0.\nPages wired down:                            1211165.\nPages purgeable:                               27189.\n\"Translation faults\":                    30309967022.\nPages copy-on-write:                      1141940286.\nPages zero filled:                       21833165135.\nPages reactivated:                         805358185.\nPages purged:                                4887427.\nFile-backed pages:                            896062.\nAnonymous pages:                             1454810.\nPages stored in compressor:                  4239979.\nPages occupied by compressor:                 352102.\nDecompressions:                            363612838.\nCompressions:                              511578667.\nPageins:                                   432259679.\nPageouts:                                    6145252.\nSwapins:                                   247936944.\nSwapouts:                                  260657863.\n",
+      "swap_before": "vm.swapusage: total = 6144.00M  used = 5694.00M  free = 450.00M  (encrypted)\n",
+      "core_pid": 16378,
+      "core_pids": [
+        16378
+      ],
+      "total_cycles": 4,
+      "business_hash": "8093e6541defb0b9",
+      "status": "PASS",
+      "finished_epoch_ms": 1793159167251,
+      "vm_after": "Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free:                                   294206.\nPages active:                                1077472.\nPages inactive:                              1262187.\nPages speculative:                             11206.\nPages throttled:                                   0.\nPages wired down:                            1217449.\nPages purgeable:                               24266.\n\"Translation faults\":                    30319176180.\nPages copy-on-write:                      1142284633.\nPages zero filled:                       21839939462.\nPages reactivated:                         806353792.\nPages purged:                                4887763.\nFile-backed pages:                            927393.\nAnonymous pages:                             1423472.\nPages stored in compressor:                  4307461.\nPages occupied by compressor:                 330671.\nDecompressions:                            363822211.\nCompressions:                              511937273.\nPageins:                                   432433813.\nPageouts:                                    6148539.\nSwapins:                                   248100671.\nSwapouts:                                  260865003.\n",
+      "swap_after": "vm.swapusage: total = 7168.00M  used = 5834.50M  free = 1333.50M  (encrypted)\n"
+    }
+  }
+}

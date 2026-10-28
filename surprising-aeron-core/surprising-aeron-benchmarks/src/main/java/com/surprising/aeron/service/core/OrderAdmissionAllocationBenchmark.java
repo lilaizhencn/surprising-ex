@@ -73,13 +73,14 @@ public class OrderAdmissionAllocationBenchmark {
 
     /** Actual close-capacity decision moved from the Owner into Account Lane admission. */
     @Benchmark public java.util.List<Long> laneCloseCapacityDecision(CloseCapacityState state) {
-        return PositionCloseCapacity.inspectLane(state.lane, 7, 0, 1,
-                CorePositionSide.NET, CoreOrderSide.SELL, 0).conflictsFor(1);
+        return PositionCloseCapacity.conflictsFor(state.lane, 7, 0, 1,
+                CorePositionSide.NET, CoreOrderSide.SELL, 0, 1);
     }
 
     @State(Scope.Thread)
     public static class CloseCapacityState {
         @Param({"0", "8", "64"}) public int liveOrders;
+        @Param({"0", "1"}) public int capacitySlack;
         AccountLaneState lane;
 
         @Setup public void setup() {
@@ -91,7 +92,7 @@ public class OrderAdmissionAllocationBenchmark {
                                     java.util.List.of(new CoreRiskLimitBracket(Long.MAX_VALUE, (1_000_000_000_000L / (100_000)), 100_000, 50_000))),
                             0, 0, 0, -1, 0));
             lane = new AccountLaneState(0, 256);
-            long quantity = Math.max(1, liveOrders);
+            long quantity = Math.max(1, Math.addExact(liveOrders, capacitySlack));
             lane.storePosition(1, new PositionRuntime(7, 0, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
                     instrument, quantity, 100, quantity * 100, 0, quantity * 10));
             for (int index = 0; index < liveOrders; index++) {

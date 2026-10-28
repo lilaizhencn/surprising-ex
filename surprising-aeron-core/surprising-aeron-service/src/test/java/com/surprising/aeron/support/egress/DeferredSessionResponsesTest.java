@@ -55,6 +55,16 @@ class DeferredSessionResponsesTest {
         return egress;
     }
 
+    @Test void immediateSuccessDoesNotReadTheDeferredResponseClock() {
+        var queue = new DeferredSessionResponses();
+        var session = new Session(1);
+        session.result = 1;
+        queue.offer(session.handle, new UnsafeBuffer(new byte[]{1}), 1,
+                () -> { throw new AssertionError("successful offers need no expiry deadline"); });
+        assertThat(queue.size()).isZero();
+        assertThat(session.received).containsExactly(1);
+    }
+
     /**
      * 首条背压后改写原数组并继续交入第二条，要求没有同步重试且复制字节不被改写；放行后每轮只发本会话队首，按一、二顺序完成。
      */
@@ -65,9 +75,9 @@ class DeferredSessionResponsesTest {
         var session = new Session(1);
         // 入队后故意改写的原数组，用来证明队列保存独立复制
         byte[] bytes = {1};
-        queue.offer(session.handle, new UnsafeBuffer(bytes), 1, 0);
+        queue.offer(session.handle, new UnsafeBuffer(bytes), 1, () -> 0);
         bytes[0] = 2;
-        queue.offer(session.handle, new UnsafeBuffer(bytes), 1, 0);
+        queue.offer(session.handle, new UnsafeBuffer(bytes), 1, () -> 0);
         assertThat(session.offers).isOne();
         session.result = 1;
         queue.poll(1, 64);
@@ -89,7 +99,7 @@ class DeferredSessionResponsesTest {
         for (/* 本轮创建会话的循环下标 */ int i = 0; i < 130; i++) {
             // 当前可控会话夹具
             var session = new Session(i); sessions.add(session);
-            queue.offer(session.handle, new UnsafeBuffer(new byte[]{1}), 1, 0);
+            queue.offer(session.handle, new UnsafeBuffer(new byte[]{1}), 1, () -> 0);
         }
         sessions.getLast().result = 1;
         assertThat(queue.poll(1, 64)).isZero();
@@ -109,8 +119,8 @@ class DeferredSessionResponsesTest {
         var queue = new DeferredSessionResponses();
         // 先入队并在本轮达到截止时间的慢会话
         var slow = new Session(1); /* 后入队仍在发送期限内的可用会话 */ var later = new Session(2);
-        queue.offer(slow.handle, new UnsafeBuffer(new byte[]{1}), 1, 0);
-        queue.offer(later.handle, new UnsafeBuffer(new byte[]{2}), 1, 500_000_000);
+        queue.offer(slow.handle, new UnsafeBuffer(new byte[]{1}), 1, () -> 0);
+        queue.offer(later.handle, new UnsafeBuffer(new byte[]{2}), 1, () -> 500_000_000);
         later.result = 1;
         queue.poll(1_000_000_000, 64);
         egress.flushSessionClosures();
@@ -128,15 +138,15 @@ class DeferredSessionResponsesTest {
         var queue = new DeferredSessionResponses();
         // 被显式移除队列但不要求关闭的会话
         var a = new Session(1); /* 返回不可重试错误并应关闭的会话 */ var b = new Session(2);
-        queue.offer(a.handle, new UnsafeBuffer(new byte[]{1}), 1, 0);
-        queue.offer(b.handle, new UnsafeBuffer(new byte[]{2}), 1, 0);
+        queue.offer(a.handle, new UnsafeBuffer(new byte[]{1}), 1, () -> 0);
+        queue.offer(b.handle, new UnsafeBuffer(new byte[]{2}), 1, () -> 0);
         queue.remove(1);
         b.result = Publication.CLOSED;
         queue.poll(1, 64);
         egress.flushSessionClosures();
         assertThat(a.closing).isFalse(); assertThat(b.closing).isTrue();
         assertThat(queue.size()).isZero();
-        queue.offer(a.handle, new UnsafeBuffer(new byte[]{3}), 1, 2);
+        queue.offer(a.handle, new UnsafeBuffer(new byte[]{3}), 1, () -> 2);
         queue.clear();
         assertThat(queue.poll(3, 64)).isZero();
         assertThat(queue.size()).isZero();

@@ -256,3 +256,8 @@ API 清理：只供 gateway 使用的请求、响应和工具类型已迁回 gat
 `InstrumentRequestService.latest` 允许通过明确的 LINEAR_DELIVERY/INVERSE_DELIVERY 合约 ID 查询 CLOSED 元数据；默认公开目录仍排除 CLOSED。Web 与 client 在当前合约从目录消失时按 ID 重新读取，保留历史查询页面并禁止新委托及杠杆修改。杠杆 GET 沿 realtime 用户投影读取，Core 不承担该用户查询。其他产品线的可见性限制保持原契约。
 
 到期清理中的 TP/SL 由 `InstrumentOrderDrainService` 调用 `TriggerOrderService.cancelLifecycleOrders`，从 Core 交易控制状态分批撤销原生条件单，并再次确认条件单、算法单及普通单均无活动记录后才发 ORDER 确认。只排空算法单与普通单会遗漏 PENDING 的 TP/SL；真实到期回归同时覆盖一组未触发 OCO 和运行中的做市报价。
+
+
+`PerpetualContractMath.proportionalUnits` 统一强平、ADL 和成交结算的整数比例分摊：
+全部数量直接返回原值，部分数量使用精确乘法后整数除法，保留有符号截断与溢出拒绝；调用方继续负责数量范围。
+公式不读取账户、容器或时钟，不改变各产品的保证金、盈亏和结算规则。

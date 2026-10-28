@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.order;
 
-import com.surprising.aeron.protocol.CoreOrderStateSource;
+import com.surprising.aeron.service.result.OrderRuntimeSource;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
@@ -29,7 +29,7 @@ import lombok.experimental.Accessors;
 /**
  * 一条批量命令从准入到终态的复用上下文。它把各项输入、准入回执、撮合与账户结果、资金差额和分页游标放在同一生命周期里；Owner 管理顺序，Matcher 和账户按交接约定使用固定槽。结果编码直接读取本批，不另建同内容的订单结果表，整批退休后才清理复用。
  */
-public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatchIntentSource, TradingOrderBatchCodec.ResultSource, CoreOrderStateSource {
+public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatchIntentSource, TradingOrderBatchCodec.ResultSource {
     /**
      * 按批内下标读取 PLACE 输入；仅在下单批次和有效下标范围使用。
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
@@ -165,7 +165,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
             preparedResponseSlot = null;
             throw failure;
         } finally {
-            responseItem = null;
+            responseOrder.clear();
         }
     }
 
@@ -212,124 +212,14 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
      * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
      */
     public CoreResultCode resultCode(int index) { return items.get(index).resultCode; }
-    /** 编码器当前选中的临时项游标，不跨线程，不随响应保存。 */
-    private OrderBatchItem responseItem;
-    /**
-     * 把临时编码游标移到指定项；有结果订单时返回本对象作为只读源，没有订单则返回空。该游标不能跨线程或逃逸到响应缓存。
-     * @param index 本方法使用的有效批内下标，撤单 Matcher 回执入口使用当前片段局部下标
-     */
+    /** 批次编码期间复用的订单适配器，编码结束和命令回收时释放借用。 */
+    private final OrderRuntimeSource responseOrder = new OrderRuntimeSource();
+
     public com.surprising.aeron.protocol.CoreOrderStateSource order(int index) {
-        responseItem = items.get(index);
-        return responseItem.resultOrder == null ? null : this;
+        OrderBatchItem item = items.get(index);
+        responseOrder.set(item.resultOrder, item.resultOrderSymbol);
+        return item.resultOrder == null ? null : responseOrder;
     }
-    /**
-     * 返回当前编码游标选中订单的订单编号；调用方须先选择有订单的项。
-     */
-    public long orderId() { return responseItem.resultOrder.orderId(); }
-    /**
-     * 返回当前编码游标选中订单的产品线；调用方须先选择有订单的项。
-     */
-    public com.surprising.product.api.ProductLine productLine() { return responseItem.resultOrder.productLine(); }
-    /**
-     * 返回当前编码游标选中订单的所属用户编号；调用方须先选择有订单的项。
-     */
-    public long userId() { return responseItem.resultOrder.userId(); }
-    /**
-     * 返回当前编码游标选中订单的已保存的品种名称；调用方须先选择有订单的项。
-     */
-    public String instrumentId() { return responseItem.resultOrderSymbol; }
-    /**
-     * 返回当前编码游标选中订单的买卖方向；调用方须先选择有订单的项。
-     */
-    public com.surprising.aeron.protocol.CoreOrderSide side() { return responseItem.resultOrder.side(); }
-    /**
-     * 返回当前编码游标选中订单的委托价格刻度；调用方须先选择有订单的项。
-     */
-    public long priceTicks() { return responseItem.resultOrder.priceTicks(); }
-    /**
-     * 返回当前编码游标选中订单的委托总数量步数；调用方须先选择有订单的项。
-     */
-    public long quantitySteps() { return responseItem.resultOrder.quantitySteps(); }
-    /**
-     * 返回当前编码游标选中订单的已成交数量步数；调用方须先选择有订单的项。
-     */
-    public long executedQuantitySteps() { return responseItem.resultOrder.executedQuantitySteps(); }
-    /**
-     * 返回当前编码游标选中订单的剩余数量步数；调用方须先选择有订单的项。
-     */
-    public long remainingQuantitySteps() { return responseItem.resultOrder.remainingQuantitySteps(); }
-    /**
-     * 返回当前编码游标选中订单的是否只允许减少持仓；调用方须先选择有订单的项。
-     */
-    public boolean reduceOnly() { return responseItem.resultOrder.reduceOnly(); }
-    /**
-     * 返回当前编码游标选中订单的全仓或逐仓模式；调用方须先选择有订单的项。
-     */
-    public com.surprising.aeron.protocol.CoreMarginMode marginMode() { return responseItem.resultOrder.marginMode(); }
-    /**
-     * 返回当前编码游标选中订单的净持仓、做多或做空方向；调用方须先选择有订单的项。
-     */
-    public com.surprising.aeron.protocol.CorePositionSide positionSide() { return responseItem.resultOrder.positionSide(); }
-    /**
-     * 返回当前编码游标选中订单的订单类别；调用方须先选择有订单的项。
-     */
-    public com.surprising.aeron.protocol.CoreOrderType orderType() { return responseItem.resultOrder.orderType(); }
-    /**
-     * 返回当前编码游标选中订单的订单有效期规则；调用方须先选择有订单的项。
-     */
-    public com.surprising.aeron.protocol.CoreTimeInForce timeInForce() { return responseItem.resultOrder.timeInForce(); }
-    /**
-     * 返回当前编码游标选中订单的是否只挂单；调用方须先选择有订单的项。
-     */
-    public boolean postOnly() { return responseItem.resultOrder.postOnly(); }
-    /**
-     * 返回当前编码游标选中订单的客户端订单号；调用方须先选择有订单的项。
-     */
-    public String clientOrderId() { return responseItem.resultOrder.clientOrderId(); }
-    /**
-     * 返回当前编码游标选中订单的原命令 UUID；调用方须先选择有订单的项。
-     */
-    public java.util.UUID commandId() { return responseItem.resultOrder.commandId(); }
-    /**
-     * 返回当前编码游标选中订单的挂单手续费率，单位为百万分之一；调用方须先选择有订单的项。
-     */
-    public long makerFeeRatePpm() { return responseItem.resultOrder.makerFeeRatePpm(); }
-    /**
-     * 返回当前编码游标选中订单的吃单手续费率，单位为百万分之一；调用方须先选择有订单的项。
-     */
-    public long takerFeeRatePpm() { return responseItem.resultOrder.takerFeeRatePpm(); }
-    /**
-     * 返回当前编码游标选中订单的累计已扣手续费最小单位数；调用方须先选择有订单的项。
-     */
-    public long cumulativeFeeUnits() { return responseItem.resultOrder.cumulativeFeeUnits(); }
-        /**
-         * 返回当前编码游标选中订单的累计成交价值的高位部分；调用方须先选择有订单的项。
-         */
-        public long executedValueHigh() { return responseItem.resultOrder.executedValueHigh(); }
-        /**
-         * 返回当前编码游标选中订单的累计成交价值的低位部分；调用方须先选择有订单的项。
-         */
-        public long executedValueLow() { return responseItem.resultOrder.executedValueLow(); }
-    /**
-     * 返回当前编码游标选中订单的创建业务时间，单位毫秒；调用方须先选择有订单的项。
-     */
-    public long createdAtEpochMillis() { return responseItem.resultOrder.createdAtEpochMillis(); }
-    /**
-     * 返回当前编码游标选中订单的最近更新业务时间，单位毫秒；调用方须先选择有订单的项。
-     */
-    public long updatedAtEpochMillis() { return responseItem.resultOrder.updatedAtEpochMillis(); }
-    /**
-     * 返回当前编码游标选中订单的最近更新的复制日志位置；调用方须先选择有订单的项。
-     */
-    public long clusterPosition() { return responseItem.resultOrder.clusterPosition(); }
-    /**
-     * 返回当前编码游标选中订单的订单状态名称；调用方须先选择有订单的项。
-     */
-    public String status() { return responseItem.resultOrder.status().name(); }
-    /**
-     * 返回当前编码游标选中订单的订单修订号；调用方须先选择有订单的项。
-     */
-    public long revision() { return responseItem.resultOrder.revision(); }
 
     /**
      * 返回指定项已统计的成交事件数，编码器用它计算所需长度。
@@ -702,7 +592,7 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
 
         nextIndex = 0;
         tradeCount = 0;
-        responseItem = null;
+        responseOrder.clear();
         if (preparedResponseSlot != null) responseArena.release(preparedResponseSlot);
         preparedResponseSlot = null;
         preparedResponse = null;
@@ -896,8 +786,8 @@ public final class OrderBatchPending implements LaneOrderResultTarget, PlaceBatc
                 if (instrument().contractType().productLine().isDerivative() && !reduceOnly()
                         && position != null && position.signedQuantitySteps() != 0
                         && (position.signedQuantitySteps() > 0) != (side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-                    closeCapacityCancellations = com.surprising.aeron.service.position.PositionCloseCapacity.inspectLane(lane, userId, symbolId(),
-                            positionKey, positionSide(), side(), orderId()).conflictsFor(quantitySteps());
+                    closeCapacityCancellations = com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor(lane, userId, symbolId(),
+                            positionKey, positionSide(), side(), orderId(), quantitySteps());
                 }
                 runtime.placePreparedOrder(userId, this, commandId,
                         required, clientKey, symbolId(), assetId);

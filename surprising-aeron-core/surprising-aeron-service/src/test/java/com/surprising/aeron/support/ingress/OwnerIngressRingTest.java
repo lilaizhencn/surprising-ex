@@ -65,7 +65,7 @@ class OwnerIngressRingTest {
             }
             consumed.get(10, TimeUnit.SECONDS);
             assertThat(ring.size()).isZero();
-            assertThat(ring.retainedBytes()).isZero();
+
         } finally {
             consumer.interrupt();
             consumer.join(5_000);
@@ -114,7 +114,7 @@ class OwnerIngressRingTest {
         ring.discard(); ring.discard();
         assertThat(command.acquireDecoderSlot()).isTrue();
         command.releaseDecoderSlot();
-        assertThat(ring.retainedBytes()).isZero();
+
         assertThatThrownBy(ring::remove).isInstanceOf(IllegalStateException.class);
     }
 

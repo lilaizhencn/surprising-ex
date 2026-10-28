@@ -409,7 +409,7 @@ class TradingAccountRuntimeTest {
         // 读到的原 TradingAccountRuntime Java 源码全文
         String runtimeSource = Files.readString(Path.of(
                 "src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java"));
-        assertThat(methodSource(runtimeSource, "public long commandRevisionCheckpoint", "public void beginOrderBatch"))
+        assertThat(methodSource(runtimeSource, "public long revision", "public void beginOrderBatch"))
                 .contains("return revision")
                 .doesNotContain("onLane(", "new CommandCheckpoint", "AccountLaneState.Checkpoint");
     }
@@ -451,13 +451,13 @@ class TradingAccountRuntimeTest {
     void riskSchedulerSelectsLeastRecentlyServedWorkRegardlessOfUserProgress() {
         // 当前被测原运行时，冷对象或按用例启动实际账户工作资源
         TradingAccountRuntime state = new TradingAccountRuntime();
-        state.putRiskScan(incompleteRiskScan(1, 0).withLastScheduledRevision(20));
-        state.putRiskScan(incompleteRiskScan(2, 900).withLastScheduledRevision(10));
+        state.putRiskScan(scheduledAt(incompleteRiskScan(1, 0), 20));
+        state.putRiskScan(scheduledAt(incompleteRiskScan(2, 900), 10));
 
         assertThat(state.firstRiskIncompleteScan().symbolId())
                 .as("a low user cursor must not repeatedly preempt older work")
                 .isEqualTo(2);
-        state.putRiskScan(state.riskScan(2).withLastScheduledRevision(30));
+        state.putRiskScan(scheduledAt(state.riskScan(2), 30));
         assertThat(state.firstRiskIncompleteScan().symbolId()).isEqualTo(1);
     }
 
@@ -1885,4 +1885,13 @@ class TradingAccountRuntimeTest {
         cursors.set(0, new com.surprising.aeron.model.RiskLaneProgress(lastUserId, false, 0, 0, "-", 0, 0, 0, 0, 0));
         return new RiskScanRuntime(symbolId, 0, 1, 1, false, true, 0, 0, 0, 0, 0, 0, 0, 0, 0, cursors);
     }
+    private static com.surprising.aeron.service.risk.RiskScanRuntime scheduledAt(
+            com.surprising.aeron.service.risk.RiskScanRuntime scan, long revision) {
+        return new com.surprising.aeron.service.risk.RiskScanRuntime(scan.symbolId(), scan.accountLaneId(),
+                scan.priceSequence(), scan.scanStartPriceSequence(), scan.riskComplete(), scan.triggerComplete(),
+                scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
+                scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
+                scan.triggerOcoCursor(), revision, scan.laneProgress());
+    }
+
 }

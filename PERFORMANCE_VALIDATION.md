@@ -629,3 +629,91 @@ java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base
 
 
 
+
+
+## 14. 2026-10-28 第二轮转换与转发清理验收结果
+
+- 基线：master `7a2caa5a4` 加本轮工作树修改；只测当前源码，不重跑旧版本、不据此宣称提升。
+- 环境：macOS 26.7.2 / x86_64，Corretto HotSpot JDK 27+33-FR，Maven 3.9.16；开始磁盘 223 GiB，实施途中约 221 GiB。
+- 首个局部场景：`OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision`；单线程冷 Lane，LINEAR_PERPETUAL，1 用户、1 symbol、活动只减仓订单 0/8/64，额外容量 0/1，新平仓数量 1；保持固定订单身份与提交次序。它只验证容量决策的时间与分配，不包含网络、Archive、撮合和记账吞吐。
+- 锁定局部采样：1 fork，2×1s 预热、3×1s 测量，固定 JDK 27、1 GiB G1。主时间采样不带 profiler；同参数另跑 GC profiler 和 JFR。无冲突路径分配目标 0 B/op，冲突路径必须保持最新优先结果；不以短录制无样本证明零分配。
+- 真实 Aeron 单成员、单 Matcher、全局在途 256 的交易与控制夹具已经执行，具体参数按下节预先锁定；命令、窗口、终态和资金结果已归档。
+- 当前结论：功能、资金及恢复核对通过；JMH/JFR 已执行并归档。时间/吞吐因持续 swap **正式验收无效**，只展示诊断观察；不提供提升或全链路零分配结论。
+
+### 14.1 执行前锁定的网络验证范围
+
+- run ID 前缀 `round2-20261028`。本机 MacBookPro16,1，16 逻辑 CPU、16 GiB RAM；单个真实 Aeron 成员、单 Matcher、2 Account Lanes、Owner 窗口 256，客户端全局及单命令会话 in-flight=256。独立临时数据、驱动和资金索引目录，保留 UDP、Consensus、Archive CRC32C 和 Core；不启动 wallet、数据库或业务前端。
+- `ClusterMixedCapacityMain`，LINEAR_PERPETUAL，1,000 零售用户加夹具账户，8 symbols，种子 92001，batchSize=20。混合 GTC 挂撤及双侧 IOC，不作为普通 GTC 50/50 场景。`mixed-trading-stream=true` 保持跨轮异步发压，预热 3s、测量 10s、随后排空；主运行不带 profiler。配对 GC/JFR 运行使用同样参数及全新目录。每种运行 1 次，不作容量上限或提升比较。
+- 另以同夹具 `mixed-trading-stream=false`、种子 92002、预热 1s / 测量 2s 做功能核对，覆盖资金费、触发单、风险续扫、强平、保险与 ADL。该夹具按轮等待依赖控制页，不作为持续交易容量结果。完整运营模式依赖 Valkey 及实时物化，本轮不启动该系统，明确列为未测。
+- 主运行及配对运行排空后均核对夹具的全部余额、冻结、零售和做市持仓、终态与资金守恒；请求真实 Cluster 快照，确认 service/consensus 有效配对后重启，使用原 seed/cycles 只读核对，比较重启前后业务哈希。验收要求 accepted=terminal、无超时或业务失败、资金偏差 0、风险/保险/ADL 夹具完成。
+- 夹具在排空前单独输出 `steadyBusiness` 各业务终态数，避免把排空数量计入稳定吞吐；测量结束后收尾未完资金费页和风险扫描，再审计财库赤字为 0。这些收尾和审计不计入交易测量窗口。
+- 采样前环境检查发现系统已有 swap：`vm.swapusage used=6150.50M`。依据性能子规范，本轮时间/吞吐数值只作诊断，不能作为正式性能验收或提升证据；分运行记录 `vm_stat`/swap 前后值，继续核对分配计数、业务终态和恢复。不停止用户其他应用或清空系统 swap。
+- 首次网络启动在录制前因缺少 `--add-opens=java.base/java.util.zip=ALL-UNNAMED` 被 CRC 初始化拒绝；按现有 `start-product-line-providers.sh` 补齐，没有关闭 Archive 校验。首次重启在旧进程已退出后遇到仍新鲜的 CnC 心跳，改为等待 Driver 存活检测期限过后重试，保留全部 Archive 与快照数据；这些基础设施重试不计作测量重复。
+- 性能只使用 `steadyCapacity` 的稳定窗口完成数；`mixedCapacity` 含排空，仅作终态统计。记录达到的在途峰值及窗口等待，闭环 256 上限有 coordinated omission，不把发压端受限结果解释成 Core 极限。JFR 分角色保存，按测量开始/结束时间筛选 CPU 栈、分配、GC、阻塞、I/O、safepoint/JIT；本机无法采集的硬件缓存计数、native 长稳和未输出的三段延迟均列缺口。
+
+
+### 14.2 结论与数据来源
+
+**本轮为真实网络混合交易短采样和局部分配诊断；正确性通过，时间/吞吐正式验收无效。** 系统在整个运行前后有数十万页 swap 计数增量（系统全局，不能归因于 Core），不据此认定容量上限或收益。此前章节是历史记录；`ClusteredBatchTradingBenchmark`、`LinearPerpetualCoreBenchmark` 使用进程内 Cluster/ClientSession 替身，名称本身不能证明网络或 WAL 覆盖。
+
+源数据：[performance.json](docs/validation/deep-forwarding-round2-20261028/performance.json)、[commands.json](docs/validation/deep-forwarding-round2-20261028/commands.json)、[主运行](docs/validation/deep-forwarding-round2-20261028/main-network-results.txt)、[配对](docs/validation/deep-forwarding-round2-20261028/jfr-network-results.txt)、[控制流程](docs/validation/deep-forwarding-round2-20261028/control-network-results.txt)。只测当前 master 工作树，未运行旧版本。
+
+### 14.3 业务、清算与协议观察
+
+以下数值均为**无正式性能效力的诊断观察**。交易采样稳定窗口 10.018130s；排空及审计另列，不能用排空后的数量计算稳定吞吐。
+
+| 层次 | 指标 | 主运行观察 | 含义 |
+| --- | --- | --- | --- |
+| 业务交易 | 委托报单 | 214,228.803 单/秒 | PLACE 单项与批次项，包含 GTC 与 IOC |
+| 业务交易 | 撮合成交 | 69,106.710 成交对/秒 | 已完成成交匹配数量，不等于委托数量 |
+| 业务交易 | 撤单 | 76,017.380 单/秒 | 单项与批次撤销项 |
+| 综合业务 | 全部业务指令 | 290,254.977 项/秒 | 含报撤单及行情命令 |
+| 清算记账 | Lane 命令/结算计数 | 553,856 次 | 测量加排空的观测差分，未冒充稳定窗清算吞吐 |
+| 底座协议 | 已终态应用命令报文 | 27,651.369 报文/秒 | 不含 Raft 控制帧，不能等同所有物理包或逐笔 fsync |
+| 底座协议 | 网络/落盘带宽 | 未独立计量 | 保留真实 UDP 与 Archive，未填写推算 MB/s |
+
+稳定窗口完成 2,907,812 个业务项、277,015 个应用命令报文；排空后均为 offered=terminal，分别 2,907,832 项、277,016 报文，unfinished=0。在途峰值 256，窗口等待 205,906 次、累计约 8.801s；客户端受到闭环上限及供给能力影响，不能认定 Core 极限。`ADMIN_ACTION` 内部重试 14 次，未记成业务拒绝；每个业务响应均要求 APPLIED。
+
+JFR 配对单独运行同样参数，稳定窗 10.013152s，完成 2,890,867 项、275,403 报文；排空后 2,891,032 项、275,416 报文。仅作为配对诊断，不与主运行计算提升百分比。控制夹具按轮等待资金费与风险依赖，单列功能验证，不报告为持续交易容量。
+
+### 14.4 延迟、分配与资源
+
+链路为客户端提交 → Aeron/Consensus/Archive → Core/Matcher/Lane → 响应回调。以下来自配对录制 UUID 关联的 1/64 确定性抽样，4,282 样本，单位 µs，nearest-rank；不是 Core 内部三个阶段的独立计时。各业务完整 HDR 分布（含排空）在源数据中。
+
+| 客户端观察边界 | p50 | p90 | p95 | p99 | p99.9 | max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 请求开始 → 成功 offer | 3.919 | 9.566 | 18.419 | 59.891 | 264.824 | 559.341 |
+| offer → 响应交付 | 7,334.160 | 13,645.129 | 19,986.716 | 39,519.240 | 64,213.296 | 93,760.769 |
+| 响应交付 → 完成回调 | 1.747 | 5.087 | 6.627 | 18.479 | 79.807 | 257.150 |
+| 请求开始 → 完成回调 | 7,345.238 | 13,654.430 | 19,991.560 | 39,598.998 | 64,236.430 | 93,775.282 |
+
+抽样按 UUID hash 选择，可能受业务周期分布影响；等待 256 窗口发生在请求起点之前，不在这些延迟中，存在 coordinated omission。中段同时包含网络、Raft、Core、匹配、结算和客户端接收，不能据此把耗时归到某一 Core 方法。
+
+局部容量决策的 GC profiler 计数如下（B/op），运行参数见 14.1 和执行命令：
+
+| 现存订单 | 额外容量 | 是否冲突 | 观测 B/op |
+| ---: | ---: | --- | ---: |
+| 0 | 0 | 否 | 0.000035715 |
+| 8 | 0 | 是 | 176.002468 |
+| 64 | 0 | 是 | 1,728.028723 |
+| 0 | 1 | 否 | 0.000034585 |
+| 8 | 1 | 否 | 0.000795579 |
+| 64 | 1 | 否 | 0.006006967 |
+
+无冲突各组合的总分配率均约 0.00602 MB/s，与固定背景分配相符，但尚未独立归因；不把正计数舍入成严格 0 B/op，也不以 JFR 无分配样本证明零分配。冲突路径保留真实候选整理与不可变编号结果。
+
+配对稳定窗内 Core GC 暂停 1 次/36.542ms，客户端 4 次/23.814ms；均为诊断。JFR DirectBuffer 池观测分别 9,575,136 / 8,522,400 bytes，不包含全部 Aeron mmap/RocksDB native 内存。`ps` 测量窗采样最大 RSS：主运行 Core 1,687,972 KiB、客户端 965,368 KiB；配对分别 1,825,700 / 982,708 KiB。短样本不证明无泄漏。
+
+8 份录制均无 DataLoss。窗口内 Core 采到 3,959 个 Java/native CPU 样本，常见栈为 Lane 工作循环与 Matcher 队列循环；客户端常见栈为在途窗口等待、接收与出口轮询。没有记录到 JavaMonitorEnter 事件不等于没有锁竞争。38 个阈值以上 Java FileWrite 事件位于 Archive conductor，最长 22.654ms；profile 的 1ms I/O 阈值及 JNI 盲区使其不能证明 Owner 完全没有同步 I/O。未改缓存行布局，未采硬件 PMU 证据。
+
+按角色和窗口的聚合见 [Core JFR](docs/validation/deep-forwarding-round2-20261028/jfr/network-core.json)、[客户端 JFR](docs/validation/deep-forwarding-round2-20261028/jfr/network-client.json)。同目录保留全部 recording summary、完整录制 view、配置标识和 SHA-256；view 包含启动/审计，JSON 才按稳定窗筛选。未导出环境变量或系统属性事件的值。
+
+### 14.5 资金、恢复与交付边界
+
+主运行及配对均核对 1,025 个夹具账户的余额非负、资金总额、零售持仓/活动订单、HFT 持仓和冻结清理；预期总资金为 1,024,000,000,125 整数单位。收尾资金费页与风险扫描后，财库赤字为 0；强平、保险、ADL 夹具完成。控制场景完成 4 轮，测量包含资金费 144 页、风险续扫 96 次、触发单放置/执行各 96 次，资金偏差 0。
+
+真实快照记录均确认 service 0 与 consensus -1 在相同时间、日志位置、任期配对，再停止进程、等待 Driver 心跳失效并原目录重启，只读重验全部账户：主运行业务哈希 `106d84dcc206a9d6`、配对 `c6c9efe9a8ab1b1a` 均与重启前相同。LINEAR_PERPETUAL 网络验证通过；六产品线的资金、终态、回滚与恢复由测试及进程内夹具覆盖。
+
+完整测试验收 2,685 项，0 failures/errors，4 skipped，构建中失败及修正过程、当前源码校验见 [第二轮验收](ROUND2_CLEANUP_PROGRESS.md) 和 [验证明细](docs/validation/deep-forwarding-round2-20261028/verification.json)。未测无 swap 正式容量、普通 50/50 GTC、三成员、完整 Valkey 运营流、长稳泄漏及完整 native/硬件计数；后续应在符合门槛的环境重跑锁定场景，不能由本次诊断代替。
+
+本轮原始录制、独立节点目录及临时日志在摘要、view、配置和校验归档后清理；实际清理状态记录于验证目录的 `cleanup.json`。

@@ -127,7 +127,7 @@ public final class TradingCoreOwner {
     }
 
     /**
-     * 绑定当前 Owner，进入异步命令作用域后推进；退出作用域后提交输入环已消费字节，不把未完成命令的租约提前释放。
+     * 绑定当前 Owner，在异步命令作用域内推进，finally 退出作用域；未完成命令的租约由命令窗口持有。
      */
     private void progressCommands() {
         state.bindOwner();
@@ -136,7 +136,6 @@ public final class TradingCoreOwner {
             progressCommandsInScope();
         } finally {
             state.runtimeState.exitAsynchronousCommandScope();
-            ingress.commitConsumedBytes();
         }
     }
 
@@ -627,7 +626,7 @@ public final class TradingCoreOwner {
      * 要求恢复缓冲非空，解码候选运行时后交给统一替换入口。
      * @param recovery 已收齐片段的恢复缓冲
      */
-    public void restoreSnapshot(SectionedCoreSnapshotCodec.RecoveryBuffer recovery) {
+    public void restoreSnapshot(com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery recovery) {
         if (recovery == null) throw new IllegalArgumentException("snapshot recovery is null");
         replaceState(recovery.decodePassive(productLine, configuration, startupTopology));
     }

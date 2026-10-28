@@ -342,7 +342,7 @@ public final class RuntimeDerivativeFillCalculator {
 
         // 关闭旧仓部分按比例可释放的原持仓保证金。
         long releasedMargin = !state.hasPosition || closeSteps == 0 ? 0
-                : proportional(state.margin, closeSteps, currentAbs);
+                : com.surprising.instrument.api.math.PerpetualContractMath.proportionalUnits(state.margin, closeSteps, currentAbs);
         // 本笔完成后的有符号持仓数量。
         long nextQuantity = Math.addExact(currentQuantity, signedFill);
         // 扣除平仓释放后仍留在旧仓中的保证金。
@@ -370,7 +370,7 @@ public final class RuntimeDerivativeFillCalculator {
         long premiumFeeFunding = instrument.contractType().isOption() && premiumDelta > 0
                 ? Math.min(feeDebit, Math.subtractExact(premiumDelta, premiumMarginFunding)) : 0;
         // 按本笔数量占剩余订单数量的比例分摊的预留预算。
-        long proportionalBudget = proportional(state.reservedUnits(), fillQuantitySteps,
+        long proportionalBudget = com.surprising.instrument.api.math.PerpetualContractMath.proportionalUnits(state.reservedUnits(), fillQuantitySteps,
                 state.remaining);
         // 以当前剩余预留为上限，并兼顾本笔费用和比例预算的可用额度。
         long fillReservationBudget = Math.min(state.reservedUnits(),
@@ -508,16 +508,6 @@ public final class RuntimeDerivativeFillCalculator {
         state.timestamp = commitTimestamp; state.clusterPosition = commitPosition;
         state.feeTreasuryUnits = Math.negateExact(feeDelta);
         state.clearingTreasuryUnits = Math.negateExact(appliedPnl);
-    }
-
-    /**
-     * 按 part/total 分摊金额，相等时直接返回全部原额，否则先精确乘法再整数除法，由调用方保证分母及业务范围有效。
-     * @param units 需要按比例分摊的金额
-     * @param part 本次占用的数量部分
-     * @param total 对应金额的总数量
-     */
-    private static long proportional(long units, long part, long total) {
-        return part == total ? units : Math.multiplyExact(units, part) / total;
     }
 
     /**

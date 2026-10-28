@@ -108,30 +108,6 @@ public class ResolvedPlaceOrder {
                 0, 0, reservationKind, reservationAsset, makerFeeRatePpm, takerFeeRatePpm);
     }
 
-    /**
-     * 先清理上一次决策，再绑定当前意图、路由、价格、预留资产和费率，允许池化对象用于下一次决策。
-     * @param intent 原始下单意图，包含订单编号、方向、数量、模式和客户端标识
-     * @param instrument 本次决策绑定的币对配置，后续准入须与同一业务身份一致
-     * @param symbolId 币对已经准备好的非负运行时稠密编号
-     * @param matchingPriceTicks 实际送入 Matcher 的价格刻度，市价单也使用已经决定的保护边界
-     * @param reservationPriceTicks 计算预留金额采用的价格刻度，可能比撮合边界更保守
-     * @param markPriceTicks 本次决策的估值价格刻度，现货在该槽保存订单自己的价格边界
-     * @param indexPriceTicks 本次决策使用的指数价格刻度，不需要该价格的入口可为 0
-     * @param forwardPriceTicks 本次决策使用的远期价格刻度，有远期价格时必须同时提供指数价格
-     * @param reservationKind 应冻结现货资产还是衍生品保证金的类别
-     * @param reservationAsset 已经规范化的冻结资产代码，衍生品为结算资产，现货按买卖方向选择
-     * @param makerFeeRatePpm Maker 费率，单位为百万分比，负数表示返佣
-     * @param takerFeeRatePpm Taker 费率，单位为百万分比，且不能小于 Maker 费率
-     */
-    public void resolve(PlaceOrderCommand intent, CoreInstrument instrument, int symbolId,
-                        long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
-                        long indexPriceTicks, long forwardPriceTicks, ReservationKind reservationKind,
-                        String reservationAsset, long makerFeeRatePpm, long takerFeeRatePpm) {
-        clearResolvedOrder();
-        initializeResolvedOrder(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks,
-                markPriceTicks, indexPriceTicks, forwardPriceTicks, reservationKind, reservationAsset,
-                makerFeeRatePpm, takerFeeRatePpm);
-    }
 
     /**
      * 清除本对象保存的意图及全部决策字段，供后续安全复用。

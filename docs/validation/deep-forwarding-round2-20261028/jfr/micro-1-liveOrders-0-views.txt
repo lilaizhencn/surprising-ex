@@ -1,0 +1,9 @@
+Views cover the entire recording, including setup/audit; JSON above applies the measurement window.
+
+VIEW allocation-by-site
+
+                                                                       Allocation by Site
+
+Method                                                                                                                                      Allocation Pressure
+------------------------------------------------------------------------------------------------------------------------------------------- -------------------
+java.lang.classfile.instruction.InvokeInstruction.of(Opcode, MemberRefEntry)                                                                            100.00%

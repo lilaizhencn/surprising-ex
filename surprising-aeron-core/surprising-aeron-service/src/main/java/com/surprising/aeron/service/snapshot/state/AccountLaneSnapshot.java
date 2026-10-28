@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.snapshot.state;
 
 import java.util.List;
+import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 
 /**
  * 一个账户 Lane 的恢复元数据和用户成员列表，保存修订号、应用/提交序号及两种本地哈希。它不包含用户余额、订单或持仓明细，账户实体仍由交易状态快照恢复；构造时把用户编号排序、去重校验并固定为只读列表。
@@ -52,16 +53,12 @@ public record AccountLaneSnapshot(
                 array[i] = val;
             }
             java.util.Arrays.sort(array);
-            // 按排序结果装入的 Long 数组，随后由 List.of 固定列表。
-            Long[] boxed = new Long[size];
-            boxed[0] = array[0];
             for (/* 当前从输入复制或从已排序数组装入只读列表的下标。 */ int i = 1; i < size; i++) {
                 if (array[i] == array[i - 1]) {
                     throw new IllegalArgumentException("duplicate account lane user");
                 }
-                boxed[i] = array[i];
             }
-            userIds = List.of(boxed);
+            userIds = ImmutableLongArrayList.takeOwnership(array);
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.core.index.ActiveOrderIndex;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.protocol.CommandFingerprint;
@@ -170,29 +172,6 @@ public final class CoreMatchingFlow {
     }
 
     /**
-     * 从活动订单派生索引按用户/品种/游标分页，再把仍有路由的订单转成控制撤单身份；使用原页的下一游标，路由缺失项跳过。
-     * @param userId 活动订单选择用户，零用于选择品种全部用户
-     * @param instrumentId 永久品种字符串
-     * @param cursorOrderId 活动订单页的排他订单游标
-     * @param maxOrders 本次最多选择的撤单订单数
-     */
-    public TradingCoreRuntime.LifecycleOrderChunk lifecycleOrders(
-            long userId, String instrumentId, long cursorOrderId, int maxOrders) {
-        // 从活动订单派生索引取得的原分页结果。
-        var page = owner.activeOrderIndex().page(userId, instrumentId, cursorOrderId, maxOrders);
-        // 本页仍有效的撤单路由身份列表。
-        List<CancellationOrder> selected = new ArrayList<>(page.orderIds().size());
-        for (Long /* 当前待查活动路由的订单号。 */ orderId : page.orderIds()) {
-            // 当前活动订单索引保留的稳定路由身份。
-            var route = owner.activeOrderIndex().activeOrderRoute(orderId);
-            if (route != null) {
-                selected.add(new CancellationOrder(route.orderId(), route.userId(), route.instrumentId()));
-            }
-        }
-        return new TradingCoreRuntime.LifecycleOrderChunk(selected, page.nextCursorOrderId());
-    }
-
-    /**
      * 按强平批次动作顺序与账户校验收据挑出 PLANNED/ORDERED 且需要撤单的工作，使用剩余撤单预算分页，返回固定外层列表，不再执行账户强平。
      * @param pending 本池仍在生命周期内的命令槽
      */
@@ -213,7 +192,7 @@ public final class CoreMatchingFlow {
             if (liquidation == null || (liquidation.status() != CoreLiquidationState.Status.PLANNED
                     && liquidation.status() != CoreLiquidationState.Status.ORDERED)) continue;
             // 当前用户/品种在剩余预算内的活动订单页。
-            TradingCoreRuntime.LifecycleOrderChunk chunk = lifecycleOrders(
+            ActiveOrderIndex.LifecycleOrderChunk chunk = owner.activeOrderIndex().lifecycleOrders(
                     liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
                     action.cursorOrderId(), remaining);
             orders.addAll(chunk.orders());
@@ -475,7 +454,7 @@ public final class CoreMatchingFlow {
         try {
             return owner.matchingAdapter().topology().matchingEngineCount() == 1
                     ? owner.matcherPipeline().readAtSubmissionFence(0,
-                    () -> owner.matchingAdapter().orderBooksStateHashAsync().join())
+                    owner.matchingAdapter()::orderBooksStateHash)
                     : owner.matcherPipeline().readEachAsync(owner.matchingAdapter()::stateHashShard)
                     .thenApply(owner.matchingAdapter()::aggregateBookHash);
         } catch (/* 当前登记、准入或哈希读取的运行异常，按所在方法清理或转为失败结果。 */ RuntimeException failure) {
@@ -501,7 +480,7 @@ public final class CoreMatchingFlow {
         return switch (pending.operation()) {
             case PLACE -> pending.preparePlaceMatching(owner, shard, userId,
                     java.util.Objects.requireNonNull(pending.placeAdmission(), "place admission receipt").matchingOrder(),
-                    null, direct);
+                    direct);
             case CANCEL -> {
                 // 当前操作对应的已解码输入或准备的固定 Matcher 函数，具体类型见声明。
                 var command = pending.decodedCommand().cancelOrder();
@@ -516,8 +495,8 @@ public final class CoreMatchingFlow {
                 yield pending.prepareReplaceMatching(owner, shard, admission.resolved().orderId(), userId,
                         admission.originalOrderId(), admission.command().instrumentId(), admission.resolved(), direct);
             }
-            case TRIGGER -> pending.preparePlaceMatching(owner, shard, userId, null,
-                    java.util.Objects.requireNonNull(pending.admittedMatchingOrder(), "trigger admission receipt"), direct);
+            case TRIGGER -> pending.prepareAdmittedPlaceMatching(owner, shard, userId,
+                    java.util.Objects.requireNonNull(pending.triggerAdmissionOrder(), "trigger admission receipt"), direct);
             default -> throw new IllegalStateException("unsupported trading operation " + pending.operation());
         };
     }
@@ -546,7 +525,7 @@ public final class CoreMatchingFlow {
                 // 账户校验收据确认的当前强平计划状态。
                 var liquidation = pending.liquidationCheck().liquidation(0);
                 orders = liquidation == null || !pending.liquidationCheck().executable(0) ? List.of()
-                        : lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
+                        : owner.activeOrderIndex().lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
                                 command.cursorOrderId(), command.maxOrders()).orders();
             }
             case LIQUIDATION_BATCH -> orders = batchCancellationOrders(pending);
@@ -554,9 +533,9 @@ public final class CoreMatchingFlow {
                 // 当前操作对应的已解码输入或准备的固定 Matcher 函数，具体类型见声明。
                 var command = pending.decodedCommand().settlement();
                 // 该品种当前到期结算进度，已完成撤单阶段时不再选挂单。
-                var progress = owner.runtimeLifecycleProgress(command.instrumentId());
+                var progress = owner.lifecycleProgress(command.instrumentId());
                 orders = progress != null && progress.ordersComplete() ? List.of()
-                        : lifecycleOrders(0, command.instrumentId(),
+                        : owner.activeOrderIndex().lifecycleOrders(0, command.instrumentId(),
                                 command.cursorOrderId(), command.maxOrders()).orders();
             }
             default -> throw new IllegalStateException("unsupported cancellation control");

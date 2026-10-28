@@ -94,7 +94,7 @@ public final class DirectMatcherTestInputs {
             long sequence, UUID commandId, long timestamp, long userId, CoreMatchingOrder order) {
         // 已保留 Matcher 发布租约的 Direct 事件，供适配器写入证据及订单簿结果
         var target = preparePlace(adapter, sequence, commandId, timestamp, userId, order);
-        adapter.placeDirect(adapter.matcherShardId(Integer.toString(order.instrumentId())), sequence, commandId,
+        adapter.placeDirect(adapter.matcherShardId(Integer.toString(order.instrumentId())), sequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
                 timestamp, userId, order, target);
         return target;
     }
@@ -127,7 +127,7 @@ public final class DirectMatcherTestInputs {
             var target = runtime.prepareDirectCancellation(sequence, userId, orderId, commandId,
                     adapter.matcherShardId(instrumentId), new RuntimeIdentityRegistry(), timestamp, 0);
             target.reserveMatcherPublication();
-            adapter.cancelDirect(adapter.matcherShardId(instrumentId), sequence, commandId, orderId,
+            adapter.cancelDirect(adapter.matcherShardId(instrumentId), sequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
                     timestamp, userId, instrumentId, target);
             return target;
         }

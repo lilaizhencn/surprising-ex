@@ -63,4 +63,30 @@ class CoreLiquidationWorkCodecTest {
         assertThat(CoreLiquidationWorkCodec.decodeWork(CoreLiquidationWorkCodec.encodeWork(work)))
                 .isEqualTo(work);
     }
+    @Test
+    void lengthCalculationsMatchUtf8EncodingForActionsResolutionsAndContinuation() {
+        var continuation = new CoreRiskScanContinuation("合约-🚀", 19, 41);
+        var action = new CoreLiquidationActionView(7, 11, "合约-🚀", CoreMarginMode.ISOLATED,
+                CorePositionSide.LONG, 19, 5, 5, 60_000, "ORDERED", 91);
+        var resolution = new CoreLiquidationWorkView.Resolution(8, 12, "合约-🚀", "结算币",
+                CoreMarginMode.CROSS, CorePositionSide.NET, 19, 5, 100, 37,
+                CoreLiquidationWorkView.Purpose.INSURANCE);
+        for (var scan : Arrays.asList(null, continuation)) {
+            var empty = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL, 0, false,
+                    scan, List.of(), List.of());
+            var work = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL, 8, false,
+                    scan, List.of(action), List.of());
+            var resolutionWork = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL, 8, false,
+                    scan, List.of(), List.of(resolution));
+            assertThat(CoreLiquidationWorkCodec.emptyWorkLength(scan))
+                    .isEqualTo(CoreLiquidationWorkCodec.encodeWork(empty).length);
+            assertThat(CoreLiquidationWorkCodec.emptyWorkLength(scan)
+                    + CoreLiquidationWorkCodec.actionLength(action))
+                    .isEqualTo(CoreLiquidationWorkCodec.encodeWork(work).length);
+            assertThat(CoreLiquidationWorkCodec.emptyWorkLength(scan)
+                    + CoreLiquidationWorkCodec.resolutionLength(resolution))
+                    .isEqualTo(CoreLiquidationWorkCodec.encodeWork(resolutionWork).length);
+        }
+    }
+
 }

@@ -1,0 +1,7 @@
+{
+  "jdk": "Corretto HotSpot 27+33-FR",
+  "profile_path": "/Users/atomex/.sdkman/candidates/java/27.0.0-amzn/lib/jfr/profile.jfc",
+  "profile_sha256": "666369719b1a8e11f6c16ecf8be9cbc58537f7c305cba10236f11d6bf7ae001e",
+  "configuration": "settings=profile; JMH built-in JFR profiler; paired network JVMs StartFlightRecording profile, maxsize=256m, dumponexit=true",
+  "retention": "Raw recordings deleted after summaries/views, profile configuration identifier, and SHA-256 archive. Environment/system-property event values were not exported."
+}

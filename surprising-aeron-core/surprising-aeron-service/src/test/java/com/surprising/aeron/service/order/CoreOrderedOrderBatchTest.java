@@ -237,7 +237,7 @@ class CoreOrderedOrderBatchTest {
             // 故障注入前的已提交 Core 水位
             long committedBefore = state.committedCoreSequence();
             // 故障前的独立发布序号，失败不得错误前进
-            long projectionBefore = state.snapshotProjectionSequence();
+            long projectionBefore = state.realtimeExportSequence();
             // 当前待测的批量改单消息或其单项输入
             var amend = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
@@ -275,7 +275,7 @@ class CoreOrderedOrderBatchTest {
                     FatalMatchingDivergenceException.class)
                     .hasRootCauseInstanceOf(ArithmeticException.class);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
-            assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
+            assertThat(state.realtimeExportSequence()).isEqualTo(projectionBefore);
             assertThat(state.commandResults()).doesNotContainKey(amend.header().commandId());
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 7))).isInstanceOf(RuntimeException.class);
             assertThatThrownBy(state::snapshot).isInstanceOf(RuntimeException.class);
@@ -2188,7 +2188,7 @@ class CoreOrderedOrderBatchTest {
             // 执行当前批次前的运行时业务修订
             long revisionBefore = runtime.revision();
             // 故障前的独立发布序号，失败不得错误前进
-            long projectionBefore = state.snapshotProjectionSequence();
+            long projectionBefore = state.realtimeExportSequence();
             // 故障注入前的已提交 Core 水位
             long committedBefore = state.committedCoreSequence();
             // 当前需要检查终态缓存及重复请求的原 UUID
@@ -2215,7 +2215,7 @@ class CoreOrderedOrderBatchTest {
             assertThatThrownBy(() -> com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
                     state.snapshotTradingState()))
                     .hasMessageContaining("unfinished reservation or patch work");
-            assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
+            assertThat(state.realtimeExportSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 3))).isSameAs(failure);
         }
@@ -2244,7 +2244,7 @@ class CoreOrderedOrderBatchTest {
             // 故障前持仓身份分配检查点，实际成交后的新身份不得回滚。
             long positionCheckpointBefore = identities.positionCheckpoint();
             // 故障前的独立发布序号，失败不得错误前进
-            long projectionBefore = state.snapshotProjectionSequence();
+            long projectionBefore = state.realtimeExportSequence();
             // 故障注入前的已提交 Core 水位
             long committedBefore = state.committedCoreSequence();
             // 随后要注入致命事实的原批次 UUID
@@ -2293,7 +2293,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.order(15_302))).isNull();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(15_301))).isNull();
             assertThat(AccountLaneQueryTestSupport.read(runtime, 1001, () -> runtime.reservation(15_302))).isNull();
-            assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
+            assertThat(state.realtimeExportSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.takeMatchingResult(sequence)).isNull();
             assertThatThrownBy(() -> state.apply(command(ProductLine.LINEAR_PERPETUAL,

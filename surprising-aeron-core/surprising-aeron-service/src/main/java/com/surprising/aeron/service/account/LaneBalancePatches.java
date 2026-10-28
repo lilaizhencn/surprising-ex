@@ -19,12 +19,12 @@ public final class LaneBalancePatches {
             // 本条余额捕获对应的资产整数编号。
             int assetId = source.assetIds[index];
             if (contains(userId, assetId)) continue;
-            // 来源中已保存的不可变余额前值，null 表示不存在。
-            BalanceState before = source.before(index);
-            // 仅为沿用 add 前值捕获入口构造的余额值，后续保存为原语金额而不是长期持有该对象。
-            BalanceRuntime value = before == null ? null
-                    : new BalanceRuntime(userId, assetId, before.availableUnits(), before.lockedUnits());
-            add(userId, assetId, value, before == null ? 0 : before.pendingReservedUnits());
+            int target = size;
+            add(userId, assetId, null, 0);
+            presentBefore[target] = source.presentBefore[index];
+            availableBefore[target] = source.availableBefore[index];
+            lockedBefore[target] = source.lockedBefore[index];
+            pendingBefore[target] = source.pendingBefore[index];
         }
     }
 
@@ -104,27 +104,6 @@ public final class LaneBalancePatches {
      */
     public int assetId(int index) { return assetIds[index]; }
     /**
-     * 把捕获的前值金额物化为不可变 BalanceState；原余额不存在时返回 null，零金额和不存在通过标记区分。
-     * @param index 本轮连续存储前缀中的下标
-     */
-    BalanceState before(int index) {
-        return !presentBefore[index] ? null : new BalanceState(
-                availableBefore[index], lockedBefore[index], pendingBefore[index]);
-    }
-
-    /**
-     * 要求该条目已捕获后值，再把金额物化为不可变值；后值标记不存在时返回 null。
-     * @param index 本轮连续存储前缀中的下标
-     */
-    public BalanceState after(int index) {
-        if (!capturedAfter[index]) {
-            throw new IllegalStateException("balance mutation did not publish its lane after-state");
-        }
-        return !presentAfter[index] ? null : new BalanceState(
-                availableAfter[index], lockedAfter[index], pendingAfter[index]);
-    }
-
-    /**
      * 按用户及资产组合键检查本轮是否已有前值记录。
      * @param userId 被捕获余额所属用户编号
      * @param assetId 被捕获余额的资产整数编号
@@ -143,6 +122,9 @@ public final class LaneBalancePatches {
     public void add(long userId, int assetId, BalanceRuntime value, long pendingReservedUnits) {
         if (indexOf(userId, assetId) >= 0) {
             throw new IllegalStateException("balance capture key already exists");
+        }
+        if (value != null && (pendingReservedUnits < 0 || pendingReservedUnits > value.lockedUnits())) {
+            throw new IllegalArgumentException("invalid runtime balance state");
         }
         ensureIndexCapacity(size + 1);
         if (size == userIds.length) {

@@ -14,15 +14,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
-import org.springframework.boot.context.properties.bind.Bindable;
-import org.springframework.boot.context.properties.bind.Binder;
-import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
-import org.springframework.core.io.ClassPathResource;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -35,17 +30,11 @@ class CoreConfigurationTest {
     /** 发布的 YAML 与 Java 默认值应一致，覆盖全部分片、种子和队列参数。 */
     @Test
     void applicationYamlAndJavaDefaultsDescribeTheSameTopology() {
-        // 加载实际随服务发布的配置，避免只验证 Java 对象默认值。
-        var yaml = new YamlPropertiesFactoryBean();
-        yaml.setResources(new ClassPathResource("application.yml"));
-        // 用真实 Binder 接收 YAML 的键值与数字类型。
-        var properties = new MapConfigurationPropertySource();
-        yaml.getObject().forEach((/* YAML 中的属性名。 */ key, /* YAML 解析后的原始值。 */ value) ->
-                properties.put(key.toString(), value));
-        // 绑定后的配置与固定默认拓扑必须完全一致。
-        var configuration = new Binder(properties).bind("surprising.aeron", Bindable.of(CoreConfiguration.class)).get();
-        assertThat(configuration.toLaneTopology()).isEqualTo(new CoreConfiguration().toLaneTopology())
-                .isEqualTo(LaneTopology.productionDefault());
+        // 读取真实发布配置并通过容器取得 Bean，避免直接调用未代理的 Bean 方法。
+        try (var context = application().run("--surprising.aeron.product-line=SPOT",
+                "--surprising.aeron.hostnames=localhost")) {
+            assertThat(context.getBean(LaneTopology.class)).isEqualTo(LaneTopology.productionDefault());
+        }
     }
 
     /** 命令行覆盖系统属性和 YAML，真实 Owner 的账户、Matcher 及快照应共用绑定后的拓扑。 */

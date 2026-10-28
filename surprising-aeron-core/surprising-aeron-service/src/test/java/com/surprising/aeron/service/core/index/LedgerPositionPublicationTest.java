@@ -219,9 +219,10 @@ class LedgerPositionPublicationTest {
         var done = new CountDownLatch(1);
         // 把账本查询操作抛出的异常带回测试线程的原子槽
         var failure = new AtomicReference<Throwable>();
-        assertThat(runtime.dispatchLedgerQuery(/* 账本查询回调传入的账本对象，本用例操作使用闭包中的业务索引 */ ignored -> {
+        assertThat(runtime.<Boolean>queryLedgerAtRest(/* 账本查询回调传入的账本对象，本用例操作使用闭包中的业务索引 */ ignored -> {
             try { operation.run(); } catch (/* 账本查询断言或操作抛出的原异常 */ Throwable problem) { failure.set(problem); }
             finally { done.countDown(); }
+            return true;
         })).isTrue();
         assertThat(done.await(3, TimeUnit.SECONDS)).isTrue();
         assertThat(failure.get()).isNull();

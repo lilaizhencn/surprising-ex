@@ -69,7 +69,7 @@ public final class RuntimeLifecycleSettlementContinuation {
         boolean moreOrders = false;
         if (!ordersComplete) {
             // 本次从活动订单或用户索引读取的页面。
-            var page = RuntimeLifecycleSettlement.selectOrders(activeOrderIndex, instrument.instrumentId(), command.cursorOrderId(), command.maxOrders());
+            var page = activeOrderIndex.lifecycleOrders(0, instrument.instrumentId(), command.cursorOrderId(), command.maxOrders());
             selectedOrders = page.orders();
             moreOrders = page.nextCursorOrderId() != 0;
         }

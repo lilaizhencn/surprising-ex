@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.order;
 
+import com.surprising.aeron.service.core.index.ActiveOrderIndex;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -296,7 +298,7 @@ public final class MatchingCommandAdmission {
         long sequence = deferredPending == null
                 ? Math.incrementExact(owner.appliedCommandCount()) : deferredPending.sequence();
         // 开始业务准入前的账户回滚检查点
-        long runtimeCommandCheckpoint = owner.runtimeState().commandRevisionCheckpoint();
+        long runtimeCommandCheckpoint = owner.runtimeState().revision();
         // 开始业务准入前的持仓身份回滚检查点
         long positionIdentityCheckpoint = owner.identities().positionCheckpoint();
         // 当前已能确定的先撤订单列表，未就绪准入可暂为空
@@ -336,7 +338,7 @@ public final class MatchingCommandAdmission {
                 }
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
             }
-            else owner.commits.publication.abort();
+            else owner.commits.publication.clearBatchState();
             // 本轮已决定的拒绝响应，由事实作用域收尾后返回
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
@@ -348,7 +350,7 @@ public final class MatchingCommandAdmission {
                 }
                 owner.rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint, sequence);
             }
-            else owner.commits.publication.abort();
+            else owner.commits.publication.clearBatchState();
             // 本轮已决定的拒绝响应，由事实作用域收尾后返回
             CoreResponse response = rejectMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
@@ -595,7 +597,7 @@ public final class MatchingCommandAdmission {
             batchChangedUsers.add(liquidation.userId());
             if (remaining > 0) {
                 // 按剩余预算取得的当前强平撤单页
-                TradingCoreRuntime.LifecycleOrderChunk chunk = owner.matchingFlow.lifecycleOrders(liquidation.userId(), liquidationSymbol,
+                ActiveOrderIndex.LifecycleOrderChunk chunk = owner.activeOrderIndex().lifecycleOrders(liquidation.userId(), liquidationSymbol,
                         action.cursorOrderId(), remaining);
                 for (var /* 当前原单路由或本页撤单身份，具体类型见声明 */ order : chunk.orders()) batchChangedOrders.add(order.orderId());
                 remaining -= chunk.orders().size();
@@ -621,7 +623,7 @@ public final class MatchingCommandAdmission {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument has not reached expiry");
         }
         // 当前品种已提交的到期结算进度
-        var progress = owner.runtimeLifecycleProgress(command.instrumentId());
+        var progress = owner.lifecycleProgress(command.instrumentId());
         if (progress == null && (command.cursorUserId() != 0 || command.cursorOrderId() != 0)) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
         }
@@ -634,12 +636,11 @@ public final class MatchingCommandAdmission {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
         }
         // 该品种在当前撤单游标后的活动订单页
-        TradingCoreRuntime.LifecycleOrderChunk orderChunk = owner.matchingFlow.lifecycleOrders(0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
+        ActiveOrderIndex.LifecycleOrderChunk orderChunk = owner.activeOrderIndex().lifecycleOrders(0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
         // 当前结算是否仍处在撤单阶段
         boolean orderPhase = progress == null || !progress.ordersComplete();
         if (orderPhase) {
-            owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
-            owner.resultBuilder.addChangedUsersFromOrders(orderChunk.orders());
+            owner.resultBuilder.addLifecycleChanges(orderChunk.orders());
         } else {
             owner.resultBuilder.commandChangedOrderIds = List.of();
         }

@@ -687,7 +687,7 @@ class CoreLifecycleStateTest {
             for (int index = 0; index < reverseIds.size(); index++) receipts[index + 1] = runtime.liquidation(reverseIds.get(index));
             receipts[receipts.length - 1] = runtime.liquidation(firstUser.liquidationId());
             int count = receipts.length - 1;
-            java.util.function.LongFunction<InsuranceAllocationPolicy.Resolution> resolution = id ->
+            java.util.function.LongUnaryOperator resolution = id ->
                     runtime.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.resolve(receipts, count, id, assetId, ledger));
             // 对反向候选列表一次性求出的全部保险分配结果。
             long[] ids = reverseIds.stream().mapToLong(Long::longValue).toArray();
@@ -708,28 +708,25 @@ class CoreLifecycleStateTest {
                 });
             }
             var allAllocations = runtime.queryLedgerAtRest(ledger -> InsuranceAllocationPolicy.allocations(
-                    ledger, InsuranceAllocationPolicy.mergeLaneClaims(claims)));
+                    ledger, claims));
             for (long /* 当前要比较逐项保险覆盖结果的强平编号。 */ id : reverseIds) {
-                assertThat(resolution.apply(id).expectedCoverage())
-                        .isEqualTo(allAllocations.get(id))
+                assertThat(allAllocations.get(id))
                         .isEqualTo(RuntimeTestStateTransitions.expectedInsuranceCoverage(state, id));
             }
-            assertThat(resolution.apply(firstUser.liquidationId()).next())
-                    .isTrue();
-            assertThat(resolution.apply(secondUser.liquidationId()).next())
-                    .isFalse();
+            assertThat(resolution.applyAsLong(firstUser.liquidationId())).isEqualTo(firstCoverage);
+            assertThat(resolution.applyAsLong(secondUser.liquidationId())).isEqualTo(-1);
 
             TreasuryRuntime fullBudget = new TreasuryRuntime();
             fullBudget.setInsurance(assetId, 10_000, 0);
             assertThat(Math.addExact(firstUser.deficitUnits(), secondUser.deficitUnits())).isLessThan(10_000);
             assertThat(InsuranceAllocationPolicy.resolve(receipts, count, firstUser.liquidationId(), assetId, fullBudget))
-                    .isEqualTo(new InsuranceAllocationPolicy.Resolution(true, firstUser.deficitUnits()));
+                    .isEqualTo(firstUser.deficitUnits());
             assertThat(InsuranceAllocationPolicy.resolve(receipts, count, secondUser.liquidationId(), assetId, fullBudget))
-                    .isEqualTo(new InsuranceAllocationPolicy.Resolution(false, secondUser.deficitUnits()));
+                    .isEqualTo(-1L);
             assertThat(InsuranceAllocationPolicy.resolve(receipts, count, firstUser.liquidationId(), assetId, new TreasuryRuntime()))
-                    .isEqualTo(new InsuranceAllocationPolicy.Resolution(true, 0));
+                    .isEqualTo(0L);
             assertThat(InsuranceAllocationPolicy.resolve(receipts, count, Long.MAX_VALUE, assetId, fullBudget))
-                    .isEqualTo(new InsuranceAllocationPolicy.Resolution(false, 0));
+                    .isEqualTo(-1L);
         }
 
         assertThat(firstCoverage).isEqualTo(secondCoverage + 1);

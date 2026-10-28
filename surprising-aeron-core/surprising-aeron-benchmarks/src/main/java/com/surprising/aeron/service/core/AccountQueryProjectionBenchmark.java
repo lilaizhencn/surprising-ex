@@ -71,9 +71,9 @@ public class AccountQueryProjectionBenchmark {
     @Benchmark public byte[] projectAndEncode() {
         byte[] result = switch (queryType) {
             case "USER" -> CoreStateQueryCodec.encodeUserState(
-                    RuntimeStateQueryService.userState(runtime, lane, identities, 7).view());
+                    RuntimeStateQueryService.userState(runtime, lane, identities, 7, false).view());
             case "ORDER" -> CoreStateQueryCodec.encodeOrderState(
-                    RuntimeStateQueryService.orderState(runtime, lane, identities, 71).view());
+                    RuntimeStateQueryService.orderState(runtime, lane, identities, 71, false).view());
             case "CLIENT" -> CoreStateQueryCodec.encodeOrderState(
                     RuntimeStateQueryService.clientOrderState(runtime, lane, identities, 7, "query-71").view());
             default -> throw new IllegalArgumentException("unknown query type");

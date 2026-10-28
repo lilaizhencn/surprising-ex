@@ -1,0 +1,836 @@
+[
+  {
+    "path": "control/client.log",
+    "bytes": 4109,
+    "sha256": "a84e3e1456a1c019017c39a6a2a648cd1311b4728ab8b1e2facd855f2db4ee0a",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/core-16378-gc.log",
+    "bytes": 9606,
+    "sha256": "e1dd3c54f2f5b2bd30ba66bee4859ee1a12731c6978d0f07ba9ddc2570ab849e",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/core.log",
+    "bytes": 1639,
+    "sha256": "deb1a5f2fcae4e0b9c8c46693cbcf89990d79b7d95ba3a85ec9cf7cf070086a2",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/core.pid",
+    "bytes": 5,
+    "sha256": "6a91be625bbb0494874fbce773f9023509bbb5f777ab9832f5158a9839f51f5e",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/data/linear_perpetual/node0/archive/0-0.rec",
+    "bytes": 134217728,
+    "sha256": "6bb491a1304c4548b775f40a155aec1fea714088f68103ea26b81aaaabf7ebc9",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/data/linear_perpetual/node0/archive/archive-mark.dat",
+    "bytes": 1056768,
+    "sha256": "3814d814078a94735c5d00896158a161001b48655efb6d7c17042b2a91f601f8",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/data/linear_perpetual/node0/archive/archive.catalog",
+    "bytes": 1048576,
+    "sha256": "3e92cff7c4878b559e084d76da0b793fc376645050fdd75cf09caf90d544fd72",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/data/linear_perpetual/node0/cluster/cluster-mark-service-0.dat",
+    "bytes": 1056768,
+    "sha256": "d4ad0aef490fe013107a82f24a18d92e35358716373fb2740223c362c7786814",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/data/linear_perpetual/node0/cluster/cluster-mark.dat",
+    "bytes": 1056768,
+    "sha256": "1673025d9b2a8d9fbecbbf8662418584eb04b456c64b586c84f338efb2f4c8c0",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/data/linear_perpetual/node0/cluster/node-state.dat",
+    "bytes": 1048576,
+    "sha256": "583bc049cd9c5aa6ec39c56f3dca83abfa5ca0e95797f2040350843887732c3d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/data/linear_perpetual/node0/cluster/recording.log",
+    "bytes": 64,
+    "sha256": "e585924c513ee4d10d722f764db503104e7744e10d4962d90a597ee1b5fe8c05",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/cnc.dat",
+    "bytes": 48238592,
+    "sha256": "3aec8ff4aa706e8ab6f3e4c39aa96772a07fa70b1feaf49525531c1384c95b5c",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/images/77.logbuffer",
+    "bytes": 50335744,
+    "sha256": "d616f7200bf44ad53649c55973f243fa55f670971d19137b8f3d39b641536b55",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/images/78.logbuffer",
+    "bytes": 50335744,
+    "sha256": "b7238e7fba24d174f646db802db7ddc569f2f446a66a2eb99a6dda53a640c96d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/loss-report.dat",
+    "bytes": 1048576,
+    "sha256": "30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/publications/36.logbuffer",
+    "bytes": 397312,
+    "sha256": "47d11acf4e1ab3fca605895e6f8d1054fb17aea8bc755be90d81d1c5d694f0fd",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/publications/45.logbuffer",
+    "bytes": 3149824,
+    "sha256": "7cae8a4a45eecc097e45adc2362ca9932697ab0d48cc2e508a4b81b3491560c8",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/publications/46.logbuffer",
+    "bytes": 397312,
+    "sha256": "5542145b846473889a2bedb9b6151c9592fecd0074e226cf4069dca030242a05",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/publications/52.logbuffer",
+    "bytes": 3149824,
+    "sha256": "7accfa05668bf13bf49e8f7dfeae146f426af6a5d8091a685281fe6164b0683f",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/publications/69.logbuffer",
+    "bytes": 201330688,
+    "sha256": "016f9356f82bf655c8543b494472627b38504b1e392efdd71a77830b8ae66ac6",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/publications/80.logbuffer",
+    "bytes": 50335744,
+    "sha256": "073aea8f65b33a6a4da51387fe6b92381bbeef7a63a25f33076d64d50460ede5",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/driver-surprising-linear_perpetual-0/publications/82.logbuffer",
+    "bytes": 50335744,
+    "sha256": "c5c1e497d324195b1dcee71d9e25fa1c743acbe07d5b18b97b7325415186d3e0",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/metadata.json",
+    "bytes": 14612,
+    "sha256": "c6456654f0ae48a7da865d31d3237ba02b4edf23bab6361e3f12ae285b5ad547",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/server-tmp/surprising-funds-index-1407953543590894712/000004.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/server-tmp/surprising-funds-index-1407953543590894712/CURRENT",
+    "bytes": 16,
+    "sha256": "9c283f6e81028b9eb0760d918ee4bc0aa256ed3b926393c1734c760c4bd724fd",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/server-tmp/surprising-funds-index-1407953543590894712/IDENTITY",
+    "bytes": 36,
+    "sha256": "1d361893b199f80d53b7b0a057cfafd680f44e150710e91341dc63bd884229e1",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/server-tmp/surprising-funds-index-1407953543590894712/LOCK",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/server-tmp/surprising-funds-index-1407953543590894712/LOG",
+    "bytes": 25280,
+    "sha256": "7df69afbc3205e4937602c96c495e4a05275f75efbbb3a043de6ef8de5b50bef",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/server-tmp/surprising-funds-index-1407953543590894712/MANIFEST-000005",
+    "bytes": 116,
+    "sha256": "6db72b009595d7faeac711fd183f4b0b0f950e345eb7cd71d6c801398747e897",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "control/server-tmp/surprising-funds-index-1407953543590894712/OPTIONS-000007",
+    "bytes": 7598,
+    "sha256": "88686079ab0abbdffee6fe95c5c84e0a9a013d64261379cc0732dc3a1d2624a3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/client-gc.log",
+    "bytes": 31438,
+    "sha256": "a9e56c6355abab18e92c157d7cab1aef63725b524f67226b8938020a5bd1f37b",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/client.jfr",
+    "bytes": 2710013,
+    "sha256": "8099d73b00268ebf289c23f3099c8283fb6a67ae9ccf18271cb385f72ecf9112",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/client.log",
+    "bytes": 3636,
+    "sha256": "ac488eb171642d7eb559ac13ba9f011a070e0e0cfb9ddacb3de32c6245bfa743",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/core-12128-gc.log",
+    "bytes": 18136,
+    "sha256": "200ebedd9a0ba6e8fb263461970e6b622fdec9c2d3a7cb7f918250634aacc222",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/core-15207-gc.log",
+    "bytes": 9853,
+    "sha256": "26f9f83a4478c84d4292d93aecd83205aecc007b3eab18048f1156c151ba030a",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/core-restart.log",
+    "bytes": 2601,
+    "sha256": "92b2399bd206129170dded76fbc8b3de6c625430b47a0ffecc01b61e2c40bb4c",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/core.jfr",
+    "bytes": 2154633,
+    "sha256": "4c020a96d9d686c074f3fb30c78117bbb2fd9d47d046fb5ba25afc5ac42dd055",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/core.log",
+    "bytes": 3065,
+    "sha256": "6277a405d611dd8ef0167c24d4ec8955b5f182f6c43a9c9c0342b5568bc15879",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/core.pid",
+    "bytes": 5,
+    "sha256": "4c94f0d7b4074bcce76b3c133b56635dba67863545e2ba9a2ef5a5d5915f8907",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/archive/0-0.rec",
+    "bytes": 134217728,
+    "sha256": "ceaa839833942f80e6a8bf2515f01b4ceceb3a39148fc3a459fc41919f577bca",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/archive/0-134217728.rec",
+    "bytes": 134217728,
+    "sha256": "d5fda3e669d93a07635ad10dc4e5b7ec081cd2d857f10531b9c8eb98c56c0010",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/archive/1-0.rec",
+    "bytes": 134217728,
+    "sha256": "65ec1163f9ec51cc5a9d9f7830819d7f5165bfffb3e9074c2358be3c969383a9",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/archive/2-0.rec",
+    "bytes": 134217728,
+    "sha256": "de291eb49853e78f337479784a39ce6f8722a56dbe9a423fa62196412012d97d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/archive/archive-mark.dat",
+    "bytes": 1056768,
+    "sha256": "77ec511a76f9397a95abba7ce4a1fe8689a1cd73ae0beb6ee07b280c36f799df",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/archive/archive.catalog",
+    "bytes": 1048576,
+    "sha256": "273434e8ce83c5ee68bf36199900951633acbaadc14dd72d65b47725e028b1ea",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/cluster/cluster-mark-service-0.dat",
+    "bytes": 1056768,
+    "sha256": "1fd6be4545989fe2ace64097cacf902a012285d4218f1d1b59e0b42b20fdc5c7",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/cluster/cluster-mark.dat",
+    "bytes": 1056768,
+    "sha256": "e516fea78974095d9c50d2ba563e6f5a579c3d1caa1b10b1e50c7d5daa19887a",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/cluster/node-state.dat",
+    "bytes": 1048576,
+    "sha256": "967d1e5394857b83db71e0ef637ca2886a20d376e460747162e0b2d744b66048",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/data/linear_perpetual/node0/cluster/recording.log",
+    "bytes": 256,
+    "sha256": "518640f59a227a289230a261a9a365c032ffaa80e02f1b4499f8c1db11742896",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/cnc.dat",
+    "bytes": 48238592,
+    "sha256": "f505044f441e2799806115de04efb5cdd6b4ed0f98a471d34518d2b474706361",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/images/100.logbuffer",
+    "bytes": 50335744,
+    "sha256": "a03cb8ad1ad463815230c3e58135ac54a938b5a550de4e146226466934c942b1",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/images/101.logbuffer",
+    "bytes": 50335744,
+    "sha256": "03d8e1cf821b7479085eb8293772088bbaa93da11640fc23e9662a3627378f88",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/loss-report.dat",
+    "bytes": 1048576,
+    "sha256": "30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/publications/103.logbuffer",
+    "bytes": 50335744,
+    "sha256": "0daafacda6121fe0b0e14da3afc9ba96413775aa655614e10b6b94647440af20",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/publications/105.logbuffer",
+    "bytes": 50335744,
+    "sha256": "89b430eedaefee1ce75e2b7a13b7adb6eacf206ae8ef62aa9e05beb9f34453ee",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/publications/36.logbuffer",
+    "bytes": 397312,
+    "sha256": "8da4e96ab6230709cb274efcb7d4c31799a8b52026a89358d559bbb0811a4a8a",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/publications/45.logbuffer",
+    "bytes": 3149824,
+    "sha256": "edc4343a279d858abc0fcc4d8da6258fd3f5c0204fbe6c4751a398e05d379b65",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/publications/46.logbuffer",
+    "bytes": 397312,
+    "sha256": "11d90a8c406b8d56b6da358af6d4ed336d115689e07dfdcb0b8048d8d4199e03",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/publications/52.logbuffer",
+    "bytes": 3149824,
+    "sha256": "21ddcf64649d0dea7675e9f3045a98018977f65b5ee165da9e01eb4d1dc71fc0",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/driver-surprising-linear_perpetual-0/publications/92.logbuffer",
+    "bytes": 201330688,
+    "sha256": "058c5fd73e74804bd9caa6e61708b0c8821a4179a3d7f93a5cd0c3c423af5e0e",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/leader.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/metadata.json",
+    "bytes": 23465,
+    "sha256": "45bff34c58d8b30cd1238e786a521d0669e3d1a367a2d967eb588231b95a3863",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/recording-log.txt",
+    "bytes": 539,
+    "sha256": "045ce695fac597e25a9761aa698959735395e148a8a81c968eb8239797e9f28a",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/recovery-client.log",
+    "bytes": 334,
+    "sha256": "33fd1bffced58ad2de01741c44f013587ecb045cff38670d778e370121124d1d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/server-tmp/surprising-funds-index-4259216279757574850/000004.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/server-tmp/surprising-funds-index-4259216279757574850/CURRENT",
+    "bytes": 16,
+    "sha256": "9c283f6e81028b9eb0760d918ee4bc0aa256ed3b926393c1734c760c4bd724fd",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/server-tmp/surprising-funds-index-4259216279757574850/IDENTITY",
+    "bytes": 36,
+    "sha256": "a62d183fa7765c55c2e021098e92c41f1d81c03d7fd72d4cf9960f8b243f1735",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/server-tmp/surprising-funds-index-4259216279757574850/LOCK",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/server-tmp/surprising-funds-index-4259216279757574850/LOG",
+    "bytes": 25264,
+    "sha256": "06fb007e1d483d849e8cd5ac9e13cf16e03f497e48530b66f52fa2271a560baa",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/server-tmp/surprising-funds-index-4259216279757574850/MANIFEST-000005",
+    "bytes": 116,
+    "sha256": "4bc276f504eb50dac297c040f0303a556bfdd86da8e0c7f148969865a16c9a3f",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/server-tmp/surprising-funds-index-4259216279757574850/OPTIONS-000007",
+    "bytes": 7598,
+    "sha256": "88686079ab0abbdffee6fe95c5c84e0a9a013d64261379cc0732dc3a1d2624a3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "jfr/snapshot.log",
+    "bytes": 42,
+    "sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/client.log",
+    "bytes": 3457,
+    "sha256": "e2f6d2c2f792ba91a15b49e0adeed309533aadba2d578950f7ab5bc62068ee15",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/core-1060-gc.log",
+    "bytes": 16126,
+    "sha256": "414cdbafc1cbfe3232ab45a8de59a285daf3c6089517a267796135170d24ad1f",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/core-3794-gc.log",
+    "bytes": 4874,
+    "sha256": "01b8495c80ca73e632d31b1db754c595ad35e486176002323073048a62c7d505",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/core-9054-gc.log",
+    "bytes": 9854,
+    "sha256": "28eed04df8f381cfadb47cffb64d52f6febd30ac7b72be812228d67c45aed1a7",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/core-recovery.log",
+    "bytes": 2598,
+    "sha256": "3ed59c1d8bb8597d6ab5596db1522bf552b5e1108d9e94ff39af2f842b029389",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/core-restart-active-driver.log",
+    "bytes": 1668,
+    "sha256": "7cfaf76170bdb77fd262bfa38917b54cce91509cebfcb28a71d0f9dffc1cbae3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/core.log",
+    "bytes": 2885,
+    "sha256": "52d4472622bdd026e5c2f171e3138ca3785c232efb8f59dc45d404b89397a183",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/core.pid",
+    "bytes": 4,
+    "sha256": "b0c71dc912263c36812f2ae847ce911bd0a2df1c68c33e85851cf6cc15b351e0",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/archive/0-0.rec",
+    "bytes": 134217728,
+    "sha256": "1ba0b333a6016261d37534d797a4b2af45dd6acd0b7c4ee44b1026f3987ff70f",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/archive/0-134217728.rec",
+    "bytes": 134217728,
+    "sha256": "b4068bdf4c117915aec962b42f8388e16a19fa32ee6e343220027aecf1e2ec8c",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/archive/1-0.rec",
+    "bytes": 134217728,
+    "sha256": "58abde9432be8a4878af4d28158a6d91338585c6bafd102ca821825c82bd6d25",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/archive/2-0.rec",
+    "bytes": 134217728,
+    "sha256": "9feb7df541a0e67368058c173757ec50b71b004f9fcfe25599ea80acaeb9dbd7",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/archive/archive-mark.dat",
+    "bytes": 1056768,
+    "sha256": "2bba220c64bf3589f749c3099be49cf8e540273e093c37c681818fb583aa918f",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/archive/archive.catalog",
+    "bytes": 1048576,
+    "sha256": "774bab1c931a7c6e60b8e31c01db8385e4698c772f00f0ea1543f322471e2f4f",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/cluster/cluster-mark-service-0.dat",
+    "bytes": 1056768,
+    "sha256": "96cf385a00778b832cf68bd6c07d7d8c0b23b77ef970f345ff30c6d4d280c95c",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/cluster/cluster-mark.dat",
+    "bytes": 1056768,
+    "sha256": "5429ea8ecda45ecb90202316fe5469052a2116507a63564d06317a548a72b6de",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/cluster/node-state.dat",
+    "bytes": 1048576,
+    "sha256": "949beda6ed4aa62de0f66dd64bb5f20a60ec42059e5e1b9f03dc88e4db86aa90",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/data/linear_perpetual/node0/cluster/recording.log",
+    "bytes": 256,
+    "sha256": "6f20e65399dd42ca6365e5a4dbefd6d93ea6cb6e560cfe18d4ffa7844974915d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/cnc.dat",
+    "bytes": 48238592,
+    "sha256": "b7b1b889b45812d20c89a614f649e1423fd9f41bc095d33bac10c21f7254f520",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/images/100.logbuffer",
+    "bytes": 50335744,
+    "sha256": "7a032c7e5e1571a03e72ccaeba0844d6b6769466ca6a2d1941f00e57a5387a3c",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/images/101.logbuffer",
+    "bytes": 50335744,
+    "sha256": "cd8103d1308a707e8aeedb4a00088d92e5c371de1dc8a26f922e068fa71ddd95",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/loss-report.dat",
+    "bytes": 1048576,
+    "sha256": "30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/publications/103.logbuffer",
+    "bytes": 50335744,
+    "sha256": "e3f0f06e46ef34a44063fe445043efa12580918b9e4c53818f528dc157c9f5a5",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/publications/105.logbuffer",
+    "bytes": 50335744,
+    "sha256": "9f1a28029c3f8104e19688e762de9ba5aa9fdc6eafbbf3ba4a25130a4af43a37",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/publications/36.logbuffer",
+    "bytes": 397312,
+    "sha256": "080e39d68672985b2aa6c6925f91f05d4cedeacf024c08eb143d91b6e097f6c0",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/publications/41.logbuffer",
+    "bytes": 3149824,
+    "sha256": "810cd15300130691022ce705060de401fa1fc073f9530ee99f63a635a43145d0",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/publications/46.logbuffer",
+    "bytes": 397312,
+    "sha256": "e019c6b244b0dae5aed5e3c40bedf365c28236aa9e2c4e46566c7acb1213272e",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/publications/52.logbuffer",
+    "bytes": 3149824,
+    "sha256": "fa0baea877ccfe71957dfd359c7b94255aa91d913aa41ce45e3bad4a622a3282",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/driver-surprising-linear_perpetual-0/publications/92.logbuffer",
+    "bytes": 201330688,
+    "sha256": "f3657bb88d2dc1f44c0ea0fd4239f588a5d828ae215b36d74a53584d3b2a7056",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/leader.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/metadata.json",
+    "bytes": 22170,
+    "sha256": "ebf07aa5a5d687fa90501b73eaf627288ae142660be92b6bc0257b75dc5ec47d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/recording-log.txt",
+    "bytes": 539,
+    "sha256": "037723dff20bbc8d2fb0a22910e2a5625a7d4bf13b29fd23a829094cd5cbdcfe",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/recovery-client.log",
+    "bytes": 334,
+    "sha256": "92a0670edc1650d679c3486755111473133c2100bfc10d73eb938d689808cbf1",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-11419304553255916916/000004.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-11419304553255916916/000008.sst",
+    "bytes": 47770,
+    "sha256": "c02e83473e5bbc8da9100169c4f04559479fba3daafa45932a6b28cd667f7c0d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-11419304553255916916/CURRENT",
+    "bytes": 16,
+    "sha256": "9c283f6e81028b9eb0760d918ee4bc0aa256ed3b926393c1734c760c4bd724fd",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-11419304553255916916/IDENTITY",
+    "bytes": 36,
+    "sha256": "49c481ea3eae3c1152612ad3c5091b6e4b8d88faad4d3c76820083fecd096bc0",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-11419304553255916916/LOCK",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-11419304553255916916/LOG",
+    "bytes": 29225,
+    "sha256": "340ca4f3402d9bd94c537bb4dfed4def4bd5be4abf24492a66461d3890f78bdb",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-11419304553255916916/MANIFEST-000005",
+    "bytes": 247,
+    "sha256": "acfb73115a489f1a1416b864e816b90c939b3dff694a9a43cd847cc14aa3215d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-11419304553255916916/OPTIONS-000007",
+    "bytes": 7598,
+    "sha256": "88686079ab0abbdffee6fe95c5c84e0a9a013d64261379cc0732dc3a1d2624a3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-14440385845310399860/000004.log",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-14440385845310399860/000008.sst",
+    "bytes": 47770,
+    "sha256": "3440bc1802f1fa8c2410120044b375201173ff8e8c4842604bc5ef2b1b0ebbdc",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-14440385845310399860/CURRENT",
+    "bytes": 16,
+    "sha256": "9c283f6e81028b9eb0760d918ee4bc0aa256ed3b926393c1734c760c4bd724fd",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-14440385845310399860/IDENTITY",
+    "bytes": 36,
+    "sha256": "184f60f3e53867a9970579c352ccac50de3ad1cd342ef226dca23a2eb34805fb",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-14440385845310399860/LOCK",
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-14440385845310399860/LOG",
+    "bytes": 29225,
+    "sha256": "a190a427c00452849b784d0086e44aa6a82ada3ccd583b004496ecc01adddc1d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-14440385845310399860/MANIFEST-000005",
+    "bytes": 247,
+    "sha256": "1425549e2ddacc6445b84ec6db37ea93f7ad47f22d8742b3a6338c78d426ed3d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/server-tmp/surprising-funds-index-14440385845310399860/OPTIONS-000007",
+    "bytes": 7598,
+    "sha256": "88686079ab0abbdffee6fe95c5c84e0a9a013d64261379cc0732dc3a1d2624a3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main/snapshot.log",
+    "bytes": 42,
+    "sha256": "3642dfc5af9b776df76edd4b2bc9e242ec90c8ae38633d1189f783e0eef0a8d3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main-startup-failure/core-97307-gc.log",
+    "bytes": 4873,
+    "sha256": "8a80793c78b8789b0f81f13a0ea3fe7a4c964bfe8df55b17f65f7aba26fb0002",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main-startup-failure/core.log",
+    "bytes": 2342,
+    "sha256": "dc54584f13e12cee9d8c323820b18958dcfeabfd7623b891ba9b99382e1b00ea",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main-startup-failure/core.pid",
+    "bytes": 5,
+    "sha256": "796cbfb43025da43f612937f13fbdfbcbefd4c5cbe235d6463384f3849ec53cb",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "main-startup-failure/metadata.json",
+    "bytes": 4272,
+    "sha256": "707c572fb5c83f37047abebe3a3c2c2d4070b16c8ef7d6d37502bcecf9224af3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/gc.json",
+    "bytes": 32201,
+    "sha256": "a69829c576cab2e130034c59eddfab1a99b725c4a75bce759a28bd5d63647162",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/gc.log",
+    "bytes": 23976,
+    "sha256": "c1bc48dd83015183562e441c7bcd8e18ebafe4842eb40160e25be8e7bf1e4ef1",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-0/profile.jfr",
+    "bytes": 493610,
+    "sha256": "8ccda154516c3f51a4be4e0a9dbefa76870476cb177f078bb37e10572a0d45a3",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-64/profile.jfr",
+    "bytes": 575593,
+    "sha256": "223810fb4dbc89693955abadae6962e6f0f4d1192abbff52aa4034733df3dbcc",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-0-liveOrders-8/profile.jfr",
+    "bytes": 606412,
+    "sha256": "c67a149d0004e44ee0908424d1e47a9b8f13ed3233effa1f9eeeb493fe5e1bfd",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-0/profile.jfr",
+    "bytes": 498242,
+    "sha256": "6736e705fea42ac9989cd15a959364fe045e6f93dc0e29f416d98f6b0dfbbb1d",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-64/profile.jfr",
+    "bytes": 497799,
+    "sha256": "2cb5656f422a82010f01ab58dc5111c66acb37ed476460aff2fbb633754cbc59",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/jfr/com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-AverageTime-capacitySlack-1-liveOrders-8/profile.jfr",
+    "bytes": 500055,
+    "sha256": "86911597e87d9a9f4f153e9f62fdf9143420b758f7104a617929b8d31fb7528e",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/jfr.json",
+    "bytes": 16925,
+    "sha256": "93d2bf6409404d3dc484b2ee0e269eab3340b8add47fea567b0289d177585a8e",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/jfr.log",
+    "bytes": 16655,
+    "sha256": "9455b1b64e2c68afae29415b138d0d0f9ef51d9deade0f140f03eddbae14f1ba",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/main.json",
+    "bytes": 12132,
+    "sha256": "06c9e3eb2dc4fcdf6804e770ffc1cf344fc1e1ea761fb31d5db0edd17d5cb1d7",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/main.log",
+    "bytes": 12945,
+    "sha256": "e52506d5498f83163ea1bbcd95bba082b7090a707cdd2eb3ae5a1d07ecf0881a",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  },
+  {
+    "path": "micro/metadata.json",
+    "bytes": 11639,
+    "sha256": "f3f1fd3254a34afca48c98b5f147a76c469c84711549f1c72cef77bffaa92e6c",
+    "retention": "deleted after summary/view/configuration and SHA-256 archive"
+  }
+]

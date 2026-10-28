@@ -54,22 +54,22 @@ class CoreAccountLaneQueryTest {
             var identities = new RuntimeIdentityRegistry();
             try (/* 由当前已提交交易状态投影的冷运行时，在合法 Lane 参数下构造预期视图和哈希。 */ var expected = RuntimeStateProjector.project(core.tradingState(), identities)) {
                 // 冷运行时中用户 1 的完整查询结果，提供详情编码和状态哈希的参照。
-                var user = RuntimeStateQueryService.userState(expected, expected.accountLaneForUser(1), identities, 1);
+                var user = RuntimeStateQueryService.userState(expected, expected.accountLaneForUser(1), identities, 1, false);
                 // 冷运行时中用户 7 的订单 200 查询结果，详情、哈希和客户端查询均应与它一致。
                 var order = RuntimeStateQueryService.orderState(expected,
-                        expected.accountLaneForUser(7), identities, 200);
+                        expected.accountLaneForUser(7), identities, 200, false);
                 // 查询开始前账户所有权交接计数，查询完成后必须不变。
                 long handoff = core.runtimeState().laneHandoffEpoch();
                 try (/* 阻止 Owner 越界读取活动账户的测试守卫，查询数据应从所属 Lane 返回。 */ var guard = new OwnerAccountReadGuard(core.runtimeState())) {
                     assertThat(query(core, CoreMessageType.USER_STATE_QUERY, 1, new byte[0]).data())
                             .isEqualTo(CoreStateQueryCodec.encodeUserState(user.view()));
                     assertThat(CoreStateQueryCodec.decodeStateHash(query(core, CoreMessageType.USER_STATE_HASH_QUERY,
-                            1, new byte[0]).data())).isEqualTo(user.stateHash());
+                            1, new byte[0]).data())).isEqualTo(RuntimeStateQueryService.userState(expected, expected.accountLaneForUser(1), identities, 1, true).stateHash());
                     assertThat(query(core, CoreMessageType.ORDER_STATE_QUERY, 0,
                             TradingCommandCodec.encodeOrderStateQuery(200)).data())
                             .isEqualTo(CoreStateQueryCodec.encodeOrderState(order.view()));
                     assertThat(CoreStateQueryCodec.decodeStateHash(query(core, CoreMessageType.ORDER_STATE_HASH_QUERY,
-                            0, TradingCommandCodec.encodeOrderStateQuery(200)).data())).isEqualTo(order.stateHash());
+                            0, TradingCommandCodec.encodeOrderStateQuery(200)).data())).isEqualTo(RuntimeStateQueryService.orderState(expected, expected.accountLaneForUser(7), identities, 200, true).stateHash());
                     assertThat(query(core, CoreMessageType.CLIENT_ORDER_STATE_QUERY, 7,
                             CoreStateQueryCodec.encodeClientOrderStateQuery("account-q-200")).data())
                             .isEqualTo(CoreStateQueryCodec.encodeOrderState(order.view()));

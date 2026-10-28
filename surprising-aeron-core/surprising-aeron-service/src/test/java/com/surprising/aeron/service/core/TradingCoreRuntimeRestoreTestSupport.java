@@ -85,7 +85,7 @@ public final class TradingCoreRuntimeRestoreTestSupport {
                 matcherSnapshot, appliedCommandCount, Map.of(), Map.of());
         try {
             // 候选要求的账户投影序号
-            long projectionSequence = candidate.snapshotProjectionSequence();
+            long projectionSequence = candidate.realtimeExportSequence();
             // 按该投影序号生成的账户 Lane 快照集合
             var accountLanes = candidate.accountLaneSnapshots(projectionSequence, snapshotState);
             candidate.restoreAccountLaneSnapshots(accountLanes, projectionSequence);

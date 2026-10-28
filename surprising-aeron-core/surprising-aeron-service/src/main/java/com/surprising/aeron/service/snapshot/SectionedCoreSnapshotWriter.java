@@ -38,12 +38,18 @@ public final class SectionedCoreSnapshotWriter {
             long coreSequence,
             long clusterTimestamp,
             long clusterPosition) {
+        var snapshotState = state.snapshotTradingState();
+        var feePolicies = state.feePolicies();
+        var pendingTransfers = state.pendingTransfers();
+        long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
+                snapshotState.businessStateHash(), feePolicies, pendingTransfers);
         return encode(capture(state, matcherSnapshot, snapshotId, coreSequence,
-                clusterTimestamp, clusterPosition), state.configuration().snapshot().maxBytes());
+                clusterTimestamp, clusterPosition, snapshotState, feePolicies, pendingTransfers,
+                businessStateHash), state.configuration().snapshot().maxBytes());
     }
 
     /**
-     * 拒绝仍有待撮合命令的运行时，物化交易状态并重算业务与资金哈希，核对 Matcher 清单、快照号、Core 数量及 Cluster 元数据，收集水位、结果、终态索引和账户 Lane 清单。其余 Lane/补丁就绪要求由外层屏障先保证。
+     * 复用同一栅栏物化的状态、费率、划转和业务哈希，计算资金哈希并核对 Matcher 清单、快照号、Core 水位及 Cluster 元数据；收集结果、终态索引和账户 Lane 清单。
      * @param state 已建立一致性读取边界的交易运行时
      * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
      * @param snapshotId 本次快照编号，具体合法范围由当前入口检查
@@ -57,15 +63,14 @@ public final class SectionedCoreSnapshotWriter {
             long snapshotId,
             long coreSequence,
             long clusterTimestamp,
-            long clusterPosition) {
+            long clusterPosition,
+            com.surprising.aeron.model.TradingCoreState snapshotState,
+            Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies,
+            Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers,
+            long businessStateHash) {
         if (!state.pendingMatching().isEmpty()) {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
-        // 捕获点物化的交易状态；header 方法中仅取得引用而未继续使用。
-        var snapshotState = state.snapshotTradingState();
-        // 物化状态连同当前费率与待划转重算的业务哈希。
-        long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
-                snapshotState.businessStateHash(), state.feePolicies(), state.pendingTransfers());
         // 从物化交易状态重算的资金哈希。
         long fundsStateHash = com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(snapshotState);
         matcherSnapshot.verifyCoreManifest(state.productLine(), state.appliedCommandCount(), businessStateHash);
@@ -78,7 +83,7 @@ public final class SectionedCoreSnapshotWriter {
                 businessStateHash, fundsStateHash,
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
                 state.lastSourceSequences(), state.commandResults(),
-                state.feePolicies(), state.pendingTransfers(),
+                feePolicies, pendingTransfers,
                 state.terminalRetention().encode(),
                 state.accountLaneSnapshots(coreSequence, snapshotState));
     }
@@ -246,8 +251,6 @@ public final class SectionedCoreSnapshotWriter {
      * @param result 保存原指纹、终态和响应数据的幂等结果
      */
     private static void putResult(ByteBuffer buffer, UUID commandId, CommandResultLedger.StoredResult result) {
-        // 当前结果的响应负载字节，用于长度及实际写入。
-        byte[] responseData = result.responseData();
         buffer.putInt(resultEntryLength(result));
         buffer.putLong(commandId.getMostSignificantBits());
         buffer.putLong(commandId.getLeastSignificantBits());
@@ -256,8 +259,8 @@ public final class SectionedCoreSnapshotWriter {
         buffer.putInt(result.resultCode().wireCode());
         buffer.putLong(result.appliedCommandCount());
         buffer.putLong(result.retentionSequence());
-        buffer.putInt(responseData.length);
-        buffer.put(responseData);
+        buffer.putInt(result.responseDataLength());
+        buffer.put(result.responseDataUnsafe(), result.responseDataOffsetUnsafe(), result.responseDataLength());
     }
 
     /**
@@ -265,7 +268,7 @@ public final class SectionedCoreSnapshotWriter {
      * @param result 保存原指纹、终态和响应数据的幂等结果
      */
     private static int resultEntryLength(CommandResultLedger.StoredResult result) {
-        return Math.addExact(SectionedCoreSnapshotCodec.RESULT_FIXED_LENGTH, result.responseData().length);
+        return Math.addExact(SectionedCoreSnapshotCodec.RESULT_FIXED_LENGTH, result.responseDataLength());
     }
 
     /**

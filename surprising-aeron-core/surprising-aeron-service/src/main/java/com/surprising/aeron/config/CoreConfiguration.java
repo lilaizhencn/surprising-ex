@@ -56,11 +56,11 @@ public class CoreConfiguration {
     /** 从已绑定的配置创建并校验启动拓扑，Owner、账户和 Matcher 共用该值。 */
     @Bean
     public LaneTopology laneTopology() {
-        return toLaneTopology();
+        return createLaneTopology();
     }
 
-    /** 将绑定值转换成已校验的不可变拓扑，不依赖 Spring Bean 生命周期。 */
-    public LaneTopology toLaneTopology() {
+    /** Spring 装配与独立工具共用校验，不直接调用不受代理的 Bean 方法。 */
+    private LaneTopology createLaneTopology() {
         return new LaneTopology(matchingEngines, accountLanes, accountLaneSeed, matcherWindowSize,
                 matchingCompletionCapacity, accountLaneQueueCapacity);
     }
@@ -72,7 +72,7 @@ public class CoreConfiguration {
     public static LaneTopology standaloneLaneTopology() {
         return Binder.get(new StandardEnvironment())
                 .bind("surprising.aeron", Bindable.of(CoreConfiguration.class))
-                .orElseGet(CoreConfiguration::new).toLaneTopology();
+                .orElseGet(CoreConfiguration::new).createLaneTopology();
     }
 
     /** CPU 绑定配置；先接收配置值，真正绑定线程时还会检查平台和可用 CPU。

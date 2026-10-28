@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.order;
 
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.CoreMatchingOrder;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.order.admission.PlaceAdmissionEvent;
 import com.surprising.aeron.service.order.admission.ResolvedPlaceOrder;
@@ -117,7 +116,6 @@ final class PlaceMatchingContinuation implements Supplier<Object> {
     private int matcherShard;
     private long userId;
     private ResolvedPlaceOrder resolvedOrder;
-    private CoreMatchingOrder matchingOrder;
     private OrderRuntime admittedOrder;
     private MatcherSettlementEvent direct;
 
@@ -126,23 +124,14 @@ final class PlaceMatchingContinuation implements Supplier<Object> {
     }
 
     void prepare(TradingCoreRuntime owner, int matcherShard, long userId,
-                 ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
-                 MatcherSettlementEvent direct) {
-        prepare(owner, matcherShard, userId, resolvedOrder, matchingOrder, null, direct);
-    }
-
-    void prepare(TradingCoreRuntime owner, int matcherShard, long userId,
-                 ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
-                 OrderRuntime admittedOrder, MatcherSettlementEvent direct) {
-        if ((resolvedOrder == null ? 0 : 1) + (matchingOrder == null ? 0 : 1)
-                + (admittedOrder == null ? 0 : 1) != 1 || admittedOrder != null && direct == null) {
-            throw new IllegalArgumentException("exactly one ordinary PLACE order representation is required");
+                 ResolvedPlaceOrder resolvedOrder, OrderRuntime admittedOrder, MatcherSettlementEvent direct) {
+        if ((resolvedOrder == null) == (admittedOrder == null)) {
+            throw new IllegalArgumentException("exactly one admitted PLACE order representation is required");
         }
         this.owner = Objects.requireNonNull(owner);
         this.matcherShard = matcherShard;
         this.userId = userId;
         this.resolvedOrder = resolvedOrder;
-        this.matchingOrder = matchingOrder;
         this.admittedOrder = admittedOrder;
         this.direct = Objects.requireNonNull(direct, "direct settlement");
     }
@@ -152,7 +141,6 @@ final class PlaceMatchingContinuation implements Supplier<Object> {
         matcherShard = 0;
         userId = 0;
         resolvedOrder = null;
-        matchingOrder = null;
         admittedOrder = null;
         direct = null;
     }
@@ -160,7 +148,7 @@ final class PlaceMatchingContinuation implements Supplier<Object> {
     @Override
     public Object get() {
         long orderId = admittedOrder != null ? admittedOrder.orderId()
-                : resolvedOrder != null ? resolvedOrder.orderId() : matchingOrder.orderId();
+                : resolvedOrder.orderId();
         var failure = slot.applyMatcherPreCancellations(owner, matcherShard, orderId, direct);
         if (failure != null) return failure;
         long msb = slot.command().header().commandIdMsb();
@@ -169,12 +157,8 @@ final class PlaceMatchingContinuation implements Supplier<Object> {
             return owner.matchingAdapter().placeAdmittedDirect(matcherShard, slot.coreSequence, msb, lsb,
                     slot.command().header().submittedAtEpochMillis(), userId, admittedOrder, direct);
         }
-        if (resolvedOrder != null) {
-            return owner.matchingAdapter().placeDirect(matcherShard, slot.coreSequence, msb, lsb,
-                    slot.command().header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
-        }
         return owner.matchingAdapter().placeDirect(matcherShard, slot.coreSequence, msb, lsb,
-                slot.command().header().submittedAtEpochMillis(), userId, matchingOrder, direct);
+                slot.command().header().submittedAtEpochMillis(), userId, resolvedOrder, direct);
     }
 }
 

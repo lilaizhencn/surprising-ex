@@ -1,5 +1,13 @@
 # aeron-service 代码导航
 
+
+2026-10-28 第二轮清理的逐项处理及验证结果见 [第二轮记录](../../ROUND2_CLEANUP_PROGRESS.md)。
+风控的行情输入、Lane 估值及 Owner 游标提交保留原线程边界，游标带账户/行情修订并直接交接不可变回执；
+余额补丁合并与回滚按原语金额和存在标记读写，平仓容量先计算总占用，超量时才整理撤单候选。
+用户、订单和算法查询按实际用途读取；强平分页与编码器共用字节长度公式。快照从栅栏首次冻结的状态、费率、划转生成镜像，继续执行完整配对审计。
+对象形式的 Lane 指标直接采样，网络指标仍直接编码原语观测计数，不取得账户业务读取权限。
+service 1,595 项、benchmarks 313 项测试覆盖本轮修改；全依赖验收共 2,685 项，0 失败/错误、4 项按条件跳过。真实 Aeron 资金与快照重启核对通过；JMH/JFR 的时间/吞吐因系统 swap 仅作诊断，未作为提升证据。
+
 2026-10-28 多层转发与无意义对象转换深度清理：
 彻底消除 `PendingTransferRoutes`、`PendingReservationTracker`（删除 3 个中间过渡 Record 与 3 层列表复制）、`RuntimeLifecycleSettlement.OrderPage` 及 `RuntimeOrderAdmission.AdmissionIdentity` 等无实际工作内容的多层对象/集合转换；
 内联并删除 `MatcherSettlementDispatcher`、`ControlFundsValidation` 及 6 个 30~70 行的微型 `*Commands` 转发薄壳类（`LeverageCommands`、`AdlCommands`、`PositionCommands`、`FeePolicyCommands`、`BalanceTransferCommands`、`LiquidationCommands`统一归入 `DirectCommandDispatcher`）；
@@ -520,7 +528,7 @@ flowchart TD
     CA --> CM[CoreMatchingFlow / Matcher 撤单]
     CM --> CS[Lane 按撮合结果释放剩余冻结 → 有序提交]
     T[PLACE_TRIGGER_ORDER / OCO_PAIR] --> TS[TriggerOrderCommands: 登记条件 / TriggerOrderIndex]
-    P[APPLY_MARK_PRICE] --> R[RiskCommands: 更新价格 / 初始化扫描]
+    P[APPLY_MARK_PRICE] --> R[DirectCommandDispatcher: 更新价格 / 初始化扫描]
     N[CONTINUE_RISK_SCAN] --> RC[RiskScanCoordinator → RiskLaneProcessor]
     R --> N
     RC --> LP[Lane 估值 / Owner 确定性编号 / PLANNED 计划]
@@ -540,10 +548,10 @@ flowchart TD
 | 撤单 | `MatchingCommandAdmission.validatePendingCancel` → `CoreMatchingFlow` → `MatcherSettlementEvent` | 所属 Lane 依据 Matcher 结果更新订单、释放冻结，不能收到请求就先解冻 |
 | 改单 / 批量 | `ReplacementAdmissionEvent`；`OrderBatchExecutor` / `OrderBatchPending` | 改单处理新旧预留差异；批量保留项游标和整批终态 |
 | 触发 / 止盈止损 / OCO | [`TriggerOrderCommands`](src/main/java/com/surprising/aeron/service/trigger/command/TriggerOrderCommands.java) → `PendingTriggerScan` → `TriggerExecutionContinuation` → `MatchingCommandAdmission.appendQueuedMatching` | 条件记录与子订单是不同生命周期；条件成立后仍须重新准入、冻结和撮合 |
-| 风控 | [`RiskCommands`](src/main/java/com/surprising/aeron/service/risk/command/RiskCommands.java) → `RuntimeDerivativeRiskProcessor` → `RiskScanCoordinator` → `RiskLaneProcessor` | 按价格序号、修订和预算续扫；扫描生成强平计划，不直接等于强平执行 |
+| 风控 | [`DirectCommandDispatcher`](src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `RuntimeDerivativeRiskProcessor` → `RiskScanCoordinator` → `RiskLaneProcessor` | 按价格序号、修订和预算续扫；扫描生成强平计划，不直接等于强平执行 |
 | 强平 | `MatchingCommandAdmission` / `CoreMatchingFlow` → `ExecutionCheck` / `CrossShardCancellationCoordinator` → [`DirectCommandDispatcher`](src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `RuntimeDerivativeLiquidationProcessor` | 先校验状态、价格和游标，分批撤单；撤单未完成时只提交进度，后续命令继续 |
 | 强平确认 / 保险 / ADL | `RuntimeLiquidationResolution`；`InsuranceFundCommands`；`DirectCommandDispatcher` / `RuntimeAdlExecution` | 各有独立复制命令和幂等边界，并非每次强平都无条件执行 |
-| 资金费 / 交割 / 行权 | `PerpetualFundingCommands` / `RuntimePerpetualFundingProcessor`；`InstrumentSettlementCommands` / `RuntimeLifecycleSettlementContinuation` | 分页资金费与到期结算各保留游标；到期结算先完成撤单，再推进持仓和账本 |
+| 资金费 / 交割 / 行权 | `DirectCommandDispatcher` / `RuntimePerpetualFundingProcessor`；`OrderedCommitCoordinator` / `RuntimeLifecycleSettlementContinuation` | 分页资金费与到期结算各保留游标；到期结算先完成撤单，再推进持仓和账本 |
 | 余额 / 划转 | [`DirectCommandDispatcher`](src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → `AccountControlTask` | 所属账户与 Ledger 完成后由 `DirectCommandSlot` 续接提交，保留跨产品划转幂等 |
 
 快照入口为 `AeronTradingClusterService.onTakeSnapshot` → `TradingCoreOwner.captureSnapshotSections`
@@ -631,7 +639,7 @@ flowchart LR
 
 | 业务 / 步骤 | 按顺序阅读的源码 | 本步完成的含义 |
 | --- | --- | --- |
-| 风控 1–3：价格与预算 | `service.risk.command.RiskCommands.executeApplyMarkPrice` / `executeContinueRiskScan` | 写入价格及扫描进度，校验续扫开关和预算 |
+| 风控 1–3：价格与预算 | `service.core.command.DirectCommandDispatcher.executeApplyMarkPrice` / `executeContinueRiskScan` | 写入价格及扫描进度，校验续扫开关和预算 |
 | 风控 4–7：估值与计划 | `service.risk.RiskScanCoordinator.poll` → `RiskLaneProcessor` | 所属 Lane 估值，Owner 确定性分配编号，再由 Lane 写入 `PLANNED` 记录并提交 |
 | 强平 2–4：输入、校验与撤单 | `service.order.MatchingCommandAdmission` → [`RuntimeDerivativeLiquidationProcessor.ExecutionCheck`](src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java) → `service.order.CoreMatchingFlow` | 步骤 1 为风控计划；此处核对价格、状态及游标，Matcher 完成分页撤单后才能推进账户执行 |
 | 强平 5–6：账户与账本 | 同类的 `ExecutionWork` / `BatchFinancialWork` → `service.order.commit.OrderedCommitCoordinator` | 所属 Lane 更新持仓与余额，Ledger 应用财务差额，两边完成才提交 |
@@ -679,7 +687,7 @@ flowchart LR
 
 # 核心提交日志回放
 
-`CommittedTradeReplay` 由独立导出进程持有核心状态，只应用 Archive 已提交的命令；不会向在线 Cluster 发送交易命令。订单和成交沿用实时捕获，资金费通过 `PerpetualFundingCommands` 的回放观察接口交出实际支付结果，形成不可变的 `CommittedFundingPage`。该对象的生命周期仅为当前完整命令，下一次 apply 清空；没有第二份资金账本或长期支付缓存。
+`CommittedTradeReplay` 由独立导出进程持有核心状态，只应用 Archive 已提交的命令；不会向在线 Cluster 发送交易命令。订单和成交沿用实时捕获，资金费通过 `TradingCoreRuntime.observeReplayFundingPayments` 注册的回放观察接口交出实际支付结果，形成不可变的 `CommittedFundingPage`。该对象的生命周期仅为当前完整命令，下一次 apply 清空；没有第二份资金账本或长期支付缓存。
 
 资金费页保留产品线、日志位置、核心时间、实际命令费率、完成游标及支付明细。重复或被拒绝的命令不产生支付页。在线异步 Account Lane 路径不安装观察接口、不读取数据库，资金计算、快照格式和核心权威状态不变。查询投影在 realtime 模块持久化，SQL 成功后才能推进导出 checkpoint。
 

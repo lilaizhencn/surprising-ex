@@ -287,10 +287,10 @@ class CoreMatchingStateTest {
             assertThat(makerLane).isNotEqualTo(takerLane);
             // 完成后读取的 Lane 应用与提交水位指标。
             CoreLaneMetricsView metrics = state.laneMetrics();
-            assertThat(metrics.accountLaneAppliedSequences()[makerLane]).isEqualTo(state.snapshotProjectionSequence());
-            assertThat(metrics.accountLaneCommittedSequences()[makerLane]).isEqualTo(state.snapshotProjectionSequence());
-            assertThat(metrics.accountLaneAppliedSequences()[takerLane]).isEqualTo(state.snapshotProjectionSequence());
-            assertThat(metrics.accountLaneCommittedSequences()[takerLane]).isEqualTo(state.snapshotProjectionSequence());
+            assertThat(metrics.accountLaneAppliedSequences()[makerLane]).isEqualTo(state.realtimeExportSequence());
+            assertThat(metrics.accountLaneCommittedSequences()[makerLane]).isEqualTo(state.realtimeExportSequence());
+            assertThat(metrics.accountLaneAppliedSequences()[takerLane]).isEqualTo(state.realtimeExportSequence());
+            assertThat(metrics.accountLaneCommittedSequences()[takerLane]).isEqualTo(state.realtimeExportSequence());
             assertThat(state.tradingState().orders().values())
                     .noneMatch(/* 当前用于状态筛选、订单编号查找或结果断言的业务订单值。 */ order -> order.status() == CoreOrderStatus.OPEN);
         }

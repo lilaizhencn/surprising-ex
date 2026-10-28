@@ -151,8 +151,8 @@ class SectionedCoreSnapshotCodecTest {
                     Arrays.copyOf(snapshot, snapshot.length - 1), ProductLine.SPOT))
                     .isInstanceOf(ProtocolException.class);
             // 总预算比原完整快照少一字节的显式恢复缓冲。
-            SectionedCoreSnapshotCodec.RecoveryBuffer bounded =
-                    new SectionedCoreSnapshotCodec.RecoveryBuffer(snapshot.length - 1);
+            com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery bounded =
+                    new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery(snapshot.length - 1);
             assertThatThrownBy(() -> bounded.accept(new UnsafeBuffer(snapshot), 0, snapshot.length))
                     .isInstanceOf(ProtocolException.class).hasMessageContaining("maximum size");
             assertThatThrownBy(() -> SectionedCoreSnapshotCodec.decode(invalidCount, ProductLine.SPOT))
@@ -184,13 +184,10 @@ class SectionedCoreSnapshotCodecTest {
         String previous = System.getProperty("surprising.aeron.snapshot.max-bytes");
         System.clearProperty("surprising.aeron.snapshot.max-bytes");
         try {
-            var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
-            var delegateField = recovery.getClass().getDeclaredField("delegate");
-            delegateField.setAccessible(true);
-            Object delegate = delegateField.get(recovery);
-            var budgetField = delegate.getClass().getDeclaredField("maximumSnapshotBytes");
+            var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery();
+            var budgetField = recovery.getClass().getDeclaredField("maximumSnapshotBytes");
             budgetField.setAccessible(true);
-            assertThat(budgetField.getInt(delegate)).isEqualTo(defaults.snapshot().maxBytes());
+            assertThat(budgetField.getInt(recovery)).isEqualTo(defaults.snapshot().maxBytes());
         } finally {
             if (previous == null) System.clearProperty("surprising.aeron.snapshot.max-bytes");
             else System.setProperty("surprising.aeron.snapshot.max-bytes", previous);
@@ -291,7 +288,7 @@ class SectionedCoreSnapshotCodecTest {
                 .isInstanceOf(ProtocolException.class)
                 .hasMessageContaining("unsupported snapshot version: 22");
         // 验证版本拒绝的增量接收入口。
-        SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
+        com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery();
         assertThatThrownBy(() -> recovery.accept(encoded, 0, unsupported.length))
                 .isInstanceOf(ProtocolException.class)
                 .hasMessageContaining("unsupported snapshot version: 22");

@@ -70,7 +70,7 @@ public record CoreSnapshotImage(
      * 先核对 Matcher 与 Core 的产品线、序号及业务哈希元数据，再从物化交易状态、费率及划转重算业务哈希和资金哈希；与保存值不同即拒绝。这里不重算来源摘要或 Lane 清单摘要。
      */
     void verifyFullState() {
-        verifyMatcherState(matcherSnapshot, tradingState, appliedCommandCount, businessStateHash);
+        matcherSnapshot.verifyCoreState(tradingState, appliedCommandCount, businessStateHash);
         if (TradingCoreRuntime.canonicalBusinessStateHash(
                 tradingState.businessStateHash(), feePolicies, pendingTransfers) != businessStateHash
                 || com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(tradingState)
@@ -79,15 +79,4 @@ public record CoreSnapshotImage(
         }
     }
 
-    /**
-     * 调用 Matcher 快照的 Core 元数据校验，不在这里读取原生订单簿或重新撮合。
-     * @param matcherSnapshot 同一产品线与 Core 冻结点的原生撮合快照
-     * @param tradingState 冻结点物化的交易状态，包含订单、账户与资金数据
-     * @param appliedCommandCount 冻结点已应用的 Core 命令水位
-     * @param businessStateHash Core 状态连同费率、待完成划转的业务哈希
-     */
-    static void verifyMatcherState(MatcherSnapshot matcherSnapshot, TradingCoreState tradingState,
-                                   long appliedCommandCount, long businessStateHash) {
-        matcherSnapshot.verifyCoreState(tradingState, appliedCommandCount, businessStateHash);
-    }
 }

@@ -59,7 +59,7 @@ public final class TradingStateSnapshotCodec {
                 .bytes(8, writeMap(value.leverages(), TradingStateSnapshotCodec::writeCoreLeverageKey, /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> new SnapshotFields.Writer().number(1, item).encode()))
                 .bytes(9, writeValues(value.algoOrders(), TradingStateSnapshotCodec::writeCoreAlgoOrderState))
                 .list(10, value.cancelAllAfterTimers().values(), TradingStateSnapshotCodec::writeCoreCancelAllAfterState)
-                .list(11, value.triggerOrders().values(), /* 当前杠杆值或触发单业务值，按其所在根字段写入。 */ item -> writeCoreTriggerOrderStateView(item.view())).encode();
+                .list(11, value.triggerOrders().values(), TradingStateSnapshotCodec::writeCoreTriggerOrderState).encode();
         return ByteBuffer.allocate(4 + fields.length).order(ByteOrder.LITTLE_ENDIAN).putInt(VERSION).put(fields).array();
     }
 
@@ -92,12 +92,8 @@ public final class TradingStateSnapshotCodec {
             for (var /* 当前解码并需要按业务键查重的倒计时撤单记录。 */ timer : r.list(10, TradingStateSnapshotCodec::readCoreCancelAllAfterState)) putUnique(timers, timer.key(), timer);
             // 按触发单编号恢复的触发单权威业务值表。
             Map<Long, CoreTriggerOrderState> triggers = new TreeMap<>();
-            for (var /* 当前触发单字段记录恢复的协议业务视图，随后绑定注册币对。 */ view : r.list(11, item -> readCoreTriggerOrderStateView(item,
-                    product))) {
-                // 当前正在检查能力要求或按触发单引用取得的注册币对。
-                var instrument = instruments.get(view.instrumentId());
-                if (instrument == null) throw new ProtocolException("trigger instrument is missing");
-                putUnique(triggers, view.triggerOrderId(), CoreTriggerOrderState.from(view, instrument));
+            for (var trigger : r.list(11, item -> readCoreTriggerOrderState(item, product, instruments))) {
+                putUnique(triggers, trigger.triggerOrderId(), trigger);
             }
             return new TradingCoreState(product, r.number(2), users, orders, instruments,
                     readCoreRiskState(r.bytes(6), product), readCoreTreasuryState(r.bytes(7)),
@@ -683,7 +679,7 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号写入触发单记录，保存触发条件、追踪止损状态、子单参数、OCO、价格来源及终态时间；枚举使用明确持久化编号，嵌套结构使用本快照专用记录编码。
      * @param value 当前要写入的触发单记录业务值
      */
-    private static byte[] writeCoreTriggerOrderStateView(CoreTriggerOrderStateView value) {
+    private static byte[] writeCoreTriggerOrderState(CoreTriggerOrderState value) {
         return new SnapshotFields.Writer()
                 .number(1, value.triggerOrderId()) // 1：触发单业务编号
                 .number(3, value.userId()) // 3：所属用户编号
@@ -722,16 +718,22 @@ public final class TradingStateSnapshotCodec {
      * 按固定字段编号读取并构造触发单记录，恢复触发条件、追踪止损状态、子单参数、OCO、价格来源及终态时间；字段类型由 SnapshotFields 检查，业务不变量沿用对应值类型构造器。
      * @param encoded 当前触发单记录的独立字段记录字节
      */
-    private static CoreTriggerOrderStateView readCoreTriggerOrderStateView(byte[] encoded, ProductLine productLine) {
+    private static CoreTriggerOrderState readCoreTriggerOrderState(byte[] encoded, ProductLine productLine,
+            Map<String, CoreInstrument> instruments) {
         // 当前独立业务记录的编号字段读取器，只访问本方法定义的字段。
         var r = new SnapshotFields.Reader(encoded);
-        return new CoreTriggerOrderStateView(
+        String instrumentId = r.text(6);
+        if (instrumentId == null || instrumentId.isBlank()) throw new IllegalArgumentException("invalid trigger order state");
+        CoreInstrument instrument = instruments.get(instrumentId);
+        if (instrument == null) throw new ProtocolException("trigger instrument is missing");
+        if (instrument.contractType().productLine() != productLine)
+            throw new IllegalArgumentException("trigger order instrument mismatch");
+        return new CoreTriggerOrderState(
                 r.number(1), // 1：触发单业务编号
-                productLine, // 产品归属取自已校验的根字段
                 r.number(3), // 3：所属用户编号
                 r.text(4), // 4：客户指定的触发单号
                 r.text(5), // 5：一腿触发后取消另一腿的 OCO 分组编号
-                r.text(6), // 6：币对或合约业务编号
+                instrument, // 6：绑定同一恢复根记录中的权威标的
                 SnapshotEnumCodes.readCoreOrderSide(r.integer(7)), // 7：买入或卖出方向
                 SnapshotEnumCodes.readCoreTriggerOrderType(r.integer(8)), // 8：止盈、止损或追踪止损类型
                 SnapshotEnumCodes.readCoreTriggerCondition(r.integer(9)), // 9：价格大于等于或小于等于的触发条件

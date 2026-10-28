@@ -57,11 +57,12 @@ public final class RiskLaneProcessor {
                     ? nextUser(runtime, indexedUserIds, progress.lastUserId())
                     : runtime.user(progress.userId());
             if (user == null) {
-                return finishPage(progress, maxWork - remaining, true, creations, userRevision, expectedMarketRevision);
+                return finishPage(progress, maxWork - remaining, true, creations);
             }
             if (progress.userId() == 0 || user.revision() != userRevision
                     || expectedMarketRevision != runtime.marketRevision()) {
-                progress = new RiskLaneProgress(progress.lastUserId(), false, user.userId(), 0, "-", 0, 0, 0, 0, 0);
+                progress = new RiskLaneProgress(progress.lastUserId(), false, user.userId(), 0, "-", 0,
+                        0, 0, 0, 0, user.revision(), runtime.marketRevision());
             }
             userRevision = user.revision();
             expectedMarketRevision = runtime.marketRevision();
@@ -72,14 +73,11 @@ public final class RiskLaneProcessor {
             // 本次从预算中扣除的工作量，最少为 1，避免空记录使循环无法推进。
             int consumed = Math.max(1, page.workUnits());
             remaining -= consumed;
-            if (page.complete()) {
-                progress = new RiskLaneProgress(user.userId(), false, 0, 0, "-", 0, 0, 0, 0, 0);
-            }
         }
         // 没有未完成用户且有序页中也无下一用户时，才表明本 Lane 当前遍历已结束。
         boolean complete = progress.userId() == 0
                 && nextUser(runtime, indexedUserIds, progress.lastUserId()) == null;
-        return finishPage(progress, maxWork - remaining, complete, creations, userRevision, expectedMarketRevision);
+        return finishPage(progress, maxWork - remaining, complete, creations);
     }
 
     /**
@@ -128,7 +126,7 @@ public final class RiskLaneProcessor {
         while (work < maxWork) {
             if (phase == 0) {
                 // 游标后下一份持仓的运行时整数键，0 表示当前持仓遍历到末尾。
-                long positionIdentity = nextPositionKey(runtime, identities, user.userId(), positionCursor);
+                long positionIdentity = runtime.nextRiskPositionKey(user.userId(), positionCursor, identities);
                 if (positionIdentity == 0) {
                     phase = 1;
                     positionCursor = "-";
@@ -160,9 +158,8 @@ public final class RiskLaneProcessor {
                 ReservationRuntime reservation = nextReservation(runtime, user.userId(), reservationCursor);
                 if (reservation == null) {
                     if (maintenance == 0) {
-                        return new UserPage(new RiskLaneProgress(scan.lastUserId(), false, user.userId(), 0, "-", 0,
-                                unrealized, maintenance, isolatedMargin, isolatedReservation),
-                                work, true);
+                        return new UserPage(new RiskLaneProgress(user.userId(), false, 0, 0, "-", 0, 0, 0, 0, 0),
+                                work);
                     }
                     phase = 2;
                     positionCursor = "-";
@@ -179,11 +176,10 @@ public final class RiskLaneProcessor {
                 continue;
             }
             // 游标后下一份持仓的运行时整数键，0 表示当前持仓遍历到末尾。
-            long positionIdentity = nextPositionKey(runtime, identities, user.userId(), positionCursor);
+            long positionIdentity = runtime.nextRiskPositionKey(user.userId(), positionCursor, identities);
             if (positionIdentity == 0) {
-                return new UserPage(new RiskLaneProgress(scan.lastUserId(), false, user.userId(), 0, "-", 0,
-                                unrealized, maintenance, isolatedMargin, isolatedReservation),
-                        work, true);
+                return new UserPage(new RiskLaneProgress(user.userId(), false, 0, 0, "-", 0, 0, 0, 0, 0),
+                        work);
             }
             positionCursor = identities.positionKey(user.userId(), positionIdentity);
             // 本轮要累加或写风险的 Lane 持仓，空仓和不属于本结算资产的记录按阶段跳过。
@@ -211,7 +207,8 @@ public final class RiskLaneProcessor {
                     positionRisk.maintenance, ratio, creations, identities);
         }
         return new UserPage(new RiskLaneProgress(scan.lastUserId(), false, user.userId(), phase, positionCursor,
-                reservationCursor, unrealized, maintenance, isolatedMargin, isolatedReservation), work, false);
+                reservationCursor, unrealized, maintenance, isolatedMargin, isolatedReservation,
+                scan.userRevision(), scan.marketRevision()), work);
     }
 
     /**
@@ -230,7 +227,9 @@ public final class RiskLaneProcessor {
                                        MarkPriceRuntime mark, RiskLiquidationBatch creations,
                                        RuntimeIdentityRegistry identities) {
         // 当前逐仓持仓在新标记价下的浮盈亏，写风险记录时单独保留。
-        long unrealized = unrealized(position, instrument, mark.markPriceTicks());
+        long unrealized = PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(), position.signedQuantitySteps(),
+                position.entryPriceTicks(), mark.markPriceTicks(), instrument.notionalMultiplierUnits(),
+                instrument.priceTickUnits(), instrument.settleScaleUnits());
         // 按当前数量、风险档位和行情算出的逐仓维持保证金。
         long maintenance = CoreContractMath.maintenanceMarginUnits(instrument,
                 position.signedQuantitySteps(), mark.markPriceTicks(), mark.indexPriceTicks(),
@@ -345,7 +344,7 @@ public final class RiskLaneProcessor {
                 || instrument != position.instrument()
                 || result.marketRevision != result.scanMarketRevision
                 || result.runtime != runtime) {
-            instrument = runtime.instrument(identities.preparedSymbol(symbolId));
+            instrument = runtime.instrument(identities.instrumentId(symbolId));
             mark = runtime.markPrice(symbolId);
             result.symbolId = symbolId;
             result.instrument = instrument;
@@ -355,7 +354,9 @@ public final class RiskLaneProcessor {
         }
         if (instrument == null || mark == null) return false;
         // 本持仓在有效行情标记价下的未实现盈亏，随后写入暂存区供调用方使用。
-        long unrealized = unrealized(position, instrument, mark.markPriceTicks());
+        long unrealized = PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(), position.signedQuantitySteps(),
+                position.entryPriceTicks(), mark.markPriceTicks(), instrument.notionalMultiplierUnits(),
+                instrument.priceTickUnits(), instrument.settleScaleUnits());
         result.instrument = instrument;
         result.priceSequence = mark.priceSequence();
         result.unrealized = unrealized;
@@ -366,18 +367,6 @@ public final class RiskLaneProcessor {
                 position.signedQuantitySteps(), mark.markPriceTicks(), mark.indexPriceTicks(),
                 mark.forwardPriceTicks());
         return true;
-    }
-
-    /**
-     * 按合约类型、带方向数量、入场价及当前标记价计算未实现盈亏，结果使用结算资产最小整数单位。
-     * @param position 当前 Lane 持有的目标持仓对象，数量及金额按该对象最新值计算
-     * @param instrument 当前持仓所属合约的类型、精度和保证金配置
-     * @param markPriceTicks 本次用于计算浮动盈亏的标记价格 tick
-     */
-    private static long unrealized(PositionRuntime position, CoreInstrument instrument, long markPriceTicks) {
-        return PerpetualContractMath.unrealizedPnlUnits(instrument.contractType(), position.signedQuantitySteps(),
-                position.entryPriceTicks(), markPriceTicks, instrument.notionalMultiplierUnits(),
-                instrument.priceTickUnits(), instrument.settleScaleUnits());
     }
 
     /**
@@ -406,18 +395,6 @@ public final class RiskLaneProcessor {
         int slot = users.binarySearch(cursor);
         slot = slot >= 0 ? slot + 1 : -slot - 1;
         return slot == users.size() ? null : runtime.user(users.get(slot));
-    }
-
-    /**
-     * 沿当前用户的风险持仓索引寻找业务键之后的下一持仓整数键，遍历顺序由运行时统一维护。
-     * @param runtime 本轮操作的交易运行时，账户数据只能在所属 Lane 的权限范围内读取或修改
-     * @param identities 业务编号与运行时整数键的映射，用于定位币对、资产和用户持仓
-     * @param userId 当前被估值或需要定位持仓、冻结记录的用户编号
-     * @param cursor 最后处理的持仓业务键，短横线表示尚未开始
-     */
-    private static long nextPositionKey(TradingAccountRuntime runtime, RuntimeIdentityRegistry identities,
-                                        long userId, String cursor) {
-        return runtime.nextRiskPositionKey(userId, cursor, identities);
     }
 
     /**
@@ -460,11 +437,12 @@ public final class RiskLaneProcessor {
 
     /** 将本批完成标记和估值版本写回唯一的 Lane 进度；没有未完成用户时不保留失效版本。 */
     private static Page finishPage(RiskLaneProgress progress, int workUnits, boolean complete,
-            RiskLiquidationBatch creations, long userRevision, long marketRevision) {
+            RiskLiquidationBatch creations) {
+        if (progress.complete() == complete) return new Page(progress, workUnits, creations);
         var result = new RiskLaneProgress(progress.lastUserId(), complete, progress.userId(), progress.phase(),
                 progress.positionCursor(), progress.reservationCursor(), progress.unrealizedPnlUnits(),
                 progress.maintenanceMarginUnits(), progress.isolatedMarginUnits(), progress.isolatedReservationUnits(),
-                progress.userId() == 0 ? 0 : userRevision, progress.userId() == 0 ? 0 : marketRevision);
+                progress.userRevision(), progress.marketRevision());
         return new Page(result, workUnits, creations);
     }
 
@@ -479,7 +457,6 @@ public final class RiskLaneProcessor {
      * 单个用户在本批内的估值进度及工作量，用来区分用户已经算完与预算耗尽后还要继续两种情况。
      * @param progress 本次分批处理的风险游标及账户累计值
      * @param workUnits 本批实际处理的工作项数量，Owner 用它扣减共享预算
-     * @param complete 对应账户 Lane 或当前用户是否已完整遍历，不能仅凭本批用完预算判断完成
      */
-    private record UserPage(RiskLaneProgress progress, int workUnits, boolean complete) { }
+    private record UserPage(RiskLaneProgress progress, int workUnits) { }
 }

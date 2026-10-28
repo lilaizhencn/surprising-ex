@@ -5,7 +5,6 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.service.account.BalanceRuntime;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.index.ActiveOrderIndex;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.order.state.ReservationRuntime;
@@ -134,24 +133,6 @@ public final class RuntimeLifecycleSettlement {
         return clearing;
     }
 
-    /** 按币对的全局活动订单索引选页，校验每条订单路由并返回后续游标。 */
-    static com.surprising.aeron.service.core.TradingCoreRuntime.LifecycleOrderChunk selectOrders(
-            ActiveOrderIndex index, String instrumentId, long startCursorOrderId, int limit) {
-        // 索引选出的当前页及续页位置。
-        var page = index.page(0, instrumentId, startCursorOrderId, limit);
-        // 本页由活动订单路由转换出的撤单记录。
-        ArrayList<CancellationOrder> selected = new ArrayList<>(page.orderIds().size());
-        for (long /* 当前活动订单编号。 */ orderId : page.orderIds()) {
-            // 当前订单路由，包含其用户与币对。
-            var order = index.activeOrderRoute(orderId);
-            if (order == null) {
-                throw new IllegalStateException("settlement active order index differs from runtime");
-            }
-            selected.add(new CancellationOrder(orderId, order.userId(), order.instrumentId()));
-        }
-        return new com.surprising.aeron.service.core.TradingCoreRuntime.LifecycleOrderChunk(
-                selected, page.nextCursorOrderId());
-    }
 
     /**
      * 只处理当前 Lane 所属用户的订单；要求预留存在，按剩余预留撤单以释放冻结资金。这里不直接操作 Matcher 订单簿。

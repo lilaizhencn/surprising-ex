@@ -2,47 +2,16 @@ package com.surprising.aeron.service.instrument.command;
 
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.protocol.CoreMaintenanceCodec;
-import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.RegisterInstrumentCommand;
-import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.core.TradingAccountRuntime;
-import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.instrument.CoreInstrument;
 
 /**
- * 标的注册、配置修改及维护状态命令入口。解码请求后执行标的状态转换，成功返回后请求提交发布；产品线隔离和具体拒绝条件在此处理。
+ * 标的注册、配置修改及维护状态转换；校验产品线、进行中的生命周期和固定合约身份。
  */
 public final class InstrumentConfigurationCommands {
-    /** 本产品线唯一交易 Owner，持有标的、身份表和提交发布入口。 */
-    private final TradingCoreRuntime owner;
-
-    /**
-     * 保存非空 Owner 引用，不创建或启动工作线程。
-     * @param owner 本产品线交易 Owner，提供命令上下文、权威状态与提交入口
-     */
-    public InstrumentConfigurationCommands(TradingCoreRuntime owner) { this.owner = java.util.Objects.requireNonNull(owner); }
-
-    /**
-     * 解码标的参数并应用注册或更新，转换正常返回后请求发布；相同配置是否需要增加修订由转换方法决定。
-     * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
-     */
-    public void executeRegisterInstrument(CoreMessage message) {
-        var command = TradingCommandCodec.decodeRegisterInstrument(message.payloadUnsafe(), owner.runtimeState().productLine());
-        applyConfiguration(owner.runtimeState(), owner.identities(), command);
-        owner.requestCommitPublication();
-    }
-
-    /**
-     * 解码带任务归属的维护命令，交给状态转换检查并修改维护状态，成功后请求发布。
-     * @param message 当前借用的请求头和载荷，解码完成前保持缓冲有效
-     */
-    public void executeUpdateInstrumentMaintenance(CoreMessage message) {
-        updateMaintenance(owner.runtimeState(), owner.identities(),
-                CoreMaintenanceCodec.decodeCommand(message.payloadUnsafe()));
-        owner.requestCommitPublication();
-    }
-
+    private InstrumentConfigurationCommands() { }
     /**
      * 检查输入和所有权，构造本产品线配置并阻止进行中的资金费或生命周期操作；新标的登记资产身份后注册，旧标的先核对固定合约身份，相同配置直接返回，变化配置保留外壳更新并增加修订。
      */

@@ -1,0 +1,596 @@
+{
+  "role": "micro-0-liveOrders-64",
+  "recording_sha256": "223810fb4dbc89693955abadae6962e6f0f4d1192abbff52aa4034733df3dbcc",
+  "recording_bytes": 575593,
+  "raw_recording_status": "deleted after summary/view/configuration and SHA-256 archive",
+  "window_epoch_ms": null,
+  "window_definition": "JMH recording (measurement iterations)",
+  "event_counts_full_recording": {
+    "jdk.GCPhaseParallel": 1310,
+    "jdk.SystemProcess": 1137,
+    "jdk.NativeLibrary": 1048,
+    "jdk.ObjectAllocationSample": 929,
+    "jdk.BooleanFlag": 700,
+    "jdk.ModuleExport": 656,
+    "jdk.ActiveSetting": 381,
+    "jdk.ExecutionSample": 271,
+    "jdk.ModuleRequire": 157,
+    "jdk.LongFlag": 156,
+    "jdk.UnsignedLongFlag": 150,
+    "jdk.PromoteObjectInNewPLAB": 95,
+    "jdk.UnsignedIntFlag": 88,
+    "jdk.InitialEnvironmentVariable": 62,
+    "jdk.IntFlag": 60,
+    "jdk.InitialSecurityProperty": 47,
+    "jdk.StringFlag": 45,
+    "jdk.ThreadAllocationStatistics": 41,
+    "jdk.DoubleFlag": 35,
+    "jdk.Checkpoint": 25,
+    "jdk.Deoptimization": 19,
+    "jdk.InitialSystemProperty": 16,
+    "jdk.TenuringDistribution": 15,
+    "jdk.JavaExceptionThrow": 10,
+    "jdk.NativeMethodSample": 9,
+    "jdk.CompilationFailure": 7,
+    "jdk.PromoteObjectOutsidePLAB": 7,
+    "jdk.ThreadEnd": 7,
+    "jdk.ClassLoaderStatistics": 6,
+    "jdk.CodeCacheStatistics": 6,
+    "jdk.GCHeapMemoryPoolUsage": 6,
+    "jdk.SafepointBegin": 6,
+    "jdk.ThreadCPULoad": 5,
+    "jdk.ClassRedefinition": 4,
+    "jdk.ExecuteVMOperation": 4,
+    "jdk.GCReferenceStatistics": 4,
+    "jdk.MetaspaceChunkFreeListSummary": 4,
+    "jdk.ThreadPark": 4,
+    "jdk.ClassLoadingStatistics": 3,
+    "jdk.CompilerStatistics": 3,
+    "jdk.ExceptionStatistics": 3,
+    "jdk.GCPhasePauseLevel1": 3,
+    "jdk.JavaThreadStatistics": 3,
+    "jdk.ResidentSetSize": 3,
+    "jdk.CPULoad": 2,
+    "jdk.FileRead": 2,
+    "jdk.G1HeapSummary": 2,
+    "jdk.GCConfiguration": 2,
+    "jdk.GCHeapMemoryUsage": 2,
+    "jdk.GCHeapSummary": 2,
+    "jdk.JavaMonitorStatistics": 2,
+    "jdk.MetaspaceSummary": 2,
+    "jdk.PhysicalMemory": 2,
+    "jdk.SwapSpace": 2,
+    "jdk.ThreadStart": 2,
+    "jdk.ActiveRecording": 1,
+    "jdk.CPUInformation": 1,
+    "jdk.CPUTimeStampCounter": 1,
+    "jdk.CodeCacheConfiguration": 1,
+    "jdk.CompilerConfiguration": 1,
+    "jdk.EvacuationInformation": 1,
+    "jdk.G1AdaptiveIHOP": 1,
+    "jdk.G1BasicIHOP": 1,
+    "jdk.G1EvacuationOldStatistics": 1,
+    "jdk.G1EvacuationYoungStatistics": 1,
+    "jdk.G1GarbageCollection": 1,
+    "jdk.G1MMU": 1,
+    "jdk.GCCPUTime": 1,
+    "jdk.GCHeapConfiguration": 1,
+    "jdk.GCPhasePause": 1,
+    "jdk.GCPhasePauseLevel2": 1,
+    "jdk.GCSurvivorConfiguration": 1,
+    "jdk.GCTLABConfiguration": 1,
+    "jdk.GarbageCollection": 1,
+    "jdk.JVMInformation": 1,
+    "jdk.Metadata": 1,
+    "jdk.OSInformation": 1,
+    "jdk.ProcessStart": 1,
+    "jdk.RetransformClasses": 1,
+    "jdk.VirtualizationInformation": 1,
+    "jdk.YoungGarbageCollection": 1,
+    "jdk.YoungGenerationConfiguration": 1,
+    "jdk.AllocationRequiringGC": 0,
+    "jdk.BooleanFlagChanged": 0,
+    "jdk.CPUTimeSample": 0,
+    "jdk.CPUTimeSamplesLost": 0,
+    "jdk.ClassDefine": 0,
+    "jdk.ClassLoad": 0,
+    "jdk.ClassUnload": 0,
+    "jdk.CodeCacheFull": 0,
+    "jdk.Compilation": 0,
+    "jdk.CompilerInlining": 0,
+    "jdk.CompilerPhase": 0,
+    "jdk.CompilerQueueUtilization": 0,
+    "jdk.ConcurrentModeFailure": 0,
+    "jdk.ContainerCPUThrottling": 0,
+    "jdk.ContainerCPUUsage": 0,
+    "jdk.ContainerConfiguration": 0,
+    "jdk.ContainerIOUsage": 0,
+    "jdk.ContainerMemoryUsage": 0,
+    "jdk.ContinuationFreeze": 0,
+    "jdk.ContinuationFreezeFast": 0,
+    "jdk.ContinuationFreezeSlow": 0,
+    "jdk.ContinuationThaw": 0,
+    "jdk.ContinuationThawFast": 0,
+    "jdk.ContinuationThawSlow": 0,
+    "jdk.DataLoss": 0,
+    "jdk.DeprecatedInvocation": 0,
+    "jdk.Deserialization": 0,
+    "jdk.DirectBufferStatistics": 0,
+    "jdk.DoubleFlagChanged": 0,
+    "jdk.DumpReason": 0,
+    "jdk.EvacuationFailed": 0,
+    "jdk.FileForce": 0,
+    "jdk.FileWrite": 0,
+    "jdk.FinalFieldMutation": 0,
+    "jdk.FinalizerStatistics": 0,
+    "jdk.Flush": 0,
+    "jdk.G1HeapRegionInformation": 0,
+    "jdk.G1HeapRegionTypeChange": 0,
+    "jdk.GCPhaseConcurrent": 0,
+    "jdk.GCPhaseConcurrentLevel1": 0,
+    "jdk.GCPhaseConcurrentLevel2": 0,
+    "jdk.GCPhasePauseLevel3": 0,
+    "jdk.GCPhasePauseLevel4": 0,
+    "jdk.HeapDump": 0,
+    "jdk.IntFlagChanged": 0,
+    "jdk.JITRestart": 0,
+    "jdk.JavaAgent": 0,
+    "jdk.JavaErrorThrow": 0,
+    "jdk.JavaMonitorDeflate": 0,
+    "jdk.JavaMonitorEnter": 0,
+    "jdk.JavaMonitorInflate": 0,
+    "jdk.JavaMonitorNotify": 0,
+    "jdk.JavaMonitorWait": 0,
+    "jdk.LongFlagChanged": 0,
+    "jdk.MetaspaceAllocationFailure": 0,
+    "jdk.MetaspaceGCThreshold": 0,
+    "jdk.MetaspaceOOM": 0,
+    "jdk.MethodTiming": 0,
+    "jdk.MethodTrace": 0,
+    "jdk.NativeAgent": 0,
+    "jdk.NativeLibraryLoad": 0,
+    "jdk.NativeLibraryUnload": 0,
+    "jdk.NativeMemoryUsage": 0,
+    "jdk.NativeMemoryUsageTotal": 0,
+    "jdk.NetworkUtilization": 0,
+    "jdk.ObjectAllocationInNewTLAB": 0,
+    "jdk.ObjectAllocationOutsideTLAB": 0,
+    "jdk.ObjectCount": 0,
+    "jdk.ObjectCountAfterGC": 0,
+    "jdk.OldGarbageCollection": 0,
+    "jdk.OldObjectSample": 0,
+    "jdk.PSHeapSummary": 0,
+    "jdk.ParallelOldGarbageCollection": 0,
+    "jdk.PromotionFailed": 0,
+    "jdk.RedefineClasses": 0,
+    "jdk.ReservedStackActivation": 0,
+    "jdk.SafepointEnd": 0,
+    "jdk.SafepointLatency": 0,
+    "jdk.SafepointStateSynchronization": 0,
+    "jdk.SecurityPropertyModification": 0,
+    "jdk.SecurityProviderService": 0,
+    "jdk.SerializationMisdeclaration": 0,
+    "jdk.ShenandoahEvacuationInformation": 0,
+    "jdk.ShenandoahHeapRegionInformation": 0,
+    "jdk.ShenandoahHeapRegionStateChange": 0,
+    "jdk.ShenandoahPromotionInformation": 0,
+    "jdk.Shutdown": 0,
+    "jdk.SocketRead": 0,
+    "jdk.SocketWrite": 0,
+    "jdk.StringDeduplication": 0,
+    "jdk.StringFlagChanged": 0,
+    "jdk.StringTableStatistics": 0,
+    "jdk.SymbolTableStatistics": 0,
+    "jdk.SyncOnValueBasedClass": 0,
+    "jdk.SystemGC": 0,
+    "jdk.TLSHandshake": 0,
+    "jdk.ThreadContextSwitchRate": 0,
+    "jdk.ThreadDump": 0,
+    "jdk.ThreadSleep": 0,
+    "jdk.UnsignedIntFlagChanged": 0,
+    "jdk.UnsignedLongFlagChanged": 0,
+    "jdk.VirtualThreadEnd": 0,
+    "jdk.VirtualThreadPinned": 0,
+    "jdk.VirtualThreadStart": 0,
+    "jdk.VirtualThreadSubmitFailed": 0,
+    "jdk.X509Certificate": 0,
+    "jdk.X509Validation": 0,
+    "jdk.ZAllocationStall": 0,
+    "jdk.ZOldGarbageCollection": 0,
+    "jdk.ZPageAllocation": 0,
+    "jdk.ZRelocationSet": 0,
+    "jdk.ZRelocationSetGroup": 0,
+    "jdk.ZStatisticsCounter": 0,
+    "jdk.ZStatisticsSampler": 0,
+    "jdk.ZThreadPhase": 0,
+    "jdk.ZUncommit": 0,
+    "jdk.ZYoungGarbageCollection": 0
+  },
+  "event_counts_window": {
+    "jdk.SafepointBegin": 6,
+    "jdk.Deoptimization": 19,
+    "jdk.ExecuteVMOperation": 4,
+    "jdk.NativeMethodSample": 9,
+    "jdk.ThreadAllocationStatistics": 41,
+    "jdk.FileRead": 2,
+    "jdk.ObjectAllocationSample": 929,
+    "jdk.ExecutionSample": 271,
+    "jdk.ThreadPark": 4,
+    "jdk.ThreadCPULoad": 5,
+    "jdk.GCHeapSummary": 2,
+    "jdk.GCPhasePause": 1,
+    "jdk.GarbageCollection": 1,
+    "jdk.CPULoad": 2
+  },
+  "data_loss_events_full_recording": 0,
+  "analysis_events": [
+    "jdk.CPULoad",
+    "jdk.Deoptimization",
+    "jdk.ExecuteVMOperation",
+    "jdk.ExecutionSample",
+    "jdk.FileRead",
+    "jdk.GCHeapSummary",
+    "jdk.GCPhasePause",
+    "jdk.GarbageCollection",
+    "jdk.NativeMethodSample",
+    "jdk.ObjectAllocationSample",
+    "jdk.SafepointBegin",
+    "jdk.ThreadAllocationStatistics",
+    "jdk.ThreadCPULoad",
+    "jdk.ThreadPark"
+  ],
+  "hot_methods": [
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity$$Lambda.0x00000001232cc400.applyAsLong:-1",
+      20
+    ],
+    [
+      "java.util.TimSort.mergeLo:721",
+      17
+    ],
+    [
+      "java.util.Comparator.lambda$comparingLong$6043328a$1:560",
+      16
+    ],
+    [
+      "org.agrona.collections.LongHashSet$LongIterator.findNext:988",
+      16
+    ],
+    [
+      "java.util.TimSort.binarySort:282",
+      10
+    ],
+    [
+      "org.agrona.collections.Long2LongHashMap.get:208",
+      9
+    ],
+    [
+      "java.util.Comparator$$Lambda.0x000000012324ec00.compare:-1",
+      8
+    ],
+    [
+      "java.util.TimSort.mergeLo:722",
+      7
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.matches:78",
+      7
+    ],
+    [
+      "java.util.Collections$ReverseComparator2.compare:5794",
+      7
+    ],
+    [
+      "com.surprising.aeron.service.account.AccountLaneState.order:1754",
+      7
+    ],
+    [
+      "java.util.Arrays.copyOf:3478",
+      7
+    ],
+    [
+      "java.util.TimSort.binarySort:316",
+      6
+    ],
+    [
+      "java.lang.Long.compare:1378",
+      5
+    ],
+    [
+      "org.agrona.collections.LongHashSet$LongIterator.findNext:991",
+      5
+    ],
+    [
+      "com.surprising.aeron.service.order.state.OrderRuntime.clusterPosition:121",
+      5
+    ],
+    [
+      "java.lang.ProcessHandleImpl.waitForProcessExit0:-1",
+      4
+    ],
+    [
+      "java.util.TimSort.countRunAndMakeAscending:355",
+      4
+    ],
+    [
+      "java.util.TimSort.mergeLo:728",
+      4
+    ],
+    [
+      "org.agrona.collections.Long2ObjectHashMap.getMapped:332",
+      4
+    ]
+  ],
+  "second_frames": [
+    [
+      "java.util.TimSort.mergeAt:518",
+      37
+    ],
+    [
+      "java.util.TimSort.sort:239",
+      34
+    ],
+    [
+      "org.agrona.collections.LongHashSet$LongIterator.nextValue:945",
+      30
+    ],
+    [
+      "java.util.Comparator.lambda$comparingLong$6043328a$1:560",
+      25
+    ],
+    [
+      "java.util.Comparator$$Lambda.0x000000012324e800.compare:-1",
+      16
+    ],
+    [
+      "com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision:76",
+      13
+    ],
+    [
+      "org.agrona.collections.Long2LongHashMap.containsKey:392",
+      11
+    ],
+    [
+      "java.util.TimSort.mergeAt:520",
+      10
+    ],
+    [
+      "org.agrona.collections.Long2ObjectHashMap.get:303",
+      10
+    ],
+    [
+      "java.util.Collections$ReverseComparator2.compare:5794",
+      8
+    ],
+    [
+      "java.util.ArrayList.grow:238",
+      7
+    ],
+    [
+      "com.surprising.aeron.service.account.AccountLaneState.pendingReservation:713",
+      6
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:38",
+      6
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:55",
+      5
+    ],
+    [
+      "java.lang.ProcessHandleImpl$1.run:147",
+      4
+    ],
+    [
+      "java.util.TimSort.sort:234",
+      4
+    ],
+    [
+      "org.agrona.collections.Hashing.evenHash:126",
+      4
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity$$Lambda.0x00000001232cc400.applyAsLong:-1",
+      4
+    ],
+    [
+      "java.io.FileInputStream.traceReadBytes:236",
+      4
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:57",
+      3
+    ]
+  ],
+  "application_frames": [
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:35",
+      22
+    ],
+    [
+      "com.surprising.aeron.service.account.AccountLaneState.pendingReservation:714",
+      18
+    ],
+    [
+      "com.surprising.aeron.service.account.AccountLaneState.order:1754",
+      17
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:53",
+      12
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.matches:78",
+      7
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:57",
+      5
+    ],
+    [
+      "com.surprising.aeron.service.order.state.OrderRuntime.clusterPosition:121",
+      5
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:62",
+      4
+    ],
+    [
+      "com.surprising.aeron.service.account.AccountLaneState.assertOwner:482",
+      3
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:59",
+      3
+    ],
+    [
+      "com.surprising.aeron.service.account.AccountLaneState.assertOwner:484",
+      2
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:61",
+      2
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:39",
+      2
+    ],
+    [
+      "com.surprising.aeron.service.order.state.OrderRuntime.userId:33",
+      2
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:52",
+      2
+    ],
+    [
+      "com.surprising.aeron.service.account.AccountLaneState.activeOrderIds:1991",
+      1
+    ],
+    [
+      "com.surprising.aeron.service.order.state.OrderRuntime.symbolId:37",
+      1
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:34",
+      1
+    ],
+    [
+      "com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor:25",
+      1
+    ],
+    [
+      "com.surprising.aeron.service.order.state.OrderRuntime.remainingQuantitySteps:380",
+      1
+    ]
+  ],
+  "cpu_samples_by_thread": [
+    [
+      "com.surprising.aeron.service.core.OrderAdmissionAllocationBenchmark.laneCloseCapacityDecision-jmh-worker-1",
+      271
+    ],
+    [
+      "process reaper (pid 96465)",
+      4
+    ],
+    [
+      "Thread-4",
+      2
+    ],
+    [
+      "Thread-5",
+      2
+    ],
+    [
+      "main",
+      1
+    ]
+  ],
+  "allocation_samples": {
+    "[Ljava/lang/Object;": {
+      "samples": 620,
+      "sampled_weight_bytes": 631087088
+    },
+    "[J": {
+      "samples": 309,
+      "sampled_weight_bytes": 308729056
+    }
+  },
+  "cpu_load": [
+    {
+      "epoch_ms": 1793158529082.9211,
+      "jvmUser": 0.059375,
+      "jvmSystem": 0.00625,
+      "machineTotal": 0.39010644
+    },
+    {
+      "epoch_ms": 1793158530088.288,
+      "jvmUser": 0.061262377,
+      "jvmSystem": 0.0006188119,
+      "machineTotal": 0.41132075
+    }
+  ],
+  "thread_waits": {
+    "jdk.ThreadPark:java/util/concurrent/locks/AbstractQueuedSynchronizer$ConditionObject": {
+      "count": 3,
+      "duration_ms": 3016.43159
+    },
+    "jdk.ThreadPark:java/util/concurrent/SynchronousQueue$Transferer": {
+      "count": 1,
+      "duration_ms": 3031.486886
+    }
+  },
+  "gc_pause_count": 1,
+  "gc_pause_total_ms": 5.405006,
+  "gc_pause_max_ms": 5.405006,
+  "jit_compilation_count": 0,
+  "jit_compilation_ms": 0,
+  "heap_samples": [
+    {
+      "epoch_ms": 1793158528974.3591,
+      "when": "Before GC",
+      "heap_used": 651998216
+    },
+    {
+      "epoch_ms": 1793158528979.76,
+      "when": "After GC",
+      "heap_used": 15269528
+    }
+  ],
+  "direct_buffer_samples": [],
+  "lock_contention": {},
+  "io": {
+    "jdk.FileRead": {
+      "count": 2,
+      "duration_ms": 100.17181,
+      "max_ms": 89.28799099999999,
+      "longest": [
+        {
+          "duration_ms": 89.28799099999999,
+          "thread": "Thread-5",
+          "path": null,
+          "stack": [
+            "java.lang.Process$PipeInputStream.read:1116",
+            "java.io.BufferedInputStream.fill:289",
+            "java.io.BufferedInputStream.read1:330",
+            "java.io.BufferedInputStream.read:388",
+            "java.io.FilterInputStream.read:95"
+          ]
+        },
+        {
+          "duration_ms": 10.883818999999999,
+          "thread": "Thread-3",
+          "path": null,
+          "stack": [
+            "java.lang.Process$PipeInputStream.read:1116",
+            "java.io.BufferedInputStream.fill:289",
+            "java.io.BufferedInputStream.read1:330",
+            "java.io.BufferedInputStream.read:388",
+            "java.io.FilterInputStream.read:95"
+          ]
+        }
+      ]
+    }
+  }
+}

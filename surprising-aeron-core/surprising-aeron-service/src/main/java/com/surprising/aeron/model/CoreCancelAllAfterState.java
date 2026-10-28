@@ -24,11 +24,13 @@ public record CoreCancelAllAfterState(
     private static final long CLAIM_LEASE_MILLIS = 30_000L;
 
     /**
-     * 复用对外视图的字段校验，再要求启用中的定时器必须有具体触发时刻。
+     * 校验状态字段，启用中的定时器必须有具体触发时刻。
      */
     public CoreCancelAllAfterState {
-        new CoreCancelAllAfterView(userId, symbolScope, status, triggerAtEpochMillis,
-                updatedAtEpochMillis, revision);
+        if (userId <= 0 || symbolScope == null || symbolScope.isBlank() || status == null
+                || triggerAtEpochMillis < 0 || updatedAtEpochMillis <= 0 || revision <= 0) {
+            throw new IllegalArgumentException("invalid cancel-all-after view");
+        }
         if (status == CoreCancelAllAfterStatus.ACTIVE && triggerAtEpochMillis == 0) {
             throw new IllegalArgumentException("active cancel-all-after timer requires trigger time");
         }

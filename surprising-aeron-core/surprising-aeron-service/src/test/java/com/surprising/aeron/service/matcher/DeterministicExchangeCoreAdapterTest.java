@@ -37,8 +37,7 @@ class DeterministicExchangeCoreAdapterTest {
     @Test
     void directCommandRejectsMissingSettlementBeforeChangingTheBook() {
         try (/* 本场景创建并在结束时关闭的原生撮合适配器。 */ var adapter = new DeterministicExchangeCoreAdapter()) {
-            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 1,
-                    new java.util.UUID(7, 1), 1000, 7, bid(1, 90), null))
+            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 1, 7, 1, 1000, 7, bid(1, 90), null))
                     .isInstanceOf(IllegalArgumentException.class);
             assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
         }
@@ -187,10 +186,10 @@ class DeterministicExchangeCoreAdapterTest {
             var id = new java.util.UUID(0, 1);
             // 已按当前命令准备好的原结算事件目标。
             var target = preparePlace(adapter, 1, id, 1000, 7, order);
-            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 0, id,
+            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 0, id.getMostSignificantBits(), id.getLeastSignificantBits(),
                     1000, 7, order, target)).isInstanceOf(IllegalArgumentException.class);
             assertThat(adapter.orderBookLevels("1", 30)).isEmpty();
-            adapter.placeDirect(adapter.matcherShardId("1"), 1, id, 1000, 7, order, target);
+            adapter.placeDirect(adapter.matcherShardId("1"), 1, id.getMostSignificantBits(), id.getLeastSignificantBits(), 1000, 7, order, target);
             assertThat(target.accepted()).isTrue();
             assertThat(target.nativeMatcherSequence()).isEqualTo(1);
             adapter.poisonFromOwner("test divergence");
@@ -350,7 +349,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(adapter.cancelDirectPrefix(1000, 7, 1, "1").resultCode())
                     .isEqualTo(CommandResultCode.SUCCESS);
             target.recordDirectPreCancellation(1);
-            adapter.placeDirect(adapter.matcherShardId("1"), 3, id, 1000, 7, command, target);
+            adapter.placeDirect(adapter.matcherShardId("1"), 3, id.getMostSignificantBits(), id.getLeastSignificantBits(), 1000, 7, command, target);
             assertThat(target.accepted()).isFalse();
             assertThat(target.plan().preCancellationCount()).isEqualTo(1);
             assertThat(target.outcome()).isEqualTo(MatchingResult.Outcome.KNOWN_PREFIX_APPLIED);
@@ -423,7 +422,7 @@ class DeterministicExchangeCoreAdapterTest {
             adapter.poisonFromOwner("fatal divergence");
             // 中毒后、尝试执行之前取得的证据进度参照。
             var progress = matcherProgress(adapter);
-            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 1, id, 1000,
+            assertThatThrownBy(() -> adapter.placeDirect(adapter.matcherShardId("1"), 1, id.getMostSignificantBits(), id.getLeastSignificantBits(), 1000,
                     7, command, prepared)).isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("matcher is poisoned");
             assertThat(prepared.resultPrepared()).isFalse();
@@ -478,7 +477,7 @@ class DeterministicExchangeCoreAdapterTest {
             assertThat(beforeSnapshot.accepted()).isTrue();
             snapshot = matcherSnapshot(adapter,
                     91, 1, state.businessStateHash(), state, activeOrders(state));
-            bookHash = adapter.orderBooksStateHashAsync().join();
+            bookHash = adapter.orderBooksStateHash();
         }
 
         // Matcher 清单编码字节，损坏测试只修改内存副本。
@@ -514,7 +513,7 @@ class DeterministicExchangeCoreAdapterTest {
 
         try (/* 从 Core 元数据和原生模块恢复的适配器，结束时关闭。 */ DeterministicExchangeCoreAdapter restored =
                      new DeterministicExchangeCoreAdapter(state, activeOrders(state), 1, decoded)) {
-            assertThat(restored.orderBooksStateHashAsync().join()).isEqualTo(bookHash);
+            assertThat(restored.orderBooksStateHash()).isEqualTo(bookHash);
             // 恢复后继续提交新买单得到的回执。
             var afterRestore = placeDirect(restored, 2, new java.util.UUID(0, 101), 1001, 8,
                     bid(101, instrumentId, 90));

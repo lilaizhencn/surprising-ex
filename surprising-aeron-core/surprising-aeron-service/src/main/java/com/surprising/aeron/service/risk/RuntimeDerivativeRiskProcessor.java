@@ -26,7 +26,7 @@ public final class RuntimeDerivativeRiskProcessor {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
         // 运行时已经注册的币对配置，提供结算资产和期权价格校验条件。
-        CoreInstrument instrument = requireInstrument(runtime, command.instrumentId());
+        CoreInstrument instrument = runtime.requireInstrument(command.instrumentId());
         // 当前币对在运行时身份表中的整数编号。
         int symbolId = identities.symbolId(instrument.instrumentIdValue());
         // 该币对上一版行情，新命令的价格序号必须严格大于它。
@@ -48,35 +48,22 @@ public final class RuntimeDerivativeRiskProcessor {
                 ? currentScan.accountLaneId() : 0;
         // 当前风险扫描控制是否停用；停用时新扫描直接标为风险已完成。
         boolean disabled = !runtime.riskScanControl().enabled();
-        // 新价格对应的扫描记录，先重置当前用户累计值，再补回各 Lane 的已完成边界。
-        RiskScanRuntime nextScan = new RiskScanRuntime(symbolId, accountLaneId,
-                command.priceSequence(), scanStart, disabled,
-                true, 0, 0, 0, 0, 0, 0, 0, 0,
-                currentScan == null ? 0 : currentScan.lastScheduledRevision(), java.util.List.of());
+        java.util.List<RiskLaneProgress> progress = java.util.List.of();
         if (!disabled && currentScan != null && !currentScan.riskComplete() && !currentScan.laneProgress().isEmpty()) {
             // 新价格使当前用户累计值失效；保留每个 Lane 已完成用户和轮次边界。
-            var progress = new java.util.ArrayList<RiskLaneProgress>(
+            progress = new java.util.ArrayList<RiskLaneProgress>(
                     currentScan.laneProgress().size());
             for (var /* 当前复制的一个 Lane 旧游标，只沿用其最后完成用户与轮次完成标记。 */ lane : currentScan.laneProgress()) progress.add(
                     new RiskLaneProgress(lane.lastUserId(), lane.complete(),
                             0, 0, "-", 0, 0, 0, 0, 0));
-            nextScan = nextScan.withLaneProgress(progress);
         }
+        RiskScanRuntime nextScan = new RiskScanRuntime(symbolId, accountLaneId,
+                command.priceSequence(), scanStart, disabled,
+                true, 0, 0, 0, 0, 0, 0, 0, 0,
+                currentScan == null ? 0 : currentScan.lastScheduledRevision(), progress);
         runtime.setMarketRevision(Math.incrementExact(runtime.revision()));
         runtime.putRiskScan(nextScan);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-    }
-
-    /**
-     * 要求当前运行时已经注册该币对，缺失时返回 INSTRUMENT_NOT_FOUND 业务拒绝。
-     * @param runtime 本次命令操作的交易运行时，Owner、账户 Lane 和账本各自遵守状态所有权
-     * @param instrumentId 对外的币对或合约编号，需要已注册到当前运行时
-     */
-    private static CoreInstrument requireInstrument(TradingAccountRuntime runtime, String instrumentId) {
-        // 运行时已经注册的币对配置，提供结算资产和期权价格校验条件。
-        CoreInstrument instrument = runtime.instrument(instrumentId);
-        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        return instrument;
     }
 
     private static void requireOptionRiskPrices(CoreInstrument instrument, long indexPriceTicks,

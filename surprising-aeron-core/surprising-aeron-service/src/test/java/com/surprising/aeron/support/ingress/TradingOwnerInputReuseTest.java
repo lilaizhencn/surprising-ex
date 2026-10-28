@@ -65,7 +65,6 @@ class TradingOwnerInputReuseTest {
             assertThat(reused.position).isEqualTo(199);
             input.remove();
             assertThat(input.size()).isZero();
-            assertThat(input.retainedBytes()).isZero();
             assertThat(owned.command).isNull();
         } finally {
             producer.interrupt(); producer.join(5_000);
@@ -194,7 +193,6 @@ class TradingOwnerInputReuseTest {
             assertThat(received[0]).isEqualTo(16_384);
         } finally { loop.onTerminate(cluster); egress.clear(); }
         assertThat(input(loop).size()).isZero();
-        assertThat(input(loop).retainedBytes()).isZero();
     }
 
     private static CoreMessage probe(long id) {

@@ -68,7 +68,7 @@ public final class RuntimeTreasuryDelta {
      */
     public int assetId(int index) {
         checkIndex(index);
-        return assetAt(index);
+        return (assetIds == null ? firstAssetId : assetIds[index]);
     }
 
     /**
@@ -77,7 +77,7 @@ public final class RuntimeTreasuryDelta {
      */
     public long feeUnits(int index) {
         checkIndex(index);
-        return feeAt(index);
+        return (feeUnits == null ? firstFeeUnits : feeUnits[index]);
     }
 
     /**
@@ -86,7 +86,7 @@ public final class RuntimeTreasuryDelta {
      */
     public long insuranceUnits(int index) {
         checkIndex(index);
-        return insuranceAt(index);
+        return (insuranceUnits == null ? firstInsuranceUnits : insuranceUnits[index]);
     }
 
     /**
@@ -95,7 +95,7 @@ public final class RuntimeTreasuryDelta {
      */
     public long deficitUnits(int index) {
         checkIndex(index);
-        return deficitAt(index);
+        return (deficitUnits == null ? firstDeficitUnits : deficitUnits[index]);
     }
 
     /**
@@ -104,7 +104,7 @@ public final class RuntimeTreasuryDelta {
      */
     public long fundingResidualUnits(int index) {
         checkIndex(index);
-        return fundingResidualAt(index);
+        return (fundingResidualUnits == null ? firstFundingResidualUnits : fundingResidualUnits[index]);
     }
 
     /**
@@ -113,7 +113,7 @@ public final class RuntimeTreasuryDelta {
      */
     public long roundingResidualUnits(int index) {
         checkIndex(index);
-        return roundingResidualAt(index);
+        return (roundingResidualUnits == null ? firstRoundingResidualUnits : roundingResidualUnits[index]);
     }
 
     /**
@@ -122,7 +122,7 @@ public final class RuntimeTreasuryDelta {
      */
     public long clearingUnits(int index) {
         checkIndex(index);
-        return clearingAt(index);
+        return (clearingUnits == null ? firstClearingUnits : clearingUnits[index]);
     }
 
     /**
@@ -211,13 +211,13 @@ public final class RuntimeTreasuryDelta {
         if (other == null) throw new IllegalArgumentException("treasury delta is required");
         for (/* 当前遍历、归并、预检或写入的有效资产槽下标。 */ int index = 0; index < other.size; index++) {
             // 当前需要应用差额或查找归并的资产编号。
-            int assetId = other.assetAt(index);
-            addFee(assetId, other.feeAt(index));
-            addInsurance(assetId, other.insuranceAt(index));
-            addDeficit(assetId, other.deficitAt(index));
-            addFundingResidual(assetId, other.fundingResidualAt(index));
-            addRoundingResidual(assetId, other.roundingResidualAt(index));
-            addClearing(assetId, other.clearingAt(index));
+            int assetId = (other.assetIds == null ? other.firstAssetId : other.assetIds[index]);
+            addFee(assetId, (other.feeUnits == null ? other.firstFeeUnits : other.feeUnits[index]));
+            addInsurance(assetId, (other.insuranceUnits == null ? other.firstInsuranceUnits : other.insuranceUnits[index]));
+            addDeficit(assetId, (other.deficitUnits == null ? other.firstDeficitUnits : other.deficitUnits[index]));
+            addFundingResidual(assetId, (other.fundingResidualUnits == null ? other.firstFundingResidualUnits : other.fundingResidualUnits[index]));
+            addRoundingResidual(assetId, (other.roundingResidualUnits == null ? other.firstRoundingResidualUnits : other.roundingResidualUnits[index]));
+            addClearing(assetId, (other.clearingUnits == null ? other.firstClearingUnits : other.clearingUnits[index]));
         }
     }
 
@@ -230,19 +230,19 @@ public final class RuntimeTreasuryDelta {
         // 普通结算通常只有一个资产，先算好全部新值，再调用 setter，避免为加法预检重复读取。
         if (size == 1) {
             // 当前需要应用差额或查找归并的资产编号。
-            int assetId = assetAt(0);
+            int assetId = (assetIds == null ? firstAssetId : assetIds[0]);
             // 单资产路径预先计算的更新后系统手续费余额。
-            long fee = Math.addExact(treasury.fee(assetId), feeAt(0));
+            long fee = Math.addExact(treasury.fee(assetId), (feeUnits == null ? firstFeeUnits : feeUnits[0]));
             // 单资产路径预先计算的更新后保险基金余额。
-            long insurance = Math.addExact(treasury.insurance(assetId), insuranceAt(0));
+            long insurance = Math.addExact(treasury.insurance(assetId), (insuranceUnits == null ? firstInsuranceUnits : insuranceUnits[0]));
             // 单资产路径预先计算的更新后保险亏空余额。
-            long deficit = Math.addExact(treasury.insuranceDeficit(assetId), deficitAt(0));
+            long deficit = Math.addExact(treasury.insuranceDeficit(assetId), (deficitUnits == null ? firstDeficitUnits : deficitUnits[0]));
             // 单资产路径预先计算的更新后资金费残差余额。
-            long fundingResidual = Math.addExact(treasury.fundingResidual(assetId), fundingResidualAt(0));
+            long fundingResidual = Math.addExact(treasury.fundingResidual(assetId), (fundingResidualUnits == null ? firstFundingResidualUnits : fundingResidualUnits[0]));
             // 单资产路径预先计算的更新后舍入残差余额。
-            long roundingResidual = Math.addExact(treasury.roundingResidual(assetId), roundingResidualAt(0));
+            long roundingResidual = Math.addExact(treasury.roundingResidual(assetId), (roundingResidualUnits == null ? firstRoundingResidualUnits : roundingResidualUnits[0]));
             // 单资产路径预先计算的更新后清算盈亏余额。
-            long clearing = Math.addExact(treasury.clearingPnl(assetId), clearingAt(0));
+            long clearing = Math.addExact(treasury.clearingPnl(assetId), (clearingUnits == null ? firstClearingUnits : clearingUnits[0]));
             treasury.setFee(assetId, fee);
             treasury.setInsurance(assetId, insurance, deficit);
             treasury.setFundingResidual(assetId, fundingResidual);
@@ -253,27 +253,27 @@ public final class RuntimeTreasuryDelta {
         // 同一账本所有者执行预检和写入两遍，任何资产加法溢出都在首个资产写入前拒绝。
         for (/* 当前遍历、归并、预检或写入的有效资产槽下标。 */ int index = 0; index < size; index++) {
             // 当前需要应用差额或查找归并的资产编号。
-            int assetId = assetAt(index);
-            Math.addExact(treasury.fee(assetId), feeAt(index));
-            Math.addExact(treasury.insurance(assetId), insuranceAt(index));
-            Math.addExact(treasury.insuranceDeficit(assetId), deficitAt(index));
-            Math.addExact(treasury.fundingResidual(assetId), fundingResidualAt(index));
-            Math.addExact(treasury.roundingResidual(assetId), roundingResidualAt(index));
-            Math.addExact(treasury.clearingPnl(assetId), clearingAt(index));
+            int assetId = assetIds[index];
+            Math.addExact(treasury.fee(assetId), feeUnits[index]);
+            Math.addExact(treasury.insurance(assetId), insuranceUnits[index]);
+            Math.addExact(treasury.insuranceDeficit(assetId), deficitUnits[index]);
+            Math.addExact(treasury.fundingResidual(assetId), fundingResidualUnits[index]);
+            Math.addExact(treasury.roundingResidual(assetId), roundingResidualUnits[index]);
+            Math.addExact(treasury.clearingPnl(assetId), clearingUnits[index]);
         }
         for (/* 当前遍历、归并、预检或写入的有效资产槽下标。 */ int index = 0; index < size; index++) {
             // 当前需要应用差额或查找归并的资产编号。
-            int assetId = assetAt(index);
-            treasury.setFee(assetId, Math.addExact(treasury.fee(assetId), feeAt(index)));
+            int assetId = assetIds[index];
+            treasury.setFee(assetId, Math.addExact(treasury.fee(assetId), feeUnits[index]));
             treasury.setInsurance(assetId,
-                    Math.addExact(treasury.insurance(assetId), insuranceAt(index)),
-                    Math.addExact(treasury.insuranceDeficit(assetId), deficitAt(index)));
+                    Math.addExact(treasury.insurance(assetId), insuranceUnits[index]),
+                    Math.addExact(treasury.insuranceDeficit(assetId), deficitUnits[index]));
             treasury.setFundingResidual(assetId,
-                    Math.addExact(treasury.fundingResidual(assetId), fundingResidualAt(index)));
+                    Math.addExact(treasury.fundingResidual(assetId), fundingResidualUnits[index]));
             treasury.setRoundingResidual(assetId,
-                    Math.addExact(treasury.roundingResidual(assetId), roundingResidualAt(index)));
+                    Math.addExact(treasury.roundingResidual(assetId), roundingResidualUnits[index]));
             treasury.setClearingPnl(assetId,
-                    Math.addExact(treasury.clearingPnl(assetId), clearingAt(index)));
+                    Math.addExact(treasury.clearingPnl(assetId), clearingUnits[index]));
         }
     }
 
@@ -322,7 +322,7 @@ public final class RuntimeTreasuryDelta {
      * @param assetId 需要读取或累加的非负资产编号
      */
     private int indexOf(int assetId) {
-        for (/* 当前遍历、归并、预检或写入的有效资产槽下标。 */ int index = 0; index < size; index++) if (assetAt(index) == assetId) return index;
+        for (/* 当前遍历、归并、预检或写入的有效资产槽下标。 */ int index = 0; index < size; index++) if ((assetIds == null ? firstAssetId : assetIds[index]) == assetId) return index;
         return -1;
     }
 
@@ -348,48 +348,6 @@ public final class RuntimeTreasuryDelta {
             clearingUnits[0] = firstClearingUnits;
         }
     }
-
-    /**
-     * 内部读取有效槽的资产编号，单资产无数组时取首项标量；调用方保证下标有效。
-     * @param index 本代有效资产槽下标
-     */
-    private int assetAt(int index) { return assetIds == null ? firstAssetId : assetIds[index]; }
-    /**
-     * 内部读取标量或数组中的手续费差额，不另检查业务有效下标。
-     * @param index 本代有效资产槽下标
-     */
-    private long feeAt(int index) { return feeUnits == null ? firstFeeUnits : feeUnits[index]; }
-    /**
-     * 内部读取标量或数组中的保险差额。
-     * @param index 本代有效资产槽下标
-     */
-    private long insuranceAt(int index) {
-        return insuranceUnits == null ? firstInsuranceUnits : insuranceUnits[index];
-    }
-    /**
-     * 内部读取标量或数组中的保险亏空差额。
-     * @param index 本代有效资产槽下标
-     */
-    private long deficitAt(int index) { return deficitUnits == null ? firstDeficitUnits : deficitUnits[index]; }
-    /**
-     * 内部读取标量或数组中的资金费残差。
-     * @param index 本代有效资产槽下标
-     */
-    private long fundingResidualAt(int index) {
-        return fundingResidualUnits == null ? firstFundingResidualUnits : fundingResidualUnits[index];
-    }
-    /**
-     * 内部读取标量或数组中的舍入残差。
-     * @param index 本代有效资产槽下标
-     */
-    private long roundingResidualAt(int index) {
-        return roundingResidualUnits == null ? firstRoundingResidualUnits : roundingResidualUnits[index];
-    }
-    /**
-     * 内部读取标量或数组中的清算盈亏差额。
-     * @param index 本代有效资产槽下标
-     */
-    private long clearingAt(int index) { return clearingUnits == null ? firstClearingUnits : clearingUnits[index]; }
 
     /**
      * 拒绝负数或超出本代有效资产前缀的下标。

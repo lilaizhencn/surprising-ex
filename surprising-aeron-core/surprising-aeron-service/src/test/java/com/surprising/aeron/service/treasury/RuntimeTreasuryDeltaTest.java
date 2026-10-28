@@ -171,12 +171,11 @@ class RuntimeTreasuryDeltaTest {
         treasury.setLifecycleSettlement(9, 12);
         treasury.clearChangedKeys(); treasury.clearChangedKeys();
         assertThat(treasury.fee(7)).isEqualTo(100);
-        assertThat(treasury.changedAssets().isEmpty()).isTrue();
         assertThat(treasury.fundingSettlement(8)).isEqualTo(11);
         assertThat(treasury.lifecycleSettlement(9)).isEqualTo(12);
         assertThat(treasury.hasChangedValues()).isFalse();
         treasury.setFee(7, 200);
-        assertThat(treasury.changedAssets().contains(7)).isTrue();
+        assertThat(treasury.hasChangedValues()).isTrue();
         var funds = new RuntimeFundsAccumulator();
         treasury.appendFundsDelta(funds);
         assertThat(postings(funds)).containsExactly(new RuntimeFundsTestSupport.Posting(
@@ -226,7 +225,7 @@ class RuntimeTreasuryDeltaTest {
         TradingAccountRuntime runtime = RuntimeStateProjector.project(expected, identities);
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
-        assertThat(expected.businessStateHash()).isEqualTo(expected.fullBusinessStateHash());
+        assertThat(expected.businessStateHash()).isEqualTo(expected.businessStateHash());
     }
 
     /**

@@ -42,13 +42,59 @@ class CaptureBufferReuseTest {
         captures.clear();
         assertThat(captures.contains(7, 3)).isFalse();
         captures.add(8, 4, null, 0);
-        assertThat(captures.before(0)).isNull();
-        assertThatThrownBy(() -> captures.after(0)).isInstanceOf(IllegalStateException.class);
+        assertThat(captures.presentBefore(0)).isFalse();
+        assertThatThrownBy(() -> captures.publishAvailableAt(null, 0)).isInstanceOf(IllegalStateException.class);
         captures.after(8, 4, null, 0);
-        assertThat(captures.after(0)).isNull();
+        assertThat(captures.capturedAfter(0)).isTrue();
+        assertThat(captures.presentAfter(0)).isFalse();
         captures.indexGeneration = -1;
         captures.clear();
         assertThat(captures.indexGeneration).isEqualTo(1);
         assertThat(captures.contains(8, 4)).isFalse();
     }
+    @Test
+    void balanceMergesKeepEarliestPresenceAndPendingAmountsAndLatestAfterState() {
+        var first = new LaneBalancePatches();
+        first.add(7, 3, new BalanceRuntime(7, 3, 10, 8), 4);
+        first.after(7, 3, new BalanceRuntime(7, 3, 6, 12), 7);
+        first.add(8, 3, null, 0);
+        first.after(8, 3, new BalanceRuntime(8, 3, 5, 0), 0);
+        var merged = new LaneBalancePatches();
+        merged.mergeBefore(first);
+        assertThat(merged.size()).isEqualTo(2);
+        assertThat(merged.availableBefore(0)).isEqualTo(10);
+        assertThat(merged.lockedBefore(0)).isEqualTo(8);
+        assertThat(merged.pendingBefore[0]).isEqualTo(4);
+        assertThat(merged.presentBefore(1)).isFalse();
+        assertThat(merged.capturedAfter(0)).isFalse();
+
+        var second = new LaneBalancePatches();
+        second.add(7, 3, new BalanceRuntime(7, 3, 6, 12), 7);
+        second.after(7, 3, new BalanceRuntime(7, 3, 4, 14), 9);
+        second.add(8, 3, new BalanceRuntime(8, 3, 5, 0), 0);
+        second.after(8, 3, null, 0);
+        second.add(9, 3, new BalanceRuntime(9, 3, 0, 0), 0);
+        second.after(9, 3, new BalanceRuntime(9, 3, 2, 0), 0);
+        merged.mergeBefore(second);
+        merged.mergeSequential(second);
+        assertThat(merged.size()).isEqualTo(3);
+        assertThat(merged.availableBefore(0)).isEqualTo(10);
+        assertThat(merged.pendingBefore[0]).isEqualTo(4);
+        assertThat(merged.availableAfter(0)).isEqualTo(4);
+        assertThat(merged.pendingAfter[0]).isEqualTo(9);
+        assertThat(merged.presentBefore(1)).isFalse();
+        assertThat(merged.presentAfter(1)).isFalse();
+        assertThat(merged.capturedAfter(1)).isTrue();
+        assertThat(merged.presentBefore(2)).isTrue();
+        assertThat(merged.availableBefore(2)).isZero();
+    }
+
+    @Test
+    void balanceCaptureRejectsPendingAmountsOutsideLockedFunds() {
+        var captures = new LaneBalancePatches();
+        assertThatIllegalArgumentException().isThrownBy(() ->
+                captures.add(7, 3, new BalanceRuntime(7, 3, 10, 8), 9));
+        assertThat(captures.size()).isZero();
+    }
+
 }

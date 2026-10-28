@@ -55,7 +55,16 @@ public record TradingCoreState(
             throw new IllegalArgumentException("client order index is required for an authoritative state transition");
         }
         Map<ClientOrderKey, Long> sortedClientOrders = StateMapSupport.freezeSorted(clientOrderIndex);
-        if (!sortedClientOrders.equals(deriveClientOrderIndex(sortedOrders))) {
+        int clientOrderCount = 0;
+        for (CoreOrderState order : sortedOrders.values()) {
+            if (order.clientOrderId().isEmpty()) continue;
+            Long indexed = sortedClientOrders.get(new ClientOrderKey(order.userId(), order.clientOrderId()));
+            if (indexed == null || indexed.longValue() != order.orderId()) {
+                throw new IllegalArgumentException("client order index does not match authoritative orders");
+            }
+            clientOrderCount++;
+        }
+        if (clientOrderCount != sortedClientOrders.size()) {
             throw new IllegalArgumentException("client order index does not match authoritative orders");
         }
         users = sortedUsers;
@@ -238,16 +247,9 @@ public record TradingCoreState(
     }
 
     /**
-     * 进入本冷状态的完整业务哈希，不包含运行时外层另行组合的费用政策及待完成划转。
-     */
-    public long businessStateHash() {
-        return fullBusinessStateHash();
-    }
-
-    /**
      * 按有序冷状态的固定选取字段混合产品线、修订、用户及未终态订单、杠杆、未终态算法、仍 open 的触发单、未终态强平、计时器、价格风险与扫描进度、财库余额及生命周期进度。跳过的保留终态和纯派生索引不作为另一份业务事实；这是全量核对入口，不是密码学证明。
      */
-    public long fullBusinessStateHash() {
+    public long businessStateHash() {
         // 按既定业务字段顺序不断混合的哈希累计值
         long hash = CoreStateHash.mix(CoreStateHash.start(), com.surprising.aeron.service.snapshot.state.SnapshotEnumCodes.encode(productLine));
         hash = CoreStateHash.mix(hash, revision);

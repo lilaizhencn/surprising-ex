@@ -177,13 +177,13 @@ class MatcherPipelineGroupTest {
             pipelines.submit(firstShard, 1, () -> {
                 firstStarted.countDown();
                 await(releaseFirst);
-                return adapter.placeDirect(firstShard, 1, firstId, 1000, 101, first, firstTarget);
+                return adapter.placeDirect(firstShard, 1, firstId.getMostSignificantBits(), firstId.getLeastSignificantBits(), 1000, 101, first, firstTarget);
             }, firstTarget);
             assertThat(firstStarted.await(5, TimeUnit.SECONDS)).isTrue();
             // 第二次提交回调固定捕获的分片号。
             int readyShard = secondShard;
             pipelines.submit(secondShard, 2, () -> adapter.placeDirect(
-                    readyShard, 2, secondId, 1001, 102, second, secondTarget), secondTarget);
+                    readyShard, 2, secondId.getMostSignificantBits(), secondId.getLeastSignificantBits(), 1001, 102, second, secondTarget), secondTarget);
 
             awaitDirect(secondTarget);
             // 已经就绪的第二笔事件别名，用于检查接受状态及业务时间。

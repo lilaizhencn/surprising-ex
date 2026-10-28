@@ -146,13 +146,6 @@ public record CoreTreasuryState(
     }
 
     /**
-     * 以亏空别名返回同一 insuranceDeficits 状态 Map，不复制或增加权威来源。
-     */
-    public Map<String, Long> deficitBalances() {
-        return insuranceDeficits;
-    }
-
-    /**
      * 校验并规范化业务币对名称后读取资金费进度，缺失返回空。
      * @param instrumentId 需要读写的业务币对名称
      */

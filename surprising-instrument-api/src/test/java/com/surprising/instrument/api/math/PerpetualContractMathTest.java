@@ -99,4 +99,13 @@ class PerpetualContractMathTest {
                 Long.MAX_VALUE, Long.MAX_VALUE, Long.MAX_VALUE, 1L, 1L))
                 .isInstanceOf(ArithmeticException.class);
     }
+    @Test
+    void proportionalUnitsPreserveSignedRoundingAndFullCloseOverflowBoundary() {
+        assertThat(PerpetualContractMath.proportionalUnits(10, 1, 3)).isEqualTo(3);
+        assertThat(PerpetualContractMath.proportionalUnits(-10, 1, 3)).isEqualTo(-3);
+        assertThat(PerpetualContractMath.proportionalUnits(Long.MAX_VALUE, 2, 2)).isEqualTo(Long.MAX_VALUE);
+        assertThatThrownBy(() -> PerpetualContractMath.proportionalUnits(Long.MAX_VALUE, 2, 3))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
 }

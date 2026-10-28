@@ -192,11 +192,9 @@ public final class RuntimeAccountRollback {
             long userId = balances.userId(index);
             // 当前恢复余额的资产整数编号。
             int assetId = balances.assetId(index);
-            // 当前实体保存的命令前值，null 表示该实体原来不存在。
-            BalanceState before = balances.before(index);
             // 该用户实际资产余额表，原余额不存在时可能需要删除空表，存在时可能需要新建表。
             IntObjectHashMap<BalanceRuntime> userBalances = lane.balances.get(userId);
-            if (before == null) {
+            if (!balances.presentBefore(index)) {
                 if (userBalances != null) {
                     userBalances.remove(assetId);
                     if (userBalances.isEmpty()) lane.balances.remove(userId);
@@ -207,7 +205,7 @@ public final class RuntimeAccountRollback {
                     lane.balances.put(userId, userBalances);
                 }
                 userBalances.put(assetId, new BalanceRuntime(userId, assetId,
-                        before.availableUnits(), before.lockedUnits()));
+                        balances.availableBefore(index), balances.lockedBefore(index)));
             }
             // 即使失败发生在首次写入前，回滚结果也要作为最终后值捕获，不能发布尝试值或未捕获值。
             balances.after(userId, assetId, userBalances == null ? null : userBalances.get(assetId),

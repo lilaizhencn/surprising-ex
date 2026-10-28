@@ -27,9 +27,6 @@ import com.surprising.aeron.service.core.index.LiquidationIndex;
 import com.surprising.aeron.service.core.index.OpenInterestIndex;
 import com.surprising.aeron.service.core.index.PositionUserIndex;
 import com.surprising.aeron.service.core.index.TriggerOrderIndex;
-import com.surprising.aeron.service.funding.command.PerpetualFundingCommands;
-import com.surprising.aeron.service.instrument.command.InstrumentConfigurationCommands;
-import com.surprising.aeron.service.insurance.command.InsuranceFundCommands;
 import com.surprising.aeron.service.market.MarkPriceRuntime;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
@@ -59,15 +56,12 @@ import com.surprising.aeron.service.result.SourceSequenceIndex;
 import com.surprising.aeron.service.retention.TerminalStateRetention;
 import com.surprising.aeron.service.risk.LiquidationRuntime;
 import com.surprising.aeron.service.risk.RiskScanRuntime;
-import com.surprising.aeron.service.risk.command.RiskCommands;
-import com.surprising.aeron.service.settlement.command.InstrumentSettlementCommands;
 import com.surprising.aeron.service.snapshot.CoreSnapshotImage;
 import com.surprising.aeron.service.snapshot.CoreSnapshotLifecycle;
 import com.surprising.aeron.service.snapshot.CoreSnapshotManifest;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotCodec;
 import com.surprising.aeron.service.snapshot.SectionedCoreSnapshotWriter;
 import com.surprising.aeron.service.trigger.command.TriggerOrderCommands;
-import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.protocol.CoreLaneMetricsView;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherEventType;
@@ -101,11 +95,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     @Getter
     final CommandFingerprint.Calculator fingerprints = new CommandFingerprint.Calculator();
 
-    /**  标的生命周期结算入口，处理交割等结算编排。 借出标的交割及结算处理对象。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final InstrumentSettlementCommands instrumentSettlement = new InstrumentSettlementCommands(this);
-
     /**  撮合命令准入入口，承担解码后的订单与账户准备。 借出撮合准入入口，使用当前 Owner 与命令上下文。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -114,19 +103,21 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 撮合结果的有序提交入口，等待账户和账本完成后交出终态。 */
     public final OrderedCommitCoordinator commits = new OrderedCommitCoordinator(this);
 
-    /**  永续资金费命令与进度入口，U 本位和币本位沿用各自结算规则。 借出资金费命令入口，沿用产品线、事实和结算边界。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter
-    final PerpetualFundingCommands funding = new PerpetualFundingCommands(this);
-
     /** 触发单、算法单、触发扫描及衍生子单的业务入口。 */
     final TriggerOrderCommands triggers = new TriggerOrderCommands(this);
 
     /** 直接控制命令的统一业务派发入口。 */
-    final DirectCommandDispatcher directCommands = new DirectCommandDispatcher(
-            this, new InstrumentConfigurationCommands(this),
-            funding, new RiskCommands(this),
-            new InsuranceFundCommands(this), triggers);
+    final DirectCommandDispatcher directCommands = new DirectCommandDispatcher(this, triggers);
+
+    private java.util.function.Consumer<com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor.FundingResult> replayFundingObserver;
+
+    public void observeReplayFundingPayments(java.util.function.Consumer<com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor.FundingResult> observer) {
+        replayFundingObserver = java.util.Objects.requireNonNull(observer);
+    }
+
+    public void notifyReplayFundingObserver(com.surprising.aeron.service.funding.RuntimePerpetualFundingProcessor.FundingResult result) {
+        if (replayFundingObserver != null) replayFundingObserver.accept(result);
+    }
     /**  本次调用是否采用独立窗口准入，执行结束恢复外层值。 返回本次调用是否允许按独立撮合窗口接纳。 */
     @Accessors(fluent = true, chain = false)
     @Getter
@@ -702,15 +693,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public int defaultTriggerScanBatchSize() { return DEFAULT_TRIGGER_SCAN_BATCH_SIZE; }
 
     /**
-     * 取得指定标的的衍生品生命周期进度；不存在标的或进度时可返回空。
-     * @param instrumentId 对外标的 ID，按本产品线身份表解析
-     */
-    public com.surprising.aeron.service.treasury.TreasuryRuntime.LifecycleProgressRuntime
-            lifecycleProgress(String instrumentId) {
-        return runtimeLifecycleProgress(instrumentId);
-    }
-
-    /**
      * 为指定产品线建立空的被动运行时；线程和活动资源由后续 activate 接入。
      * @param productLine 必须明确隔离的所属产品线
      */
@@ -1239,7 +1221,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         // 命令开始前的运行时修订，失败后辅助判断是否发生变化
         long beforeRuntimeRevision = runtimeState.revision();
         // 命令开始前的账户回滚检查点
-        long runtimeCommandCheckpoint = runtimeState.commandRevisionCheckpoint();
+        long runtimeCommandCheckpoint = runtimeState.revision();
         // 命令开始前的持仓身份注册检查点
         long positionIdentityCheckpoint = identities.positionCheckpoint();
         directCommand.initialize(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
@@ -1380,7 +1362,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         Math.incrementExact(appliedCommandCount));
             }
             if (status == null) {
-                commits.publication.abort();
+                commits.publication.clearBatchState();
                 return finishDirectCommandContext(rejected(CoreResultCode.INVALID_MESSAGE));
             }
             if (status == ResponseStatus.APPLIED) {
@@ -1589,18 +1571,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 生命周期撤单的一页订单描述和下一页游标；本 record 沿用传入列表，不自行复制或校验。
-     * @param orders 本页按顺序借用的生命周期撤单描述
-     * @param nextCursorOrderId 下一页继续扫描的订单游标，零表示结束
-     */
-    public record LifecycleOrderChunk(List<CancellationOrder> orders, long nextCursorOrderId) {
-        /**
-         * 根据下一页订单游标是否为零，判断生命周期撤单是否还有后续页。
-         */
-        public boolean more() { return nextCursorOrderId != 0; }
-    }
-
-    /**
      * 按 Core 序号取走已完成的撮合终态；尚未可取时由既有完成存储返回空。
      * @param sequence 本次业务对应的 Core 序号
      */
@@ -1713,10 +1683,33 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     /**
-     * 把当前 Lane 指标编码后再解码成独立观测视图，避免把复用编码缓冲直接交给调用方。
+     * 从原语观测计数直接构造独立视图；各字段允许独立滞后，不取得账户业务读取权限。
      */
     public CoreLaneMetricsView laneMetrics() {
-        return com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encodeLaneMetrics());
+        assertOwner();
+        int count = matchingAdapter.topology().accountLaneCount();
+        int operations = Math.multiplyExact(count, CoreLaneMetricsView.OPERATION_TYPE_COUNT);
+        long[] revisions = new long[count], applied = new long[count], committed = new long[count];
+        int[] depths = new int[count], capacities = new int[count], highWaterMarks = new int[count];
+        long[] completed = new long[operations];
+        for (int laneId = 0; laneId < count; laneId++) {
+            var lane = runtimeState.accountLane(laneId);
+            revisions[laneId] = lane.observedRevision();
+            committed[laneId] = lane.observedCommittedSequence();
+            applied[laneId] = Math.max(committed[laneId], lane.observedAppliedSequence());
+            depths[laneId] = runtimeState.laneWorkerDepth(laneId);
+            capacities[laneId] = runtimeState.laneWorkerCapacity(laneId);
+            highWaterMarks[laneId] = runtimeState.observeLaneQueueHighWaterMark(laneId, depths[laneId]);
+            for (int operation = 0; operation < CoreLaneMetricsView.OPERATION_TYPE_COUNT; operation++) {
+                completed[laneId * CoreLaneMetricsView.OPERATION_TYPE_COUNT + operation] = lane.observedOperationCount(operation);
+            }
+        }
+        return new CoreLaneMetricsView(matchingAdapter.topology().matchingEngineCount(), count,
+                matcherPipeline.submissionDepth(), matcherPipeline.capacity(), matcherPipeline.submissionHighWaterMark(),
+                matcherPipeline.completionDepth(), matcherPipeline.capacity(), matcherPipeline.completionHighWaterMark(),
+                pendingMatching.inFlight(), pendingMatching.capacity(), pendingMatching.highWaterMark(), committedCoreSequence,
+                revisions, applied, committed, depths, capacities, highWaterMarks, new long[count], new long[count],
+                completed, new long[operations], new long[operations], new long[operations]);
     }
 
     /**
@@ -2054,10 +2047,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return fence != null && fence.snapshotState() != null ? fence.snapshotState() : tradingState();
     }
     /**
-     * 取得当前快照编码使用的已发布投影序号。
-     */
-    public long snapshotProjectionSequence() { return commits.publication.publishedSequence(); }
-    /**
      * 判断是否不存在尚未完成的风险扫描。
      */
     boolean runtimeRiskScanComplete() { return runtimeState.firstIncompleteRiskScan() == null; }
@@ -2240,7 +2229,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
      * @param instrumentId 对外标的 ID，按本产品线身份表解析
      */
     public com.surprising.aeron.service.treasury.TreasuryRuntime.LifecycleProgressRuntime
-            runtimeLifecycleProgress(String instrumentId) {
+            lifecycleProgress(String instrumentId) {
         // 从外部标的解析出的内部身份，未知标的可为空
         Integer symbolId = identities.findSymbolId(instrumentId);
         return symbolId == null ? null : runtimeState.treasury().lifecycleProgress(symbolId);
@@ -2281,7 +2270,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         context.suspendCommitContext(
                 resultBuilder,
                 commits.publication.dirty(), commits.publication.provisionalOnly());
-        commits.publication.suspend();
+        commits.publication.clearBatchState();
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
         resultBuilder.resetChangeAccumulators();
@@ -2340,7 +2329,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             long runtimeCheckpoint,
             long positionIdentityCheckpoint,
             long commandSequence) {
-        commits.publication.abort();
+        commits.publication.clearBatchState();
         runtimeState.rollbackActiveCommand(runtimeCheckpoint, commandSequence);
         identities.rollbackPositionKeys(positionIdentityCheckpoint);
     }
@@ -2385,17 +2374,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (resultBuilder.commandChangedOrderIds != null) resultBuilder.changedOrderIds().addAll(resultBuilder.commandChangedOrderIds);
     }
 
-    /**
-     * 把撤单描述中的订单号收集到新原始数组，并交给只读长整数列表持有，避免先构造逐项装箱集合。
-     * @param orders 本次按顺序借用的撤单描述，调用方保持列表稳定
-     */
-    public static List<Long> boxedOrderIds(List<CancellationOrder> orders) {
-        if (orders == null || orders.isEmpty()) return List.of();
-        // 新建的原始订单号数组，填完后把所有权交给只读列表
-        long[] values = new long[orders.size()];
-        for (/* 当前数组或事件列表的遍历下标 */ int index = 0; index < values.length; index++) values[index] = orders.get(index).orderId();
-        return ImmutableLongArrayList.takeOwnership(values);
-    }
 
     /**
      * 返回运行时记录的待处理风险扫描数量。

@@ -2,7 +2,7 @@
  * 风控估值与强平计划；步骤对应 Aeron 总 README 的“标记价与风控扫描”。
  *
  * <ol>
- *   <li>步骤 1–2：command.risk.RiskCommands 接收标记价，
+ *   <li>步骤 1–2：core.command.DirectCommandDispatcher 接收标记价，
  *       {@link com.surprising.aeron.service.risk.RuntimeDerivativeRiskProcessor} 更新价格和扫描进度。</li>
  *   <li>步骤 3–4：后续续扫命令校验预算，
  *       {@link com.surprising.aeron.service.risk.RiskScanCoordinator} 分发账户估值。</li>

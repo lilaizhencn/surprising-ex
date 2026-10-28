@@ -243,9 +243,9 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
 
     /**
      * 由已派发到的 Lane 执行当前种类的账户操作；余额和划转路径保存回执标记，杠杆和持仓路径也直接保存原始类型结果，邮箱只通知完成，未准备的种类直接失败。
-     * @param ignoredLaneId 控制派发回调传入的 Lane 编号；目标和输入已在准备阶段保存，本实现不读取它
+     * @param laneId 当前已取得执行所有权的账户 Lane 编号
      */
-    @Override public Object apply(int ignoredLaneId) {
+    @Override public Object apply(int laneId) {
         return switch (kind) {
             case KIND_BALANCE -> {
                 adjustAccountBalance(runtime, userId, assetId, deltaUnits);
@@ -269,7 +269,8 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
             }
             case KIND_LEVERAGE -> {
                 changedOnLane = DerivativeAccountCommandProcessor.updateAccountLeverage(
-                        runtime, leverageKey, symbolId, leverageCommand.leveragePpm(), leverageCommand.repriceCrossMargin());
+                        runtime, runtime.accountLane(laneId), leverageKey, symbolId,
+                        leverageCommand.leveragePpm(), leverageCommand.repriceCrossMargin());
                 yield null;
             }
             case KIND_POSITION_MODE -> {
@@ -287,7 +288,7 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
     /**
      * 在 Owner 轮询 Lane 完成；收齐后按种类发布变化、划转路由和产品修订号，并标记本续步完成，重复轮询不会重复发布。
      */
-    public boolean poll() {
+    @Override public boolean getAsBoolean() {
         runtime.assertOwner();
         if (completed) return true;
         if (!runtime.pollControlLanes()) return false;
@@ -333,13 +334,6 @@ public final class AccountControlTask implements IntFunction<Object>, BooleanSup
         }
         completed = true;
         return true;
-    }
-
-    /**
-     * 把 BooleanSupplier 轮询接口接到 poll，供命令槽继续推进。
-     */
-    @Override public boolean getAsBoolean() {
-        return poll();
     }
 
     /**

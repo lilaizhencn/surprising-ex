@@ -117,7 +117,7 @@ class RuntimeCommitRecoveryTest {
                 assertThat(restored.feePolicies()).containsExactlyEntriesOf(original.feePolicies());
                 assertThat(restored.pendingTransfers()).containsExactlyEntriesOf(original.pendingTransfers());
                 assertThat(restored.stateHash()).isEqualTo(originalStateHash);
-                assertThat(restored.snapshotProjectionSequence()).isEqualTo(original.snapshotProjectionSequence());
+                assertThat(restored.realtimeExportSequence()).isEqualTo(original.realtimeExportSequence());
                 // 快照之后两份运行时都必须继续执行的同一原命令清单
                 List<CoreMessage> postSnapshot = List.of(
                         command(1, 1001, CoreMessageType.ADJUST_BALANCE, balance(500)));
@@ -169,8 +169,8 @@ class RuntimeCommitRecoveryTest {
             byte[] snapshot = uninterrupted.snapshot(701);
             try (/* 初始挂单快照恢复的第一份运行时 */ TradingCoreRuntime firstRestore = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 // 初次快照围栏的投影序号，恢复后必须一致
-                long fenceProjectionSequence = uninterrupted.snapshotProjectionSequence();
-                assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(fenceProjectionSequence);
+                long fenceProjectionSequence = uninterrupted.realtimeExportSequence();
+                assertThat(firstRestore.realtimeExportSequence()).isEqualTo(fenceProjectionSequence);
                 // 原运行时部分成交阶段响应清单
                 ReplayResult uninterruptedPartial = replay(uninterrupted, partialFill);
                 // 第一恢复运行时相同部分成交阶段响应清单
@@ -245,20 +245,20 @@ class RuntimeCommitRecoveryTest {
                 // 已成功执行过的原部分成交消息，用于核对幂等
                 CoreMessage duplicateCommand = partialFill.getFirst();
                 // 重复或冲突原消息前保存的投影序号
-                long projectionBeforeDuplicate = firstRestore.snapshotProjectionSequence();
+                long projectionBeforeDuplicate = firstRestore.realtimeExportSequence();
                 // 原消息重放得到的重复终态
                 CoreResponse duplicate = firstRestore.apply(duplicateCommand);
                 assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(duplicate.resultCode()).isEqualTo(restoredPartial.responses().getFirst().resultCode());
                 assertThat(HexFormat.of().formatHex(duplicate.data()))
                         .isEqualTo(restoredPartial.responses().getFirst().data());
-                assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
+                assertThat(firstRestore.realtimeExportSequence()).isEqualTo(projectionBeforeDuplicate);
                 // 同 UUID 但修改原下单数量的冲突重试
                 CoreMessage changedRetry = new CoreMessage(duplicateCommand.header(),
                         place(202, CoreOrderSide.BUY, 100, 5, false));
                 assertThat(firstRestore.apply(changedRetry).resultCode())
                         .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
-                assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
+                assertThat(firstRestore.realtimeExportSequence()).isEqualTo(projectionBeforeDuplicate);
             }
         }
     }
@@ -274,7 +274,7 @@ class RuntimeCommitRecoveryTest {
             // 破坏快照测试前原运行时业务哈希
             long stateHash = original.stateHash();
             // 破坏快照测试前原投影序号
-            long projectionSequence = original.snapshotProjectionSequence();
+            long projectionSequence = original.realtimeExportSequence();
             // 按指定旧线程名前缀统计的破坏测试前存活数
             long projectorThreads = projectorThreadCount();
             // 只有候选解码成功后才替换的原运行时发布引用
@@ -313,7 +313,7 @@ class RuntimeCommitRecoveryTest {
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("matcher snapshot checksum mismatch");
             assertThat(original.stateHash()).isEqualTo(stateHash);
-            assertThat(original.snapshotProjectionSequence()).isEqualTo(projectionSequence);
+            assertThat(original.realtimeExportSequence()).isEqualTo(projectionSequence);
             assertThat(published.get()).isSameAs(original);
             assertThat(projectorThreadCount()).isEqualTo(projectorThreads);
         }
@@ -376,14 +376,14 @@ class RuntimeCommitRecoveryTest {
             assertThat(recovered.state().tradingState().treasuryState().feeBalances().get("USDT")).isPositive();
             assertThat(economicUsdt(recovered.state().tradingState())).isEqualTo(4_000);
             // 重复或冲突原消息前保存的投影序号
-            long projectionBeforeDuplicate = recovered.state().snapshotProjectionSequence();
+            long projectionBeforeDuplicate = recovered.state().realtimeExportSequence();
             // 原对照 Owner 入口收到的该批次重复终态响应
             CoreResponse referenceDuplicate = replayClusterCommand(uninterrupted, batch).response();
             // 恢复 Owner 入口收到的同批次重复终态响应
             CoreResponse recoveredDuplicate = replayClusterCommand(recovered, batch).response();
             assertThat(response(recoveredDuplicate)).isEqualTo(response(referenceDuplicate));
             assertThat(recoveredDuplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
-            assertThat(recovered.state().snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
+            assertThat(recovered.state().realtimeExportSequence()).isEqualTo(projectionBeforeDuplicate);
             assertBatchRecoveryParity(recovered.state(), uninterrupted.state());
         } finally {
             uninterrupted.state().close();
@@ -1004,7 +1004,7 @@ class RuntimeCommitRecoveryTest {
         assertThat(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(actualState.snapshotTradingState()))
                 .isEqualTo(com.surprising.aeron.service.snapshot.state.FundsStateHash.compute(
                         expectedState.snapshotTradingState()));
-        assertThat(actualState.snapshotProjectionSequence()).isEqualTo(expectedState.snapshotProjectionSequence());
+        assertThat(actualState.realtimeExportSequence()).isEqualTo(expectedState.realtimeExportSequence());
         assertThat(actualState.commandResults()).isEqualTo(expectedState.commandResults());
         assertThat(actualState.lastSourceSequences()).isEqualTo(expectedState.lastSourceSequences());
         assertThat(actualState.feePolicies()).isEqualTo(expectedState.feePolicies());
@@ -1212,14 +1212,14 @@ class RuntimeCommitRecoveryTest {
             TradingOwnerTestSupport reference, TradingOwnerTestSupport restored,
             CoreMessage command) throws Exception {
         // 重放原重复消息前保存的对照投影序号
-        long projectionBefore = reference.state().snapshotProjectionSequence();
+        long projectionBefore = reference.state().realtimeExportSequence();
         // 原对照入口的重复响应清单
         ReplayResult referenceDuplicate = replayClustered(reference, List.of(command));
         // 恢复入口的同一原消息重复响应清单
         ReplayResult restoredDuplicate = replayClustered(restored, List.of(command));
         assertThat(restoredDuplicate).isEqualTo(referenceDuplicate);
         assertThat(referenceDuplicate.responses()).allMatch(/* 本次重复重放复制的原响应对照值 */ value -> value.status() == ResponseStatus.DUPLICATE);
-        assertThat(reference.state().snapshotProjectionSequence()).isEqualTo(projectionBefore);
+        assertThat(reference.state().realtimeExportSequence()).isEqualTo(projectionBefore);
         assertBatchRecoveryParity(restored.state(), reference.state());
     }
 

@@ -200,10 +200,11 @@ public final class CoreSnapshotLifecycle {
                 if (fence.projectionSequence < 0) {
                     fence.projectionSequence = owner.commits.publication.publishedSequence();
                     fence.snapshotState = owner.tradingState();
-                    // 首次物化状态连同当时费率及待划转重算的配对业务哈希。
+                    fence.feePolicies = owner.runtimeState().feePoliciesSnapshot();
+                    fence.pendingTransfers = owner.runtimeState().pendingTransfersSnapshot();
+                    // 同一栅栏捕获的状态、费率和划转贯穿 Matcher 配对、审计与编码。
                     long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
-                            fence.snapshotState.businessStateHash(), owner.runtimeState().feePoliciesSnapshot(),
-                            owner.runtimeState().pendingTransfersSnapshot());
+                            fence.snapshotState.businessStateHash(), fence.feePolicies, fence.pendingTransfers);
                     fence.businessStateHash = businessStateHash;
                 }
                 if (fence.matcherSnapshot == null) {
@@ -227,9 +228,10 @@ public final class CoreSnapshotLifecycle {
                 if (matcherSnapshot == null || owner.appliedCommandCount() != fence.coreSequence || !owner.pendingMatching().isEmpty()) {
                     throw new IllegalStateException("snapshot fence state changed during capture");
                 }
-                // Matcher 完成且 Core 水位未变时再次从运行时捕获的编码输入，随后执行完整哈希审计。
+                // Matcher 完成且 Core 水位未变时复用首次冻结的编码输入，再执行完整哈希审计。
                 CoreSnapshotImage image = SectionedCoreSnapshotWriter.capture(owner, matcherSnapshot, fence.snapshotId,
-                        fence.coreSequence, clusterTimestamp, clusterPosition);
+                        fence.coreSequence, clusterTimestamp, clusterPosition, fence.snapshotState,
+                        fence.feePolicies, fence.pendingTransfers, fence.businessStateHash);
                 image.verifyFullState();
                 fence.encodedSnapshot = snapshotEncoder.encode(image);
                 if (fence.encodedSnapshot == null) {
@@ -312,6 +314,8 @@ public final class CoreSnapshotLifecycle {
         TradingCoreState snapshotState;
         /** 首次物化状态连同费率及待划转的业务哈希，用于 Matcher 配对。 */
         long businessStateHash;
+        java.util.Map<Long, com.surprising.aeron.model.CoreFeePolicyState> feePolicies;
+        java.util.Map<Long, com.surprising.aeron.protocol.TransferFundsCommand> pendingTransfers;
         /** 本屏障的 Matcher 捕获 Future，可能在屏障释放后仍继续执行。 */
         CompletableFuture<MatcherSnapshot> matcherSnapshot;
         /**  通过审计后启动的编码 Future，成功后交给持久化边界。 返回当前编码 Future 引用，尚未进入编码阶段时为空，不复制或阻止调用方操作该 Future。 */

@@ -432,7 +432,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         start(snapshot);
         reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
         // 全部恢复订单对账后的汇总哈希，用来与快照比较。
-        StateHashes restoredHashes = currentStateHashesAsync().join();
+        StateHashes restoredHashes = currentStateHashes();
         if (restoredHashes.engineHash() != snapshot.engineStateHash()) {
             throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
                     snapshot.snapshotId(), "restored exchange-core state hash mismatch"
@@ -503,25 +503,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 要求 UUID 非空，拆成两个 long 后进入冻结准入下单入口。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
-     */
-    public exchange.core2.core.common.MatcherResult placeAdmittedDirect(
-            int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
-            long userId, com.surprising.aeron.service.order.state.OrderRuntime command,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
-        return placeAdmittedDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
-    }
-
-    /**
      * 检查分片、冻结输入身份和命令证据后开启串行命令，撮合并发布到结算事件；运行异常记为全局首个故障，finally 释放命令作用域。
      * @param shardId 目标全局 Matcher 分片号
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
@@ -551,25 +532,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             scope.aeronTimestamp = 0;
             scope.active = false;
         }
-    }
-
-    /**
-     * 把非空 UUID 拆为两个 long，转入已准入订单的直接下单入口。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
-     */
-    public exchange.core2.core.common.MatcherResult placeDirect(
-            int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
-            long userId, ResolvedPlaceOrder command,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
-        return placeDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
     }
 
     /**
@@ -604,25 +566,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 把非空 UUID 拆为两个 long，转入独立撮合输入的直接下单入口。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param command 只读撮合输入，必须遵守其冻结及使用期限
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
-     */
-    public exchange.core2.core.common.MatcherResult placeDirect(
-            int shardId, long coreSequence, java.util.UUID commandId, long aeronTimestamp,
-            long userId, CoreMatchingOrder command,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
-        return placeDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), aeronTimestamp, userId, command, target);
-    }
-
-    /**
      * 检查分片与独立撮合输入，进入同步作用域后撮合并发布证据；捕获运行异常并清理作用域，不在这里提交账户状态。
      * @param shardId 目标全局 Matcher 分片号
      * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
@@ -651,26 +594,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             scope.aeronTimestamp = 0;
             scope.active = false;
         }
-    }
-
-    /**
-     * 把非空 UUID 拆开，转入带原生结果槽的直接撤单入口。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param instrumentId 外部永久数字品种字符串
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
-     */
-    public exchange.core2.core.common.MatcherResult cancelDirect(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
-            long aeronTimestamp, long userId, String instrumentId,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher cancellation");
-        return cancelDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), orderId, aeronTimestamp, userId, instrumentId, target);
     }
 
     /**
@@ -704,30 +627,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             scope.aeronTimestamp = 0;
             scope.active = false;
         }
-    }
-
-    /**
-     * 把非空 UUID 拆开，转入先撤旧单再下新单的直接改单入口。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param aeronTimestamp Cluster 提供的确定性业务时间戳
-     * @param userId 请求或对账订单所属用户号
-     * @param originalOrderId 需要先撤掉的旧订单号
-     * @param instrumentId 外部永久数字品种字符串
-     * @param replacement 旧单撤销接受后才提交的新单准入输入
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
-     */
-    public exchange.core2.core.common.MatcherResult replaceDirect(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
-            long aeronTimestamp, long userId, long originalOrderId, String instrumentId,
-            ResolvedPlaceOrder replacement,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher replacement");
-        return replaceDirect(shardId, coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), orderId, aeronTimestamp, userId, originalOrderId,
-                instrumentId, replacement, target);
     }
 
     /**
@@ -806,7 +705,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int nativeShard = result.symbol() <= 0 ? -1 : topology.matcherShardId(result.symbol());
             if (nativeShard >= 0 && nativeShard != shardId)
                 throw new IllegalStateException("native matcher batch crossed its evidence partition");
-            return matcherEvidence.publishBatchItem(coreSequence, commandId, command.orderId(), matcherEvidence.nextSequence(shardId), shardId, nativeShard,
+            return matcherEvidence.publishBatchItem(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), command.orderId(), matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     result, index, target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -846,7 +745,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int nativeShard = result.symbol() <= 0 ? shardId : topology.matcherShardId(result.symbol());
             if (nativeShard != shardId)
                 throw new IllegalStateException("native matcher cancellation crossed its evidence partition");
-            return matcherEvidence.publishBatchItem(coreSequence, commandId, orderId, matcherEvidence.nextSequence(shardId), shardId, nativeShard,
+            return matcherEvidence.publishBatchItem(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId, matcherEvidence.nextSequence(shardId), shardId, nativeShard,
                     result, index, target);
         } catch (/* 当前捕获的运行异常，按所在入口停止、记故障或完成失败结果。 */ RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -864,23 +763,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private static boolean nativeAccepted(exchange.core2.core.common.MatcherResult result) {
         return result.resultCode() == CommandResultCode.SUCCESS
                 || result.resultCode() == CommandResultCode.ACCEPTED;
-    }
-
-    /**
-     * 要求 UUID 非空，拆分后进入原生结果的证据发布方法。
-     * @param shardId 目标全局 Matcher 分片号
-     * @param coreSequence 当前逻辑命令或冻结点的 Core 序号
-     * @param commandId 逻辑命令 UUID
-     * @param orderId 当前命令关联的订单号，证据校验允许零
-     * @param result 当前原生或普通撮合结果，方法签名决定具体类型
-     * @param target 调用方独占且尚未发布的原生结果槽或结算事件，具体类型决定用途
-     */
-    private exchange.core2.core.common.MatcherResult publishNativeMatcherResult(
-            int shardId, long coreSequence, java.util.UUID commandId, long orderId, exchange.core2.core.common.MatcherResult result,
-            com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
-        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
-        return publishNativeMatcherResult(shardId, coreSequence, commandId.getMostSignificantBits(),
-                commandId.getLeastSignificantBits(), orderId, result, target);
     }
 
     /**
@@ -941,6 +823,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public exchange.core2.core.common.MatcherResult publishDirectPrefixFailure(
             int shardId, long coreSequence, java.util.UUID commandId, long logicalOrderId, exchange.core2.core.common.MatcherResult result,
             com.surprising.aeron.service.settlement.MatcherSettlementEvent target) {
+        if (commandId == null) throw new IllegalArgumentException("invalid direct matcher command");
         if (MatcherPrefixFailure.TYPE.isEnabled()) {
             // 仅在 JFR 启用时创建的失败事件，记录逻辑身份与原生撤单结果。
             var failure = new MatcherPrefixFailure();
@@ -958,7 +841,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         // 结算事件自己持有的原生结果槽，捕获临时结果后按租约消费。
         var retained = target.nativeResultSlot(0);
         retained.capture(result);
-        return publishNativeMatcherResult(shardId, coreSequence, commandId, logicalOrderId, retained, target);
+        return publishNativeMatcherResult(shardId, coreSequence, commandId.getMostSignificantBits(),
+                commandId.getLeastSignificantBits(), logicalOrderId, retained, target);
     }
 
     /**
@@ -983,7 +867,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         Throwable poison = matcherFailure.get();
         if (poison != null)
             throw new IllegalStateException("matcher completion discarded after fatal divergence", poison);
-        matcherEvidence.publishRejection(coreSequence, commandId, orderId,
+        matcherEvidence.publishRejection(coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(), orderId,
                 matcherEvidence.nextSequence(shardId), shardId, resultCode, target);
     }
 
@@ -1393,10 +1277,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 在当前线程读取并汇总各分片哈希，用 Future 返回订单簿哈希；不会自己向工作线程投递读取任务。
+     * 在既有分片读取边界同步汇总订单簿哈希，不创建已经完成的 Future。
      */
-    public CompletableFuture<Integer> orderBooksStateHashAsync() {
-        return currentStateHashesAsync().thenApply(StateHashes::bookHash);
+    public int orderBooksStateHash() {
+        return currentStateHashes().bookHash();
     }
 
     /**
@@ -1593,21 +1477,18 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     /**
-     * 在调用线程逐分片读取哈希并汇总，捕获运行异常包装失败 Future；调用方负责让各原生引擎处在允许读取的边界。
+     * 在调用线程按分片号折叠哈希，不创建中间分片快照列表；调用方负责保持原生引擎读取边界。
      */
-    private CompletableFuture<StateHashes> currentStateHashesAsync() {
-        try {
-            // 按分片号收集的当前哈希结果。
-            ArrayList<MatcherShardSnapshot> snapshots = new ArrayList<>(engines.length);
-            for (/* 当前需要操作或汇总的 Matcher 分片号。 */ int shardId = 0; shardId < engines.length; shardId++) {
-                // 当前冷态读取或汇总出的引擎与订单簿哈希。
-                StateHashes hashes = stateHashes(shardId);
-                snapshots.add(new MatcherShardSnapshot(shardId, hashes.engineHash(), hashes.bookHash()));
-            }
-            return CompletableFuture.completedFuture(aggregateStateHashes(snapshots));
-        } catch (/* 当前捕获或共享操作返回的异常，所在方法决定登记、转发或停止等待。 */ RuntimeException failure) {
-            return CompletableFuture.failedFuture(failure);
+    private StateHashes currentStateHashes() {
+        if (engines.length == 1) return stateHashes(0);
+        int engineHash = 1;
+        int bookHash = 0;
+        for (int shardId = 0; shardId < engines.length; shardId++) {
+            StateHashes hashes = stateHashes(shardId);
+            engineHash = (engineHash * 31 + shardId) * 31 + hashes.engineHash();
+            bookHash = (bookHash * 31 + shardId) * 31 + hashes.bookHash();
         }
+        return new StateHashes(engineHash, bookHash);
     }
 
     /**

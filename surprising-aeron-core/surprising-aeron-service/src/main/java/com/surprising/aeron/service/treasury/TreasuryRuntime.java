@@ -99,11 +99,6 @@ public final class TreasuryRuntime {
      */
     public long insuranceDeficit(int assetId) { assertOwner(); return insuranceDeficits.get(assetId); }
     /**
-     * 沿现有别名读取同一份保险亏空余额，不另存亏空状态。
-     * @param assetId 需要读写或捕获的非负资产编号
-     */
-    public long deficit(int assetId) { assertOwner(); return insuranceDeficits.get(assetId); }
-    /**
      * 当前所有者读取指定资产独立强平费余额。
      * @param assetId 需要读写或捕获的非负资产编号
      */
@@ -345,19 +340,6 @@ public final class TreasuryRuntime {
     }
 
     /**
-     * 为当前范围已捕获资产编号新建集合并返回，不暴露内部变更索引，也不代表金额最终必然不同。
-     */
-    public IntHashSet changedAssets() {
-        assertOwner();
-        // 为导出边界新建的资产集合或结算进度原语 Map，不是内部权威表引用。
-        IntHashSet result = new IntHashSet();
-        for (/* 当前资产捕获列或返回页的有效原语下标。 */ int index = 0; index < assetChanges.size(); index++) {
-            result.add((int) assetChanges.keyAt(index));
-        }
-        return result;
-    }
-
-    /**
      * 检查资产、资金费或生命周期是否有已登记变化键，不逐项比较最终值与前值。
      */
     public boolean hasChangedValues() {
@@ -438,7 +420,9 @@ public final class TreasuryRuntime {
             restoreSigned(roundingResidualBalances, assetId, roundingResidualBefore[index]);
             restoreSigned(clearingPnlBalances, assetId, clearingPnlBefore[index]);
         }
-        for (int /* 当前遍历发布单元或恢复进度的币对编号。 */ symbolId : changedFundingSymbols.toArray()) {
+        var fundingSymbols = changedFundingSymbols.intIterator();
+        while (fundingSymbols.hasNext()) {
+            int symbolId = fundingSymbols.next();
             // 当前币对首个资金费或生命周期前值记录，空表示原来没有事实。
             FundingState before = patchFundingBefore.get(symbolId);
             // 当前线程，或本币对本次修改前已发布的完整结算记录，按所在步骤使用。
@@ -447,7 +431,9 @@ public final class TreasuryRuntime {
                     before == null ? null : before.progress(), current.lifecycleSettlementId(),
                     current.lifecycleProgress()));
         }
-        for (int /* 当前遍历发布单元或恢复进度的币对编号。 */ symbolId : changedLifecycleSymbols.toArray()) {
+        var lifecycleSymbols = changedLifecycleSymbols.intIterator();
+        while (lifecycleSymbols.hasNext()) {
+            int symbolId = lifecycleSymbols.next();
             // 当前币对首个资金费或生命周期前值记录，空表示原来没有事实。
             LifecycleState before = patchLifecycleBefore.get(symbolId);
             // 当前线程，或本币对本次修改前已发布的完整结算记录，按所在步骤使用。
@@ -489,10 +475,6 @@ public final class TreasuryRuntime {
      * 当前所有者借用权威保险亏空 Map。
      */
     public IntLongHashMap insuranceDeficits() { assertOwner(); return insuranceDeficits; }
-    /**
-     * 以别名返回同一保险亏空 Map，不创建第二份表。
-     */
-    public IntLongHashMap deficitBalances() { assertOwner(); return insuranceDeficits; }
     /**
      * 当前所有者借用独立强平费余额 Map。
      */

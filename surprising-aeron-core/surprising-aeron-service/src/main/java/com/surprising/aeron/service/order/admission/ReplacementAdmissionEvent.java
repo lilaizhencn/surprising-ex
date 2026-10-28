@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.order.admission;
 
-import com.surprising.aeron.bootstrap.account.SettlementLaneWorker;
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.protocol.AmendOrderCommand;
@@ -14,7 +13,6 @@ import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.service.position.PositionCloseCapacity;
 import com.surprising.aeron.service.position.PositionRuntime;
-import com.surprising.aeron.service.treasury.TreasuryRuntime;
 import java.util.List;
 
 /**
@@ -117,9 +115,8 @@ public final class ReplacementAdmissionEvent extends BaseOrderAdmissionEvent {
                     && position != null && position.signedQuantitySteps() != 0
                     && (position.signedQuantitySteps() > 0)
                     != (side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
-                closeCapacityCancellations = PositionCloseCapacity.inspectLane(
-                        lane, userId, symbolId(), positionKey, positionSide(), side(), originalOrderId)
-                        .conflictsFor(quantitySteps());
+                closeCapacityCancellations = PositionCloseCapacity.conflictsFor(
+                        lane, userId, symbolId(), positionKey, positionSide(), side(), originalOrderId, quantitySteps());
             }
             closeCapacityCancellations = lane.preMatchingCancellations(userId, symbolId(),
                     side(), matchingPriceTicks(), originalOrderId, orderId(), closeCapacityCancellations);

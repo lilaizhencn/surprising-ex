@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.order.commit;
 
+import com.surprising.aeron.service.core.index.ActiveOrderIndex;
+
 import com.surprising.aeron.exception.CoreStateRejectedException;
 import com.surprising.aeron.model.CoreLiquidationState;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultView;
@@ -390,11 +392,11 @@ public final class OrderedCommitCoordinator {
                     // 当前动作是否通过账户强平执行资格检查
                     boolean executable = matchingResult.accepted() && liquidation != null && pending.liquidationCheck().executable(0);
                     // 本次实际选择的撤单页，不可执行时为空页
-                    TradingCoreRuntime.LifecycleOrderChunk chunk = !executable ? new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0)
-                            : owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
+                    ActiveOrderIndex.LifecycleOrderChunk chunk = !executable ? new ActiveOrderIndex.LifecycleOrderChunk(List.of(), 0)
+                            : owner.activeOrderIndex().lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
                             command.cursorOrderId(),
                             command.maxOrders());
-                    owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
+                    owner.resultBuilder.addLifecycleChanges(chunk.orders());
                     if (liquidation == null) owner.resultBuilder.commandChangedUserIds = List.of();
                     else owner.resultBuilder.setSingleChangedUser(liquidation.userId());
                     if (matchingResult.accepted() && liquidation != null) {
@@ -422,10 +424,12 @@ public final class OrderedCommitCoordinator {
                     // 按当前操作取出的解码输入，具体用途见所在分支
                     var command = pending.decodedCommand().settlement();
                     if (matchingResult.accepted()) {
-                        owner.instrumentSettlement().applySettlementChangedIds(command);
+                        applySettlementChangedIds(command);
                         // 本命令要挂起轮询的强平、到期或批次控制工作
-                        var work = owner.instrumentSettlement().beginAsyncSettlement(
-                                pending.settlementWork(), command);
+                        var work = com.surprising.aeron.service.settlement.lifecycle.RuntimeLifecycleSettlementContinuation.prepare(
+                                pending.settlementWork(), command,
+                                owner.positionUserIndex().usersAfter(command.instrumentId(), command.cursorUserId()),
+                                owner.activeOrderIndex(), owner.runtimeState(), owner.identities());
                         pending.settlementWork(work);
                         pending.deferSettlementControl(this, work);
                     }
@@ -836,8 +840,8 @@ public final class OrderedCommitCoordinator {
                         continue;
                     }
                     // 本次实际选择的撤单页，不可执行时为空页
-                    var chunk = executable ? owner.matchingFlow.lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
-                            action.cursorOrderId(), remaining) : new TradingCoreRuntime.LifecycleOrderChunk(List.of(), 0);
+                    var chunk = executable ? owner.activeOrderIndex().lifecycleOrders(liquidation.userId(), owner.identities().instrumentId(liquidation.symbolId()),
+                            action.cursorOrderId(), remaining) : new ActiveOrderIndex.LifecycleOrderChunk(List.of(), 0);
                     for (var /* 当前活动订单路由或撤单页身份 */ order : chunk.orders()) owner.resultBuilder.markOrderChanged(order.orderId());
                     owner.resultBuilder.markUserChanged(liquidation.userId());
                     // 仍有后续撤单时保留的排他订单游标，否则为零
@@ -1368,4 +1372,21 @@ public final class OrderedCommitCoordinator {
      * @param count 进度数组总长度，调用方须计入控制分片
      */
     public void initializeMatcherProgress(int count) { appliedMatcherSequences = new long[count]; }
+    /**
+     * 读取当前结算进度并按 Matcher 活动订单选择本页路由；撤单尚未完成时把订单及用户加入结果，已完成则清空本命令的订单变化列表。本方法只登记变化范围，不实际执行撤单。
+     * @param command 币对结算编号、固定价格及订单和用户分页参数
+     */
+    private void applySettlementChangedIds(com.surprising.aeron.protocol.SettleInstrumentCommand command) {
+        // 当前币对已有的生命周期结算进度，用来判断是否还处于撤单阶段。
+        var progress = owner.lifecycleProgress(command.instrumentId());
+        if (progress == null || !progress.ordersComplete()) {
+            // Matcher 索引按当前订单游标选出的路由页，不表示本方法已撤单。
+            ActiveOrderIndex.LifecycleOrderChunk chunk = owner.activeOrderIndex().lifecycleOrders(
+                    0, command.instrumentId(), command.cursorOrderId(), command.maxOrders());
+            owner.resultBuilder.addLifecycleChanges(chunk.orders());
+            return;
+        }
+        owner.resultBuilder.commandChangedOrderIds = List.of();
+    }
+
 }

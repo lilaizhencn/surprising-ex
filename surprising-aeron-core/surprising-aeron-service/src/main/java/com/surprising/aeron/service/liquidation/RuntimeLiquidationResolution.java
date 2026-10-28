@@ -35,7 +35,7 @@ public final class RuntimeLiquidationResolution {
         var route = runtime.liquidationRoute(command.liquidationId());
         if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
         // 源强平或当前候选的合约配置，用来确定并过滤结算资产。
-        CoreInstrument instrument = requireInstrument(runtime, route.instrumentId());
+        CoreInstrument instrument = runtime.requireInstrument(route.instrumentId());
         // 源强平的结算资产编号，保险候选和账本都限定在这项资产。
         int assetId = identities.assetId(instrument.settleAsset());
         // 本命令新建或复用的补亏续步，异步路径准备好后返回 Owner。
@@ -134,11 +134,11 @@ public final class RuntimeLiquidationResolution {
                     if (command.coveredUnits() > liquidation.deficitUnits())
                         throw new CoreStateRejectedException("INSURANCE_COVER_EXCEEDS_DEFICIT", "insurance coverage must be within liquidation deficit");
                     // 保险分配规则给出的本笔处理优先级和期望覆盖额，命令声明必须与它一致。
-                    InsuranceAllocationPolicy.Resolution result = InsuranceAllocationPolicy.resolve(
+                    long expectedCoverage = InsuranceAllocationPolicy.resolve(
                             claimReceipts, claimCount, liquidation.liquidationId(), assetId, ledger);
-                    if (!result.next()) throw new CoreStateRejectedException("INSURANCE_RESOLUTION_ORDER_MISMATCH",
+                    if (expectedCoverage < 0) throw new CoreStateRejectedException("INSURANCE_RESOLUTION_ORDER_MISMATCH",
                             "insurance claims must resolve in deterministic priority order");
-                    if (command.coveredUnits() != result.expectedCoverage())
+                    if (command.coveredUnits() != expectedCoverage)
                         throw new CoreStateRejectedException("INSURANCE_ALLOCATION_MISMATCH", "insurance coverage does not match deterministic allocation");
                     if (command.coveredUnits() > ledger.insurance(assetId))
                         throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "insurance fund balance is insufficient");
@@ -223,17 +223,4 @@ public final class RuntimeLiquidationResolution {
         }
     }
 
-    /**
-     * 查找源强平关联的合约配置，缺失时返回 INSTRUMENT_NOT_FOUND 业务拒绝。
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param instrumentId 需要已经注册在当前运行时的外部合约编号
-     */
-    private static CoreInstrument requireInstrument(TradingAccountRuntime runtime, String instrumentId) {
-        // 源强平或当前候选的合约配置，用来确定并过滤结算资产。
-        CoreInstrument instrument = runtime.instrument(instrumentId);
-        if (instrument == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        return instrument;
-    }
 }

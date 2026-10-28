@@ -4,7 +4,6 @@ import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
-import com.surprising.aeron.service.matcher.CoreMatchingOrder;
 import com.surprising.aeron.service.matcher.CoreMatchingResult;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.matcher.MatchingResult;
@@ -26,7 +25,6 @@ import java.util.Objects;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.RequiredArgsConstructor;
 import lombok.Setter;
 import lombok.experimental.Accessors;
 
@@ -74,11 +72,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     private MatcherSettlementEvent settlementContinuation;
     /** 与结算事件配套的账户应用计划。 */
     private MatcherSettlementPlan settlementPlan;
-    /**  触发等路径已经形成的独立撮合输入。 返回已经形成的独立撮合输入，普通直达路径也可能不需要它。 */
-    @Accessors(fluent = true, chain = false)
-    @Getter(value = AccessLevel.PACKAGE)
-    private CoreMatchingOrder admittedMatchingOrder;
-
     /** 普通下单在所属 Lane 执行的准入事件。 */
     private PlaceAdmissionEvent placeAdmission;
     /** Owner 是否已收取本次准入收据。 */
@@ -251,7 +244,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
                 }
             }
             case TRIGGER -> {
-                if (admittedMatchingOrder != null) first = admittedMatchingOrder.orderId();
+                if (triggerAdmissionOrder != null) first = triggerAdmissionOrder.orderId();
             }
             default -> { }
         }
@@ -313,14 +306,13 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      * @param matcherShard 调用方确定的目标 Matcher 分片
      * @param userId 请求所属用户编号
      * @param resolvedOrder 已经完成准入的下单对象
-     * @param matchingOrder 独立的不可变撮合输入
      * @param direct 本命令独占并尚未退休的直达结算事件
      */
     java.util.function.Supplier<?> preparePlaceMatching(TradingCoreRuntime owner,
             int matcherShard, long userId,
-            ResolvedPlaceOrder resolvedOrder, CoreMatchingOrder matchingOrder,
+            ResolvedPlaceOrder resolvedOrder,
             MatcherSettlementEvent direct) {
-        placeMatching.prepare(owner, matcherShard, userId, resolvedOrder, matchingOrder, direct);
+        placeMatching.prepare(owner, matcherShard, userId, resolvedOrder, null, direct);
         return placeMatching;
     }
 
@@ -334,7 +326,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     java.util.function.Supplier<?> prepareAdmittedPlaceMatching(TradingCoreRuntime owner,
             int matcherShard, long userId, OrderRuntime admittedOrder, MatcherSettlementEvent direct) {
-        placeMatching.prepare(owner, matcherShard, userId, null, null, admittedOrder, direct);
+        placeMatching.prepare(owner, matcherShard, userId, null, admittedOrder, direct);
         return placeMatching;
     }
 
@@ -511,7 +503,7 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
             throw new IllegalArgumentException("invalid pending matching request");
         }
         if (!command.header().hasCommandId()) throw new NullPointerException("commandId");
-        clearLifecycleState();
+        clear();
         this.coreSequence = sequence;
         claimed = true;
         orderBatch = null;
@@ -528,7 +520,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         clearPlaceReferences();
         replacementAdmission = null;
         settlementPlan = null;
-        admittedMatchingOrder = null;
         triggerAdmissionOrder = null;
         sourceTrigger = null;
         matchingLifecycle = MATCHING_ADMITTED;
@@ -706,16 +697,14 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
      */
     public OrderRuntime triggerAdmissionOrder() { return triggerAdmissionOrder; }
     /**
-     * 只允许 TRIGGER 且尚无独立撮合输入时，保存非空冻结订单并用其剩余数量、撮合价和产品滑点生成 CoreMatchingOrder。
+     * 只允许 TRIGGER 且尚无准入收据时保存冻结订单，Matcher 直接消费同一租约。
      * @param order 需要保存的准入订单或捕获的可空结果订单，按当前接口语义使用
      */
     void triggerAdmission(OrderRuntime order) {
-        if (operation != Operation.TRIGGER || order == null || admittedMatchingOrder != null)
+        if (operation != Operation.TRIGGER || order == null || triggerAdmissionOrder != null)
             throw new IllegalStateException("invalid trigger admission");
         triggerAdmissionOrder = order;
-        admittedMatchingOrder = new CoreMatchingOrder(order.orderId(), order.instrument().instrumentIdValue(),
-                order.side(), order.orderType(), order.timeInForce(), order.matchingPriceTicks(),
-                order.remainingQuantitySteps(), CoreMatchingOrder.slippagePpm(order.productLine()));
+
     }
     /**
      * 按阶段标签判断是否已到提交 Matcher 或更后阶段，不探查实际传输队列。
@@ -777,7 +766,6 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
         clearPlaceReferences();
         replacementAdmission = null;
         settlementPlan = null;
-        admittedMatchingOrder = null;
         triggerAdmissionOrder = null;
         sourceTrigger = null;
         clearLiquidationReferences();
@@ -1201,18 +1189,9 @@ public final class CommandSlot implements MatcherSettlementEvent.MatcherCompleti
     }
 
     /**
-     * 只清生命周期、回调和提交缓冲，保留部分业务引用与原序号直到 initialize 覆盖；它与 clearReferences 的清理范围不同。
-     */
-    void clear() {
-        // 后续 initialize 会覆盖本次业务输入，这里只清生命周期。
-        // 空闲期间保留部分引用，不能把 clear 当作彻底解除所有引用。
-        clearLifecycleState();
-    }
-
-    /**
      * 解除当前任务借用引用、结果和路由，清提交上下文、Lane 结果目标并把 claimed 置假；不清 coreSequence、command、operation 等全部业务引用。
      */
-    private void clearLifecycleState() {
+    void clear() {
         clearMatchingControlContinuations();
         if (reusableSettlementWork != null) reusableSettlementWork.clearReferences();
         clearLiquidationReferences();

@@ -210,8 +210,9 @@ class TradingCoreOwnerTest {
                 for (CoreMessage /* 本轮逐项检查或入队的原协议请求 */ request : requests)
                     service.acceptCommittedCommand(clientSession(responses), request, 2_000, 2_000);
                 finishCommands(service);
-                assertThat(runtime.dispatchLedgerQuery(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
+                assertThat(runtime.<Boolean>queryLedgerAtRest(/* 真实账本回调给出的权威 Treasury，只在账本作用域读取 */ ledger -> {
                     observedFees.set(ledger.fee(assetId));
+                    return true;
                 })).isTrue();
                 assertThat(observedFees).hasValue(4L * itemsPerCommand);
             }
@@ -1458,7 +1459,7 @@ class TradingCoreOwnerTest {
      */
     @Test
     void rejectsSnapshotFragmentsBeyondBoundedRecoveryBuffer() {
-        var buffer = new SectionedCoreSnapshotCodec.RecoveryBuffer(1024);
+        var buffer = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery(1024);
         var bytes = new byte[1025];
         assertThatThrownBy(() -> buffer.accept(new UnsafeBuffer(bytes), 0, bytes.length))
                 .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class);

@@ -60,23 +60,13 @@ public final class InsuranceAllocationPolicy {
      * 把各 Lane 已交接的索赔列表按资产拼到新输入容器，跳过空 Lane 输入，不复制索赔记录或重新去重。
      * @param laneClaims 各 Lane 已交回并完成所有权交接的索赔输入数组
      */
-    public static AllocationInputs mergeLaneClaims(AllocationInputs[] laneClaims) {
+    public static Map<Long, Long> allocations(TreasuryRuntime ledger, AllocationInputs[] laneClaims) {
         // 合并各 Lane 分组后新建的资产索赔 Map。
         Map<Integer, ArrayList<LiquidationRuntime>> merged = new HashMap<>();
         for (AllocationInputs /* 本次准备或合并的索赔输入，包含当前调用持有的列表引用。 */ inputs : laneClaims) if (inputs != null)
             inputs.byAsset.forEach((/* 当前索赔所属结算资产编号。 */ assetId, /* 当前资产需要分配的独占索赔列表，排序会改变列表顺序。 */ claims) -> merged.computeIfAbsent(assetId, /* 创建该资产分组时回调收到的键，只需要新建列表，不再读取键。 */ ignored -> new ArrayList<>()).addAll(claims));
-        return new AllocationInputs(merged);
-    }
-
-    /**
-     * 当前账本所有者读取每组资产保险余额，再计算该组全部强平编号的补偿金额，返回新结果 Map。
-     * @param ledger 当前查询或执行方持有的原系统财库
-     * @param inputs 当前调用独占的索赔及目标输入，分配会原地排序其中列表
-     */
-    public static Map<Long, Long> allocations(TreasuryRuntime ledger, AllocationInputs inputs) {
-        // 本次新建的强平编号到预期补偿结果 Map。
         Map<Long, Long> result = new HashMap<>();
-        inputs.byAsset.forEach((/* 当前索赔所属结算资产编号。 */ assetId, /* 当前资产需要分配的独占索赔列表，排序会改变列表顺序。 */ claims) -> allocateAsset(ledger.insurance(assetId), claims, result));
+        merged.forEach((assetId, claims) -> allocateAsset(ledger.insurance(assetId), claims, result));
         return result;
     }
 
@@ -87,15 +77,16 @@ public final class InsuranceAllocationPolicy {
      * @param liquidationId 本次目标强平编号
      * @param assetId 当前共享保险预算的结算资产编号
      * @param ledger 当前线程独占的原财库
+     * @return 顺序首项的预期覆盖金额；目标非首项、缺失或总缺口为零时返回 -1
      */
-    public static Resolution resolve(LiquidationRuntime[] receipts, int count, long liquidationId,
+    public static long resolve(LiquidationRuntime[] receipts, int count, long liquidationId,
                                      int assetId, TreasuryRuntime ledger) {
         ArrayList<LiquidationRuntime> claims = new ArrayList<>();
         for (int index = 0; index < count; index++) {
             LiquidationRuntime value = receipts[index];
             if (value != null) claims.add(value);
         }
-        if (claims.isEmpty()) return new Resolution(false, 0);
+        if (claims.isEmpty()) return -1;
         claims.sort(CLAIM_ORDER);
         // 目标在固定排序中的下标，负一表示目标不在当前索赔列表。
         int targetIndex = -1;
@@ -107,11 +98,11 @@ public final class InsuranceAllocationPolicy {
             total = total.add(BigInteger.valueOf(claim.deficitUnits()));
             if (claim.liquidationId() == liquidationId) targetIndex = index;
         }
-        if (targetIndex < 0 || total.signum() == 0) return new Resolution(false, 0);
+        if (targetIndex != 0 || total.signum() == 0) return -1;
         // 当前非负保险余额与同资产总缺口取小后的可分配预算。
         BigInteger available = BigInteger.valueOf(Math.max(0, ledger.insurance(assetId))).min(total);
-        if (available.signum() == 0) return new Resolution(targetIndex == 0, 0);
-        if (available.equals(total)) return new Resolution(targetIndex == 0, claims.get(targetIndex).deficitUnits());
+        if (available.signum() == 0) return 0;
+        if (available.equals(total)) return claims.get(0).deficitUnits();
         // 已按比例整除分出的基础金额大整数合计。
         BigInteger allocated = BigInteger.ZERO;
         // 目标按比例整除得到的基础补偿，不含余数补一。
@@ -125,15 +116,8 @@ public final class InsuranceAllocationPolicy {
         }
         // 预算减基础份额合计后的剩余单位数，按固定排序前缀逐项补一。
         int remainder = available.subtract(allocated).intValueExact();
-        return new Resolution(targetIndex == 0, targetBase + (targetIndex < remainder ? 1 : 0));
+        return targetBase + (remainder > 0 ? 1 : 0);
     }
-
-    /**
-     * 目标是否应先处理，以及当前预算下预计保险补偿的计算结果，不代表资金已经支付。
-     * @param next 目标是否为同资产确定性顺序首项
-     * @param expectedCoverage 按当前预算和候选缺口计算的目标补偿金额
-     */
-    public record Resolution(boolean next, long expectedCoverage) { }
 
     /**
      * 对单资产索赔原地排序，以非负预算和总缺口取小，按大整数比例整除并把剩余单位按排序前缀补一，写入每个强平编号的结果。

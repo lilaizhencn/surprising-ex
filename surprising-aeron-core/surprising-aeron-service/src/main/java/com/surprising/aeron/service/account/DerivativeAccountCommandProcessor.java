@@ -86,10 +86,9 @@ public final class DerivativeAccountCommandProcessor {
      * @param leveragePpm 目标杠杆，按百万分之一保存
      * @param repriceCrossMargin 是否显式降低全仓杠杆并按持仓补足保证金
      */
-    static boolean updateAccountLeverage(TradingAccountRuntime runtime, CoreLeverageKey key,
+    static boolean updateAccountLeverage(TradingAccountRuntime runtime, AccountLaneState lane, CoreLeverageKey key,
                                          int symbolId, long leveragePpm, boolean repriceCrossMargin) {
-        if (repriceCrossMargin) return runtime.onLane(key.userId(), /* onLane 回调提供的用户所属 Lane，全仓重定价只读写这个账户分区。 */ lane ->
-                lowerCrossLeverage(runtime, key, symbolId, leveragePpm, lane));
+        if (repriceCrossMargin) return lowerCrossLeverage(runtime, key, symbolId, leveragePpm, lane);
         // 当前杠杆键的显式设置；缺失为 null，不等同于已保存了目标杠杆。
         Long current = runtime.leverage(key);
         if (current != null && current.longValue() == leveragePpm) return false;
@@ -136,7 +135,8 @@ public final class DerivativeAccountCommandProcessor {
         }
         Math.incrementExact(runtime.revision());
         // 检查完成后准备写回的持仓键与新持仓值列表，计算期间不先改原持仓。
-        var positions = new java.util.ArrayList<java.util.Map.Entry<Long, PositionRuntime>>();
+        var updatedKeys = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
+        var positions = new java.util.ArrayList<PositionRuntime>();
         // 本次所有相关持仓累计需要补充的非负保证金金额。
         long additional = 0;
         // 本批相关持仓共同的结算资产编号，初始 -1 表示尚未选定。
@@ -173,10 +173,11 @@ public final class DerivativeAccountCommandProcessor {
             additional = Math.addExact(additional, Math.subtractExact(margin, position.positionMarginUnits()));
             if (assetId != -1 && assetId != position.assetId()) throw new IllegalStateException("position settlement asset mismatch");
             assetId = position.assetId();
-            positions.add(java.util.Map.entry(positionKey, new PositionRuntime(position.userId(), symbolId,
+            updatedKeys.add(positionKey);
+            positions.add(new PositionRuntime(position.userId(), symbolId,
                     assetId, position.marginMode(), position.positionSide(), position.instrument(),
                     position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
-                    position.realizedPnlUnits(), margin)));
+                    position.realizedPnlUnits(), margin));
         }
         if (!positions.isEmpty()) {
             // 目标结算资产的权威可用与冻结余额。
@@ -193,7 +194,9 @@ public final class DerivativeAccountCommandProcessor {
             long userRevision = Math.incrementExact(user.revision());
             // 先完成本段的业务拒绝判断及金额、用户修订算术，再进入余额和持仓写入。
             runtime.replaceBalance(key.userId(), assetId, nextAvailable, nextLocked);
-            for (var /* 当前 Lane 权威持仓，最终写回循环中则为已计算的新持仓键值项。 */ position : positions) runtime.replacePosition(position.getKey(), position.getValue());
+            for (int index = 0; index < positions.size(); index++) {
+                runtime.replacePosition(updatedKeys.get(index), positions.get(index));
+            }
             runtime.setUserState(user.userId(), userRevision, user.positionMode());
         }
         runtime.putLeverage(key, leveragePpm);

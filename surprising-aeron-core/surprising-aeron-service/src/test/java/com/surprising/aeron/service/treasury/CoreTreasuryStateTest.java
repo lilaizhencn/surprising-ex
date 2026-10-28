@@ -38,7 +38,7 @@ class CoreTreasuryStateTest {
         assertThat(treasury.fundingResidualBalances()).containsEntry("USDT", -4L);
         assertThat(treasury.roundingResidualBalances()).containsEntry("USDT", 5L);
         assertThat(treasury.clearingPnlBalances()).containsEntry("USDT", -6L);
-        assertThat(treasury.deficitBalances()).containsEntry("USDT", 7L);
+        assertThat(treasury.insuranceDeficits()).containsEntry("USDT", 7L);
         assertThat(java.util.Arrays.stream(CoreTreasuryState.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName))
                 .doesNotContain("liquidationWorkDeficits");

@@ -430,18 +430,10 @@ public final class RuntimeIdentityRegistry {
     }
 
     /**
-     * 按内部稠密标的编号取得已发布的永久数字文本。
-     * @param symbolId 内部稠密标的编号，不是外部永久 ID
-     */
-    public String instrumentId(int symbolId) {
-        return preparedSymbol(symbolId);
-    }
-
-    /**
      * 只读反向数组，拒绝越界或尚未准备的标的槽，不进行身份分配。
      * @param symbolId 内部稠密标的编号，不是外部永久 ID
      */
-    public String preparedSymbol(int symbolId) {
+    public String instrumentId(int symbolId) {
         // 本次读取一次 volatile 标的数组引用，范围检查与取值使用同一数组
         String[] current = symbols;
         // 该内部稠密编号在已发布数组中对应的永久数字标的文本

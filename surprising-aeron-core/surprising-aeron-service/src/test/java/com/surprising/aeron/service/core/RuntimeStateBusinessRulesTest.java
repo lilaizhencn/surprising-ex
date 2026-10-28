@@ -565,7 +565,7 @@ class RuntimeStateBusinessRulesTest {
                 long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
                 // 账户控制任务是否完成，退出轮询后必须为真
                 boolean done = false;
-                while (!(done = work.poll()) && System.nanoTime() < deadline) Thread.onSpinWait();
+                while (!(done = work.getAsBoolean()) && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(done).isTrue();
             }
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(removed);
@@ -636,7 +636,7 @@ class RuntimeStateBusinessRulesTest {
             long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
             // 账户控制任务是否完成，退出轮询后必须为真
             boolean done = false;
-            while (!(done = work.poll()) && System.nanoTime() < deadline) Thread.onSpinWait();
+            while (!(done = work.getAsBoolean()) && System.nanoTime() < deadline) Thread.onSpinWait();
             assertThat(done).isTrue();
             assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
         }

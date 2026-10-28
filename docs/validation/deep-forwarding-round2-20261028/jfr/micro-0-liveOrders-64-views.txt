@@ -1,0 +1,11 @@
+Views cover the entire recording, including setup/audit; JSON above applies the measurement window.
+
+VIEW allocation-by-site
+
+                                                                       Allocation by Site
+
+Method                                                                                                                                      Allocation Pressure
+------------------------------------------------------------------------------------------------------------------------------------------- -------------------
+java.util.Arrays.copyOf(Object[], int)                                                                                                                   67.04%
+com.surprising.aeron.service.position.PositionCloseCapacity.conflictsFor(...)                                                                            32.85%
+java.lang.reflect.Array.newInstance(Class, int)                                                                                                           0.11%

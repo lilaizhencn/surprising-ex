@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.core.index;
 
 import com.surprising.aeron.model.CoreOrderState;
+import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
+import com.surprising.aeron.support.collection.ImmutableLongArrayList;
 import com.surprising.aeron.model.CoreOrderStatus;
 import com.surprising.aeron.model.TradingCoreState;
 import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
@@ -291,7 +293,7 @@ public final class ActiveOrderIndex {
             LongHashSet userIds = idsByUser.get(userId);
             // 标的维度的原成员桶
             LongHashSet symbolIds = idsBySymbol.get(normalizedSymbol);
-            if (userIds == null || symbolIds == null) return new Page(List.of(), 0);
+            if (userIds == null || symbolIds == null) return new Page(ImmutableLongArrayList.empty(), 0);
             if (userIds.size() <= symbolIds.size()) {
                 source = userIds;
                 filter = symbolIds;
@@ -300,7 +302,7 @@ public final class ActiveOrderIndex {
                 filter = userIds;
             }
         }
-        if (allOrders == null && (source == null || source.isEmpty())) return new Page(List.of(), 0);
+        if (allOrders == null && (source == null || source.isEmpty())) return new Page(ImmutableLongArrayList.empty(), 0);
         if (pageScratch == null) pageScratch = new long[MAX_PAGE_SIZE + 1];
         // 借用的分页暂存数组，筛选期间实际按小顶堆维护，输出前升序排序
         long[] descending = pageScratch;
@@ -339,17 +341,36 @@ public final class ActiveOrderIndex {
             }
         }
         java.util.Arrays.sort(descending, 0, size);
-        // 本次独立结果列表，最终复制为只读页
-        List<Long> result = new ArrayList<>(limit);
-        // 确有多余候选时取本页最后一条 ID，否则为零
-        long nextCursor = 0;
-        for (/* 从已排序候选数组尾部向前输出的下标 */ int index = size - 1; index >= 0; index--) {
-            // 当前候选或当前页中要输出的订单号
-            long orderId = descending[index];
-            if (result.size() < limit) result.add(orderId);
-            else { nextCursor = result.getLast(); break; }
+        int count = Math.min(limit, size);
+        long[] result = new long[count];
+        for (int index = 0; index < count; index++) result[index] = descending[size - 1 - index];
+        long nextCursor = size > limit ? result[count - 1] : 0;
+        return new Page(ImmutableLongArrayList.takeOwnership(result), nextCursor);
+    }
+
+    /** 从同一 Owner 索引页直接取撤单路由，生命周期处理与撮合控制共用这一选择顺序。 */
+    public LifecycleOrderChunk lifecycleOrders(long userId, String instrumentId, long cursorOrderId, int maxOrders) {
+        Page page = page(userId, instrumentId, cursorOrderId, maxOrders);
+        ArrayList<CancellationOrder> selected = new ArrayList<>(page.orderIds().size());
+        for (int index = 0; index < page.orderIds().size(); index++) {
+            long orderId = page.orderIds().valueAt(index);
+            var route = activeOrderRoute(orderId);
+            if (route == null) throw new IllegalStateException("settlement active order index differs from runtime");
+            selected.add(new CancellationOrder(route.orderId(), route.userId(), route.instrumentId()));
         }
-        return new Page(List.copyOf(result), nextCursor);
+        return new LifecycleOrderChunk(selected, page.nextCursorOrderId());
+    }
+
+    /**
+     * 生命周期撤单的一页订单描述和下一页游标；本 record 沿用传入列表，不自行复制或校验。
+     * @param orders 本页按顺序借用的生命周期撤单描述
+     * @param nextCursorOrderId 下一页继续扫描的订单游标，零表示结束
+     */
+    public record LifecycleOrderChunk(List<CancellationOrder> orders, long nextCursorOrderId) {
+        /**
+         * 根据下一页订单游标是否为零，判断生命周期撤单是否还有后续页。
+         */
+        public boolean more() { return nextCursorOrderId != 0; }
     }
 
     /**
@@ -357,13 +378,12 @@ public final class ActiveOrderIndex {
      * @param orderIds 按降序排列的本页独立结果列表
      * @param nextCursorOrderId 有后续结果时为本页末尾 ID，结束为零
      */
-    public record Page(List<Long> orderIds, long nextCursorOrderId) {
+    public record Page(ImmutableLongArrayList orderIds, long nextCursorOrderId) {
         /**
-         * 检查结果列表非空、游标非负，并复制成只读列表；不另行校验排序或页大小。
+         * 检查结果列表非空、游标非负；编号列表已不可变，不再次复制或校验排序及页大小。
          */
         public Page {
             if (orderIds == null || nextCursorOrderId < 0) throw new IllegalArgumentException("invalid page");
-            orderIds = List.copyOf(orderIds);
         }
     }
 

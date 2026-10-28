@@ -102,7 +102,7 @@ public class TreasurySettlementAllocationBenchmark {
 
     @TearDown
     public void verifyBalances() {
-        if (!treasury.changedAssets().isEmpty()) throw new IllegalStateException("uncommitted Treasury funds");
+        if (treasury.hasChangedValues()) throw new IllegalStateException("uncommitted Treasury funds");
         for (int asset = 0; asset < assetCount; asset++) {
             long feeDelta = treasury.fee(asset) - 1_000_000;
             if (feeDelta != 0 && feeDelta != 7) throw new IllegalStateException("fee drift");

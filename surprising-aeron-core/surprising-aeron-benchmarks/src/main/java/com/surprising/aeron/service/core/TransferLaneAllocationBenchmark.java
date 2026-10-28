@@ -28,7 +28,7 @@ public class TransferLaneAllocationBenchmark {
                 new LaneTopology(1, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 256, 256, 256));
         task.prepareBalanceAdjustment(runtime, identities, 7, "USDT", 1_000_000_000_000L);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (!task.poll()) {
+        while (!task.getAsBoolean()) {
             if (System.nanoTime() >= deadline) throw new IllegalStateException("balance setup timed out");
             Thread.onSpinWait();
         }
@@ -41,7 +41,7 @@ public class TransferLaneAllocationBenchmark {
     public long debitAndComplete() {
         task.prepareTransferOut(runtime, identities, 7, command);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (!task.poll()) {
+        while (!task.getAsBoolean()) {
             if (System.nanoTime() >= deadline) throw new IllegalStateException("transfer debit timed out");
             Thread.onSpinWait();
         }

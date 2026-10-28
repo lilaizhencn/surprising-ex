@@ -1,0 +1,338 @@
+Views cover the entire recording, including setup/audit; JSON above applies the measurement window.
+
+VIEW hot-methods
+
+                                                               Java Methods that Execute the Most
+
+Method                                                                                                                                          Samples Percent
+----------------------------------------------------------------------------------------------------------------------------------------------- ------- -------
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.run(TradingCpuAffinity)                                                              10,700  51.79%
+com.surprising.aeron.service.matcher.pipeline.MatcherCommandPipeline.runMatching()                                                                5,836  28.25%
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.peekMatcherSettlement()                                                               1,341   6.49%
+com.surprising.aeron.service.order.AdmissionMatchingContinuation.get()                                                                              371   1.80%
+sun.security.provider.ByteArrayAccess.i2bBig(int[], int, byte[], int, int)                                                                           99   0.48%
+org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probe(long)                                                                     71   0.34%
+io.aeron.driver.IpcPublication.updatePublisherPositionAndLimit()                                                                                     69   0.33%
+org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap.isNonSentinelAtIndex(int)                                                          53   0.26%
+com.surprising.aeron.bootstrap.account.AccountLaneLifecycle.assertHealthy()                                                                          48   0.23%
+org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.getIfAbsent(int, Function0)                                                      45   0.22%
+org.agrona.collections.Long2ObjectHashMap.getMapped(long)                                                                                            41   0.20%
+io.aeron.driver.DriverConductor.processClientCommands()                                                                                              40   0.19%
+com.surprising.aeron.service.retention.TerminalTombstoneStore.entitySlot(long)                                                                       32   0.15%
+org.agrona.ExpandableArrayBuffer.ensureCapacity(int, int)                                                                                            30   0.15%
+org.agrona.AbstractMutableDirectBuffer.putByte(int, byte)                                                                                            28   0.14%
+com.surprising.aeron.service.order.OrderBatchPending.clear()                                                                                         28   0.14%
+com.surprising.aeron.protocol.PlaceOrderCommand.decodeClientOrderId(byte[], int, int)                                                                28   0.14%
+com.surprising.aeron.bootstrap.account.SettlementLaneWorker.shouldRunMatcherSettlement(MatcherSettlementEvent, SettlementLaneWorker$Command)         27   0.13%
+org.agrona.collections.Long2LongHashMap.get(long)                                                                                                    25   0.12%
+org.agrona.collections.Long2ObjectHashMap.put(long, Object)                                                                                          23   0.11%
+io.aeron.driver.buffer.MappedRawLog.preTouchPages(UnsafeBuffer[], int, int)                                                                          22   0.11%
+java.util.concurrent.ConcurrentHashMap.get(Object)                                                                                                   21   0.10%
+com.surprising.aeron.service.core.change.RuntimeChangeBuffer.put(long, Object)                                                                       21   0.10%
+com.surprising.aeron.service.order.admission.RuntimeOrderAdmission.resolveInto(...)                                                                  20   0.10%
+com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry.hashUtf8(long, String)                                                            19   0.09%
+
+VIEW allocation-by-site
+
+                                                                       Allocation by Site
+
+Method                                                                                                                                      Allocation Pressure
+------------------------------------------------------------------------------------------------------------------------------------------- -------------------
+com.surprising.aeron.service.order.OrderBatchPending.resolvedOrderSlot(int)                                                                              25.74%
+java.util.Arrays.copyOf(byte[], int)                                                                                                                     15.63%
+java.util.Arrays.copyOfRange(byte[], int, int)                                                                                                           10.90%
+com.surprising.aeron.protocol.PlaceOrderCommand.decodeClientOrderId(byte[], int, int)                                                                     8.40%
+com.surprising.aeron.service.result.ResponseArena.<init>(int, int)                                                                                        4.58%
+com.surprising.aeron.service.retention.TerminalTombstoneStore.grow()                                                                                      2.04%
+java.util.HashMap.resize()                                                                                                                                1.93%
+java.nio.HeapByteBuffer.<init>(int, int, MemorySegment)                                                                                                   1.68%
+jdk.internal.classfile.impl.DirectCodeBuilder.<init>(MethodInfo, SplitConstantPool, ClassFileImpl, CodeModel, boolean)                                    1.57%
+jdk.internal.classfile.impl.SplitConstantPool.classEntryForClassOrInterface(ClassDesc)                                                                    1.12%
+java.util.HashMap.newNode(int, Object, Object, HashMap$Node)                                                                                              1.09%
+java.nio.HeapByteBuffer.slice()                                                                                                                           1.08%
+java.util.zip.InflaterInputStream.<init>(InputStream, Inflater, int)                                                                                      1.07%
+jdk.internal.classfile.impl.EntryMap.<init>(int, float)                                                                                                   0.99%
+java.nio.ByteBuffer.allocate(int)                                                                                                                         0.94%
+jdk.internal.misc.Unsafe.allocateUninitializedArray(Class, int)                                                                                           0.92%
+com.surprising.aeron.protocol.CoreMessageHeader.commandId()                                                                                               0.86%
+jdk.internal.classfile.impl.SplitConstantPool.<init>()                                                                                                    0.68%
+exchange.core2.collections.objpool.ObjectsPool$ArrayStack.<init>(int)                                                                                     0.57%
+com.surprising.aeron.service.risk.RiskScanCoordinator.finish()                                                                                            0.57%
+java.util.ArrayList.spliterator()                                                                                                                         0.57%
+com.surprising.aeron.service.order.OrderBatchExecutor.prepareBatchDecision(OrderBatchPending, String)                                                     0.52%
+org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.allocateTable(int)                                                                   0.50%
+exchange.core2.collections.art.LongAdaptiveRadixTreeMap$$Lambda.0x0000000128521800.apply(Object)                                                          0.50%
+com.surprising.aeron.service.order.state.OrderRuntime.copyIntoCommandSlot(OrderRuntime)                                                                   0.50%
+
+VIEW contention-by-site
+
+No events found for 'Contention by Site'.
+
+VIEW gc-pauses
+
+GC Pauses
+---------
+
+Total Pause Time: 89.5 ms
+
+Number of Pauses: 8
+
+Minimum Pause Time: 0.0973 ms
+
+Median Pause Time: 5.92 ms
+
+Average Pause Time: 11.2 ms
+
+P90 Pause Time: 36.5 ms
+
+P95 Pause Time: 36.5 ms
+
+P99 Pause Time: 36.5 ms
+
+P99.9% Pause Time: 36.5 ms
+
+Maximum Pause Time: 36.5 ms
+
+VIEW safepoints
+
+                                                                            Safepoints
+
+Start Time                  Duration                                     State Syncronization                  JNI Critical Threads                  Total Threads
+--------------------------- --------------------------- ------------------------------------- ------------------------------------- ------------------------------
+11:42:51                    Indefinite                                                    N/A                                     0                             17
+11:42:51                    Indefinite                                                    N/A                                     0                             17
+11:42:52                    Indefinite                                                    N/A                                     0                             18
+11:42:53                    Indefinite                                                    N/A                                     0                             25
+11:42:53                    Indefinite                                                    N/A                                     0                             25
+11:42:53                    Indefinite                                                    N/A                                     0                             25
+11:43:36                    Indefinite                                                    N/A                                     0                             24
+11:43:52                    Indefinite                                                    N/A                                     0                             24
+11:43:52                    Indefinite                                                    N/A                                     0                             24
+11:44:06                    Indefinite                                                    N/A                                     0                             29
+11:44:07                    Indefinite                                                    N/A                                     0                             27
+11:44:07                    Indefinite                                                    N/A                                     0                             27
+11:44:08                    Indefinite                                                    N/A                                     0                             27
+11:44:08                    Indefinite                                                    N/A                                     0                             28
+11:44:08                    Indefinite                                                    N/A                                     0                             28
+
+VIEW file-reads-by-path
+
+                                                                       File Reads by Path
+
+Path                                                                                                                                           Reads Total Read
+---------------------------------------------------------------------------------------------------------------------------------------------- ----- ----------
+/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar                  8     5.9 kB
+
+VIEW file-writes-by-path
+
+                                                                      File Writes by Path
+
+Path                                                                                                                                       Writes Total Written
+------------------------------------------------------------------------------------------------------------------------------------------ ------ -------------
+/private/tmp/surprising-round2-evidence/jfr/data/linear_perpetual/node0/archive/0-0.rec                                                        30      421.9 kB
+/private/tmp/surprising-round2-evidence/jfr/data/linear_perpetual/node0/archive/0-134217728.rec                                                23       96.8 kB
+N/A                                                                                                                                             4     802 bytes
+
+VIEW active-settings
+
+                                                                        Active Settings
+
+Event Type                                       Enabled          Threshold          Stack Trace          Period              Cutoff          Throttle
+------------------------------------------------ ---------------- ------------------ -------------------- ------------------- --------------- -----------------
+Allocation Requiring GC                          false                               true
+Allocation in new TLAB                           false                               true
+Allocation outside TLAB                          false                               true
+Boolean Flag                                     true                                                     beginChunk
+Boolean Flag Changed                             true
+CPU Information                                  true                                                     beginChunk
+CPU Load                                         true                                                     1000 ms
+CPU Throttling                                   true                                                     30 s
+CPU Time Sample                                  false                               true                                                     10ms
+CPU Time Samples Lost                            true
+CPU Time Stamp Counter                           true                                                     beginChunk
+CPU Usage                                        true                                                     30 s
+Class Define                                     false                               true
+Class Load                                       false            0 ms               true
+Class Loader Statistics                          true                                                     everyChunk
+Class Loading Statistics                         true                                                     1000 ms
+Class Redefinition                               true
+Class Unload                                     false
+Code Cache Configuration                         true                                                     beginChunk
+Code Cache Full                                  true
+Code Cache Statistics                            true                                                     everyChunk
+Compilation                                      true             100 ms
+Compilation Failure                              true
+Compiler Configuration                           true                                                     beginChunk
+Compiler Phase                                   true             10 s
+Compiler Queue Utilization                       true                                                     5 s
+Compiler Statistics                              true                                                     1000 ms
+Concurrent Mode Failure                          true
+Container Configuration                          true                                                     beginChunk
+Container IO Usage                               true                                                     30 s
+Container Memory Usage                           true                                                     30 s
+Continuation Continue                            false            0 ms               false
+Continuation Freeze Fast                         false
+Continuation Freeze Slow                         false
+Continuation Thaw Fast                           false
+Continuation Thaw Slow                           false
+Continuation Yield                               false            0 ms               false
+Data Loss                                        true
+Deoptimization                                   true                                true
+Deprecated Method Invocation                     true                                true
+Deserialization                                  false                               true
+Direct Buffer Statistics                         true                                                     5 s
+Double Flag                                      true                                                     beginChunk
+Double Flag Changed                              true
+Evacuation Failed                                true
+Evacuation Information                           true
+Exception Statistics                             true                                                     1000 ms
+File Force                                       true             10 ms              true
+File Read                                        true             1 ms               true                                                     300/s
+File Write                                       true             1 ms               true                                                     300/s
+Final Field Mutation Sample                      true                                true
+Finalizer Statistics                             true                                                     endChunk
+Flight Recording                                 true
+Flush                                            false            0 ns
+G1 Adaptive IHOP Statistics                      true
+G1 Basic IHOP Statistics                         true
+G1 Evacuation Memory Statistics for Old          true
+G1 Evacuation Statistics for Young               true
+G1 Heap Region Information                       false                                                    everyChunk
+G1 Heap Region Type Change                       false
+G1 Heap Summary                                  true
+G1 MMU Information                               true
+G1 Young Garbage Collection                      true             0 ms
+GC CPU Time                                      true
+GC Configuration                                 true                                                     everyChunk
+GC Heap Configuration                            true                                                     beginChunk
+GC Heap Memory Pool Usage                        true                                                     everyChunk
+GC Heap Memory Usage                             true                                                     everyChunk
+GC Phase Concurrent                              true             0 ms
+GC Phase Concurrent Level 1                      true             0 ms
+GC Phase Concurrent Level 2                      true             0 ms
+GC Phase Parallel                                true             0 ms
+GC Phase Pause                                   true             0 ms
+GC Phase Pause Level 1                           true             0 ms
+GC Phase Pause Level 2                           true             0 ms
+GC Phase Pause Level 3                           false            0 ms
+GC Phase Pause Level 4                           false            0 ms
+GC Reference Statistics                          true
+GC Survivor Configuration                        true                                                     beginChunk
+Garbage Collection                               true             0 ms
+Heap Dump                                        true             0 ns               true
+Heap Summary                                     true
+Initial Environment Variable                     true                                                     beginChunk
+Initial Security Property                        true                                                     beginChunk
+Initial System Property                          true                                                     beginChunk
+Int Flag                                         true                                                     beginChunk
+Int Flag Changed                                 true
+JIT Restart                                      true
+JVM Information                                  true                                                     beginChunk
+JVM Shutdown                                     true                                true
+Java Agent                                       true                                                     endChunk
+Java Error                                       true                                true
+Java Exception                                   true                                true                                                     300/s
+Java Execution Sample                            true                                                     10 ms
+Java Monitor Blocked                             true             10 ms              true
+Java Monitor Deflated                            false            0 ms
+Java Monitor Inflated                            false            0 ms               true
+Java Monitor Notify                              false            0 ms               true
+Java Monitor Statistics                          true                                                     everyChunk
+Java Monitor Wait                                true             10 ms              true
+Java Thread End                                  true
+Java Thread Park                                 true             10 ms              true
+Java Thread Sleep                                true             10 ms              true
+Java Thread Start                                true                                true
+Java Thread Statistics                           true                                                     1000 ms
+Long Flag                                        true                                                     beginChunk
+Long Flag Changed                                true
+Metaspace Allocation Failure                     true                                true
+Metaspace Chunk Free List Summary                true
+Metaspace GC Threshold                           true
+Metaspace Out of Memory                          true                                true
+Metaspace Summary                                true
+Method Inlining                                  false
+Method Timing                                    true                                                     endChunk
+Method Trace                                     true             0 ms               true
+Module Export                                    true                                                     endChunk
+Module Require                                   true                                                     endChunk
+Native Agent                                     true                                                     endChunk
+Native Library                                   true                                                     everyChunk
+Native Library Load                              true             0 ms               true
+Native Library Unload                            true             0 ms               true
+Native Memory Usage Per Type                     true                                                     1000 ms
+Native Sample                                    true                                                     20 ms
+Network Utilization                              true                                                     5 s
+OS Information                                   true                                                     beginChunk
+Object Allocation Sample                         true                                true                                                     300/s
+Object Count                                     false                                                    everyChunk
+Object Count after GC                            false
+Old Garbage Collection                           true             0 ms
+Old Object Sample                                true                                true                                     0 ns
+Parallel Old Garbage Collection                  true             0 ms
+Parallel Scavenge Heap Summary                   true
+Physical Memory                                  true                                                     everyChunk
+Process Start                                    true                                true
+Promotion Failed                                 true
+Promotion in new PLAB                            true
+Promotion outside PLAB                           true
+Recording Reason                                 true
+Recording Setting                                true
+Redefine Classes                                 true             0 ms               true
+Reserved Stack Activation                        true                                true
+Resident Set Size                                true                                                     1000 ms
+Retransform Classes                              true             0 ms               true
+Safepoint Begin                                  true             0 ms
+Safepoint End                                    false            0 ms
+Safepoint Latency                                false            0 ms               false                                                    off
+Safepoint State Synchronization                  false            0 ms
+Security Property Modification                   false                               true
+Security Provider Instance Request               false                               true
+Serialization Misdeclaration                     true
+Shenandoah Evacuation Information                false
+Shenandoah Heap Region Information               false                                                    everyChunk
+Shenandoah Heap Region State Change              false
+Shenandoah Promotion Information                 false
+Socket Read                                      true             1 ms               true                                                     300/s
+Socket Write                                     true             1 ms               true                                                     300/s
+String Deduplication Statistics                  true             0 ms
+String Flag                                      true                                                     beginChunk
+String Flag Changed                              true
+String Table Statistics                          true                                                     10 s
+Swap Space                                       true                                                     everyChunk
+Symbol Table Statistics                          true                                                     10 s
+System GC                                        true             0 ms               true
+System Process                                   true                                                     endChunk
+TLAB Configuration                               true                                                     beginChunk
+TLS Handshake                                    false                               true
+Tenuring Distribution                            true
+Thread Allocation Statistics                     true                                                     everyChunk
+Thread CPU Load                                  true                                                     10 s
+Thread Context Switch Rate                       true                                                     10 s
+Thread Dump                                      true                                                     60 s
+Total Native Memory Usage                        true                                                     1000 ms
+Unsigned Int Flag                                true                                                     beginChunk
+Unsigned Int Flag Changed                        true
+Unsigned Long Flag                               true                                                     beginChunk
+Unsigned Long Flag Changed                       true
+VM Operation                                     true             0 ms
+Value Based Class Synchronization                true                                true
+Virtual Thread End                               false
+Virtual Thread Pinned                            true             20 ms              true
+Virtual Thread Start                             false                               true
+Virtual Thread Submit Failed                     true                                true
+Virtualization Information                       true                                                     beginChunk
+X509 Certificate                                 false                               true
+X509 Validation                                  false                               true
+Young Garbage Collection                         true             0 ms
+Young Generation Configuration                   true                                                     beginChunk
+ZGC Allocation Stall                             true             0 ms               true
+ZGC Old Garbage Collection                       true             0 ms
+ZGC Page Allocation                              true             1 ms               true
+ZGC Relocation Set                               true             0 ms
+ZGC Relocation Set Group                         true             0 ms
+ZGC Statistics Counter                           false            0 ms
+ZGC Statistics Sampler                           false            0 ms
+ZGC Thread Phase                                 false            0 ms
+ZGC Uncommit                                     true             0 ms
+ZGC Young Garbage Collection                     true             0 ms

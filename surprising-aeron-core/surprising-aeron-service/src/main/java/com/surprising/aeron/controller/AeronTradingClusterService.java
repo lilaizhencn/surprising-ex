@@ -464,9 +464,9 @@ public final class AeronTradingClusterService implements ClusteredService {
      * @param cluster 提供空闲等待策略的当前集群上下文
      * @return 已收集的恢复缓冲区；没有快照时返回 null
      */
-    private SectionedCoreSnapshotCodec.RecoveryBuffer readSnapshot(Image image, Cluster cluster) {
+    private com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery readSnapshot(Image image, Cluster cluster) {
         if (image == null) return null;
-        var recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer(maximumSnapshotBytes);
+        var recovery = new com.surprising.aeron.service.snapshot.SectionedCoreSnapshotRecovery(maximumSnapshotBytes);
         long deadline = System.nanoTime() + snapshotTimeoutNanos;
         while (!image.isEndOfStream()) {
             int work = image.poll((buffer, offset, length, header) ->

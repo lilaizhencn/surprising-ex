@@ -81,13 +81,6 @@ public final class OwnerIngressRing {
     }
 
     /**
-     * 保留兼容方法：单线程无锁模式下无需跨线程核算载荷字节。
-     */
-    public long retainedBytes() {
-        return 0L;
-    }
-
-    /**
      * Owner 完成当前动作或交出请求租约后移除队首并推进消费游标。
      */
     public void remove() {
@@ -97,13 +90,6 @@ public final class OwnerIngressRing {
         Entry entry = entries[(int) consumedEntries & MASK];
         entry.clear();
         consumedEntries++;
-    }
-
-    /**
-     * 保留兼容方法：单线程无锁模式下无需跨线程公布字节。
-     */
-    public void commitConsumedBytes() {
-        // 单线程内联原位模式无跨线程字节进度提交需求
     }
 
     /**

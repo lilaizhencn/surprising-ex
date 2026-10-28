@@ -194,7 +194,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         if (coreSequence <= 0 || command == null) {
             throw new IllegalArgumentException("matcher pipeline command is invalid");
         }
-        submitInternal(coreSequence, command, settlement);
+        submitInternal(coreSequence, command, settlement, null);
     }
 
     /**
@@ -220,7 +220,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         controlSequence = Math.incrementExact(controlSequence);
         // 当前控制请求生成的负 token。
         long token = -controlSequence;
-        submitInternal(token, command);
+        submitInternal(token, command, null, null);
         return token;
     }
 
@@ -231,26 +231,6 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     public Object pollControl(long token) {
         if (token >= 0) throw new IllegalArgumentException("matcher control token must be negative");
         return pollResult(token);
-    }
-
-    /**
-     * 把无结算事件的普通或控制 token 转入内部发布方法。
-     * @param token 非零传输标识，正数为普通命令，负数为控制调用
-     * @param command 需要在 Matcher 拥有线程执行的非空函数
-     */
-    private void submitInternal(long token, Supplier<?> command) {
-        submitInternal(token, command, null);
-    }
-
-    /**
-     * 把可选结算事件转入完整发布路径，不指定 CommandSlot 回写目标。
-     * @param token 非零传输标识，正数为普通命令，负数为控制调用
-     * @param command 需要在 Matcher 拥有线程执行的非空函数
-     * @param settlement 可空的结算事件，直达模式由它保留原生成交事实
-     */
-    private void submitInternal(long token, Supplier<?> command,
-                                MatcherSettlementEvent settlement) {
-        submitInternal(token, command, settlement, null);
     }
 
     /**

@@ -136,7 +136,7 @@ public final class DirectCommandSlot {
     public DirectCommandSlot(TradingCoreRuntime owner) {
         this.owner = Objects.requireNonNull(owner);
         accountControlWork = () -> {
-            if (!accountControl.poll()) return false;
+            if (!accountControl.getAsBoolean()) return false;
             if (accountControl.stateChanged()) this.owner.requestCommitPublication();
             return true;
         };
@@ -506,7 +506,7 @@ public final class DirectCommandSlot {
                 || owner.runtimeState().revision() != beforeRevision
                 || owner.runtimeState().hasUncommittedCommandChanges())) {
             if (controlWork == null) {
-                owner.commits.publication.abort();
+                owner.commits.publication.clearBatchState();
                 controlWork = owner.runtimeState().beginCommandRollback(
                         checkpoint, Math.incrementExact(owner.appliedCommandCount()));
             }
@@ -554,7 +554,7 @@ public final class DirectCommandSlot {
             owner.requestCommitPublication();
             owner.resultBuilder.commandFundingProgress = result.progress();
             owner.resultBuilder.addChangedUsersFromFundingPayments(result.payments());
-            owner.funding().notifyReplayObserver(result);
+            owner.notifyReplayFundingObserver(result);
             return true;
         }
     }

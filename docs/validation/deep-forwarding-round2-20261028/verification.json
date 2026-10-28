@@ -1,0 +1,3591 @@
+{
+  "baseline": "7a2caa5a48a8a127e3503a6bfaa300d68cc8227b",
+  "java": "Corretto HotSpot 27+33-FR",
+  "maven": "3.9.16",
+  "builds": [
+    {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-aeron-core/surprising-aeron-benchmarks",
+        "-am",
+        "clean",
+        "package"
+      ],
+      "result": "13 modules passed; benchmark compile failed at four unmigrated fixture call sites; subsequently fixed",
+      "log_sha256": "0bd164aa5d418448acf0cdf642373a065c3c264393ff8db06f8fb734aef338b0"
+    },
+    {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-aeron-core/surprising-aeron-benchmarks",
+        "clean"
+      ],
+      "result": "PASS"
+    },
+    {
+      "command": [
+        "mvn",
+        "-pl",
+        "surprising-aeron-core/surprising-aeron-benchmarks",
+        "-am",
+        "-Dtest=AccountLaneCommitBenchmarkTest,AccountQueryProjectionBenchmarkTest,ClientSourceOrderingBenchmarkTest,ClusterAsyncPairTest,ClusterCapacityMetricsTest,ClusterMarkPriceGateTest,ClusterMixedCapacityTest,ClusterOfferRetryTest,ClusterStreamFillCountTest,ClusteredBatchTradingBenchmarkTest,CommandReplicationLoggingTest,CommandReplicationTest,CommittedReplayAllocationBenchmarkTest,ContinuousOwnerBenchmarkTest,CorePerpetualEndToEndBenchmarkTest,D1BenchmarkBoundaryTest,DerivativeMixedWorkloadTest,DerivativeRiskBoundaryBenchmarkTest,FundingCutBenchmarkTest,GeneratedMarkPriceSourceTest,GeneratedPriceClockTest,HttpArtifactsLoadTest,HttpOpenLoopLoadTest,HttpOperationPoolLoadTest,InstrumentPauseAdmissionBenchmarkTest,LifecycleGuardTest,LifecyclePaginationBenchmarkTest,LinearPerpetualBenchmarkSupportTest,MakerReconciliationAllocationBenchmarkTest,MatcherTreasuryReceiptBenchmarkTest,OperationalLifecycleAuditTest,OrderBookBootstrapLoaderTest,OwnerPublicationBenchmarkTest,P10CapacityGateTest,RealtimeWorkloadTest,SettlementSolvencyBenchmarkTest,SpotMixedWorkloadTest,StableIdentityLedgerTest,TriggerCommitBenchmarkTest,W4LifecycleQaMainTest",
+        "-Dsurefire.failIfNoSpecifiedTests=false",
+        "package"
+      ],
+      "result": "PASS; all benchmark test classes selected, current sources recompiled, all reactor modules packaged",
+      "log_sha256": "167e7a47d792cb574f90897a12bad90e833686afa8142a8abfed89740458cd27"
+    }
+  ],
+  "totals": {
+    "tests": 2685,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 4
+  },
+  "modules": [
+    {
+      "artifact": "surprising-price-provider",
+      "path": "surprising-price/surprising-price-provider",
+      "tests": 154,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 3,
+      "classes": [
+        {
+          "class": "com.surprising.price.SurprisingPriceApplicationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a7ac98f78a45280080016ba2b44cb1836beff4055f49275b1abea57130c0917e"
+        },
+        {
+          "class": "com.surprising.price.index.client.ExternalSpotPriceClientTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c04d7295a5696975dedb045427fd7097f0514eb23692cf08fab6782955e72b17"
+        },
+        {
+          "class": "com.surprising.price.index.client.ExternalSpotWebSocketManagerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b4e58415e5fe1b25f659e6a6e91d4e7b7f51d9114efa703095b2528ce794a22f"
+        },
+        {
+          "class": "com.surprising.price.index.config.IndexKafkaProducerConfigurationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "f1c531b282494d1de61c01d63f447c9977b9c558455d9c56bd1e2222b9b132d2"
+        },
+        {
+          "class": "com.surprising.price.index.config.IndexPriceApplicationYamlTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "8b343659590583132f2d082daa9f9e92255531731fdff65ccb0c99cefbb417df"
+        },
+        {
+          "class": "com.surprising.price.index.controller.ExchangeRateInputBoundaryTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "26cf9daf93c09b290cd99bb40c99426ed02a667bad040110a735fa4ff938a5fd"
+        },
+        {
+          "class": "com.surprising.price.index.repository.IndexPriceRepositoryBoundaryTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "801e65ae4e8b61f563d431f537abc7fb26dd17d1c6971d358a4d94fe2e3c6c14"
+        },
+        {
+          "class": "com.surprising.price.index.service.ExchangeRateFetchBoundaryTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d6313549707b5e6e788b8ee9746717a57801a6ad4d44391c28922a146f12c2fe"
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexInstrumentConfigLoaderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "aabec04412e88ab567678c3fc4af28acadc7e15a411835cf65cdc40502f72048"
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexInstrumentConfigServiceTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "8216b552384789b56e28aa6ae230ede5dc5a5272314060269518f643096af401"
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceAuditConsumerTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7ebf507ca138bb9e133415cfb9248eb90ffca0c10e251b50a6cf7927e0068ad6"
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceCalculatorTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "31bb11b3e4e5b78f1e64c85c2ef0fdb475e79bb6f70a0842fa877e74d9f956a8"
+        },
+        {
+          "class": "com.surprising.price.index.service.IndexPriceServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "33999e2b62952d277d90e4a3c2bc3d57c1bca45a80b98cad8b6df5e70db1517f"
+        },
+        {
+          "class": "com.surprising.price.index.service.LatestIndexPriceCacheTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4e2748c67ea46efc6c91fafc8773d454a2ac4ed0002161256a26d98f1ce6b2d8"
+        },
+        {
+          "class": "com.surprising.price.mark.config.MarkKafkaConfigurationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "bf2ae54a3d420aa6289d469ea13134cdf1bf0b94a3ecc1432c9714cfdb58d170"
+        },
+        {
+          "class": "com.surprising.price.mark.config.MarkPriceApplicationYamlTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e6325e7c859a9b57369da3a9a65db214cfeb251ce4ced04fae374b5fff461bc7"
+        },
+        {
+          "class": "com.surprising.price.mark.consumer.MarkPriceConsumerTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "73cd820405d210749f69388ccd520e3b806d6e9580c8a8be68a6c0e6cd045d15"
+        },
+        {
+          "class": "com.surprising.price.mark.repository.MarkPriceTickRepositoryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a9f57dade25b8786b1a866ff5b54051ceab298cd81426cd7951ee87c855972df"
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceAuditConsumerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c934ebfe9b3f8104c348d4d0e6af0d28e9c75b0245092adf8e4a77e857a03ff9"
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceCalculatorTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0e7b6c5ab43c1ed52ab1451a87ca4c1d9fb7febfd18e57d10783bac6325080d9"
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceCorePublisherTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "059b6700958e1aeb355562b11e3d4df1b2adabf3c5b71e35ac922fa5b89af612"
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceEncodingServiceTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e4c0117558631bd7a14044366c4c5e377e04bad4ca3b9d58a8a26e04406ecd90"
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceMarketSubscriptionTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b0e0cf3a0237738a37e3f701034af69266ddcd7bba399bfbedf81d80320ba44e"
+        },
+        {
+          "class": "com.surprising.price.mark.service.MarkPriceServiceTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "8196c527ccf6608786399f38b25b1974ce79c3de2b06efeabae02dd691c15c37"
+        },
+        {
+          "class": "com.surprising.price.mark.service.OptionPricePipelineTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "166d90f08d12fb75ae6419b66092859072c399315b1b23353e97f7bd5596d9b6"
+        },
+        {
+          "class": "com.surprising.price.mark.service.PublicTradeEventMapperTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7365f348d6081ed79bc886dab48f13d6e29ea7a2d55f453c4b687067e6b91021"
+        },
+        {
+          "class": "com.surprising.price.probe.MarketProbeControllerTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "17823a306188f34d10d0d63ea8baaaacc3bda570217c2ef4d83fa566dd30c42e"
+        },
+        {
+          "class": "com.surprising.price.probe.MarketProbeServiceTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "528675c15bef6e24bb44cf4db4e2e4415392f41c8717e2c82dd8880bbc4a81a0"
+        },
+        {
+          "class": "com.surprising.price.settings.PriceBusinessSettingsControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4b3dadb53017c34cdae6ca476bbc0f4dad9e07589bdac21311cc6be87b6d49e1"
+        },
+        {
+          "class": "com.surprising.price.settings.PriceBusinessSettingsIntegrationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "skipped_cases": [
+            {
+              "name": "persistsReloadsAndRejectsInvalidSettingsWithoutChangingRuntime(ProductLine)",
+              "reason": "Environment variable [PRICE_TEST_JDBC_URL] does not exist"
+            }
+          ],
+          "report_sha256": "077a3173d98810653c8702acb7b33b425861aabe620cc12ac4790fab45d502d7"
+        },
+        {
+          "class": "com.surprising.price.settings.PriceMaintenanceSchedulingTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "13ba9e1898af47768d68497412daf0487e358b1dcaf9d6f74a0282ac12caf09f"
+        },
+        {
+          "class": "com.surprising.price.settings.PriceSettingsBoundaryPostgresTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 2,
+          "skipped_cases": [
+            {
+              "name": "callerRollbackCannotUndoTheInstalledDatabaseVersion(ProductLine)",
+              "reason": "Environment variable [PRICE_TEST_JDBC_URL] does not exist"
+            },
+            {
+              "name": "malformedPersistedRulesNeverInstallOrPublishAndOtherLinesStayUntouched(ProductLine)",
+              "reason": "Environment variable [PRICE_TEST_JDBC_URL] does not exist"
+            }
+          ],
+          "report_sha256": "bf649dc43ab69e314849d72710162ab0fd185a0bc57bce4fbc43bcd659394b68"
+        },
+        {
+          "class": "com.surprising.price.settings.PriceSettingsSchedulingEventTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7816fcccd5d2a90f9c9d26987bb71058c43ea88275b3a093ac6a6d653a09adf2"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-price-api",
+      "path": "surprising-price/surprising-price-api",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": []
+    },
+    {
+      "artifact": "surprising-price-consumer",
+      "path": "surprising-price/surprising-price-consumer",
+      "tests": 9,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.price.consumer.LatestMarkPriceCacheTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "3c9f4bedb4d1dbaa9a44279a6c35888ad66626cd9b4cfd217abfee672a45bde2"
+        },
+        {
+          "class": "com.surprising.price.consumer.MarkPriceConsumerConfigurationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "83b58fcc69a595ed698757f4b52b7cbe8a7bdfbc9ca88f327c908799ee263a4c"
+        },
+        {
+          "class": "com.surprising.price.consumer.MarkPriceKafkaConsumerTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "63ddaef2f654e8b54899acd0627ee589cf23c43952bdd11a825fec2ad58fe80b"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-instrument-api",
+      "path": "surprising-instrument-api",
+      "tests": 30,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.instrument.api.InstrumentEventKeysTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "58ee0d219edbbbbb2beaf93e73cc81b749243570c00f3f8a043a94d7107231e9"
+        },
+        {
+          "class": "com.surprising.instrument.api.cache.InstrumentSnapshotSupportTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "01b741b4259f6380596517856951d7cbc364dfd0f2995650e5f309e42c305d29"
+        },
+        {
+          "class": "com.surprising.instrument.api.math.PerpetualContractMathTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "8c79d4f2903d61557b249749829e397aa33fcd8141dcc3079174d0e1e978351b"
+        },
+        {
+          "class": "com.surprising.instrument.api.model.ContractTypeProductLineTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "40ad8c4a728791dcea3128f920746da49e346fb68b4cfb2956a1839eb0d573a1"
+        },
+        {
+          "class": "com.surprising.product.api.InstrumentIdsTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "46325960c520f5efdbf983f0898e4841e6f82e46d26bb87e288d5cff948519de"
+        },
+        {
+          "class": "com.surprising.product.api.ProductLineTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "519c6539c004e69095de9d7af6aa6d643616ff9612bb8bf45d7e434fcc995436"
+        },
+        {
+          "class": "com.surprising.product.api.ProductTopicNamesTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "639149332274b8d4dd1e5853e3fa4551fd0fcd87802248cd51a1daae2d564c5a"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-maker",
+      "path": "surprising-maker",
+      "tests": 178,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.marketmaker.provider.SurprisingMarketMakerApplicationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c54abdc3eb8b8d5616f27a62ab4f5817820d6c7b154ef357ddf6315da8eaa6a0"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.client.RestReferenceMarketProviderTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a0619e066e1f353110957e8a136001a6cf04ea4c2a42706bd76ca5a78760f0d8"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.AdminIntegerBindingTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "99743b794a902ca76e2f1ed3c64cad8c094b06b24b55d49e7d9288752ca7f118"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerApplicationYamlTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ff8dea657acdbb635d35370b77f830172e24852716b6ee9d1a32d6c274da1099"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerFeignConfigurationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "956f5472bc90aa1f38df1d3a4016a2fe9bb15f8ed7426bce5e7d0af16e0e6164"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.config.MarketMakerFeignConnectionTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "1fdc3847e2c6fc5a0d019e268094bf573af0da745826e28870a9de4f1299abc0"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.AdminMarketMakerControllerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "04bb40dc1a3c9df6899bed47420d58ff86fad53b4a086c3ef47890e4f1e23c48"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.MakerRunEventBoundaryTest",
+          "tests": 20,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ad21dcae6f018dec9314d1a94ffc2c5858a48568e89a03e928f91b4ceca57346"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.MarketMakerSettingsConflictTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6f2dedb530a20dc2281d1a9a52d087cc88fdb5b3292de5426e95c2dbf1273685"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.controller.MarketMakerSettingsValidationTest",
+          "tests": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7bf5f24898f040815d6b03feaff0a3e595837c11e00d0b08af91b438ab05c874"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.repository.MarketMakerMemorySettingsTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c0e58f857dadddf59918881bac7e2b76b470ed184d9ccd3e6538554aa9a6d602"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepositoryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "5dd585e94be8c0d15fbd7eef46ed649664a018c6026ce6bb8dc9afc5ef3f9dbe"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerBusinessSettingsServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "080cf724e89d11e819e9000ca932bf97bf1b15f29e050978d64c5d4abf267590"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerQuoteArithmeticTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "bb21749e54123cc49d02a78a85a640225daddc08f25b3e5f112863a71832d870"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerQuoteSlotTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "de5807e07f6e3e65f5b9dbb86b18dfae58d85fbda480502e8e532e06a1692854"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MarketMakerServiceTest",
+          "tests": 56,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "fc186b23914b17eafc8c846ae3f82fd6e9ee062e0d498e5bd20440f05b95f52b"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.QuotePlannerTest",
+          "tests": 31,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "54da7774087674e979eff4375407014b1a63b894fc8cb73ad8259b469d11dba9"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.task.MarketMakerTaskTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "28215b92a058837afd91a85d82133d550e439f282192e4873e245fc5cdd76548"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-aeron-benchmarks",
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks",
+      "tests": 313,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.aeron.benchmarks.transport.CommandReplicationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7f4a5e4733246d9fba735d339460ff57726d6019aafb67c345e1c3bf9d9dddcc"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.ClusterAsyncPairTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "26b01311bcb7f86e09b0e259247fdc2084c7132f7afc1697409f4e97d63145c8"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.ClusterCapacityMetricsTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "075756d08a75c3544177cd2bcf083cf5cf64776fda92c020a9fb74b5a65dcc3e"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.ClusterMarkPriceGateTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "3730e53589cb68b7257a764fcbb856ad537c579789357f572eae8216b3ab715e"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2e2765b3159462aae6162329b3256a5e3e2f55e6741a867cab71d9a520f9e75f"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.ClusterOfferRetryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "769e6cb3534c4258decf386f5a4b76d6e8473d62c35315410c8b233870f83a8b"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.ClusterStreamFillCountTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "be2b2c8c0d8b635b9fd0bfefc6f06158fc8aa6231a158cdfaf661b096b0e74ed"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.GeneratedMarkPriceSourceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d08c5cf0108013680f03f9b9dcf0b60b93748e3aef23be6cc370136bf7294353"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.GeneratedPriceClockTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "fcd929ad0945210a5e28717e65d26cb91d41d7485d12d97345d0b1755a522774"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.HttpArtifactsLoadTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4b650c4c790c4028aaf01f817cf1e6a2e80845cb8b78c09e26e4c3ba874412a9"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.HttpOpenLoopLoadTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7115ccca2076d34ddd75e4b92cfb97fe6cd98d1d8591fefc9c48f15066fdea5b"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.HttpOperationPoolLoadTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e2b07c1d10c5670e9572cb60678af1b351bb03f2007d9cbdf608d4b48b85cb7e"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.OperationalLifecycleAuditTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6d791f84ac8ae77cd3a17cf34871ab9bdcf7a4703cfa19a948361942d37bd6d4"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.OrderBookBootstrapLoaderTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a12a6d58fe29e19a94db8b946ed9e8645c7308c4d8f3c08cd9106b53e629c21a"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.P10CapacityGateTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "49ca8fd1252d3466059e8b2e5f7b37ffcb4f0f899c565935074d449aeef9d9d9"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.StableIdentityLedgerTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b66540e68dddda20d3fe5ccc93ef04c0f2741cdbb10280c812996cc4995abbbf"
+        },
+        {
+          "class": "com.surprising.aeron.benchmarks.workload.W4LifecycleQaMainTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "251dc29eef98905caa193a5597c8d9dd28518891b56cf9116cc3b1e051c216ba"
+        },
+        {
+          "class": "com.surprising.aeron.client.ClientSourceOrderingBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "10237fbe511efe219f7100e9d3754328511c2e35a3ba6fae51c6e4572f2a9d28"
+        },
+        {
+          "class": "com.surprising.aeron.controller.CommandReplicationLoggingTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "fff160c4b615e2e506bb1dddde5b7ddb98fa11aa6ae4648793a4ae000183f767"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.AccountLaneCommitBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d11278c1824f0ded767c68a82d5d31854bcca6b9b35eaf4d459cc397e5f1be4b"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.AccountQueryProjectionBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d28728a3bbee6049ba50a7aad5ba01d41eb98067d9048a8ded43cc6dfc87d87c"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.ClusteredBatchTradingBenchmarkTest",
+          "tests": 125,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "262c14fbc2a7bf76c4037dd69f761a3b35f9fdba496160021edfb6c084a834b4"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CommittedReplayAllocationBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d74f6e29cfeb0a7c5809748a05fa44d174ebd83478935874cde3e5c45d1da3d0"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.ContinuousOwnerBenchmarkTest",
+          "tests": 30,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "f5f20dfadaf1a46446d85b3d810b3261adf05ab2f5d85ca181748dbbb3dab4c3"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CorePerpetualEndToEndBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2cb8d25ba7cbad0c2a96c3595fab627f2d32d24b217b96e62943a507b11b5fc5"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.D1BenchmarkBoundaryTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a01943ca9acbe907c8d30d0bc9dc581d022b39edb3af36b918862c5ef1b83474"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.DerivativeMixedWorkloadTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "5b15fcc090eba943e14a1b759c72b0ab84f8a351c91c8f1c13113ae11f3513ea"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.DerivativeRiskBoundaryBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a9a3a212d447241415a216aa38d1bb468c920ef0d140c8ebacb09d1f3987bfe6"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.FundingCutBenchmarkTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "42d1162bcbda269234904f6debe9ef7b2e687f59196119cd49b2860b1e7cd9bf"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.InstrumentPauseAdmissionBenchmarkTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "46681cbc148ded03b250ef627e21eaa26f29e3819b69df12b1aca89d1afdd430"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.LifecycleGuardTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "43e7ba724e82e694dd5bd9d4e87b5c033e1e7981b1a2e2ea110c905b324716df"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.LifecyclePaginationBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6ebc38c4c87bfdf47ad880181becde2de6ed9b3cb47cd7c3a02fefb67eede57f"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.LinearPerpetualBenchmarkSupportTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d933b6d1e5c31d7904401d6c41cf5dafb03536d3854f5e7589567ad6633656c8"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.MatcherTreasuryReceiptBenchmarkTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7fd2e3d775c75b752e8382bb7ec4284b794d7b7c4213d0b0b41b3603e82584b4"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.OwnerPublicationBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2cd3377f26664f4e8983c81d935dbcf745c5e1c6d75a0e17994eda0b1cf5b646"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RealtimeWorkloadTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2c98b4e1342f31a93c52b608c7779b11b510f6a879668b764ae21f196d32d95d"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.SettlementSolvencyBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e72fc66755fdae1e91aaa0b9d542edbc13f48de4d10d308fcacf777781ea8380"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.SpotMixedWorkloadTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "154eef42808de26ed343fc7de2b3dbe4caf8235673e1bf8f80cc68514ff22c10"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.TriggerCommitBenchmarkTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c5849129549dce62982e410aa0ce2f13f8d79c7a08cd88ce23d573ed66ae4e8e"
+        },
+        {
+          "class": "com.surprising.marketmaker.provider.service.MakerReconciliationAllocationBenchmarkTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6c33479ad7cce33fa578de512ad64774a81a439d5565b0085ac6d3af6347f0d5"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-aeron-tools",
+      "path": "surprising-aeron-core/surprising-aeron-tools",
+      "tests": 20,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.aeron.tools.diagnostics.CoreLaneMetricsPrometheusFormatterTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "423c00a490b4d938db27048c93a84606c5cb54feba4130efb20856e7a76ed1c3"
+        },
+        {
+          "class": "com.surprising.aeron.tools.reconciliation.ClusterFundsReconcileTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "5b2d86d83ea7a913fa96f6db3c4306426e5e7abf82e5cea7ed2875e42e6046cf"
+        },
+        {
+          "class": "com.surprising.aeron.tools.replay.OfflineReplayMainTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "87d210798a741f7b0388c94da151a2525c173d1b7813a2e4112101985f7838b9"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-aeron-service",
+      "path": "surprising-aeron-core/surprising-aeron-service",
+      "tests": 1595,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 1,
+      "classes": [
+        {
+          "class": "com.surprising.aeron.bootstrap.ClusterFatalErrorTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e721c85ff276284f30a73cb8fc4be99ec8bc7fdc77499e1e3d4f0159f73117bc"
+        },
+        {
+          "class": "com.surprising.aeron.bootstrap.CoreBusinessRejectionCodeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "9b4a6608946d1dc98d74e039ca449a7dae57e65c51855e8bb96a55784c3298d6"
+        },
+        {
+          "class": "com.surprising.aeron.bootstrap.SurprisingCoreApplicationIdleStrategyTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "af738f6ec4c3fb20d0cb3d4e9d3702312455aa180ef154c5faf1b62e526a217c"
+        },
+        {
+          "class": "com.surprising.aeron.bootstrap.SurprisingCoreApplicationNetworkingTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2998438a3c0499666ebd67c0f56ad036fc05eb883e4884887de4d35024ff2beb"
+        },
+        {
+          "class": "com.surprising.aeron.bootstrap.SurprisingCoreApplicationTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "07e6d61dbb61ba29bfd403222d33dd046ad1e24fcb817d2445e9e8cec1b57fd0"
+        },
+        {
+          "class": "com.surprising.aeron.bootstrap.SurprisingCoreApplicationThreadingModeTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ebfcaed6d5c4a640d25a237998e1b7b94c82975e5a178559c7061520df8227c4"
+        },
+        {
+          "class": "com.surprising.aeron.bootstrap.account.AccountLaneLifecycleTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "cd61cde13bb726e25f4eae685b2d323720709f4ea0aee7675824e861562bfb0e"
+        },
+        {
+          "class": "com.surprising.aeron.config.CoreConfigurationTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "9d8592bd14d51c4a88dcba083704fea04d04b6d3b2018e5f45491f0f9ec39d67"
+        },
+        {
+          "class": "com.surprising.aeron.config.CoreRuntimeConfigurationTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "42160df704908a4af043f9c924df46d2d8f443596e5a173c8abd854e82cfbe14"
+        },
+        {
+          "class": "com.surprising.aeron.config.LaneTopologyTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "be936e28ef03a3789bc7e0000e17f51263639dd87f9a27ee9c09f8445733f318"
+        },
+        {
+          "class": "com.surprising.aeron.config.RealtimeConfigurationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "429c2f5c278b6f8f640f4b5802f6a66c7f999a87b2de6775f5fcc9f722aa3b62"
+        },
+        {
+          "class": "com.surprising.aeron.config.TradingCpuAffinityTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 1,
+          "skipped_cases": [
+            {
+              "name": "linuxBindsEachRoleToTheRequestedCpuAndRestoresItsOriginalMask",
+              "reason": "Disabled on operating system: Mac OS X"
+            }
+          ],
+          "report_sha256": "08a18e387ad611450e8d86f772d274883a611dce8662d0f916019dc19805fbf8"
+        },
+        {
+          "class": "com.surprising.aeron.model.CoreOrderStateTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d2dcb8c7771eb61283d61787bcfa707995b580777569fe90b31727abf1376ec0"
+        },
+        {
+          "class": "com.surprising.aeron.model.CoreTriggerOrderStateTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c799095caf1aa9ecebfc5cb452cff004cf69e2d65d14837d2931560ad59062a2"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.AccountLanePendingReservationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c069a18d07229f21f17753b30ce47f9d584d913ccff898a5c4c7fc66e74ab133"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.CaptureBufferReuseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "50e170f0e2e6f815d007e383f203e2fd000ee6285eacc439c7854314fd318937"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.ControlLaneDispatcherTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "63a3f028e10c65e07ca1e683bdbef3a9ca1f735599f1765657540cb89747b8ae"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.ControlOrderMetadataLeaseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "dbdccbc9e77d7f54a94db404d4f180633507784931b9d439bc4ae51768458725"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.CoreUserStateTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "81bf897992fb2bcdcaa66d2d5f78a9a4d3b007b8eb73aa20a4ece734391d3e87"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.LaneAdmissionAggregateTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "f908dbb18645e6812a9f8e46c3267662cfcefe7d1eab0e69524eb8d014bd1f43"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.LaneAdmissionReuseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "251ff04f56178bf6f6f39289edf83a0088d76993efd4e20f0fa1956d074416ce"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.LaneClientIdentitiesTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "eb59efdd3b09b4c69a80d31458149bffd7912bf0cacaf837351e6010868592de"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.LaneCloseCapacityTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "00e8e2111b02db001ec839f9a771125df01f3e3d3e6caa29c3f2dfe3e6390b47"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.LaneEntityMembershipTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "3c62ce94d739252d61b8f508f6ffb3eac9b4b4f51d7a7be6ce432daa3f9bdffe"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.OrderClientKeyIndexTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e59828e5d52a8862195a0e9c8f2348e8b8c2f86f414573617cf0ab9a1755bb03"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.PublishedPositionCountTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "65c6aa6da64e85e2bea7395189407e690d034aa1b46aadc4752cd85af2c467e9"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.RuntimeLeverageLookupTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "32667e37dc6c4b233a5e9972e92b8ca9f32414a67a7ad2a2772ab42c18b61651"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.TerminalClientReleaseTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e785d74e719d7116166b5baac7c00662905a9e1e853323cc62eab69b9d6cf712"
+        },
+        {
+          "class": "com.surprising.aeron.service.account.UserIndexPageTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "88191c278ad56f96692e7e61fd3fe0246831c7cf9dfe811002b3be849546ab57"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.AccountControlTaskResultTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "87ffd5c84e3a463d80823ec6258508cae1577d419740d6bc11185068403b4020"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.AccountLaneOwnershipTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "9a568b00b2fa480b192f65d51175cb5b60b54e4a73ac8975c9dd5d922035380c"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.AdmissionSettlementFactTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "1dd7f379c7b5bf3764337745972e3ac0b6d046f9c362c75f191d5944936c0a63"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.AsyncAccountBalanceCommandTest",
+          "tests": 24,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "eefa2d23f6fabab5353ac2c48c74d384bde7f872347e444c5afc5087749a55c4"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.AsyncFundingCommandTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a28f03abf25a63f11e500beb2b370aaf9655fea1d87e793fc2566916ccb27faf"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CommittedDeliveryReplayTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b5b2e016990259786cddfee756d7ec3543208c9daf4c83a2343fc3bce9fa122d"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CommittedFundingReplayTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "afd317416096e920770b6f72018710fa43df4c90962244e2d3360780869ca482"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CommittedLiquidationReplayTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "3317f418d06ed467ddefc43c6816ede71f502015ef360bcd2d799333a4f889ca"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CommittedOptionExerciseReplayTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b279d2fa684251103bb3570b44349f351a365f380bf8c1dd5ef53a9c73d37b05"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CommittedPortfolioFlowTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "3c3fe9eedf1d1ff25774a8aef011d2cfeece6e9aa411ab1fba7d8bda001c4b28"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.ConditionalOrderSchedulingIndexTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d65a735402b51cd530aa7d7d782e9da46f0c5c8f87658b198c50bc2f6d3eeb57"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreActiveLaneIngressTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a6e07515cff48a0b4bd2e0a9b70b26f40d34c1226e2155f7037d8d79ff4018cb"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreAdmissionInputOwnershipTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0818e5636c5f1be2114fc2a6b8df7a29b9ace95f86a6d2bd61ede17ab14969ff"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreAlgoLaneQueryTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "be0d63b72dee1a115ba773653160812b3533a399cb31455d2107aab9af1cf287"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreAuditHashQueryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d2026dc2040e6ba7329cf7f99a1592c5edc49a6799850f7ee339a8dc69dbc8d6"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreBusinessStateHashTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "da031973214a458442b46152c5cde62f42709bc731c6632b5ed9d8fd83f54b89"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreCommandFingerprintTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7d6e964ba5c0cbaecc0da94d2866d3155e12502d9a3956a0fb0ec43c08847260"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreContractMathTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "304c95c19251183f817f9fdc13486f751975ecd28d7eb39f7bad5350c04abca2"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreDeliveryOptionFinancialMatrixTest",
+          "tests": 29,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "15cfb587a7cd3bb8e06f6f33fc358ca36e97f4946111acf86d0f0c4ec2a7b18a"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreFeePolicySnapshotCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "22ae747b4f8f303f2a050357105852e2383eb5efcacd3e0ab5d20e694f1a2bbc"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreFinancialLedgerProductionTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4ec2a2a33ef865b07f0a3321c6e89b9b9a4f35d18538e3916a02748226480af8"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreLaneMetricsBoundaryTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "aa2ff673420af674db82f7920eceb59cd84085cd092a6bcfd0106efa12c572f5"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreLifecycleStateTest",
+          "tests": 20,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "adac4f085693700ed85831b49e3efe4c0f54c438e507a472ccf275b15575261e"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreLifecycleWorkTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ebd82ab4c36efd0941a41b736044328dcdbc5f1d7f61f60e3e2cf81dac459608"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreLiquidationLaneCheckTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "36c811b1475d3397547da8337b82c6831913f8051912d790d40faffc6794c956"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreMaintenanceTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "f478f4b4b72904300c995a76e40122f10e1714d7ac27f2bc62449cab7405062a"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreMatcherLedgerTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4386048aacf9b5eaba58032f083b93d90d655934929e4daefa715f44243990a8"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreMatchingStateTest",
+          "tests": 51,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "f8e381ed63e4d21f07fa8eb2daebc8ea07aca007785902c0201327d6f85931a3"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreMessageFlyweightDecoderTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "510dbc79c512c89712f0de80b3c1033d3bc375f23bf795cc89538223ca944dc8"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreNativeSnapshotProductLineTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4083b0f191dab082137a05658cdbca4fd586967bd6e7571d1e04376d060d1ddf"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreOptionPremiumFeeFundingTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "8e25bbfe57b0428850e611b9a9b525fde1e70fb25fce8a81b539ad2ff5a4b39a"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreOrderDecisionResolverTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a33b870d76365a13a60b5da23e8419ae05f38b19f40dcb51ed84ff5870d31dff"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CorePerpetualFinancialMatrixTest",
+          "tests": 42,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "12cdb2ca4b65270a5412dd9ef5116384f263e2e80402dc66021532ed5aa77600"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CorePreflightLaneQueryTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "136f8a693957cb50c7b3ba5e5eae7654319270d8d3e7bceee5f0a2a193caaba2"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreProductLineArchitectureContractTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "bec165a3a2b1ad78c559051d6dcce1dbe2aa6175ec399504f6cd2e301205dec1"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreRiskLaneQueryTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "65553d114561ae83724a53e4e668d732f471f69045ec70b9e992df91550c930b"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreRiskStateTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "88b38ea06a8b446988638ca06d202bc9b1b8b730f6d6d1afab7fc8274eec9dc2"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreRuntimeBalanceSurfaceTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4c116d03a7ea06a1840e3b92a65c49bfe217301aa26a37631c29a149881e8eb7"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreSelfTradePrefixTest",
+          "tests": 42,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "3c7049153be4b5fcb8acd5ae095a9d326bf87bc28f227bb874efefdc48a4b673"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreShutdownFailureTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0f48f2aa318a2f38ea7a1ba0f22e3cc06c5245eae4163a1bbec1c1157f07f521"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreSpotAssetUnitsTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "07120b2abb733bfb3f0ee83bbf10d54c52a1e8a9e6a84a9511a6a9f290bfab75"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreTransferLaneLifecycleTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c2f42d94df4df28538974d7601b1a443768f95f39fd2c1bcae788bfec9c621cd"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreUserRevisionTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2ec4b2f64b2a839c2165ed4c31eb35c4b9cb081c9964b5fbfa89cb76afd4bde9"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CoreValueValidationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "bb485a256713e55740ea647c926bb438062f7dc04989209d7208e61b62985b0d"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.CrossShardCancellationTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "065f7cfe8057b9edf6ce3e115170e33c7707727d4de7ec7f2f0cd5b8a09a605b"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.ExplicitLaneAccessTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c492df67714fb79884b70c50518ec06c0e916ecd0393d9386f1f3ffbf6232cd9"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.FrozenMatcherInputTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "923ee320dfab1ec460227352cd27dcda5d0d5d7538b9b72170a6188e0850ebbe"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.LaneSequenceQueueTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d96fa5ef673d585b757768226fbf3f90704124081225c90c2e25b2d4f270ca69"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.LaneTerminalSummaryTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "082e08b805d63e764719eb09a4aa7bb37fb773f04da5c1be982baade4e990f60"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.MatcherCommandPipelineTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "eb1341abb98ffe2b4657e55e4f1521224555500dc2432351143656ad20b8c372"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.MatchingNotificationProbeTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ad4292066120825af1ae19ca2b420ff15704b72773c5b9813c6ea74b00ad6194"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.OwnerIndexChurnTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c836d597688630d897dacaf41c76e6e3358fcefda994bc5a1abe94d3e4ded77e"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.OwnerLogContextTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e959730d185206009f777c165f7ca4f4a468970747f448c8a07af8fea77386a6"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.OwnerPositionRetirementTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "1d31920d711d66cac5075075ed3834cdc2ee620c4422ff560fbf1aacaf638572"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.ParallelRiskScanTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d02b665ef430ca0cf7ea73ff3c241ec625c4ee90d47563b59ba14011b2f64d7d"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.PlaceLaneDecisionTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e7e1edd30aa8435795f5b073bb9740a8eec2be894db181cd3d2b98975542a57b"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.PrimitiveLongChangeSetTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "1e3209d39918a2a4f1c619c277a7caa3adbf9619cee2b2a9a5bc5e3325692015"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.ProductRecoveryLifecycleTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7fb26134d089bcd86dac5f84c0a1b220e26c32adb1d687b470d08b3db3cca337"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.ProductionSourceBoundaryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a59774cddab3727b6182562cd16ade8094d6362bf71241e5e5954f99c8ff40ea"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.PublishedSnapshotRecoveryTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0b507eefda671ef3523a1f48984cef48dd834286d38d74c3b7322426b619413b"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.ReadyLaneNotificationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6c3e2efdbd2ce62378c7e05951a789b0907e1f9a89ac90ff994ebb9354412c74"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RealtimeTerminalEmissionTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "1d703129a7d9e775fc982a531fb58c6ed8523ba275f8497c6a147bd950f8e2f9"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RiskBatchBudgetTest",
+          "tests": 15,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e55c6646723c21759c73b05a4664cc3518c45c4097e60b66d14aa112bfead626"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RuntimeChangedIndexCommitTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a36d6cfced0097c978a09e960648b8b73b710c9c565aa14bc52afc7d47d18d09"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RuntimeCommitRecoveryTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0627112b12716ca78614b1b06b77f5a97d329a8deade860f3fe7f42fa579095a"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RuntimeExecutionScopeTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "aa5fb44bf6d46d38c1a1b6222d8061ef1e0f4955410233a5f1b7519998c0e4e6"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RuntimeRiskQueryServiceTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c6c61882151e81c2de7f8121af429783fc3fad67b66070ca1ecde32577809548"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RuntimeStateBusinessRulesTest",
+          "tests": 37,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "155718d61c1f86da855d7fad65e438baa394e673f025d268332f52217c740f85"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RuntimeStateQueryServiceTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d5c8ea2c5628b441904f955d6aada053c799928f3c1429f20560ce1214ec3ae9"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.RuntimeStateTransitionsTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2bb60f97313897c707c947f73fd891617294c8ee4eec3950d08d4622f19a8309"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.SectionedCoreSnapshotCodecTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e97e4ae7d8d3c419bb735c7312f31292efc89e8d280a63056d9c41fc5c9c3381"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.SettlementLaneWorkerTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "396a1abf023ea7cfffc0c72eb7048873f6c0bd17b642053d7faedca290205754"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.SharedProductLineSnapshotContractTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6bf737d544cb20ba17696754a4f7707fd0ca3ef819e9ddcbb352520161166693"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.SystemLedgerFundsValidationTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "24a18e4841710f3204a88a7076eab3a854fb21d2da3746c6531147e8ad23bf81"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.TradingAccountRuntimeTest",
+          "tests": 58,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "fe9d541d4cebdac711d823a1fb1f60a51dda2d96a44672203b6f497b69821fe4"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.TradingCoreOwnerTest",
+          "tests": 44,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0cf2bd999288f284f00cb60294efa0602e05ddd75a4f63fede4ea8c0396917c8"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.TradingRuntimeOwnershipTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "8608fae1d708f9716149505d15c01dfd4c8db753b4ea559a04f86fce784e5d1b"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.TradingStateSnapshotCodecTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "37e075d5c503b98e0003ffc54b5f00069cea82cf5f2a3eeed590f1c99401a7e9"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.TransferLaneCapacityTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "86023c1109d85ad8131075befbb4ab3018f694757d3cc344cc3c85a1d88bb746"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.TriggerOrderIndexTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "335157be1ee8d2f67473a9a45cd351fb8c1f06b51ef5e22c5962ff39d0d8f476"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.change.CommittedIndexVisitTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "5f227bcbc9cc5e85fa4aeccaff7a2e97daf41897f838063e4e8799e692f79e28"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.change.OrderSlotReuseTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b02dc96e656cdce8702da734faf06752fbbe63db1508be824267b5e78f7de269"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.change.OwnerIndexedChangesTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "9e8b924ce7c265ee36f3f207f318a38d111a648339529992c45e852286e29e99"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.change.PositionPublicationReuseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "892082ab871a9041417bb46e28e90843b51ed05a2cd3562d20de2ad79e3dc22b"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.change.RuntimeChangeBufferTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "06a30de4a19e262fdcb0510c13d05c331b966c309797291d352fd7841b28cc10"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.change.RuntimeIndexedChangeBufferTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "5100f4f9a82f6270531b1315cf6eba5c842acdb16c301e9b14d00e37da6a7739"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.identity.RuntimeIdentityRegistryTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "66a51fdd96585153ce595d836c0980ac2be6916a0cade4db6c850a97df7ae24f"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.index.ActiveOrderIndexTest",
+          "tests": 11,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7dda48e5383474087dc6b11d278f823d0c0d4bd38abbbeca3289f90498a39730"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.index.AdlPositionIndexTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "db93a7395384120b9ca1ac5d4cec832d43fd5264df88a85210768d1df98105be"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.index.LedgerPositionPublicationTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b4b6c38cde2a459f425cf2e340f43b0922f0fce5210d47962c21f6b9b0ec55ff"
+        },
+        {
+          "class": "com.surprising.aeron.service.core.index.PositionUserIndexTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2a7ee6ea9a73e773483cc326ff004784a3aca95275e0b2d2bbadebbcb0e180ef"
+        },
+        {
+          "class": "com.surprising.aeron.service.fee.FeePolicyBookTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a3a4beb3e24b0bad37d25dc2562a5112490d24d80de7dc3146effa6648e5668a"
+        },
+        {
+          "class": "com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapterTest",
+          "tests": 28,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "24660fa5f2b864b41bdd7742cd3c7f0c3765df60610dbe20cc2b80d10621af4b"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.BatchDecisionCaptureTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "61ecd84091891ad58d7cfcae0e95f61a717101fa1a2aeb8f40b20366621f85d1"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.ClusterCommandPipelineTest",
+          "tests": 326,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6e0dafaf0d66ade98f4739f0ae23b4d3c8371e051eca1f22f8702377591bd7af"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.ClusterCommandWindowRoutingTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a651d557fb9aa7ab97f0976188ffcb97536dc0225414fb2652ebdefa28eedb33"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.CommandSlotRingTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0b1730e1c451c26a3576fc40eb5718758a944a634541e10f577cdf8d170b9609"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.CommandSlotTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "f7dc20411db50392d37baaf0cf053fcba8bc3d9a89d0de227de1a3046985c5f3"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.CoreOrderedOrderBatchTest",
+          "tests": 42,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "df4bd0b7ec9eeb57de77ae4b91e718fb65409857dd5d2edd839d81efa8e8c0f2"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.LaneReplacementResponseTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "60dd84c33bfc214bdbdc6f7e87ccb960ac08cd1fe26368b3a47071eb6c0660f3"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.MatcherPipelineGroupTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c1373cd735ba42e2ad6f4af5291b6dcf8fbc4ac5bc13599d79a2bead9eceb2c9"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.OrderBatchSlotReuseTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0e15ba243fe815d257762cfdc83ab0c264e5d0e8e52da1f3c44b519f66090384"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.OrdinaryLifecycleOverlapTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b33c8d22205c268d916a68b2ceae2708bf3c4b785f927c5521d07180819aa51c"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.OwnerCommandPipelineStateTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "79ce71ccf42d028f3a1cf16ae574ceb0f87be4ba3294d52a96a2ccb29bcd7303"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.PendingMatchingRingTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "61e74b9b2d6d368296f5d9de43dc389fb5e7a200546cf1e6585b9406e076df30"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.admission.PendingReservationSequenceIndexTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2c59c9bfb4f358402d48b191b3e44ef584eed2336ed304cddec768c9f139595a"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.admission.ReplacementAdmissionEventTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "317416f6ebe4dc91db1eacbc2b5fe1d4113b63133972366a3417f63d717c82ab"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.state.OrderRuntimeTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "d72f6ef9f0cfdf5540d5dd0aebe02e17bd423d72bf6f588fb46a8a9aa4cac90b"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.state.ReservationPublicationLeaseTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "29697783681dcd39dc629a9ebd9300afc9c90ee521d087a32cd5b02afd0703f2"
+        },
+        {
+          "class": "com.surprising.aeron.service.order.state.ReservationRuntimeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0439c2a8b75f8c0f526e140102b416e9eb1f21abd6cf71624eee1a8141c78395"
+        },
+        {
+          "class": "com.surprising.aeron.service.query.CoreAccountLaneQueryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "47f513bd297bcab9f9c4639da34fd5c7886b2eda583696d3bf92ea2230bb7add"
+        },
+        {
+          "class": "com.surprising.aeron.service.query.CoreLedgerQueryTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "17a2b4c091dfeeef16d74ff2433bcf8847731ec2af1bb1d87239c86696b2035d"
+        },
+        {
+          "class": "com.surprising.aeron.service.replay.CommittedPortfolioSnapshotTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "9d4e752d57cf28b4a9f2b84f9502f7043fdd3bedc927bee760ef9b0e9f901d94"
+        },
+        {
+          "class": "com.surprising.aeron.service.replay.CommittedTradeReplayTest",
+          "tests": 17,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "dc8efbaef160ef7c6f2da9c531e7e2bd4c1ecb467c6e490b40ac0717951eb2b3"
+        },
+        {
+          "class": "com.surprising.aeron.service.result.CoreResultLedgerTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6c57bba8c5b46aab75d8753cb0f3d37fb6f1901366a6b1f42fad41994d757ae9"
+        },
+        {
+          "class": "com.surprising.aeron.service.result.FundsCommandIndexTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "6d030394dd01dba237e9a9bc7a7fb10fcaeb343bc8237765c979b93f2057b403"
+        },
+        {
+          "class": "com.surprising.aeron.service.result.ResponseArenaTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "36a12b1d6ca72db0fe38e8c691ccc55409565c5663ab8a6b85624201de0d08dd"
+        },
+        {
+          "class": "com.surprising.aeron.service.retention.CoreFundsIdempotencyTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e20988b7b6c8e518677d9eae031f7b93d8b044e9f5bcfce4b47555a01b922975"
+        },
+        {
+          "class": "com.surprising.aeron.service.retention.CoreFundsLedgerIndexTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ccdb5cb8a4f38106123c2fcc2ab50d3e855f257155324b643d012393d9840784"
+        },
+        {
+          "class": "com.surprising.aeron.service.retention.TerminalStateRetentionTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "9107a32461ad28d0b9c83ac67dd6b021b0f336e61f4f3d6ca2e1ded32e772cf6"
+        },
+        {
+          "class": "com.surprising.aeron.service.retention.TerminalTombstoneStoreTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ed510603d49c5b7d27a62b687ed66111cecf9b877322ee307c5b8a89fefc0b76"
+        },
+        {
+          "class": "com.surprising.aeron.service.settlement.MatcherSettlementPlanTest",
+          "tests": 16,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "1fc9e14cbb234041cecbd02a9aab9d6e16cedd8c1dfb8112f718188fd1656316"
+        },
+        {
+          "class": "com.surprising.aeron.service.settlement.MatcherTreasurySettlementTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b30160a9c6acb566fe753bca420c8ffaea63614c9d3be3506f28007119a29d12"
+        },
+        {
+          "class": "com.surprising.aeron.service.settlement.OrderBatchSettlementWaitTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b51b5002113db9cdde3a71a3836accd6d9917c624141b21c71602ac9265fe3f6"
+        },
+        {
+          "class": "com.surprising.aeron.service.settlement.RuntimeDerivativeFillCalculatorTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c8789dc712addaf28d479996f3c10ea5647b5900a6e0fd078843b79190b686f2"
+        },
+        {
+          "class": "com.surprising.aeron.service.settlement.RuntimeDerivativeMatchProcessorTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ea19bfc468e50b80dd191a026c8d377517bc7536375078d9bb3cdc1e5d1bde76"
+        },
+        {
+          "class": "com.surprising.aeron.service.settlement.SettlementChangesReuseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "bf77e4fdf67159dfe79c72854f7a206ddbff18c231b0f71f927c0864c0aad495"
+        },
+        {
+          "class": "com.surprising.aeron.service.settlement.UserRevisionReuseTest",
+          "tests": 18,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "7ef10a417de4b68336074eea85178b7a3e3abff1432d7c8da71d728d1a391f45"
+        },
+        {
+          "class": "com.surprising.aeron.service.snapshot.state.CoreTransferSnapshotCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "512665284018654988a27054465e6c853c90eb0a65716b7c55de686f78cae578"
+        },
+        {
+          "class": "com.surprising.aeron.service.snapshot.state.SnapshotFieldEvolutionTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e6ea044647ba1595ecac164999903f7c2cc8e8b0a875ffe826c161b73f890c6a"
+        },
+        {
+          "class": "com.surprising.aeron.service.snapshot.state.StateMapSupportTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "bccb613fc8fe40cf8c21d1b89f7ae31724d1ec2824170ce697f6b8c1ee0191a3"
+        },
+        {
+          "class": "com.surprising.aeron.service.treasury.CoreTreasuryStateTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a96c557d57fe56201677bb7b3a7518bcd6e31a8cee2d9a94cec8ea9ced937d62"
+        },
+        {
+          "class": "com.surprising.aeron.service.treasury.RuntimeFundsAccumulatorTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "fc9a68ed3b0d9d49085445698c4a7a6973816e97121894401f10c5881c693904"
+        },
+        {
+          "class": "com.surprising.aeron.service.treasury.RuntimeTreasuryDeltaTest",
+          "tests": 13,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e16e2c883b58f8e6db0baf17e8785a5ce9d84cbf91d83f448fef263a4d08485c"
+        },
+        {
+          "class": "com.surprising.aeron.service.treasury.SystemLedgerControlTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "33b28bafba1e334673e356be15fada6a63a6eacf1ec1190705680206b1e0187d"
+        },
+        {
+          "class": "com.surprising.aeron.support.egress.BorrowedHeaderEgressTest",
+          "tests": 7,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2cf7a0c3c9361b2a2a10d77b2723025d98dc7287f5820099bd5878d76ea3924f"
+        },
+        {
+          "class": "com.surprising.aeron.support.egress.DeferredSessionResponsesTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c4a3594cf4133a367147ce92de5e65c6597b3e0954d0387c1e29f42844efce69"
+        },
+        {
+          "class": "com.surprising.aeron.support.egress.OwnerSessionBoundaryTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "44d413c5dc9d1571db043ae4987b3ae81b4e7952f5ea50d4ac5a2fe8f0e151c0"
+        },
+        {
+          "class": "com.surprising.aeron.support.ingress.OwnerIngressRingTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a8f28660c79094ea4fc49525f15bfe8cbef2a5571fe507bc82097e29f00c498a"
+        },
+        {
+          "class": "com.surprising.aeron.support.ingress.TradingOwnerInputReuseTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "189036d7781d41213cb76176e23b7eaead3e5f250f03406448277dbab55dcd6b"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-aeron-client",
+      "path": "surprising-aeron-core/surprising-aeron-client",
+      "tests": 69,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.aeron.client.AeronClientAgentTest",
+          "tests": 23,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "3400e8e8027360e2c8f68f460aa89053bddf862b1b370fb5552d9b7760dfa77f"
+        },
+        {
+          "class": "com.surprising.aeron.client.AeronClientCapacityTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4dbde5ac1fd6be5f30baed6357d7478d118bc3133a1f4b53788c2879d7bafafd"
+        },
+        {
+          "class": "com.surprising.aeron.client.AeronClientPoolTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0e2b0f66018166e0409a7ee770014e62d9446f7f689dc17afc7e8496412ea747"
+        },
+        {
+          "class": "com.surprising.aeron.client.AeronRealtimeReceiverTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ef722c599ae10885e4755edd35e4dd57d85599789a27f6f355e3afd113e287b7"
+        },
+        {
+          "class": "com.surprising.aeron.client.AeronRealtimeTransportTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2bc593f678e70a2341700d2a092b9e307196cc001e94a34516c88ed02a3e76f3"
+        },
+        {
+          "class": "com.surprising.aeron.client.AeronRequestLeaseTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "551797df14f4b90912213f7c126cf2c02795e395a204478e7b18d01153411eda"
+        },
+        {
+          "class": "com.surprising.aeron.client.BorrowedMediaDriverTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0a1f224d25759ea4469a85f1ae0721c3c7457ee5a6286d722017d50b9355c020"
+        },
+        {
+          "class": "com.surprising.aeron.client.CoreCommandOutcomeTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ac023a0f1f3b73bb7f44db9e22d924aae0a5732647b690420d5d2125866d28ea"
+        },
+        {
+          "class": "com.surprising.aeron.client.CoreQueryClassTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a516d36a5a2536230c8f9fcd431de1260f3962436c6a750934c79dc6a3f563c3"
+        },
+        {
+          "class": "com.surprising.aeron.client.RealtimeOutboxTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "980e4e00ce5fadd539b10a005bea564cd71ef1213e85ab73cdd446d72026966a"
+        },
+        {
+          "class": "com.surprising.aeron.client.SurprisingAeronClientConcurrencyTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "625bb8a9ca95b1bfe3eab9669723d1501e7326bddfa08a64f5bafd2bbcae5e1f"
+        },
+        {
+          "class": "com.surprising.aeron.client.SurprisingAeronClientMediaDriverTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "c51cb333f391bd2d66ff4e7a1863e2baccb5239fbcb542d5dcfb7d100abfcc05"
+        },
+        {
+          "class": "com.surprising.aeron.client.SurprisingAeronClientThreadingModeTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ce275d9412f8cda8dcdab8074a7480aa065b64bae47107ed737ef723c88637c6"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-aeron-protocol",
+      "path": "surprising-aeron-core/surprising-aeron-protocol",
+      "tests": 258,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.aeron.protocol.BorrowedResponseSlotTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2970237812d61c901a32d92a9d3f813ae11718a7aeec3aae8b0ccd447260cdb5"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CommandFingerprintLeaseTest",
+          "tests": 9,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "fc2b427b40b1b3a3bda2f2db058f0e9869eab1a568c69b87cdea0c909de7c5e3"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreAlgoOrderCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "5766720085f850a2f3554831787157d82b84bbd20123ca36ac9053a0c92f5323"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreCancelAllAfterCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "cd4716f3ae5c6344051abc2e6fb2997151ce921439025e19f499ec92520b3952"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreCommandResultCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b91be2533719e8273ffe0afec0e8719cbbd196cf8aefa8f3feb4a6ff9b1c136b"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreLaneMetricsCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "1e775353560dec48bdc1c27011cc500ded6d5c22cca4d7274e869315d115a68c"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreLiquidationBatchCodecTest",
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "cd82bb2cc953f21c90c546a7d4808cbc0abd152e28440546dec6c4eef8fd1c3b"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreLiquidationWorkCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "db8e03512b70a87064852bdf294c6edc57cce94f9e1d3118d4123d81e089b118"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreMaintenanceCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "671ac459d3cca8551c0f67de300a27e121686efa256619495aa5e645c6dd68a6"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreMessageCodecTest",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "8c2c3f287e9a8c0f518037aa70709f9e4972738dec2b2492b4a43cb6a8e78fad"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreOpenInterestCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b3ee5c2a941afae4abcfca8a75085879b1dc49bbdbe0a893d1f8542c0af53662"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreOrderPreflightCodecTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2233017af48954e713cc267830162a65636b765b91bde184a8a1089aafd254e3"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CorePendingTransferCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "93bcef348b3166691ed549a021d9a7c52099481e6eac28b90d3e26c55d61525e"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreResponseTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "69e0172228242f7f1c90ddeb03da7b5741ff358d8696d494726f11f479b5548c"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreResultCodeTest",
+          "tests": 114,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "830dc08b63fdb3d1b8b4b5c64a5fec50425610e94553d7c1d1d71c416b5738c4"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreRiskQueryCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b3590a83ac16b0f76fe0ec294c40219340175edf5dd80871756662bf141d9fa0"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreRiskScanControlCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "787e552c75aa63c6927b84a485e80c8a75e8ad5e0194ef31cc74594033c6b77c"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreSettlementProgressCodecTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "b5c7e8d993d8fd421f14626858bd823a53d82307ccdde6d662955d143f7afb27"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreStateQueryCodecTest",
+          "tests": 14,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "03ded8301779fac3b8b471b681f3ce6a3ec0a3204a30eee9385d52a2146eb7e6"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.CoreTriggerOrderCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "963d953196a06fdc277caafe1c1f3342391c3e65800060667eaa338dc2972a2f"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.OrderDecoderSlotTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "68ca60f7edcec07345510cf691e57237fe5b5307a34901ebe751177232a54a91"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.OrderExecutionValueTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "cac0963125350e6e6982d85ba33dbe8564d33aa189c53514c1bd12c8d6ede0ec"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.ProductLineClusterLayoutTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "bc115b338f00b9ab3d345a2567c01fd3a542a6c32583107d245f7629ad537b5b"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.RealtimeFrameCodecTest",
+          "tests": 5,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "20af88803f838d836e21acf295b48fa592d5449594b3ab548eb6d72c9045124a"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.RealtimeWireCompatibilityTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "33e7edf2a6d105661b9fa89288a0a4b460ba8c77ed5c761901f411ad0db3ccd1"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.TradingCommandCodecTest",
+          "tests": 29,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "602f3ce24d21af486243687a1d2ac9f7b19947884b25b0f3223d011c017e61c3"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.TradingOrderBatchCodecTest",
+          "tests": 12,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a8a3115f9b0ee8d8b69f6b06eafff7428fde16d3fde72fc1134a0cc5c49508c1"
+        },
+        {
+          "class": "com.surprising.aeron.protocol.WireCodeLookupTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "efc6b00aa8835f18cb93b31d30e63c9f288f2e6da7da6a02846c8242d04534cd"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-trading-api",
+      "path": "surprising-trading-api",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.trading.api.KafkaSymbolKeyValidatorTest",
+          "tests": 4,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "26bc2498b77a667baf33a2460d187a427565763f0f86934079ddf6e1e315b549"
+        },
+        {
+          "class": "com.surprising.trading.api.client.OrderRpcApiContractTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "a16ee98937ba10fcfb880035cc63af9daee89f53fe31793a5377c3cc1870e9a7"
+        },
+        {
+          "class": "com.surprising.trading.api.model.MakerQuoteInputsTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "ba9cfbc14ee2d8211e15a1b2498598c5113fd5de02d99ce6779e7bcdb99173aa"
+        },
+        {
+          "class": "com.surprising.trading.api.model.OrderCommandReceiptJsonContractTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0b98f3825aeae975273fe833c68c9c76f9b742832b079eb384348483602a82f4"
+        },
+        {
+          "class": "com.surprising.trading.api.utils.AdminCursorPageTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "79a0652c89d56e4d5d33c2ea07252064fbadd9a2cd7a6608d147458c398ec4d9"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-account-api",
+      "path": "surprising-account-api",
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.account.api.model.AccountTypeProductLineTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "53e402ce8195e0da081d92884af8d866de5fd4018546440f792f61d63195efbc"
+        },
+        {
+          "class": "com.surprising.account.api.model.PerpetualAccountStateUpdatedEventTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "89a72eed30349ed1e103a9ff658a3b710e1f9196a4f6beaddba60d7ed9e473d2"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-realtime-api",
+      "path": "surprising-realtime/surprising-realtime-api",
+      "tests": 40,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": [
+        {
+          "class": "com.surprising.realtime.api.PortfolioIncomePeriodTest",
+          "tests": 2,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "0a69e8489a666d56cc098c794b06ac0a676cab5aca5334fe4f9d3ea12c2cb62c"
+        },
+        {
+          "class": "com.surprising.realtime.api.RealtimeDeltaCommandTest",
+          "tests": 6,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "2d1512ba771984a5c59d605aa6480eb5d7bab9cefb0667905a5c5952201f4ad5"
+        },
+        {
+          "class": "com.surprising.realtime.api.RealtimeVersionEncodingTest",
+          "tests": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "e19ffb5fe0054864bc13867df603c26fba31e31cb1199a29555b8eb7ae4e3905"
+        },
+        {
+          "class": "com.surprising.realtime.api.ValkeyReadViewIntegrationTest",
+          "tests": 28,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "4450ea056068b4b5f2504008622606bfb43d7e434489642c18d260f6c301bf53"
+        },
+        {
+          "class": "com.surprising.realtime.api.ValkeyScriptPipelineTest",
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "skipped_cases": [],
+          "report_sha256": "561878a0303999ff6fc879665b1872f5c309437fc7e97ade8039813ef269cbe8"
+        }
+      ]
+    },
+    {
+      "artifact": "surprising-parent",
+      "path": "surprising-parent",
+      "tests": 0,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "classes": []
+    }
+  ],
+  "coverage_note": "Union of the complete clean reactor test execution and the benchmark correction execution. No claim that the first package command succeeded.",
+  "java_source_state": [
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterMixedCapacityMain.java",
+      "sha256": "82d15e2666dfee45ab86ac3bb4df51bc720c23acdfd898e88eba4a49e3a3a716"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/AccountQueryProjectionBenchmark.java",
+      "sha256": "005a902e6bcb209905e8563c89aadb2f4d0fecf4966a3f7f1f0bddbbd8445c53"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/OrderAdmissionAllocationBenchmark.java",
+      "sha256": "c5eb231bec4d351d5d7f2d24b1cb649a13c9cb66e41a14782bd18566803f741f"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/core/TransferLaneAllocationBenchmark.java",
+      "sha256": "da1dacdbde76e6a70d66bc61a5156e6e38d921cc9246e9b23d180d8c30e7577b"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/treasury/TreasurySettlementAllocationBenchmark.java",
+      "sha256": "8f2b0b7d532921935b2e5dad7c858cac8e3f8e10f5b046574374443e7fdeba42"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreLiquidationWorkCodec.java",
+      "sha256": "2a4c70f1076a93df6109121d61cc78fc81c5667fe8b0a4603a6003fcdbd777f7"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-protocol/src/test/java/com/surprising/aeron/protocol/CoreLiquidationWorkCodecTest.java",
+      "sha256": "f332cd147a2f93cdb82fb8d6dc44393f19ceb958bb946b4b0f1017f9a5dcf458"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/bootstrap/account/SettlementLaneWorker.java",
+      "sha256": "a737662ac596390cdabd4505d593d802de793485ef4f57bd7b116a6a41f716ed"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/config/CoreConfiguration.java",
+      "sha256": "a758509ee9c38d99df06b1db735b8f09e4417bbc85214f095d36beaebf819fff"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/controller/AeronTradingClusterService.java",
+      "sha256": "65840df51a32707dc4c1953cb3847ffe1159386c580337a8ae0187bd4df7fd4c"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/CoreCancelAllAfterState.java",
+      "sha256": "42aace7266470d38c6133c201b8990bd5618abcd945dded008f43992c373c2c9"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/model/TradingCoreState.java",
+      "sha256": "fa6eab3d8264ce7dd90778f6d4380200a0e705f808108c56c976d713ba5dfa5e"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/AccountControlTask.java",
+      "sha256": "37040eedb034aa86cc615dfc85e2bb03b557ee222d3ea2aa6a587ceea1f34e78"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/AccountLaneState.java",
+      "sha256": "84ed56e8284bfbd422f4399e5836c5b2302394982fa8a130c430a97170a77506"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/BalanceState.java",
+      "sha256": null
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/DerivativeAccountCommandProcessor.java",
+      "sha256": "e72bb715b9a227ee1a808b4ff373d40c9ed2b6352df2fcba7626222b1b088dd5"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/LaneBalancePatches.java",
+      "sha256": "8870c36ccc0fd8ffe006746887de5f16baec46169a5b695098392dfa355dfb94"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/account/RuntimeAccountRollback.java",
+      "sha256": "c5049ef4401b82507615a4b170dce05cdf846d7f10191cc835f8d803b6dc86fc"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/adl/RuntimeAdlExecution.java",
+      "sha256": "f3c0dbb6f92d6b31992996bd897ce5580bf43eacbb8b9caa2fb889197824453c"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingAccountRuntime.java",
+      "sha256": "82f41cdba00ceb4ce253b7d55d8d80e73f1e1b7459b2b831cd155ff3db462a00"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreOwner.java",
+      "sha256": "c998f860ec4d0b8883197af704f527e2e30a32469b47cfb264fdcdf7def0a55b"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/TradingCoreRuntime.java",
+      "sha256": "46e1f6706507f67823335954c9ed54076f583bb165106d89a0779f4614a5ce60"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java",
+      "sha256": "d8f1db6c4e533edb713ce2758e5c11b0cdadc6e36d36150282f6723ad5f537b0"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/identity/RuntimeIdentityRegistry.java",
+      "sha256": "ba329151ce5cab9fa960ac5f00723601d67b367198edea7cb2b0f59d977f2fec"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/ActiveOrderIndex.java",
+      "sha256": "2409bc715afea35fc5e03cb374f37ffcfa438944a93ae8e8d558d519f9c62066"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/index/RuntimeFactIndexes.java",
+      "sha256": "7ad7c92f73d55900a5d76f75e222d289e2e40107ad18ceca4bdfc8e53c2f7ae0"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/command/PerpetualFundingCommands.java",
+      "sha256": null
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/instrument/command/InstrumentConfigurationCommands.java",
+      "sha256": "a53f8e8d7aa572cfee97a621847c124352bf146ebcad7b4a2d645f0f92b96b50"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/insurance/command/InsuranceFundCommands.java",
+      "sha256": "9a778a219d4366fe2a26e850ae6dc33f1ac459e0f170df7f5852361eaa54e77c"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeDerivativeLiquidationProcessor.java",
+      "sha256": "2dda86cd24e0c76bcd7e7852e63571808e8eab23bb90160b65e3b1d1511f9606"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/liquidation/RuntimeLiquidationResolution.java",
+      "sha256": "08fa9e8b6f97d6301346ebc6fd4b34d863947639e5812618a68f13433992c128"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapter.java",
+      "sha256": "1f2b04b8c49cde4d2c0a83de68e1b87503c99c4b668e1c949b1c6bb4b0babbb7"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/MatcherEvidenceLedger.java",
+      "sha256": "9152f36ef09eae7dec5185cf08facf92658ba806fa172651fcbd6e2cab33d1be"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/matcher/pipeline/MatcherCommandPipeline.java",
+      "sha256": "60e657d153bb415ed4722dc061a31384b5f94722d477b080ff04a9ceee729c11"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlot.java",
+      "sha256": "af0491a8e0f10aa0506928e493d775012a580b3b51288be90313424ac638b480"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CommandSlotContinuations.java",
+      "sha256": "1c54ea9ca8934bc39e0f83f97e022619ae43ef83e1b81dd35e0a4702ac7fec8a"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/CoreMatchingFlow.java",
+      "sha256": "2ee8aa4e4022745630beebefa4b9fbfab62e34b18889170462c50e0f2cb4e137"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/DirectCommandSlot.java",
+      "sha256": "3f7b602717a8961009194ae5ab35c4dcb4f12aec92ae1b9df3273fed78a4cfce"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/MatchingCommandAdmission.java",
+      "sha256": "e21dac10812ede81eb551415986175a6c035e5488492b84a7b7daae32676cad8"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/OrderBatchPending.java",
+      "sha256": "4d8631034eb25a1ca907bd02667339a8795982af40b5778c7d73d53718693556"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/PlaceAdmissionEvent.java",
+      "sha256": "ca70874a45108e86d96e7c66673fa2d1c0e1c09ff1b27df68ecb282e751ce821"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/ReplacementAdmissionEvent.java",
+      "sha256": "12eb2f0eed0db4a3d5eb47b32e8dc778b79381de11ef031476f26da43a3114df"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/ResolvedPlaceOrder.java",
+      "sha256": "36547d10afa20c2187cf5d3a7c9d6043fe28bdbef740b35feb000f0df2d22af3"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/admission/RuntimeOrderAdmission.java",
+      "sha256": "b24bb54048bd63c9507879feee3193aea26193b98930b35b218ec5e00fce2983"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/CommitPublication.java",
+      "sha256": "ae160f64301d24cae0c4ba134aca33b4d1f492b6c8d56b26d9a74d64ab478fa0"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java",
+      "sha256": "6b650a3c1a40ae2de4ffaa7b234d8e14d21402fb12b079189370d0f49f1d0ddc"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/position/PositionCloseCapacity.java",
+      "sha256": "58cfa4d9dc430a30667f5e5b3d99bb15407239aacfac4ebf8d23b9fc45d9f2e1"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/CoreQueryService.java",
+      "sha256": "3a1eb7ea2489a2f78d3edffbc8e1659f64d683ce20f671044aa1312c94a17852"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeLiquidationQueryService.java",
+      "sha256": "1577275f79712e18b9b620715ed638d8d8b3af5ee9da8562589ec14839ab92be"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeOperationalQueryService.java",
+      "sha256": "e31e776476c66b21293332d37c46b1e0188d052e717dc791648e8d77d7344698"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeRiskQueryService.java",
+      "sha256": "1df09bfeb14a464900aed08f2ef3e65ebd30a98abed787e4db80e335807f3c06"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/query/state/RuntimeStateQueryService.java",
+      "sha256": "6a03d3351050cab353f998a84226c1f56dbfdc06d628e4f1375372ffef3aa63d"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/realtime/state/RealtimeStateCapture.java",
+      "sha256": "794ebd4a8f64892c8f897220618b88fe5a4273859339e45d2a018862e3f8a862"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/replay/CommittedTradeReplay.java",
+      "sha256": "3da45b9c94e3e5765b9c3279dd9ffcbec81f86cf29295373bfb02f1395b65c62"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/result/CommandResultBuilder.java",
+      "sha256": "f91a9ce7cb0208cf7e9cd8bd984dbd2899fec1235195c2528728ce31e9f19268"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskLaneProcessor.java",
+      "sha256": "fafd7c885b344ae48eed080195ae214662312c233d644b6e5176838d7383f050"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java",
+      "sha256": "80e10de715c5bb0ff6e03db9593943dc3be3766b2a46c4ba334df5d11a08a8bb"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanRuntime.java",
+      "sha256": "8056719cf2bf3e427dc26bc9401a3e5b32b02609e99afb03cbd28fe86e47964b"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java",
+      "sha256": "ca31a1c6f14a2733eab01eb93d00c036001cb0d70a3672085a98dbfda5a458fb"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/command/RiskCommands.java",
+      "sha256": null
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/command/package-info.java",
+      "sha256": null
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/package-info.java",
+      "sha256": "75961007f490014c158600d3a70d6d2387384e65a704615019dc5faa3dad32eb"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/RuntimeDerivativeFillCalculator.java",
+      "sha256": "c0e1ee6362f95bd0ab452dd72ef616d0b84737a23636e458c1438eb28bc65318"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands.java",
+      "sha256": null
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlement.java",
+      "sha256": "64d3a043a396451dde7378c2387b34e227ef13cf6c67088578045e2ce13daeea"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/lifecycle/RuntimeLifecycleSettlementContinuation.java",
+      "sha256": "19f2193915a3cba5c75b39ff7373fe726e3a44a0c32d3919d4fc04b304f506fe"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/CoreSnapshotImage.java",
+      "sha256": "9275325dee79a44f551382de54911f7adc779b5a40e65d1ecf67051b362f483f"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/CoreSnapshotLifecycle.java",
+      "sha256": "2b4437d5ed632c8964184c9b9705f5eb6f667868be3f332bc9c2194b46e26925"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotCodec.java",
+      "sha256": "e1e9fc2b1eba882e98532200b2d42f969ea79c6bd52a427fce27ddfba471625a"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotParser.java",
+      "sha256": "6c433756a4c96e0b19e8583d6e3b47ea08af3043c17c73631130ffd53ed09daf"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/SectionedCoreSnapshotWriter.java",
+      "sha256": "f965485138c75d4bc09ef6f013934f7bfd298d2ab94d19145922eb306092ec59"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/AccountLaneSnapshot.java",
+      "sha256": "a4118e05da10e6688c62c09f5850094dc97022826511b9a59bec36435921b872"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/snapshot/state/TradingStateSnapshotCodec.java",
+      "sha256": "30632663a367f4d3b773919c457524c21ab5389f6d66fed4709f78f8f7ba9160"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/CoreTreasuryState.java",
+      "sha256": "7c886222fb4988079fa2cb87f2d57569f5834a775e39b6176c5bf0cd952aa046"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/InsuranceAllocationPolicy.java",
+      "sha256": "c0e233a9e06961d55aa60eea36ea4d6666febc7322cfe4f15e32b16ae5401dbd"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/RuntimeTreasuryDelta.java",
+      "sha256": "dec887d69daa6817ce64d6927beb10e38033e182fd35f544e7fcd2cd54ae2937"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/treasury/TreasuryRuntime.java",
+      "sha256": "3c92d2fc3d4409b644913bd71ea5932084051eb6dd6db92a2d788c1629654006"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/egress/DeferredSessionResponses.java",
+      "sha256": "70e6b206f768918bf80da616d3799e7cbb205a8289f20f4c77d933536a9889fb"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/ingress/OwnerIngressRing.java",
+      "sha256": "0886118ff05df438f41fdc92860da117f0f023e935d26835c911e29b78bc810e"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/support/math/CoreContractMath.java",
+      "sha256": "ea0ba7011c5925cc627e82e6fc6d4288e98b4c12e470803cc875a7bb76104b5c"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/config/CoreConfigurationTest.java",
+      "sha256": "5a2f3625a4313adcafb12ceb0e3491549172163c9192912bf13c29778cac1f51"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/account/CaptureBufferReuseTest.java",
+      "sha256": "509bb2c5e91c5dc9665795400447384cf7d343d22a5438b38cf68f67e203a3dc"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/account/LaneCloseCapacityTest.java",
+      "sha256": "59401e841fc11c33d17fcd9d262183d0a0469ad90fec9c4de0b118bd42242948"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/account/LaneEntityMembershipTest.java",
+      "sha256": "2001bfa41ed976c71715e2525b5a7ad76262489e73e29e8ff033458a32b0ad9e"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/AccountControlTaskResultTest.java",
+      "sha256": "b0c0f85f098da3f68f09bfaaf9ccc5101e11635757c61612e40cd3a7b1fdd05b"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreAlgoLaneQueryTest.java",
+      "sha256": "048e68ec57348760c6f08549197304f9120c30424b3fd1a0c3481960b8cb3acb"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreLifecycleStateTest.java",
+      "sha256": "5702be2310c197b38d1314bec7cb9690c9e61df5fb1ea507e3d90e3395181a80"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/CoreMatchingStateTest.java",
+      "sha256": "346fd2a00d98423c719e401710a011904fa72831ab95e6bd8d9af378297f541b"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/DirectMatcherTestInputs.java",
+      "sha256": "4ca7977a50a4438b227c88341405064b7af2e49e931fad6457caabd3696c5a6c"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/ProductionSourceBoundaryTest.java",
+      "sha256": "16f328e48799dfa0ac9211fb0600528808e5789530c5c2d4eec6b62083320558"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeCommitRecoveryTest.java",
+      "sha256": "4d1418ae36ac7268666818236b7e18c08b584c23d9e156a960f4697132162c05"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeStateBusinessRulesTest.java",
+      "sha256": "c001c58cf27e4717e55fada04ffa7f21341b190a0ca8f171132aea3b03c8c86b"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/RuntimeStateQueryServiceTest.java",
+      "sha256": "1f07febf55bc093ec200e8c2ebf47fbbb33c9aefd3e60cb2b6fef3810a70a29b"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/SectionedCoreSnapshotCodecTest.java",
+      "sha256": "7ae32a630c146e56b2ffffef1a4dfe4e4cd6709bc753e24b85f5511de2c9712c"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingAccountRuntimeTest.java",
+      "sha256": "493dedd46396a92b558efd3f713e0b5786b4d2ca3d9197619f016b522ae76c82"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreOwnerTest.java",
+      "sha256": "8164f3a6c9139438c7fcbb1ab1a2a4e1519c4552220b7a0b95cf0912b92359a0"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingCoreRuntimeRestoreTestSupport.java",
+      "sha256": "7261433427f89ee0bf36a7b9eb89d55b053bf0470ed2e90f5d1aaf1cbe7e61d1"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TradingOwnerTestSupport.java",
+      "sha256": "3d7f8f1dabb189212949421dc5fc0b221d0e8ff92b5c699db4b7b5139428cc84"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/TransferLaneCapacityTest.java",
+      "sha256": "931f3917a452245a1be2c53f01362170e6ace5a0b0dc40ae0f2bedbbcbd91623"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/core/index/LedgerPositionPublicationTest.java",
+      "sha256": "892b1e4264087eb00cbbf82a0fa598390af2a3add2588a35469826a7c6fa17c4"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/matcher/DeterministicExchangeCoreAdapterTest.java",
+      "sha256": "3d21c924f5180f18a860ebc7f2dea0c54190891209ebe3e30641ddbad1e446ff"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/ClusterCommandPipelineTest.java",
+      "sha256": "9101b73739f33895cadea3c5a9f0e9dd9112150c8fdf11a63d2bc981db851806"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/CoreOrderedOrderBatchTest.java",
+      "sha256": "a3235b750fc50b4629ab282ce469fbec07aa070b36b7388e439f83f69ef3aa0f"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/order/MatcherPipelineGroupTest.java",
+      "sha256": "8bc01140f0f8e5ae47ab3c36916b58b0039b7983ba940002d09f9b8a1fcf53b9"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/query/CoreAccountLaneQueryTest.java",
+      "sha256": "1ff0ae7dcea10c304b1483d99b91492467bfb7a3c85cc5856f56025224ec6d4b"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/treasury/CoreTreasuryStateTest.java",
+      "sha256": "0888b205677e0922f93109a6194f6affb8836a04ae61419260f074d18457c069"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/treasury/RuntimeTreasuryDeltaTest.java",
+      "sha256": "25b6b78ac11db3aa66ea3babd40de634d7a53905162de608e303417088d1b8fd"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/support/egress/DeferredSessionResponsesTest.java",
+      "sha256": "caa4c631e02cb39dc64da981d9ad1257f6ab16d811ad493e3c10f37b15bff3d5"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/support/ingress/OwnerIngressRingTest.java",
+      "sha256": "c80ca14496967dd6ad3e28a220fc3249e77d7dbc3e911227d727e9ee5cd8edb2"
+    },
+    {
+      "path": "surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/support/ingress/TradingOwnerInputReuseTest.java",
+      "sha256": "0bf959b815af6c3d520287986d55809a697d728934a942b21c35f85c8af03293"
+    },
+    {
+      "path": "surprising-instrument-api/src/main/java/com/surprising/instrument/api/math/PerpetualContractMath.java",
+      "sha256": "bc8652bda6bef9173d39eb1d8eabf117c6fb242928080a3fcefc2f5800c2349b"
+    },
+    {
+      "path": "surprising-instrument-api/src/test/java/com/surprising/instrument/api/math/PerpetualContractMathTest.java",
+      "sha256": "48c0c88996e61a14061ca7350d50d41be85f0d87a8908c0bdd5ab0f38b93816f"
+    }
+  ]
+}

@@ -38,29 +38,17 @@ final class DeferredSessionResponses {
      * @param length 当前要发送或复制的有效编码字节数
      */
     void offer(TransportSession session, DirectBuffer source, int length) {
-        if (session.isClosing()) {
-            if (size != 0) remove(session.id());
-            return;
-        }
-        // 当前会话重试队列或轮询节点，空表示需新建
-        SessionQueue queue = size == 0 ? null : sessions.get(session.id());
-        if (queue == null) {
-            // 一次发送尝试的返回值，决定成功、继续背压或关闭会话
-            long result = session.offer(source, 0, length);
-            if (result >= 0) return;
-            if (!retryable(result)) { session.close(); return; }
-        }
-        enqueueDeferred(session, queue, source, length, System.nanoTime());
+        offer(session, source, length, System::nanoTime);
     }
 
     /**
-     * 按调用方给定的纳秒时间执行同样的首次发送与入队逻辑，便于测试确定地控制过期边界。
+     * 共用首次发送与入队流程；仅在需要延期时读取单调时钟，测试可提供固定时刻。
      * @param session 本条响应目标的实际传输句柄
      * @param source 从偏移零开始含有效响应的原编码缓冲
      * @param length 当前要发送或复制的有效编码字节数
-     * @param nowNs 本轮单调纳秒时间，用于计算或检查本地发送期限
+     * @param clock 只在首次背压或已有积压时读取的本地单调时钟
      */
-    void offer(TransportSession session, DirectBuffer source, int length, long nowNs) {
+    void offer(TransportSession session, DirectBuffer source, int length, java.util.function.LongSupplier clock) {
         if (session.isClosing()) {
             if (size != 0) remove(session.id());
             return;
@@ -73,7 +61,7 @@ final class DeferredSessionResponses {
             if (result >= 0) return;
             if (!retryable(result)) { session.close(); return; }
         }
-        enqueueDeferred(session, queue, source, length, nowNs);
+        enqueueDeferred(session, queue, source, length, clock.getAsLong());
     }
 
     /**

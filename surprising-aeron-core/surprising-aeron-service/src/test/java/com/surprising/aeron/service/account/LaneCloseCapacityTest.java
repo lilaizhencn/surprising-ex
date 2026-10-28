@@ -13,6 +13,8 @@ import com.surprising.aeron.service.position.PositionCloseCapacity;
 import com.surprising.aeron.service.position.PositionRuntime;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 平仓容量检查的账户 Lane 测试，区分有效已提交挂单与其他用户、合约、持仓腿、方向、终态、预占或排除订单，并验证最新只减仓订单优先进入冲突撤单列表。
@@ -44,14 +46,32 @@ class LaneCloseCapacityTest {
         lane.markPendingReservation(209, 1);
         lane.putOrder(order(210, 7, 3, CorePositionSide.NET, CoreOrderSide.SELL, true, 100, 50));
 
-        // 过滤干扰订单并排除订单 210 后的平仓容量结果，应剩一步且冲突按新到旧排序。
-        var capacity = PositionCloseCapacity.inspectLane(
-                lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.SELL, 210);
-        assertThat(capacity.requestedQuantitySteps()).isEqualTo(9);
-        assertThat(capacity.availableQuantitySteps()).isEqualTo(1);
-        assertThat(capacity.conflictsFor(5)).containsExactly(202L);
-        assertThat(capacity.conflictsFor(6)).containsExactly(202L, 201L);
-        assertThat(capacity.conflictsFor(1)).isEmpty();
+        assertThat(PositionCloseCapacity.conflictsFor(
+                lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.SELL, 210, 5)).containsExactly(202L);
+        assertThat(PositionCloseCapacity.conflictsFor(
+                lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.SELL, 210, 6)).containsExactly(202L, 201L);
+        assertThat(PositionCloseCapacity.conflictsFor(
+                lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.SELL, 210, 1)).isEmpty();
+    }
+
+    @Test
+    void conflictOrderUsesOrderIdToBreakEqualLogPositionsAndStopsAtAvailableCandidates() {
+        var lane = new AccountLaneState(0, 256);
+        lane.positions.put(99, new PositionRuntime(7, 3, 0, CoreMarginMode.CROSS, CorePositionSide.NET,
+                CoreStateTestFixtures.runtimeInstrument(), -10, 100, 1000, 0, 100));
+        lane.putOrder(order(201, 7, 3, CorePositionSide.NET, CoreOrderSide.BUY, true, 3, 10));
+        lane.putOrder(order(202, 7, 3, CorePositionSide.NET, CoreOrderSide.BUY, true, 4, 10));
+        assertThat(PositionCloseCapacity.conflictsFor(lane, 7, 3, 99,
+                CorePositionSide.NET, CoreOrderSide.BUY, 0, 3)).isEmpty();
+        assertThat(PositionCloseCapacity.conflictsFor(lane, 7, 3, 99,
+                CorePositionSide.NET, CoreOrderSide.BUY, 0, 4)).containsExactly(202L);
+        assertThat(PositionCloseCapacity.conflictsFor(lane, 7, 3, 99,
+                CorePositionSide.NET, CoreOrderSide.BUY, 0, 20)).containsExactly(202L, 201L);
+        assertThatThrownBy(() -> PositionCloseCapacity.conflictsFor(lane, 7, 3, 99,
+                CorePositionSide.NET, CoreOrderSide.BUY, 0, Long.MAX_VALUE))
+                .isInstanceOf(ArithmeticException.class);
+        assertThatIllegalArgumentException().isThrownBy(() -> PositionCloseCapacity.conflictsFor(
+                lane, 7, 3, 99, CorePositionSide.NET, CoreOrderSide.BUY, 0, 0));
     }
 
     /**

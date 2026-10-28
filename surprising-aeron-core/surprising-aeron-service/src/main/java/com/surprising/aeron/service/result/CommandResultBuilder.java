@@ -7,16 +7,11 @@ import com.surprising.aeron.protocol.CoreLiquidationBatchResultCodec;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultView;
 import com.surprising.aeron.protocol.CoreLiquidationProgressCodec;
 import com.surprising.aeron.protocol.CoreLiquidationProgressView;
-import com.surprising.aeron.protocol.CoreMarginMode;
-import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderStateSource;
-import com.surprising.aeron.protocol.CoreOrderType;
-import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreRiskScanControlCodec;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreSettlementProgressCodec;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
-import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.service.core.TradingCoreRuntime;
 import com.surprising.aeron.service.matcher.DeterministicExchangeCoreAdapter.CancellationOrder;
 import com.surprising.aeron.service.matcher.MatchingResult;
@@ -25,11 +20,9 @@ import com.surprising.aeron.service.order.command.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.order.state.OrderRuntime;
 import com.surprising.aeron.support.collection.PrimitiveLongChangeSet;
 import com.surprising.aeron.support.collection.PrimitiveLongView;
-import com.surprising.product.api.ProductLine;
 import java.util.AbstractList;
 import java.util.List;
 import java.util.RandomAccess;
-import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.experimental.Accessors;
@@ -222,6 +215,16 @@ public final class CommandResultBuilder {
         commandChangedUserIds = List.of();
         if (orders == null) return;
         for (var /* 本轮借用的现存订单或撤单条目，空项按当前入口规则跳过 */ order : orders) if (order != null) changedUserIds.add(order.userId());
+    }
+
+    public void addLifecycleChanges(Iterable<CancellationOrder> orders) {
+        owner.seedChangeAccumulators();
+        commandChangedOrderIds = List.of();
+        commandChangedUserIds = List.of();
+        for (CancellationOrder order : orders) {
+            changedOrderIds.add(order.orderId());
+            changedUserIds.add(order.userId());
+        }
     }
 
     /**

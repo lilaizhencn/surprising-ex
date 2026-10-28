@@ -234,7 +234,7 @@ public final class CoreQueryService {
         if (type == CoreMessageType.CLIENT_ORDER_STATE_QUERY && userId <= 0)
             throw new IllegalArgumentException("userId must be positive");
         // 按挂单索引页顺序固定的订单编号数组，非挂单查询保持 null。
-        long[] openOrderIds = null;
+        com.surprising.aeron.support.collection.ImmutableLongArrayList openOrderIds = null;
         if (type == CoreMessageType.USER_OPEN_ORDERS_QUERY) {
             // 已解码的挂单页币对、排他订单游标和条数条件。
             var pageQuery = CoreStateQueryCodec.decodeOpenOrdersQuery(message.payloadUnsafe());
@@ -244,8 +244,7 @@ public final class CoreQueryService {
             var page = owner.activeOrderIndex().page(userId, pageQuery.instrumentId(), before, pageQuery.limit());
             if (page.orderIds().isEmpty()) return new CoreResponse(ResponseStatus.OK, owner.appliedCommandCount(),
                     CoreStateQueryCodec.encodeOpenOrders(new com.surprising.aeron.protocol.CoreOpenOrdersView(List.of())));
-            openOrderIds = new long[page.orderIds().size()];
-            for (/* 把选中订单编号按页顺序复制到固定数组的下标。 */ int index = 0; index < openOrderIds.length; index++) openOrderIds[index] = page.orderIds().get(index);
+            openOrderIds = page.orderIds();
         }
         // 当前是否为只带普通订单编号的详情或哈希查询，决定是否需要跨 Lane 探测。
         boolean orderQuery = type == CoreMessageType.ORDER_STATE_QUERY || type == CoreMessageType.ORDER_STATE_HASH_QUERY;
@@ -254,7 +253,8 @@ public final class CoreQueryService {
         long laneMask;
         if (openOrderIds != null) {
             laneMask = 0;
-            for (long /* 当前挂单页中的订单编号，用其活跃路由计算目标 Lane。 */ selected : openOrderIds) {
+            for (int index = 0; index < openOrderIds.size(); index++) {
+                long selected = openOrderIds.valueAt(index);
                 // 当前索引记录的身份与归属路由，用来取得所属用户并定位账户 Lane。
                 var route = owner.activeOrderIndex().activeOrderRoute(selected);
                 if (route == null) throw new IllegalStateException("active order query route is missing");
@@ -348,7 +348,8 @@ public final class CoreQueryService {
         long laneMask = 0;
         for (/* 正在填入父单编号和所属用户两个对齐数组的下标。 */ int index = 0; index < ids.size(); index++) {
             // 本轮从算法索引取出的父单编号，用于读取所属用户路由。
-            long selected = ids.get(index);
+            long selected = ids instanceof com.surprising.aeron.support.collection.ImmutableLongArrayList primitive
+                    ? primitive.valueAt(index) : ids.get(index);
             // 当前索引记录的身份与归属路由，用来取得所属用户并定位账户 Lane。
             var route = owner.algoOrderIndex().value(selected);
             if (route == null) throw new IllegalStateException("algo query route is missing");
@@ -440,7 +441,7 @@ public final class CoreQueryService {
         /** 各 Lane 是否命中单实体的标记，合并订单查询时检查只能有一个所有者命中。 */
         private final boolean[] found;
         /** Owner 按挂单索引选出的固定顺序编号数组，非挂单页为 null。 */
-        private final long[] openOrderIds;
+        private final com.surprising.aeron.support.collection.ImmutableLongArrayList openOrderIds;
         /** 与挂单编号对齐的详情 DTO 槽，只保留实际读取时仍为 OPEN 的订单。 */
         private final com.surprising.aeron.protocol.CoreOrderStateView[] openOrders;
         /** 算法父单的固定路由与结果槽，非算法查询为 null。 */
@@ -464,7 +465,7 @@ public final class CoreQueryService {
          * @param algoPage 本次算法父单查询的固定路由及结果槽，其他查询为 null
          */
         private AccountQuery(long commandCount, CoreMessageType type, long userId,
-                             long orderId, String clientName, long laneMask, long[] openOrderIds, AlgoQueryPage algoPage) {
+                             long orderId, String clientName, long laneMask, com.surprising.aeron.support.collection.ImmutableLongArrayList openOrderIds, AlgoQueryPage algoPage) {
             this.commandCount = commandCount; this.type = type;
             this.userId = userId; this.orderId = orderId; this.clientName = clientName; this.laneMask = laneMask;
             // 当前拓扑的账户 Lane 总数，按此分配响应与命中槽。
@@ -472,7 +473,7 @@ public final class CoreQueryService {
             responses = new CoreResponse[count]; found = new boolean[count];
             this.openOrderIds = openOrderIds;
             this.algoPage = algoPage;
-            openOrders = openOrderIds == null ? null : new com.surprising.aeron.protocol.CoreOrderStateView[openOrderIds.length];
+            openOrders = openOrderIds == null ? null : new com.surprising.aeron.protocol.CoreOrderStateView[openOrderIds.size()];
         }
 
         /**
@@ -540,23 +541,23 @@ public final class CoreQueryService {
             if (algoPage != null) {
                 for (/* 当前页编号和 DTO 数组的共同下标，所属 Lane 只写它实际拥有的记录。 */ int index = 0; index < algoPage.ids.length; index++) {
                     if (owner.runtimeState().topology().accountLaneId(algoPage.users[index]) != lane.laneId()) continue;
-                    // 当前单个算法父单及保留子订单汇总后的结果列表，非空时取其唯一首项。
-                    var views = RuntimeOperationalQueryService.algoOrders(owner.runtimeState(), List.of(algoPage.ids[index]));
-                    if (!views.isEmpty()) algoPage.views[index] = views.getFirst();
+                    algoPage.views[index] = RuntimeOperationalQueryService.algoOrder(
+                            owner.runtimeState(), algoPage.ids[index]);
                 }
                 return null;
             }
             if (openOrderIds != null) {
-                for (/* 当前页编号和 DTO 数组的共同下标，所属 Lane 只写它实际拥有的记录。 */ int index = 0; index < openOrderIds.length; index++) {
+                for (/* 当前页编号和 DTO 数组的共同下标，所属 Lane 只写它实际拥有的记录。 */ int index = 0; index < openOrderIds.size(); index++) {
                     // 当前 Lane 对某个挂单编号的详情探测结果，只把命中且仍 OPEN 的订单写入页槽。
-                    var query = RuntimeStateQueryService.orderState(owner.runtimeState(), lane, owner.identities(), openOrderIds[index]);
+                    var query = RuntimeStateQueryService.orderState(owner.runtimeState(), lane, owner.identities(), openOrderIds.valueAt(index), false);
                     if (query.found() && "OPEN".equals(query.view().status())) openOrders[index] = query.view();
                 }
                 return null;
             }
             if (type == CoreMessageType.USER_STATE_QUERY || type == CoreMessageType.USER_STATE_HASH_QUERY) {
                 // 当前用户的完整状态与哈希查询结果，超限标记优先转换为拒绝。
-                var query = RuntimeStateQueryService.userState(owner.runtimeState(), lane, owner.identities(), userId);
+                var query = RuntimeStateQueryService.userState(owner.runtimeState(), lane, owner.identities(), userId,
+                        type == CoreMessageType.USER_STATE_HASH_QUERY);
                 if (query.tooLarge()) return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                         CoreResultCode.QUERY_RESPONSE_TOO_LARGE, commandCount);
                 found[lane.laneId()] = query.found();
@@ -568,7 +569,8 @@ public final class CoreQueryService {
             // 按用户客户端标识或普通订单编号读取的结果，未命中时按原协议返回缺失。
             var query = type == CoreMessageType.CLIENT_ORDER_STATE_QUERY
                     ? RuntimeStateQueryService.clientOrderState(owner.runtimeState(), lane, owner.identities(), userId, clientName)
-                    : orderId == 0 ? null : RuntimeStateQueryService.orderState(owner.runtimeState(), lane, owner.identities(), orderId);
+                    : orderId == 0 ? null : RuntimeStateQueryService.orderState(owner.runtimeState(), lane, owner.identities(), orderId,
+                            type == CoreMessageType.ORDER_STATE_HASH_QUERY);
             found[lane.laneId()] = query != null && query.found();
             if (!found[lane.laneId()]) return missingAccountResponse(type, commandCount);
             // 当前查询已经编码的协议字节，随后由对应响应或盘口上限检查使用。
@@ -817,7 +819,7 @@ public final class CoreQueryService {
                         receipts, continuation, sourceComplete);
                 if (requested.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE) {
                     // 账本依据各 Lane 全部相关请求和原保险余额算出的建议分配，不是实际支付。
-                    var allocations = InsuranceAllocationPolicy.allocations(ledger, InsuranceAllocationPolicy.mergeLaneClaims(claims));
+                    var allocations = InsuranceAllocationPolicy.allocations(ledger, claims);
                     result = RuntimeLiquidationQueryService.insuranceRecommendations(result, allocations);
                 }
                 response = new CoreResponse(ResponseStatus.OK, commandCount, CoreLiquidationWorkCodec.encodeWork(result));

@@ -1,5 +1,10 @@
 # Aeron 交易核心：启动、架构与业务源码导航
 
+
+2026-10-28 第二轮冗余转换与转发清理及验证结果见 [逐项记录](../ROUND2_CLEANUP_PROGRESS.md)。
+活动订单页使用不可变原语编号列表；生命周期撤单统一从活动索引选路由，结果直接归入命令变更集。
+恢复入口使用 `SectionedCoreSnapshotRecovery` 承担增量接收、CRC、预算和恢复校验，已移除外层逐方法代理。
+
 本目录聚合五个 Maven 模块。Core 按产品线独立运行：现货、U 本位/币本位永续、U 本位/币本位交割、期权各有自己的 Cluster、账户和订单簿。HTTP、数据库接入、价格生产和生命周期调度位于外部服务；Core 接收复制日志中的命令，完成交易裁决、撮合、账户变更与恢复。
 
 聚合 POM 用于 Maven/IDE 分组，子模块仍直接继承 `surprising-parent`，artifactId 和产物路径保持原有定义。
@@ -286,10 +291,10 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    P[1. APPLY_MARK_PRICE] --> R[RiskCommands.executeApplyMarkPrice]
+    P[1. APPLY_MARK_PRICE] --> R[DirectCommandDispatcher.executeApplyMarkPrice]
     R --> M[2. RuntimeDerivativeRiskProcessor: 标记价与扫描状态]
     M --> T[初始化触发扫描]
-    C[3. CONTINUE_RISK_SCAN] --> B[RiskCommands: 开关与预算校验]
+    C[3. CONTINUE_RISK_SCAN] --> B[DirectCommandDispatcher: 开关与预算校验]
     B --> L[4. RiskScanCoordinator: Ledger 读取持仓路由]
     L --> A[5. RiskLaneProcessor: 所属 Lane 账户估值]
     A --> ID[6. Owner 按固定 Lane 顺序分配强平编号]
@@ -297,7 +302,7 @@ flowchart LR
     W --> K[7. 提交风险结果，剩余预算推进触发扫描]
 ```
 
-源码：[`RiskCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/command/RiskCommands.java) → [`RuntimeDerivativeRiskProcessor`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java) → [`RiskScanCoordinator.poll`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java) → [`RiskLaneProcessor`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskLaneProcessor.java)。扫描按预算/游标继续，记录价格和用户修订，避免旧估值当成当前风险；强平编号不依赖线程完成顺序。扫描产生计划，执行由后续强平命令完成；续扫为止盈止损保留推进预算。
+源码：[`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) → [`RuntimeDerivativeRiskProcessor`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RuntimeDerivativeRiskProcessor.java) → [`RiskScanCoordinator.poll`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskScanCoordinator.java) → [`RiskLaneProcessor`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/risk/RiskLaneProcessor.java)。扫描按预算/游标继续，记录价格和用户修订，避免旧估值当成当前风险；强平编号不依赖线程完成顺序。扫描产生计划，执行由后续强平命令完成；续扫为止盈止损保留推进预算。
 
 ### 强平、保险基金与 ADL
 
@@ -329,17 +334,17 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    F[1. APPLY_FUNDING] --> FC[PerpetualFundingCommands]
+    F[1. APPLY_FUNDING] --> FC[DirectCommandDispatcher]
     FC --> FP[2. RuntimePerpetualFundingProcessor: 用户分页与 Lane 结算]
     FP --> FK[3. Ledger / 进度 / 账户变化 → 提交]
     S[1. SETTLE_INSTRUMENT] --> SC[MatchingCommandAdmission: 生命周期冲突校验]
     SC --> SO[2. Matcher 分页撤单]
-    SO --> SP[3. InstrumentSettlementCommands / RuntimeLifecycleSettlementContinuation]
+    SO --> SP[3. OrderedCommitCoordinator / RuntimeLifecycleSettlementContinuation]
     SP --> SR[4. 各产品规则: 交割 / 行权 / 失效 / 资金与持仓处理]
     SR --> SK[5. Ledger / 生命周期游标 → 有序提交]
 ```
 
-资金费看 [`PerpetualFundingCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/funding/command/PerpetualFundingCommands.java) 与 `RuntimePerpetualFundingProcessor`；交割和期权看 [`InstrumentSettlementCommands`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/settlement/command/InstrumentSettlementCommands.java)、`RuntimeLifecycleSettlement`、`RuntimeLifecycleSettlementContinuation` 与各产品规则。命令保留分页游标，撤单阶段完成后才能推进持仓结算；分页提交不等于整个合约已结算。
+资金费看 [`DirectCommandDispatcher`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/core/command/DirectCommandDispatcher.java) 与 `RuntimePerpetualFundingProcessor`；交割和期权看 [`OrderedCommitCoordinator`](surprising-aeron-service/src/main/java/com/surprising/aeron/service/order/commit/OrderedCommitCoordinator.java)、`RuntimeLifecycleSettlement`、`RuntimeLifecycleSettlementContinuation` 与各产品规则。命令保留分页游标，撤单阶段完成后才能推进持仓结算；分页提交不等于整个合约已结算。
 
 ### 余额、划转与账户设置
 

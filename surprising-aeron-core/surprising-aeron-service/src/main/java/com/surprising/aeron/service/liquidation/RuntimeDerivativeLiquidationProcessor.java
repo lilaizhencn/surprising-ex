@@ -539,7 +539,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             long remainingAbs = Math.subtractExact(currentAbs, closeQuantity);
             // 本次平仓对应可释放的持仓保证金，按平仓占原数量比例分摊。
             long releasedMargin = position.positionMarginUnits() == 0 ? 0
-                    : proportional(position.positionMarginUnits(), closeQuantity, currentAbs);
+                    : com.surprising.instrument.api.math.PerpetualContractMath.proportionalUnits(position.positionMarginUnits(), closeQuantity, currentAbs);
             // 带原持仓多空方向的平仓数量，用于计算盈亏或期权现金市值。
             long signedCloseQuantity = position.signedQuantitySteps() > 0
                     ? closeQuantity : Math.negateExact(closeQuantity);
@@ -553,17 +553,57 @@ public final class RuntimeDerivativeLiquidationProcessor {
             long feeDue = Math.negateExact(CoreContractMath.feeDeltaUnits(instrument,
                     executionPriceTicks, closeQuantity, liquidationFeeRatePpm));
             // 按全仓或逐仓资金边界算出的新余额、实际应用盈亏和实收费。
-            LiquidationCash cash = applyCash(balance, liquidation.marginMode(), releasedMargin, pnl, feeDue);
+            // 局部计算中的可用余额，先释放本次保证金，再在允许范围内计入盈亏和扣费。
+            long available = balance.availableUnits();
+            // 局部计算中的冻结余额，只移除本次释放的持仓保证金，保留其他冻结。
+            long locked = balance.lockedUnits();
+            // 实际进入账户的平仓现金变化，亏损最多扣到允许使用的资金。
+            long appliedPnl;
+            // 按资金边界真正收到的费用，可能少于应收强平费。
+            long collectedFee;
+            if (liquidation.marginMode() == CoreMarginMode.ISOLATED) {
+                if (pnl < 0) {
+                    // 逐仓亏损实际吃掉的本次释放保证金，不使用账户其他可用资金补该仓亏损。
+                    long consumedMargin = Math.min(releasedMargin, Math.negateExact(pnl));
+                    // 逐仓承担亏损后剩余的本次保证金，用于退回可用并限制强平费。
+                    long remainingMargin = Math.subtractExact(releasedMargin, consumedMargin);
+                    locked = Math.subtractExact(locked, releasedMargin);
+                    available = Math.addExact(available, remainingMargin);
+                    appliedPnl = Math.negateExact(consumedMargin);
+                    collectedFee = Math.min(feeDue, remainingMargin);
+                } else {
+                    locked = Math.subtractExact(locked, releasedMargin);
+                    available = Math.addExact(available, Math.addExact(releasedMargin, pnl));
+                    appliedPnl = pnl;
+                    collectedFee = Math.min(feeDue, Math.addExact(releasedMargin, pnl));
+                }
+                available = Math.subtractExact(available, collectedFee);
+            } else {
+                locked = Math.subtractExact(locked, releasedMargin);
+                available = Math.addExact(available, releasedMargin);
+                if (pnl >= 0) {
+                    available = Math.addExact(available, pnl);
+                    appliedPnl = pnl;
+                } else {
+                    // 全仓亏损在释放保证金后的可用余额内实际能扣掉的金额。
+                    long debit = Math.min(available, Math.negateExact(pnl));
+                    available = Math.subtractExact(available, debit);
+                    appliedPnl = Math.negateExact(debit);
+                }
+                collectedFee = Math.min(available, feeDue);
+                available = Math.subtractExact(available, collectedFee);
+            }
+            BalanceRuntime nextBalance = new BalanceRuntime(balance.userId(), balance.assetId(), available, locked);
             // 本次现金亏损绝对额中未实际从账户扣到的部分，仅比较亏损与实际扣款。
             long uncovered = pnl < 0 ? Math.subtractExact(Math.negateExact(pnl),
-                    Math.negateExact(Math.min(0, cash.appliedPnl()))) : 0;
+                    Math.negateExact(Math.min(0, appliedPnl))) : 0;
 
             // 剩余持仓保留原多空方向，全部强平时为 0。
             long nextQuantity = remainingAbs == 0 ? 0
                     : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
             // 按剩余数量保留的入场价格量，空仓时归零。
             long nextEntryValue = remainingAbs == 0 ? 0
-                    : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
+                    : com.surprising.instrument.api.math.PerpetualContractMath.proportionalUnits(position.entryValueTicks(), remainingAbs, currentAbs);
             // 平仓后的持仓新值，剩余保证金相应减少，期货累计原始平仓盈亏，期权不在此累加该字段。
             PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
                     position.marginMode(), position.positionSide(), position.instrument(),
@@ -571,15 +611,15 @@ public final class RuntimeDerivativeLiquidationProcessor {
                     Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : pnl),
                     Math.subtractExact(position.positionMarginUnits(), releasedMargin));
             // 保险基金应记的差额：实际账户盈亏的反向值加已收强平费，可能为收入或支出。
-            long insuranceDelta = Math.addExact(Math.negateExact(cash.appliedPnl()), cash.collectedFee());
+            long insuranceDelta = Math.addExact(Math.negateExact(appliedPnl), collectedFee);
             // 仍有未覆盖亏空时待保险基金，否则本笔强平执行完成。
             CoreLiquidationState.Status nextStatus = uncovered > 0
                     ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED;
 
-            runtime.replaceBalance(cash.balance());
+            runtime.replaceBalance(nextBalance);
             runtime.replacePosition(positionKey, nextPosition);
             runtime.replaceLiquidation(copy(liquidation, uncovered, executionPriceTicks,
-                    liquidationFeeRatePpm, nextStatus, cash.collectedFee()));
+                    liquidationFeeRatePpm, nextStatus, collectedFee));
             runtime.advanceUserRevision(liquidation.userId());
             // 所属 Lane 保存实际两项金额，Owner 收齐账户完成位后交原账本消费。
             this.insuranceDelta = insuranceDelta;
@@ -693,60 +733,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
     }
 
     /**
-     * 按保证金模式计算新余额和实际收付：逐仓亏损最多消耗本次释放保证金，费用限于该仓剩余资金或收益；全仓先释放保证金，再以可用余额承担亏损及费用。只返回实际扣到的亏损和费用，调用方另算未覆盖亏损。
-     * @param balance 源用户结算资产的余额；现金计算结果中则为应用强平后的新余额
-     * @param marginMode 全仓还是逐仓，决定亏损和费用可以使用的资金边界
-     * @param releasedMargin 本次计划平掉数量对应的持仓保证金，单位为结算资产最小单位
-     * @param pnl 本次平仓的现金估值变化，期货为盈亏，期权为带方向市值
-     * @param feeDue 本次按计划价格、数量和费率计算的应收强平费，单位为结算资产最小单位
-     */
-    private static LiquidationCash applyCash(BalanceRuntime balance, CoreMarginMode marginMode,
-                                             long releasedMargin, long pnl, long feeDue) {
-        // 局部计算中的可用余额，先释放本次保证金，再在允许范围内计入盈亏和扣费。
-        long available = balance.availableUnits();
-        // 局部计算中的冻结余额，只移除本次释放的持仓保证金，保留其他冻结。
-        long locked = balance.lockedUnits();
-        // 实际进入账户的平仓现金变化，亏损最多扣到允许使用的资金。
-        long appliedPnl;
-        // 按资金边界真正收到的费用，可能少于应收强平费。
-        long collectedFee;
-        if (marginMode == CoreMarginMode.ISOLATED) {
-            if (pnl < 0) {
-                // 逐仓亏损实际吃掉的本次释放保证金，不使用账户其他可用资金补该仓亏损。
-                long consumedMargin = Math.min(releasedMargin, Math.negateExact(pnl));
-                // 逐仓承担亏损后剩余的本次保证金，用于退回可用并限制强平费。
-                long remainingMargin = Math.subtractExact(releasedMargin, consumedMargin);
-                locked = Math.subtractExact(locked, releasedMargin);
-                available = Math.addExact(available, remainingMargin);
-                appliedPnl = Math.negateExact(consumedMargin);
-                collectedFee = Math.min(feeDue, remainingMargin);
-            } else {
-                locked = Math.subtractExact(locked, releasedMargin);
-                available = Math.addExact(available, Math.addExact(releasedMargin, pnl));
-                appliedPnl = pnl;
-                collectedFee = Math.min(feeDue, Math.addExact(releasedMargin, pnl));
-            }
-            available = Math.subtractExact(available, collectedFee);
-        } else {
-            locked = Math.subtractExact(locked, releasedMargin);
-            available = Math.addExact(available, releasedMargin);
-            if (pnl >= 0) {
-                available = Math.addExact(available, pnl);
-                appliedPnl = pnl;
-            } else {
-                // 全仓亏损在释放保证金后的可用余额内实际能扣掉的金额。
-                long debit = Math.min(available, Math.negateExact(pnl));
-                available = Math.subtractExact(available, debit);
-                appliedPnl = Math.negateExact(debit);
-            }
-            collectedFee = Math.min(available, feeDue);
-            available = Math.subtractExact(available, collectedFee);
-        }
-        return new LiquidationCash(new BalanceRuntime(balance.userId(), balance.assetId(), available, locked),
-                appliedPnl, collectedFee);
-    }
-
-    /**
      * 只有产品可强平、持仓仍存在且配置引用、保证金模式和带方向数量与计划一致，风险记录也仍在同价格序号下判为强平时，才允许最终执行。
      * @param runtime 本命令操作的交易运行时，账户变更只在所属 Lane，资金差额交账本应用
      * @param liquidation 源账户当前强平记录，提供用户、币对、持仓腿和计划平仓量
@@ -805,22 +791,4 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 deficit, priceTicks, feeRatePpm, feeUnits, status, 0);
     }
 
-    /**
-     * 按平仓数量占原持仓数量的比例分摊整数值并截断小数；全部平掉时直接返回原值，避免无必要的中间乘法溢出。
-     * @param units 需要分摊的整数保证金或入场价格量
-     * @param part 本次平仓或保留的绝对数量，由调用方保证在总数量内
-     * @param total 原持仓绝对数量，作为正的分摊除数
-     */
-    private static long proportional(long units, long part, long total) {
-        return part == total ? units : Math.multiplyExact(units, part) / total;
-    }
-
-    /**
-     * 强平现金计算的局部结果，分开保存新余额、实际计入的盈亏和实际收取费用，供后续计算未覆盖亏空及账本差额。
-     * @param balance 源用户结算资产的余额；现金计算结果中则为应用强平后的新余额
-     * @param appliedPnl 本次实际计入账户的平仓现金变化，负亏损可能按可扣资金封顶
-     * @param collectedFee 本次在允许资金范围内实际收取的强平费用
-     */
-    private record LiquidationCash(BalanceRuntime balance, long appliedPnl, long collectedFee) {
-    }
 }

@@ -38,7 +38,7 @@ public final class RuntimeAdlExecution {
         var route = runtime.liquidationRoute(command.liquidationId());
         if (route == null) throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation route is missing");
         // 源强平对应的合约配置，检查产品并为目标平仓计算提供金额参数。
-        CoreInstrument instrument = requireInstrument(runtime, route.instrumentId());
+        CoreInstrument instrument = runtime.requireInstrument(route.instrumentId());
         // 源强平合约的整数编号，用于检查行情和资金费进度。
         int symbolId = identities.symbolId(route.instrumentId());
         // 与 ADL 命令要求序号一致的当前行情，后续目标平仓估值固定使用它。
@@ -221,7 +221,7 @@ public final class RuntimeAdlExecution {
         long currentAbs = Math.absExact(position.signedQuantitySteps());
         // 本次减仓量能实现的盈利份额，必须足以覆盖命令指定的补亏额。
         long coverCapacity = totalProfit <= 0 ? 0
-                : proportional(totalProfit, command.closeQuantitySteps(), currentAbs);
+                : com.surprising.instrument.api.math.PerpetualContractMath.proportionalUnits(totalProfit, command.closeQuantitySteps(), currentAbs);
         if (coverCapacity < command.coveredUnits()) {
             throw new CoreStateRejectedException("ADL_PROFIT_INSUFFICIENT", "ADL target profit is insufficient");
         }
@@ -231,7 +231,7 @@ public final class RuntimeAdlExecution {
         long nextQuantity = remainingAbs == 0 ? 0
                 : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
         // 按本次减仓比例释放的持仓保证金，从冻结余额转回可用。
-        long releasedMargin = proportional(position.positionMarginUnits(), command.closeQuantitySteps(), currentAbs);
+        long releasedMargin = com.surprising.instrument.api.math.PerpetualContractMath.proportionalUnits(position.positionMarginUnits(), command.closeQuantitySteps(), currentAbs);
         // 目标账户在结算资产上的当前余额，没有该余额时返回业务拒绝。
         BalanceRuntime balance = runtime.balance(command.targetUserId(), settleAssetId);
         if (balance == null) {
@@ -253,7 +253,7 @@ public final class RuntimeAdlExecution {
                 Math.subtractExact(balance.lockedUnits(), releasedMargin));
         // 减仓后按剩余数量保留的入场价格量，空仓时清零。
         long nextEntryValue = remainingAbs == 0 ? 0
-                : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
+                : com.surprising.instrument.api.math.PerpetualContractMath.proportionalUnits(position.entryValueTicks(), remainingAbs, currentAbs);
         // 保留原身份、减小数量并相应释放保证金的目标持仓新值。
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
                 position.marginMode(), position.positionSide(), position.instrument(),
@@ -290,27 +290,4 @@ public final class RuntimeAdlExecution {
         runtime.replaceLiquidation(nextLiquidation);
     }
 
-    /**
-     * 要求当前运行时存在该合约配置，缺失时返回币对未注册的业务拒绝。
-     * @param runtime 本次操作的交易运行时，各账户修改由所属 Lane 完成，资金总账由账本处理
-     * @param instrumentId 需要已经注册在当前运行时的外部合约编号
-     */
-    private static CoreInstrument requireInstrument(TradingAccountRuntime runtime, String instrumentId) {
-        // 源强平对应的合约配置，检查产品并为目标平仓计算提供金额参数。
-        CoreInstrument instrument = runtime.instrument(instrumentId);
-        if (instrument == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        return instrument;
-    }
-
-    /**
-     * 按本次数量占原总量的比例分摊整数值并截断小数；全部数量时直接取原值，避免无必要乘法造成中间溢出。
-     * @param units 待按数量比例分配的原整数金额或入场价格量
-     * @param part 本次分配的数量，调用方应确保其在总数量范围内
-     * @param total 用于分摊的原持仓绝对数量，作为正的除数
-     */
-    private static long proportional(long units, long part, long total) {
-        return part == total ? units : Math.multiplyExact(units, part) / total;
-    }
 }

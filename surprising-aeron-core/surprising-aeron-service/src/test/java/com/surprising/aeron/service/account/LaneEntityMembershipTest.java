@@ -60,12 +60,12 @@ class LaneEntityMembershipTest {
                 assertThat(reservations.size()).isOne();
                 assertThat(orders.contains(1)).isTrue();
                 assertThat(reservations.contains(1)).isTrue();
-                assertThat(state.reservationIdsForUser(8).toArray()).containsExactly(Long.MAX_VALUE);
+                assertThat(state.reservationIdsForUser(8)).containsExactly(Long.MAX_VALUE);
                 state.clearChangedKeys();
             }
             // 运行时返回的预留成员副本，修改它应不影响权威集合。
             var detached = state.reservationIdsForUser(7);
-            detached.remove(1);
+            detached[0] = 99;
             assertThat(reservations.contains(1)).isTrue();
             state.removeOrder(1);
             state.removeReservation(1, 7);
@@ -108,7 +108,7 @@ class LaneEntityMembershipTest {
             assertThat(orders.contains(1)).isTrue();
             assertThat(orders.contains(2)).isTrue();
             assertThat(orders.contains(3)).isFalse();
-            assertThat(reservations.toArray()).containsExactlyInAnyOrder(1, 2);
+            assertThat(reservations).containsExactlyInAnyOrder(1, 2);
             assertThat(lane.orders.get(3)).isNull();
             assertThat(lane.reservations.get(3)).isNull();
         }

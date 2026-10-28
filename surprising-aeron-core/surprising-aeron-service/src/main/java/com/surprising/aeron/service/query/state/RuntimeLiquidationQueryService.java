@@ -9,7 +9,6 @@ import com.surprising.aeron.service.core.identity.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.risk.RiskScanRuntime;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
-import java.util.List;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -40,8 +39,7 @@ public final class RuntimeLiquidationQueryService {
         // 该页是否已消费完来源范围，条数、扫描或字节边界使它变为 false。
         boolean complete = sourceComplete;
         // 回执合页当前已接纳的编码总长度，每次加项前都检查预算。
-        int encoded = CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
-                productLine, cursor, false, continuation, List.of(), List.of())).length;
+        int encoded = CoreLiquidationWorkCodec.emptyWorkLength(continuation);
         for (/* 当前候选编号及对应动作、补亏回执的共同数组下标。 */ int index = 0; index < ids.length; index++) {
             if (ids[index] <= query.afterLiquidationId()) continue;
             // 当前候选的执行动作视图，补亏用途或无有效执行回执时为空。
@@ -51,12 +49,8 @@ public final class RuntimeLiquidationQueryService {
             if (action == null && resolution == null) { cursor = ids[index]; continue; }
             if (actions.size() + resolutions.size() == query.maxItems()) { complete = false; break; }
             // 当前一条有效项增加的编码字节数，加入之前先与页面总上限比较。
-            int itemBytes = CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
-                    productLine, ids[index], false, continuation,
-                    action == null ? List.of() : List.of(action),
-                    resolution == null ? List.of() : List.of(resolution))).length
-                    - CoreLiquidationWorkCodec.encodeWork(new CoreLiquidationWorkView(
-                    productLine, ids[index], false, continuation, List.of(), List.of())).length;
+            int itemBytes = Math.addExact(action == null ? 0 : CoreLiquidationWorkCodec.actionLength(action),
+                    resolution == null ? 0 : CoreLiquidationWorkCodec.resolutionLength(resolution));
             if (Math.addExact(encoded, itemBytes) > query.maxBytes()) { complete = false; break; }
             encoded = Math.addExact(encoded, itemBytes);
             if (action != null) actions.add(action);
@@ -94,8 +88,7 @@ public final class RuntimeLiquidationQueryService {
             CoreLiquidationWorkView.Purpose purpose) {
         if (purpose != CoreLiquidationWorkView.Purpose.EXECUTION) return null;
         // 风险扫描元数据集合，先用它的规模限制查询扫描范围。
-        var scans = runtime.riskScansForSnapshot();
-        if (scans.size() > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
+        if (runtime.riskScanCount() > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
             throw new RuntimeOperationalQueryService.QueryTooLargeException();
         }
         // 公平调度中下一份未完成的账户风险扫描，若没有就不生成继续信息。

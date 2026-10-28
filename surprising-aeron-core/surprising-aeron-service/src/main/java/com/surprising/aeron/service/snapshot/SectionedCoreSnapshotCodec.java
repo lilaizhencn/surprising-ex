@@ -9,7 +9,6 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
-import org.agrona.DirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 
 /** 分段快照 v30 的公开格式入口：外层封套、段头及本类基础数据按小端编码，内嵌 Matcher/交易状态负载遵循各自编解码器。提供整体编码、恢复和增量接收；格式解析与配对检查分别由 Writer、Recovery、Parser 和 Validation 承担。 构造约定：禁止实例化纯静态格式入口。 */
@@ -115,110 +114,16 @@ public final class SectionedCoreSnapshotCodec {
      * 明确拒绝空数组引用，创建部署上限的恢复器并一次送入全部字节；其他截断或格式错误由恢复器拒绝。
      * @param snapshot 待探测或恢复的完整快照字节数组
      */
-    private static RecoveryBuffer recovery(byte[] snapshot) {
+    private static SectionedCoreSnapshotRecovery recovery(byte[] snapshot) {
         return recovery(snapshot, com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
     }
 
-    private static RecoveryBuffer recovery(byte[] snapshot, int maximumSnapshotBytes) {
+    private static SectionedCoreSnapshotRecovery recovery(byte[] snapshot, int maximumSnapshotBytes) {
         if (snapshot == null) throw new ProtocolException("snapshot is null");
         // 接收整个快照的内部有界恢复缓冲。
-        RecoveryBuffer recovery = new RecoveryBuffer(maximumSnapshotBytes);
+        SectionedCoreSnapshotRecovery recovery = new SectionedCoreSnapshotRecovery(maximumSnapshotBytes);
         recovery.accept(new UnsafeBuffer(snapshot), 0, snapshot.length);
         return recovery;
-    }
-
-    /**
-     * 对外暴露的有界增量接收入口，内部保存完整的各段负载；接收完成后才能读清单或创建运行时。
-     */
-    public static final class RecoveryBuffer {
-        /** 拥有增量缓冲、CRC 和接收进度的内部恢复器。 */
-        private final SectionedCoreSnapshotRecovery delegate;
-
-        /**
-         * 以本部署配置的最大快照字节数创建增量恢复器。
-         */
-        public RecoveryBuffer() {
-            this(com.surprising.aeron.config.CoreRuntimeConfiguration.standalone().snapshot().maxBytes());
-        }
-
-        /**
-         * 使用显式总字节上限创建增量恢复器，供边界测试或离线读取使用。
-         * @param maximumSnapshotBytes 显式恢复器允许接收的总字节上限
-         */
-        public RecoveryBuffer(int maximumSnapshotBytes) {
-            delegate = new SectionedCoreSnapshotRecovery(maximumSnapshotBytes);
-        }
-
-        /**
-         * 按给定范围增量接收字节，片段可跨封套、段头和负载边界；格式、长度及 CRC 检查委托内部恢复器。
-         * @param source 本次接收的片段来源缓冲
-         * @param offset 片段在来源缓冲中的起始字节偏移
-         * @param length 本次接收的字节数，或 SectionedSnapshot 保存的总长度，具体含义见当前签名
-         */
-        public void accept(DirectBuffer source, int offset, int length) {
-            delegate.accept(source, offset, length);
-        }
-
-        /**
-         * 要求完整接收后解析组件，恢复并激活指定产品线的运行时，失败不返回半恢复对象。
-         * @param expectedProductLine 调用方明确要求恢复或检查的产品线
-         */
-        public TradingCoreRuntime decode(ProductLine expectedProductLine) {
-            return delegate.decode(expectedProductLine);
-        }
-
-        public TradingCoreRuntime decode(ProductLine expectedProductLine,
-                com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-            return decode(expectedProductLine, configuration,
-                    com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
-        }
-
-        public TradingCoreRuntime decode(ProductLine expectedProductLine,
-                com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
-                com.surprising.aeron.config.LaneTopology deploymentTopology) {
-            return delegate.decode(expectedProductLine, configuration, deploymentTopology);
-        }
-
-        public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
-                com.surprising.aeron.config.CoreRuntimeConfiguration configuration) {
-            return decodePassive(expectedProductLine, configuration,
-                    com.surprising.aeron.config.CoreConfiguration.standaloneLaneTopology());
-        }
-
-        public TradingCoreRuntime decodePassive(ProductLine expectedProductLine,
-                com.surprising.aeron.config.CoreRuntimeConfiguration configuration,
-                com.surprising.aeron.config.LaneTopology deploymentTopology) {
-            return delegate.decodePassive(expectedProductLine, configuration, deploymentTopology);
-        }
-
-        /**
-         * 完整解析并检查组件后返回公开清单，不启动 Matcher；临时终态索引由内部恢复器关闭。
-         * @param expectedProductLine 调用方明确要求恢复或检查的产品线
-         */
-        public CoreSnapshotManifest manifest(ProductLine expectedProductLine) {
-            return delegate.manifest(expectedProductLine);
-        }
-
-        /**
-         * 返回已经接收完整的段数，当前尚未收齐但已分配的段不计入，完成时包含页尾段。
-         */
-        public int ownedSectionCount() {
-            return delegate.ownedSectionCount();
-        }
-
-        /**
-         * 返回已成功拷入内部数组的累计字节数，包含封套、段头和负载。
-         */
-        public int totalLength() {
-            return delegate.totalLength();
-        }
-
-        /**
-         * 返回固定封套/段头数组及已分配负载数组的字节长度之和，不计对象头、引用数组或解析后对象。
-         */
-        public int allocatedBytes() {
-            return delegate.allocatedBytes();
-        }
     }
 
     /**

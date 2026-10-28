@@ -38,14 +38,14 @@ class TransferLaneCapacityTest {
             assertThatThrownBy(() -> task.prepareTransferOut(runtime, identities, 7, next))
                     .hasMessageContaining("capacity is full");
             task.prepareTransferOut(runtime, identities, 7, first);
-            LedgerControlTestSupport.await(runtime, task::poll);
+            LedgerControlTestSupport.await(runtime, task::getAsBoolean);
             assertThat(runtime.pendingTransferUser(1)).isEqualTo(7);
             // 释放第一条待转记录的完成续步
             var completion = new AccountControlTask().prepareTransferCompletion(runtime, 7, 1);
             LedgerControlTestSupport.await(runtime, completion);
             assertThat(runtime.hasPendingTransferCapacity()).isTrue();
             task.prepareTransferOut(runtime, identities, 7, next);
-            LedgerControlTestSupport.await(runtime, task::poll);
+            LedgerControlTestSupport.await(runtime, task::getAsBoolean);
             assertThat(runtime.hasPendingTransferCapacity()).isFalse();
             assertThat(runtime.pendingTransferUser(next.transferId())).isEqualTo(7);
             // USDT在本例身份表中的内部资产号

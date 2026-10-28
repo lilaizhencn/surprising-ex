@@ -1,0 +1,791 @@
+{
+  "role": "network-client",
+  "recording_sha256": "8099d73b00268ebf289c23f3099c8283fb6a67ae9ccf18271cb385f72ecf9112",
+  "recording_bytes": 2710013,
+  "raw_recording_status": "deleted after summary/view/configuration and SHA-256 archive",
+  "window_epoch_ms": [
+    1793159008326,
+    1793159018339
+  ],
+  "window_definition": "network measurement only; interval durations clipped to overlap",
+  "event_counts_full_recording": {
+    "jdk.GCPhaseParallel": 18441,
+    "surprising.ClientTransportBoundary": 14358,
+    "jdk.ObjectAllocationSample": 13317,
+    "jdk.ExecutionSample": 9050,
+    "jdk.ThreadSleep": 7403,
+    "surprising.ClientRequestLatency": 4304,
+    "jdk.NativeMethodSample": 1307,
+    "jdk.PromoteObjectInNewPLAB": 1166,
+    "jdk.SystemProcess": 1142,
+    "jdk.NativeLibrary": 1041,
+    "jdk.ModuleExport": 626,
+    "jdk.BooleanFlag": 472,
+    "jdk.ActiveSetting": 387,
+    "jdk.Checkpoint": 258,
+    "jdk.Deoptimization": 237,
+    "jdk.TenuringDistribution": 225,
+    "jdk.ModuleRequire": 158,
+    "jdk.ThreadPark": 152,
+    "jdk.PromoteObjectOutsidePLAB": 139,
+    "jdk.LongFlag": 135,
+    "jdk.JavaExceptionThrow": 134,
+    "jdk.ThreadCPULoad": 95,
+    "jdk.UnsignedLongFlag": 83,
+    "jdk.ClassLoadingStatistics": 68,
+    "jdk.CompilerStatistics": 68,
+    "jdk.ExceptionStatistics": 68,
+    "jdk.JavaThreadStatistics": 68,
+    "jdk.ResidentSetSize": 68,
+    "jdk.CPULoad": 67,
+    "jdk.NetworkUtilization": 64,
+    "jdk.InitialEnvironmentVariable": 62,
+    "jdk.GCReferenceStatistics": 60,
+    "jdk.MetaspaceChunkFreeListSummary": 60,
+    "jdk.JavaErrorThrow": 50,
+    "jdk.InitialSecurityProperty": 47,
+    "jdk.GCPhasePauseLevel1": 45,
+    "jdk.IntFlag": 44,
+    "jdk.UnsignedIntFlag": 44,
+    "jdk.StringFlag": 34,
+    "jdk.ThreadAllocationStatistics": 34,
+    "jdk.ExecuteVMOperation": 33,
+    "jdk.ThreadStart": 33,
+    "jdk.ThreadEnd": 32,
+    "jdk.G1HeapSummary": 30,
+    "jdk.GCHeapSummary": 30,
+    "jdk.MetaspaceSummary": 30,
+    "jdk.InitialSystemProperty": 28,
+    "jdk.CompilerQueueUtilization": 26,
+    "jdk.SafepointBegin": 21,
+    "jdk.Compilation": 18,
+    "jdk.DoubleFlag": 16,
+    "jdk.OldObjectSample": 16,
+    "jdk.EvacuationInformation": 15,
+    "jdk.G1AdaptiveIHOP": 15,
+    "jdk.G1BasicIHOP": 15,
+    "jdk.G1EvacuationOldStatistics": 15,
+    "jdk.G1EvacuationYoungStatistics": 15,
+    "jdk.G1GarbageCollection": 15,
+    "jdk.G1MMU": 15,
+    "jdk.GCCPUTime": 15,
+    "jdk.GCPhasePause": 15,
+    "jdk.GarbageCollection": 15,
+    "jdk.YoungGarbageCollection": 15,
+    "jdk.DirectBufferStatistics": 13,
+    "jdk.ClassLoaderStatistics": 6,
+    "jdk.CodeCacheStatistics": 6,
+    "jdk.FileRead": 6,
+    "jdk.GCHeapMemoryPoolUsage": 6,
+    "jdk.GCPhasePauseLevel2": 6,
+    "jdk.StringTableStatistics": 6,
+    "jdk.SymbolTableStatistics": 6,
+    "jdk.ThreadContextSwitchRate": 5,
+    "jdk.CompilationFailure": 4,
+    "jdk.DeprecatedInvocation": 4,
+    "jdk.JavaMonitorWait": 4,
+    "jdk.GCConfiguration": 2,
+    "jdk.GCHeapMemoryUsage": 2,
+    "jdk.JavaMonitorStatistics": 2,
+    "jdk.Metadata": 2,
+    "jdk.PhysicalMemory": 2,
+    "jdk.SwapSpace": 2,
+    "jdk.UnsignedLongFlagChanged": 2,
+    "jdk.ActiveRecording": 1,
+    "jdk.CPUInformation": 1,
+    "jdk.CPUTimeStampCounter": 1,
+    "jdk.CodeCacheConfiguration": 1,
+    "jdk.CompilerConfiguration": 1,
+    "jdk.GCHeapConfiguration": 1,
+    "jdk.GCSurvivorConfiguration": 1,
+    "jdk.GCTLABConfiguration": 1,
+    "jdk.JVMInformation": 1,
+    "jdk.NativeLibraryLoad": 1,
+    "jdk.OSInformation": 1,
+    "jdk.Shutdown": 1,
+    "jdk.ThreadDump": 1,
+    "jdk.VirtualizationInformation": 1,
+    "jdk.YoungGenerationConfiguration": 1,
+    "jdk.AllocationRequiringGC": 0,
+    "jdk.BooleanFlagChanged": 0,
+    "jdk.CPUTimeSample": 0,
+    "jdk.CPUTimeSamplesLost": 0,
+    "jdk.ClassDefine": 0,
+    "jdk.ClassLoad": 0,
+    "jdk.ClassRedefinition": 0,
+    "jdk.ClassUnload": 0,
+    "jdk.CodeCacheFull": 0,
+    "jdk.CompilerInlining": 0,
+    "jdk.CompilerPhase": 0,
+    "jdk.ConcurrentModeFailure": 0,
+    "jdk.ContainerCPUThrottling": 0,
+    "jdk.ContainerCPUUsage": 0,
+    "jdk.ContainerConfiguration": 0,
+    "jdk.ContainerIOUsage": 0,
+    "jdk.ContainerMemoryUsage": 0,
+    "jdk.ContinuationFreeze": 0,
+    "jdk.ContinuationFreezeFast": 0,
+    "jdk.ContinuationFreezeSlow": 0,
+    "jdk.ContinuationThaw": 0,
+    "jdk.ContinuationThawFast": 0,
+    "jdk.ContinuationThawSlow": 0,
+    "jdk.DataLoss": 0,
+    "jdk.Deserialization": 0,
+    "jdk.DoubleFlagChanged": 0,
+    "jdk.DumpReason": 0,
+    "jdk.EvacuationFailed": 0,
+    "jdk.FileForce": 0,
+    "jdk.FileWrite": 0,
+    "jdk.FinalFieldMutation": 0,
+    "jdk.FinalizerStatistics": 0,
+    "jdk.Flush": 0,
+    "jdk.G1HeapRegionInformation": 0,
+    "jdk.G1HeapRegionTypeChange": 0,
+    "jdk.GCPhaseConcurrent": 0,
+    "jdk.GCPhaseConcurrentLevel1": 0,
+    "jdk.GCPhaseConcurrentLevel2": 0,
+    "jdk.GCPhasePauseLevel3": 0,
+    "jdk.GCPhasePauseLevel4": 0,
+    "jdk.HeapDump": 0,
+    "jdk.IntFlagChanged": 0,
+    "jdk.JITRestart": 0,
+    "jdk.JavaAgent": 0,
+    "jdk.JavaMonitorDeflate": 0,
+    "jdk.JavaMonitorEnter": 0,
+    "jdk.JavaMonitorInflate": 0,
+    "jdk.JavaMonitorNotify": 0,
+    "jdk.LongFlagChanged": 0,
+    "jdk.MetaspaceAllocationFailure": 0,
+    "jdk.MetaspaceGCThreshold": 0,
+    "jdk.MetaspaceOOM": 0,
+    "jdk.MethodTiming": 0,
+    "jdk.MethodTrace": 0,
+    "jdk.NativeAgent": 0,
+    "jdk.NativeLibraryUnload": 0,
+    "jdk.NativeMemoryUsage": 0,
+    "jdk.NativeMemoryUsageTotal": 0,
+    "jdk.ObjectAllocationInNewTLAB": 0,
+    "jdk.ObjectAllocationOutsideTLAB": 0,
+    "jdk.ObjectCount": 0,
+    "jdk.ObjectCountAfterGC": 0,
+    "jdk.OldGarbageCollection": 0,
+    "jdk.PSHeapSummary": 0,
+    "jdk.ParallelOldGarbageCollection": 0,
+    "jdk.ProcessStart": 0,
+    "jdk.PromotionFailed": 0,
+    "jdk.RedefineClasses": 0,
+    "jdk.ReservedStackActivation": 0,
+    "jdk.RetransformClasses": 0,
+    "jdk.SafepointEnd": 0,
+    "jdk.SafepointLatency": 0,
+    "jdk.SafepointStateSynchronization": 0,
+    "jdk.SecurityPropertyModification": 0,
+    "jdk.SecurityProviderService": 0,
+    "jdk.SerializationMisdeclaration": 0,
+    "jdk.ShenandoahEvacuationInformation": 0,
+    "jdk.ShenandoahHeapRegionInformation": 0,
+    "jdk.ShenandoahHeapRegionStateChange": 0,
+    "jdk.ShenandoahPromotionInformation": 0,
+    "jdk.SocketRead": 0,
+    "jdk.SocketWrite": 0,
+    "jdk.StringDeduplication": 0,
+    "jdk.StringFlagChanged": 0,
+    "jdk.SyncOnValueBasedClass": 0,
+    "jdk.SystemGC": 0,
+    "jdk.TLSHandshake": 0,
+    "jdk.UnsignedIntFlagChanged": 0,
+    "jdk.VirtualThreadEnd": 0,
+    "jdk.VirtualThreadPinned": 0,
+    "jdk.VirtualThreadStart": 0,
+    "jdk.VirtualThreadSubmitFailed": 0,
+    "jdk.X509Certificate": 0,
+    "jdk.X509Validation": 0,
+    "jdk.ZAllocationStall": 0,
+    "jdk.ZOldGarbageCollection": 0,
+    "jdk.ZPageAllocation": 0,
+    "jdk.ZRelocationSet": 0,
+    "jdk.ZRelocationSetGroup": 0,
+    "jdk.ZStatisticsCounter": 0,
+    "jdk.ZStatisticsSampler": 0,
+    "jdk.ZThreadPhase": 0,
+    "jdk.ZUncommit": 0,
+    "jdk.ZYoungGarbageCollection": 0
+  },
+  "event_counts_window": {
+    "surprising.ClientTransportBoundary": 12867,
+    "jdk.ThreadSleep": 1135,
+    "jdk.ExecutionSample": 1827,
+    "jdk.ObjectAllocationSample": 2973,
+    "jdk.NativeMethodSample": 398,
+    "jdk.Deoptimization": 34,
+    "surprising.ClientRequestLatency": 4282,
+    "jdk.FileRead": 1,
+    "jdk.ThreadCPULoad": 14,
+    "jdk.CPULoad": 10,
+    "jdk.Compilation": 3,
+    "jdk.SafepointBegin": 4,
+    "jdk.GCHeapSummary": 8,
+    "jdk.GCPhasePause": 4,
+    "jdk.GarbageCollection": 4,
+    "jdk.ExecuteVMOperation": 4,
+    "jdk.DirectBufferStatistics": 2
+  },
+  "data_loss_events_full_recording": 0,
+  "analysis_events": [
+    "jdk.CPULoad",
+    "jdk.Compilation",
+    "jdk.Deoptimization",
+    "jdk.DirectBufferStatistics",
+    "jdk.ExecuteVMOperation",
+    "jdk.ExecutionSample",
+    "jdk.FileRead",
+    "jdk.GCHeapSummary",
+    "jdk.GCPhasePause",
+    "jdk.GarbageCollection",
+    "jdk.JavaMonitorWait",
+    "jdk.NativeMethodSample",
+    "jdk.ObjectAllocationSample",
+    "jdk.SafepointBegin",
+    "jdk.ThreadAllocationStatistics",
+    "jdk.ThreadCPULoad",
+    "jdk.ThreadPark",
+    "jdk.ThreadSleep",
+    "surprising.ClientRequestLatency",
+    "surprising.ClientTransportBoundary"
+  ],
+  "hot_methods": [
+    [
+      "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain.space:549",
+      661
+    ],
+    [
+      "java.util.concurrent.ConcurrentHashMap$Traverser.advance:3410",
+      337
+    ],
+    [
+      "sun.nio.ch.DatagramChannelImpl.receive0:-1",
+      178
+    ],
+    [
+      "java.util.concurrent.locks.AbstractQueuedSynchronizer.signalNext:645",
+      138
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.run:862",
+      123
+    ],
+    [
+      "java.lang.Thread.yield0:-1",
+      114
+    ],
+    [
+      "sun.nio.ch.DatagramDispatcher.write0:-1",
+      87
+    ],
+    [
+      "java.util.concurrent.TimeUnit.toNanos:257",
+      57
+    ],
+    [
+      "io.aeron.Image.poll:357",
+      45
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.admitQueued:975",
+      37
+    ],
+    [
+      "java.util.concurrent.ConcurrentHashMap$EntryIterator.next:3517",
+      31
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.run:823",
+      20
+    ],
+    [
+      "com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length:444",
+      20
+    ],
+    [
+      "io.aeron.cluster.client.AeronCluster.pollEgress:601",
+      19
+    ],
+    [
+      "jdk.internal.util.DecimalDigits.uncheckedGetCharsLatin1:222",
+      17
+    ],
+    [
+      "com.surprising.aeron.protocol.CoreStateQueryCodec.writeUtf8Bytes:400",
+      17
+    ],
+    [
+      "java.util.concurrent.ArrayBlockingQueue.bulkRemove:1505",
+      16
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.run:840",
+      16
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.dispatchResponses:1074",
+      16
+    ],
+    [
+      "sun.nio.ch.DatagramChannelImpl.send0:-1",
+      13
+    ]
+  ],
+  "second_frames": [
+    [
+      "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain.send:499",
+      661
+    ],
+    [
+      "java.util.concurrent.ConcurrentHashMap$BaseIterator.<init>:3462",
+      333
+    ],
+    [
+      "sun.nio.ch.DatagramChannelImpl.receiveIntoNativeBuffer:730",
+      178
+    ],
+    [
+      "java.lang.Thread.runWith:1540",
+      171
+    ],
+    [
+      "java.util.concurrent.locks.AbstractQueuedSynchronizer.release:1101",
+      138
+    ],
+    [
+      "java.lang.Thread.yield:515",
+      114
+    ],
+    [
+      "sun.nio.ch.DatagramDispatcher.write:54",
+      87
+    ],
+    [
+      "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain.report:652",
+      57
+    ],
+    [
+      "io.aeron.Subscription.poll:203",
+      47
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.run:830",
+      44
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient.drainResponses:293",
+      31
+    ],
+    [
+      "java.lang.StringConcatHelper.prepend:438",
+      24
+    ],
+    [
+      "com.surprising.aeron.protocol.TradingCommandCodec.commandTextLength:286",
+      23
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient$AeronClusterOperations.pollEgress:499",
+      19
+    ],
+    [
+      "com.surprising.aeron.protocol.TradingCommandCodec.putCommandText:296",
+      17
+    ],
+    [
+      "java.util.concurrent.ArrayBlockingQueue.removeIf:1474",
+      16
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.pollSession:913",
+      16
+    ],
+    [
+      "sun.nio.ch.DatagramChannelImpl.sendFromNativeBuffer:914",
+      13
+    ],
+    [
+      "com.surprising.aeron.protocol.CoreStateQueryCodec.readOrderState:518",
+      8
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient$AsyncConnection.pollEgress:572",
+      8
+    ]
+  ],
+  "application_frames": [
+    [
+      "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain.space:549",
+      661
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient.drainResponses:291",
+      333
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.run:862",
+      123
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient$AeronClusterOperations.pollEgress:499",
+      71
+    ],
+    [
+      "com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain.report:652",
+      60
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.admitQueued:970",
+      58
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.admitQueued:975",
+      37
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient.drainResponses:293",
+      35
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.run:823",
+      20
+    ],
+    [
+      "com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length:444",
+      20
+    ],
+    [
+      "com.surprising.aeron.protocol.CoreStateQueryCodec.writeUtf8Bytes:400",
+      17
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.expireQueued:1063",
+      16
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.run:840",
+      16
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$EgressDispatcher.dispatchResponses:1074",
+      16
+    ],
+    [
+      "com.surprising.aeron.protocol.CoreStateQueryCodec$Reader.text:869",
+      15
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient$AeronClusterOperations.offer:494",
+      11
+    ],
+    [
+      "com.surprising.aeron.protocol.CoreStateQueryCodec$Reader.optionalText:883",
+      8
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient$AsyncConnection.poll:554",
+      8
+    ],
+    [
+      "com.surprising.aeron.client.AeronClientPool$Request.terminal:1348",
+      8
+    ],
+    [
+      "com.surprising.aeron.client.SurprisingAeronClient.onMessage:391",
+      8
+    ]
+  ],
+  "cpu_samples_by_thread": [
+    [
+      "mixed-egress-dispatcher",
+      897
+    ],
+    [
+      "main",
+      889
+    ],
+    [
+      "/tmp/surprising-round2-evidence/jfr/client-tmp/surprising-aeron--4958429971276728970 [sender,receiver,aeron-md-nra,driver-conductor]",
+      431
+    ],
+    [
+      "benchmark-mark-price-source",
+      4
+    ],
+    [
+      "aeron-client",
+      3
+    ],
+    [
+      "JFR Periodic Tasks",
+      1
+    ]
+  ],
+  "allocation_samples": {
+    "[B": {
+      "samples": 1161,
+      "sampled_weight_bytes": 1329697792
+    },
+    "java/util/concurrent/ConcurrentHashMap$EntryIterator": {
+      "samples": 448,
+      "sampled_weight_bytes": 422609112
+    },
+    "java/nio/HeapByteBuffer": {
+      "samples": 211,
+      "sampled_weight_bytes": 232146632
+    },
+    "com/surprising/aeron/protocol/PlaceOrderCommand": {
+      "samples": 192,
+      "sampled_weight_bytes": 167191376
+    },
+    "com/surprising/aeron/protocol/CoreOrderBatchResult$Item": {
+      "samples": 228,
+      "sampled_weight_bytes": 161944432
+    },
+    "java/lang/String": {
+      "samples": 145,
+      "sampled_weight_bytes": 131120224
+    },
+    "com.surprising.aeron.client.AeronClientPool$EgressDispatcher$$Lambda/0x000000012335e800": {
+      "samples": 128,
+      "sampled_weight_bytes": 118575216
+    },
+    "com/surprising/aeron/protocol/CoreOrderStateView": {
+      "samples": 85,
+      "sampled_weight_bytes": 70086128
+    },
+    "[Ljava/lang/Object;": {
+      "samples": 71,
+      "sampled_weight_bytes": 68094376
+    },
+    "com/surprising/aeron/protocol/CoreExecutionView": {
+      "samples": 40,
+      "sampled_weight_bytes": 59730552
+    },
+    "java/lang/Long": {
+      "samples": 18,
+      "sampled_weight_bytes": 36716720
+    },
+    "[Lcom/surprising/aeron/protocol/PlaceOrderCommand;": {
+      "samples": 10,
+      "sampled_weight_bytes": 34052808
+    },
+    "java/util/ArrayList": {
+      "samples": 16,
+      "sampled_weight_bytes": 27930360
+    },
+    "com/surprising/aeron/protocol/CoreMessageHeader": {
+      "samples": 24,
+      "sampled_weight_bytes": 27418656
+    },
+    "com/surprising/aeron/protocol/CoreMessage": {
+      "samples": 14,
+      "sampled_weight_bytes": 27244104
+    }
+  },
+  "cpu_load": [
+    {
+      "epoch_ms": 1793159009021.1501,
+      "jvmUser": 0.13125,
+      "jvmSystem": 0.025,
+      "machineTotal": 0.9787765
+    },
+    {
+      "epoch_ms": 1793159010035.734,
+      "jvmUser": 0.17636138,
+      "jvmSystem": 0.048267327,
+      "machineTotal": 0.94835097
+    },
+    {
+      "epoch_ms": 1793159011043.0989,
+      "jvmUser": 0.14789604,
+      "jvmSystem": 0.03960396,
+      "machineTotal": 0.9544035
+    },
+    {
+      "epoch_ms": 1793159012050.515,
+      "jvmUser": 0.125,
+      "jvmSystem": 0.030625,
+      "machineTotal": 0.9486537
+    },
+    {
+      "epoch_ms": 1793159013053.208,
+      "jvmUser": 0.13375,
+      "jvmSystem": 0.0375,
+      "machineTotal": 0.92525125
+    },
+    {
+      "epoch_ms": 1793159014060.8362,
+      "jvmUser": 0.13675742,
+      "jvmSystem": 0.041460395,
+      "machineTotal": 0.9389937
+    },
+    {
+      "epoch_ms": 1793159015067.166,
+      "jvmUser": 0.14375,
+      "jvmSystem": 0.04375,
+      "machineTotal": 0.9271357
+    },
+    {
+      "epoch_ms": 1793159016073.722,
+      "jvmUser": 0.13737623,
+      "jvmSystem": 0.042079207,
+      "machineTotal": 0.90605295
+    },
+    {
+      "epoch_ms": 1793159017084.552,
+      "jvmUser": 0.13118812,
+      "jvmSystem": 0.035272278,
+      "machineTotal": 0.955196
+    },
+    {
+      "epoch_ms": 1793159018091.1692,
+      "jvmUser": 0.115625,
+      "jvmSystem": 0.033125,
+      "machineTotal": 0.9285714
+    }
+  ],
+  "thread_waits": {
+    "jdk.ThreadSleep:?": {
+      "count": 1135,
+      "duration_ms": 20000.35791015625
+    }
+  },
+  "gc_pause_count": 4,
+  "gc_pause_total_ms": 23.813720703125,
+  "gc_pause_max_ms": 6.49658203125,
+  "jit_compilation_count": 3,
+  "jit_compilation_ms": 510.041015625,
+  "heap_samples": [
+    {
+      "epoch_ms": 1793159010228.396,
+      "when": "Before GC",
+      "heap_used": 650816472
+    },
+    {
+      "epoch_ms": 1793159010234.889,
+      "when": "After GC",
+      "heap_used": 16365240
+    },
+    {
+      "epoch_ms": 1793159012398.25,
+      "when": "Before GC",
+      "heap_used": 651802296
+    },
+    {
+      "epoch_ms": 1793159012403.888,
+      "when": "After GC",
+      "heap_used": 16592240
+    },
+    {
+      "epoch_ms": 1793159014256.881,
+      "when": "Before GC",
+      "heap_used": 652029296
+    },
+    {
+      "epoch_ms": 1793159014262.913,
+      "when": "After GC",
+      "heap_used": 16232656
+    },
+    {
+      "epoch_ms": 1793159015999.3,
+      "when": "Before GC",
+      "heap_used": 651669712
+    },
+    {
+      "epoch_ms": 1793159016004.935,
+      "when": "After GC",
+      "heap_used": 16416136
+    }
+  ],
+  "direct_buffer_samples": [
+    {
+      "epoch_ms": 1793159011043.405,
+      "count": 6,
+      "totalCapacity": 8522400,
+      "memoryUsed": 8522400
+    },
+    {
+      "epoch_ms": 1793159016074.016,
+      "count": 6,
+      "totalCapacity": 8522400,
+      "memoryUsed": 8522400
+    }
+  ],
+  "lock_contention": {},
+  "io": {
+    "jdk.FileRead": {
+      "count": 1,
+      "duration_ms": 1.4375,
+      "max_ms": 1.4375,
+      "longest": [
+        {
+          "duration_ms": 1.4375,
+          "thread": "main",
+          "path": "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+          "stack": [
+            "java.util.zip.ZipFile$Source.readFullyAt:1588",
+            "java.util.zip.ZipFile$ZipFileInputStream.initDataOffset:921",
+            "java.util.zip.ZipFile$ZipFileInputStream.read:937",
+            "java.util.zip.ZipFile$ZipFileInflaterInputStream.fill:450",
+            "java.util.zip.InflaterInputStream.read:208"
+          ]
+        }
+      ]
+    }
+  },
+  "client_stage_quantiles": {
+    "end_to_end": {
+      "samples": 4282,
+      "p50us": 7345.238,
+      "p90us": 13654.43,
+      "p95us": 19991.56,
+      "p99us": 39598.998,
+      "p999us": 64236.43,
+      "maxus": 93775.282
+    },
+    "request_to_offer": {
+      "samples": 4282,
+      "p50us": 3.919,
+      "p90us": 9.566,
+      "p95us": 18.419,
+      "p99us": 59.891,
+      "p999us": 264.824,
+      "maxus": 559.341
+    },
+    "offer_to_delivery": {
+      "samples": 4282,
+      "p50us": 7334.16,
+      "p90us": 13645.129,
+      "p95us": 19986.716,
+      "p99us": 39519.24,
+      "p999us": 64213.296,
+      "maxus": 93760.769
+    },
+    "delivery_to_completion": {
+      "samples": 4282,
+      "p50us": 1.747,
+      "p90us": 5.087,
+      "p95us": 6.627,
+      "p99us": 18.479,
+      "p999us": 79.807,
+      "maxus": 257.15
+    }
+  },
+  "sampled_command_types": {
+    "APPLY_MARK_PRICE": 5,
+    "PLACE_ORDER": 1087,
+    "PLACE_ORDER_BATCH": 1824,
+    "CANCEL_ORDER": 1048,
+    "CANCEL_ORDER_BATCH": 318
+  },
+  "transport_stage_names": [
+    "delivered",
+    "offered",
+    "queued"
+  ]
+}

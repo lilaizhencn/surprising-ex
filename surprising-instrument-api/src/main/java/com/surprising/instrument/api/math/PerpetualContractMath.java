@@ -240,4 +240,9 @@ public final class PerpetualContractMath {
             throw new IllegalArgumentException(name + " must be positive");
         }
     }
+    /** 按数量比例分摊整数金额，截断小数；全量直接返回，其他情况保留精确乘法的溢出拒绝。调用方保证数量和分母范围。 */
+    public static long proportionalUnits(long units, long part, long total) {
+        return part == total ? units : Math.multiplyExact(units, part) / total;
+    }
+
 }
