@@ -48,7 +48,7 @@ class ArchiveReplayIntegrationTest {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                 int recordingCounter;
                 while ((recordingCounter = RecordingPos.findCounterIdBySession(
-                        aeron.countersReader(), publication.sessionId())) < 0) {
+                        aeron.countersReader(), publication.sessionId(), archive.archiveId())) < 0) {
                     checkDeadline(deadline);
                     Thread.sleep(1);
                 }

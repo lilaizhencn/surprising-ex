@@ -51,7 +51,7 @@ class CommittedFundingRepairIntegrationTest {
             archive.startRecording("aeron:ipc",1001,SourceLocation.LOCAL);
             try(var pub=aeron.addExclusivePublication("aeron:ipc?mtu=128",1001)) {
                 long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);int counter;
-                while((counter=RecordingPos.findCounterIdBySession(aeron.countersReader(),pub.sessionId()))<0){check(deadline);Thread.sleep(1);}
+                while((counter=RecordingPos.findCounterIdBySession(aeron.countersReader(),pub.sessionId(),archive.archiveId()))<0){check(deadline);Thread.sleep(1);}
                 long recording=RecordingPos.getRecordingId(aeron.countersReader(),counter);
                 try(var log=new RecordingLog(cluster.toFile(),true)){log.appendTerm(recording,1,0,TIME);log.force(2);}
                 offer(pub,CoreMessageType.REGISTER_INSTRUMENT,0,TradingCommandCodec.encodeRegisterInstrument(

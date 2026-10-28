@@ -110,7 +110,7 @@ class CommittedTradeExportIntegrationTest {
                 int recordingCounter;
                 while ((recordingCounter =
                                 RecordingPos.findCounterIdBySession(
-                                        aeron.countersReader(), publication.sessionId()))
+                                        aeron.countersReader(), publication.sessionId(), archive.archiveId()))
                         < 0) {
                     if (System.nanoTime() > deadline)
                         throw new IllegalStateException("recording did not start");

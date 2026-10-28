@@ -80,7 +80,7 @@ class CommittedPortfolioRepairIntegrationTest {
             try (var pub = aeron.addExclusivePublication("aeron:ipc?mtu=128", 1001)) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                 int recordingCounter;
-                while ((recordingCounter = RecordingPos.findCounterIdBySession(aeron.countersReader(), pub.sessionId())) < 0) {
+                while ((recordingCounter = RecordingPos.findCounterIdBySession(aeron.countersReader(), pub.sessionId(), archive.archiveId())) < 0) {
                     check(deadline); Thread.sleep(1);
                 }
                 long recording = RecordingPos.getRecordingId(aeron.countersReader(), recordingCounter);

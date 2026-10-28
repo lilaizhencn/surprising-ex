@@ -19,6 +19,11 @@ Product line identity controls routing and keeps instruments, accounts, trading 
 
 构建基线：HotSpot JDK 27、Spring Boot 4.1.2、Spring Cloud 2025.1.4；框架版本统一由 `surprising-parent/pom.xml` 管理。
 
+Aeron 基线为 **1.54.0**（由 1.53.3 升级），Client、Driver、Archive、Cluster 统一使用父 POM 管理的 `aeron-all`。
+本次重点包括 Java 线程 CPU 亲和性、UDP Traffic Class、收发路径优化，以及 Cluster 超时和 Archive 关闭/恢复修复。
+Realtime 的 5 处 `RecordingPos` 测试调用已补充具体 `archiveId`；新增绑核功能未默认开启，也不替换现有业务线程绑定。
+更新内容、兼容性核对和验证范围见 [Aeron 1.54.0 升级记录](surprising-aeron-core/validation/aeron-1.54.0-20261028.md)。
+
 产品线定义、topic 命名、币对契约和共享合约公式统一由
 [`surprising-instrument-api`](surprising-instrument-api/README.md) 提供。
 开发分层与约束见 [AGENTS.md](AGENTS.md)；性能优化和压测前必须读取
