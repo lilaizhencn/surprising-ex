@@ -1,0 +1,11 @@
+{
+  "scope": "native device UI with explicit local HTTP contract fixture; no real financial writes",
+  "device": "emulator-5582",
+  "exit_code": 0,
+  "screenshots": [
+    "android-basic-light",
+    "android-basic-dark",
+    "android-kol-dark",
+    "android-recovered-dark"
+  ]
+}

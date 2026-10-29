@@ -1,0 +1,35 @@
+{
+  "at_utc": "2026-10-29T04:29:54.733120+00:00",
+  "repositories": {
+    "backend": {
+      "head": "5332e201f3f3738207bc833dc2b3159ea3e113b3",
+      "sha256": {
+        "surprising-gateway/src/main/java/com/surprising/affiliate/service/AffiliateService.java": "f07dc6036c4b2a6c89d2523338815389361db87d8bf9138a5c702899b48b27d1",
+        "surprising-gateway/src/test/java/com/surprising/affiliate/AffiliatePostgresTest.java": "d5962f27e4100b5dc9458443a56ed7fe2f0eb570b18e7e487ed96d5c8f75b72d"
+      }
+    },
+    "web": {
+      "head": "7781f42d3ab345047e218b798a0b5cc8af4f305d",
+      "sha256": {
+        "src/features/affiliate/AffiliatePage.tsx": "eb400f7b112e78ceb5d4bfdeedf2bec45993a36885bc63b429f659cb7ec8495a",
+        "src/features/affiliate/affiliate.css": "53464f960f925b411b4a657f19161936bd4c8b3aa47e71264ac525c85eccc989",
+        "src/features/auth/AuthPage.tsx": "814466265146eff38b3f843d0cb5ec1614687fa6ad47ff588e5795a1e36cbf14",
+        "src/components/layout/AccountSidebar.tsx": "f2cfe889d08cbe2479b86f02000088be3ea056505846cb24318a24ff3b8f5107",
+        "scripts/affiliate-access-fixture.py": "76349a1e3e91d655cca6b7ef372e83bda72f03434b54c3c2402f6417990f633a",
+        "scripts/affiliate-access-qa.mjs": "60b1b4a6f3311c982dc85170eac850912c9fc63965cd9184bcb87a90f61afc3b"
+      }
+    },
+    "client": {
+      "head": "e9e174f9a3d1890489f662253176e68e9b9b6215",
+      "sha256": {
+        "lib/src/affiliate/affiliate_page.dart": "1d0bef43ca0e9e3e70bc51bfbbd7c02313e544dddd3590f662d80933f9e9d5b8",
+        "lib/src/account/profile_page.dart": "70b97450327a5530fdbbc335e92725afea09601b746976323f2a8e3de9fa808e",
+        "lib/src/auth/auth_sheet.dart": "268b9340145fd1434935ece1bc4983729063a8efd84fabb5985b3f0bf14607e6",
+        "integration_test/affiliate_access_test.dart": "acd521dd14a4c3f46fedee7f01254b1b9a55a9eaf39c87ed85ca2e8d1bc2514d",
+        "integration_test/affiliate_live_test.dart": "b79c15ba561ab0ad0850e41f32026d8d62be257c2966064daf0f69a2f36a3bd2",
+        "integration_test/affiliate_access_host.py": "aff8ea96e229a4610d3849f35aeda25fe5217551de58af3dd2de1fd9f51e58a9",
+        "integration_test/affiliate_host.py": "d2dff97a2a2cfa84a0b7138a28368e7f811011926d0e5a3ecec3fa9b1dbb82ab"
+      }
+    }
+  }
+}

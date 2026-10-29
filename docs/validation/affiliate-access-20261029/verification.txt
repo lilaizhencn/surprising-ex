@@ -1,0 +1,131 @@
+Checks for affiliate access policy, 2026-10-29
+Backend isolated export from 5332e201f plus owned AffiliateService/AffiliatePostgresTest; exact source bytes verified.
+
+$ red
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 2.407 s <<< FAILURE! -- in com.surprising.affiliate.AffiliatePostgresTest
+Expecting code to raise a throwable.
+Expecting code to raise a throwable.
+[ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+[INFO] Total time:  36.918 s
+[INFO] Finished at: 2026-10-29T11:52:21+08:00
+
+$ backend-tests
+[ERROR] COMPILATION ERROR :
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java:[62,52] constructor C2cStatusController in class com.surprising.gateway.c2c.controller.C2cStatusController cannot be applied to given types;
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java:[71,56] constructor ClientWebSocketHandler in class com.surprising.websocket.provider.handler.ClientWebSocketHandler cannot be applied to given types;
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.14.1:testCompile (default-testCompile) on project surprising-gateway: Compilation failure: Compilation failure:
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java:[62,52] constructor C2cStatusController in class com.surprising.gateway.c2c.controller.C2cStatusController cannot be applied to given types;
+[ERROR]   required: boolean,com.surprising.gateway.c2c.service.C2cMarketService,com.surprising.gateway.provider.product.GatewayProductServices
+[ERROR]   found:    boolean,com.surprising.gateway.c2c.service.C2cMarketService,com.surprising.gateway.provider.product.GatewayProductServices,com.surprising.gateway.provider.service.GatewayRequestLimits
+[ERROR]   reason: actual and formal argument lists differ in length
+[ERROR] /Users/atomex/Desktop/surprising/surprising-ex/surprising-gateway/src/test/java/com/surprising/gateway/c2c/C2cBrowserQaTest.java:[71,56] constructor ClientWebSocketHandler in class com.surprising.websocket.provider.handler.ClientWebSocketHandler cannot be applied to given types;
+[ERROR]   required: tools.jackson.databind.ObjectMapper,com.surprising.websocket.provider.service.SubscriptionRegistry,com.surprising.websocket.provider.config.WebSocketProperties,com.surprising.websocket.provider.service.WebSocketAuthenticator,com.surprising.gateway.provider.product.GatewayProductServices,com.surprising.gateway.provider.service.GatewayRequestLimits
+[ERROR]   found:    tools.jackson.databind.ObjectMapper,com.surprising.websocket.provider.service.SubscriptionRegistry,com.surprising.websocket.provider.config.WebSocketProperties,com.surprising.websocket.provider.service.WebSocketAuthenticator,com.surprising.gateway.provider.product.GatewayProductServices
+[ERROR]   reason: actual and formal argument lists differ in length
+
+$ backend-isolated-tests
+[ERROR] Tests run: 15, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 83.89 s <<< FAILURE! -- in com.surprising.affiliate.AffiliatePostgresTest
+expected: 3
+ but was: 1
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.affiliate.CommissionAllocationTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 49.01 s -- in com.surprising.affiliate.AffiliateSafetyPostgresTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.764 s -- in com.surprising.affiliate.AffiliateResourceTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.629 s -- in com.surprising.affiliate.AffiliateHttpTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 36.21 s -- in com.surprising.affiliate.AffiliateTeamIsolationPostgresTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.207 s -- in com.surprising.affiliate.CommittedPayoutTransferTest
+expected: 3
+ but was: 1
+[ERROR] Tests run: 55, Failures: 1, Errors: 0, Skipped: 0
+[INFO] BUILD FAILURE
+[INFO] Total time:  04:23 min
+[INFO] Finished at: 2026-10-29T12:01:30+08:00
+
+$ backend-isolated-final
+[INFO] Tests run: 15, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 59.23 s -- in com.surprising.affiliate.AffiliatePostgresTest
+[INFO] Tests run: 3, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.009 s -- in com.surprising.affiliate.CommissionAllocationTest
+[INFO] Tests run: 19, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 63.39 s -- in com.surprising.affiliate.AffiliateSafetyPostgresTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.816 s -- in com.surprising.affiliate.AffiliateResourceTest
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.628 s -- in com.surprising.affiliate.AffiliateHttpTest
+[INFO] Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 37.63 s -- in com.surprising.affiliate.AffiliateTeamIsolationPostgresTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.115 s -- in com.surprising.affiliate.CommittedPayoutTransferTest
+[INFO] Tests run: 55, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  04:11 min
+[INFO] Finished at: 2026-10-29T12:07:18+08:00
+
+$ backend-registration
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 4.130 s -- in com.surprising.affiliate.AffiliatePostgresTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+[INFO] Total time:  01:17 min
+[INFO] Finished at: 2026-10-29T12:09:46+08:00
+
+$ npm run lint (exit 0)
+Diagnostics not shown: 676.
+Checked 205 files in 295ms. No fixes applied.
+Found 696 infos.
+
+$ npm run typecheck (exit 0)
+
+> surprising-ex-web@0.1.0 typecheck
+> tsc -b --pretty false
+
+
+$ npm run test (exit 0)
+ RUN  v4.1.10 /Users/atomex/Desktop/surprising/surprising-ex-web
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  12:20:55
+   Duration  579ms (transform 135ms, setup 0ms, import 327ms, tests 5ms, environment 0ms)
+
+
+$ npm run build (exit 0)
+✓ built in 509ms
+
+$ flutter test --no-pub test/affiliate_input_test.dart (exit 0)
+00:00 +0: loading /Users/atomex/Desktop/surprising/surprising-client/test/affiliate_input_test.dart
+00:00 +0: commission display preserves large asset scales without floating point
+00:00 +1: shares preserve four decimal places and reject invalid percentages
+00:00 +2: web and native links identify the same invitation code
+00:00 +3: All tests passed!
+
+UI browser: full desktop/mobile enable/revoke/recovery + guest registration checks, exit 0
+[{"label":"desktop","viewport":{"width":1440,"height":1000},"theme":"light","basic":true,"enable":true,"branchWithDisabledMember":true,"revokeFromBranch":true,"blockedInvitation":true,"copy":true,"failedRefreshRecovery":true,"pageErrors":[],"overflow":false},{"label":"mobile","viewport":{"width":390,"height":844},"theme":"dark","basic":true,"enable":true,"branchWithDisabledMember":true,"revokeFromBranch":true,"blockedInvitation":true,"copy":true,"failedRefreshRecovery":true,"pageErrors":[],"overflow":false},{"guestRegistrationHidesKol":true,"cooperationRegistrationBlockedBeforePost":true}]
+
+$ flutter analyze --no-pub (exit 0)
+Analyzing surprising-client...
+No issues found! (ran in 18.0s)
+
+$ native ios drive (exit 0), explicit HTTP UI fixture
+Xcode build done.                                           56.3s
+flutter: AFFILIATE_ACCESS_SCREENSHOT:ios-basic-light
+flutter: AFFILIATE_ACCESS_SCREENSHOT:ios-basic-dark
+flutter: AFFILIATE_ACCESS_SCREENSHOT:ios-kol-dark
+flutter: AFFILIATE_ACCESS_SCREENSHOT:ios-recovered-dark
+flutter: 00:25 +2: All tests passed!
+All tests passed.
+
+$ native android drive (exit 0), explicit HTTP UI fixture
+Running Gradle task 'assembleDebug'...
+Running Gradle task 'assembleDebug'...                              7.2s
+I/flutter ( 4869): AFFILIATE_ACCESS_SCREENSHOT:android-basic-light
+I/flutter ( 4869): AFFILIATE_ACCESS_SCREENSHOT:android-basic-dark
+I/flutter ( 4869): AFFILIATE_ACCESS_SCREENSHOT:android-kol-dark
+I/flutter ( 4869): AFFILIATE_ACCESS_SCREENSHOT:android-recovered-dark
+I/flutter ( 4869): 00:32 +2: All tests passed!
+All tests passed.
+
+Expected/invalid early attempts: iOS fixture originally ignored chunked JSON control bodies; corrected fixture, no production patch. Android System UI ANR blocked clipboard read; closed system dialog on owned emulator, repeated actual UI/clipboard checks successfully. No early failed device run counted as passed.
+
+Final browser replay includes ordinary registration preview and waits for the cooperative-registration error before asserting no POST (exit 0).
+[{"label":"desktop","viewport":{"width":1440,"height":1000},"theme":"light","basic":true,"enable":true,"branchWithDisabledMember":true,"revokeFromBranch":true,"blockedInvitation":true,"copy":true,"failedRefreshRecovery":true,"pageErrors":[],"overflow":false},{"label":"mobile","viewport":{"width":390,"height":844},"theme":"dark","basic":true,"enable":true,"branchWithDisabledMember":true,"revokeFromBranch":true,"blockedInvitation":true,"copy":true,"failedRefreshRecovery":true,"pageErrors":[],"overflow":false},{"guestRegistrationHidesKol":true,"cooperationRegistrationBlockedBeforePost":true,"ordinaryRegistrationPreview":true}]
+
+Final unchanged-source Flutter inputs (exit 0):
+00:00 +0: loading /Users/atomex/Desktop/surprising/surprising-client/test/affiliate_input_test.dart
+00:00 +0: commission display preserves large asset scales without floating point
+00:00 +1: shares preserve four decimal places and reject invalid percentages
+00:00 +2: web and native links identify the same invitation code
+00:00 +3: All tests passed!

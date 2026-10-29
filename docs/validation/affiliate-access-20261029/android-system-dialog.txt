@@ -1,0 +1,8 @@
+I/flutter ( 4025): The following TestFailure was thrown running a test:
+I/flutter ( 4025): Expected: 'https://ex.tokdou.com/affiliate?invite=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+I/flutter ( 4025):   Actual: <null>
+I/flutter ( 4025):   Test failed. See exception logs above.
+I/flutter ( 4025): 00:10 +1 -1: Some tests failed.
+The following TestFailure was thrown running a test:
+Expected:
+  Actual: <null>

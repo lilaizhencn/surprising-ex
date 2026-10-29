@@ -1,0 +1,22 @@
+{
+  "at_utc": "2026-10-29T04:30:04.707884+00:00",
+  "database_removed": "surprising_affiliate_visibility_20261029",
+  "dedicated_worktree_removed": "/tmp/surprising-affiliate-visibility-20261029/backend",
+  "stopped_listeners": [
+    {
+      "port": 5426,
+      "pid": 69182
+    },
+    {
+      "port": 19106,
+      "pid": 7937
+    }
+  ],
+  "created_ios_simulator_deleted": "A2216A6E-C3BF-4587-81EC-8E3A6CAF5641",
+  "read_only_android_emulator_5582_stopped": true,
+  "android_reverse_removed_by_runner": true,
+  "temporary_tool_and_log_directory_removed": "/tmp/surprising-affiliate-visibility-20261029",
+  "shared_sdk_and_gradle_caches_retained": true,
+  "other_tasks_resources_touched": false,
+  "production_deployed": false
+}

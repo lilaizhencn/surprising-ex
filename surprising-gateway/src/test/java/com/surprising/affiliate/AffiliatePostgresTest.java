@@ -151,6 +151,7 @@ class AffiliatePostgresTest {
   }
 
   void partner(long parent, long child, int share) {
+    kol(child); // Team membership never grants platform KOL permission.
     var invite = service.invite(
       parent,
       new InviteInput(Long.toString(child), share)
@@ -274,6 +275,15 @@ class AffiliatePostgresTest {
     assertThatThrownBy(() -> service.accept(3, invitation.code())).isInstanceOf(
       IllegalArgumentException.class
     );
+    assertThat(repository.profile(2).kolEnabled()).isFalse();
+    assertThatThrownBy(() -> service.accept(2, invitation.code()))
+      .isInstanceOf(IllegalArgumentException.class)
+      .hasMessageContaining("管理员");
+    assertThat(repository.profile(2).kolEnabled()).isFalse();
+    assertThat(repository.parent(2, repository.now())).isEmpty();
+    assertThat(repository.inviter(2, repository.now())).isEmpty();
+    assertThat(repository.invitation(invitation.code()).acceptedBy()).isNull();
+    kol(2);
     service.accept(2, invitation.code());
     service.accept(2, invitation.code());
     assertThat(
@@ -282,6 +292,23 @@ class AffiliatePostgresTest {
     assertThatThrownBy(() ->
       service.invite(2, new InviteInput("1", 500000))
     ).isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void cooperationRegistrationRequiresApprovalWithoutLeavingPartialRecords() {
+    kol(1);
+    jdbc.update("INSERT INTO gateway_users(user_id) VALUES(99)");
+    var invitation = service.invite(1, new InviteInput(null, 500000));
+    assertThatThrownBy(() -> service.register(99, invitation.code()))
+      .isInstanceOf(IllegalArgumentException.class)
+      .hasMessageContaining("管理员");
+    assertThatThrownBy(() -> repository.profile(99))
+      .isInstanceOf(IllegalArgumentException.class);
+    assertThat(repository.inviter(99, repository.now())).isEmpty();
+    assertThat(repository.invitation(invitation.code()).acceptedBy()).isNull();
+    var ordinary = service.register(99, repository.profile(1).inviteCode());
+    assertThat(ordinary.kolEnabled()).isFalse();
+    assertThat(repository.inviter(99, repository.now())).contains(1L);
   }
 
   @Test
@@ -308,7 +335,7 @@ class AffiliatePostgresTest {
   }
 
   @Test
-  void acceptedManagersCanRecruitAndPlatformSuspensionBlocksTheWholeBranch() {
+  void approvedManagersCanRecruitAndPlatformSuspensionBlocksTheWholeBranch() {
     kol(1);
     partner(1, 2, 600000);
     assertThat(repository.profile(2).kolEnabled()).isTrue();
@@ -528,7 +555,8 @@ class AffiliatePostgresTest {
       manager,
       context.getBean(AffiliateProperties.class)
     );
-    settlement.prepare(true, 10);
+    // A bounded worker may yield after one group under host load.
+    for (int turn = 0; turn < 3; turn++) settlement.prepare(true, 10);
     assertThat(
       jdbc.queryForObject(
         "SELECT count(*) FROM affiliate_payouts",

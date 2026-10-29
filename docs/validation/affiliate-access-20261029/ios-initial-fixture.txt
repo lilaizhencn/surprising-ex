@@ -1,0 +1,6 @@
+flutter: The following TestFailure was thrown running a test:
+flutter: Timed out waiting for real Affiliate response
+flutter:   Test failed. See exception logs above.
+flutter: 00:53 +1 -1: Some tests failed.
+The following TestFailure was thrown running a test:
+Timed out waiting for real Affiliate response

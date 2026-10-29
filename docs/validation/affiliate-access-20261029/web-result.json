@@ -1,0 +1,44 @@
+{
+  "scope": "UI contract fixture only; backend authorization separately tested with PostgreSQL",
+  "results": [
+    {
+      "label": "desktop",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "basic": true,
+      "enable": true,
+      "branchWithDisabledMember": true,
+      "revokeFromBranch": true,
+      "blockedInvitation": true,
+      "copy": true,
+      "failedRefreshRecovery": true,
+      "pageErrors": [],
+      "overflow": false
+    },
+    {
+      "label": "mobile",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "dark",
+      "basic": true,
+      "enable": true,
+      "branchWithDisabledMember": true,
+      "revokeFromBranch": true,
+      "blockedInvitation": true,
+      "copy": true,
+      "failedRefreshRecovery": true,
+      "pageErrors": [],
+      "overflow": false
+    },
+    {
+      "guestRegistrationHidesKol": true,
+      "cooperationRegistrationBlockedBeforePost": true,
+      "ordinaryRegistrationPreview": true
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "scope": "native device UI with explicit local HTTP contract fixture; no real financial writes",
+  "device": "A2216A6E-C3BF-4587-81EC-8E3A6CAF5641",
+  "exit_code": 0,
+  "screenshots": [
+    "ios-basic-light",
+    "ios-basic-dark",
+    "ios-kol-dark",
+    "ios-recovered-dark"
+  ]
+}

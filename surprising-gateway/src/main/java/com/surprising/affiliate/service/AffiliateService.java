@@ -96,24 +96,13 @@ public class AffiliateService {
     ) throw new IllegalArgumentException("此邀请属于其他用户");
     long parent = Long.parseLong(invitation.inviterId());
     requireKol(parent);
+    if (!repository.profile(user).kolEnabled()) throw new IllegalArgumentException(
+      "请先由后台管理员开通 KOL，再接受团队合作邀请"
+    );
     bind(user, parent);
     if (
       repository.parent(user, Instant.now()).isPresent()
     ) throw new IllegalArgumentException("用户已加入团队");
-    if (repository.suspended(user)) throw new IllegalArgumentException(
-      "平台已停用该用户的 KOL 功能，请联系平台处理"
-    );
-    var current = repository.profile(user);
-    repository.configure(
-      user,
-      new ProfileInput(
-        true,
-        current.autoSettlement(),
-        current.ratePpm(),
-        "接受团队合作并继承分支管理权限"
-      ),
-      user
-    );
     repository.term(parent, user, invitation.sharePpm(), parent);
     repository.acceptInvitation(code, user);
   }
