@@ -25,6 +25,9 @@ class AffiliateResourceTest {
     when(accrual.accrueBatch(anyString())).thenReturn(
       new BatchResult(0, false, false)
     );
+    when(accrual.retryDeferred(anyString())).thenReturn(
+      new BatchResult(0, false, false)
+    );
     when(accrual.accrueBatch(ProductLine.values()[0].name())).thenThrow(
       new IllegalStateException("corrupt history")
     );

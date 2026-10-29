@@ -38,7 +38,7 @@ class MaintenanceIntegrationTest {
             submit(22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(112,CoreOrderSide.BUY,false)));
             submit(11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(113,CoreOrderSide.SELL,false)));
             long before = total();
-            long baseBefore = state.tradingState().users().values().stream().mapToLong(u -> u.totalUnits("BTC")).sum();
+            long baseBefore = state.tradingState().users().values().stream().mapToLong(u -> totalUnits(u, "BTC")).sum();
             var trigger = new CoreTriggerOrderStateView(511,line,22,"maintenance-trigger","","1",line==ProductLine.SPOT?CoreOrderSide.BUY:CoreOrderSide.SELL,
                     CoreTriggerOrderType.STOP_LOSS,CoreTriggerCondition.GREATER_OR_EQUAL,200,0,0,0,0,0,
                     CoreOrderType.LIMIT,CoreTimeInForce.GTC,90,1,CoreMarginMode.CROSS,CorePositionSide.NET,CoreTriggerOrderStatus.PENDING,
@@ -65,7 +65,7 @@ class MaintenanceIntegrationTest {
             assertThat(preview.gateMode()).isEqualTo("HALTED");
             assertThat(total()).isEqualTo(before);
             if (line == ProductLine.SPOT) {
-                assertThat(state.tradingState().users().values().stream().mapToLong(u -> u.totalUnits("BTC")).sum()).isEqualTo(baseBefore);
+                assertThat(state.tradingState().users().values().stream().mapToLong(u -> totalUnits(u, "BTC")).sum()).isEqualTo(baseBefore);
                 for (long userId : new long[] {11,22}) {
                     assertThat(fixture.gateway.userState(userId).balances()).allSatisfy(b -> assertThat(b.lockedUnits()).isZero());
                 }
@@ -388,7 +388,6 @@ class MaintenanceIntegrationTest {
             if (System.nanoTime() >= deadline) throw new AssertionError("Lane handoff timeout");
             Thread.onSpinWait();
         }
-        state.runtimeState().enterAsynchronousCommandScope();
         try {
             long timestamp = message.header().submittedAtEpochMillis();
             long position = message.header().sourceSequence();
@@ -419,7 +418,6 @@ class MaintenanceIntegrationTest {
             }
             return response;
         } finally {
-            state.runtimeState().exitAsynchronousCommandScope();
             state.runtimeState().releaseOwnerLaneAccess();
         }
     }
@@ -427,5 +425,10 @@ class MaintenanceIntegrationTest {
     private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce) { return new PlaceOrderCommand(id,"1",side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
     private static PlaceOrderCommand order(long id,CoreOrderSide side,boolean reduce,long quantity) { return new PlaceOrderCommand(id,"1",side,100,quantity,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
     private static PlaceOrderCommand hedgedOrder(long id,CoreOrderSide side,CorePositionSide positionSide,long quantity) { return new PlaceOrderCommand(id,"1",side,100,quantity,false,CoreMarginMode.CROSS,positionSide,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maintenance-fixture-"+id); }
-    private long total() { var s=state.tradingState(); String asset=ContractType.valueOf(line.contractTypeCode()).isInverse()?"BTC":"USDT"; var t=s.treasuryState(); return s.users().values().stream().mapToLong(u -> u.totalUnits(asset)).sum()+t.feeBalances().getOrDefault(asset,0L)+t.insuranceBalances().getOrDefault(asset,0L)+t.clearingPnlBalances().getOrDefault(asset,0L)+t.roundingResidualBalances().getOrDefault(asset,0L); }
+    private long total() { var s=state.tradingState(); String asset=ContractType.valueOf(line.contractTypeCode()).isInverse()?"BTC":"USDT"; var t=s.treasuryState(); return s.users().values().stream().mapToLong(u -> totalUnits(u, asset)).sum()+t.feeBalances().getOrDefault(asset,0L)+t.insuranceBalances().getOrDefault(asset,0L)+t.clearingPnlBalances().getOrDefault(asset,0L)+t.roundingResidualBalances().getOrDefault(asset,0L); }
+    private static long totalUnits(com.surprising.aeron.service.account.CoreUserState user, String asset) {
+        var balance = user.balances().get(asset);
+        return balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
+    }
+
 }

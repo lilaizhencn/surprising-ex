@@ -2,6 +2,7 @@ package com.surprising.affiliate.service;
 
 import com.surprising.affiliate.config.AffiliateProperties;
 import com.surprising.affiliate.model.AffiliateModels.*;
+import com.surprising.affiliate.model.AffiliateRelationshipException;
 import com.surprising.affiliate.repository.AffiliateRepository;
 import java.time.Instant;
 import java.util.*;
@@ -329,24 +330,26 @@ public class AffiliateService {
     var rows = repository.lineage(user, at, properties.getMaxPathNodes() + 1);
     if (
       rows.size() > properties.getMaxPathNodes()
-    ) throw new IllegalStateException(
+    ) throw new AffiliateRelationshipException(
       "团队路径超过本机安全处理上限，整笔核算已暂停，未截断分账"
     );
     var nodes = new HashMap<Long, PathNode>();
     for (var row : rows)
       if (
         nodes.putIfAbsent(row.node().userId(), row) != null
-      ) throw new IllegalStateException("团队历史合作区间重叠，核算已暂停");
+      ) throw new AffiliateRelationshipException(
+        "团队历史合作区间重叠，核算已暂停"
+      );
     var reverse = new ArrayList<TeamTerm>();
     var seen = new HashSet<Long>();
     boolean active = true;
     long current = user;
     while (true) {
-      if (!seen.add(current)) throw new IllegalStateException(
+      if (!seen.add(current)) throw new AffiliateRelationshipException(
         "团队关系存在循环，核算已暂停"
       );
       var row = nodes.get(current);
-      if (row == null) throw new IllegalStateException(
+      if (row == null) throw new AffiliateRelationshipException(
         "团队路径不完整，核算已暂停"
       );
       active &= row.node().kolEnabled();

@@ -55,6 +55,42 @@ public class AffiliateProperties {
   @Max(8)
   private int concurrentReads = 4;
 
+  @Min(1)
+  @Max(100000)
+  private int maxDeferredFees = 10000;
+
+  @Min(1)
+  @Max(64)
+  private int deferredBatchSize = 16;
+
+  @Min(1)
+  @Max(3600)
+  private int deferredRetrySeconds = 60;
+
+  public int getMaxDeferredFees() {
+    return maxDeferredFees;
+  }
+
+  public void setMaxDeferredFees(int v) {
+    maxDeferredFees = v;
+  }
+
+  public int getDeferredBatchSize() {
+    return deferredBatchSize;
+  }
+
+  public void setDeferredBatchSize(int v) {
+    deferredBatchSize = v;
+  }
+
+  public int getDeferredRetrySeconds() {
+    return deferredRetrySeconds;
+  }
+
+  public void setDeferredRetrySeconds(int v) {
+    deferredRetrySeconds = v;
+  }
+
   public int getConcurrentReads() {
     return concurrentReads;
   }

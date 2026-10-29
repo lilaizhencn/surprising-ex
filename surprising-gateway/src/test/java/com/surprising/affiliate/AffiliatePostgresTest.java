@@ -84,6 +84,13 @@ class AffiliatePostgresTest {
         Path.of("../deployment/migrations/20261028-affiliate-safety.sql")
       )
     );
+    jdbc.execute(
+      Files.readString(
+        Path.of(
+          "../deployment/migrations/20261029-affiliate-team-isolation.sql"
+        )
+      )
+    );
     for (long id = 1; id <= 10; id++) jdbc.update(
       "INSERT INTO gateway_users(user_id) VALUES(?)",
       id
@@ -712,29 +719,43 @@ class AffiliatePostgresTest {
   }
 
   /** Transport adapter to the real deterministic Core. Only the first debit response is lost. */
-  static final class ReplayAccounts
+  static class ReplayAccounts
     implements
       com.surprising.gateway.provider.service.ProductAccountClient,
       AutoCloseable
   {
 
-    com.surprising.aeron.service.replay.CommittedTradeReplay replay =
-      new com.surprising.aeron.service.replay.CommittedTradeReplay(
-        com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
+    final com.surprising.product.api.ProductLine product;
+    com.surprising.aeron.service.replay.CommittedTradeReplay replay;
+
+    ReplayAccounts() {
+      this(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL);
+    }
+
+    ReplayAccounts(com.surprising.product.api.ProductLine product) {
+      this.product = product;
+      replay = new com.surprising.aeron.service.replay.CommittedTradeReplay(
+        product,
         null
       );
+    }
+
     final Map<Long, Long> balances = new HashMap<>();
     long sequence;
     boolean loseDebitResponse = true;
 
     void adjust(long user, long amount) {
+      adjust(user, "USDT", amount);
+    }
+
+    void adjust(long user, String asset, long amount) {
       apply(
         com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE,
         user,
         UUID.randomUUID(),
         com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(
           new com.surprising.aeron.protocol.BalanceAdjustmentCommand(
-            "USDT",
+            asset,
             amount
           )
         )
@@ -745,7 +766,7 @@ class AffiliatePostgresTest {
       byte[] snapshot = replay.snapshot();
       replay.close();
       replay = new com.surprising.aeron.service.replay.CommittedTradeReplay(
-        com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
+        product,
         snapshot
       );
     }
@@ -761,7 +782,7 @@ class AffiliatePostgresTest {
       var header = com.surprising.aeron.protocol.CoreMessageHeader.command(
         type,
         id,
-        com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
+        product,
         com.surprising.aeron.protocol.CommandSource.GATEWAY,
         71428,
         n,

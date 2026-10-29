@@ -131,7 +131,11 @@ class MultiProductMoneyIntegrationTest {
             }
             return response;
         }
-        long balance() { var user=state.tradingState().users().get(42L);return user==null?0:user.totalUnits("USDT"); }
+        long balance() {
+            var user = state.tradingState().users().get(42L);
+            var balance = user == null ? null : user.balances().get("USDT");
+            return balance == null ? 0 : Math.addExact(balance.availableUnits(), balance.lockedUnits());
+        }
         void restart() { byte[] snapshot=state.snapshot(900);state.close();state=TradingCoreRuntime.fromSnapshot(line,snapshot); }
         @Override public void close() { state.close(); }
     }

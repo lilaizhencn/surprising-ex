@@ -59,7 +59,6 @@ public class AffiliateSettlementService {
       )) {
         remaining -= ledger.reserve(
           group,
-          hours,
           Math.min(remaining, properties.getPayoutRows())
         );
         users.add(((Number) group.get("beneficiary")).longValue());

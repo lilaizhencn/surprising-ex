@@ -116,16 +116,17 @@ class AffiliateSafetyPostgresTest {
     properties().setMaxPathNodes(4);
     var fee = f.fee(1, 108, 10000);
     fact(fee);
-    assertThatThrownBy(() ->
-      f.accrual.accrueBatch("LINEAR_PERPETUAL")
-    ).isInstanceOf(IllegalStateException.class);
+    f.accrual.accrueBatch("LINEAR_PERPETUAL");
     assertThat(count("affiliate_fee_receipts")).isZero();
     assertThat(count("affiliate_delegation_buckets")).isZero();
     assertThat(f.ledger.sourcePosition("LINEAR_PERPETUAL")).isEqualTo(
       new SourceCursor(0, 0)
     );
     properties().setMaxPathNodes(8);
-    f.accrual.accrueBatch("LINEAR_PERPETUAL");
+    f.jdbc.update(
+      "UPDATE affiliate_deferred_fees SET next_attempt_at='-infinity'"
+    );
+    f.accrual.retryDeferred("LINEAR_PERPETUAL");
     assertThat(count("affiliate_commissions")).isEqualTo(8);
     assertThat(
       f.jdbc.queryForObject(
@@ -181,7 +182,7 @@ class AffiliateSafetyPostgresTest {
     var now = f.repository.now();
     f.accrual.accrue(new Fee(2, "LINEAR_PERPETUAL", 4, 2, "USDT", 10, now));
     f.jdbc.update(
-      "UPDATE affiliate_source_progress SET cluster_position=0,order_id=0"
+      "UPDATE affiliate_source_progress SET cluster_position=0,order_id=0,read_cluster_position=0,read_order_id=0"
     );
     fact(new Fee(1, "LINEAR_PERPETUAL", 4, 1, "USDT", 10000, now));
     fact(new Fee(2, "LINEAR_PERPETUAL", 4, 2, "USDT", 11, now));

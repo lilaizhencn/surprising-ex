@@ -4,6 +4,7 @@ import com.surprising.affiliate.config.AffiliateDatabase;
 import com.surprising.affiliate.model.AffiliateModels.*;
 import java.math.BigInteger;
 import java.sql.Timestamp;
+import java.sql.PreparedStatement;
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -34,20 +35,156 @@ public class AffiliateLedgerRepository {
     SourceCursor cursor,
     String error
   ) {
+    var read = readPosition(product);
+    if (
+      cursor.clusterPosition() > read.clusterPosition() ||
+      (cursor.clusterPosition() == read.clusterPosition() &&
+        cursor.orderId() > read.orderId())
+    ) read = cursor;
+    var pending = jdbc.queryForList(
+      "SELECT cluster_position,order_id,previous_position,previous_order_id,user_id,error FROM affiliate_deferred_fees WHERE product_line=? AND resolved_at IS NULL ORDER BY cluster_position,order_id LIMIT 1",
+      product
+    );
+    var confirmed = read;
+    if (!pending.isEmpty()) {
+      var first = pending.getFirst();
+      confirmed = new SourceCursor(
+        ((Number) first.get("previous_position")).longValue(),
+        ((Number) first.get("previous_order_id")).longValue()
+      );
+      String held =
+        "存在隔离待核算费用，确认游标保留；首笔日志 " +
+        first.get("cluster_position") +
+        "，订单 " +
+        first.get("order_id") +
+        "，来源 UID " +
+        first.get("user_id") +
+        "；" +
+        first.get("error") +
+        "；修复后后台按原身份重试";
+      error = error == null ? held : error + "；" + held;
+    }
     jdbc.update(
       """
-      INSERT INTO affiliate_source_progress(product_line,cluster_position,order_id,checked_at,error)
-      VALUES(?,?,?,clock_timestamp(),?) ON CONFLICT(product_line) DO UPDATE SET
-        order_id=CASE WHEN EXCLUDED.cluster_position>affiliate_source_progress.cluster_position THEN EXCLUDED.order_id
-          WHEN EXCLUDED.cluster_position=affiliate_source_progress.cluster_position THEN GREATEST(affiliate_source_progress.order_id,EXCLUDED.order_id)
-          ELSE affiliate_source_progress.order_id END,
-        cluster_position=GREATEST(affiliate_source_progress.cluster_position,EXCLUDED.cluster_position),
+      INSERT INTO affiliate_source_progress(product_line,cluster_position,order_id,read_cluster_position,read_order_id,checked_at,error)
+      VALUES(?,?,?,?,?,clock_timestamp(),?) ON CONFLICT(product_line) DO UPDATE SET
+        cluster_position=EXCLUDED.cluster_position,order_id=EXCLUDED.order_id,
+        read_cluster_position=EXCLUDED.read_cluster_position,read_order_id=EXCLUDED.read_order_id,
         checked_at=EXCLUDED.checked_at,error=EXCLUDED.error
       """,
       product,
-      cursor.clusterPosition(),
-      cursor.orderId(),
+      confirmed.clusterPosition(),
+      confirmed.orderId(),
+      read.clusterPosition(),
+      read.orderId(),
       error
+    );
+  }
+
+  public SourceCursor readPosition(String product) {
+    return jdbc
+      .query(
+        "SELECT read_cluster_position,read_order_id FROM affiliate_source_progress WHERE product_line=?",
+        (r, n) -> new SourceCursor(r.getLong(1), r.getLong(2)),
+        product
+      )
+      .stream()
+      .findFirst()
+      .orElse(new SourceCursor(0, 0));
+  }
+
+  public int deferredCount(String product, int limit) {
+    return jdbc.queryForObject(
+      "SELECT count(*) FROM (SELECT 1 FROM affiliate_deferred_fees WHERE product_line=? AND resolved_at IS NULL LIMIT ?) d",
+      Integer.class,
+      product,
+      limit
+    );
+  }
+
+  public void deferFee(
+    Fee fee,
+    SourceCursor previous,
+    String error,
+    int retrySeconds
+  ) {
+    jdbc.update(
+      """
+      INSERT INTO affiliate_deferred_fees(product_line,cluster_position,order_id,user_id,asset,fee_units,occurred_at,previous_position,previous_order_id,error,next_attempt_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,clock_timestamp()+(?*interval '1 second'))
+      """,
+      fee.productLine(),
+      fee.clusterPosition(),
+      fee.orderId(),
+      fee.userId(),
+      fee.asset(),
+      fee.feeUnits(),
+      Timestamp.from(fee.occurredAt()),
+      previous.clusterPosition(),
+      previous.orderId(),
+      error.substring(0, Math.min(500, error.length())),
+      retrySeconds
+    );
+  }
+
+  public List<Fee> deferredFees(String product, int limit) {
+    return jdbc.query(
+      """
+      SELECT d.*,f.user_id AS fact_user,f.asset AS fact_asset,f.fee_units AS fact_units,f.occurred_at AS fact_time
+      FROM affiliate_deferred_fees d JOIN core_trade_fee_facts f
+        ON f.product_line=d.product_line AND f.order_id=d.order_id AND f.cluster_position=d.cluster_position
+      WHERE d.product_line=? AND d.resolved_at IS NULL AND d.next_attempt_at<=clock_timestamp()
+      ORDER BY d.next_attempt_at,d.cluster_position,d.order_id LIMIT ?
+      """,
+      (r, n) -> {
+        var fee = new Fee(
+          r.getLong("cluster_position"),
+          r.getString("product_line"),
+          r.getLong("user_id"),
+          r.getLong("order_id"),
+          r.getString("asset"),
+          r.getLong("fee_units"),
+          r.getTimestamp("occurred_at").toInstant()
+        );
+        if (
+          fee.userId() != r.getLong("fact_user") ||
+          !fee.asset().equals(r.getString("fact_asset")) ||
+          fee.feeUnits() != r.getLong("fact_units") ||
+          !fee.occurredAt().equals(r.getTimestamp("fact_time").toInstant())
+        ) throw new IllegalStateException(
+          "隔离费用与权威来源身份冲突，产品核算已暂停"
+        );
+        return fee;
+      },
+      product,
+      limit
+    );
+  }
+
+  public void retryDeferredFee(Fee fee, String error, int seconds) {
+    jdbc.update(
+      "UPDATE affiliate_deferred_fees SET attempt_count=attempt_count+1,last_attempt_at=clock_timestamp(),next_attempt_at=clock_timestamp()+(?*interval '1 second'),error=? WHERE product_line=? AND cluster_position=? AND order_id=? AND resolved_at IS NULL",
+      seconds,
+      error.substring(0, Math.min(500, error.length())),
+      fee.productLine(),
+      fee.clusterPosition(),
+      fee.orderId()
+    );
+  }
+
+  public void resolveDeferredFee(Fee fee) {
+    int changed = jdbc.update(
+      """
+      UPDATE affiliate_deferred_fees d SET resolved_at=clock_timestamp(),receipt_id=f.receipt_id,error='已恢复核算',last_attempt_at=clock_timestamp()
+      FROM affiliate_fee_receipts f WHERE d.product_line=? AND d.cluster_position=? AND d.order_id=? AND d.resolved_at IS NULL
+        AND f.product_line=d.product_line AND f.cluster_position=d.cluster_position AND f.order_id=d.order_id
+      """,
+      fee.productLine(),
+      fee.clusterPosition(),
+      fee.orderId()
+    );
+    if (changed != 1) throw new IllegalStateException(
+      "隔离费用缺少唯一已提交核算凭证"
     );
   }
 
@@ -61,7 +198,14 @@ public class AffiliateLedgerRepository {
 
   public List<Map<String, Object>> sources() {
     return jdbc.queryForList(
-      "SELECT product_line AS \"productLine\",cluster_position::text AS \"clusterPosition\",order_id::text AS \"orderId\",checked_at AS \"checkedAt\",error FROM affiliate_source_progress ORDER BY product_line"
+      """
+      SELECT p.product_line AS "productLine",p.cluster_position::text AS "clusterPosition",p.order_id::text AS "orderId",
+        p.read_cluster_position::text AS "readClusterPosition",p.read_order_id::text AS "readOrderId",
+        d.total::text AS "deferredCount",d.oldest AS "oldestDeferredAt",p.checked_at AS "checkedAt",p.error
+      FROM affiliate_source_progress p LEFT JOIN LATERAL(
+        SELECT count(*) AS total,min(occurred_at) AS oldest FROM affiliate_deferred_fees
+        WHERE product_line=p.product_line AND resolved_at IS NULL)d ON TRUE ORDER BY p.product_line
+      """
     );
   }
 
@@ -191,7 +335,7 @@ public class AffiliateLedgerRepository {
       """,
       rows,
       256,
-      (ps, row) -> {
+      (PreparedStatement ps, Allocation row) -> {
         ps.setLong(1, receipt);
         ps.setLong(2, row.userId());
         ps.setLong(3, row.receivedUnits());
@@ -211,8 +355,8 @@ public class AffiliateLedgerRepository {
       """,
       java.util.stream.IntStream.range(0, path.size()).boxed().toList(),
       256,
-      (ps, i) -> {
-        var edge = path.get(i);
+      (PreparedStatement ps, Integer i) -> {
+        TeamTerm edge = path.get(i);
         ps.setString(1, fee.productLine());
         ps.setLong(2, fee.orderId());
         ps.setString(3, fee.asset());
@@ -231,7 +375,7 @@ public class AffiliateLedgerRepository {
       """
       INSERT INTO affiliate_settlement_groups(beneficiary_id,product_line,asset,first_fee_at,available_at)
       SELECT c.beneficiary_id,c.product_line,c.asset,c.occurred_at,
-        CASE WHEN p.auto_settlement THEN GREATEST(p.next_settlement_at,c.occurred_at+(s.settlement_hours*interval '1 hour')) ELSE 'infinity' END
+        CASE WHEN p.auto_settlement THEN GREATEST(CASE WHEN c.occurred_at<=p.settlement_cutoff_at THEN '-infinity'::timestamptz ELSE p.next_settlement_at END,c.occurred_at+(s.settlement_hours*interval '1 hour')) ELSE 'infinity' END
       FROM affiliate_commissions c JOIN affiliate_profiles p ON p.user_id=c.beneficiary_id
       CROSS JOIN LATERAL(SELECT settlement_hours FROM affiliate_settings ORDER BY version DESC LIMIT 1)s
       WHERE c.receipt_id=? AND c.retained_units>0
@@ -277,24 +421,28 @@ public class AffiliateLedgerRepository {
     return jdbc.queryForList(
       """
       SELECT g.beneficiary_id AS beneficiary,g.product_line AS product,g.asset,b.user_id AS budget,
-        recipient.status AS recipient_status,sender.status AS sender_status
+        recipient.status AS recipient_status,sender.status AS sender_status,
+        CASE WHEN ? OR p.next_settlement_at<=statement_timestamp() THEN statement_timestamp()-(?*interval '1 hour') ELSE p.settlement_cutoff_at END AS cutoff
       FROM affiliate_settlement_groups g JOIN affiliate_profiles p ON p.user_id=g.beneficiary_id
       LEFT JOIN affiliate_budget_accounts b ON b.product_line=g.product_line
       LEFT JOIN gateway_users sender ON sender.user_id=b.user_id
       JOIN gateway_users recipient ON recipient.user_id=p.user_id
       WHERE g.first_fee_at<=clock_timestamp()-(?*interval '1 hour')
-        AND (? OR (g.available_at<=clock_timestamp() AND p.auto_settlement AND p.next_settlement_at<=clock_timestamp()))
+        AND (? OR (g.available_at<=clock_timestamp() AND p.auto_settlement AND
+          (p.next_settlement_at<=clock_timestamp() OR g.first_fee_at<=p.settlement_cutoff_at)))
       """ +
         " ORDER BY " +
         order +
         " LIMIT ? FOR UPDATE OF g SKIP LOCKED",
+      manual,
+      hours,
       hours,
       manual,
       limit
     );
   }
 
-  public int reserve(Map<String, Object> group, int hours, int limit) {
+  public int reserve(Map<String, Object> group, int limit) {
     long user = ((Number) group.get("beneficiary")).longValue();
     String product = group.get("product").toString(),
       asset = group.get("asset").toString();
@@ -319,13 +467,13 @@ public class AffiliateLedgerRepository {
       """
       SELECT commission_id,retained_units FROM affiliate_commissions
       WHERE beneficiary_id=? AND product_line=? AND asset=? AND payout_id IS NULL AND retained_units>0
-        AND occurred_at<=clock_timestamp()-(?*interval '1 hour')
+        AND occurred_at<=?
       ORDER BY occurred_at,commission_id LIMIT ? FOR UPDATE
       """,
       user,
       product,
       asset,
-      hours,
+      group.get("cutoff"),
       limit
     );
     long total = 0;
@@ -337,7 +485,7 @@ public class AffiliateLedgerRepository {
       count++;
     }
     if (count > 0) {
-      var selected = rows.subList(0, count);
+      List<Map<String, Object>> selected = rows.subList(0, count);
       UUID id = UUID.randomUUID();
       jdbc.update(
         "INSERT INTO affiliate_payouts(payout_id,beneficiary_id,budget_user_id,product_line,asset,amount_units) VALUES(?,?,?,?,?,?)",
@@ -352,7 +500,7 @@ public class AffiliateLedgerRepository {
         "UPDATE affiliate_commissions SET payout_id=? WHERE commission_id=? AND payout_id IS NULL",
         selected,
         256,
-        (ps, row) -> {
+        (PreparedStatement ps, Map<String, Object> row) -> {
           ps.setObject(1, id);
           ps.setLong(2, ((Number) row.get("commission_id")).longValue());
         }
@@ -405,14 +553,17 @@ public class AffiliateLedgerRepository {
     var args = new ArrayList<Object>();
     args.add(hours);
     args.add(hours);
+    args.add(hours);
     args.addAll(users);
     String keys = String.join(",", Collections.nCopies(users.size(), "?"));
     jdbc.update(
       """
-      UPDATE affiliate_profiles p SET next_settlement_at=CASE WHEN EXISTS(
+      UPDATE affiliate_profiles p SET
+        settlement_cutoff_at=CASE WHEN p.next_settlement_at<=statement_timestamp() THEN statement_timestamp()-(?*interval '1 hour') ELSE p.settlement_cutoff_at END,
+        next_settlement_at=CASE WHEN p.next_settlement_at>statement_timestamp() THEN p.next_settlement_at WHEN EXISTS(
         SELECT 1 FROM affiliate_commissions c WHERE c.beneficiary_id=p.user_id AND c.payout_id IS NULL AND c.retained_units>0
-          AND c.occurred_at<=clock_timestamp()-(?*interval '1 hour')) THEN clock_timestamp()
-        ELSE clock_timestamp()+(?*interval '1 hour') END
+          AND c.occurred_at<=statement_timestamp()-(?*interval '1 hour')) THEN statement_timestamp()
+        ELSE statement_timestamp()+(?*interval '1 hour') END
       WHERE p.auto_settlement AND p.user_id IN (""" +
         keys +
         ")",
@@ -424,7 +575,7 @@ public class AffiliateLedgerRepository {
     jdbc.update(
       """
       UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN p.auto_settlement
-        THEN GREATEST(p.next_settlement_at,g.first_fee_at+(?*interval '1 hour')) ELSE 'infinity' END
+        THEN GREATEST(CASE WHEN g.first_fee_at<=p.settlement_cutoff_at THEN '-infinity'::timestamptz ELSE p.next_settlement_at END,g.first_fee_at+(?*interval '1 hour')) ELSE 'infinity' END
       FROM affiliate_profiles p WHERE p.user_id=g.beneficiary_id AND NOT g.blocked AND p.user_id IN (""" +
         keys +
         ")",

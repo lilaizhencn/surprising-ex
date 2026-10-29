@@ -2,6 +2,7 @@ package com.surprising.affiliate.repository;
 
 import com.surprising.affiliate.config.AffiliateDatabase;
 import com.surprising.affiliate.model.AffiliateModels.*;
+import com.surprising.affiliate.model.AffiliateRelationshipException;
 import com.surprising.product.api.ProductLine;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -114,7 +115,7 @@ public class AffiliateRepository {
     );
     jdbc.update(
       """
-      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN p.auto_settlement THEN GREATEST(p.next_settlement_at,g.first_fee_at+(?*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
+      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN p.auto_settlement THEN GREATEST(CASE WHEN g.first_fee_at<=p.settlement_cutoff_at THEN '-infinity'::timestamptz ELSE p.next_settlement_at END,g.first_fee_at+(?*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
       FROM affiliate_profiles p WHERE p.user_id=g.beneficiary_id
       """,
       input.settlementHours()
@@ -141,7 +142,7 @@ public class AffiliateRepository {
     );
     jdbc.update(
       """
-      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN ? THEN GREATEST(p.next_settlement_at,g.first_fee_at+(s.settlement_hours*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
+      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN ? THEN GREATEST(CASE WHEN g.first_fee_at<=p.settlement_cutoff_at THEN '-infinity'::timestamptz ELSE p.next_settlement_at END,g.first_fee_at+(s.settlement_hours*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
       FROM affiliate_profiles p CROSS JOIN LATERAL(SELECT settlement_hours FROM affiliate_settings ORDER BY version DESC LIMIT 1)s
       WHERE p.user_id=g.beneficiary_id AND p.user_id=?
       """,
@@ -235,7 +236,7 @@ public class AffiliateRepository {
       LIMIT ?
       """,
       (r, n) -> {
-        if (!r.getBoolean("present")) throw new IllegalStateException(
+        if (!r.getBoolean("present")) throw new AffiliateRelationshipException(
           "团队历史资料不完整，核算已暂停"
         );
         long id = r.getLong("user_id");
@@ -501,7 +502,7 @@ public class AffiliateRepository {
     );
     jdbc.update(
       """
-      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN p.auto_settlement THEN GREATEST(p.next_settlement_at,g.first_fee_at+(s.settlement_hours*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
+      UPDATE affiliate_settlement_groups g SET available_at=CASE WHEN p.auto_settlement THEN GREATEST(CASE WHEN g.first_fee_at<=p.settlement_cutoff_at THEN '-infinity'::timestamptz ELSE p.next_settlement_at END,g.first_fee_at+(s.settlement_hours*interval '1 hour')) ELSE 'infinity' END,blocked=FALSE
       FROM affiliate_profiles p CROSS JOIN LATERAL(SELECT settlement_hours FROM affiliate_settings ORDER BY version DESC LIMIT 1)s
       WHERE p.user_id=g.beneficiary_id AND g.product_line=?
       """,

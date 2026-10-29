@@ -52,9 +52,12 @@ public class AffiliateScheduling {
       var product = products[slot];
       try {
         var result = accrual.accrueBatch(product.name());
+        boolean more = result.more();
+        if (!result.busy()) more |= accrual
+          .retryDeferred(product.name())
+          .more();
         failures[slot] = 0;
-        nextPoll[slot] =
-          System.nanoTime() + (result.more() ? 0 : 10_000_000_000L);
+        nextPoll[slot] = System.nanoTime() + (more ? 0 : 10_000_000_000L);
       } catch (RuntimeException failure) {
         failures[slot] = Math.min(6, failures[slot] + 1);
         nextPoll[slot] =

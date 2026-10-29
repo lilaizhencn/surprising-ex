@@ -2,6 +2,7 @@ package com.surprising.affiliate.service;
 
 import com.surprising.affiliate.config.AffiliateProperties;
 import com.surprising.affiliate.model.AffiliateModels.*;
+import com.surprising.affiliate.model.AffiliateRelationshipException;
 import com.surprising.affiliate.repository.*;
 import java.math.BigInteger;
 import java.util.List;
@@ -38,7 +39,14 @@ public class AffiliateAccrualService {
   public void accrue(Fee fee) {
     repository.productLock(fee.productLine());
     repository.readLock();
-    accrueLocked(fee, properties.getMaxAllocationRows());
+    if (
+      accrueLocked(fee, properties.getMaxAllocationRows()) < 0
+    ) throw new IllegalStateException("处理预算不能覆盖完整核算路径");
+    ledger.sourcePosition(
+      fee.productLine(),
+      new SourceCursor(fee.clusterPosition(), fee.orderId()),
+      null
+    );
   }
 
   @Transactional(
@@ -48,29 +56,101 @@ public class AffiliateAccrualService {
     if (
       !repository.tryProductLock(product) || !repository.tryReadLock()
     ) return new BatchResult(0, true, true);
-    var facts = source.read(
+    var position = ledger.readPosition(product);
+    var facts = source.read(product, position, properties.getFeeBatchSize());
+    long deadline =
+      System.nanoTime() + properties.getBatchMillis() * 1_000_000L;
+    int processed = 0,
+      rows = 0,
+      pending = -1;
+    boolean capacity = false;
+    for (var fee : facts) {
+      int added;
+      try {
+        added = accrueLocked(fee, properties.getMaxAllocationRows() - rows);
+      } catch (AffiliateRelationshipException failure) {
+        if (pending < 0) pending = ledger.deferredCount(
+          product,
+          properties.getMaxDeferredFees() + 1
+        );
+        if (pending >= properties.getMaxDeferredFees()) {
+          capacity = true;
+          break;
+        }
+        ledger.deferFee(
+          fee,
+          position,
+          failure.getMessage(),
+          properties.getDeferredRetrySeconds()
+        );
+        pending++;
+        added = 1;
+      }
+      if (added < 0) break;
+      rows += added;
+      processed++;
+      position = new SourceCursor(fee.clusterPosition(), fee.orderId());
+      if (
+        rows >= properties.getMaxAllocationRows() ||
+        System.nanoTime() >= deadline
+      ) break;
+    }
+    ledger.sourcePosition(
       product,
-      ledger.sourcePosition(product),
-      properties.getFeeBatchSize()
+      position,
+      capacity ? "关系异常隔离队列已达容量，本笔未跳过，等待处理存量异常" : null
     );
+    return new BatchResult(
+      processed,
+      !capacity &&
+        (processed < facts.size() ||
+          facts.size() == properties.getFeeBatchSize()),
+      false
+    );
+  }
+
+  /** Separate transaction/budget: a busy repair queue cannot consume healthy ingestion's allowance. */
+  @Transactional(
+    timeoutString = "${surprising.affiliate.transaction-timeout-seconds:5}"
+  )
+  public BatchResult retryDeferred(String product) {
+    if (
+      !repository.tryProductLock(product) || !repository.tryReadLock()
+    ) return new BatchResult(0, true, true);
+    var fees = ledger.deferredFees(product, properties.getDeferredBatchSize());
     long deadline =
       System.nanoTime() + properties.getBatchMillis() * 1_000_000L;
     int processed = 0,
       rows = 0;
-    for (var fee : facts) {
-      int added = accrueLocked(fee, properties.getMaxAllocationRows() - rows);
-      if (added < 0) break;
-      rows += added;
+    for (var fee : fees) {
+      try {
+        int added = accrueLocked(fee, properties.getMaxAllocationRows() - rows);
+        if (added < 0) break;
+        ledger.resolveDeferredFee(fee);
+        rows += Math.max(1, added);
+      } catch (AffiliateRelationshipException failure) {
+        ledger.retryDeferredFee(
+          fee,
+          failure.getMessage(),
+          properties.getDeferredRetrySeconds()
+        );
+        rows++;
+      }
       processed++;
       if (
         rows >= properties.getMaxAllocationRows() ||
         System.nanoTime() >= deadline
       ) break;
     }
-    ledger.sourcePosition(product, ledger.sourcePosition(product), null);
+    if (processed > 0) ledger.sourcePosition(
+      product,
+      ledger.readPosition(product),
+      null
+    );
     return new BatchResult(
       processed,
-      processed < facts.size() || facts.size() == properties.getFeeBatchSize(),
+      processed < fees.size() ||
+        fees.size() == properties.getDeferredBatchSize(),
       false
     );
   }
@@ -79,14 +159,7 @@ public class AffiliateAccrualService {
     if (fee.feeUnits() <= 0) throw new IllegalArgumentException(
       "计佣只接受实际正手续费"
     );
-    if (ledger.received(fee)) {
-      ledger.sourcePosition(
-        fee.productLine(),
-        new SourceCursor(fee.clusterPosition(), fee.orderId()),
-        null
-      );
-      return 0;
-    }
+    if (ledger.received(fee)) return 0;
     var inviter = repository.inviter(fee.userId(), fee.occurredAt());
     if (inviter.isEmpty()) {
       record(
@@ -105,7 +178,9 @@ public class AffiliateAccrualService {
     long direct = inviter.get();
     var ownTeam = repository.parent(fee.userId(), fee.occurredAt());
     if (ownTeam.isPresent()) {
-      if (ownTeam.get().parentId() != direct) throw new IllegalStateException(
+      if (
+        ownTeam.get().parentId() != direct
+      ) throw new AffiliateRelationshipException(
         "合作归属与邀请归属冲突，核算已暂停"
       );
       record(
@@ -184,10 +259,5 @@ public class AffiliateAccrualService {
       disposition
     );
     if (!rows.isEmpty()) ledger.allocations(receipt, fee, rows, path, prior);
-    ledger.sourcePosition(
-      fee.productLine(),
-      new SourceCursor(fee.clusterPosition(), fee.orderId()),
-      null
-    );
   }
 }

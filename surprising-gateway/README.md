@@ -16,6 +16,18 @@ Core 仍独立。公共接口继续经过 Gateway 的身份、审批与审计，
 
 面向前端和 BFF 的无状态 REST API 网关。
 
+## 返佣异常团队隔离
+
+返佣按产品消费已提交费用事实。可识别的团队关系异常会保存完整费用并有界重试，
+同产品的健康团队继续核算；身份冲突或数据库错误仍回滚事务。接收游标与确认游标
+分开保存，确认游标不能越过未解决费用，修复后按原费用身份与发生时间补算。
+自动结算保存本周期费用截止时间，迟到的成熟费用可补结，不提前结算下一周期。
+
+部署前停止 Gateway 写入并执行
+[团队隔离迁移](../deployment/migrations/20261029-affiliate-team-isolation.sql)；新库使用 `init.sql`。
+配置与运行边界见[返佣设计](../docs/affiliate-design.md)，本轮编译和相关功能测试见
+[验证记录](../docs/validation/affiliate-teams-20261029/README.md)。本轮未运行压测或全量测试。
+
 ## 订单入口简化
 
 `OrderService.place/placeCommand/placeCommandAsync` 在入口一次完成请求标准化、BBO 解析、
